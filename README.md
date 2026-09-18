@@ -18,6 +18,8 @@ implementation plan only.
 | [docs/05-external-dependencies.md](docs/05-external-dependencies.md) | The three items in an external queue, and what is answerable from documents already held |
 | [docs/06-blind-spots-and-risks.md](docs/06-blind-spots-and-risks.md) | What was missing from the original brief, plus the risk register |
 | [docs/07-frontend-and-agents-requirements.md](docs/07-frontend-and-agents-requirements.md) | Confirmed frontend, SEO and agent requirements — design language, settings model, review autoresponder, Google connection |
+| [docs/08-frontend-design.md](docs/08-frontend-design.md) | The design system: accessible pastel palette with measured ratios, type, motion tokens, media/hero technique, performance budget |
+| [docs/09-ia-seo-and-settings.md](docs/09-ia-seo-and-settings.md) | Page set, therapist pages, mobile booking flow, the location record that drives all SEO, and the settings spine |
 
 ## The one-paragraph summary
 
