@@ -17,6 +17,7 @@ implementation plan only.
 | [docs/04-uae-compliance.md](docs/04-uae-compliance.md) | UAE licensing, tax, telecom and privacy rules translated into software requirements |
 | [docs/05-external-dependencies.md](docs/05-external-dependencies.md) | The three items in an external queue, and what is answerable from documents already held |
 | [docs/06-blind-spots-and-risks.md](docs/06-blind-spots-and-risks.md) | What was missing from the original brief, plus the risk register |
+| [docs/07-frontend-and-agents-requirements.md](docs/07-frontend-and-agents-requirements.md) | Confirmed frontend, SEO and agent requirements — design language, settings model, review autoresponder, Google connection |
 
 ## The one-paragraph summary
 
