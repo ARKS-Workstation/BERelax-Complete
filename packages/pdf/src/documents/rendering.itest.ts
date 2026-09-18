@@ -43,9 +43,9 @@ const INVOICE_FIXTURE = join(FIXTURES, 'tax-invoice-en-ar.pdf')
 const SPECIMEN_FIXTURE = join(FIXTURES, 'bidi-specimen.pdf')
 
 /** Arabic Presentation Forms-B: the contextual shapes a shaper chooses, never typed directly. */
-const PRESENTATION_FORMS = /[ﹰ-ﻼ]/
+const PRESENTATION_FORMS = /[\ufe70-\ufefc]/
 /** The base Arabic block, i.e. the letters as they are stored. */
-const BASE_ARABIC = /[ؠ-ي]/
+const BASE_ARABIC = /[\u0620-\u064a]/
 
 let renderer: PdfRenderer
 let invoice: PdfPageText[]
@@ -72,14 +72,19 @@ function xOf(pages: readonly PdfPageText[], needle: string): number {
   return line === undefined ? Number.NaN : xOfOnLine(line, needle)
 }
 
+/** The amount as the document prints it. */
+const SETTLEMENT_AMOUNT = 'AED 950.00'
+
 /**
- * The Arabic settlement sentence: the one line carrying the reference, the amount and the phone.
+ * The first line of the Arabic settlement sentence: the one carrying the reference and the amount.
  *
- * The invoice number also appears in the header meta row, so a single-needle search finds that row
- * instead and every order assertion made against it is meaningless.
+ * Pinned on two needles, not one. The invoice number also appears in the header meta row, and an
+ * order assertion made against that row compares two unrelated things. The sentence wraps at A4
+ * width, so the phone number lands on the *second* line — which is why the amount is the second
+ * anchor rather than the phone.
  */
 function settlementLine(pages: readonly PdfPageText[]) {
-  const line = findLineWithAll(pages, SAMPLE_INVOICE.number, SUPPLIER_PHONE)
+  const line = findLineWithAll(pages, SAMPLE_INVOICE.number, SETTLEMENT_AMOUNT)
   expect(line, 'the Arabic settlement sentence is missing from the render').toBeDefined()
   if (line === undefined) throw new Error('no settlement line')
   return line
@@ -156,10 +161,12 @@ describe('acceptance 1 — Arabic shaping and RTL order', () => {
   })
 
   it('orders the invoice settlement sentence right to left', () => {
-    // Logically the invoice number comes before the phone number in the Arabic sentence, so the
-    // reader must find the number to the right of the phone.
+    // Logically the invoice number comes before the amount in the Arabic sentence, so the reader
+    // must find the number to the right of the amount.
     const line = settlementLine(invoice)
-    expect(xOfOnLine(line, SAMPLE_INVOICE.number)).toBeGreaterThan(xOfOnLine(line, SUPPLIER_PHONE))
+    expect(xOfOnLine(line, SAMPLE_INVOICE.number)).toBeGreaterThan(
+      xOfOnLine(line, SETTLEMENT_AMOUNT),
+    )
   })
 
   it('starts Arabic table cells at the right edge of the column', () => {
@@ -204,8 +211,14 @@ describe('acceptance 2 — Latin runs inside Arabic are bidi-isolated', () => {
   it('keeps the invoice number and the amount intact in the Arabic sentence', () => {
     const settlement = settlementLine(invoice)
     expect(settlement.visual).toContain(SAMPLE_INVOICE.number)
-    expect(settlement.visual).toContain(SUPPLIER_PHONE)
-    expect(settlement.visual).toContain('950.00')
+    expect(settlement.visual).toContain(SETTLEMENT_AMOUNT)
+  })
+
+  it('never breaks an isolated run across a line break', () => {
+    // The sentence wraps at A4 width; the phone number inside it must not. A number split over two
+    // lines is as undiallable as a reordered one — the same failure by a different route.
+    const line = findLine(invoice, SUPPLIER_PHONE)
+    expect(line?.visual, 'the phone number was split across lines').toContain(SUPPLIER_PHONE)
   })
 })
 
@@ -242,7 +255,9 @@ describe('acceptance 3 — the committed fixtures are the documents described ab
     expect(text).toContain(SUPPLIER_PHONE)
     expect(text).not.toContain('%5')
     const line = settlementLine(pages)
-    expect(xOfOnLine(line, SAMPLE_INVOICE.number)).toBeGreaterThan(xOfOnLine(line, SUPPLIER_PHONE))
+    expect(xOfOnLine(line, SAMPLE_INVOICE.number)).toBeGreaterThan(
+      xOfOnLine(line, SETTLEMENT_AMOUNT),
+    )
   })
 
   it('the committed specimen fixture still carries every case, good and bad', async () => {

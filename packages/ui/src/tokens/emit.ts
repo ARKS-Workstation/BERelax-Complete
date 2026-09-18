@@ -9,6 +9,7 @@
  */
 import { paletteCss } from './palette.ts'
 import { scaleCss } from './scale.ts'
+import { shadowCss } from './shadow.ts'
 
 export function tokensCss(): string {
   return [
@@ -20,6 +21,8 @@ export function tokensCss(): string {
     ' */',
     '',
     paletteCss(),
+    '',
+    shadowCss(),
     '',
     scaleCss(),
     '',

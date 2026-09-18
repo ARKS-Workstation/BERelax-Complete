@@ -150,8 +150,10 @@ function partyBlock(label: Label, party: InvoiceParty): string {
     `<span class="en">${safeText(label.en)}</span>`,
     `<span class="ar" dir="rtl" lang="ar">${safeText(label.ar)}</span>`,
     '</h2>',
-    `<div class="party-body"><div class="en"><strong>${safeText(party.name)}</strong>${lines}</div>`,
-    `<div class="ar" dir="rtl" lang="ar"><strong>${safeText(party.nameAr)}</strong>${linesAr}</div></div>`,
+    '<div class="party-body">',
+    `<div class="en"><strong>${safeText(party.name)}</strong>${lines}</div>`,
+    `<div class="ar" dir="rtl" lang="ar"><strong>${safeText(party.nameAr)}</strong>${linesAr}</div>`,
+    '</div>',
     trn,
     phone,
     '</section>',
@@ -266,12 +268,16 @@ header .title-ar { font-size: 17pt; font-weight: 600; }
 .meta .label { color: var(--color-ink-2); font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; }
 .meta .label-ar { color: var(--color-ink-2); font-size: 8.5pt; }
 
-.parties { display: flex; gap: 18pt; margin-bottom: 16pt; }
-.party { flex: 1; }
+.parties { display: flex; gap: 22pt; margin-bottom: 16pt; }
+.party { flex: 1; min-width: 0; }
 .party h2 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-ink-2); margin: 0 0 4pt; display: flex; justify-content: space-between; }
 .party h2 .ar { text-transform: none; font-size: 8.5pt; }
-.party-body { display: flex; justify-content: space-between; gap: 10pt; }
-.party-body > div { flex: 1; }
+/* English above Arabic, not beside it.
+   Side by side, each party block is a quarter of the page: the legal entity name wraps across three
+   lines and the address across four, on a document whose whole job is to be read at a glance.
+   Stacked, each language gets the full half-width and the block is four lines instead of nine. */
+.party-body .en { margin-bottom: 4pt; }
+.party-body .ar { color: var(--color-ink); }
 .party .labelled { display: flex; align-items: baseline; gap: 8pt; margin-top: 3pt; color: var(--color-ink-2); }
 .party .labelled .en { text-transform: uppercase; letter-spacing: 0.06em; font-size: 8pt; }
 .party .labelled .ar { font-size: 8.5pt; }
@@ -303,7 +309,11 @@ table { width: 100%; border-collapse: collapse; }
 
 .inclusive { display: flex; justify-content: space-between; gap: 14pt; margin-top: 8pt; color: var(--color-ink-2); font-size: 9pt; }
 
-.settlement { background: var(--color-ground-sunk); padding: 8pt 10pt; margin-top: 16pt; }
+.settlement { background: var(--color-ground-sunk); padding: 9pt 12pt; margin-top: 16pt; }
+/* An isolated run is one thing to the reader, so it must not be two things to the line breaker:
+   a phone number split across lines is a phone number nobody can dial, which is the same failure
+   the isolate exists to prevent, arriving by a different route. */
+.settlement bdi, .figure bdi { white-space: nowrap; }
 footer { margin-top: 14pt; display: flex; justify-content: space-between; color: var(--color-ink-2); font-size: 8.5pt; border-top: 0.5pt solid var(--color-hairline); padding-top: 6pt; }
 `
 }

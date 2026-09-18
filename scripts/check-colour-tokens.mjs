@@ -38,6 +38,9 @@ const COLOUR_LITERAL_ALLOWLIST = [
   'packages/ui/src/tokens/palette.generated.ts',
   'packages/ui/src/tokens/tokens.css',
   'packages/ui/src/tokens/palette.test.ts',
+  // The one shadow token. A shadow carries no contrast requirement, so there is nothing for
+  // palette.py to derive or measure; see the file's own note on why the exception is scoped to it.
+  'packages/ui/src/tokens/shadow.ts',
 ]
 
 /** The prototype gold. Decorative only — see rule 2. */

@@ -34,10 +34,21 @@ export interface PageSetup {
   readonly margin: { top: number; right: number; bottom: number; left: number }
 }
 
+/**
+ * A4 with document margins rather than web margins.
+ *
+ * 18mm at the sides is a printed-document measure: a tax invoice is filed, sometimes punched, and
+ * often photocopied, and 14mm leaves the amount column uncomfortably near the trim. The extra at the
+ * foot is for the page furniture a printer adds.
+ */
 export const A4_DOCUMENT: PageSetup = {
   format: 'A4',
-  margin: { top: 14, right: 14, bottom: 16, left: 14 },
+  margin: { top: 18, right: 18, bottom: 20, left: 18 },
 }
+
+/** A4, for the screen preview of a printed page. */
+const A4_WIDTH_MM = 210
+const A4_HEIGHT_MM = 297
 
 /**
  * Chromium flags.
@@ -59,8 +70,15 @@ const LAUNCH_OPTIONS: LaunchOptions = {
 export interface PdfRenderer {
   /** Renders a complete HTML document to PDF bytes. */
   render(html: string, setup?: PageSetup): Promise<Uint8Array>
-  /** Renders the same HTML to a PNG, for visual review of a fixture. */
-  screenshot(html: string, widthPx?: number): Promise<Uint8Array>
+  /**
+   * Renders the same HTML to a PNG of the printed page, for visual review of a fixture.
+   *
+   * Not a screenshot of the document at some browser width: the content sits inside an A4 sheet with
+   * the same margins `render` prints, on a backdrop. A preview that does not show the page box is a
+   * preview of a different document — which is how a fixture can look wrong while the PDF is right,
+   * and how it can look right while the PDF is wrong.
+   */
+  screenshot(html: string, setup?: PageSetup): Promise<Uint8Array>
   /** The underlying browser, for callers that need a page of their own. */
   browser(): Browser
   close(): Promise<void>
@@ -110,14 +128,16 @@ export async function createPdfRenderer(): Promise<PdfRenderer> {
       })
     },
 
-    async screenshot(html, widthPx = 900) {
+    async screenshot(html, setup = A4_DOCUMENT) {
       const context = await browser.newContext({
-        viewport: { width: widthPx, height: 1400 },
+        // A4 at 96dpi plus room for the backdrop either side.
+        viewport: { width: Math.round((A4_WIDTH_MM / 25.4) * 96) + 64, height: 1400 },
         deviceScaleFactor: 2,
       })
       try {
         const page = await context.newPage()
         await page.setContent(html, { waitUntil: 'load' })
+        await page.addStyleTag({ content: paperPreviewCss(setup) })
         await page.evaluate(async () => {
           await (globalThis as unknown as PageGlobals).document.fonts.ready
         })
@@ -135,6 +155,35 @@ export async function createPdfRenderer(): Promise<PdfRenderer> {
       return browser.close()
     },
   }
+}
+
+/**
+ * Turns the document into a sheet of A4 on a desk.
+ *
+ * Injected after the document's own stylesheet so it wins on document order, and scoped to
+ * `@media screen` so it can never affect the PDF — the preview must not be able to change the thing
+ * it is previewing.
+ */
+function paperPreviewCss(setup: PageSetup): string {
+  const { top, right, bottom, left } = setup.margin
+  return `@media screen {
+  html {
+    background: var(--color-surface-clay);
+    padding: 32px 0;
+    min-height: 100%;
+  }
+  body {
+    box-sizing: border-box;
+    width: ${A4_WIDTH_MM}mm;
+    /* At least one full page, so a short document previews as a sheet with space left on it
+       rather than as a card cropped to its content. */
+    min-height: ${A4_HEIGHT_MM}mm;
+    margin: 0 auto;
+    padding: ${top}mm ${right}mm ${bottom}mm ${left}mm;
+    background: var(--color-ground);
+    box-shadow: var(--shadow-overlay);
+  }
+}`
 }
 
 /** The subset of a Playwright page this module needs, so the closure above stays readable. */
