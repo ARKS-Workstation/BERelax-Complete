@@ -56,6 +56,15 @@ export {
   payablesAging,
 } from './queries/payables-aging.ts'
 export {
+  type ForecastFilter,
+  type ForecastPeriod,
+  type ForecastRow,
+  forecastPeriodTotalFils,
+  type RecurringCostForecast,
+  recurringCostForecast,
+  recurringCostSchedule,
+} from './queries/recurring-cost-forecast.ts'
+export {
   isBalanced,
   type TrialBalance,
   type TrialBalanceRow,
@@ -255,6 +264,35 @@ export {
   type SupplierResidency,
   TRADE_PAYABLES_ACCOUNT_CODE,
 } from './services/post-bill.ts'
+export {
+  findRecurringCostByCode,
+  type GeneratedInstance,
+  type GenerateWindow,
+  generateRecurringInstances,
+  isDuplicateRecurringCostMatch,
+  type MatchInput,
+  type MatchResult,
+  matchBillToRecurringCost,
+  type PeriodStatus,
+  type PostedRecurringBill,
+  postRecurringBill,
+  type RaisedAlert,
+  RECURRING_CADENCES,
+  RECURRING_COST_ALERT_KINDS,
+  RECURRING_COST_KINDS,
+  RECURRING_COST_SQLSTATE,
+  type RecurringBillToPost,
+  type RecurringCadence,
+  type RecurringCostAlertKind,
+  type RecurringCostInput,
+  type RecurringCostKind,
+  type RecurringCostRecord,
+  recordRecurringCost,
+  recurringCostError,
+  recurringCostPeriodStatus,
+  sweepRecurringCostAlerts,
+  tradingDateAt,
+} from './services/recurring-cost.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 29 as const
+export const SCHEMA_VERSION = 31 as const

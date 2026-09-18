@@ -116,6 +116,42 @@ export interface ConsentWrite {
   readonly consentAt: Instant
 }
 
+/**
+ * The one write a resource selection makes: which Google resource this capability now serves.
+ *
+ * Deliberately cannot express a health, a status or a token. A selection is evidence that the resource
+ * **resolves** — the picker re-read it from Google before writing — and nothing more: `ok` means every
+ * capability read succeeded and stays G-CONN-06's to write, because the read that confirmed a location
+ * through Business Information v1 says nothing about whether the legacy v4 reviews path works. So this
+ * carries `verifiedAt`, which records that a read happened, and leaves `health` alone.
+ *
+ * `resourceRef` is not nullable here. Clearing a selection is a different operation with a different
+ * consequence — every consumer of that capability degrades — and the narrowest write that expresses
+ * "choose this one" is the cheapest way to guarantee it cannot silently do the other thing.
+ */
+export interface CapabilityResourceWrite {
+  readonly connectionId: string
+  readonly capability: GoogleCapability
+  readonly resourceRef: Readonly<Record<string, unknown>>
+  /** When the resource was last read back from Google. Written to `verified_at`. */
+  readonly verifiedAt: Instant
+}
+
+/**
+ * What the picker needs, and nothing else.
+ *
+ * A third interface beside `GoogleConnectionStore` and `GoogleConsentStore` rather than more methods on
+ * either, for the reason the other two already give: the narrowest seam that expresses what a caller needs
+ * is the cheapest way to guarantee it does nothing else. The picker chooses a resource and records that it
+ * did. It cannot insert a connection, exchange a consent, replace a token or change a status — and it is a
+ * surface an admin clicks, which is the surface where "while we are here" changes accumulate.
+ */
+export interface GoogleCapabilitySelectionStore {
+  capabilitiesFor(connectionId: string): Promise<readonly GoogleCapabilityRecord[]>
+  selectCapabilityResource(write: CapabilityResourceWrite): Promise<void>
+  appendEvent(event: ConnectionEventInput): Promise<void>
+}
+
 export interface CapabilityHealthWrite {
   readonly connectionId: string
   readonly capability: GoogleCapability

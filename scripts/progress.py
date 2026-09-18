@@ -19,6 +19,18 @@ def ready(u):
 done = [u for u in units if u["status"] == "done"]
 nxt = [u for u in units if ready(u)][:3]
 
+# `meta.units_total` is a second count of the same list, and a second count is a future disagreement.
+# It read 206 against 207 units for long enough that nobody knew which number was wrong — caught by an
+# agent reading the two side by side, not by any gate. Asserted here because this is the script that
+# already walks every unit, and the failure it prevents is a planning figure quoted from stale metadata.
+declared = m.get("meta", {}).get("units_total")
+if declared is not None and declared != len(units):
+    print(
+        f"FAIL  build/manifest.yaml meta.units_total says {declared} but the file holds {len(units)} "
+        "units — correct the metadata, do not adjust it to match a stale plan"
+    )
+    raise SystemExit(1)
+
 L = ["# Build Progress", "",
      "Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**", "",
      f"**{len(done)} / {len(units)} units complete.**", ""]

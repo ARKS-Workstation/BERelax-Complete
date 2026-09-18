@@ -154,6 +154,22 @@ export const ROUTES = [
       'before it is written.',
   },
   {
+    id: 'google-picker',
+    path: '/settings/integrations/google/picker',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-CONN-05s account and location picker: GET enumerates the accounts and locations this Google ' +
+      'account manages, POST records the chosen listing or Search Console property. A handler rather ' +
+      'than a document because a document has to be served in both locales and needs the admin shell ' +
+      'W-SYS-01 builds; the settings card that will call this is G-CONN-07. Covered by the /settings ' +
+      'noindex prefix, like the consent route beside it.',
+  },
+  {
     id: 'treatment-path',
     path: '/treatments/[slug]',
     kind: 'handler',

@@ -10,7 +10,7 @@ meta:
   branch: claude/massage-crm-planning-c05j70
   plan: docs/11-execution-plan.md
   contract: docs/12-autonomous-delivery.md
-  units_total: 206
+  units_total: 207
 
 units:
   - id: F01
@@ -2268,7 +2268,7 @@ units:
       matched idempotently against arriving bills, with over-tolerance variance alerts and missing-cost
       alerts, and a 12-period forward schedule for the cash-flow forecast R-REP will consume.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H03
@@ -2286,12 +2286,118 @@ units:
       raise'
     - the 12-period forward schedule totals a committed worked example to the fils and is queryable by R-REP
       without touching the cost tables directly
+    - 'NOTE: THE VARIANCE DEFINITION. A variance is the difference between what a bill charged and what the
+      register declared it expected FOR THAT PERIOD — never last period and never a rolling mean. The
+      declared expectation has two shapes, which is what the fixed/variable split is for. A FIXED cost
+      (rent, insurance, a licence, a subscription) expects a contracted AMOUNT, and any difference past its
+      tolerance is news in either direction: a rent 200 AED low is a credit to chase exactly as a rent 200
+      AED high is a query. A VARIABLE cost (the utility recharge, laundry by volume, card fees) moves by
+      design, so one expected number would be wrong every month by construction; it expects a declared
+      BAND and its variance is the distance OUTSIDE the band — zero while the bill is inside it, which is
+      what stops an August electricity bill alerting every summer. Both alternatives were rejected for
+      specific reasons. Against LAST PERIOD: the second month of a wrong amount is silent, because the
+      landlord who overcharges the identical amount twice produces a zero difference on the second — and a
+      wrong figure that persists is the one most worth catching. Against a ROLLING MEAN: the mean absorbs
+      the error it exists to detect (three months of an incorrect rent pulls the mean onto it), and on a
+      seasonal cost it fires on the way up and again on the way down, both of which are normal. The
+      tolerance is basis points of the BREACHED expectation — the contracted amount, or whichever band edge
+      was crossed — so one declared number means one thing while the two shapes keep their two
+      expectations. It is NOT NULL with NO DEFAULT, like supplier_tax_profile.residency: zero would make
+      every variable cost alert on the first fils outside its band and 500 would accept a 5% rent rise for
+      ever, and a default makes "nobody chose" indistinguishable from a choice. Strictly greater than the
+      tolerance is over it, so a bill exactly ON the tolerance is within — the off-by-one there alerts on
+      every cost whose tolerance was set to the amount it actually varies by.'
+    - 'NOTE: the expectation is SNAPSHOTTED onto each period by recurring_cost_instance rather than read
+      through the definition, which is why five columns appear twice. A rent renegotiated in June must not
+      retroactively change what March''s variance report said, in either direction. Same mechanism and same
+      argument as bill.supplier_trn in 0028.'
+    - 'NOTE: "period" in the 12-period forward schedule is read as a MONTH OF THE HORIZON, not an
+      occurrence of the cost. It is the only reading under which cadences can be summed: a quarterly
+      insurance premium and a monthly rent both land in the month they fall due, so one cash-flow line adds
+      up. The window is half-open, [as_of, as_of + 12 months), which makes a monthly cost contribute exactly
+      twelve occurrences whatever day of the month it falls on — bounding it on calendar months instead
+      gives eleven for a cost due on the 1st and twelve for one due on the 20th, purely because of when the
+      report was run. Twelve rolling months from 18 September therefore touch THIRTEEN calendar month keys,
+      the first and last partial, which the committed worked example states explicitly.'
+    - 'NOTE: "queryable by R-REP without touching the cost tables directly" is
+      recurring_cost_forward_schedule(as_of, months), a SQL set-returning function, wrapped by
+      packages/db/src/queries/recurring-cost-forecast.ts. It computes the occurrences from the DEFINITIONS
+      and deliberately does not read recurring_cost_instance: a forecast that joined the generated periods
+      would end wherever the nightly pass last got to, and a horizon that quietly shortens looks exactly
+      like a business with no costs in month eleven. The same function is what generateRecurringInstances
+      enumerates, so a period can never be forecast but not generated (and therefore never able to raise a
+      missing-cost alert) or generated but not forecast (a cash-flow line short by one rent).'
+    - 'NOTE: NO RECURRING COST IS SEEDED, in the migration or by the fixture loader, and that is the
+      decision rather than an omission. The real register — landlord, utilities, laundry, consumables,
+      licence, insurance — is an H-MIG import, exactly as the domestic supplier list is (0028 makes the same
+      call). A recurring cost carries an AMOUNT, so a placeholder contract would be summed into a cash-flow
+      forecast and then believed; the empty register is the strictest safe option and it needs no
+      is_placeholder_text marker because there is no provisional value in the schema at all. Logged as
+      Y11-recurring-costs in docs/OPEN-QUESTIONS.md, blocking the register''s contents and R-REP''s
+      forecast. The five offshore vendors 0028 seeds as suppliers are not registered as costs either: what
+      any of them actually bills per month is unknown, and guessing is how a forecast acquires a number
+      nobody chose. The committed fixtures in packages/fixtures/src/recurring-costs.ts are test data,
+      carry the FIXTURE supplier prefix, and are loaded by no seed.'
+    - 'NOTE: AUTOMATIC MATCHING IS DELIBERATELY ABSENT. The nightly pass generates periods and raises
+      alerts; it never guesses which invoice satisfies which period. A landlord bills rent AND a service
+      charge, so "the other invoice from this supplier" is not a unique answer, and one wrong attachment
+      reports a false variance, silences a real missing-cost alert and leaves another cost looking unbilled
+      — three wrong answers from one row. Matching is recorded where the knowledge is: postRecurringBill
+      records it as the bill is entered (through postBill, so there is no second posting path), and
+      matchBillToRecurringCost attaches one entered earlier. A rules-based matcher is available to a later
+      unit as an addition, not a rewrite: it would call the same service. Also deliberately absent is any
+      constraint tying the bill''s date to the period it satisfies — September''s utility bill is normally
+      issued in October, and refusing that would refuse the ordinary case.'
+    - 'NOTE: generation is bounded to twelve months BACK and twelve forward, not to each cost''s anchor. A
+      contract anchored in 2019 and registered today would otherwise acquire seven years of unbilled
+      periods and seven years of missing-cost alerts on the day it was entered — a burst nobody reads,
+      which is the same failure as an alert that fires every month. Twelve months back is one full VAT
+      year. generateRecurringInstances takes the window explicitly, so a caller that wants the full history
+      asks for it.'
+    - 'NOTE: a missing-cost alert fires when due_date < the business day, with no extra grace period. The
+      grace is already in the definition — the DUE date is later than the supplier''s invoice date — rather
+      than a second knob nobody would tune. A period due today is not late, exactly as a payable due today
+      is "current" in 0028''s aging.'
+    - 'NOTE: there is no acknowledged_at on recurring_cost_alert and the table is fully append-only (ADR
+      0008/0017). An alert row is the evidence that something was noticed on a date, and that fact does not
+      change; an inbox that tracks what has been dealt with is a different table and a later unit''s
+      decision, and a mutable column here would make the row rewritable by whatever owns that inbox.'
+    - 'NOTE: the nightly pass takes its business day from business_day (the materialised trading calendar,
+      generated from the same rule resolveTradingDate states) and THROWS when the calendar holds nothing at
+      or before the instant, rather than falling back to a calendar date. Trading runs 11:00-02:00, so the
+      03:45 cron belongs to the session that opened the previous morning; a truncated timestamp would date
+      every alert a day late and, at a month boundary, into a period already filed.'
+    - 'NOTE: five files outside this unit changed. apps/worker/src/registry.ts gains the
+      recurring-cost.check cron (pnpm jobs fails a cron declared anywhere else, and one with no agent);
+      0031 seeds the recurring_cost_register agent_definition AND its agent_heartbeat row, because
+      agentsWithHeartbeat INNER joins and an agent with no heartbeat is one the watchdog silently never
+      checks; and packages/core/src/index.ts, packages/db/src/index.ts and packages/fixtures/src/index.ts
+      each gain one export line. scripts/test-gates.mjs gains the 26s block. The migration took 0031
+      because 0030 and 0032 were held by units in flight.'
+    - 'NOTE: the cadence stepper, the period key and the variance are each stated TWICE — in
+      0031_recurring_cost.sql and in packages/core/src/money/recurring-schedule.ts — because packages/db
+      may not import packages/core and the forecast has to group where the rows are. The two are asserted
+      to agree over every cadence, thirty-seven occurrences of each, anchors on the 29th to 31st where the
+      month-end clamp applies, and a sweep of amounts either side of both expectation shapes, in
+      packages/fixtures/src/recurring-costs.itest.ts. That is the arrangement price_list/resolve-price.ts
+      and payables_aging_bucket/payablesBucketFor already use, for the same reason and with the same
+      agreement test.'
     files:
+    - packages/db/migrations/0031_recurring_cost.sql
     - packages/db/src/schema/recurring-cost.ts
-    - packages/db/migrations/00xx_recurring_cost.sql
+    - packages/db/src/services/recurring-cost.ts
+    - packages/db/src/services/recurring-cost.itest.ts
+    - packages/db/src/queries/recurring-cost-forecast.ts
     - packages/core/src/money/recurring-schedule.ts
-    - apps/worker/src/jobs/recurring-cost-check.ts
     - packages/core/src/money/recurring-schedule.test.ts
+    - packages/fixtures/src/recurring-costs.ts
+    - packages/fixtures/src/recurring-costs.test.ts
+    - packages/fixtures/src/recurring-costs.itest.ts
+    - apps/worker/src/jobs/recurring-cost-check.ts
+    - apps/worker/src/jobs/recurring-cost-check.itest.ts
+    - apps/worker/src/registry.ts
+    - scripts/test-gates.mjs
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-05
     order: 60
     title: Opening balances and the trial balance
@@ -6762,7 +6868,7 @@ units:
       it while v1 returns only locations/{l}. Search Console capability is selectable and verifiable on
       a connection whose GBP access is still pending.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-03
@@ -6786,12 +6892,95 @@ units:
       test)'
     - Every capability selection writes a google_connection_events row and an audit_event naming the actor
       and the chosen placeId or siteUrl
+    - 'NOTE: the picker is a route HANDLER, not the page.tsx this entry''s files list named. W-SITE-01''s
+      registry is in exact bijection with the filesystem and requires every *document* to be served in both
+      locales, so a page.tsx here would need an Arabic admin document and the admin shell to render it —
+      W-SYS-01 — and would join the screenshot, a11y and critique matrices for a screen G-CONN-07 is about to
+      replace. apps/web/app/(admin)/settings/integrations/google/picker/route.ts answers JSON instead: GET
+      enumerates both halves, POST records one choice, and it is declared in apps/web/src/routes/registry.ts
+      as a handler covered by the /settings noindex prefix, exactly like G-CONN-03''s consent route beside
+      it. The rendered card that calls it is G-CONN-07''s, and like the consent route this one is NOT
+      authenticated until W-SYS-01: its recorded actor says so rather than inventing a user'
+    - 'NOTE: withGoogle gained two OPTIONS, both defaulting to the strict answer, and the picker is the only
+      caller of either. `resource: ''enumerating''` is the substance: every other consumer must degrade with
+      ResourceNotSelected when no resource is chosen, but accounts.list and locations.list are calls against
+      the ACCOUNT rather than against a resource, and they are how a resource is chosen — requiring one would
+      make the only path out of ResourceNotSelected unreachable. `connectionId` narrows resolution to one
+      connection because the picker enumerates under one grant and then writes the selection back to that
+      same grant; a resolver free to pick another would offer one account''s listings and persist them under
+      another''s, which is how a reply reaches somebody else''s listing. Both are named unions/ids rather than
+      booleans so a call site reads as a claim, and neither can widen what a call may see: a disconnected
+      connection and one that does not serve the capability still degrade with NotConnected'
+    - 'NOTE: one choice fills all three Business Profile capabilities — gbp_reviews, gbp_location and
+      gbp_performance — because they are three APIs over one listing. Asking the owner the same question
+      three times is three chances to answer differently, and a system whose review replies and consistency
+      check point at different listings cannot be reasoned about. So three capability_changed rows are
+      written, one per capability, each carrying the same correlationId so a human reads them as one action.
+      gsc is deliberately not in that set: that is the third criterion'
+    - 'NOTE: a selection writes resource_ref and verified_at and deliberately NOT health. A locations.get
+      that succeeded proves the resource resolves; it says nothing about whether the legacy v4 reviews path
+      works, and ok means every capability read succeeded, which stays G-CONN-06''s to write (G-CONN-02''s
+      NOTE already fixed that boundary). CapabilityResourceWrite cannot express a health, a status or a
+      token, and GoogleCapabilitySelectionStore is a third narrow seam beside GoogleConnectionStore and
+      GoogleConsentStore for the same reason rewrapRefreshToken is narrow: the picker is a surface an admin
+      clicks, which is where "while we are here" changes accumulate'
+    - 'NOTE: no migration and no SCHEMA_VERSION change. google_capabilities.resource_ref is already jsonb and
+      nullable and verified_at already exists, which is exactly the shape a selection fills — this unit is
+      the write that was missing, not a column. The selection addresses the PRIMARY row
+      (where connection_id = … and capability = … and is_primary), which is single-valued only because of two
+      indexes from 0016, so both are pinned with known-bad fixtures in scripts/test-gates.mjs:
+      google_capability_one_primary (a second primary row) and google_capability_resource_unique, the latter
+      twice — the same resource twice, and two resource-LESS rows, because NULLS NOT DISTINCT is the half a
+      reader skips and a resource-less row is the one a consent leaves for the picker to fill. Plus
+      google_connection_events_no_token against a selection payload carrying a token, and three acceptance
+      controls: a second non-primary location (0016 models several on purpose), the selection UPDATE itself
+      wrapped so the probe fails unless it addressed exactly one row, and the real event payload'
+    - 'NOTE: the token allow-list was NOT widened, and a new case pins it for the four modules this unit
+      added. The picker is a consumer: it obtains its token from withGoogle, names no accessor and never
+      imports token-store.ts, so pnpm chokepoint still reports five modules. The pin also asserts the four
+      modules EXIST, because an absence check passes trivially once a file is renamed'
+    - 'NOTE: a defect in existing code, found by this unit''s own control and fixed here. The Search Console
+      verification first ran INSIDE the withGoogle body, and withGoogle classifies anything thrown in the
+      body through the Google taxonomy — so *our* refusal ("this account is listed on the property but not
+      verified on it") came back as TransientUpstream with its reason code discarded, and wrote a
+      health_check_failed row onto the owner''s connection dashboard for something Google had not done. The
+      I/O now runs inside the chokepoint and the decision about what came back runs outside it:
+      assertSiteSelectable is pure. A test asserts the refusal writes NEITHER ledger, which is what would
+      have caught it. The same shape applies to any future validation inside a body'
+    - 'NOTE: the fakes gained what the picker needs and could not be tested without — accounts.list,
+      locations.list, locations.get and sites.list, plus configurable accounts, a per-account location map and
+      a site list. Three fixture facts are load-bearing: the Al Zahiyah listing (docs/13 §2) sits under a
+      LOCATION_GROUP account and NOT under the PERSONAL one, so enumerating only the personal account returns
+      the DECOY — an unrelated airport spa also called Be Relax — rather than nothing, which is the dangerous
+      failure and the control the LOCATION_GROUP criterion is paired with; the fake refuses a maskless
+      locations.list the way Google does, so the adapter''s guard is not the only thing standing in the way;
+      and sites.list includes a siteUnverifiedUser property (the prototype host), which is listed for the
+      account and returns no data, so selecting it would produce an SEO report of zeroes that reads as a
+      collapse in traffic. placeIds are visibly fixtures (ChIJ-fake-…) rather than plausible, per the
+      brief''s rule 15. Every addition is additive and every existing caller still compiles'
+    - 'NOTE deferred to G-CONN-06: nothing here compares the returned title and postal address against an
+      owner-confirmed snapshot. A selection re-reads the chosen location and refuses if the placeId that
+      comes back is not the one on the screen — a listing merged or moved between the enumeration and the
+      click — but listing-drift detection over title and address is that unit''s acceptance line and its
+      finding, and duplicating it here would produce two answers to one question'
     files:
     - packages/google/src/adapters/account-management.ts
     - packages/google/src/adapters/business-information.ts
     - packages/google/src/adapters/search-console.ts
     - packages/google/src/capability-resolver.ts
-    - apps/web/app/(admin)/settings/integrations/google/picker/page.tsx
+    - packages/google/src/capability-resolver.test.ts
+    - packages/google/src/capability-resolver.itest.ts
+    - packages/google/src/connection-store.ts
+    - packages/google/src/postgres-store.ts
+    - packages/google/src/memory-store.ts
+    - packages/google/src/with-google.ts
+    - packages/google/src/index.ts
+    - packages/providers/src/google/port.ts
+    - packages/providers/src/google/fake-google.ts
+    - packages/providers/src/google/index.ts
+    - apps/web/app/(admin)/settings/integrations/google/picker/route.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
   - id: G-CONN-06
     order: 156
     title: Daily health check, Testing-expiry tripwire, listing-drift detection

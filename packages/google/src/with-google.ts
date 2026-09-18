@@ -48,6 +48,10 @@ import { accessTokenUnderLock, type RefreshLockRunner } from './token-refresh.ts
  * frequently not the account verified on the Search Console property (docs/10 §2). So *which* connection
  * serves a call is a function of the capability, and a caller that passed a connection id would have to
  * know that — which is how the SEO agent ends up pointed at the GBP-owning account.
+ *
+ * A caller *may* name a connection through `WithGoogleOptions`, and exactly one does: the picker, which is
+ * choosing the resource for a connection somebody just consented on. See that type for why that is a
+ * narrowing rather than a hole.
  */
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -162,6 +166,32 @@ export type WithGoogleOutcome<T> =
       readonly consumer: GoogleConsumer
     }
 
+/**
+ * The two things a caller may say about *which* call this is. Both default to the strict answer.
+ *
+ * Added by G-CONN-05, which is the one caller that needs either — and both exist because the picker is a
+ * genuinely different shape of call, not because the chokepoint was inconvenient:
+ *
+ * **`connectionId`.** `withGoogle` resolves a connection *from the capability* precisely so a consumer
+ * never has to know which Google account is wired up. The picker is the exception: it enumerates the
+ * accounts of one connection and then writes a selection onto that same connection, and a resolver that
+ * chose a different one would offer locations from one account and persist them under another — which is
+ * how a review reply reaches somebody else's listing. So the picker names the connection it means. A
+ * connection that does not serve the capability still degrades with `NotConnected` rather than throwing.
+ *
+ * **`resource: 'enumerating'`.** Every other call needs a selected resource and must degrade without one —
+ * that is `ResourceNotSelected`, and it is what `completeGoogleConsent` leaves behind on purpose, because
+ * choosing the listing is a separate step. The enumeration *is* that step: `accounts.list` and
+ * `locations.list` are calls against the account rather than against a resource, so requiring one would
+ * make the only path to a selection unreachable. It is spelled as a named union rather than a boolean so
+ * the call site reads as a claim about the call, and the default is the strict value, which is what keeps
+ * the guarantee for everybody else.
+ */
+export interface WithGoogleOptions {
+  readonly connectionId?: string
+  readonly resource?: 'required' | 'enumerating'
+}
+
 interface ResolvedTarget {
   readonly connectionId: string
   readonly googleEmail: string
@@ -183,10 +213,14 @@ interface ResolvedTarget {
 async function resolveTarget(
   store: Pick<GoogleConnectionStore, 'listAll' | 'capabilitiesFor'>,
   capability: GoogleCapability,
+  connectionId?: string,
 ): Promise<ResolvedTarget | null> {
   const candidates: { target: ResolvedTarget; rank: number }[] = []
   for (const connection of await store.listAll()) {
     if (connection.status === 'disconnected') continue
+    // Narrowing, never widening: a named connection restricts what this call can see and cannot make a
+    // disconnected one or one that does not serve the capability eligible.
+    if (connectionId !== undefined && connection.id !== connectionId) continue
     const rows = (await store.capabilitiesFor(connection.id)).filter(
       (row) => row.capability === capability,
     )
@@ -284,6 +318,7 @@ export async function withGoogle<T>(
   deps: WithGoogleDeps,
   capability: DeclaredCapability,
   body: (context: GoogleCallContext) => Promise<T>,
+  options: WithGoogleOptions = {},
 ): Promise<WithGoogleOutcome<T>> {
   const declaration = declarationFor(capability)
   const consumer = declaration.consumer
@@ -308,14 +343,19 @@ export async function withGoogle<T>(
     consumer,
   })
 
-  emit('info', 'google call started', null, { degradesTo: declaration.degradesTo })
+  // `resource` is on the line, not only in the code: a call that succeeded with no resource selected is
+  // exactly the thing somebody reading the log at 03:00 would otherwise have to explain to themselves.
+  emit('info', 'google call started', null, {
+    degradesTo: declaration.degradesTo,
+    resource: options.resource ?? 'required',
+  })
   deps.errors?.addBreadcrumb({
     category: 'google',
     message: `withGoogle ${capability}`,
     data: { correlationId, capability, consumer },
   })
 
-  const target = await resolveTarget(deps.store, capability)
+  const target = await resolveTarget(deps.store, capability, options.connectionId)
   if (target === null) {
     // Not an error, and deliberately not reported as one. Before onboarding finishes there is no
     // connection, and docs/10 §6: the fallback is the launch mode rather than something we hope not to
@@ -324,7 +364,7 @@ export async function withGoogle<T>(
     emit('warn', 'no Google connection serves this capability', null, { cause: 'NotConnected' })
     return degrade('NotConnected', null)
   }
-  if (!target.resourceSelected) {
+  if (!target.resourceSelected && options.resource !== 'enumerating') {
     emit('warn', 'no resource selected for this capability', target.connectionId, {
       cause: 'ResourceNotSelected',
     })

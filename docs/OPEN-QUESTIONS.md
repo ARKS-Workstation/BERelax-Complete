@@ -45,6 +45,7 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 | Y1-analytics-credentials | GA4 measurement id and API secret, Meta dataset id and CAPI access token, and Meta Business verification | **Fake analytics provider; no real ids configured** | open | real analytics dispatch |
 | Y11-vat201-boxes | The actual VAT201 box numbers for standard-rated sales, reverse charge and recoverable input VAT | **Box 1 / Box 3 / Box 10 as placeholders, held in a data table with a test proving the mapping is data not code** | open | VAT return working papers |
 | Y11-rounding | Confirm the gross-to-net rounding convention is acceptable to the tax agent | **half-up on net, VAT as the remainder** (exactness proven either way) | open | first VAT return |
+| Y11-recurring-costs | The real recurring cost register: which contracts exist, what each is contracted at, on what cadence, and — for the ones that move by design, like the utility recharge — what range counts as normal. Every figure is an amount that gets summed into a cash-flow forecast | **Nothing is seeded. The register ships EMPTY and the forecast reports zero until the real contracts are loaded (H-MIG)** — a placeholder contract would put money that does not exist into a forecast, where it is added up and believed | open | `M-VAT-04` register contents, `R-REP` cash-flow forecast |
 
 ---
 

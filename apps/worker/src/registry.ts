@@ -22,6 +22,7 @@ import type { Job, PgBoss } from 'pg-boss'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
+import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
@@ -159,6 +160,26 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 120,
     handler: watchdogHandler,
   },
+  {
+    name: 'recurring-cost.check',
+    purpose:
+      'Generates the expected periods of every recurring cost, then raises a variance alert for a bill ' +
+      'outside its declared tolerance and a missing-cost alert for a period that passed its due date ' +
+      'unbilled. Two failures nothing else in the system can see: a cost that stops arriving, and a ' +
+      'cost that changes (M-VAT-04).',
+    // 03:45 Asia/Dubai, after trading closes at 02:00 and after audit.ensure-partitions at 03:00. The
+    // pass reads the trading calendar for the session that has just ended, so running it inside trading
+    // hours would date its alerts on a business day that is not over yet.
+    cron: '45 3 * * *',
+    agent: 'recurring_cost_register',
+    retryLimit: 3,
+    retryDelaySeconds: 60,
+    retryBackoff: true,
+    // Generation is one INSERT over a 24-month window and the sweep is two more. Five minutes is
+    // generous; a pass still running past it is blocked on a lock rather than slow.
+    expireInSeconds: 300,
+    handler: recurringCostHandler,
+  },
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
@@ -187,6 +208,31 @@ async function watchdogHandler(_data: never, context: JobContext): Promise<void>
       `agent watchdog raised ${result.raised.length} alert(s): ${result.raised.join(', ')}`,
     )
   }
+}
+
+/**
+ * The recurring cost register's pass.
+ *
+ * Thin on purpose: the business day is resolved and the three steps are taken by
+ * `runRecurringCostCheck`, which takes its instant as an argument so the integration suite can drive it
+ * at the frozen clock. What this wrapper adds is the connection and the log line — and the log line
+ * reports the count of alerts *newly* raised, which on a healthy register is zero every night. Zero is
+ * the evidence, not the silence: the alert rows are what a reader looks at.
+ */
+async function recurringCostHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The recurring cost check ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const result = await runRecurringCostCheck(sql, context.now())
+  console.log(
+    `recurring-cost.check ${result.asOf}: ${result.generated} period(s) generated, ` +
+      `${result.raised.length} alert(s) raised`,
+  )
 }
 
 /**

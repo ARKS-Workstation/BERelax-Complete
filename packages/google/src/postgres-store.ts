@@ -8,9 +8,11 @@ import type { Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import type {
   CapabilityHealthWrite,
+  CapabilityResourceWrite,
   ConnectionEventInput,
   ConsentWrite,
   GoogleCapabilityRecord,
+  GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
@@ -105,7 +107,8 @@ const SELECT_COLUMNS = `
 export type { NewConnection } from './connection-store.ts'
 
 export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
-  GoogleConsentStore & {
+  GoogleConsentStore &
+  GoogleCapabilitySelectionStore & {
     allocateId(): Promise<string>
     insert(connection: NewConnection): Promise<string>
     upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
@@ -249,6 +252,34 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
         throw new AppError(
           'not_found',
           `No ${write.capability} capability on connection ${write.connectionId} for that resource`,
+        )
+      }
+    },
+
+    async selectCapabilityResource(write: CapabilityResourceWrite) {
+      // The PRIMARY row, and that is the whole addressing scheme. `google_capability_one_primary` is a
+      // partial unique index on (connection_id, capability) where is_primary, so at most one row can match
+      // — which is what makes "the row a consumer gets when it asks for this capability without naming a
+      // resource" a single row rather than whichever the plan happened to read. A consent registers exactly
+      // one row per capability and marks it primary (G-CONN-02), so this is the row it created.
+      //
+      // Not an upsert: a capability with no row at all means no consent has registered it, and inserting
+      // one here would create a resource selection against a grant that never included the scope. The
+      // not_found below says so instead.
+      const rows = await sql`
+        update google_capabilities set
+          resource_ref = ${sql.json(write.resourceRef as never)},
+          verified_at  = ${new Date(write.verifiedAt)}
+        where connection_id = ${write.connectionId}
+          and capability = ${write.capability}
+          and is_primary
+        returning id
+      `
+      if (rows.length === 0) {
+        throw new AppError(
+          'not_found',
+          `No primary ${write.capability} capability on connection ${write.connectionId}. A consent ` +
+            'registers one per capability; without it there is nothing for a selection to fill.',
         )
       }
     },

@@ -11,11 +11,65 @@
  * what a human is shown) lives in `@berelax/core` and is tested without a clock or a database. This
  * package is the I/O around it.
  */
+export {
+  type AccountEnumeration,
+  enumerateAccounts,
+  GBP_ACCOUNT_TYPES,
+  holdsLocationsIndependently,
+} from './adapters/account-management.ts'
+export {
+  assertReadMask,
+  type EnumeratedLocation,
+  getLocationUnder,
+  LOCATION_READ_MASK,
+  listLocationsUnder,
+  oneLineAddress,
+  READ_MASK_INCOMPLETE,
+  READ_MASK_MISSING,
+  REQUIRED_READ_MASK_FIELDS,
+} from './adapters/business-information.ts'
+export {
+  assertSiteSelectable,
+  isDomainProperty,
+  listSearchConsoleSites,
+  SITE_NOT_LISTED,
+  SITE_NOT_VERIFIED,
+  siteIsUsable,
+  USABLE_SITE_PERMISSIONS,
+} from './adapters/search-console.ts'
+export {
+  dedupeByPlaceId,
+  enumerateGbpChoices,
+  enumerateSearchConsoleChoices,
+  type GbpPickerView,
+  type GbpResourceRef,
+  type GscPickerView,
+  type GscResourceRef,
+  mapsLinkFor,
+  PICKER_CHOICE_UNKNOWN,
+  PICKER_GUIDANCE,
+  PICKER_LISTING_MOVED,
+  PICKER_STATE_FOR_CAUSE,
+  type PickerChoice,
+  type PickerDeps,
+  type PickerState,
+  parseGbpResourceRef,
+  parseGscResourceRef,
+  RESOURCE_REF_MALFORMED,
+  reviewsPathFor,
+  type SelectionActor,
+  type SelectionOutcome,
+  type SiteChoice,
+  selectGbpLocation,
+  selectSearchConsoleProperty,
+} from './capability-resolver.ts'
 export type {
   CapabilityHealthWrite,
+  CapabilityResourceWrite,
   ConnectionEventInput,
   ConsentWrite,
   GoogleCapabilityRecord,
+  GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
@@ -137,6 +191,7 @@ export {
   type GoogleLogLine,
   type LogLevel,
   type WithGoogleDeps,
+  type WithGoogleOptions,
   type WithGoogleOutcome,
   withGoogle,
 } from './with-google.ts'

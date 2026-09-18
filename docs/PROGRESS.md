@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**47 / 207 units complete.**
+**49 / 207 units complete.**
 
 ## Next up
 
@@ -73,7 +73,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 56 | `M-VAT-01` | Suppliers, supplier tax profile, bills and payables | `M-TILL-02`, `M-TILL-03` | — | — |
 | [ ] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
 | [ ] | 58 | `M-VAT-03` | Reverse charge on offshore suppliers and the nightly exception report | `F06`, `M-VAT-01`, `M-VAT-02` | — | — |
-| [ ] | 59 | `M-VAT-04` | Recurring cost register with fixed/variable split and variance alerting | `H03`, `M-VAT-01` | — | — |
+| [x] | 59 | `M-VAT-04` | Recurring cost register with fixed/variable split and variance alerting | `H03`, `M-VAT-01` | — | — |
 | [x] | 60 | `M-VAT-05` | Opening balances and the trial balance | `M-TILL-02` | — | Y8-opening-balances, Y8-coa |
 | [ ] | 61 | `M-VAT-06` | Period close and lock workflow, corrections by dated reversal | `M-TILL-08`, `M-VAT-05` | — | — |
 | [ ] | 62 | `M-VAT-07` | VAT201 box mapping and working papers with drill-down | `M-TILL-10`, `M-VAT-02`, `M-VAT-03`, `M-VAT-06` | — | Y11-tax-agent, Y11-vat-package |
@@ -169,7 +169,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 152 | `G-CONN-02` | OAuth consent against the fake, granted-scope truth, sub-match reconnect semantics | `G-CONN-01`, `H02` | — | Y10-consent |
 | [x] | 153 | `G-CONN-03` | withGoogle: the single chokepoint, error taxonomy and declared degradation | `G-CONN-02` | — | — |
 | [x] | 154 | `G-CONN-04` | Proactive token refresh under an advisory transaction lock, double-checked | `G-CONN-03` | — | — |
-| [ ] | 155 | `G-CONN-05` | Account and location picker, LOCATION_GROUP enumeration, GSC selected independently | `G-CONN-03` | — | Y10-consent, Y2-listing-owner |
+| [x] | 155 | `G-CONN-05` | Account and location picker, LOCATION_GROUP enumeration, GSC selected independently | `G-CONN-03` | — | Y10-consent, Y2-listing-owner |
 | [ ] | 156 | `G-CONN-06` | Daily health check, Testing-expiry tripwire, listing-drift detection | `G-AGT-01`, `G-CONN-04`, `G-CONN-05` | — | Y4-token-test |
 | [ ] | 157 | `G-CONN-07` | Connection state machine, plain-English states, Test connection, settings card | `G-CONN-06`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 158 | `G-AGT-02` | Agent console: last success, cost against budget, pending approvals, kill switches | `G-AGT-01`, `G-CONN-07`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |

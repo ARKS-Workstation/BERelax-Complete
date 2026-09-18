@@ -9,7 +9,7 @@
  * This covers: the unit runner, the typechecker, the linter, and the CI workflow's completeness.
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -48,11 +48,39 @@ const run = (cmd, args) => {
  * hour on the wrong bug. It has happened.
  */
 const withFixture = (path, contents, body) => {
+  // Refuse a path that already exists. This helper ENDS by deleting the file, which is right for a
+  // fixture it created and destructive for anything tracked — and the failure is silent, because the
+  // deletion happens in a `finally` after the assertion has already passed. It was pointed at
+  // `build/manifest.yaml` once and deleted it; every unit's status went with it, and the only symptom
+  // was an unrelated-looking control failing several cases later. Use `withEditedFile` for a file that
+  // is supposed to survive.
+  if (existsSync(path)) {
+    throw new Error(
+      `withFixture would DELETE the existing file ${path} when it finishes. Use withEditedFile, which ` +
+        'restores the original bytes instead.',
+    )
+  }
   writeFileSync(path, contents.endsWith('\n') ? contents : `${contents}\n`)
   try {
     return body()
   } finally {
     rmSync(path, { force: true })
+  }
+}
+
+/**
+ * Temporarily replace the contents of a file that must still be there afterwards.
+ *
+ * `edit` receives the original text and returns the broken version. The original **bytes** are written
+ * back — not a re-serialisation — so a restore cannot quietly reformat a file the next gate then reads.
+ */
+const withEditedFile = (path, edit, body) => {
+  const original = readFileSync(path)
+  writeFileSync(path, edit(original.toString()))
+  try {
+    return body()
+  } finally {
+    writeFileSync(path, original)
   }
 }
 
@@ -4276,6 +4304,685 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       `the four supply-chain gates add ${total.toFixed(2)}s to pnpm verify, within the 25s budget`,
       total <= 25,
       `${total.toFixed(2)}s is more than pnpm verify should spend on supply-chain scanning`,
+    )
+  }
+}
+
+// 28ag-28an. (G-CONN-05) The picker's addressing scheme is enforced by the database, and the set of
+//            modules allowed to hold a plaintext Google token did not grow to make the picker possible.
+//
+// A selection fills the **primary** capability row: `update google_capabilities set resource_ref = … where
+// connection_id = … and capability = … and is_primary`. That is a single-row address only because two
+// indexes from migration 0016 say so, and both are easy to believe without checking:
+//
+//   - `google_capability_one_primary` — at most one primary per (connection_id, capability). Without it the
+//     update touches an arbitrary number of rows and the review autoresponder resolves whichever the plan
+//     read first, which is how a reply reaches the wrong listing.
+//   - `google_capability_resource_unique` — (connection_id, capability, resource_ref) with **NULLS NOT
+//     DISTINCT**, so a second resource-less row cannot exist either. That is the half a reader skips: the
+//     row a consent leaves behind has `resource_ref` null, and two of them would make "the row the picker
+//     fills" ambiguous before any resource was ever chosen.
+//
+// And the event a selection writes carries the chosen `placeId` into an append-only row that is mirrored
+// into `audit_event`, so `google_connection_events_no_token` is the constraint standing between a
+// convenient debugging line and a bearer credential in a query log.
+//
+// Every probe runs inside `begin; … ; rollback;`, so one that is wrongly ACCEPTED leaves nothing behind
+// either, and each asserts its rule BY NAME — a bare non-zero exit is also what a typo in a column name
+// produces, and the constraint under test would then be dead while this file reported PASS for ever
+// (ADR 0003).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const SUB = 'sub-gate-fixture-picker-selection'
+  // Not a token and not pretending to be one: these rows never leave the rolled-back transaction, and what
+  // is under test is the indexes' arity rather than anything cryptographic.
+  const BYTES = "'\\x00'::bytea"
+  const seed =
+    'insert into google_connections (google_sub, google_email, granted_scopes, refresh_token_ct, ' +
+    'refresh_token_nonce, refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp) values ' +
+    `('${SUB}', 'google-admin@berelax.ae', array['openid'], ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'fp')`
+
+  // The shape `completeGoogleConsent` leaves: one primary row per capability, no resource chosen yet.
+  const REF = `'{"account":"accounts/1","location":"locations/2","placeId":"ChIJ-gate-fixture"}'::jsonb`
+  const OTHER_REF = `'{"account":"accounts/1","location":"locations/9","placeId":"ChIJ-gate-fixture-other"}'::jsonb`
+  const capabilityRow = (ref, primary) =>
+    'insert into google_capabilities (connection_id, capability, resource_ref, health, is_primary) ' +
+    `select id, 'gbp_reviews', ${ref}, 'unknown', ${primary} from google_connections ` +
+    `where google_sub = '${SUB}'`
+  const eventRow = (detail) =>
+    'insert into google_connection_events (connection_id, google_sub, event, actor_kind, actor_label, ' +
+    `detail) select id, google_sub, 'capability_changed', 'staff', 'gate fixture', ${detail}::jsonb ` +
+    `from google_connections where google_sub = '${SUB}'`
+
+  // The write the picker makes, wrapped so the probe fails unless it addressed exactly one row. An update
+  // that matched none would otherwise be reported as success by psql, which is the one outcome that would
+  // make every assertion in this block vacuous.
+  const selectOneRow =
+    'do $$ declare touched int; begin ' +
+    'update google_capabilities set resource_ref = ' +
+    REF +
+    ", verified_at = now() where capability = 'gbp_reviews' and is_primary and connection_id = " +
+    `(select id from google_connections where google_sub = '${SUB}'); ` +
+    'get diagnostics touched = row_count; ' +
+    "if touched <> 1 then raise exception 'the selection addressed % rows, not one', touched; end if; " +
+    'end $$'
+
+  const psqlProbe = (...statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statements.join('; ')}; rollback;`,
+    ])
+
+  if (!dbUrl) {
+    check(
+      'google capability selection constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 28ag. The same resource registered twice under one capability.
+    checkRejectedBy(
+      'picker gate rejects the same listing registered twice for one capability',
+      psqlProbe(capabilityRow(REF, 'true'), capabilityRow(REF, 'false')),
+      'google_capability_resource_unique',
+    )
+
+    // 28ah. Two resource-less rows — the NULLS NOT DISTINCT half, and the one a reader skips. This is the
+    //       state a consent would leave twice if it ran twice, and it is what would make "the primary row
+    //       the picker fills" ambiguous before any listing was chosen.
+    checkRejectedBy(
+      'picker gate rejects two resource-less rows for one capability, nulls not distinct',
+      psqlProbe(capabilityRow('null', 'true'), capabilityRow('null', 'false')),
+      'google_capability_resource_unique',
+    )
+
+    // 28ai. Two primary rows. The selection addresses `where is_primary`, so this is the constraint that
+    //       makes that address single-valued.
+    checkRejectedBy(
+      'picker gate rejects a second primary row for one capability',
+      psqlProbe(capabilityRow(REF, 'true'), capabilityRow(OTHER_REF, 'true')),
+      'google_capability_one_primary',
+    )
+
+    // 28aj. A selection event carrying a token. The tempting debugging line at 2am, refused by constraint
+    //       rather than by code review — rows reach query logs, pg_stat_statements, backups and pg-boss
+    //       payloads (docs/10 §4).
+    checkRejectedBy(
+      'picker gate rejects a selection event whose payload carries a token',
+      psqlProbe(
+        capabilityRow(REF, 'true'),
+        eventRow(`'{"capability":"gbp_reviews","accessToken":"ya29.gate-fixture"}'`),
+      ),
+      'google_connection_events_no_token',
+    )
+
+    // The controls. Without them a renamed table or a broken connection string would reject all four probes
+    // above and this gate would report four passes while examining nothing.
+    //
+    // 28ak. A DIFFERENT resource as a second, non-primary row is legitimate: docs/10 §2 models several
+    //       locations per account on purpose, and a gate that refused it would be describing a singleton.
+    const second = psqlProbe(capabilityRow(REF, 'true'), capabilityRow(OTHER_REF, 'false'))
+    check(
+      'picker gate accepts a second location under one capability when only one is primary',
+      !second.failed,
+      `rejected the many-resources shape migration 0016 exists to allow:\n${second.output}`,
+    )
+
+    // 28al. The selection write itself, and it must touch exactly one row.
+    const selected = psqlProbe(capabilityRow('null', 'true'), selectOneRow)
+    check(
+      'picker gate accepts the selection write and confirms it addresses exactly one row',
+      !selected.failed,
+      `the update the picker makes was refused or matched the wrong number of rows:\n${selected.output}`,
+    )
+
+    // 28am. The event the picker really writes, with the placeId and the actor and no token key.
+    const legitimate = psqlProbe(
+      capabilityRow(REF, 'true'),
+      eventRow(
+        `'{"capability":"gbp_reviews","source":"picker","placeId":"ChIJ-gate-fixture",` +
+          `"account":"accounts/1","location":"locations/2","correlationId":"corr-gate-fixture"}'`,
+      ),
+    )
+    check(
+      'picker gate accepts the selection event the picker writes, placeId and all',
+      !legitimate.failed,
+      `the CHECK refused a payload with no token in it:\n${legitimate.output}`,
+    )
+  }
+}
+
+// 28an. (G-CONN-05) The token allow-list did not grow for the picker, and the pin is not vacuous.
+//
+// The picker is a consumer: it obtains its token from `withGoogle` and never sees a ciphertext, so none of
+// the three modules it added may appear on either allow-list. Widening one is the cheapest way to make a
+// boundary rule stop meaning anything, and it happens one deliberate exception at a time — G-CONN-04 pinned
+// the list for the refresh lock for exactly this reason, and this is the same pin for the three new modules.
+//
+// The second half is what keeps it honest: the modules are asserted to EXIST. A pin that only checks
+// absence passes trivially once the files are deleted or renamed, which is the failure mode of every
+// allow-list assertion written the obvious way.
+{
+  const scanner = readFileSync('scripts/check-google-token-chokepoint.mjs', 'utf8')
+  const cruiser = readFileSync('.dependency-cruiser.cjs', 'utf8')
+  const allowList = scanner.slice(
+    scanner.indexOf('const TOKEN_MODULES'),
+    scanner.indexOf('COLUMN_MODULES'),
+  )
+  const rule = cruiser.slice(
+    cruiser.indexOf('google-tokens-only-in-with-google'),
+    cruiser.indexOf('dependencyTypesNot', cruiser.indexOf('google-tokens-only-in-with-google')),
+  )
+  const pickerModules = [
+    'packages/google/src/capability-resolver.ts',
+    'packages/google/src/adapters/account-management.ts',
+    'packages/google/src/adapters/business-information.ts',
+    'packages/google/src/adapters/search-console.ts',
+  ]
+  const named = pickerModules.filter(
+    (module) =>
+      allowList.includes(module) ||
+      allowList.includes(module.replace('packages/google/src/', '')) ||
+      rule.includes(module.replace('packages/google/src/', '').replace('.ts', '')),
+  )
+  check(
+    'the Google token allow-list was not widened for the picker',
+    allowList.length > 0 && rule.length > 0 && named.length === 0,
+    named.length === 0
+      ? 'the allow-list or the dependency-cruiser rule could not be read out of source'
+      : `${named.join(', ')} appears in a token allow-list. The picker goes through withGoogle and holds ` +
+          'no key: if that has changed, move the allow-list deliberately and say so.',
+  )
+  const missing = pickerModules.filter((module) => {
+    try {
+      readFileSync(module, 'utf8')
+      return false
+    } catch {
+      return true
+    }
+  })
+  check(
+    'the picker modules this pin is about are actually on disk',
+    missing.length === 0,
+    `absent, so the pin above proved nothing: ${missing.join(', ')}`,
+  )
+}
+
+// 32. `meta.units_total` is a second count of the units, and a second count is a future disagreement.
+//
+// It read 206 against a file holding 207 for long enough that nobody could say which number was wrong,
+// and nothing noticed: `pnpm progress:check` counted the list and ignored the metadata. The number is
+// what a planning figure gets quoted from, so the gate is that the two agree.
+{
+  const manifest = readFileSync('build/manifest.yaml', 'utf8')
+  const declared = /^\s*units_total:\s*(\d+)/m.exec(manifest)?.[1]
+  check(
+    'the manifest declares a unit total at all',
+    declared !== undefined,
+    'meta.units_total is gone — the check below cannot fail, which makes it not a check',
+  )
+  const result = withEditedFile(
+    'build/manifest.yaml',
+    (text) =>
+      text.replace(/^(\s*units_total:\s*)(\d+)/m, (_m, lead, n) => `${lead}${Number(n) + 1}`),
+    () => run('python3', ['scripts/progress.py', '--check']),
+  )
+  checkRejectedBy(
+    'progress gate rejects a unit total that disagrees with the units',
+    result,
+    'units_total',
+  )
+  // The control: the real file passes. Without it a broken script would satisfy the probe above.
+  const real = run('python3', ['scripts/progress.py', '--check'])
+  check(
+    'progress gate accepts the committed manifest and ledger',
+    !real.failed,
+    `rejected the committed pair:\n${real.output}`,
+  )
+}
+
+// 26s. (M-VAT-04) The recurring cost register's constraints, as known-bad fixtures against real
+//      PostgreSQL.
+//
+// The register exists to catch two failures nothing else in the system can see: a cost that stops
+// arriving, and a cost that changes. Both become rows here — an expected period, the bill matched to it,
+// and the alert raised when one of those is missing or wrong — and every probe below is a way of getting
+// one of those rows into a state that would make the register lie about a month.
+//
+// Every probe asserts the **name of the rule written for it**: a constraint name, or one of the ZR
+// SQLSTATEs. A bare non-zero exit is also what a typo in a column name produces, and the rule under test
+// would then be dead while this file reported PASS for ever (ADR 0003).
+//
+// Every probe runs inside `begin; … ; rollback;`, which matters more here than elsewhere:
+// `recurring_cost_instance`, `recurring_cost_match` and `recurring_cost_alert` refuse DELETE for every
+// role including the owner, so a committed fixture could not be swept up afterwards by anything.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // After the provisional opening date (2026-09-01) and inside the frozen clock's month, so a refusal
+  // below is the rule under test rather than ZL002 or ZL004.
+  const DATE = "'2026-09-18'"
+  const TRN = "'000000000000003'"
+  const SUPPLIER_A = 'rc-gate-landlord'
+  const SUPPLIER_B = 'rc-gate-laundry'
+  const COST_A = 'rc-gate-rent'
+  const COST_B = 'rc-gate-laundry-cost'
+
+  const supplier = (code) =>
+    `insert into supplier (code, legal_name) values ('${code}', 'gate fixture supplier'); ` +
+    'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+    `select supplier_id, 'domestic', 'domestic_uae', ${TRN} from supplier where code = '${code}'`
+
+  /**
+   * A recurring cost definition. Every column is spelled out rather than defaulted, because the point of
+   * several probes below is that the schema HAS no default for the tolerance or the expectation shape.
+   */
+  const cost = ({
+    code,
+    supplierCode = SUPPLIER_A,
+    account = "'6010'",
+    cadence = "'monthly'",
+    first = "'2026-01-01'",
+    final = 'null',
+    kind = "'fixed'",
+    amount = '2100000',
+    min = 'null',
+    max = 'null',
+    tolerance = '0',
+  }) =>
+    'insert into recurring_cost (code, description, supplier_id, expense_account_code, tax_treatment, ' +
+    'cadence, first_due_date, final_due_date, cost_kind, expected_amount_fils, expected_min_fils, ' +
+    `expected_max_fils, variance_tolerance_bp) select '${code}', 'Gate fixture cost', supplier_id, ` +
+    `${account}, 'standard_recoverable', ${cadence}, ${first}, ${final}, ${kind}, ${amount}, ${min}, ` +
+    `${max}, ${tolerance} from supplier where code = '${supplierCode}'`
+
+  /** One expected period, with the expectation snapshotted onto it. */
+  const instance = ({
+    costCode = COST_A,
+    period = "'2026-09'",
+    due = "'2026-09-01'",
+    kind = "'fixed'",
+    amount = '2100000',
+    min = 'null',
+    max = 'null',
+    tolerance = '0',
+  }) =>
+    'insert into recurring_cost_instance (recurring_cost_id, period_key, due_date, cost_kind, ' +
+    'expected_amount_fils, expected_min_fils, expected_max_fils, variance_tolerance_bp) select ' +
+    `recurring_cost_id, ${period}, ${due}, ${kind}, ${amount}, ${min}, ${max}, ${tolerance} ` +
+    `from recurring_cost where code = '${costCode}'`
+
+  /**
+   * A posted bill with its journal entry and one line, so the header agrees with the lines and the
+   * deferred totals trigger would accept it too. `number` is distinct per call so a probe is refused by
+   * the rule it names rather than by `bill_internal_number_unique`.
+   */
+  const bill = ({ n, supplierCode = SUPPLIER_A, reference }) => {
+    const entryId = `JE-RC-GATE-${n}`
+    return [
+      'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('${entryId}', ${DATE}, 'gate fixture recurring bill', 'supplier_bill')`,
+      'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+        `('${entryId}', 1, '6010', 20000, 0), ('${entryId}', 2, '1080', 1000, 0), ` +
+        `('${entryId}', 3, '2010', 0, 21000)`,
+      'insert into bill (supplier_id, supplier_reference, series_code, period_key, number, ' +
+        'display_number, bill_date, due_date, entry_id, net_fils, gross_fils, ' +
+        'recoverable_input_vat_fils, received_by) select supplier_id, ' +
+        `'${reference}', 'SUPP-BILL', '', ${960000 + n}, 'BILL-RCGATE-${n}', ${DATE}, ${DATE}, ` +
+        `'${entryId}', 20000, 21000, 1000, 'gate' from supplier where code = '${supplierCode}'`,
+      'insert into bill_line (bill_id, line_no, description, expense_account_code, tax_treatment, ' +
+        'vat_rate_bp, net_fils, gross_fils, recoverable_input_vat_fils) select bill_id, 1, ' +
+        "'Gate fixture line', '6010', 'standard_recoverable', 500, 20000, 21000, 1000 " +
+        `from bill where supplier_reference = '${reference}'`,
+    ].join('; ')
+  }
+
+  const match = ({ costCode = COST_A, period = "'2026-09'", reference }) =>
+    'insert into recurring_cost_match (recurring_cost_id, period_key, bill_id, matched_by) ' +
+    `select c.recurring_cost_id, ${period}, b.bill_id, 'gate' from recurring_cost c, bill b ` +
+    `where c.code = '${costCode}' and b.supplier_reference = '${reference}'`
+
+  const alert = ({
+    costCode = COST_A,
+    period = "'2026-09'",
+    kind = "'variance_over_tolerance'",
+    delta = '1000',
+    tolerance = '0',
+  }) =>
+    'insert into recurring_cost_alert (recurring_cost_id, period_key, alert_kind, delta_fils, ' +
+    `tolerance_fils, raised_for_date) select recurring_cost_id, ${period}, ${kind}, ${delta}, ` +
+    `${tolerance}, ${DATE} from recurring_cost where code = '${costCode}'`
+
+  // Two suppliers, two costs, three periods and three bills: enough for every probe below to be refused
+  // by the rule it names rather than by a missing row.
+  const setup = [
+    supplier(SUPPLIER_A),
+    supplier(SUPPLIER_B),
+    cost({ code: COST_A }),
+    cost({ code: COST_B, supplierCode: SUPPLIER_B, account: "'6050'", amount: '63000' }),
+    instance({}),
+    instance({ period: "'2026-10'", due: "'2026-10-01'" }),
+    instance({ costCode: COST_B }),
+    bill({ n: 1, reference: 'RC-GATE-1' }),
+    bill({ n: 2, reference: 'RC-GATE-2' }),
+    bill({ n: 3, supplierCode: SUPPLIER_B, reference: 'RC-GATE-3' }),
+  ].join('; ')
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  /** Reads a value back with the fixtures in place, then rolls them away. */
+  const psqlRead = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-At',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits next to the statement that must trip it.
+  const probes = [
+    {
+      name: 'recurring cost gate rejects a variable cost with no expected range',
+      rule: 'recurring_cost_variable_needs_an_expected_range',
+      // A variable cost moves by design, so a single number would be wrong every period; with no band
+      // there is nothing to be inside and nothing is ever normal.
+      sql: cost({ code: 'rc-gate-no-range', kind: "'variable'", amount: 'null' }),
+    },
+    {
+      name: 'recurring cost gate rejects a fixed cost with no expected amount',
+      rule: 'recurring_cost_fixed_needs_an_expected_amount',
+      sql: cost({ code: 'rc-gate-no-amount', amount: 'null' }),
+    },
+    {
+      name: 'recurring cost gate rejects a definition that states both expectation shapes',
+      rule: 'recurring_cost_fixed_needs_an_expected_amount',
+      // The halfway row is worse than either missing one: whichever non-null column a reader reached for
+      // first would decide the variance, and two readers would disagree about the same bill.
+      sql: cost({ code: 'rc-gate-both', min: '210000', max: '525000' }),
+    },
+    {
+      name: 'recurring cost gate rejects an inverted expected range',
+      rule: 'recurring_cost_range_is_ordered',
+      // Every bill is then simultaneously above the maximum and below the minimum, so every period
+      // alerts and the alert means nothing.
+      sql: cost({
+        code: 'rc-gate-inverted',
+        kind: "'variable'",
+        amount: 'null',
+        min: '525000',
+        max: '210000',
+        tolerance: '500',
+      }),
+    },
+    {
+      name: 'recurring cost gate rejects a zero expectation',
+      rule: 'recurring_cost_expected_amount_positive',
+      // Zero is a missing amount, not a free contract: it forecasts nothing and makes every arriving
+      // bill a total variance while the definition still looks complete.
+      sql: cost({ code: 'rc-gate-zero', amount: '0' }),
+    },
+    {
+      name: 'recurring cost gate rejects a tolerance that is not a fraction',
+      rule: 'recurring_cost_variance_tolerance_bp_check',
+      sql: cost({ code: 'rc-gate-tolerance', tolerance: '10001' }),
+    },
+    {
+      name: 'recurring cost gate rejects an anchor whose day is missing from some months',
+      rule: 'recurring_cost_anchor_day_is_in_every_month',
+      // `date + interval '1 month'` clamps the 31st to the 28th, so such an anchor produces a series
+      // whose day of the month wanders and cannot be compared period to period.
+      sql: cost({ code: 'rc-gate-anchor', first: "'2026-01-31'" }),
+    },
+    {
+      name: 'recurring cost gate rejects a contract that ends before it starts',
+      rule: 'recurring_cost_ends_after_it_starts',
+      sql: cost({ code: 'rc-gate-ended', final: "'2025-12-01'" }),
+    },
+    {
+      name: 'recurring cost gate rejects a second expected period for one cost and month',
+      rule: 'recurring_cost_instance_one_per_period',
+      // The idempotency the nightly pass depends on. Without it a daily cron produces a second September
+      // every night, and the missing-cost alert fires for a period that was in fact billed.
+      sql: instance({}),
+    },
+    {
+      name: 'recurring cost gate rejects a period whose key disagrees with its due date',
+      rule: 'recurring_cost_instance_period_matches_due_date',
+      // A generator bug filing October's expectation under September would make the missing-cost alert
+      // fire for a month that was billed and stay silent for the one that was not.
+      sql: instance({ period: "'2026-11'", due: "'2026-10-01'" }),
+    },
+    {
+      name: 'recurring cost gate rejects a half-filled expectation snapshot',
+      rule: 'recurring_cost_instance_variable_needs_an_expected_range',
+      // The snapshot is what the variance is actually computed from, so the shape rules are restated on
+      // it rather than inherited from the definition.
+      sql: instance({
+        period: "'2026-12'",
+        due: "'2026-12-01'",
+        kind: "'variable'",
+        amount: 'null',
+      }),
+    },
+    {
+      name: 'recurring cost gate rejects a second bill matched to one expected period',
+      rule: 'recurring_cost_match_one_per_period',
+      sql: [match({ reference: 'RC-GATE-1' }), match({ reference: 'RC-GATE-2' })].join('; '),
+    },
+    {
+      name: 'recurring cost gate rejects one bill satisfying two expected periods',
+      rule: 'recurring_cost_match_one_per_bill',
+      // Otherwise one invoice could be used to silence two different missing-cost alerts.
+      sql: [
+        match({ reference: 'RC-GATE-1' }),
+        match({ period: "'2026-10'", reference: 'RC-GATE-1' }),
+      ].join('; '),
+    },
+    {
+      name: 'recurring cost gate rejects a bill matched to a cost somebody else bills',
+      rule: 'MatchedBillFromAnotherSupplier',
+      // The mis-keystroke this guard exists for: the laundry invoice matched to the rent reports a large
+      // false variance, silences the rent's missing-cost alert and leaves the laundry looking unbilled.
+      sql: match({ reference: 'RC-GATE-3' }),
+    },
+    {
+      name: 'recurring cost gate rejects a second alert of the same kind for one period',
+      rule: 'recurring_cost_alert_once_per_period_and_kind',
+      // This constraint is what makes a daily pass raise once per incident. Without it one unbilled
+      // August produces 365 alerts, and the 365th is the one nobody reads.
+      sql: [alert({}), alert({})].join('; '),
+    },
+    {
+      name: 'recurring cost gate rejects a missing-cost alert carrying a delta',
+      rule: 'recurring_cost_alert_variance_carries_a_delta',
+      // Nothing arrived, so there is nothing to differ from. A delta here invites the reader to treat an
+      // absence as a difference.
+      sql: alert({ kind: "'missing_cost'" }),
+    },
+    {
+      name: 'recurring cost gate rejects a variance alert whose delta is zero',
+      rule: 'recurring_cost_alert_variance_delta_is_not_zero',
+      sql: alert({ delta: '0' }),
+    },
+    {
+      name: 'recurring cost gate rejects a delta with no tolerance beside it',
+      rule: 'recurring_cost_alert_delta_and_tolerance_travel_together',
+      // The alert has to explain itself: a difference with no threshold beside it cannot be judged.
+      sql: alert({ tolerance: 'null' }),
+    },
+    {
+      name: 'recurring cost gate rejects an UPDATE of an expected period, for the owner too',
+      rule: 'recurring_cost_instance is append-only',
+      // Re-stating what a period expected would silently rewrite a variance somebody has already been
+      // told about.
+      sql:
+        'update recurring_cost_instance set expected_amount_fils = 9900000 ' +
+        "where period_key = '2026-09'",
+    },
+    {
+      name: 'recurring cost gate rejects a DELETE of an alert, for the owner too',
+      rule: 'recurring_cost_alert is append-only',
+      sql: [alert({}), 'delete from recurring_cost_alert'].join('; '),
+    },
+    {
+      name: 'recurring cost gate rejects a cadence the schedule cannot step',
+      rule: 'UnknownRecurringCadence',
+      // A SQL `case` with no `else` would return NULL here, and a NULL does not fail: it makes every due
+      // date NULL and the cost vanishes from the forecast, which is the failure the register exists for.
+      sql: "select recurring_cost_period_months('fortnightly')",
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'recurring cost constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement } of probes) {
+      checkRejectedBy(name, psqlProbe(statement), rule)
+    }
+
+    // The controls, and the reason the twenty-one above mean anything: the same tables accept the
+    // legitimate rows. Without these, a broken connection string or a renamed table would reject every
+    // probe and this gate would report twenty-one passes while examining nothing.
+    const legitimate = psqlProbe(
+      [
+        cost({
+          code: 'rc-gate-good-variable',
+          kind: "'variable'",
+          amount: 'null',
+          min: '210000',
+          max: '525000',
+          tolerance: '500',
+        }),
+        instance({
+          costCode: 'rc-gate-good-variable',
+          kind: "'variable'",
+          amount: 'null',
+          min: '210000',
+          max: '525000',
+          tolerance: '500',
+        }),
+        match({ reference: 'RC-GATE-1' }),
+        alert({}),
+        alert({ kind: "'missing_cost'", delta: 'null', tolerance: 'null' }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'recurring cost gate accepts a fixed cost, a variable cost, a match and both alert kinds',
+      !legitimate.failed,
+      `rejected the rows the register writes every night:\n${legitimate.output}`,
+    )
+
+    // The variance, read back from the database rather than merely executed: a function that returned the
+    // same verdict for every input would satisfy "it ran". Both sides of the boundary — a bill exactly ON
+    // the tolerance is within it, and one fils past is not.
+    const variance = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(v.delta_fils || ':' || v.tolerance_fils || ':' || v.over_tolerance, ',' " +
+        'order by g.gross) ' +
+        'from unnest(array[2100000, 2121000, 2121001]::bigint[]) as g(gross) ' +
+        "cross join lateral recurring_cost_variance('fixed', 2100000, null, null, 100, g.gross) as v",
+    ])
+    check(
+      'recurring cost gate reads the variance from the database, within and over the same boundary',
+      !variance.failed &&
+        variance.output.trim() === '0:21000:false,21000:21000:false,21001:21000:true',
+      `the variance function did not answer both sides of its tolerance boundary:\n${variance.output}`,
+    )
+
+    // And the variable shape, where the expectation is a band and the reference is the edge that was
+    // crossed. Inside the band the verdict must be zero, which is what stops a seasonal cost alerting
+    // every month.
+    const band = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(v.delta_fils || ':' || v.over_tolerance, ',' order by g.gross) " +
+        'from unnest(array[210000, 525000, 551250, 551251]::bigint[]) as g(gross) ' +
+        "cross join lateral recurring_cost_variance('variable', null, 210000, 525000, 500, g.gross) as v",
+    ])
+    check(
+      'recurring cost gate reads a variable cost as zero variance anywhere inside its band',
+      !band.failed && band.output.trim() === '0:false,0:false,26250:false,26251:true',
+      `the variance function did not treat the declared band as normal:\n${band.output}`,
+    )
+
+    // The forward schedule R-REP consumes, read back: exactly twelve occurrences of a monthly cost over
+    // twelve months whatever day of the month it falls on, and the prudent figure for each.
+    const schedule = psqlRead(
+      "select count(*) || ':' || sum(expected_fils) " +
+        "from recurring_cost_forward_schedule('2026-09-18', 12) where code = '" +
+        COST_A +
+        "'",
+    )
+    check(
+      'recurring cost gate reads twelve monthly occurrences and their total from the forward schedule',
+      !schedule.failed && schedule.output.includes('12:25200000'),
+      `the forward schedule did not answer twelve periods of the fixture rent:\n${schedule.output}`,
+    )
+
+    // And it is computed from the definitions rather than from generated periods, so a forecast cannot
+    // quietly shorten to wherever the nightly pass last got to.
+    const withoutPeriods = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-At',
+      dbUrl,
+      '-c',
+      'begin; ' +
+        supplier('rc-gate-forecast-only') +
+        '; ' +
+        cost({ code: 'rc-gate-forecast-only', supplierCode: 'rc-gate-forecast-only' }) +
+        "; select 'occurrences=' || count(*) from recurring_cost_forward_schedule('2026-09-18', 12) " +
+        "where code = 'rc-gate-forecast-only'; rollback;",
+    ])
+    check(
+      'recurring cost gate reads a forecast for a cost with no generated periods at all',
+      !withoutPeriods.failed && withoutPeriods.output.includes('occurrences=12'),
+      'the forecast depends on the generator having run, so a horizon can silently shorten:\n' +
+        withoutPeriods.output,
+    )
+
+    // The cron's agent row. `pnpm jobs` refuses a cron with no agent statically; this is the half that
+    // needs a database, and without the row the watchdog would never check the pass at all.
+    const agent = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select d.expected_interval_seconds || ':' || (h.agent_key is not null) from agent_definition d " +
+        'left join agent_heartbeat h on h.agent_key = d.agent_key ' +
+        "where d.agent_key = 'recurring_cost_register'",
+    ])
+    check(
+      'recurring cost gate finds the register agent, with a heartbeat row the watchdog can join to',
+      !agent.failed && agent.output.trim() === '86400:true',
+      `the recurring_cost_register agent is missing or has no heartbeat: ${agent.output}`,
     )
   }
 }

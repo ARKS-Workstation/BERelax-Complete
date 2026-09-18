@@ -3,6 +3,7 @@ import { AppError } from '@berelax/shared'
 import type {
   ConnectionEventInput,
   GoogleCapabilityRecord,
+  GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
@@ -38,7 +39,10 @@ const sameResource = (
   b: Readonly<Record<string, unknown>> | null,
 ): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
-export interface MemoryConnectionStore extends GoogleConnectionStore, GoogleConsentStore {
+export interface MemoryConnectionStore
+  extends GoogleConnectionStore,
+    GoogleConsentStore,
+    GoogleCapabilitySelectionStore {
   put(record: GoogleConnectionRecord): void
   putCapability(capability: GoogleCapabilityRecord): void
   records(): readonly GoogleConnectionRecord[]
@@ -167,6 +171,43 @@ export function createMemoryConnectionStore(
         )
       }
       capabilities.push(capability)
+    },
+
+    async selectCapabilityResource(write) {
+      // The primary row, keyed the way the partial unique index keys it. A fake that searched by resource
+      // would find nothing on the first selection — the row it has to fill is the one whose resource_ref is
+      // still null — and a fake that searched by capability alone would pick whichever row came first once
+      // a second resource existed, which is the ambiguity `google_capability_one_primary` exists to remove.
+      const index = capabilities.findIndex(
+        (c) =>
+          c.connectionId === write.connectionId && c.capability === write.capability && c.isPrimary,
+      )
+      const existing = capabilities[index]
+      if (existing === undefined) {
+        throw new AppError(
+          'not_found',
+          `No primary ${write.capability} capability on connection ${write.connectionId}. A consent ` +
+            'registers one per capability; without it there is nothing for a selection to fill.',
+        )
+      }
+      // `google_capability_resource_unique` is NULLS NOT DISTINCT over (connection_id, capability,
+      // resource_ref), so the same resource cannot be registered twice under one capability. Reproduced
+      // here because a fake more permissive than the database is how a bug reaches production green.
+      const clash = capabilities.find(
+        (c, position) =>
+          position !== index &&
+          c.connectionId === write.connectionId &&
+          c.capability === write.capability &&
+          sameResource(c.resourceRef, write.resourceRef),
+      )
+      if (clash !== undefined) {
+        throw new AppError(
+          'conflict',
+          `That resource is already registered for ${write.capability} on ${write.connectionId} ` +
+            '(google_capability_resource_unique).',
+        )
+      }
+      capabilities[index] = { ...existing, resourceRef: write.resourceRef }
     },
 
     async updateCapabilityHealth(write) {

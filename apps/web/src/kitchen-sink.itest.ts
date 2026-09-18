@@ -39,7 +39,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * note. Where the question is about the *result*, computed styles are exactly right, and that is what
  * the track widths, the measures and the rings are read from.
  */
-const PORT = 3124
+/**
+ * A random port, and the reason is not politeness about a busy machine.
+ *
+ * This was a fixed 3124, which is fine alone and wrong the moment two checkouts run the suite at once —
+ * and several usually do, because each unit works in its own worktree. The second `next start` cannot bind,
+ * exits, and `waitForServer` then **succeeds against the first worktree's server**: the assertions below run
+ * against a different build of the application and report on code this checkout does not contain. A flake
+ * would have been the good outcome; this passes or fails for reasons that have nothing to do with the tree
+ * under test. The other three server-starting suites already randomise, in disjoint ranges — shell 3200,
+ * primitives 3800, route spine 4100 — so this one takes 4400.
+ */
+const PORT = 4400 + Math.floor(Math.random() * 300)
 const BASE = `http://127.0.0.1:${PORT}`
 const ROUTE = `${BASE}/kitchen-sink`
 
@@ -61,12 +72,30 @@ async function waitForServer(timeoutMs = 60_000): Promise<void> {
 }
 
 beforeAll(async () => {
+  // `pipe`, not `ignore`: a server that cannot bind says so on stderr, and with the output discarded the
+  // only symptom was `ERR_CONNECTION_REFUSED` from Playwright several assertions later.
   server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NODE_ENV: 'production' },
   })
+  let output = ''
+  server.stdout?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
+  server.stderr?.on('data', (chunk: Buffer) => {
+    output += chunk.toString()
+  })
   await waitForServer()
+  // The server that answered must be OURS. `waitForServer` only proves something is listening, and a
+  // reachable port plus a dead child is exactly the case above: another checkout's application answering
+  // for this one.
+  if (server.exitCode !== null) {
+    throw new Error(
+      `next start exited with ${server.exitCode} yet ${BASE} answered — something else is serving that ` +
+        `port and these assertions would run against it:\n${output}`,
+    )
+  }
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 180_000)
 

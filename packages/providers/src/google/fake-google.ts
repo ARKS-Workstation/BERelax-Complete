@@ -23,11 +23,14 @@ import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
 import type {
   BusinessProfileProvider,
+  GbpAccount,
+  GbpLocation,
   GoogleOAuthProvider,
   GoogleTokens,
   Review,
   SearchAnalyticsRow,
   SearchConsoleProvider,
+  SearchConsoleSite,
 } from './port.ts'
 
 export const GOOGLE_OAUTH = 'google-oauth'
@@ -87,6 +90,26 @@ export interface FakeGoogleOptions {
    * one nobody has seen work.
    */
   readonly rotatesRefreshToken?: boolean
+  /**
+   * The accounts `accounts.list` returns. Default: the two fixtures below.
+   *
+   * `[]` is the case the picker gets wrong most easily: **HTTP 200 with an empty list**, which means the
+   * consenting account genuinely administers no profiles and is not a gating error (docs/10 §7). Passing
+   * `[]` here is how that path is reachable at all.
+   */
+  readonly accounts?: readonly GbpAccount[]
+  /**
+   * Which locations each account returns, keyed by the account's resource name.
+   *
+   * A map rather than one list, because the fact this fake exists to reproduce is that **the answer
+   * depends on which account you ask**. The default puts the business's only listing under the
+   * LOCATION_GROUP account and nothing but the decoy under the PERSONAL one, so a client that enumerated
+   * only the personal account finds the wrong listing rather than none — which is the more dangerous
+   * failure and the one a test would otherwise never see.
+   */
+  readonly locationsByAccount?: Readonly<Record<string, readonly GbpLocation[]>>
+  /** What `sites.list` returns. Default: the three fixtures below. */
+  readonly sites?: readonly SearchConsoleSite[]
 }
 
 function addSeconds(iso: string, seconds: number): string {
@@ -361,8 +384,89 @@ export const REVIEW_FIXTURES: readonly Review[] = [
   },
 ]
 
+/**
+ * The Google account that owns the listing, as docs/10 §5 expects to find it.
+ *
+ * A **LOCATION_GROUP**, because that is the shape that breaks a naive client: its locations are not
+ * returned under the personal account, so enumerating only the personal account finds nothing.
+ */
+export const GBP_LOCATION_GROUP_ACCOUNT: GbpAccount = {
+  name: 'accounts/fake-location-group-1',
+  accountName: 'BE RELAX SPA - L.L.C - O.P.C (location group)',
+  type: 'LOCATION_GROUP',
+}
+
+/** The personal Gmail the listing was claimed on — the ordinary starting state (docs/10 §5). */
+export const GBP_PERSONAL_ACCOUNT: GbpAccount = {
+  name: 'accounts/fake-personal-1',
+  accountName: 'Be Relax owner (personal)',
+  type: 'PERSONAL',
+}
+
+export const GBP_ACCOUNT_FIXTURES: readonly GbpAccount[] = [
+  GBP_PERSONAL_ACCOUNT,
+  GBP_LOCATION_GROUP_ACCOUNT,
+]
+
+/**
+ * The business's one permanent listing: 250 Al Meena Street, Al Zahiyah, Abu Dhabi (docs/13 §2).
+ *
+ * The `placeId` is visibly a fixture rather than a plausible one. A real place id is opaque, so a
+ * plausible-looking value is indistinguishable from a configured one — and a wrong `placeId` stored as a
+ * fact is a review reply published against somebody else's listing (the brief's rule 15).
+ */
+export const AL_ZAHIYAH_LOCATION: GbpLocation = {
+  name: 'locations/fake-al-zahiyah-1',
+  title: 'BE RELAX — Massage Center and Spa',
+  storefrontAddress: {
+    addressLines: ['250 Al Meena Street', 'Tower Block A/B, M-Floor'],
+    locality: 'Al Zahiyah',
+    administrativeArea: 'Abu Dhabi',
+    regionCode: 'AE',
+  },
+  metadata: { placeId: 'ChIJ-fake-place-al-zahiyah' },
+  websiteUri: 'https://berelaxmassage.com/',
+}
+
+/**
+ * The decoy, and it is not a contrivance.
+ *
+ * "Be Relax" is also the name of an airport spa chain with listings in airports, so a Google account that
+ * manages several profiles returns more than one plausible *Be Relax*. This is the listing that must NOT
+ * be selected, and the reason the picker shows the full address rather than the title: with titles alone,
+ * these two rows read identically, and picking the wrong one silently publishes replies against another
+ * company's listing.
+ */
+export const AIRPORT_DECOY_LOCATION: GbpLocation = {
+  name: 'locations/fake-airport-decoy-1',
+  title: 'Be Relax Spa — Terminal A',
+  storefrontAddress: {
+    addressLines: ['Zayed International Airport, Terminal A, Departures'],
+    locality: 'Abu Dhabi',
+    administrativeArea: 'Abu Dhabi',
+    regionCode: 'AE',
+  },
+  metadata: { placeId: 'ChIJ-fake-place-airport-terminal-a' },
+}
+
+export const GBP_LOCATION_FIXTURES: Readonly<Record<string, readonly GbpLocation[]>> = {
+  [GBP_PERSONAL_ACCOUNT.name]: [AIRPORT_DECOY_LOCATION],
+  [GBP_LOCATION_GROUP_ACCOUNT.name]: [AL_ZAHIYAH_LOCATION],
+}
+
+/**
+ * The fields the fake requires in a `readMask`, because without them its answer is unusable.
+ *
+ * Not a copy of the adapter's list: this is the *minimum* the fake needs to return a location a picker
+ * could act on, and it is asserted here so a caller that skipped the adapter still cannot get a location
+ * with no `placeId` — which would dedupe on `undefined` and merge two different businesses into one row.
+ */
+const REQUIRED_READ_MASK_FIELDS = ['name', 'title', 'metadata']
+
 export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessProfileProvider {
   const { log, failures, now } = options
+  const accounts = options.accounts ?? GBP_ACCOUNT_FIXTURES
+  const locationsByAccount = options.locationsByAccount ?? GBP_LOCATION_FIXTURES
   const reviews = new Map(REVIEW_FIXTURES.map((review) => [review.reviewId, { ...review }]))
 
   const guard = (operation: string, summary: string): void => {
@@ -378,8 +482,97 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
     throw failureError(GOOGLE_BUSINESS_PROFILE, armed)
   }
 
+  /**
+   * The `readMask` refusal, reproduced rather than tolerated.
+   *
+   * Google returns 400 for `locations.list` and `locations.get` without a `readMask`. A fake that
+   * defaulted the mask would make the adapter's own guard untestable and would hide the mistake until the
+   * first real call — so this refuses, and the adapter refuses earlier so the round trip is never spent.
+   */
+  const requireReadMask = (
+    operation: string,
+    readMask: readonly string[] | undefined,
+  ): readonly string[] => {
+    const missing =
+      readMask === undefined || readMask.length === 0
+        ? REQUIRED_READ_MASK_FIELDS
+        : REQUIRED_READ_MASK_FIELDS.filter((field) => !readMask.includes(field))
+    if (missing.length === 0 && readMask !== undefined) return readMask
+    log.record({
+      provider: GOOGLE_BUSINESS_PROFILE,
+      operation,
+      outcome: 'failure',
+      summary: `${operation} rejected: readMask is mandatory and must cover ${missing.join(', ')}`,
+      detail: { failureMode: 'rejected', missingReadMaskFields: missing },
+    })
+    throw failureError(GOOGLE_BUSINESS_PROFILE, 'rejected')
+  }
+
   return {
     name: GOOGLE_BUSINESS_PROFILE,
+
+    async listAccounts() {
+      guard('listAccounts', 'Listing Google accounts failed')
+      log.record({
+        provider: GOOGLE_BUSINESS_PROFILE,
+        operation: 'listAccounts',
+        outcome: 'success',
+        // An empty list is a successful answer, and the summary says so: HTTP 200 with no accounts means
+        // this Google account administers no profiles, which is not a gating error (docs/10 §7).
+        summary:
+          accounts.length === 0
+            ? 'No Business Profile accounts: HTTP 200 with an empty list'
+            : `${accounts.length} account(s), types ${accounts.map((a) => a.type).join(', ')}`,
+        detail: { accounts: accounts.map((account) => account.name) },
+      })
+      return accounts
+    },
+
+    async listLocations({ parent, readMask, pageSize }) {
+      guard('listLocations', `Listing locations under ${parent} failed`)
+      const mask = requireReadMask('listLocations', readMask)
+      const all = locationsByAccount[parent] ?? []
+      const page = pageSize === undefined ? all : all.slice(0, pageSize)
+      log.record({
+        provider: GOOGLE_BUSINESS_PROFILE,
+        operation: 'listLocations',
+        outcome: 'success',
+        summary: `${page.length} location(s) under ${parent}`,
+        detail: {
+          parent,
+          readMask: [...mask],
+          locations: page.map((location) => location.name),
+        },
+      })
+      return page
+    },
+
+    async getLocation({ name, readMask }) {
+      guard('getLocation', `Reading ${name} failed`)
+      requireReadMask('getLocation', readMask)
+
+      const found = Object.values(locationsByAccount)
+        .flat()
+        .find((location) => location.name === name)
+      if (found === undefined) {
+        log.record({
+          provider: GOOGLE_BUSINESS_PROFILE,
+          operation: 'getLocation',
+          outcome: 'failure',
+          summary: `No location ${name}`,
+          detail: { failureMode: 'rejected', name },
+        })
+        throw failureError(GOOGLE_BUSINESS_PROFILE, 'rejected')
+      }
+      log.record({
+        provider: GOOGLE_BUSINESS_PROFILE,
+        operation: 'getLocation',
+        outcome: 'success',
+        summary: `${found.title} resolved from ${name}`,
+        detail: { name, placeId: found.metadata.placeId },
+      })
+      return found
+    },
 
     async listReviews(locationId: string) {
       guard('listReviews', `Listing reviews for ${locationId} failed`)
@@ -507,8 +700,28 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
 const RARE_QUERY_CLICKS = 71
 const RARE_QUERY_IMPRESSIONS = 2140
 
+/**
+ * The properties the consenting account can see, and the trap in the middle of the list.
+ *
+ * Three rows, and every one of them is a decision the owner has to make correctly:
+ *
+ *   - the **domain** property, verified by DNS TXT, which docs/10 §5 recommends precisely because it
+ *     survives the loss of any one Google account;
+ *   - the **URL-prefix** property for the same site, which is a *different* property with a different
+ *     identifier and its own data — picking it is not wrong, but it is not the same choice;
+ *   - the prototype host (docs/13 names `berelax.netlify.app`), listed but `siteUnverifiedUser`: the
+ *     account can see it and can read nothing from it. Selecting it yields an SEO report of zeroes, which
+ *     reads as a finding rather than as a misconfiguration.
+ */
+export const SEARCH_CONSOLE_SITE_FIXTURES: readonly SearchConsoleSite[] = [
+  { siteUrl: 'sc-domain:berelaxmassage.com', permissionLevel: 'siteOwner' },
+  { siteUrl: 'https://berelaxmassage.com/', permissionLevel: 'siteFullUser' },
+  { siteUrl: 'https://berelax.netlify.app/', permissionLevel: 'siteUnverifiedUser' },
+]
+
 export function createFakeSearchConsole(options: FakeGoogleOptions): SearchConsoleProvider {
   const { log, failures } = options
+  const sites = options.sites ?? SEARCH_CONSOLE_SITE_FIXTURES
 
   const guard = (operation: string, summary: string): void => {
     const armed = failures.take()
@@ -525,6 +738,18 @@ export function createFakeSearchConsole(options: FakeGoogleOptions): SearchConso
 
   return {
     name: GOOGLE_SEARCH_CONSOLE,
+
+    async listSites() {
+      guard('listSites', 'Listing Search Console properties failed')
+      log.record({
+        provider: GOOGLE_SEARCH_CONSOLE,
+        operation: 'listSites',
+        outcome: 'success',
+        summary: `${sites.length} propert(ies), ${sites.filter((s) => s.permissionLevel === 'siteUnverifiedUser').length} unverified`,
+        detail: { sites: sites.map((site) => `${site.siteUrl} (${site.permissionLevel})`) },
+      })
+      return sites
+    },
 
     async queryAnalytics({ siteUrl, startDate, endDate, rowLimit }) {
       guard('queryAnalytics', `Search analytics for ${siteUrl} failed`)

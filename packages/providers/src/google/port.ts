@@ -80,8 +80,94 @@ export interface Review {
   readonly reply?: { readonly comment: string; readonly updatedAtIso: string }
 }
 
+/**
+ * What kind of Google account this is, and why the distinction is load-bearing.
+ *
+ * `LOCATION_GROUP` is the one that matters. An account of that type **holds locations the `PERSONAL`
+ * account does not return**, so a client that enumerates only the personal account finds nothing and
+ * reports it as *"no locations"* — which is indistinguishable, on a screen, from a business whose
+ * listing somebody else owns (docs/10 §7). The picker therefore enumerates under every account.
+ *
+ * `ORGANIZATION` and `USER_GROUP` are here because they are values the real API returns; nothing
+ * branches on them, and a union that omitted them would make an ordinary response unparseable.
+ */
+export type GbpAccountType = 'PERSONAL' | 'LOCATION_GROUP' | 'ORGANIZATION' | 'USER_GROUP'
+
+export interface GbpAccount {
+  /** The resource name, `accounts/{account}`. Persisted with a selection: the v4 reviews path needs it. */
+  readonly name: string
+  /** What a human sees in the Business Profile UI. Display only. */
+  readonly accountName: string
+  readonly type: GbpAccountType
+}
+
+/**
+ * A postal address as Business Information v1 returns it: structured, never one string.
+ *
+ * `postalCode` is optional and absent in the fixtures, because Abu Dhabi addresses do not carry one
+ * and an invented postcode is worse than a blank field (the brief's rule 15).
+ */
+export interface GbpPostalAddress {
+  readonly addressLines: readonly string[]
+  readonly locality: string
+  readonly administrativeArea: string
+  /** CLDR region code, `AE` here. */
+  readonly regionCode: string
+  readonly postalCode?: string
+}
+
+export interface GbpLocation {
+  /** `locations/{location}` — v1 returns the location WITHOUT its account (docs/10 §7). */
+  readonly name: string
+  readonly title: string
+  readonly storefrontAddress: GbpPostalAddress
+  /**
+   * Where the `placeId` actually lives on the real API: under `metadata`, not at the top level.
+   *
+   * Modelled faithfully because it changes the client: `readMask` is per field, so a mask that omits
+   * `metadata` returns locations with no `placeId` at all — and `placeId` is the key the picker dedupes
+   * by and the value a Maps deep link is built from. A flattened shape would have hidden that.
+   */
+  readonly metadata: { readonly placeId: string; readonly mapsUri?: string }
+  readonly websiteUri?: string
+}
+
+/**
+ * `locations.list`, as the adapter constructs it.
+ *
+ * `readMask` is **mandatory on the real API** and optional here, deliberately: the acceptance criterion
+ * is that the adapter refuses a call without one *before it reaches the transport*, and a required field
+ * would make that refusal unreachable from a test — the compiler would refuse the fixture instead, which
+ * proves nothing about the adapter. The fake refuses it too, the way Google does, so a caller that
+ * bypassed the adapter would still not get away with it.
+ */
+export interface LocationsListRequest {
+  /** `accounts/{account}` — every account, including the LOCATION_GROUP ones. */
+  readonly parent: string
+  readonly readMask?: readonly string[]
+  readonly pageSize?: number
+}
+
+export interface LocationsGetRequest {
+  /** `locations/{location}`. */
+  readonly name: string
+  readonly readMask?: readonly string[]
+}
+
 export interface BusinessProfileProvider {
   readonly name: string
+  /**
+   * Account Management v1 `accounts.list`.
+   *
+   * Returns an empty list with **HTTP 200** when the account genuinely administers no profiles. That is
+   * not a gating error and must not be reported as one (docs/10 §7), which is why it is an empty array
+   * here rather than a thrown `access_not_granted`.
+   */
+  listAccounts(): Promise<readonly GbpAccount[]>
+  /** Business Information v1 `locations.list`. Rejects a request with no `readMask`, as Google does. */
+  listLocations(request: LocationsListRequest): Promise<readonly GbpLocation[]>
+  /** Business Information v1 `locations.get`. Also `readMask`-mandatory. */
+  getLocation(request: LocationsGetRequest): Promise<GbpLocation>
   listReviews(locationId: string): Promise<readonly Review[]>
   /** Replying twice overwrites; there is no separate create and update. */
   updateReply(args: { locationId: string; reviewId: string; comment: string }): Promise<void>
@@ -99,8 +185,41 @@ export interface SearchAnalyticsRow {
   readonly position: number
 }
 
+/**
+ * What the consenting account may do with a Search Console property.
+ *
+ * `siteUnverifiedUser` is the value that matters: the property is *listed* for the account and carries no
+ * data access at all. A picker that offered it would let the owner select a property that returns nothing,
+ * and the SEO agent would then read zero rows and report a site with no traffic — which looks like a
+ * finding rather than like a misconfiguration.
+ */
+export type SitePermissionLevel =
+  | 'siteOwner'
+  | 'siteFullUser'
+  | 'siteRestrictedUser'
+  | 'siteUnverifiedUser'
+
+export interface SearchConsoleSite {
+  /**
+   * A **domain** property (`sc-domain:example.com`) or a **URL-prefix** property
+   * (`https://example.com/`). Two different identifiers for what a human calls one website, and the API
+   * treats them as separate properties — which is why this is the Search Console resource identifier and
+   * cannot be derived from a Business Profile listing.
+   */
+  readonly siteUrl: string
+  readonly permissionLevel: SitePermissionLevel
+}
+
 export interface SearchConsoleProvider {
   readonly name: string
+  /**
+   * `sites.list` — the properties the consenting account can see, with its permission on each.
+   *
+   * The whole basis of *"GSC is selected independently"*: this list comes from the Search Console account,
+   * has no connection to which Business Profile listing was picked, and is often verified on a different
+   * Google account entirely (docs/10 §2).
+   */
+  listSites(): Promise<readonly SearchConsoleSite[]>
   /**
    * Search Analytics rows for a date range.
    *
