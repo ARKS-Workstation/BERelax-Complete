@@ -2,12 +2,12 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**17 / 206 units complete.**
+**18 / 206 units complete.**
 
 ## Next up
 
 1. **B-CAT-02 — Rooms, room types, capacity and service/room compatibility**  — **needs owner input:** Y8-rooms, Y1-rooms, Y9-shaving-room
-1. **B-MSG-01 — Channel-shaped template model, encoding, segment count and cost**
+1. **B-MSG-02 — The single send choke point, sender-ID class routing and fail-closed evaluation**  — **needs owner input:** Y6-sender-ids
 1. **M-TILL-01 — Chart of accounts and the pure double-entry ledger kernel**  — **needs owner input:** Y8-coa
 
 ## All units
@@ -45,7 +45,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
 | [ ] | 30 | `B-LIFE-01` | Appointment lifecycle state machine with actor permissions and declared side effects | `B-AVAIL-06`, `F06`, `F07` | — | — |
 | [ ] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
-| [ ] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
+| [x] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
 | [ ] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
 | [ ] | 34 | `B-LIFE-02` | Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP | `B-MSG-02`, `F04`, `F06` | — | — |
 | [ ] | 35 | `B-MSG-03` | Scheduled steps with invalidation keys, and reminder rebuilds | `B-LIFE-03`, `B-MSG-02` | — | — |

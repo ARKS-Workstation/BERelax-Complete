@@ -21,7 +21,7 @@ import { join } from 'node:path'
 
 const ROOTS = ['packages', 'apps', 'scripts', 'docs']
 const EXTENSIONS = new Set(['.ts', '.tsx', '.mjs', '.js', '.cjs', '.json', '.css', '.sql', '.md'])
-const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'fixtures'])
+const SKIP_DIRECTORIES = new Set(['.claude', 'node_modules', 'dist', '.next', 'fixtures'])
 
 /** Codepoint -> why it is forbidden. Keyed by the escape a reviewer should see instead. */
 const FORBIDDEN = new Map([
@@ -77,7 +77,7 @@ for (const root of ROOTS) {
       for (const [offset, char] of [...line].entries()) {
         const name = FORBIDDEN.get(char.codePointAt(0))
         if (name === undefined) continue
-        const escaped = `\\u${char}.codePointAt(0).toString(16).padStart(4, '0')}`
+        const escaped = `\\u${char.codePointAt(0).toString(16).padStart(4, '0')}`
         violations.push(
           `${file}:${index + 1}:${offset + 1}  literal ${name} — write ${escaped} instead`,
         )

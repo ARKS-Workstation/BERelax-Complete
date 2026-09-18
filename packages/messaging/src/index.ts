@@ -6,6 +6,12 @@
  * template's message class. Nothing in the codebase may call a provider SDK directly.
  */
 
+export {
+  campaignCost,
+  costOf,
+  type MessageCost,
+  PROVISIONAL_FILS_PER_SEGMENT,
+} from './encoding.ts'
 export { createGuardedTransport, InMemoryOutbox, type OutboxEntry } from './outbox.ts'
 export type {
   Channel,
@@ -15,4 +21,18 @@ export type {
   SendOutcome,
   Transport,
 } from './port.ts'
+export {
+  placeholdersIn,
+  renderTemplate,
+  type TemplateDefinition,
+  TemplateRenderError,
+  type TemplateValues,
+  validateTemplate,
+} from './render.ts'
 export { type GuardContext, type GuardDecision, guardOutbound } from './send-guard.ts'
+export {
+  DEFAULT_TEMPLATES,
+  type DefaultTemplate,
+  DISCRETION_FORBIDDEN_VARIABLES,
+  transactionalDefaults,
+} from './templates.ts'

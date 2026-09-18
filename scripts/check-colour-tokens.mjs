@@ -26,7 +26,7 @@ import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const ROOTS = ['packages', 'apps']
 const EXTENSIONS = new Set(['.css', '.ts', '.tsx'])
-const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'fixtures'])
+const SKIP_DIRECTORIES = new Set(['.claude', 'node_modules', 'dist', '.next', 'fixtures'])
 
 /**
  * Files exempt from these rules, and why each one is.

@@ -800,7 +800,7 @@ units:
       with segment and cost computation at authoring time. Default transactional templates are discreet,
       with detail behind the magic link.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04

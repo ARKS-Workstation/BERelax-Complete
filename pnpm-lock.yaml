@@ -129,6 +129,9 @@ importers:
       '@berelax/config':
         specifier: workspace:*
         version: link:../config
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
