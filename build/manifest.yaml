@@ -30,7 +30,7 @@ units:
     order: 2
     title: CI pipeline with real Postgres
     owner: claude
-    status: todo
+    status: done
     depends_on: [F01]
     steps: [15]
     acceptance:

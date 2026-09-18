@@ -1,0 +1,2 @@
+Migrations live here as numbered .sql files, applied in lexical order.
+F04 adds the first one. `pnpm db:migrate:dry` applies them all to a scratch database.

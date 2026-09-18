@@ -5,7 +5,6 @@
     "lib": ["ES2023"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -14,17 +13,14 @@
     "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-
     "paths": {
       "@berelax/shared": ["./packages/shared/src/index.ts"],
       "@berelax/shared/*": ["./packages/shared/src/*"],
@@ -32,6 +28,7 @@
       "@berelax/core/*": ["./packages/core/src/*"],
       "@berelax/db": ["./packages/db/src/index.ts"],
       "@berelax/db/*": ["./packages/db/src/*"]
-    }
+    },
+    "types": ["node"]
   }
 }

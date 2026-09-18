@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_ENV: test
+  # Non-production, so the staging send guard (F03) refuses every outbound transport.
+  TEST_DATABASE_URL: postgres://berelax:berelax@127.0.0.1:5432/berelax_test
+  DATABASE_URL: postgres://berelax:berelax@127.0.0.1:5432/berelax_test
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: berelax
+          POSTGRES_PASSWORD: berelax
+          POSTGRES_DB: berelax_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U berelax -d berelax_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      # Ordered cheapest-first so a trivial mistake fails in seconds, not minutes.
+      - name: Lint and format
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Module boundaries
+        run: pnpm boundaries
+
+      - name: Module boundaries actually reject violations
+        run: pnpm boundaries:test
+
+      - name: Core purity gate
+        run: pnpm purity
+
+      - name: Palette contrast gate
+        run: pnpm palette
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests (real PostgreSQL)
+        run: pnpm test:integration
+
+      - name: Migration dry run
+        run: pnpm db:migrate:dry
+
+      - name: Gates fire
+        run: pnpm gates:test

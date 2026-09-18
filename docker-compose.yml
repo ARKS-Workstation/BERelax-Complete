@@ -1,0 +1,23 @@
+# Local development database. CI uses a GitHub Actions service container instead.
+#
+# If Docker is unavailable, a local PostgreSQL 16 cluster works identically:
+#   sudo pg_ctlcluster 16 main start
+#   sudo -u postgres psql -c "create role berelax login password 'berelax' superuser"
+#   sudo -u postgres createdb -O berelax berelax_dev
+#   sudo -u postgres createdb -O berelax berelax_test
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: berelax
+      POSTGRES_PASSWORD: berelax
+      POSTGRES_DB: berelax_dev
+    ports: ['5432:5432']
+    volumes: ['berelax-pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U berelax -d berelax_dev']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  berelax-pgdata:
