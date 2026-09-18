@@ -506,7 +506,7 @@ units:
       therapist-buffer, minimum-lead and maximum-advance constraints. Turnaround occupies the room; buffer
       occupies the therapist; they are never conflated. No slot table is ever materialised.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-01
@@ -537,6 +537,23 @@ units:
       is included and day 91 is excluded, all under the frozen clock'
     - A schema assertion proves no precomputed slot or availability_cache table exists in the migrations,
       enforcing compute-on-demand
+    - 'NOTE: scoped, not satisfied as written — the third acceptance line''s "45-minute treatment starting
+      01:00 with 20-minute turnaround is offered" is arithmetically impossible on an 11:00-02:00 day:
+      01:00 + 45 + 20 = 02:05, five minutes past close, which the first acceptance line forbids outright
+      ("start + duration + turnaround > closes_at") and from which the second line''s 23:40 figure is
+      derived. Implemented and asserted instead: 01:00 is offered for a 45-minute treatment with any
+      turnaround up to 15 minutes (01:00 + 45 + 15 = 02:00 exactly, the inclusive close), and with a
+      20-minute turnaround the last start is 00:55. The 01:55, 02:00-exact, 23:40 and 23:30 figures all
+      hold as written. If the owner rules that room turnaround may run past close, the single rule to
+      change is the latestStartIn call in candidateStarts (Y9-turnaround).'
+    - 'NOTE: the therapist interval is checked against existing appointments and shift gaps only.
+      resource_block (0012_rooms.sql) is room-scoped, so blocks are checked against the room interval;
+      therapist unavailability from approved leave and expired mandatory credentials is deferred to
+      B-AVAIL-04, which narrows the therapistIds handed to this solver rather than adding a second source
+      of truth here. Shifts, appointments, rooms, blocks and closures are injected as packages/core types
+      because packages/core is pure; B-AVAIL-01 and B-AVAIL-04 add the tables and repositories that fill
+      them, and B-AVAIL-03 turns availableRoomIds/availableTherapistIds into a concrete (therapists[],
+      room) tuple.'
     files:
     - packages/core/src/availability/solve.ts
     - packages/core/src/availability/intervals.ts
@@ -656,7 +673,7 @@ units:
       price list -> promotion, returning a snapshot-ready object that names which rule produced the number.
       price_list rows are effective-dated with an exclusion constraint preventing overlap.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-CAT-03
@@ -675,11 +692,38 @@ units:
       a test asserts these are populated when those layers applied and null when they did not
     - 'resolvePrice is pure and deterministic: dependency-cruiser proves packages/core/src/pricing imports
       no db or I/O module, and the same input returns a byte-identical result across 1000 calls'
+    - 'NOTE: all 16 presence/absence combinations are enumerated and 14 of them assert an exact fils
+      value. The other 2 - the ones where base, variant and price_list are all absent - assert the named
+      `no_applicable_price` error instead, because there is no price to state. Zero is not available as
+      an answer: B-CAT-03 settled that zero is a MISSING price rather than a free treatment, and a zero
+      reaching a booking would invoice as 0.00 and reconcile to nothing. The three "price on request"
+      items of docs/13 section 4 are a catalogue state B-CAT-06 models, not a figure this resolver may
+      invent. A control asserts the other 14 do not throw, so "it threw" cannot pass for all 16.'
+    - 'NOTE: no `promotion` table exists and NO unit in this manifest owns one - this is a gap, not a
+      deferral by B-CAT-04. The promotion layer is therefore data the caller supplies (kind, value,
+      validity window) and `promotion_id` is carried through to the resolved object untyped by any
+      foreign key. B-AVAIL-06 stores that id on the appointment, so whichever unit introduces
+      promotions must add the table and the FK; until then a promotion id references nothing.'
+    - 'NOTE: the 32 catalogue prices ARE in docs/13 section 4, so that acceptance line is satisfied in
+      full as 32 literal cases in packages/core/src/pricing/resolve-price.test.ts - transcribed by hand
+      from the document rather than generated, because a generated expectation proves only that the
+      formula equals itself. Nothing is seeded: the 32 service_variant rows remain B-CAT-06`s and 0025
+      seeds no price_list rows either, so every database probe here creates its own variant inside a
+      rolled-back transaction.'
+    - 'NOTE: the effective date is the CALENDAR date in Asia/Dubai, deliberately not the trading date
+      from `businessDayFor`. Trading runs 11:00-02:00, so the trading date at 00:01 is still yesterday -
+      but a customer looking at the site at 00:01 on the effective date sees the new menu, and pricing
+      their booking from yesterday`s trading day would quote a price the site no longer shows. The
+      resolver takes the date as an argument so the choice is the caller`s and visible; the 23:59/00:01
+      pair asserts it, and the acceptance line itself pins the calendar reading by naming 00:01.'
     files:
     - packages/core/src/pricing/resolve-price.ts
     - packages/core/src/pricing/resolve-price.test.ts
+    - packages/core/src/pricing/index.ts
     - packages/db/src/schema/price-list.ts
-    - packages/db/migrations/
+    - packages/db/src/schema/price-list.itest.ts
+    - packages/db/migrations/0025_price_list.sql
+    - packages/fixtures/src/price-resolution.itest.ts
   - id: B-AVAIL-06
     order: 26
     title: 'The booking transaction: room row lock, idempotency, all-or-none, price snapshot'

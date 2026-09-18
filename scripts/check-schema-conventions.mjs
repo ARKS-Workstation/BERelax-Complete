@@ -178,6 +178,58 @@ for (const { path, sql } of migrations) {
   }
 }
 
+// --- availability is computed on demand, never materialised -------------------------------------
+/**
+ * Rule `no-precomputed-slot-table`.
+ *
+ * B-AVAIL-02 answers availability by arithmetic over the trading window, the appointments, the blocks
+ * and the closures — `packages/core/src/availability/solve.ts`. A slot is therefore a **computed
+ * answer**, and this rule is the negative schema assertion that keeps it one: there is no slot table,
+ * no `availability_cache`, no materialised view of either.
+ *
+ * Why a gate rather than a convention. A precomputed slot table is an attractive idea — it makes the
+ * booking page a single indexed read — and it fails in a way nobody sees for weeks: the rows are stale
+ * from the instant a block, a closure, a shift change or a manual booking lands, so the page offers a
+ * slot the floor cannot deliver, and the front desk learns about it from the customer. Every
+ * regeneration strategy that fixes that is a second source of truth for the same question.
+ *
+ * Scoped to the SQL, because a table comes into existence there (ADR 0006). A table created straight
+ * in a database without a migration is `pnpm db:drift`'s to catch.
+ */
+const SLOT_RULE = 'no-precomputed-slot-table'
+
+/** True for a relation name that would hold precomputed availability. */
+const namesPrecomputedAvailability = (name) => {
+  const bare = name.replace(/^[a-z0-9_]+\./i, '')
+  if (/(^|_)slots?(_|$)/.test(bare)) return true
+  if (/^precomputed_/.test(bare)) return true
+  // "availability" plus any word that means "stored earlier": availability_cache, avail_snapshot.
+  return /avail/.test(bare) && /(cache|snapshot|precomputed|materiali[sz]ed|generated)/.test(bare)
+}
+
+for (const { path, sql } of migrations) {
+  sql.split('\n').forEach((line, i) => {
+    // Comments and string literals blanked first. The migrations and this repository's prose talk about
+    // slots constantly — 0012 explains why a block "must never make a single slot unavailable" — and a
+    // rule that read comments would fire on the sentence explaining why it exists.
+    const code = line.replace(/'(?:[^']|'')*'/g, "''").replace(/--.*$/, '')
+    const created =
+      /^\s*create\s+(?:or\s+replace\s+)?(?:unlogged\s+|temp\s+|temporary\s+)?(table|materialized\s+view|view)\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/i.exec(
+        code,
+      )
+    if (created === null) return
+    const kind = created[1].toLowerCase().replace(/\s+/g, ' ')
+    const name = created[2].replace(/"/g, '')
+    if (!namesPrecomputedAvailability(name)) return
+    problems.push(
+      `${path}:${i + 1}  ${SLOT_RULE}: ${kind} "${name}" would materialise availability. Slots are ` +
+        'computed on demand from the trading window, appointments, blocks and closures ' +
+        '(packages/core/src/availability/solve.ts); a stored copy is stale from the next block, ' +
+        'closure or walk-in and offers a slot the floor cannot deliver',
+    )
+  })
+}
+
 if (problems.length > 0) {
   console.error(`Schema convention violations — ${problems.length}:`)
   for (const p of problems) console.error(`  ${p}`)
@@ -189,5 +241,6 @@ if (problems.length > 0) {
 // A summary that lists the rules makes the loss visible in the output as well.
 console.log(
   'Schema conventions hold: all timestamps are timestamptz, no floating-point amounts, no overloaded ' +
-    'posted_at on a review table, and every append-only table refuses UPDATE and DELETE.',
+    'posted_at on a review table, every append-only table refuses UPDATE and DELETE, and no migration ' +
+    'materialises availability as a slot or cache table.',
 )

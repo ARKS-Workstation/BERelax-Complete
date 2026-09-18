@@ -76,6 +76,49 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // packages/core/src/pricing resolves money. B-CAT-04's acceptance asks dependency-cruiser to prove it
+  // reaches no database and no I/O, and the reason is narrower than tidiness: the resolver is the
+  // function whose answer gets snapshotted onto an appointment and later defended to a customer. A
+  // pricing module that read a row, a file or an environment variable would produce a figure that could
+  // not be recomputed from the arguments it was given, and the snapshot would be the only evidence of a
+  // number nobody can reproduce. Each forbidden shape is a separate case, because the pure rule's
+  // `to.path` is one alternation and a typo in one branch is invisible while the others still fire.
+  {
+    rule: 'core-must-not-import-db',
+    file: 'packages/core/src/pricing/__boundary_fixture__.ts',
+    source: ["import { schema } from '@berelax/db'", 'export const illegal = schema', ''].join(
+      '\n',
+    ),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/pricing/__boundary_fixture__.ts',
+    // The installed driver, not a bare uninstalled name: resolving into node_modules is the branch the
+    // ledger fixture caught as dead, and a price list read straight from Postgres is exactly how this
+    // module would stop being pure.
+    source: ["import postgres from 'postgres'", 'export const illegal = postgres', ''].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/pricing/__boundary_fixture__.ts',
+    source: [
+      "import { readFileSync } from 'node:fs'",
+      'export const illegal = readFileSync',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'core-must-not-import-infrastructure',
+    file: 'packages/core/src/pricing/__boundary_fixture__.ts',
+    // packages/config reads the environment. A VAT rate or a rounding rule taken from configuration
+    // rather than from an argument is the same defect as a clock read: the same input would price
+    // differently on a different machine.
+    source: [
+      "import { loadConfig } from '@berelax/config'",
+      'export const illegal = loadConfig',
+      '',
+    ].join('\n'),
+  },
   {
     rule: 'messaging-providers-only-inside-a-transport',
     // A feature reaching SMSala directly bypasses the sender-ID class rule, the promotional gate and
@@ -122,8 +165,11 @@ for (const { rule, file, source } of CASES) {
   }
 
   const caught = exitCode !== 0 && output.includes(rule)
+  // The directory is part of the case identity: four cases share `core-must-be-pure`, and without the
+  // scope in the line the output cannot say which of them ran.
+  const scope = /packages\/core\/src\/(ledger|pricing)\//.exec(file)?.[1]
   console.log(
-    `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${file.includes('/ledger/') ? 'ledger: ' : ''}` +
+    `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${scope === undefined ? '' : `${scope}: `}` +
       `${what} ${caught ? 'rejected' : 'NOT rejected'}`,
   )
   if (!caught) {

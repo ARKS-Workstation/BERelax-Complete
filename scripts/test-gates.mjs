@@ -1511,6 +1511,263 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 28a-28l. (B-CAT-04) The price resolution chain: the purity of packages/core/src/pricing, and the
+// price_list rules against real PostgreSQL.
+//
+// Two gates, one unit. The purity of `pricing` is scoped the way the ledger's is in case 24 and for a
+// related reason: `resolvePrice` produces the figure that gets snapshotted onto an appointment and
+// defended to a customer months later, so it has to be recomputable from its arguments alone. A clock
+// read there would answer "what did this cost on the 3rd of March" with today's menu.
+//
+// The price_list rules are database rules — an EXCLUDE USING gist and four CHECKs — and a constraint is
+// only a gate once something has been seen to bounce off it. Each probe states the rule that must reject
+// it, because a bare non-zero exit is also what a typo in a column name produces (ADR 0003).
+//
+// B-CAT-03 did not seed the 32 prices, so there is no service_variant row to hang a price list off:
+// every probe creates its own inside `begin; … ; rollback;` and leaves nothing behind.
+{
+  const PRICING_FIXTURE = 'packages/core/src/pricing/__gate_fixture__.ts'
+
+  // 28a. A clock read inside packages/core/src/pricing must fail the purity gate, by the reason the
+  //      rule gives rather than by a bare non-zero exit.
+  {
+    const result = withFixture(
+      PRICING_FIXTURE,
+      'export const priceNow = (): string => new Date().toISOString()',
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'purity gate rejects a clock read in packages/core/src/pricing',
+      result,
+      'inject a Clock and pass the instant in',
+    )
+  }
+
+  // 28b. The control for 28a. Taking the effective date as an argument is the whole design, and a gate
+  //      that rejected it would make the module unwritable.
+  {
+    const result = withFixture(
+      PRICING_FIXTURE,
+      'export const priceOn = (on: string): string => on',
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(
+      'purity gate allows a pricing module whose effective date is an argument',
+      !result.failed,
+      `rejected the mechanism B-CAT-04 specifies:\n${result.output}`,
+    )
+  }
+
+  const priceDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // Two variants and one price list row, created inside the probe transaction. `provisional_note` is
+  // the handle rather than a new column: it is unconstrained while `is_provisional` stays false.
+  const PRICE_SETUP =
+    'insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note) ' +
+    "values ((select id from service where style = 'asian' and treatment_key = 'normal_massage'), " +
+    "60, 20000, 'gate fixture 60'), " +
+    "((select id from service where style = 'asian' and treatment_key = 'normal_massage'), " +
+    "90, 30000, 'gate fixture 90'); " +
+    'insert into price_list (service_variant_id, gross_price_fils, label, valid_from, valid_to) ' +
+    "values ((select id from service_variant where provisional_note = 'gate fixture 60'), 18000, " +
+    "'gate fixture', '2027-03-01', '2027-03-31');"
+  const VARIANT_60 = "(select id from service_variant where provisional_note = 'gate fixture 60')"
+  const VARIANT_90 = "(select id from service_variant where provisional_note = 'gate fixture 90')"
+  const priceProbe = (statement, extraArgs = []) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      ...extraArgs,
+      priceDbUrl ?? '',
+      '-c',
+      `begin; ${PRICE_SETUP} ${statement}; rollback;`,
+    ])
+  const priceListInsert = (variant, gross, from, to, label = "'gate fixture'") =>
+    'insert into price_list (service_variant_id, gross_price_fils, label, valid_from, valid_to) ' +
+    `values (${variant}, ${gross}, ${label}, ${from}, ${to})`
+
+  const priceProbes = [
+    {
+      name: 'price_list gate rejects a second row overlapping the first for one variant',
+      rule: 'price_list_no_overlap',
+      sql: priceListInsert(VARIANT_60, 19000, "'2027-03-15'", "'2027-04-15'"),
+    },
+    {
+      // The inclusive upper bound. With '[)' this would be accepted and the 31st would have two prices.
+      name: 'price_list gate rejects a row starting on the last day of an existing one',
+      rule: 'price_list_no_overlap',
+      sql: priceListInsert(VARIANT_60, 19000, "'2027-03-31'", "'2027-04-30'"),
+    },
+    {
+      name: 'price_list gate rejects a zero price',
+      rule: 'price_list_gross_positive',
+      sql: priceListInsert(VARIANT_90, 0, "'2027-06-01'", 'null'),
+    },
+    {
+      name: 'price_list gate rejects a window that ends before it starts',
+      rule: 'price_list_valid_to_not_before_from',
+      sql: priceListInsert(VARIANT_90, 18000, "'2027-06-30'", "'2027-06-01'"),
+    },
+    {
+      name: 'price_list gate rejects a price list with no label',
+      rule: 'price_list_label_nonempty',
+      sql: priceListInsert(VARIANT_90, 18000, "'2027-06-01'", 'null', "'   '"),
+    },
+    {
+      name: 'price_list gate rejects a provisional price that names no open question',
+      rule: 'price_list_provisional_names_a_question',
+      sql:
+        'insert into price_list (service_variant_id, gross_price_fils, label, valid_from, valid_to, ' +
+        `is_provisional) values (${VARIANT_90}, 18000, 'gate fixture', '2027-06-01', null, true)`,
+    },
+    {
+      // A fractional price, on the path that actually refuses one. The application writes through bind
+      // parameters, where the bigint input function parses the text; a quoted literal takes the same
+      // path, which is why this probe is spelled '250.5' and not 250.5. See 28l for what the bare
+      // numeric literal does instead.
+      name: 'price_list gate rejects a fractional price on the input-function path',
+      rule: 'invalid input syntax for type bigint',
+      sql: priceListInsert(VARIANT_90, "'250.5'", "'2027-06-01'", 'null'),
+    },
+  ]
+
+  if (!priceDbUrl) {
+    check(
+      'price_list constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement } of priceProbes) {
+      checkRejectedBy(name, priceProbe(statement), rule)
+    }
+
+    // 28j. The first control. Without it the seven probes above are satisfied by a table nobody can
+    //      write to at all, which also has no overlapping rows.
+    const abutting = priceProbe(priceListInsert(VARIANT_60, 19000, "'2027-04-01'", "'2027-04-30'"))
+    check(
+      'price_list gate accepts a row that starts the day after the last one ended',
+      !abutting.failed,
+      `rejected a legitimate price change:\n${abutting.output}`,
+    )
+
+    // 28k. The second control, and the one that proves the constraint is scoped per variant. A
+    //      60-minute and a 90-minute treatment change price on the same day as a matter of course.
+    const otherVariant = priceProbe(
+      priceListInsert(VARIANT_90, 28000, "'2027-03-15'", "'2027-04-15'"),
+    )
+    check(
+      'price_list gate accepts the same period for a different service_variant',
+      !otherVariant.failed,
+      `rejected a price change on a second variant:\n${otherVariant.output}`,
+    )
+
+    // 28l. The trap, asserted rather than described. Written into the statement text, 250.5 is a
+    //      NUMERIC constant and the assignment cast to bigint rounds it — silently, to 251. So the
+    //      fractional probe above has to use the input-function path: a gate that probed with a bare
+    //      literal would report that the rejection works while nothing was ever refused.
+    const roundedLiteral = priceProbe(
+      `${priceListInsert(VARIANT_90, 250.5, "'2027-06-01'", 'null')}; ` +
+        "select gross_price_fils from price_list where valid_from = '2027-06-01'",
+      ['-At'],
+    )
+    check(
+      'a fractional price written as a numeric literal is rounded, not rejected',
+      !roundedLiteral.failed && roundedLiteral.output.includes('251'),
+      `expected 250.5 to be stored as 251:\n${roundedLiteral.output}`,
+    )
+  }
+}
+
+// 26n. (B-AVAIL-02) No migration may materialise availability.
+//
+//       The availability solver answers from the trading window, the appointments, the blocks and the
+//       closures every time it is asked, and B-AVAIL-02's last acceptance line is the *negative* schema
+//       assertion that keeps it that way: no slot table, no availability cache, no materialised view of
+//       either. A stored copy is the attractive version — one indexed read for the booking page — and it
+//       is stale from the next block, closure, shift change or walk-in, so the page offers a slot the
+//       floor cannot deliver and the front desk hears about it from the customer.
+//
+//       Asserted BY RULE NAME against `no-precomputed-slot-table` in check-schema-conventions.mjs. A
+//       bare non-zero exit would also be what a typo in the fixture produces, and the rule could then be
+//       dead while this file reported PASS for ever (ADR 0003). Two controls, because the word "slot"
+//       appears throughout these migrations' prose and a rule that banned the word would be unshippable.
+{
+  const f = 'packages/db/migrations/9999__gate_fixture_availability__.sql'
+  const CONVENTIONS = ['scripts/check-schema-conventions.mjs']
+  const RULE = 'no-precomputed-slot-table'
+
+  const cases = [
+    {
+      name: 'conventions gate rejects a precomputed slot table',
+      source: [
+        '-- Known-bad fixture written by scripts/test-gates.mjs. Removed in a finally.',
+        'create table availability_slot (',
+        '  id         uuid        primary key,',
+        '  room_id    uuid        not null,',
+        '  starts_at  timestamptz not null',
+        ');',
+      ].join('\n'),
+      rule: `${RULE}: table "availability_slot"`,
+    },
+    {
+      // The same idea wearing a cache's clothes, which is how it usually arrives: nobody proposes a slot
+      // table, they propose caching the answer.
+      name: 'conventions gate rejects a materialised availability cache',
+      source: 'create materialized view availability_cache as select 1 as one;',
+      rule: `${RULE}: materialized view "availability_cache"`,
+    },
+    {
+      // A plain view is the third costume. It is not stale, but it is the schema claiming to own the
+      // question, and the next step is always to materialise it for speed.
+      name: 'conventions gate rejects a view of bookable slots',
+      source: 'create view bookable_slots as select 1 as one;',
+      rule: `${RULE}: view "bookable_slots"`,
+    },
+  ]
+
+  for (const { name, source, rule } of cases) {
+    const result = withFixture(f, source, () => run('node', CONVENTIONS))
+    checkRejectedBy(name, result, rule)
+  }
+
+  // Control 1. The migrations talk about slots constantly — 0012 explains why a maintenance block "must
+  // never make a single slot unavailable" — so a rule that read comments would fire on the sentence
+  // explaining why it exists.
+  const prose = withFixture(
+    f,
+    [
+      '-- A maintenance block never makes a single slot unavailable.',
+      'create table gate_fixture_note (',
+      '  id     uuid primary key,',
+      '  reason text not null',
+      ');',
+      'comment on table gate_fixture_note is',
+      "  'Explains why no precomputed slot table exists. A fixture, never applied to a database.';",
+    ].join('\n'),
+    () => run('node', CONVENTIONS),
+  )
+  check(
+    'conventions gate allows a migration whose prose mentions slots',
+    !prose.failed,
+    `rejected a table named for something else entirely:\n${prose.output}`,
+  )
+
+  // Control 2. Availability has legitimate *inputs* in the schema — hours, closures, blocks, shifts —
+  // and a rule that banned the stem would block the tables the solver reads from.
+  const inputs = withFixture(
+    f,
+    ['create table gate_fixture_availability_note (', '  id uuid primary key', ');'].join('\n'),
+    () => run('node', CONVENTIONS),
+  )
+  check(
+    'conventions gate allows an availability input table that stores no answers',
+    !inputs.failed,
+    `rejected a table that holds inputs rather than computed slots:\n${inputs.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

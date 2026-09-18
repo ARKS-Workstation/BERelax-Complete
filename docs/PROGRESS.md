@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**34 / 207 units complete.**
+**36 / 207 units complete.**
 
 ## Next up
 
 1. **B-AVAIL-01 — Booking and appointment schema with the concurrency constraints**
-1. **B-AVAIL-02 — The pure availability solver: trading window, duration, turnaround, buffers, lead and advance**  — **needs owner input:** Y9-turnaround, Y9-buffer, Y9-lead
-1. **B-CAT-04 — Price resolution chain and effective-dated price lists**
+1. **B-AVAIL-03 — Resource-shape assignment for the three real shapes**
+1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
 
 ## All units
 
@@ -35,11 +35,11 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |
 | [x] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
 | [ ] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |
-| [ ] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
+| [x] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
 | [ ] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |
 | [ ] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
 | [ ] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
-| [ ] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |
+| [x] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |
 | [ ] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
 | [ ] | 27 | `B-CAT-05` | Catalogue mutation guard rails and the public display-name compliance lint | `B-AVAIL-01`, `B-CAT-04` | — | — |
 | [ ] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
