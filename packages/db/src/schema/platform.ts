@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm'
-import { index, inet, jsonb, pgTable, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import {
+  index,
+  inet,
+  jsonb,
+  pgTable,
+  primaryKey,
+  smallint,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core'
 
 /** Audit trail. Append-only and partitioned monthly in the database; see migration 0005. */
 export const auditEvent = pgTable(
@@ -46,4 +56,28 @@ export const outboxEvent = pgTable(
     lastError: text('last_error'),
   },
   (t) => [index('outbox_event_aggregate_idx').on(t.aggregateType, t.aggregateId, t.occurredAt)],
+)
+
+/**
+ * One row per (event, handler) already delivered.
+ *
+ * The composite primary key is what turns the outbox's at-least-once delivery into exactly-once
+ * *per handler*: a second attempt is a PK conflict rather than a duplicate side effect. A handler
+ * added later starts with no rows and therefore receives events it has not yet seen.
+ */
+export const outboxDelivery = pgTable(
+  'outbox_delivery',
+  {
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => outboxEvent.id, { onDelete: 'cascade' }),
+    handler: text('handler').notNull(),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }).notNull(),
+    attempts: smallint('attempts').notNull(),
+    lastError: text('last_error'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.handler] }),
+    index('outbox_delivery_handler_idx').on(t.handler, t.deliveredAt),
+  ],
 )

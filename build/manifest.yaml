@@ -81,7 +81,7 @@ units:
     order: 6
     title: Audit service and domain event outbox
     owner: claude
-    status: todo
+    status: done
     depends_on: [F04]
     steps: [20]
     acceptance:
