@@ -89,7 +89,9 @@ risk rather than a scheduling annoyance. Room gender zoning is modelled alongsid
   supplier name, address and TRN; sequential number; issue date and supply date; customer details;
   per-line description, quantity, unit price, VAT rate and VAT amount; totals in AED; and the
   **Arabic-language requirement**. Simplified tax invoices for retail below the threshold.
-- **Sequential, gap-free numbering** per series, allocated inside the document insert transaction.
+- **Sequential, gap-free numbering** per series, from a **locked counter row**, not a Postgres
+  sequence — `nextval` is non-transactional and a rollback would leave a permanent gap. See
+  [03-modules.md](03-modules.md) section 7.
 - **Credit notes only** for corrections. Never edit or delete an issued invoice.
 - **Reverse charge on imported services** — DigitalOcean, Resend, SMSala if billed offshore, Google,
   Meta, Anthropic. Incurred from day one and the most commonly missed obligation at this size.

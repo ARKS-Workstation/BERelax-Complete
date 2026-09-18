@@ -377,7 +377,8 @@ Dark mode: `@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark
 
 **Not looking like every other shadcn site** is a stated requirement, and these are what achieve it:
 17px base type on a 28px rhythm (not 16/24), a 2px corner radius (not 8), one shadow token instead of
-five, the editorial grid, Newsreader display type, and real photography. Default shadcn geometry is
+five, the editorial grid, **Cormorant Garamond** display type inherited from the prototype, and real
+photography. Default shadcn geometry is
 replaced, not themed.
 
 Motion library: `motion` (ex-framer-motion) v12, **≤2 code-split islands, never in the shared layout** —

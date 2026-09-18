@@ -227,9 +227,23 @@ package sold today is a *liability*, drawn down per session as it is redeemed �
 the customer pays. A deposit is a liability. Tips are pass-through, not revenue. The VAT event and the
 revenue event happen at **different times** for a package, and getting that wrong is discovered during a VAT reconciliation, when it is historical.
 
-**Gapless sequential numbering.** Tax authorities check for gaps. The number must be allocated from
-a Postgres sequence *inside the same transaction as the document insert* — allocate-then-insert
-leaves gaps whenever a transaction rolls back.
+**Gapless sequential numbering — and NOT from a Postgres sequence.** Tax authorities check for gaps.
+A `SEQUENCE` cannot deliver gap-free numbering: `nextval` is deliberately non-transactional, so a
+rollback consumes the number permanently and leaves a hole. That is the right trade for a surrogate
+key and the wrong one for a statutory document number.
+
+The correct mechanism is a **counter row per series, locked for the duration of the transaction**:
+
+```sql
+-- inside the same transaction as the document insert
+update invoice_series set next_number = next_number + 1
+ where series = $1 returning next_number - 1 as allocated;
+```
+
+`UPDATE` takes a row lock, so concurrent issuers serialise on that one row, and a rollback returns the
+number. Throughput is irrelevant here — a spa issues tens of invoices a day, not thousands a second —
+so serialising is free. A test must assert that a rolled-back document leaves no gap, because that is
+precisely the case a sequence gets wrong.
 
 **Reverse charge on imported services.** DigitalOcean, Resend, Google, Meta, Anthropic. Incurred
 from day one, routinely missed at this size, and mechanical to automate: mark suppliers offshore in

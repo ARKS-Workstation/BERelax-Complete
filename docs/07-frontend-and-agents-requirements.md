@@ -104,7 +104,7 @@ can publish to a live site can also de-index it or publish copy the licence does
 
 | Review | Handling |
 |---|---|
-| 4–5 star, no free text, no named individual | May auto-send after a cooling-off delay |
+| 4–5 star, no free text, no named individual | May auto-send after a cooling-off delay — **only in API mode, and only when the owner has explicitly enabled it. Default off.** In draft mode nothing auto-sends, because there is no API to send through |
 | 1–2 star | Always escalated to a human. Never auto-sent |
 | Any mention of injury, illness, pain, staff conduct, refunds, hygiene, or legal threat | Always escalated |
 | Language outside the configured set | Always escalated |
@@ -164,15 +164,27 @@ breaks.** Specified as follows.
 
 ### Detection
 
-- A scheduled health check on pg-boss (hourly) making one cheap authenticated call per connected
-  Google surface.
+- **Two scheduled checks, deliberately different** — reconciling what were two conflicting cadences:
+  an **hourly liveness probe** (one cheap authenticated call, is the token still good?) and a
+  **daily deep check at 03:00 Asia/Dubai** (forced refresh, one read per granted capability, scope
+  diff, `placeId` re-resolution against the confirmed listing). The hourly probe catches a revocation
+  within the hour; the deep check catches a listing that was merged, moved or edited by Google.
+  See [10-google-connection.md](10-google-connection.md) §4.
 - Inline detection: any `401` or `invalid_grant` during an agent run marks the connection degraded
   immediately, without waiting for the next scheduled check.
 
-### Connection states
+### Connection states — stored versus displayed
 
-`never_connected` · `healthy` · `expiring_soon` · `degraded` (some scopes failing) · `broken`
-(revoked or `invalid_grant`)
+These are two different vocabularies and conflating them caused a genuine inconsistency between
+documents. They are now distinct on purpose:
+
+- **Stored** on `google_connections.status` ([10 §2](10-google-connection.md)):
+  `active` · `needs_reauth` · `revoked` · `disconnected`. This is the state of the *grant*.
+- **Displayed** in the admin panel, **derived** from the stored status plus capability health, token
+  age and whether GBP access has been granted: `never_connected` · `healthy` · `expiring_soon` ·
+  `degraded` (some capabilities failing) · `broken` · `pending_gbp_approval`.
+
+The derivation lives in one function so the panel and the emails cannot disagree.
 
 ### In the admin panel
 

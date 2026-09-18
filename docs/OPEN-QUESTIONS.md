@@ -24,6 +24,30 @@ Statuses: `open` · `asked` (with whom and when) · `resolved` (with the answer 
 | Y9-package-policy | Package validity, transferability, and unredeemed-balance treatment at expiry | **6 months, non-transferable, balance retained not forfeited** | open | `M-TILL` |
 | Y9-package-thin | Policy for a pre-system package with a thin paper trail — honour, honour-once-on-evidence, or decline | **Honour once on evidence, logged** | open | `H-MIG` |
 
+## A2. Opened by the unit decomposition
+
+Each of these is a value a build unit needs and that no document supplies. They were found by
+decomposing the plan into machine-checkable acceptance criteria — the point at which "to be confirmed"
+stops being acceptable. Every one has a provisional value chosen as the strictest safe option, and each
+is flagged `provisional: true` in settings so it appears in the Unconfirmed Assumptions panel.
+
+| ID | Question | Provisional value | Status | Blocks |
+|---|---|---|---|---|
+| Y9-buffer | Therapist buffer before/after a treatment, as distinct from room turnaround | **10 min each side** | open | availability engine |
+| Y9-overtime | Overtime uplift percentages and the daily cap under MOHRE rules | **8h/day standard, 25% uplift, 2h daily overtime cap** | open | rota validator, payroll |
+| Y9-coverage | Minimum floor coverage, and the daily treatment-load cap per therapist | **2 therapists on the floor; max 6 treatment-hours/day/therapist, max 4 of them deep-tissue** | open | leave approval, rota |
+| Y9-leave-detail | Probation length, first-year and pro-rata accrual, carry-over cap and expiry, and whether a public holiday inside annual leave is counted | **6-month probation; accrual from day 1; 30-day carry-over cap expiring after 12 months; public holidays inside leave NOT counted** | open | leave accrual engine |
+| Y9-frequency-cap | Maximum marketing sends per contact per week across all flows and campaigns | **2 per week, 6 per month** | open | automation engine rails |
+| Y9-ramadan-window | Whether the 07:00–21:00 promotional SMS window narrows during Ramadan | **Narrowed to 10:00–16:00 during Ramadan** (the conservative guess; a wider window would risk a breach) | open | campaign scheduler |
+| Y9-queued-staleness | What happens to a time-sensitive promotional message queued at 23:00 whose offer expires before the window reopens | **Expires unsent, with a report to the owner rather than a late send** | open | campaign scheduler |
+| Y9-tips | Tip model: cash vs card, pooled vs individual, and the payout and tax treatment | **Cash only, individual, recorded but not banked — no card tips until the model is decided** | open | till, payroll, payments |
+| Y9-deposits | Which services require a deposit, what percentage, and whether first-time clients prepay | **Deposits DISABLED. No service requires one** | open | payments |
+| Y1-analytics-credentials | GA4 measurement id and API secret, Meta dataset id and CAPI access token, and Meta Business verification | **Fake analytics provider; no real ids configured** | open | real analytics dispatch |
+| Y11-vat201-boxes | The actual VAT201 box numbers for standard-rated sales, reverse charge and recoverable input VAT | **Box 1 / Box 3 / Box 10 as placeholders, held in a data table with a test proving the mapping is data not code** | open | VAT return working papers |
+| Y11-rounding | Confirm the gross-to-net rounding convention is acceptable to the tax agent | **half-up on net, VAT as the remainder** (exactness proven either way) | open | first VAT return |
+
+---
+
 ## B. Legal and regulatory
 
 | ID | Question | Provisional value | Status | Blocks |
