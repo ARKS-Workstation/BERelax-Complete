@@ -6,9 +6,19 @@ caught a real defect in this repository.
 ## The rules
 
 1. **`pnpm verify` is the only arbiter.** A unit is done when it passes, never on assertion. Run it.
-   Start PostgreSQL first: `pg_ctlcluster 16 main start`, then export
-   `TEST_DATABASE_URL="postgres://berelax:berelax@127.0.0.1:5432/berelax_test"` and `DATABASE_URL` to
-   the same value.
+
+   Start PostgreSQL with `pg_ctlcluster 16 main start`, then **create your own database** — several
+   units are usually in flight at once, and a shared database means one unit's migration makes
+   another's drift check fail:
+
+   ```
+   psql postgres://berelax:berelax@127.0.0.1:5432/postgres -c 'create database berelax_<unit> owner berelax'
+   for f in packages/db/migrations/*.sql; do psql -q postgres://berelax:berelax@127.0.0.1:5432/berelax_<unit> -f "$f"; done
+   export TEST_DATABASE_URL=postgres://berelax:berelax@127.0.0.1:5432/berelax_<unit>
+   export DATABASE_URL="$TEST_DATABASE_URL"
+   ```
+
+   Apply your own migration to that database only.
 
 2. **Every gate needs a known-bad fixture** (ADR 0003). If you add a check, add a case to
    `scripts/test-gates.mjs` that deliberately breaks it and asserts it fails. A passing check that has
