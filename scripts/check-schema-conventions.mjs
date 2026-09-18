@@ -8,6 +8,14 @@
  *    business days and therefore between cash-up totals.
  * 2. **Money columns are integer.** `numeric`, `real` or `double precision` on an amount column is
  *    the float-money mistake in a different costume.
+ * 3. **A table that says UPDATE and DELETE raise must actually make them raise.** ADR 0017's
+ *    append-only tables are enforced by a pair of BEFORE triggers, and the pair is where the defect
+ *    hides: you write one trigger, copy it for the other event, and forget to change the word. The
+ *    table then documents a guarantee it only half keeps, and the half that is missing is invisible in
+ *    review because the comment says otherwise. The same rule refuses an `updated_at` column or a
+ *    `set_updated_at` trigger on such a table, which is what arrives when a mutable table's definition
+ *    is copied to make the next log: a row with no second version has no update time, and a table
+ *    carrying both triggers claims two contradictory things.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -41,9 +49,9 @@ for (const dir of SCHEMA_DIRS) {
  *
  * A review table records its reply delivery as `delivery_mode` plus `submitted_at`/`confirmed_at` and
  * `posted_manually_at` (docs/10 §6, migration 0020). A single `posted_at` is the mistake this exists to
- * stop: it reads identically whether the system submitted the reply through the API or a human says
- * they pasted it in, which is the only question anybody asks of that column afterwards — and it has no
- * room for the API's separate acknowledgement.
+ * stop: it reads identically whether the system submitted the reply through the API or a human says they
+ * pasted it in, which is the only question anybody asks of that column afterwards — and it has no room
+ * for the API's separate acknowledgement.
  *
  * Scoped to the SQL, because SQL-first is where a column comes into existence (ADR 0006). The applied
  * schema is asserted separately, by introspecting `information_schema` in
@@ -93,12 +101,93 @@ for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))
     })
 }
 
+// --- append-only tables must refuse UPDATE and DELETE -------------------------------------------
+// Scoped by what the table itself claims, so it judges a declaration rather than a guess: the marker
+// is the phrase "UPDATE and DELETE raise" in the table's own SQL comment. `audit_event` and
+// `app_setting_history` use `create rule ... do instead nothing` and say so differently; a rule reports
+// success to the caller, which is a different (and weaker) promise and not the one checked here.
+const RULE = 'append-only-table-must-refuse-update-and-delete'
+const APPEND_ONLY_MARKER = /UPDATE and DELETE raise/i
+
+const migrationFiles = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+const migrations = migrationFiles.map((file) => ({
+  path: join(MIGRATIONS_DIR, file),
+  sql: readFileSync(join(MIGRATIONS_DIR, file), 'utf8'),
+}))
+// One corpus, because the trigger that enforces a table declared in 0016 may be added in 0020. A
+// per-file check would report a defect that a later migration had already fixed.
+const allSql = migrations.map((m) => m.sql).join('\n')
+
+/** The body of `create table <name> ( ... )`, by matching parentheses rather than a closing line. */
+function createTableBody(name) {
+  const opened = new RegExp(`create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${name}\\s*\\(`, 'i')
+  const match = opened.exec(allSql)
+  if (match === null) return null
+  let depth = 1
+  let i = match.index + match[0].length
+  while (i < allSql.length && depth > 0) {
+    if (allSql[i] === '(') depth += 1
+    else if (allSql[i] === ')') depth -= 1
+    i += 1
+  }
+  return allSql.slice(match.index + match[0].length, i - 1)
+}
+
+const hasTrigger = (event, table) =>
+  new RegExp(`create\\s+trigger\\s+\\w+\\s+before\\s+${event}\\s+on\\s+${table}\\b`, 'i').test(
+    allSql,
+  )
+
+for (const { path, sql } of migrations) {
+  // `comment on table <name> is '<prose>';` — the prose may span lines as adjacent string literals.
+  for (const match of sql.matchAll(/comment\s+on\s+table\s+([a-z0-9_.]+)\s+is\s+([^;]*);/gi)) {
+    const qualified = match[1]
+    const prose = match[2]
+    if (!APPEND_ONLY_MARKER.test(prose)) continue
+    const table = qualified.replace(/^[a-z0-9_]+\./i, '')
+
+    for (const event of ['update', 'delete']) {
+      if (!hasTrigger(event, table)) {
+        problems.push(
+          `${path}  ${RULE}: ${table} is documented as raising on UPDATE and DELETE, but no ` +
+            `BEFORE ${event.toUpperCase()} trigger on it exists in any migration`,
+        )
+      }
+    }
+
+    const body = createTableBody(table)
+    if (body !== null && /^\s*updated_at\b/im.test(body)) {
+      problems.push(
+        `${path}  ${RULE}: ${table} is append-only and has an updated_at column. A row with no ` +
+          'second version has no update time',
+      )
+    }
+    if (
+      new RegExp(
+        `create\\s+trigger\\s+\\w+[\\s\\S]{0,120}?on\\s+${table}\\b[\\s\\S]{0,120}?set_updated_at`,
+        'i',
+      ).test(allSql)
+    ) {
+      problems.push(
+        `${path}  ${RULE}: ${table} is append-only and carries a set_updated_at trigger, which can ` +
+          'only ever fire on an UPDATE the refusal trigger rejects',
+      )
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`Schema convention violations — ${problems.length}:`)
   for (const p of problems) console.error(`  ${p}`)
   process.exit(1)
 }
+// Every rule is named in the summary. Two units added a rule to this file in parallel and one of them
+// branched before the other's landed; copying the file wholesale dropped a rule, and the only reason it
+// was noticed is that scripts/test-gates.mjs still had the fixture and reported the gate had not fired.
+// A summary that lists the rules makes the loss visible in the output as well.
 console.log(
-  'Schema conventions hold: all timestamps are timestamptz, no floating-point amounts, ' +
-    'no overloaded posted_at on a review table.',
+  'Schema conventions hold: all timestamps are timestamptz, no floating-point amounts, no overloaded ' +
+    'posted_at on a review table, and every append-only table refuses UPDATE and DELETE.',
 )

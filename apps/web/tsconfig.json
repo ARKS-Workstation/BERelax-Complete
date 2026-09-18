@@ -17,6 +17,11 @@
       "@berelax/shared": ["../../packages/shared/src/index.ts"],
       "@berelax/core": ["../../packages/core/src/index.ts"],
       "@berelax/config": ["../../packages/config/src/index.ts"],
+      "@berelax/db": ["../../packages/db/src/index.ts"],
+      "@berelax/fixtures": ["../../packages/fixtures/src/index.ts"],
+      "@berelax/messaging": ["../../packages/messaging/src/index.ts"],
+      "@berelax/messaging/transports/smsala": ["../../packages/messaging/src/transports/smsala.ts"],
+      "@berelax/providers": ["../../packages/providers/src/index.ts"],
       "@berelax/ui": ["../../packages/ui/src/index.ts"],
       "@berelax/ui/theme-provider": ["../../packages/ui/src/theme/theme-provider.tsx"],
       "@berelax/ui/*": ["../../packages/ui/src/*"]

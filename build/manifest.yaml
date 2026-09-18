@@ -999,7 +999,7 @@ units:
       the merge C-CRM will own, guest booking, and SMS OTP that is rate-limited, enumeration-resistant and
       routed through the messaging choke point rather than a provider SDK.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-MSG-02
@@ -1024,6 +1024,26 @@ units:
     - 'The OTP send goes through the packages/messaging send() choke point: the fake SMSala outbox holds
       the message, and a dependency-cruiser fixture proves a direct provider import outside packages/messaging
       fails the gate by rule name'
+    - 'NOTE: scoped where a dependency does not exist yet. (1) There is no booking or appointment table
+      - B-AVAIL-01 owns it and is still todo - so "a guest booking creates a customer row" is satisfied
+      at the customer half only: ensureCustomer(created_via=guest_booking) creates the row with no credential
+      and phone_verified_at null, and the spelling-reuse assertion runs through it in packages/fixtures/src/customer-identity.itest.ts.
+      Attaching that customer_id to a booking row is B-AVAIL-01; the flow that does it is B-UI-02. (2)
+      The route issues codes only. verifyOtpCode is implemented and asserted under the frozen clock (single
+      use, 5-minute expiry, 5 attempts, 15-minute lock), but there is no verify endpoint, because a successful
+      verification has to mint a customer session or magic-link token and nothing in the system defines
+      one yet - B-UI-02. (3) Nothing about the send is persisted, per B-MSG-02 NOTE: the OTP send is asserted
+      on the returned SendResult, on the local outbox and, for an allowlisted recipient, on the fake SMSala
+      call log. (4) The route wires gate evaluators that throw, so a promotional send through this runtime
+      is blocked_unevaluable rather than sent; the consent, suppression and frequency stores are C-CRM-03,
+      C-CRM-04 and C-AUTO-03. auth.otp is transactional and returns from the gate before any of them is
+      read. (5) The database-backed suites are .itest.ts rather than the .test.ts this files list names,
+      because packages/db has no database in the unit runner: otp.test.ts keeps the pure half (code shape,
+      hash under salt, the declared policy constants) and otp.itest.ts holds the rest. (6) The dependency-cruiser
+      rule the last line asks for already existed as messaging-providers-only-inside-a-transport; it was
+      verified to cover an import from apps/web/app/api/v1/otp and was NOT duplicated. Two cases were
+      appended to scripts/test-gates.mjs: the provider import from the route directory rejected by rule
+      name, and its control - the sendMessage choke point still importable from a route'
     files:
     - packages/core/src/identity/normalise-phone.ts
     - packages/core/src/identity/normalise-phone.test.ts
@@ -1386,7 +1406,7 @@ units:
       trigger, and a posting repository that is the only write path. Integration-tested against real Postgres
       because grants and deferred triggers cannot be tested against a mock.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04
@@ -1407,11 +1427,64 @@ units:
       audit rows per posting and fails on zero
     - the migration is forward-only and pnpm db:migrate:dry passes; the seeded chart of accounts round-trips
       to the packages/core chart with no drift, asserted by a comparison test
+    - 'NOTE: the application role is refused UPDATE and DELETE on journal_entry and journal_line by the GRANT,
+      so for that role the statement raises 42501 (insufficient_privilege) and never reaches the trigger. The
+      named trigger error ZL001 is therefore asserted in the same suite for the OWNER role, which is what a
+      migration or a psql session connects as and the one role a privilege cannot constrain. Both layers are
+      asserted, both on SQLSTATE, and the ZL001 cases additionally on the trigger''s own message; nothing in
+      the suite matches on "an error was raised". TRUNCATE is covered separately, because it is the one
+      statement that does not fire a row-level DELETE trigger: 0018 revokes it from berelax_app, the itest
+      asserts the refusal, and the itest itself uses TRUNCATE as the owner to reset between cases.'
+    - 'NOTE: what before/after means for an append-only insert. A fresh posting records no before state,
+      because there was none — a fabricated one would be a record of something that never existed, and
+      postgres.js serialises sql.json(null) as SQL NULL anyway, so an explicit null is indistinguishable from
+      an omission in the stored row. A REVERSAL does have a prior state, so it records the entry it corrects,
+      read back inside the same transaction rather than taken from the caller. Both shapes are asserted and
+      each is the other''s control; the count-per-posting criterion is proved as a delta from a timestamp
+      captured in beforeEach, because audit_event is append-only and a total would differ on every re-run.'
+    - 'NOTE: the chart round-trip lives in packages/fixtures/src/ledger-chart.itest.ts rather than in
+      packages/db, because it compares core''s STANDARD_SPA_CHART against the seeded rows and db must never
+      import core (db-must-not-import-core); fixtures is the package allowed to depend on both. The
+      migration''s 62 account rows were GENERATED from that chart, not retyped. The comparison runs in both
+      directions over every field in ACCOUNT_FIELDS, feeds each stored row back through core''s defineAccount,
+      and is itself shown to fail five ways — a renamed account, a re-tagged vat_box, a missing account, an
+      extra account and a dropped provisional marker — one of them as a rolled-back UPDATE against the
+      database rather than against a copy of the rows.'
+    - 'NOTE: deferred to M-VAT-06 — lockAccountingPeriod checks no preconditions. Refusing a close until the
+      trial balance balances and every document in the period is posted, naming the earliest OPEN period in
+      the refusal, and hashing the period''s trial balance into the audit row are that unit''s acceptance
+      lines. What is here is the mechanism they need: period_lock with a gist exclusion constraint that makes
+      two overlapping locks impossible (so the named period is never ambiguous), period_lock_for(date) as the
+      single definition of "is this date closed", BEFORE INSERT guards on journal_entry and journal_line, and
+      no exported way to reopen a period. M-TILL-01''s NOTE that period locking belongs here rather than as a
+      pure predicate in core is discharged by this.'
+    - 'NOTE: the gate this unit adds is a third rule in scripts/check-schema-conventions.mjs,
+      append-only-table-must-refuse-update-and-delete. A table whose own SQL comment claims "UPDATE and
+      DELETE raise" must have BOTH a BEFORE UPDATE and a BEFORE DELETE trigger somewhere in the migrations,
+      and must carry neither an updated_at column nor a set_updated_at trigger. Scoped by that declaration
+      rather than by a hardcoded list, so it already judges google_connection_events from 0016 as well as the
+      two journal tables; audit_event and app_setting_history are out of scope on purpose, because
+      `create rule ... do instead nothing` makes a weaker promise and reports success to the caller. Case 28
+      in scripts/test-gates.mjs proves it fires four ways by rule name, including the copy-paste defect where
+      the DELETE trigger exists and the UPDATE one does not, plus the control that the correct shape passes.'
+    - 'NOTE: no caller posts through this repository yet; M-TILL-06 is the first. Because db may not import
+      core, JournalEntryInput is a structural mirror of core''s JournalEntry — Money becomes integer
+      debitFils/creditFils, LocalDate becomes an ISO YYYY-MM-DD string, EntryId becomes a string — and the
+      caller maps field for field. The balance failure arrives from COMMIT, which belongs to withUnitOfWork
+      rather than to any repository function, so the SQLSTATE translation is exported as journalError() for
+      that caller to wrap its own transaction with, rather than hidden in a catch block that could never see
+      it. No TypeScript balance pre-check is added: core''s postEntry and the deferred trigger are already
+      two statements of that rule, and a third would be a second opportunity to disagree.'
     files:
     - packages/db/src/schema/ledger.ts
-    - packages/db/migrations/00xx_ledger.sql
+    - packages/db/src/schema/index.ts
+    - packages/db/src/index.ts
+    - packages/db/migrations/0018_ledger.sql
     - packages/db/src/repositories/journal.ts
     - packages/db/src/repositories/journal.itest.ts
+    - packages/fixtures/src/ledger-chart.itest.ts
+    - scripts/check-schema-conventions.mjs
+    - scripts/test-gates.mjs
   - id: M-TILL-03
     order: 45
     title: Gap-free sequential document numbering allocated inside the insert transaction

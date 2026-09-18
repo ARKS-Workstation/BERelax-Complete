@@ -13,7 +13,18 @@ const config: NextConfig = {
   // The monorepo's workspace packages ship TypeScript source rather than built output, so Next has to
   // compile them. Without this they arrive as untranspiled `.ts` and the build fails on the first
   // type annotation.
-  transpilePackages: ['@berelax/ui', '@berelax/core', '@berelax/config'],
+  transpilePackages: [
+    '@berelax/ui',
+    '@berelax/core',
+    '@berelax/config',
+    // The API routes reach the database and the send choke point, which pull in their own workspace
+    // dependencies. Every package in the chain has to be listed: a package that is only a transitive
+    // dependency still arrives as untranspiled TypeScript.
+    '@berelax/db',
+    '@berelax/messaging',
+    '@berelax/providers',
+    '@berelax/shared',
+  ],
   typedRoutes: true,
   experimental: {
     // Font and image optimisation write into .next; nothing else needs to.

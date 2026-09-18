@@ -886,6 +886,137 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   }
 }
 
+// 28. An append-only table that only half keeps its promise must fail the conventions gate.
+//     ADR 0017's journal is enforced by a PAIR of BEFORE triggers, and the pair is where the defect
+//     hides: you write one, copy it for the other event, and forget to change the word. The table then
+//     documents a guarantee it half keeps, and the missing half is invisible in review precisely
+//     because the comment says otherwise. Four fixtures: three defects and the control that passes.
+{
+  const f = 'packages/db/migrations/9999__gate_fixture__.sql'
+  const RULE = 'append-only-table-must-refuse-update-and-delete'
+  const TABLE = 'gate_fixture_event_log'
+
+  const refusal = (event) =>
+    [
+      `create trigger ${TABLE}_no_${event} before ${event} on ${TABLE}`,
+      '  for each row execute function refuse_journal_change();',
+    ].join('\n')
+
+  const fixture = ({ extraColumn = '', triggers = [] }) =>
+    [
+      '-- Known-bad fixture written by scripts/test-gates.mjs. Removed in a finally.',
+      `create table ${TABLE} (`,
+      '  id          bigint      generated always as identity primary key,',
+      `  occurred_at timestamptz not null default now()${extraColumn === '' ? '' : ','}`,
+      extraColumn,
+      ');',
+      `comment on table ${TABLE} is`,
+      "  'Append-only: UPDATE and DELETE raise. A deliberate fixture, never applied to a database.';",
+      ...triggers,
+    ]
+      .filter((line) => line !== '')
+      .join('\n')
+
+  const cases = [
+    {
+      name: 'conventions gate rejects an append-only table with no refusal trigger at all',
+      source: fixture({}),
+      rule: `${RULE}: ${TABLE} is documented as raising on UPDATE and DELETE, but no BEFORE UPDATE trigger`,
+    },
+    {
+      // The copy-paste defect, in the shape it actually arrives: DELETE covered, UPDATE forgotten.
+      name: 'conventions gate rejects an append-only table whose UPDATE trigger is missing',
+      source: fixture({ triggers: [refusal('delete')] }),
+      rule: `${RULE}: ${TABLE} is documented as raising on UPDATE and DELETE, but no BEFORE UPDATE trigger`,
+    },
+    {
+      // What arrives when a mutable table's definition is copied to make the next log.
+      name: 'conventions gate rejects an updated_at column on an append-only table',
+      source: fixture({
+        extraColumn: '  updated_at  timestamptz not null default now()',
+        triggers: [refusal('update'), refusal('delete')],
+      }),
+      rule: `${RULE}: ${TABLE} is append-only and has an updated_at column`,
+    },
+    {
+      name: 'conventions gate rejects a set_updated_at trigger on an append-only table',
+      source: fixture({
+        triggers: [
+          refusal('update'),
+          refusal('delete'),
+          `create trigger ${TABLE}_updated_at before update on ${TABLE}`,
+          '  for each row execute function set_updated_at();',
+        ],
+      }),
+      rule: `${RULE}: ${TABLE} is append-only and carries a set_updated_at trigger`,
+    },
+  ]
+
+  for (const { name, source, rule } of cases) {
+    const result = withFixture(f, source, () =>
+      run('node', ['scripts/check-schema-conventions.mjs']),
+    )
+    checkRejectedBy(name, result, rule)
+  }
+
+  // The control. The same table, correctly enforced, must PASS — otherwise the four cases above would
+  // be satisfied by a gate that rejected every append-only table, including the three real ones.
+  const correct = withFixture(
+    f,
+    fixture({ triggers: [refusal('update'), refusal('delete')] }),
+    () => run('node', ['scripts/check-schema-conventions.mjs']),
+  )
+  check(
+    'conventions gate accepts an append-only table that refuses both UPDATE and DELETE',
+    !correct.failed,
+    correct.output,
+  )
+}
+
+// 26a. (B-LIFE-02) The OTP route must not reach an SMS provider directly.
+//
+//      The rule already exists — `messaging-providers-only-inside-a-transport`, with its fixture in
+//      scripts/test-boundaries.mjs pointed at packages/messaging. This case points it at the place the
+//      temptation actually lives: an API route that needs to send one SMS and is three lines from
+//      importing SMSala to do it. Bypassing `sendMessage` there would skip the sender-ID class rule,
+//      the promotional gate, the campaign cap and the staging guard at once, which in a non-production
+//      run means a real code to a real handset. Asserted BY RULE NAME: a fixture rejected by some other
+//      rule would leave this one free to stop matching.
+{
+  const result = withFixture(
+    'apps/web/app/api/v1/otp/__gate_fixture__.ts',
+    ["import { SMSALA } from '@berelax/providers'", 'export const illegal = SMSALA'].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  checkRejectedBy(
+    'boundaries reject an SMS provider import from the OTP route',
+    result,
+    'messaging-providers-only-inside-a-transport',
+  )
+}
+
+// 26b. (B-LIFE-02) The control for 26a: the choke point itself must remain importable from a route.
+//
+//      Without this, the rule above is indistinguishable from "apps may not send messages", and the
+//      only way to satisfy that reading is to send them from somewhere worse.
+{
+  const result = withFixture(
+    'apps/web/app/api/v1/otp/__gate_fixture__.ts',
+    [
+      "import { sendMessage } from '@berelax/messaging'",
+      'export const legitimate = sendMessage',
+    ].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  check(
+    'boundaries allow the sendMessage choke point in an API route',
+    !result.failed,
+    `rejected the legitimate send path:\n${result.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
