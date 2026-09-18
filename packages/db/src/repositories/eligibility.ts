@@ -1,4 +1,9 @@
-import { AppError, type TherapistSkill } from '@berelax/shared'
+import {
+  AppError,
+  type GenderMatchingMode,
+  genderMatchingMode,
+  type TherapistSkill,
+} from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 
 /**
@@ -13,7 +18,7 @@ import type { Sql } from '../connection.ts'
  * made for `CompliancePolicyRow` and the compliance lexicon, and for the same reason: the field copy
  * is one line in a test, and a shared type would be an import the boundary forbids.
  *
- * ## Six reasons, one order, two implementations
+ * ## Seven reasons, one order, two implementations
  *
  * `ELIGIBILITY_EXCLUSION_REASONS` in core is the order these checks are applied in, and the `case`
  * expression below mirrors it exactly. A therapist who is both unemployed and unrostered must be
@@ -21,13 +26,27 @@ import type { Sql } from '../connection.ts'
  * comparing two different questions rather than two answers to one.
  *
  * {@link EXCLUSION_REASONS} is the list as this side spells it, and {@link exclusionReasonFrom}
- * refuses anything else rather than letting it through as `undefined`. A seventh reason added to the
+ * refuses anything else rather than letting it through as `undefined`. An eighth reason added to the
  * SQL and not to this list is a therapist excluded for a reason the caller cannot name — and the
  * failure mode of the permissive version is an exclusion that reads as eligibility.
+ * `packages/fixtures/src/therapist-eligibility.itest.ts` pins the two lists to each other in both
+ * directions, at runtime for the order and at compile time for the membership, so a reason that exists
+ * on one side only fails `pnpm typecheck` rather than a booking.
+ *
+ * ## Same-gender matching is the seventh, and it is the last arm of the `case`
+ *
+ * B-AVAIL-05, and a hard constraint rather than a preference (ADR 0020, docs/04 §3, `Y9-gender` still
+ * open). It is applied last for the two reasons `ELIGIBILITY_EXCLUSION_REASONS` records: it is only the
+ * useful answer when everything else passed, and reporting it for a therapist who is excluded anyway
+ * would name a person's recorded gender to a caller with no use for it. `clientGender` absent means the
+ * query is not about a client at all — the admin calendar asks who is working on Thursday — and a
+ * BOOKING request with no client gender is refused one layer up, in
+ * `solveGenderMatchedAvailability`, with `requires_client_gender`. The mode goes through
+ * `genderMatchingMode`, so an absent or unreadable setting is strict here exactly as it is in core.
  *
  * ## Why the rules are in SQL rather than in a loop over rows
  *
- * Three of the six are set operations over rows this layer is already joining (skills, credentials,
+ * Three of the seven are set operations over rows this layer is already joining (skills, credentials,
  * roster), and the fourth — subtracting approved leave from the roster — is range arithmetic Postgres
  * does natively with `range_agg` and multirange difference. Fetching every employee's every document
  * and doing it in TypeScript would move a `where` clause into a `filter` and make the read cost grow
@@ -52,7 +71,12 @@ import type { Sql } from '../connection.ts'
  * one record over-reports the room's free places.
  */
 
-/** The reasons this reader can report. Mirrors `EligibilityExclusionReason` in `@berelax/core`. */
+/**
+ * The reasons this reader can report, in the order the `case` applies them.
+ *
+ * Mirrors `EligibilityExclusionReason` and `ELIGIBILITY_EXCLUSION_REASONS` in `@berelax/core`, which
+ * this package may not import. `gender_mismatch` is last and only last; see the header.
+ */
 export const EXCLUSION_REASONS = [
   'not_employed',
   'missing_skill',
@@ -60,6 +84,7 @@ export const EXCLUSION_REASONS = [
   'credential_expired',
   'not_rostered',
   'on_approved_leave',
+  'gender_mismatch',
 ] as const
 export type ExclusionReason = (typeof EXCLUSION_REASONS)[number]
 
@@ -107,6 +132,25 @@ export interface EligibilityQueryInput {
    * deleting rows that `shift_assignment.employee_id` protects with ON DELETE RESTRICT.
    */
   readonly employeeIds?: readonly string[]
+  /**
+   * The **client's** gender, when it is known. A different question from the therapist's.
+   *
+   * The therapist's is `employee.gender`; this is a fact about the person asking for the appointment,
+   * which no table holds — `customer` has no gender column and B-AVAIL-05 added none. Absent means the
+   * query is not about a client (the admin calendar, the reminder scheduler), so no gender narrowing is
+   * applied; it does NOT mean "any therapist will do" for a booking, which
+   * `solveGenderMatchedAvailability` refuses with `requires_client_gender`.
+   */
+  readonly clientGender?: 'female' | 'male'
+  /**
+   * `booking.same_gender_matching`, from {@link readGenderMatching}. **Absent is strict.**
+   *
+   * Optional deliberately: a call site that has never heard of this field must not be able to relax a
+   * compliance constraint by omission. The value is normalised with `genderMatchingMode`, the same
+   * function the settings reader and `@berelax/core` use, so an unreadable or stale value means strict
+   * in all three places rather than in two of them.
+   */
+  readonly genderMatching?: GenderMatchingMode
 }
 
 export interface EligibleTherapistRow {
@@ -203,6 +247,12 @@ export async function readEligibleTherapists(
   // `null` rather than an empty array for "every employee": `= any(array[]::uuid[])` is false for
   // every row, so an empty array would silently mean "nobody" where the caller meant "everybody".
   const narrowed = employeeIds === undefined ? null : [...employeeIds]
+  // `null` rather than `undefined`, because postgres.js sends `undefined` as an error rather than as
+  // SQL NULL, and NULL is what the `case` arm below tests for "this query is not about a client".
+  const clientGender = query.clientGender ?? null
+  // Normalised here rather than passed through, so the SQL cannot be handed a mode this build does not
+  // know how to be strict about. `genderMatchingMode` is the same function core applies.
+  const strictGender = genderMatchingMode(query.genderMatching) === 'strict'
 
   const rows = await sql<PoolQueryRow[]>`
     with profile as (
@@ -287,6 +337,14 @@ export async function readEligibleTherapists(
              when cr.any_expired then 'credential_expired'
              when p.employee_id is null then 'not_rostered'
              when isempty(p.net) then 'on_approved_leave'
+             -- Same-gender matching (B-AVAIL-05), LAST. "is distinct from" and not "<>": a therapist
+             -- whose gender nobody has recorded (Y8-staff leaves employee.gender nullable) is a
+             -- MISMATCH and not a wildcard, and "<>" against NULL is NULL, which a case treats as
+             -- false - the permissive answer, reached by writing the obvious operator.
+             when ${strictGender}::boolean
+                  and ${clientGender}::employee_gender is not null
+                  and c.gender is distinct from ${clientGender}::employee_gender
+               then 'gender_mismatch'
            end as reason
       from candidate c
       left join skill sk on sk.employee_id = c.id

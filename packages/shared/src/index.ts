@@ -3,6 +3,14 @@
  * Types, branded primitives and error taxonomy. No I/O, no framework imports.
  */
 
+export {
+  GENDER_MATCHING_MODES,
+  GENDER_MATCHING_SETTING_KEY,
+  type GenderMatchingMode,
+  genderMatchingMode,
+  genderMatchingModeSchema,
+  STRICT_GENDER_MATCHING,
+} from './gender-matching.ts'
 export type { Channel, MessageClass } from './messaging.ts'
 export {
   type Assert,

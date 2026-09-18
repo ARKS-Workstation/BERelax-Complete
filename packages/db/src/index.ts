@@ -337,9 +337,14 @@ export {
   tradingDateAt,
 } from './services/recurring-cost.ts'
 export {
+  GENDER_MATCHING_SETTING_KEY,
+  readGenderMatching,
+  setGenderMatching,
+} from './settings/availability.ts'
+export {
   type UnconfirmedAssumptionRow,
   unconfirmedAssumptionRows,
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 32 as const
+export const SCHEMA_VERSION = 36 as const

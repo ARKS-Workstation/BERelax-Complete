@@ -92,6 +92,20 @@ describe('validateSetting', () => {
     expect(() => validateSetting('booking.same_gender_matching', 'maybe')).toThrow()
   })
 
+  it('refuses switching same-gender matching OFF, which is not a decision anybody took', () => {
+    // B-AVAIL-05 narrowed this schema from three values to two. ADR 0020 and docs/01 decision 19 permit
+    // relaxing the constraint to advisory and nothing further, so `'off'` was a stored value the
+    // database could hold and no document supported — and a compliance constraint that can be switched
+    // off entirely is a different decision from one that can be relaxed to a warning.
+    expect(() => validateSetting('booking.same_gender_matching', 'off')).toThrow(
+      /Same-gender therapist matching/,
+    )
+    // The control: the two modes that ARE decisions still validate, so the refusal above is about
+    // `'off'` and not about a schema that has stopped accepting anything.
+    expect(validateSetting('booking.same_gender_matching', 'strict')).toBe('strict')
+    expect(validateSetting('booking.same_gender_matching', 'advisory')).toBe('advisory')
+  })
+
   it('accepts a valid value and returns it parsed', () => {
     expect(validateSetting('booking.turnaround_minutes_standard', 25)).toBe(25)
     expect(validateSetting('messaging.promotional_window', { startHour: 9, endHour: 20 })).toEqual({

@@ -2,8 +2,11 @@ import {
   type ApprovedLeave,
   ASIA_DUBAI,
   assertPoolIsTotal,
+  ELIGIBILITY_EXCLUSION_REASONS,
+  type EligibilityExclusionReason,
   type EligibilityFacts,
   type EligibilityQuery,
+  type GenderMatchedSlot,
   type HoursForDate,
   type Instant,
   instantFromIso,
@@ -14,6 +17,7 @@ import {
   type ScheduledAppointment,
   type SlotRequest,
   solveAvailability,
+  solveGenderMatchedAvailability,
   type TherapistCredential,
   type TherapistEligibilityProvider,
   type TherapistGender,
@@ -25,8 +29,11 @@ import {
 } from '@berelax/core'
 import {
   createConnection,
+  EXCLUSION_REASONS,
+  type ExclusionReason,
   readCommittedAppointments,
   readEligibleTherapists,
+  readGenderMatching,
   readMandatoryDocumentTypes,
   type Sql,
   type TherapistPoolRead,
@@ -45,9 +52,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  *
  *   1. the db reader is **structurally the port**, asserted with `satisfies` rather than by a comment,
  *      so a P-HR extension that changes either side fails `pnpm typecheck`;
- *   2. the two implementations **agree**, over a matrix that produces every one of the six exclusion
+ *   2. the two implementations **agree**, over a matrix that produces every one of the seven exclusion
  *      reasons from real rows — which is what makes two implementations of one rule safe rather than
- *      one rule plus a future disagreement;
+ *      one rule plus a future disagreement. The seventh is B-AVAIL-05's `gender_mismatch`, and the last
+ *      describe block below is that unit's half: the matrix with a client attached, the ordering that
+ *      keeps gender last, and the strict default read out of a database with NO `app_setting` row;
  *   3. the pool **feeds the solver unchanged**: `poolSolverInput` supplies `therapistIds` and `shifts`
  *      and nothing in `solveAvailability` learns what a credential or a leave request is. The
  *      acceptance list's worked example — shift ends 22:00, a 90-minute treatment excluded at 21:00 and
@@ -135,9 +144,31 @@ const dbProvider = {
         tradingDate: query.tradingDate,
         requiredSkill: query.requiredSkill,
         ...(query.therapistIds === undefined ? {} : { employeeIds: query.therapistIds }),
+        // Forwarded, not dropped. A provider that silently ignored these two would still satisfy the
+        // port's type and would answer a DIFFERENT question from the pure rule — which is the only way
+        // the agreement test below can be passing and wrong at the same time.
+        ...(query.clientGender === undefined ? {} : { clientGender: query.clientGender }),
+        ...(query.genderMatching === undefined ? {} : { genderMatching: query.genderMatching }),
       }),
     ),
 } satisfies TherapistEligibilityProvider
+
+/**
+ * The two reason lists are the SAME set, checked at compile time in both directions.
+ *
+ * `packages/db` may not import `packages/core`, so `EXCLUSION_REASONS` and
+ * `ELIGIBILITY_EXCLUSION_REASONS` are two hand-kept lists of one vocabulary, and until B-AVAIL-05 the
+ * only thing holding them together was a comment in each. A reason present on one side only is a
+ * therapist excluded for a reason the caller cannot name: the SQL `case` emits it, `exclusionReasonFrom`
+ * throws on it, and the failure arrives at a booking rather than at `pnpm typecheck`. Either half of this
+ * pair becoming `never` is a compile error on the assignment below — which is what gate 35h mutates.
+ */
+type DbReasonsAreCoreReasons = ExclusionReason extends EligibilityExclusionReason ? true : never
+type CoreReasonsAreDbReasons = EligibilityExclusionReason extends ExclusionReason ? true : never
+const REASON_UNIONS_AGREE: readonly [DbReasonsAreCoreReasons, CoreReasonsAreDbReasons] = [
+  true,
+  true,
+]
 
 async function addEmployee(args: {
   readonly reference: string
@@ -733,5 +764,189 @@ describe('acceptance — it does not offer a slot the database would then refuse
 
     await sql`delete from appointment where booking_id = ${bookingId}`
     await sql`delete from booking where id = ${bookingId}`
+  })
+})
+
+/**
+ * B-AVAIL-05 — same-gender matching, in both implementations and against an unconfigured database.
+ *
+ * The pair is the point again: `resolveTherapistPool` applies `genderVerdict` as its seventh check and
+ * `readEligibleTherapists` applies the same rule as the last arm of its `case`. Two implementations of
+ * one compliance constraint is one constraint plus a future disagreement unless something compares them
+ * over rows that produce it, and "the SQL forgot the gender arm" is invisible from either side alone: the
+ * pool simply reads as a wider roster.
+ *
+ * The probe roster is B-AVAIL-04's: `bavail04p-short` is female, `bavail04p-ok` is male, and everyone
+ * else has no gender on record at all — which is the real handover position (Y8-staff) and the case that
+ * matters most, because an unrecorded gender must be a MISMATCH rather than a wildcard.
+ */
+describe('acceptance — same-gender matching is the seventh reason, in both implementations', () => {
+  const genderQuery = (
+    clientGender: TherapistGender | undefined,
+    genderMatching?: 'strict' | 'advisory',
+  ): EligibilityQuery => ({
+    tradingDate: localDate(TRADING_DATE),
+    requiredSkill: requiredSkillFor('asian'),
+    therapistIds: allIds(),
+    ...(clientGender === undefined ? {} : { clientGender }),
+    ...(genderMatching === undefined ? {} : { genderMatching }),
+  })
+
+  const reasonOf = (pool: TherapistPool, reference: string): string | undefined =>
+    pool.excluded.find((therapist) => therapist.therapistId === idOf(reference))?.reason
+
+  it('lists the seven reasons in one order, and neither list has a member the other lacks', () => {
+    // The runtime half of the drift guard: the compile-time half is `REASON_UNIONS_AGREE` above, which
+    // catches a missing MEMBER, and this catches a different ORDER — a therapist failing two checks is
+    // then reported differently by the two implementations while both lists still hold the same seven.
+    expect([...EXCLUSION_REASONS]).toEqual([...ELIGIBILITY_EXCLUSION_REASONS])
+    expect(EXCLUSION_REASONS.at(-1)).toBe('gender_mismatch')
+    expect(REASON_UNIONS_AGREE).toEqual([true, true])
+  })
+
+  it('answers a gendered query identically, field for field', async () => {
+    const { pure, database } = await bothPools(genderQuery('female'))
+    expect(comparable(database)).toEqual(comparable(pure))
+    // Not trivially empty on either side, and not trivially full: the female therapist survives and the
+    // male one is excluded by name, so the equality is between two answers rather than two blanks.
+    expect(pure.therapists.map((therapist) => therapist.therapistId)).toEqual([
+      idOf('bavail04p-short'),
+    ])
+    expect(reasonOf(database, 'bavail04p-ok')).toBe('gender_mismatch')
+    expect(reasonOf(pure, 'bavail04p-ok')).toBe('gender_mismatch')
+    assertPoolIsTotal(database, allIds())
+    assertPoolIsTotal(pure, allIds())
+
+    // The other direction, so the rule is the pair and not a filter that happens to keep one person.
+    const male = await bothPools(genderQuery('male'))
+    expect(comparable(male.database)).toEqual(comparable(male.pure))
+    expect(male.pure.therapists.map((therapist) => therapist.therapistId)).toEqual([
+      idOf('bavail04p-ok'),
+    ])
+    expect(reasonOf(male.database, 'bavail04p-short')).toBe('gender_mismatch')
+  })
+
+  it('treats a gender nobody has recorded as a mismatch, on both sides', async () => {
+    // `bavail04p-halfday` is eligible on every other count and has no gender: nineteen therapists have
+    // photographs and no staff list (Y8-staff), so this is the ordinary row rather than the odd one.
+    // A wildcard here would make strict matching offer a therapist whose pairing cannot be justified.
+    for (const clientGender of ['female', 'male'] as const) {
+      const { pure, database } = await bothPools(genderQuery(clientGender))
+      expect(reasonOf(database, 'bavail04p-halfday'), clientGender).toBe('gender_mismatch')
+      expect(reasonOf(pure, 'bavail04p-halfday'), clientGender).toBe('gender_mismatch')
+    }
+    // The control: with no client in the query the same therapist is in the pool, so "excluded" above is
+    // the gender rule and not this fixture quietly losing somebody.
+    const { database } = await bothPools(genderQuery(undefined))
+    expect(reasonOf(database, 'bavail04p-halfday')).toBeUndefined()
+  })
+
+  it('reports an earlier reason in preference to gender, identically on both sides', async () => {
+    const { pure, database } = await bothPools(genderQuery('female'))
+    // Every one of these has no gender on record, so a rule applied anywhere but last would report
+    // `gender_mismatch` for all of them and the six conversations the front desk can act on would be
+    // replaced by one it cannot.
+    const earlier = [
+      ['bavail04p-ended', 'not_employed'],
+      ['bavail04p-noskill', 'missing_skill'],
+      ['bavail04p-nolicence', 'credential_missing'],
+      ['bavail04p-lapsed', 'credential_expired'],
+      ['bavail04p-unrostered', 'not_rostered'],
+      ['bavail04p-onleave', 'on_approved_leave'],
+    ] as const
+    for (const [reference, reason] of earlier) {
+      expect(reasonOf(database, reference), reference).toBe(reason)
+      expect(reasonOf(pure, reference), reference).toBe(reason)
+    }
+    // All seven produced from real rows in one query, so none of them is dead in either implementation.
+    const produced = new Set([
+      ...earlier.map(([, reason]) => reason as string),
+      reasonOf(database, 'bavail04p-ok') as string,
+    ])
+    expect([...produced].sort()).toEqual([...EXCLUSION_REASONS].sort())
+  })
+
+  it('narrows the pool only in strict mode — advisory leaves the labelling to the slot layer', async () => {
+    const advisory = await bothPools(genderQuery('female', 'advisory'))
+    const noClient = await bothPools(genderQuery(undefined))
+    // An equality rather than an absence: a reader that narrowed under advisory as well would be
+    // enforcing a mode the owner did not choose, which is the opposite failure to the one this unit is
+    // mostly about and just as wrong.
+    expect(comparable(advisory.database)).toEqual(comparable(advisory.pure))
+    expect(comparable(advisory.database)).toEqual(comparable(noClient.database))
+    expect(advisory.database.excluded.map((each) => each.reason)).not.toContain('gender_mismatch')
+  })
+})
+
+describe('acceptance — with NO app_setting row, the database still enforces strict matching', () => {
+  it('reads strict from an empty settings table and offers no cross-gender slot', async () => {
+    // The whole of the unit's fail-safe, end to end and in one transaction: empty `app_setting`, read the
+    // mode from the database rather than assuming it, feed THAT value to both implementations, and solve.
+    // A test that passed `'strict'` as a literal would prove the strict path and nothing about the
+    // default — and the default is what a fresh deployment actually runs on.
+    await expect(
+      sql.begin(async (tx) => {
+        const scoped = tx as unknown as Sql
+        await scoped`delete from app_setting`
+        const [count] = await scoped<{ n: string }[]>`select count(*)::text as n from app_setting`
+        expect(Number(count?.n)).toBe(0)
+
+        const mode = await readGenderMatching(scoped)
+        expect(mode).toBe('strict')
+
+        const query: EligibilityQuery = {
+          tradingDate: localDate(TRADING_DATE),
+          requiredSkill: requiredSkillFor('asian'),
+          therapistIds: allIds(),
+          clientGender: 'female',
+          genderMatching: mode,
+        }
+        const pool = asPool(
+          await readEligibleTherapists(scoped, {
+            tradingDate: TRADING_DATE,
+            requiredSkill: requiredSkillFor('asian'),
+            employeeIds: allIds(),
+            clientGender: 'female',
+            genderMatching: mode,
+          }),
+        )
+        const facts = await readFacts()
+        expect(comparable(pool)).toEqual(comparable(resolveTherapistPool(facts, query)))
+        // Only the female therapist is in the pool, and she is the only one offered any slot.
+        expect(pool.therapists.map((each) => each.therapistId)).toEqual([idOf('bavail04p-short')])
+
+        const solution = solveGenderMatchedAvailability({
+          ...solverRequest(pool, [], 10),
+          pool,
+          clientGender: 'female',
+          genderMatching: mode,
+        })
+        expect(solution.refusal).toBeNull()
+        expect(solution.slots.length).toBeGreaterThan(0)
+        const offered = new Set(
+          solution.slots.flatMap((slot: GenderMatchedSlot) => slot.availableTherapistIds),
+        )
+        expect([...offered]).toEqual([idOf('bavail04p-short')])
+        expect(solution.slots.every((slot: GenderMatchedSlot) => !slot.genderMismatch)).toBe(true)
+
+        // And a booking taken over the telephone, where nobody asked: zero slots and a reason code, not
+        // an unexplained empty day.
+        const noGender = solveGenderMatchedAvailability({
+          ...solverRequest(pool, [], 10),
+          pool,
+          clientGender: undefined,
+          genderMatching: mode,
+        })
+        expect(noGender.slots).toEqual([])
+        expect(noGender.refusal).toBe('requires_client_gender')
+
+        // Rolled back: `app_setting` is the settings suite's table too, and this file borrows it.
+        throw new Error('rollback: the empty-settings probe is read-only')
+      }),
+    ).rejects.toThrow(/rollback: the empty-settings probe/)
+
+    // The rollback happened, so nothing after this file sees an empty settings table.
+    const [after] = await sql<{ n: string }[]>`select count(*)::text as n from app_setting`
+    expect(Number(after?.n)).toBeGreaterThan(0)
   })
 })

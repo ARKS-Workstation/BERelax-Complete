@@ -824,7 +824,7 @@ units:
       configuration required, and downgradable to advisory only as an owner-role audited settings change.
       Fail-safe: an unreadable or missing setting resolves to strict.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-04
@@ -849,10 +849,114 @@ units:
       list
     - 'The gender constraint is applied inside the solver, not as a post-filter on results: a test injecting
       a solver-internal spy asserts ineligible therapists are never considered for assignment'
+    - 'NOTE: the setting this list calls availability.gender_matching is booking.same_gender_matching, the
+      one F09 already declares - compliance_locked, owner-only, audited, is_provisional against Y9-gender.
+      No second key was added: two keys for one compliance constraint is one constraint plus a future
+      disagreement, and the new one would be neither seeded nor compliance-locked. Its schema was NARROWED
+      to exactly strict | advisory, which the line asks for: it accepted a third value ''off'' until this
+      unit, and ADR 0020 and docs/01 decision 19 both permit relaxing this rule to advisory and nothing
+      further, so a stored value that switches it off entirely is a compliance position no document
+      supports. A row an older build left at ''off'' now READS as strict rather than failing validation on
+      the read path, which is the only safe direction for a value that has stopped being a legal one.'
+    - 'NOTE: where the code is, and why it is not all in one file. The two modes, the setting key and the
+      total normaliser genderMatchingMode are in packages/shared/src/gender-matching.ts, because
+      @berelax/config (the registry''s z.enum), @berelax/db (the SQL) and @berelax/core (the rule) all read
+      that vocabulary and none of the three may import another - the same argument that puts TherapistSkill
+      there. The per-therapist verdict (genderVerdict, sameGenderMatch) is in eligibility-port.ts beside
+      the other verdicts, because resolveTherapistPool has to apply it to stay in step with the SQL and a
+      port importing gender-match.ts - which imports the port - is a cycle pnpm boundaries rejects.
+      gender-match.ts owns the rest: the pool narrowing, the request-level refusal, the slot label and the
+      solver wiring.'
+    - 'NOTE: gender_mismatch is the SEVENTH EligibilityExclusionReason and it is applied LAST, in both
+      implementations. Last is a decision: it is the only reason that is useful because everything else
+      passed ("no female therapist is free at 20:00" is actionable, "the therapist who left in March is
+      the wrong gender for you" is not), and reporting it for a therapist who is excluded anyway would
+      disclose a person''s recorded gender to a caller with no use for it. The order is asserted on both
+      sides and the two reason lists are now pinned to each other in
+      packages/fixtures/src/therapist-eligibility.itest.ts - at runtime for the order, and at compile time
+      for the membership, so a reason added to one side only fails pnpm typecheck rather than a booking.
+      Until this unit the only thing holding those two lists together was a comment in each.'
+    - 'NOTE: the slot flag is spelled genderMismatch, not gender_mismatch. camelCase in TypeScript and
+      snake_case in SQL is the convention every other field in the solver follows (turnaroundMinutes,
+      therapistBufferMinutes), and two spellings of one field is the drift this repository keeps paying
+      for. It is a REQUIRED boolean on every returned slot in both modes - never optional, because an
+      absent flag reads as undefined, undefined is falsy, and a cross-gender slot would then present as a
+      compliant one. false is a claim that needs evidence on both sides of the pair; true needs none, so
+      an unknown client gender under advisory flags every slot. crossGenderTherapistIds names the
+      therapists who were free but not proved a match, and is empty in strict mode always.'
+    - 'NOTE: the customer''s gender is a different question from the therapist''s and is read in a
+      different place. The therapist''s is employee.gender (nullable, Y8-staff). The customer''s is on NO
+      table - customer has no gender column, this unit added none, and inventing one would be a field the
+      front desk fills in with a guess - so it is an argument supplied by the booking request. At a phone
+      booking it is very often unknown, and strict matching then returns ZERO slots with the reason code
+      requires_client_gender, before any start is considered: no windows and no rejected starts either,
+      because a list of rejections would say the day had been examined and found full. The field is a
+      REQUIRED key with a possibly-undefined value on GenderMatchedRequest, so "we did not collect it" has
+      to be written out at the call site. On refusal the narrowed pool is emptied as well as flagged: a
+      refusal a caller can ignore is a refusal somebody books through.'
+    - 'NOTE: an unknown THERAPIST gender is a mismatch, not a wildcard, and the consequence is deliberate.
+      sameGenderMatch is a claim about a pair and a pair with a hole in it cannot be claimed, so under
+      strict matching a database with no HR data offers NOBODY - which is the loud failure rather than the
+      quiet one, and the same argument 0030 makes for not seeding nineteen fabricated people. The fixture
+      salon''s eight therapists and the two integration suites'' probe rosters carry genders; production
+      availability appears once P-HR''s import fills employee.gender.'
+    - 'NOTE: scoped, and left strict, because Y9-gender is open. (1) ROOM gender zoning is not modelled.
+      docs/04 section 3 says "Room gender zoning is modelled alongside it" and rooms carry no gender
+      attribute - 0012 has none and this unit invented none, because which rooms are zoned for whom is a
+      premises fact nobody has stated. (2) A Couple Massage has TWO clients and the request carries one
+      gender, so the strict reading applied is that every therapist assigned must match that single
+      supplied gender; a per-client gender for a couple booking is unresolved and belongs with the booking
+      transaction, B-AVAIL-06. (3) Under advisory, a slot is offered with the same-gender therapists
+      whenever any are free, so a two-therapist shape that would need a MIXED pair is not offered by
+      default - its ids are named in crossGenderTherapistIds and choosing them deliberately is
+      B-AVAIL-06''s. All three are stricter than the relaxed reading, which is the direction 0004 says an
+      unconfirmed licence question resolves in.'
+    - 'NOTE: how the Unconfirmed Assumptions line is satisfied, which needed a reading. provisionalSettings()
+      (the registry) keeps listing booking.same_gender_matching under Y9-gender after an advisory switch,
+      because the assumption is a property of the declaration and does not stop existing when a row
+      changes. The DATABASE panel (unconfirmedAssumptions) does empty, because writeSetting clears
+      is_provisional when a human confirms a value - "that is the whole point of the Unconfirmed
+      Assumptions panel", and for a compliance_locked key the required justification IS the confirmation.
+      Both directions are asserted in packages/db/src/settings/availability.itest.ts. Changing
+      writeSetting so a compliance_locked key stays provisional after a justified change would be F09''s
+      decision, not this unit''s.'
+    - 'NOTE: a defect found in shipped code, recorded rather than fixed. app_setting_history.justification
+      is ALWAYS NULL. writeSetting annotates the newest history row with `update app_setting_history set
+      justification = ...`, and 0010 creates `app_setting_history_no_update ... do instead nothing`, so the
+      statement succeeds affecting zero rows and the `.catch(() => undefined)` beside it never fires. The
+      reason a compliance-locked change carries is therefore recorded only in audit_event.after_state,
+      which is where this unit asserts it (before and after, plus the required reason string). Fixing it
+      means either a different write path that inserts the history row itself or a trigger change, i.e. a
+      migration, so it is out of scope here; whichever unit takes it should note that the column has read
+      NULL for every settings change ever made.'
+    - 'NOTE: no migration, and SCHEMA_VERSION is unchanged at 32. Worth recording because 0010 creates
+      app_setting and app_setting_history and seeds NO rows - the values come from seedSettingDefaults
+      reading the registry at boot. "A database with no app_setting row at all" is therefore the ordinary
+      state of a freshly migrated database rather than a contrived one, which is why the strict default is
+      proved there: packages/db/src/settings/availability.itest.ts empties the table inside a rolled-back
+      transaction and reads strict, and packages/fixtures/src/therapist-eligibility.itest.ts does the same
+      end to end - empty table, read the mode from the database, feed THAT value to both implementations,
+      and assert the only therapist offered is the same-gender one. The 5,000-case property test drives the
+      values a real read hands back when nothing is configured (absent, jsonb null, ''off'', a stale
+      capitalisation, a number) through the same normaliser, rather than passing ''strict'' as a literal -
+      which would prove the strict path and nothing about the default.'
     files:
+    - packages/shared/src/gender-matching.ts
+    - packages/shared/src/gender-matching.test.ts
     - packages/core/src/availability/gender-match.ts
     - packages/core/src/availability/gender-match.test.ts
+    - packages/core/src/availability/gender-match.property.test.ts
+    - packages/core/src/availability/eligibility-port.ts
+    - packages/core/src/availability/eligibility-port.test.ts
+    - packages/config/src/settings/registry.ts
+    - packages/config/src/settings/registry.test.ts
     - packages/db/src/settings/availability.ts
+    - packages/db/src/settings/availability.itest.ts
+    - packages/db/src/repositories/eligibility.ts
+    - packages/db/src/repositories/eligibility.test.ts
+    - packages/db/src/repositories/eligibility.itest.ts
+    - packages/fixtures/src/therapist-eligibility.itest.ts
+    - scripts/test-gates.mjs
   - id: B-CAT-04
     order: 25
     title: Price resolution chain and effective-dated price lists

@@ -1,4 +1,4 @@
-import type { TherapistSkill } from '@berelax/shared'
+import type { GenderMatchingMode, TherapistSkill } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from '../connection.ts'
 import {
@@ -119,18 +119,35 @@ async function roster(args: {
   return id
 }
 
-const poolFor = async (overrides: { readonly requiredSkill?: TherapistSkill } = {}) =>
+const poolFor = async (
+  overrides: {
+    readonly requiredSkill?: TherapistSkill
+    readonly clientGender?: 'female' | 'male'
+    readonly genderMatching?: GenderMatchingMode
+  } = {},
+) =>
   readEligibleTherapists(sql, {
     tradingDate: TRADING_DATE,
     requiredSkill: overrides.requiredSkill ?? 'asian_style',
     employeeIds: allIds(),
+    ...(overrides.clientGender === undefined ? {} : { clientGender: overrides.clientGender }),
+    ...(overrides.genderMatching === undefined ? {} : { genderMatching: overrides.genderMatching }),
   })
 
-const reasonFor = async (reference: string, requiredSkill: TherapistSkill = 'asian_style') => {
+const reasonFor = async (
+  reference: string,
+  overrides: {
+    readonly requiredSkill?: TherapistSkill
+    readonly clientGender?: 'female' | 'male'
+    readonly genderMatching?: GenderMatchingMode
+  } = {},
+) => {
   const pool = await readEligibleTherapists(sql, {
     tradingDate: TRADING_DATE,
-    requiredSkill,
+    requiredSkill: overrides.requiredSkill ?? 'asian_style',
     employeeIds: [idOf(reference)],
+    ...(overrides.clientGender === undefined ? {} : { clientGender: overrides.clientGender }),
+    ...(overrides.genderMatching === undefined ? {} : { genderMatching: overrides.genderMatching }),
   })
   return pool.excluded[0]?.reason ?? null
 }
@@ -315,7 +332,7 @@ describe('acceptance — the tables and the view availability reads exist, with 
   })
 })
 
-describe('acceptance — the six exclusion reasons, each caused by one thing', () => {
+describe('acceptance — the seven exclusion reasons, each caused by one thing', () => {
   it('puts the fully eligible therapists in the pool with their presence', async () => {
     const pool = await poolFor()
     expect(pool.therapists.map((therapist) => therapist.therapistId).sort()).toEqual(
@@ -338,11 +355,14 @@ describe('acceptance — the six exclusion reasons, each caused by one thing', (
     expect(await reasonFor('bavail04-onleave')).toBe('on_approved_leave')
     // The control. Every fixture above differs from this one in exactly one respect, so a rule that
     // excluded everybody — which is what a credential check reading the wrong column does — would fail
-    // here rather than pass six assertions.
+    // here rather than pass seven assertions.
     expect(await reasonFor('bavail04-a')).toBeNull()
-    // And every reason the reader can produce has been produced, so none of the six is dead.
-    const produced = new Set(
-      await Promise.all(
+    // The seventh (B-AVAIL-05) needs a client to be a question at all: `a` is female and eligible on
+    // every other count, so a male client is the one thing that changes about her.
+    expect(await reasonFor('bavail04-a', { clientGender: 'male' })).toBe('gender_mismatch')
+    // And every reason the reader can produce has been produced, so none of the seven is dead.
+    const produced = new Set([
+      ...(await Promise.all(
         [
           'bavail04-ended',
           'bavail04-noskill',
@@ -351,9 +371,65 @@ describe('acceptance — the six exclusion reasons, each caused by one thing', (
           'bavail04-unrostered',
           'bavail04-onleave',
         ].map((reference) => reasonFor(reference)),
-      ),
-    )
+      )),
+      await reasonFor('bavail04-a', { clientGender: 'male' }),
+    ])
     expect([...produced].sort()).toEqual([...EXCLUSION_REASONS].sort())
+  })
+
+  it('applies same-gender matching last, and only when the query names a client', async () => {
+    // B-AVAIL-05, against real rows. `ended` left employment on the 10th AND has no recorded gender, so
+    // a rule applied anywhere but last would report the gender rather than the employment — and would
+    // name a fact about a person to a caller already being told they do not work here.
+    expect(await reasonFor('bavail04-ended', { clientGender: 'female' })).toBe('not_employed')
+    expect(await reasonFor('bavail04-noskill', { clientGender: 'female' })).toBe('missing_skill')
+    // No client gender is not "any therapist will do": it is a query that is not about a client, so
+    // nothing is narrowed. The booking-level refusal is `requires_client_gender`, one layer up.
+    expect(await reasonFor('bavail04-a')).toBeNull()
+    expect(await reasonFor('bavail04-b')).toBeNull()
+    // A female client keeps the female therapist and removes the male one, which is the rule in both
+    // directions rather than a filter that happens to empty the pool.
+    const female = await poolFor({ clientGender: 'female' })
+    expect(female.therapists.map((t) => t.therapistId)).toContain(idOf('bavail04-a'))
+    expect(female.therapists.map((t) => t.therapistId)).not.toContain(idOf('bavail04-b'))
+    const male = await poolFor({ clientGender: 'male' })
+    expect(male.therapists.map((t) => t.therapistId)).toContain(idOf('bavail04-b'))
+    expect(male.therapists.map((t) => t.therapistId)).not.toContain(idOf('bavail04-a'))
+    // A therapist whose gender nobody has recorded is a MISMATCH and not a wildcard: `halfday` was
+    // created without one (Y8-staff), and `is distinct from` in the `case` is what makes the NULL
+    // exclude rather than silently pass. `<>` there would be NULL, which a `case` reads as false.
+    expect(await reasonFor('bavail04-halfday', { clientGender: 'female' })).toBe('gender_mismatch')
+    expect(await reasonFor('bavail04-halfday', { clientGender: 'male' })).toBe('gender_mismatch')
+    // The presence rows go with the therapist. A pool that dropped the id and kept the shifts would
+    // hand the solver presence for somebody it was never given.
+    expect(female.shifts.map((shift) => shift.therapistId)).not.toContain(idOf('bavail04-b'))
+  })
+
+  it('narrows by gender only in strict mode — advisory leaves the pool to the slot layer', async () => {
+    // Advisory does not withhold the cross-gender slot; it labels it (`gender-match.ts`). So the pool is
+    // the same pool, and the assertion is an equality rather than an absence: a reader that narrowed in
+    // advisory mode as well would be enforcing a mode the owner did not choose.
+    const advisory = await poolFor({ clientGender: 'female', genderMatching: 'advisory' })
+    const noClient = await poolFor()
+    expect(advisory.therapists.map((t) => t.therapistId).sort()).toEqual(
+      noClient.therapists.map((t) => t.therapistId).sort(),
+    )
+    expect(advisory.excluded.map((t) => t.reason)).not.toContain('gender_mismatch')
+    // And the fail-safe, which is the whole of this unit: a mode nobody set, or set to a value that is
+    // no longer legal, is STRICT. `'off'` was accepted by the registry's schema until B-AVAIL-05.
+    for (const stale of [undefined, 'off', 'OFF', '', 'Advisory'] as const) {
+      const pool = await readEligibleTherapists(sql, {
+        tradingDate: TRADING_DATE,
+        requiredSkill: 'asian_style',
+        employeeIds: allIds(),
+        clientGender: 'female',
+        ...(stale === undefined ? {} : { genderMatching: stale as GenderMatchingMode }),
+      })
+      expect(
+        pool.therapists.map((t) => t.therapistId),
+        `mode ${String(stale)}`,
+      ).not.toContain(idOf('bavail04-b'))
+    }
   })
 
   it('answers the skill question by set membership, not by an attribute of the person', async () => {

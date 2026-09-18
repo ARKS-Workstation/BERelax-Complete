@@ -77,6 +77,21 @@ export async function writeSetting(
 
   const before = await sql_readRaw(uow.sql, args.key)
 
+  /**
+   * The justification, handed to the history trigger through a transaction-local setting.
+   *
+   * It cannot be annotated onto the history row afterwards: `app_setting_history` is append-only (ADR
+   * 0008) and 0010's `do instead nothing` rule silently swallows the UPDATE. That is what this code used
+   * to do, with a `.catch` that never fired because nothing ever failed — 8,202 history rows, not one
+   * justification, including every compliance-locked change where a written reason is *required*. 0036
+   * moves the read into the trigger; this is the write that feeds it.
+   *
+   * `true` makes it local to the transaction, so a reason cannot leak onto the next statement that shares
+   * this pooled connection. `set_config` cannot store NULL, so absent becomes '' and the trigger
+   * normalises it back.
+   */
+  await uow.sql`select set_config('berelax.justification', ${args.justification ?? ''}, true)`
+
   await uow.sql`
     insert into app_setting (key, value, tier, updated_by, updated_at)
     values (${args.key}, ${uow.sql.json(validated as never)}, ${def.tier}, ${args.actorLabel}, now())
@@ -88,15 +103,6 @@ export async function writeSetting(
           -- Unconfirmed Assumptions panel.
           is_provisional = false
   `
-
-  if (args.justification) {
-    await uow.sql`
-      update app_setting_history
-         set justification = ${args.justification}
-       where key = ${args.key}
-         and id = (select max(id) from app_setting_history where key = ${args.key})
-    `.catch(() => undefined) // history is append-only; a failed annotation must not fail the change
-  }
 
   await uow.audit.record({
     action: `settings.${def.tier}.changed`,

@@ -1,4 +1,9 @@
-import { AppError } from '@berelax/shared'
+import {
+  AppError,
+  GENDER_MATCHING_SETTING_KEY,
+  genderMatchingModeSchema,
+  STRICT_GENDER_MATCHING,
+} from '@berelax/shared'
 import { z } from 'zod'
 
 /**
@@ -161,10 +166,17 @@ export const SETTINGS = [
     provisional: { openQuestionId: 'Y9-windows', note: '24 hours, flagged only, no fee.' },
   }),
   define({
-    key: 'booking.same_gender_matching',
+    key: GENDER_MATCHING_SETTING_KEY,
     tier: 'compliance_locked',
-    schema: z.enum(['strict', 'advisory', 'off']),
-    defaultValue: 'strict' as const,
+    // `z.enum(GENDER_MATCHING_MODES)` and not a literal list: the same two labels are read by the rule
+    // in `@berelax/core` and by the SQL in `@berelax/db`, neither of which may import the other, so the
+    // set is spelled once in `@berelax/shared`. It previously read `['strict', 'advisory', 'off']`, and
+    // `'off'` is gone deliberately — ADR 0020 and docs/01 decision 19 permit relaxing this constraint
+    // to advisory and nothing further, so a stored value that switches it off entirely is a compliance
+    // position no document supports. A row an older build left at `'off'` now READS as strict
+    // (`genderMatchingMode`) rather than failing validation on the read path.
+    schema: genderMatchingModeSchema,
+    defaultValue: STRICT_GENDER_MATCHING,
     label: 'Same-gender therapist matching',
     help: "Strongly indicated by UAE municipal practice. A non-compliant appointment found at inspection is a licence risk, not a scheduling annoyance. Changing this requires the licensing authority's answer in writing.",
     editableBy: OWNER_ONLY,

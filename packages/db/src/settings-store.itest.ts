@@ -215,6 +215,48 @@ describe('history', () => {
     expect(history[0]?.changedBy).toBe('Owner')
   })
 
+  it('records the justification a compliance-locked change required', async () => {
+    // The column existed from 0010 and had never held a value: 8,202 history rows, none with a reason,
+    // including every compliance-locked change — the one kind `writeSetting` refuses to make without one.
+    // It annotated the row afterwards with an UPDATE, and the append-only rule swallowed it silently, so
+    // the `.catch` beside it never fired. 0036 gives the trigger the value at INSERT time instead.
+    const before = await historyCount('booking.same_gender_matching')
+    await withUnitOfWork(sql, OWNER, (uow) =>
+      writeSetting(uow, {
+        key: 'booking.same_gender_matching',
+        value: 'advisory',
+        role: 'owner',
+        actorLabel: 'Owner',
+        justification: 'Y9-gender confirmed with the licensing authority on 2026-09-18',
+      }),
+    )
+    expect((await historyCount('booking.same_gender_matching')) - before).toBe(1)
+    const [row] = await sql<{ justification: string | null }[]>`
+      select justification from app_setting_history
+      where key = 'booking.same_gender_matching' order by id desc limit 1
+    `
+    expect(row?.justification).toBe(
+      'Y9-gender confirmed with the licensing authority on 2026-09-18',
+    )
+
+    // The control, and the reason the assertion above means anything: a change that needs no justification
+    // still records history, with NULL rather than the previous statement's reason leaking into it. That
+    // leak is what a session-level setting or a column on `app_setting` would have allowed.
+    await withUnitOfWork(sql, OWNER, (uow) =>
+      writeSetting(uow, {
+        key: 'theme.density',
+        value: 'compact',
+        role: 'owner',
+        actorLabel: 'Owner',
+      }),
+    )
+    const [unjustified] = await sql<{ justification: string | null }[]>`
+      select justification from app_setting_history
+      where key = 'theme.density' order by id desc limit 1
+    `
+    expect(unjustified?.justification).toBeNull()
+  })
+
   it('history is append-only: UPDATE and DELETE are no-ops', async () => {
     await withUnitOfWork(sql, OWNER, (uow) =>
       writeSetting(uow, {

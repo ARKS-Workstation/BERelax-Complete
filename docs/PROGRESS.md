@@ -2,11 +2,11 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**53 / 207 units complete.**
+**54 / 207 units complete.**
 
 ## Next up
 
-1. **B-AVAIL-05 — Gender matching as a hard constraint, default strict**  — **needs owner input:** Y9-gender
+1. **B-AVAIL-06 — The booking transaction: room row lock, idempotency, all-or-none, price snapshot**
 1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
 1. **M-VAT-02 — Input VAT recoverability classification, including blocked categories**
 
@@ -38,7 +38,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
 | [x] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |
 | [x] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
-| [ ] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
+| [x] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
 | [x] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |
 | [ ] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
 | [x] | 27 | `B-CAT-05` | Catalogue mutation guard rails and the public display-name compliance lint | `B-AVAIL-01`, `B-CAT-04` | — | — |

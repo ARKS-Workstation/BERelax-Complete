@@ -6019,6 +6019,263 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   check('tax-document rules pass on this tree', !clean.failed, clean.output)
 }
 
+// 35a-35i. (B-AVAIL-05) Same-gender matching is a HARD constraint with a STRICT default, and every
+//           clause of that sentence has a mutant here.
+//
+// This is a compliance constraint rather than a preference (ADR 0020, docs/04 §3, docs/01 decision 19),
+// and `Y9-gender` is still open — the rule is in force and the regulatory basis is unconfirmed. Every
+// failure below is silent in production and visible only as bookings the business cancels by hand, or as
+// a non-compliant appointment an inspector finds:
+//
+//   - a normaliser that resolves an absent or unreadable setting to the PERMISSIVE mode. This is the one
+//     the unit exists to prevent: nothing throws, nothing logs, and the system is simply not enforcing
+//     the rule in every database where the row was never seeded;
+//   - a rule that RECORDS the cross-gender therapist instead of REMOVING them. `assignShape` sorts
+//     therapists by id, so a therapist who reaches the slot reaches the booking — "not merely sorted
+//     lower" is the acceptance line's own wording;
+//   - a missing client gender treated as "any therapist will do" instead of the named refusal
+//     `requires_client_gender`. At a phone booking the gender is very often unknown, so this is the
+//     ordinary path and not the edge case;
+//   - an UNRECORDED therapist gender treated as a wildcard. `employee.gender` is nullable because
+//     nineteen therapists have photographs and no staff list (Y8-staff), so a permissive reading here
+//     makes almost every pairing legal in a fresh database;
+//   - the registry accepting `'off'` again, a third mode no document supports;
+//   - the SQL implementation losing the gender arm of its `case`, which is invisible from either side
+//     alone: the pool simply reads as a wider roster;
+//   - the two exclusion-reason lists drifting. `packages/db` may not import `packages/core`, so they are
+//     two hand-kept lists of one vocabulary and the pair test in `packages/fixtures` is what holds them
+//     together.
+//
+// Each mutant is asserted **by the name of the test that must catch it**, not by a bare non-zero exit: a
+// suite can fail for an unrelated reason while the assertion under test has quietly stopped asserting,
+// and this file would report PASS for ever (ADR 0003). The mutations are applied to the SHIPPED modules
+// with `withEditedFile`, which writes the original bytes back in a `finally` — a fixture file would prove
+// only that a fixture can fail.
+{
+  const GENDER_SHARED = 'packages/shared/src/gender-matching.ts'
+  const GENDER_RULE = 'packages/core/src/availability/gender-match.ts'
+  const GENDER_PORT = 'packages/core/src/availability/eligibility-port.ts'
+  const GENDER_READER = 'packages/db/src/repositories/eligibility.ts'
+  const GENDER_REGISTRY = 'packages/config/src/settings/registry.ts'
+  const GENDER_PAIR = 'packages/fixtures/src/therapist-eligibility.itest.ts'
+  const GENDER_UNIT_SUITES = [
+    'packages/core/src/availability/gender-match.test.ts',
+    'packages/core/src/availability/gender-match.property.test.ts',
+    'packages/core/src/availability/eligibility-port.test.ts',
+    'packages/shared/src/gender-matching.test.ts',
+    'packages/config/src/settings/registry.test.ts',
+  ]
+
+  /** Replaces one anchor in a shipped file, runs `body`, and restores the original bytes. */
+  const genderMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes every assertion below vacuous, so it is an error rather than a
+        // no-op replace. `String.replace` with a missing needle returns the text unchanged and the mutant
+        // would then be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the B-AVAIL-05 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const genderUnits = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...GENDER_UNIT_SUITES])
+  const genderPairSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', GENDER_PAIR])
+
+  // 35a. The default. `genderMatchingMode` is the one place that decides what an absent or unreadable
+  //      setting means, and this mutant makes it mean "advisory" — which is what a `safeParse` with a
+  //      fall-back to the caller's value does in practice.
+  checkRejectedBy(
+    'gender gate: an unset setting resolving to advisory fails the strict-default tests',
+    genderMutant(
+      GENDER_SHARED,
+      "  return value === 'advisory' ? 'advisory' : STRICT_GENDER_MATCHING",
+      "  return value === 'strict' ? 'strict' : 'advisory'",
+      genderUnits,
+    ),
+    'strict is the value that needs no argument',
+  )
+
+  // 35b. Hard means removed. The mutant keeps the cross-gender therapist in the pool and merely records
+  //      them alongside — the shape of every "sort them lower" implementation.
+  checkRejectedBy(
+    'gender gate: recording a cross-gender therapist instead of removing them is caught',
+    genderMutant(
+      GENDER_RULE,
+      "    if (verdict === 'ok') kept.push(therapist)\n" +
+        "    else excludedByGender.push({ therapistId: therapist.therapistId, reason: 'gender_mismatch' })",
+      '    kept.push(therapist)\n' +
+        "    if (verdict !== 'ok')\n" +
+        "      excludedByGender.push({ therapistId: therapist.therapistId, reason: 'gender_mismatch' })",
+      genderUnits,
+    ),
+    'the constraint is inside the solver, not a post-filter on results',
+  )
+
+  // 35c. The named refusal. Dropping it turns "we have not asked the client" into "anyone will do", and
+  //      the caller sees a normal day.
+  checkRejectedBy(
+    'gender gate: losing requires_client_gender is caught by name, not as an empty list',
+    genderMutant(
+      GENDER_RULE,
+      "    mode === 'strict' && clientGender === undefined ? 'requires_client_gender' : null",
+      '    null',
+      genderUnits,
+    ),
+    'an unknown client gender is a named refusal, not an empty day',
+  )
+
+  // 35d. The unrecorded gender. `false` for a pair with a hole in it is the substance of the rule, and
+  //      `true` is the reading that makes a fresh, unstaffed database offer everybody to everybody.
+  checkRejectedBy(
+    'gender gate: an unrecorded therapist gender read as a wildcard is caught',
+    genderMutant(
+      GENDER_PORT,
+      '  if (clientGender === undefined || therapistGender === undefined) return false',
+      '  if (clientGender === undefined || therapistGender === undefined) return true',
+      genderUnits,
+    ),
+    'a pair with a hole in it cannot be claimed',
+  )
+
+  // 35e. The registry. Re-widening the schema to the three values it held before this unit must fail the
+  //      test that says `'off'` is refused — a value the database can hold and no document supports.
+  checkRejectedBy(
+    'gender gate: re-adding the off mode to the registry is caught',
+    genderMutant(
+      GENDER_REGISTRY,
+      '    schema: genderMatchingModeSchema,',
+      "    schema: z.enum(['strict', 'advisory', 'off']),",
+      genderUnits,
+    ),
+    'refuses switching same-gender matching OFF',
+  )
+
+  // 35f. The acceptance control for 35a-35e. Without it, five mutants are satisfied by a suite that
+  //      fails on the unmutated tree as well — and the name each of them matches would be printed by a
+  //      suite that never passes.
+  const genderClean = genderUnits()
+  check(
+    'gender gate: the same suites pass on this tree, so the five mutants above mean something',
+    !genderClean.failed,
+    genderClean.output,
+  )
+
+  // 35g. The SQL half. `packages/db` computes the same answer over real rows, and losing the gender arm
+  //      of its `case` is invisible from either side alone: the pool reads as a wider roster and nothing
+  //      says a rule stopped being applied. Only the pair test in `packages/fixtures` can see it.
+  {
+    // The arm sits inside a tagged template, so its text carries driver placeholders. They are assembled
+    // from characters rather than written out, because a literal one in a plain string here is exactly
+    // what `noTemplateCurlyInString` flags — and switching this anchor to a template literal would make
+    // the linter interpolate the very thing the anchor has to match.
+    const param = (name) => ['$', '{', name, '}'].join('')
+    const genderArm =
+      `             when ${param('strictGender')}::boolean\n` +
+      `                  and ${param('clientGender')}::employee_gender is not null\n` +
+      `                  and c.gender is distinct from ${param('clientGender')}::employee_gender\n` +
+      `               then 'gender_mismatch'\n`
+    checkRejectedBy(
+      'gender gate: dropping the gender arm from the SQL case breaks the pair test',
+      genderMutant(GENDER_READER, genderArm, '', genderPairSuite),
+      'gender_mismatch',
+    )
+  }
+
+  // 35h. The acceptance control for 35g, and it is not a formality: the integration suite needs a
+  //      database, and a pair test that cannot connect fails with a message about a connection while
+  //      naming nothing. This is what says the failure above was the mutation.
+  const genderPairClean = genderPairSuite()
+  check(
+    'gender gate: the pair test passes on this tree against real PostgreSQL',
+    !genderPairClean.failed,
+    genderPairClean.output,
+  )
+
+  // 35i. The drift guard between the two reason lists, at compile time. `packages/db` may not import
+  //      `packages/core`, so `EXCLUSION_REASONS` and `ELIGIBILITY_EXCLUSION_REASONS` are two hand-kept
+  //      lists of one vocabulary; until this unit the only thing holding them together was a comment in
+  //      each. A reason on one side only is a therapist excluded for a reason the caller cannot name —
+  //      the SQL emits it and `exclusionReasonFrom` throws at a booking rather than at a typecheck.
+  {
+    const typecheck = genderMutant(
+      GENDER_READER,
+      "  'on_approved_leave',\n  'gender_mismatch',\n] as const",
+      "  'on_approved_leave',\n] as const",
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'gender gate: a reason list that loses gender_mismatch fails typecheck in packages/fixtures',
+      typecheck.failed && typecheck.output.includes('therapist-eligibility.itest.ts'),
+      typecheck.output,
+    )
+  }
+}
+
+// 40. (0036) The justification on a settings change must actually be recorded.
+//
+// `app_setting_history.justification` existed from 0010 and held a value 0 times in 8,202 rows —
+// including every `compliance_locked` change, which `writeSetting` refuses to make WITHOUT a written
+// reason. It annotated the row afterwards with an UPDATE, and 0010's append-only `do instead nothing`
+// rule swallowed it; the `.catch` beside it never fired because nothing failed. An append-only table
+// accepting a write that does nothing is the shape ADR 0008 warns about, and the column read as "no
+// reason given" rather than as broken.
+//
+// So the mutation is the write that feeds the trigger. Remove it and the reason goes back to NULL, which
+// is what nobody noticed for 8,202 rows.
+{
+  const store = 'packages/db/src/settings-store.ts'
+  const anchor = "await uow.sql`select set_config('berelax.justification'"
+  const source = readFileSync(store, 'utf8')
+  check(
+    'the justification write is where the mutation below expects it',
+    source.includes(anchor),
+    `${store} no longer sets berelax.justification — the mutation below would be a no-op, and a no-op ` +
+      'mutation makes this gate report a pass for a defect it is not testing',
+  )
+  const result = withEditedFile(
+    store,
+    (text) =>
+      text
+        .split('\n')
+        .filter((line) => !line.includes("set_config('berelax.justification'"))
+        .join('\n'),
+    () =>
+      run('pnpm', [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.integration.config.ts',
+        'packages/db/src/settings-store.itest.ts',
+      ]),
+  )
+  checkRejectedBy(
+    'settings history gate rejects a justification that is not recorded',
+    result,
+    'records the justification a compliance-locked change required',
+  )
+  // The control: the real file passes. Without it a suite broken for any other reason satisfies the probe.
+  const real = run('pnpm', [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    'packages/db/src/settings-store.itest.ts',
+  ])
+  check(
+    'settings history gate accepts the committed write path',
+    !real.failed,
+    `the committed settings store failed its own suite:\n${real.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

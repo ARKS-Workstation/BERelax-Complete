@@ -436,7 +436,42 @@ describe('resolveTherapistPool', () => {
       'credential_expired',
       'not_rostered',
       'on_approved_leave',
+      // B-AVAIL-05's, and LAST. A therapist who left in March and is also the wrong gender for this
+      // client is reported as `not_employed`: the gender of a person who is excluded anyway is a fact
+      // the caller has no use for, and the reason it can act on is the employment. The rule itself and
+      // the argument for the position are in `gender-match.ts` and in the list's own comment.
+      'gender_mismatch',
     ])
+  })
+
+  it('reports an earlier reason in preference to gender_mismatch, on one therapist', () => {
+    // The position of the seventh reason, asserted as an ORDER rather than as membership: the same
+    // record, with and without the thing that makes it ineligible earlier, under the same client.
+    // `eligibleRecord` is already female, which is what makes a male client the one thing that changes.
+    const female = eligibleRecord(THERAPIST_A)
+    const maleClient = query({ clientGender: 'male' })
+    // Eligible on every count except the client's gender.
+    expect(
+      reasonsOf(
+        resolveTherapistPool(
+          facts({ therapists: [female], shifts: [eveningShift(THERAPIST_A)] }),
+          maleClient,
+        ),
+      ),
+    ).toEqual(['gender_mismatch'])
+    // The same therapist, now also unrostered. `not_rostered` is a rota edit and is reported instead.
+    expect(
+      reasonsOf(resolveTherapistPool(facts({ therapists: [female], shifts: [] }), maleClient)),
+    ).toEqual(['not_rostered'])
+    // And with no client in the query at all, gender is not a question: the pool is not narrowed.
+    expect(
+      reasonsOf(
+        resolveTherapistPool(
+          facts({ therapists: [female], shifts: [eveningShift(THERAPIST_A)] }),
+          query(),
+        ),
+      ),
+    ).toEqual([])
   })
 
   it('narrows to the candidate ids it is given, and answers for every one of them', () => {

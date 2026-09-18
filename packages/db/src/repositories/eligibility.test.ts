@@ -12,7 +12,7 @@ import { EXCLUSION_REASONS, exclusionReasonFrom } from './eligibility.ts'
  * path that gets shipped untested.
  */
 describe('EXCLUSION_REASONS', () => {
-  it('is the six reasons, in the order the rules are applied', () => {
+  it('is the seven reasons, in the order the rules are applied', () => {
     // The order is load-bearing rather than cosmetic: the `case` in `readEligibleTherapists` and
     // `ELIGIBILITY_EXCLUSION_REASONS` in `@berelax/core` mirror this list, and a therapist failing two
     // checks must be reported identically by both implementations or the agreement test in
@@ -24,7 +24,17 @@ describe('EXCLUSION_REASONS', () => {
       'credential_expired',
       'not_rostered',
       'on_approved_leave',
+      'gender_mismatch',
     ])
+  })
+
+  it('puts gender_mismatch LAST, which is a decision and not the end of a list', () => {
+    // B-AVAIL-05. Asserted as a position rather than as membership, because moving it earlier changes
+    // the answer for a therapist who fails two checks — and it would report a person's recorded gender
+    // to a caller that is already being told the therapist left in March. The pair in `packages/fixtures`
+    // asserts the same position against real rows, on both implementations.
+    expect(EXCLUSION_REASONS.at(-1)).toBe('gender_mismatch')
+    expect(EXCLUSION_REASONS.indexOf('gender_mismatch')).toBe(EXCLUSION_REASONS.length - 1)
   })
 })
 

@@ -30,8 +30,9 @@
  * The division is deliberate and it is the thing P-HR must not blur:
  *
  *   - **Here**: is this person employed on this trading date, do they hold the skill the treatment's
- *     style requires, are their mandatory credentials unexpired, are they rostered at all, and does
- *     approved leave cover their roster. All of these are answered once per trading date.
+ *     style requires, are their mandatory credentials unexpired, are they rostered at all, does
+ *     approved leave cover their roster, and — when the query names a client — does same-gender
+ *     matching permit the pair. All of these are answered once per trading date.
  *   - **The solver's**: does the therapist's *buffered* interval fit inside their presence with no
  *     gap, and does it collide with an appointment they already hold. Those are per-candidate
  *     questions, asked for every start on the grid, and `intervals.ts` already answers them.
@@ -51,6 +52,16 @@
  * impossible for a reassignment to reprice a booking (0017: the mapping "carries no price and never
  * will").
  *
+ * ## Same-gender matching is the seventh check, and only half of it is here
+ *
+ * B-AVAIL-05. {@link genderVerdict} is the per-therapist half and it is applied **last** — see
+ * {@link ELIGIBILITY_EXCLUSION_REASONS} for why the position is load-bearing. The other half is
+ * `gender-match.ts`: the mode, what a booking request with no client gender does
+ * (`requires_client_gender`, zero slots), the advisory label on a cross-gender slot, and the narrowing
+ * that keeps an ineligible therapist out of the solver's candidate list rather than filtering them out
+ * of its answers. The split is not taste — a port that imported `gender-match.ts`, which imports this
+ * module, is a cycle that `pnpm boundaries` rejects.
+ *
  * ## Ids, never names
  *
  * A therapist has no display name until an admin sets one, and publishing one needs a recorded
@@ -58,7 +69,12 @@
  *
  * Pure: dates, instants and records in, a pool out. No clock, no database, no framework.
  */
-import { AppError, type TherapistSkill } from '@berelax/shared'
+import {
+  AppError,
+  type GenderMatchingMode,
+  genderMatchingMode,
+  type TherapistSkill,
+} from '@berelax/shared'
 import type { LocalDate } from '../time.ts'
 import { mergePeriods } from './intervals.ts'
 import type { Period } from './room-predicates.ts'
@@ -76,12 +92,13 @@ export const THERAPIST_GENDERS = ['female', 'male'] as const
 export type TherapistGender = (typeof THERAPIST_GENDERS)[number]
 
 /**
- * Why a therapist is not in the pool for a trading date.
+ * Why a therapist is not in the pool for a trading date, or for this client.
  *
  * Named reasons rather than a filtered list, for the reason `resolveTradingDate` and
  * `roomUnavailableReason` give: *"no availability"* is the answer the front desk cannot act on, and
- * these six are six different conversations. `credential_expired` is a renewal, `missing_skill` is a
- * training record, `not_rostered` is a rota edit, and `not_employed` is neither.
+ * these seven are seven different conversations. `credential_expired` is a renewal, `missing_skill` is
+ * a training record, `not_rostered` is a rota edit, `not_employed` is neither, and `gender_mismatch`
+ * is not a question about the therapist at all — it is a question about who is asking.
  */
 export type EligibilityExclusionReason =
   /** Not employed on this trading date: before `employed_from`, or after `employed_until`. */
@@ -92,10 +109,18 @@ export type EligibilityExclusionReason =
   | 'credential_missing'
   /** A mandatory document's latest expiry is before this trading date. */
   | 'credential_expired'
-  /** No shift on this trading date. A rota question, and the only one of the six that is. */
+  /** No shift on this trading date. A rota question, and the only one of the seven that is. */
   | 'not_rostered'
   /** Rostered, but approved leave covers every rostered minute of the date. */
   | 'on_approved_leave'
+  /**
+   * Same-gender matching excludes them from **this booking** (B-AVAIL-05, `gender-match.ts`).
+   *
+   * The only reason here that is not a fact about the therapist or the day: the same therapist is
+   * eligible for the next client. It is therefore also the only one that is not actionable by the
+   * business — there is no renewal, rota edit or training record that answers it.
+   */
+  | 'gender_mismatch'
 
 /**
  * The reasons in the order they are applied, which is also the order they are reported in.
@@ -103,10 +128,22 @@ export type EligibilityExclusionReason =
  * Exported because the SQL implementation in `@berelax/db` mirrors this `CASE` order, and two
  * orderings of one list is one list plus a future disagreement: a therapist who is both unemployed and
  * unrostered must be reported the same way by both implementations or the agreement test in
- * `packages/fixtures` is comparing two different questions.
+ * `packages/fixtures` is comparing two different questions. That file also pins the two lists to each
+ * other, as a runtime `toEqual` on the order and a compile-time check that neither union has a member
+ * the other lacks — a seventh reason added to one side and not to the other is a therapist excluded for
+ * a reason the caller cannot name.
  *
  * The order is "least specific to this date, first". Employment and skill are facts about the person;
  * credentials are facts about their file; the roster and their leave are facts about the day.
+ *
+ * `gender_mismatch` is **last**, and that is a decision rather than an appendix. Two reasons:
+ *
+ *   1. It is the only reason that is useful *because* everything else passed. "We have no female
+ *      therapist free at 20:00" is actionable; "the therapist who left in March is the wrong gender for
+ *      you" is noise, and it is what any earlier position would report.
+ *   2. Reporting it for a therapist who is excluded anyway discloses a person's recorded gender to a
+ *      caller that has no operational use for it. Last means the gender of a therapist is only ever
+ *      named when it is the whole of the answer.
  */
 export const ELIGIBILITY_EXCLUSION_REASONS: readonly EligibilityExclusionReason[] = Object.freeze([
   'not_employed',
@@ -115,6 +152,7 @@ export const ELIGIBILITY_EXCLUSION_REASONS: readonly EligibilityExclusionReason[
   'credential_expired',
   'not_rostered',
   'on_approved_leave',
+  'gender_mismatch',
 ])
 
 /** One credential on file: its type, and the date it expires at the end of. */
@@ -132,8 +170,10 @@ export interface TherapistCredential {
 export interface TherapistRecord {
   readonly therapistId: string
   /**
-   * Absent when nobody has told the build (Y8-staff). Carried through the pool untouched: applying it
-   * is B-AVAIL-05's, and a provider that dropped it would force that unit to read `employee` again.
+   * Absent when nobody has told the build (Y8-staff), and absence is never a match — see
+   * {@link sameGenderMatch}. Carried through the pool as well as applied, because a caller that is
+   * re-validating a tuple inside the booking transaction has to be able to check the pair again
+   * (`narrowPoolByGender`) without reading `employee` a second time.
    */
   readonly gender?: TherapistGender
   readonly employedFrom: LocalDate
@@ -197,13 +237,40 @@ export interface EligibilityQuery {
    * `shift_assignment.employee_id` protects with ON DELETE RESTRICT.
    */
   readonly therapistIds?: readonly string[]
+  /**
+   * The **client's** gender, when it is known. Absent is the ordinary state at a phone booking.
+   *
+   * A different question from the therapist's, and read in a different place: therapist gender is a
+   * column on `employee`, and this is a fact about the person asking for the appointment, which no
+   * table holds — `customer` has no gender column and this unit added none. It reaches the rule as an
+   * argument, from the booking request, which is also why it is optional *here*: the admin calendar and
+   * the reminder scheduler ask "who is working on Thursday" and have no client at all. Absent therefore
+   * means "not a client-specific question", and the pool is not narrowed by gender.
+   *
+   * It does **not** mean "any therapist will do" for a booking. A booking request with no client gender
+   * is refused outright in strict mode with the reason `requires_client_gender`, and that is
+   * `solveGenderMatchedAvailability`'s (`gender-match.ts`): its request type makes the field a required
+   * key with a possibly-undefined value, so a caller cannot omit it without saying so.
+   */
+  readonly clientGender?: TherapistGender
+  /**
+   * `booking.same_gender_matching`, read through `genderMatchingMode`. Absent is **strict**.
+   *
+   * Optional, and that is the fail-safe rather than a convenience: the strict reading has to be what a
+   * caller gets for saying nothing, so that a provider, a test or a future call site that has never
+   * heard of this field cannot relax a compliance constraint by omission.
+   */
+  readonly genderMatching?: GenderMatchingMode
 }
 
 /** An eligible therapist, with the two attributes a later layer needs and nothing else. */
 export interface EligibleTherapist {
   readonly therapistId: string
   readonly skills: readonly TherapistSkill[]
-  /** Present only when it is on record. B-AVAIL-05 decides what strict matching does with absence. */
+  /**
+   * Present only when it is on record. Under strict matching absence is a MISMATCH, not a wildcard:
+   * `sameGenderMatch` is a claim about a pair and a pair with a hole in it cannot be claimed.
+   */
   readonly gender?: TherapistGender
 }
 
@@ -341,6 +408,75 @@ export function credentialVerdict(args: {
 }
 
 /**
+ * True only when both genders are on record **and** they are the same. The primitive of B-AVAIL-05.
+ *
+ * `false` for an unknown gender on either side, and that is the substance of the rule rather than a
+ * defensive default: same-gender matching is a claim about a pair, and a pair with a hole in it cannot
+ * be claimed. Nineteen therapists have photographs and no staff list (Y8-staff), so `employee.gender`
+ * is nullable and a fresh install has holes everywhere — which under strict matching means availability
+ * offers **nobody** until HR data exists. That is the loud failure rather than the quiet one, and it is
+ * the same argument 0030 makes for not seeding nineteen fabricated people.
+ *
+ * Lives here, beside the other verdicts, and not in `gender-match.ts` where the rest of the unit is:
+ * `resolveTherapistPool` below has to apply it to stay in step with the SQL, and a port that imported
+ * `gender-match.ts` — which imports this module — is a cycle, which `pnpm boundaries` rejects.
+ */
+export function sameGenderMatch(
+  clientGender: TherapistGender | undefined,
+  therapistGender: TherapistGender | undefined,
+): boolean {
+  if (clientGender === undefined || therapistGender === undefined) return false
+  return clientGender === therapistGender
+}
+
+/**
+ * The gender verdict for one therapist against one client, under one mode. The seventh check.
+ *
+ * Three ways to reach `'ok'`, and each of them is a decision:
+ *
+ *   - the mode is `'advisory'` — the pool is **not** narrowed, because advisory means the cross-gender
+ *     slot is offered and labelled rather than withheld. Labelling it is the slot layer's
+ *     (`gender-match.ts`), which is why this returns `'ok'` rather than a third verdict;
+ *   - no client gender was supplied — this is not a client-specific query at all (see
+ *     {@link EligibilityQuery.clientGender}). A *booking request* with no client gender is refused with
+ *     `requires_client_gender`, one layer up, before any start is considered;
+ *   - the two genders are on record and equal.
+ *
+ * Everything else is `'gender_mismatch'`, including a therapist whose gender nobody has recorded.
+ */
+export function genderVerdict(args: {
+  readonly therapistGender?: TherapistGender
+  readonly clientGender?: TherapistGender
+  readonly genderMatching?: GenderMatchingMode
+}): 'ok' | 'gender_mismatch' {
+  // Through `genderMatchingMode` rather than `=== 'advisory'` on the raw field: one normaliser decides
+  // what an absent, stale or unreadable mode means, and it decides it the same way here, in the db
+  // reader and in the settings store.
+  if (genderMatchingMode(args.genderMatching) !== 'strict') return 'ok'
+  if (args.clientGender === undefined) return 'ok'
+  return sameGenderMatch(args.clientGender, args.therapistGender) ? 'ok' : 'gender_mismatch'
+}
+
+/**
+ * {@link genderVerdict} for one record under one query, with the optional keys assembled.
+ *
+ * A named function rather than three conditional spreads inside the loop below: under
+ * `exactOptionalPropertyTypes` an absent key and a present-and-undefined one are different types, so
+ * every optional field has to be spread conditionally, and three of those in a loop body is where the
+ * check stops being readable.
+ */
+function genderExclusion(
+  record: TherapistRecord,
+  query: EligibilityQuery,
+): 'ok' | 'gender_mismatch' {
+  return genderVerdict({
+    ...(record.gender === undefined ? {} : { therapistGender: record.gender }),
+    ...(query.clientGender === undefined ? {} : { clientGender: query.clientGender }),
+    ...(query.genderMatching === undefined ? {} : { genderMatching: query.genderMatching }),
+  })
+}
+
+/**
  * The pool, from facts. The rule, and the specification the SQL implementation mirrors.
  *
  * Order of the checks is {@link ELIGIBILITY_EXCLUSION_REASONS} and nothing else, so a therapist who
@@ -398,6 +534,13 @@ export function resolveTherapistPool(
     // would drop them silently and the gap in the day would have no explanation.
     if (available.length === 0) {
       exclude('on_approved_leave')
+      continue
+    }
+    // Last, which is what makes the ordering structural rather than remembered: the six checks above
+    // are about the person and the day, this one is about the client, and a therapist is only ever
+    // reported as the wrong gender when they would otherwise have been offered.
+    if (genderExclusion(record, query) !== 'ok') {
+      exclude('gender_mismatch')
       continue
     }
     eligible.push({
