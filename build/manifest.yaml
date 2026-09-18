@@ -1,0 +1,406 @@
+# BeRelax build manifest — the machine-readable work ledger.
+#
+# Next unit = lowest `order` whose status is `todo` and whose depends_on are all `done`.
+# A unit is `done` only when every acceptance check passes in CI. Never on assertion.
+# Units marked `expand: true` are group-level and must be decomposed into session-sized
+# units before being worked. See docs/12-autonomous-delivery.md.
+
+meta:
+  project: berelax
+  branch: claude/massage-crm-planning-c05j70
+  plan: docs/11-execution-plan.md
+  contract: docs/12-autonomous-delivery.md
+
+units:
+  # ---------- Order 1: Foundation ----------
+  - id: F01
+    order: 1
+    title: Monorepo scaffold and toolchain
+    owner: claude
+    status: todo
+    depends_on: []
+    steps: [14]
+    acceptance:
+      - "pnpm install completes"
+      - "pnpm typecheck passes on an empty workspace"
+      - "pnpm lint passes"
+      - "module import-boundary rule rejects a core -> db import in a fixture test"
+
+  - id: F02
+    order: 2
+    title: CI pipeline with real Postgres
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    steps: [15]
+    acceptance:
+      - "GitHub Actions runs typecheck, lint, unit, integration against a postgres:16 service"
+      - "a deliberately failing test fails the workflow"
+      - "migration dry-run step present and passing"
+
+  - id: F03
+    order: 3
+    title: Environments, config validation, staging send guard
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    steps: [16, 17, 20]
+    acceptance:
+      - "boot fails loudly with a named error on a missing required env var"
+      - "APP_ENV != production makes every outbound transport refuse to send, proven by test"
+      - "separate OAuth client id per environment enforced by config schema"
+
+  - id: F04
+    order: 4
+    title: Database spine and migration pipeline
+    owner: claude
+    status: todo
+    depends_on: [F02]
+    steps: [19]
+    acceptance:
+      - "btree_gist, pgcrypto, pg_trgm, unaccent enabled"
+      - "legal_entity and premises are single-row-enforced by constraint"
+      - "regulatory_profile versioned, defaults to the stricter combination"
+      - "audit_event monthly partitions created by a scheduled job"
+      - "outbox_event table plus pg-boss schema installed"
+
+  - id: F05
+    order: 5
+    title: Money, time and identifier primitives
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    steps: [20]
+    acceptance:
+      - "money is integer fils with explicit currency; float construction is a type error"
+      - "gross -> net/VAT round-trip exact at 5% across a property-based range"
+      - "all timestamps timestamptz; a naive Date in a schema fails a lint rule"
+      - "deterministic clock available in tests; Date.now banned in packages/core by lint"
+
+  - id: F06
+    order: 6
+    title: Audit service and domain event outbox
+    owner: claude
+    status: todo
+    depends_on: [F04]
+    steps: [20]
+    acceptance:
+      - "every mutation through the repository layer writes an audit_event with before/after"
+      - "a sensitive-field read writes an audit_event"
+      - "an outbox event written in the same transaction reaches a worker exactly once per handler"
+
+  - id: F07
+    order: 7
+    title: Staff auth with mandatory TOTP and the RBAC policy layer
+    owner: claude
+    status: todo
+    depends_on: [F04]
+    steps: [21]
+    acceptance:
+      - "owner, manager and accountant roles cannot complete login without TOTP"
+      - "deny-by-default proven: an unlisted permission is refused"
+      - "field-level policy proven: receptionist cannot read clinical notes or salary"
+
+  - id: F08
+    order: 8
+    title: Clinical schema boundary
+    owner: claude
+    status: todo
+    depends_on: [F04, F07]
+    steps: [22]
+    acceptance:
+      - "clinical schema has its own role; the app role cannot select from it"
+      - "no foreign key crosses the boundary (asserted by a schema test)"
+      - "envelope encryption with per-record DEK; ciphertext bound to its row by AAD"
+      - "only boolean contraindication flags are exposed across the boundary"
+
+  - id: F09
+    order: 9
+    title: Settings registry
+    owner: claude
+    status: todo
+    depends_on: [F04, F07]
+    steps: [23]
+    acceptance:
+      - "each setting declares type, constraint, role, audited flag and onChange cache tags"
+      - "an out-of-constraint value is rejected with a readable message"
+      - "a change purges its declared cache tags, proven by test"
+      - "provisional:true settings are listed by the Unconfirmed Assumptions query"
+
+  - id: F10
+    order: 10
+    title: Arabic RTL PDF proof
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    steps: [24]
+    acceptance:
+      - "a bilingual EN/AR invoice PDF renders with correct Arabic shaping and RTL order"
+      - "Latin numerals inside Arabic text are bidi-isolated correctly"
+      - "rendered PDF committed as a reviewed fixture"
+
+  - id: F11
+    order: 11
+    title: Design tokens
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    steps: [25]
+    acceptance:
+      - "palette from docs/08 as CSS custom properties, light and dark"
+      - "generated hex mirror committed and matching the OKLCH source"
+      - "an automated contrast test asserts every declared text/background pair meets its stated ratio"
+      - "Tailwind default palette removed; an un-tokened colour fails lint"
+
+  # ---------- Order 2: repo-as-memory and the harness ----------
+  - id: H01
+    order: 12
+    title: Progress ledger, ADRs for locked decisions, open questions
+    owner: claude
+    status: todo
+    depends_on: [F01]
+    acceptance:
+      - "an ADR exists for each of the 20 locked decisions in docs/01"
+      - "PROGRESS.md regenerated from this manifest by a script"
+
+  - id: H02
+    order: 13
+    title: Fake provider layer
+    owner: claude
+    status: todo
+    depends_on: [F03, F06]
+    acceptance:
+      - "SMSala, Resend, GBP, GSC, Google OAuth, card gateway and LLM fakes implement the real interfaces"
+      - "each fake can be made to fail on demand: rate limit, rejection, invalid_grant, quota zero"
+      - "no fake returns success without writing to a visible local outbox"
+      - "provider selection is config only; no code change to switch"
+
+  - id: H03
+    order: 14
+    title: Deterministic seed and frozen clock
+    owner: claude
+    status: todo
+    depends_on: [F04, F05]
+    acceptance:
+      - "seed produces the fixture salon described in docs/12 section 5, reproducibly"
+      - "seeded twice from clean yields byte-identical reporting output"
+      - "no real personal data; health fixtures obviously synthetic"
+
+  - id: H04
+    order: 15
+    title: Screenshot harness and gallery
+    owner: claude
+    status: todo
+    depends_on: [H03, F11]
+    acceptance:
+      - "Playwright captures every declared route at 3 viewports, 2 themes, 2 directions"
+      - "two consecutive runs on unchanged code produce zero pixel diff"
+      - "gallery.html generated and publishable as an Artifact"
+
+  - id: H05
+    order: 16
+    title: Quality gates wired into CI
+    owner: claude
+    status: todo
+    depends_on: [F02, H04]
+    acceptance:
+      - "axe, Lighthouse CI budget, visual regression and coverage thresholds all fail the build when breached"
+
+  # ---------- Orders 3+ : product. Group-level, decompose before working. ----------
+  - id: B-CAT
+    order: 17
+    title: Service catalogue and rooms
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [F09, H03]
+    steps: [26, 27]
+    blocked_on_owner: [Y8-menu, Y8-rooms, Y9-turnaround]
+
+  - id: B-AVAIL
+    order: 18
+    title: Availability engine
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-CAT]
+    steps: [28, 29, 32]
+    blocked_on_owner: [Y9-gender, Y9-windows]
+    acceptance:
+      - "property-based: no double-booked therapist, no room over capacity, no closure crossing"
+      - "turnaround always respected; gender constraint never violated"
+      - "two concurrent bookings for the last slot: exactly one succeeds"
+
+  - id: B-LIFE
+    order: 19
+    title: Appointment lifecycle and phone-first identity
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-AVAIL]
+    steps: [30, 31]
+
+  - id: B-UI
+    order: 20
+    title: Booking flow and admin calendar
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-LIFE, H04]
+    steps: [33, 34]
+    milestone: M1
+
+  - id: B-MSG
+    order: 21
+    title: Transactional messaging and reminder invalidation
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-LIFE, H02]
+    steps: [35, 36]
+
+  - id: M-TILL
+    order: 22
+    title: Till, invoicing, ledger, packages
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-LIFE, F10]
+    steps: [52, 53, 54, 55, 56, 57]
+    milestone: M2
+
+  - id: M-VAT
+    order: 23
+    title: Purchases, recurring costs, VAT working papers, compliance calendar
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [M-TILL]
+    steps: [58, 59, 60, 61, 62, 63, 64]
+    blocked_on_owner: [Y11-tax-agent]
+
+  - id: C-CRM
+    order: 24
+    title: CRM, clinical intake, consent
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [F08, B-LIFE]
+    steps: [43, 44, 45, 46]
+
+  - id: C-AUTO
+    order: 25
+    title: Automation engine and messaging compliance gate
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [C-CRM, B-MSG]
+    steps: [47, 48, 49, 50, 51]
+    milestone: M3
+
+  - id: P-HR
+    order: 26
+    title: People, credentials gating availability, leave
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-AVAIL, M-TILL]
+    steps: [65, 66, 67, 68, 69, 70, 71, 72]
+    milestone: M6
+
+  - id: A-MEAS
+    order: 27
+    title: Analytics, server-side push, egress guard
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [M-TILL, H02]
+    steps: [73, 74, 75, 76, 77]
+    milestone: M7
+
+  - id: R-REP
+    order: 28
+    title: Reporting, KPIs, dashboards
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [M-VAT, C-CRM, P-HR]
+    steps: [78, 79, 80, 81, 82]
+    milestone: M5
+
+  - id: W-SYS
+    order: 29
+    title: Component library, CMS, media pipeline
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [F11, H04]
+    steps: [37, 38, 39, 40, 41, 42, 89, 90]
+
+  - id: W-SITE
+    order: 30
+    title: Public site, SEO, publication control plane
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [W-SYS, B-CAT]
+    steps: [91, 92, 93, 94, 95, 96, 97]
+    milestone: M4
+
+  - id: G-CONN
+    order: 31
+    title: Google connection, health check, re-auth surfaces
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [H02, F09]
+    steps: [98, 101]
+    blocked_on_owner: [Y2-listing-owner, Y4-token-test, Y10-consent]
+
+  - id: G-REV
+    order: 32
+    title: Review autoresponder, fallback mode first
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [G-CONN]
+    steps: [99]
+
+  - id: G-SEO
+    order: 33
+    title: SEO agent
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [G-CONN, W-SITE]
+    steps: [100]
+
+  - id: Y-PAY
+    order: 34
+    title: Payments
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [M-TILL]
+    steps: [83, 84, 85, 86, 87, 88]
+    blocked_on_owner: [Y7-mcc]
+
+  - id: H-HARD
+    order: 35
+    title: Hardening, runbooks, restore drill
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [R-REP, W-SITE, G-SEO]
+    steps: [102, 103, 104, 105]
+    blocked_on_owner: [Y13-pentest]
+
+  - id: H-MIG
+    order: 36
+    title: Migration tooling and dry runs
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [H-HARD]
+    steps: [106]
+    blocked_on_owner: [Y8-packages, Y8-leave, Y8-opening-balances]
