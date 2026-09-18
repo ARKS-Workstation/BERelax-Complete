@@ -3,8 +3,8 @@
 Custom booking, CRM and back-office platform for a single-location massage and spa
 business in the UAE.
 
-**Status: planning. No application code yet.** This repository currently contains the
-implementation plan only.
+**Status: building.** The plan is complete and the build is under way against
+[build/manifest.yaml](build/manifest.yaml); [docs/PROGRESS.md](docs/PROGRESS.md) is the live ledger.
 
 ## Start here
 
@@ -25,6 +25,7 @@ implementation plan only.
 | [docs/12-autonomous-delivery.md](docs/12-autonomous-delivery.md) | The deferred-scope contract, fake provider layer, and how completion is evidenced |
 | [docs/13-business-profile.md](docs/13-business-profile.md) | Extracted business facts: entity, premises, the 32-price catalogue, therapists, existing web estate |
 | [docs/14-autonomous-run-plan.md](docs/14-autonomous-run-plan.md) | **The runbook** — the session loop, gates, critique pass, milestone stops and stop-and-ask conditions |
+| [docs/adr/](docs/adr/) | Architecture decision records — one per decision that would otherwise be re-litigated |
 | [docs/PROGRESS.md](docs/PROGRESS.md) · [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Live build ledger, and everything awaiting the owner |
 
 ## The one-paragraph summary

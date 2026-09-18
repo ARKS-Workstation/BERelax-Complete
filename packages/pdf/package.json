@@ -1,0 +1,19 @@
+{
+  "name": "@berelax/pdf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@berelax/core": "workspace:*",
+    "@berelax/shared": "workspace:*",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@fontsource/ibm-plex-sans-arabic": "5.3.0",
+    "playwright": "1.56.1"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.3.289"
+  }
+}

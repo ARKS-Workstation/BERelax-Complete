@@ -11,4 +11,5 @@
 export * from './access/permissions.ts'
 export { assertNever } from './assert-never.ts'
 export * from './money.ts'
+export * from './text/index.ts'
 export * from './time.ts'

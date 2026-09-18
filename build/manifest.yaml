@@ -145,7 +145,7 @@ units:
     order: 10
     title: Arabic RTL PDF proof
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F01
     steps:

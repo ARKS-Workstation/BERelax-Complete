@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config'
 
 /**
- * Integration tests: require a real PostgreSQL 16.
+ * Integration tests: require real external processes — PostgreSQL 16, and headless Chromium for the
+ * document renderer.
  *
  * These do NOT skip when DATABASE_URL is absent — they fail. A gate that silently
  * skips is the failure mode described in docs/adr/0002-typescript-6-not-7.md.

@@ -113,7 +113,28 @@ const runExpectingFailure = (cmd, args) => {
   check('conventions gate rejects a timestamp without withTimezone', failed)
 }
 
-// 7. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 7. A literal bidi override in source must fail the invisible-character gate.
+{
+  const f = 'packages/core/src/__gate_fixture__.ts'
+  // A Trojan Source specimen. The override is built from its codepoint rather than typed, because
+  // this file is itself scanned by the gate it is testing.
+  const override = String.fromCodePoint(0x202e)
+  writeFileSync(f, [`export const label = "Ahmed${override}"`, ''].join('\n'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-invisible-chars.mjs'])
+  rmSync(f, { force: true })
+  check('invisible-character gate rejects a literal bidi override in source', failed)
+}
+
+// 8. A zero-width space must fail the same gate. Different hazard, same scan.
+{
+  const f = 'packages/core/src/__gate_fixture__.ts'
+  writeFileSync(f, [`export const sneaky = "a${String.fromCodePoint(0x200b)}b"`, ''].join('\n'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-invisible-chars.mjs'])
+  rmSync(f, { force: true })
+  check('invisible-character gate rejects a zero-width space in source', failed)
+}
+
+// 9. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -122,6 +143,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm boundaries',
     'pnpm boundaries:test',
     'pnpm purity',
+    'pnpm invisibles',
     'pnpm palette',
     'pnpm test',
     'pnpm test:integration',

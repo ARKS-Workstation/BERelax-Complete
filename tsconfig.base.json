@@ -35,7 +35,9 @@
       "@berelax/auth": ["./packages/auth/src/index.ts"],
       "@berelax/auth/*": ["./packages/auth/src/*"],
       "@berelax/clinical": ["./packages/clinical/src/index.ts"],
-      "@berelax/clinical/*": ["./packages/clinical/src/*"]
+      "@berelax/clinical/*": ["./packages/clinical/src/*"],
+      "@berelax/pdf": ["./packages/pdf/src/index.ts"],
+      "@berelax/pdf/*": ["./packages/pdf/src/*"]
     },
     "types": ["node"]
   }

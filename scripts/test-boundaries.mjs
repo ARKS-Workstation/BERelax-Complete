@@ -30,6 +30,16 @@ const CASES = [
     ].join('\n'),
   },
   {
+    rule: 'core-must-not-import-infrastructure',
+    file: 'packages/core/src/__boundary_fixture__.ts',
+    source: [
+      // packages/pdf drives a browser. core reaching it would make pricing logic need Chromium.
+      "import { fontFaceCss } from '@berelax/pdf'",
+      'export const illegal = fontFaceCss',
+      '',
+    ].join('\n'),
+  },
+  {
     rule: 'db-must-not-import-core',
     file: 'packages/db/src/__boundary_fixture__.ts',
     source: [

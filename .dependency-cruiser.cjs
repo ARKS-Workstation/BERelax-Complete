@@ -33,11 +33,12 @@ module.exports = {
     {
       name: 'core-must-not-import-infrastructure',
       comment:
-        'packages/config reads the environment and packages/messaging performs I/O. core stays pure ' +
+        'packages/config reads the environment, packages/messaging performs I/O and packages/pdf drives a ' +
+        'browser. core stays pure ' +
         'and receives what it needs as arguments.',
       severity: 'error',
       from: { path: '^packages/core/' },
-      to: { path: '^packages/(config|messaging|auth|db|clinical)/' },
+      to: { path: '^packages/(config|messaging|auth|db|clinical|pdf)/' },
     },
     {
       name: 'db-must-not-import-core',
@@ -51,7 +52,7 @@ module.exports = {
       comment: 'packages/shared is the leaf. Nothing internal may be imported into it.',
       severity: 'error',
       from: { path: '^packages/shared/' },
-      to: { path: '^(packages/(core|db|ui|config|messaging|auth|clinical)|apps)/' },
+      to: { path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf)|apps)/' },
     },
     {
       name: 'nothing-imports-an-app',

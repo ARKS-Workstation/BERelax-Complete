@@ -54,6 +54,12 @@ jobs:
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
 
+      # packages/pdf renders documents in headless Chromium so Arabic shaping and bidirectional
+      # layout are done by an engine that gets them right (docs/adr/0011). The browser is a build
+      # dependency of the integration suite, not an optional extra.
+      - name: Install Chromium for PDF rendering
+        run: pnpm exec playwright install --with-deps chromium
+
       # Ordered cheapest-first so a trivial mistake fails in seconds, not minutes.
       - name: Lint and format
         run: pnpm lint
@@ -69,6 +75,9 @@ jobs:
 
       - name: Core purity gate
         run: pnpm purity
+
+      - name: No invisible or bidi-reordering characters in source
+        run: pnpm invisibles
 
       - name: Palette contrast gate
         run: pnpm palette
