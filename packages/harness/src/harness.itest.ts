@@ -208,12 +208,18 @@ describe('the gallery', () => {
     expect(html).toContain('dark · rtl')
   })
 
-  it('inlines every image, so it is one self-contained file publishable as an Artifact', () => {
+  it('references every capture by its relative filename, so the page stays small', () => {
+    // Inlining them came to 24MB once the specimen carried real photographs — over the Artifact
+    // limit, and a page that decodes 24MB of base64 before it shows anything.
     const html = gallery()
-    expect(html).not.toContain('src="./')
-    expect((html.match(/data:image\/png;base64,/g) ?? []).length).toBe(
-      compliant.length + nonCompliant.length,
-    )
+    expect(html).not.toContain('data:image/png;base64,')
+    for (const capture of [...compliant, ...nonCompliant]) {
+      expect(html).toContain(`src="./${capture.filename}"`)
+    }
+  })
+
+  it('loads images lazily, because twelve full-page captures is a lot of pixels', () => {
+    expect(gallery()).toContain('loading="lazy"')
   })
 
   it('lists the critique findings above the images they came from', () => {

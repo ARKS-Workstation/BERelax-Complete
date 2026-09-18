@@ -19,8 +19,19 @@ import type { Capture } from './capture.ts'
 import { type Finding, summarise, uniqueFindings } from './critique.ts'
 import { type Direction, THEMES, type Theme, VIEWPORTS } from './matrix.ts'
 
-function dataUrl(png: Uint8Array): string {
-  return `data:image/png;base64,${Buffer.from(png).toString('base64')}`
+/**
+ * Images are referenced, not embedded.
+ *
+ * An earlier version inlined every capture as a `data:` URL so the gallery was one file. That worked
+ * until the specimen carried real photographs, at which point twelve captures came to 24MB — over the
+ * Artifact limit, and a page that has to decode 24MB of base64 before it renders anything.
+ *
+ * Referencing is better on both counts: the page is a few kilobytes, the browser loads images lazily
+ * as they scroll into view, and it still opens straight from disk because the filenames are relative
+ * and the PNGs sit beside it. Publishing sends the same files alongside the page.
+ */
+function imageSrc(filename: string): string {
+  return `./${filename}`
 }
 
 function findingRow(finding: Finding): string {
@@ -51,7 +62,7 @@ function cell(
   return [
     '<figure class="cell">',
     `<figcaption>${theme} · ${direction}${defects > 0 ? ` · <span class="badge">${defects} defect${defects === 1 ? '' : 's'}</span>` : ''}</figcaption>`,
-    `<img src="${dataUrl(capture.png)}" alt="${safeText(`${capture.target.page} at ${viewportName}, ${theme}, ${direction}`)}" loading="lazy">`,
+    `<img src="${imageSrc(capture.filename)}" alt="${safeText(`${capture.target.page} at ${viewportName}, ${theme}, ${direction}`)}" loading="lazy" decoding="async">`,
     '</figure>',
   ].join('')
 }
