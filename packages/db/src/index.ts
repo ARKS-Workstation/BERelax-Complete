@@ -11,5 +11,12 @@ export {
   REQUIRED_EXTENSIONS,
   type Sql,
 } from './connection.ts'
+export {
+  createJobQueue,
+  type JobQueueOptions,
+  MAINTENANCE_JOBS,
+  PGBOSS_SCHEMA,
+} from './jobs/boss.ts'
+export * as schema from './schema/index.ts'
 
-export const SCHEMA_VERSION = 0 as const
+export const SCHEMA_VERSION = 6 as const

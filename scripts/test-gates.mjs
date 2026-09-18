@@ -81,7 +81,23 @@ const runExpectingFailure = (cmd, args) => {
   check('purity gate rejects a clock read in packages/core', failed)
 }
 
-// 5. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 5. A Drizzle column with no database counterpart must fail the drift gate.
+{
+  const f = 'packages/db/src/schema/__gate_fixture__.ts'
+  writeFileSync(
+    f,
+    [
+      "import { pgTable, text } from 'drizzle-orm/pg-core'",
+      "export const ghost = pgTable('ghost_table', { phantom: text('phantom') })",
+      '',
+    ].join('\n'),
+  )
+  const { failed } = runExpectingFailure('node', ['scripts/check-schema-drift.mjs'])
+  rmSync(f, { force: true })
+  check('drift gate rejects a Drizzle table the database does not have', failed)
+}
+
+// 6. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -94,6 +110,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm test',
     'pnpm test:integration',
     'pnpm db:migrate:dry',
+    'pnpm db:drift',
     'pnpm gates:test',
     'postgres:16',
   ]

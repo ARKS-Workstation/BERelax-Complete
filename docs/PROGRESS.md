@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**3 / 37 units complete.**
+**4 / 37 units complete.**
 
 ## Next up
 
-1. **F04 — Database spine and migration pipeline**
 1. **F05 — Money, time and identifier primitives**
-1. **F10 — Arabic RTL PDF proof**
+1. **F06 — Audit service and domain event outbox**
+1. **F07 — Staff auth with mandatory TOTP and the RBAC policy layer**
 
 ## All units
 
@@ -17,7 +17,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 1 | `F01` | Monorepo scaffold and toolchain | — | — | — |
 | [x] | 2 | `F02` | CI pipeline with real Postgres | `F01` | — | — |
 | [x] | 3 | `F03` | Environments, config validation, staging send guard | `F01` | — | — |
-| [ ] | 4 | `F04` | Database spine and migration pipeline | `F02` | — | — |
+| [x] | 4 | `F04` | Database spine and migration pipeline | `F02` | — | — |
 | [ ] | 5 | `F05` | Money, time and identifier primitives | `F01` | — | — |
 | [ ] | 6 | `F06` | Audit service and domain event outbox | `F04` | — | — |
 | [ ] | 7 | `F07` | Staff auth with mandatory TOTP and the RBAC policy layer | `F04` | — | — |

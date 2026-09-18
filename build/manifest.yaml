@@ -54,7 +54,7 @@ units:
     order: 4
     title: Database spine and migration pipeline
     owner: claude
-    status: todo
+    status: done
     depends_on: [F02]
     steps: [19]
     acceptance:

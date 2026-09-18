@@ -82,5 +82,8 @@ jobs:
       - name: Migration dry run
         run: pnpm db:migrate:dry
 
+      - name: Schema drift (Drizzle vs database)
+        run: pnpm db:drift
+
       - name: Gates fire
         run: pnpm gates:test
