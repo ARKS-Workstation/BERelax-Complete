@@ -130,7 +130,7 @@ units:
     order: 9
     title: Settings registry
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F04
     - F07

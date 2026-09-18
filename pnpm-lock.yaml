@@ -75,6 +75,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@berelax/config':
+        specifier: workspace:*
+        version: link:../config
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared

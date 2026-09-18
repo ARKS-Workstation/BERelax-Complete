@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@berelax/config": "workspace:*",
     "@berelax/shared": "workspace:*"
   },
   "scripts": {

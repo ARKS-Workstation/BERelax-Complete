@@ -39,4 +39,4 @@ export {
 export * as schema from './schema/index.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 7 as const
+export const SCHEMA_VERSION = 10 as const

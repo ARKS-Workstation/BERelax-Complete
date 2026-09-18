@@ -60,3 +60,13 @@ in a comment in one file, because every future unit that audits will hit it.
 
 It is also a small argument for the append-only design: the rule was strong enough to defeat a
 cleanup the test author assumed would work.
+
+**Second instance, F09.** `app_setting_history` is append-only for the same reason, and the same
+mistake recurred: a test asserted a total row count and failed once other tests had run. The general
+rule, now stated rather than implied:
+
+> **Never assert a total against an append-only table. Assert a delta, or assert on the newest rows.**
+
+Append-only tables in the system so far: `audit_event`, `app_setting_history`, `regulatory_profile`,
+`journal_line` (coming in M-TILL), and `clinical.treatment_note` (corrections supersede rather than
+overwrite). Every test touching one of these must follow the rule above.
