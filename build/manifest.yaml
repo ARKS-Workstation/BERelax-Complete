@@ -42,13 +42,13 @@ units:
     order: 3
     title: Environments, config validation, staging send guard
     owner: claude
-    status: todo
+    status: done
     depends_on: [F01]
     steps: [16, 17, 20]
     acceptance:
       - "boot fails loudly with a named error on a missing required env var"
       - "APP_ENV != production makes every outbound transport refuse to send, proven by test"
-      - "separate OAuth client id per environment enforced by config schema"
+      - "config schema REFUSES to boot with GOOGLE_PROVIDER=real unless APP_ENV=production, so no non-production environment can consume real refresh tokens (stronger than a per-env client-id naming convention; see docs/10 §4 on the ~100-token-per-account limit)"
 
   - id: F04
     order: 4

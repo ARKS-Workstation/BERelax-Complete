@@ -31,6 +31,15 @@ module.exports = {
       },
     },
     {
+      name: 'core-must-not-import-config-or-messaging',
+      comment:
+        'packages/config reads the environment and packages/messaging performs I/O. core stays pure ' +
+        'and receives what it needs as arguments.',
+      severity: 'error',
+      from: { path: '^packages/core/' },
+      to: { path: '^packages/(config|messaging)/' },
+    },
+    {
       name: 'db-must-not-import-core',
       comment: 'Dependency direction is core <- db, never db -> core.',
       severity: 'error',
@@ -42,7 +51,7 @@ module.exports = {
       comment: 'packages/shared is the leaf. Nothing internal may be imported into it.',
       severity: 'error',
       from: { path: '^packages/shared/' },
-      to: { path: '^(packages/(core|db|ui|messaging|clinical)|apps)/' },
+      to: { path: '^(packages/(core|db|ui|config|messaging|clinical)|apps)/' },
     },
     {
       name: 'nothing-imports-an-app',

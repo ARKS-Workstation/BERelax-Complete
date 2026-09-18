@@ -26,6 +26,15 @@ importers:
       vitest:
         specifier: 5.0.1
         version: 5.0.1(@types/node@26.6.1)(vite@8.3.0(@types/node@26.6.1))
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/config:
+    dependencies:
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/core:
     dependencies:
@@ -35,6 +44,15 @@ importers:
 
   packages/db:
     dependencies:
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/messaging:
+    dependencies:
+      '@berelax/config':
+        specifier: workspace:*
+        version: link:../config
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
@@ -669,6 +687,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+
 snapshots:
 
   '@biomejs/biome@2.5.14':
@@ -1107,3 +1128,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@4.6.5: {}

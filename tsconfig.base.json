@@ -27,7 +27,11 @@
       "@berelax/core": ["./packages/core/src/index.ts"],
       "@berelax/core/*": ["./packages/core/src/*"],
       "@berelax/db": ["./packages/db/src/index.ts"],
-      "@berelax/db/*": ["./packages/db/src/*"]
+      "@berelax/db/*": ["./packages/db/src/*"],
+      "@berelax/config": ["./packages/config/src/index.ts"],
+      "@berelax/config/*": ["./packages/config/src/*"],
+      "@berelax/messaging": ["./packages/messaging/src/index.ts"],
+      "@berelax/messaging/*": ["./packages/messaging/src/*"]
     },
     "types": ["node"]
   }

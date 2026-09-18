@@ -26,7 +26,8 @@
     "dependency-cruiser": "18.3.1",
     "postgres": "3.4.9",
     "typescript": "6.0.3",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "zod": "4.6.5"
   },
   "dependencies": {}
 }
