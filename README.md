@@ -21,6 +21,7 @@ implementation plan only.
 | [docs/08-frontend-design.md](docs/08-frontend-design.md) | The design system: accessible pastel palette with measured ratios, type, motion tokens, media/hero technique, performance budget |
 | [docs/09-ia-seo-and-settings.md](docs/09-ia-seo-and-settings.md) | Page set, therapist pages, mobile booking flow, the location record that drives all SEO, and the settings spine |
 | [docs/10-google-connection.md](docs/10-google-connection.md) | The owner-consented Google OAuth connection: API access gating, token lifecycle, identity, and the fallback that is actually launch mode |
+| [docs/11-execution-plan.md](docs/11-execution-plan.md) | **The step-by-step execution sequence**, 118 numbered steps across ten stages, with the timeline and team shapes |
 
 ## The one-paragraph summary
 
