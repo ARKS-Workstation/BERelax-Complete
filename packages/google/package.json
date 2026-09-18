@@ -1,0 +1,16 @@
+{
+  "name": "@berelax/google",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@berelax/clinical": "workspace:*",
+    "@berelax/core": "workspace:*",
+    "@berelax/db": "workspace:*",
+    "@berelax/providers": "workspace:*",
+    "@berelax/shared": "workspace:*"
+  }
+}

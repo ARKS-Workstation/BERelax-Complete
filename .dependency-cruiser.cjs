@@ -51,7 +51,7 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/core/' },
       to: {
-        path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers|fixtures|harness)/',
+        path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers|fixtures|harness|google)/',
       },
     },
     {
@@ -67,7 +67,7 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/shared/' },
       to: {
-        path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers|fixtures|harness)|apps)/',
+        path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers|fixtures|harness|google)|apps)/',
       },
     },
     {
@@ -78,18 +78,30 @@ module.exports = {
       to: { path: '^apps/' },
     },
     {
-      name: 'providers-only-inside-a-transport',
+      name: 'messaging-providers-only-inside-a-transport',
       comment:
-        'Only packages/messaging/src/transports may import a provider package or a provider SDK. ' +
-        'Everything else reaches a provider through the sendMessage() choke point, which is where the ' +
-        'sender-ID class rule, the promotional gate and the staging send guard live. A feature that ' +
-        'calls SMSala directly bypasses all three: it can send promotional content from the ' +
-        'transactional identity, inside quiet hours, to a real customer from a staging run. See ' +
-        'ADR 0016 and docs/03 §4.',
+        'Only packages/messaging/src/transports may reach an SMS or email provider. Everything else ' +
+        'sends through the sendMessage() choke point, which is where the sender-ID class rule, the ' +
+        'promotional gate, the campaign spend cap and the staging send guard live. A feature that calls ' +
+        'SMSala directly bypasses all four: it can send promotional content from the transactional ' +
+        'identity, inside quiet hours, to a real customer from a staging run. See ADR 0016 and docs/03 ' +
+        '§4. Scoped to the messaging providers on purpose — the Google OAuth port carries none of those ' +
+        'concerns, and a rule that banned all of packages/providers stopped packages/google compiling ' +
+        'while proving nothing extra.',
       severity: 'error',
       from: { pathNot: '^packages/(providers|messaging/src/transports)/' },
       to: {
-        path: '^packages/providers/|/node_modules/(smsala|resend|googleapis|stripe|twilio)/',
+        // Three things, and the middle one is the interesting one. The SMS and email ports and their
+        // SDKs are the hazard; the **barrel** is the loophole, because `@berelax/providers` re-exports
+        // every port, so `import { SMSALA } from '@berelax/providers'` reaches SMSala while naming
+        // nothing forbidden. Banning the barrel outside a transport closes it, and a consumer with a
+        // legitimate non-messaging need imports a subpath — `@berelax/providers/google`,
+        // `/failure`, `/call-log` — which is what `packages/google` does.
+        //
+        // Deliberately a direct-dependency rule and not `reachable`: reachability also condemns
+        // `send.test.ts` for importing the transport, which is the one path that is *supposed* to
+        // reach a provider. It was tried; it reported four violations, all of them the intended design.
+        path: '^packages/providers/src/(sms|email)/|^packages/providers/src/index\\.ts$|/node_modules/(smsala|resend|twilio)/',
       },
     },
     {

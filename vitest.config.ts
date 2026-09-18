@@ -38,6 +38,7 @@ export default defineConfig({
         'packages/config/src/**/*.ts',
         'packages/messaging/src/**/*.ts',
         'packages/providers/src/**/*.ts',
+        'packages/google/src/**/*.ts',
         'packages/fixtures/src/**/*.ts',
         'packages/ui/src/**/*.ts',
         'packages/shared/src/**/*.ts',
@@ -51,6 +52,9 @@ export default defineConfig({
         // Loaded by the harness with a browser; the unit suite cannot reach the file reads.
         'packages/fixtures/src/media.ts',
         'packages/fixtures/src/load.ts',
+        // SQL only. Its behaviour — including that a re-wrap touches five columns and nothing else — is
+        // proved against a real PostgreSQL by packages/google/src/google-connection.itest.ts.
+        'packages/google/src/postgres-store.ts',
       ],
       thresholds: {
         statements: 88,

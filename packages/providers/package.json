@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./google": "./src/google/index.ts",
+    "./failure": "./src/failure.ts",
+    "./call-log": "./src/call-log.ts"
   },
   "dependencies": {
     "@berelax/config": "workspace:*",

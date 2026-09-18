@@ -176,6 +176,24 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/google:
+    dependencies:
+      '@berelax/clinical':
+        specifier: workspace:*
+        version: link:../clinical
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
+      '@berelax/db':
+        specifier: workspace:*
+        version: link:../db
+      '@berelax/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/harness:
     dependencies:
       '@berelax/core':

@@ -77,7 +77,7 @@ const CASES = [
     ].join('\n'),
   },
   {
-    rule: 'providers-only-inside-a-transport',
+    rule: 'messaging-providers-only-inside-a-transport',
     // A feature reaching SMSala directly bypasses the sender-ID class rule, the promotional gate and
     // the staging send guard at once. packages/messaging is the closest legal caller there is — one
     // directory away from src/transports — so it is the fixture most likely to be waved through.

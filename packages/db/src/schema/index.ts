@@ -1,4 +1,5 @@
 export * from './document-series.ts'
+export * from './google.ts'
 export * from './identity.ts'
 export * from './messaging.ts'
 export * from './platform.ts'

@@ -5503,7 +5503,7 @@ units:
       as two rows. Refresh and access tokens are envelope-encrypted with a kid so rotation is a re-wrap
       job, reusing F08's DEK/KEK primitive.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04
@@ -5531,11 +5531,38 @@ units:
     - google_capabilities.capability is constrained to gbp_reviews|gbp_location|gbp_performance|gsc, resource_ref
       is jsonb, and at most one row per (connection_id, capability) may have primary=true (partial unique
       index, proven by a rejected second insert)
+    - 'NOTE: the migration is numbered 0016_google_connection.sql, not 0041 — 0012 and 0013 are reserved
+      by units in flight and 0014/0015 are used, so the next free number is 0016. The schema assertions
+      live in packages/db/src/schema/google.itest.ts rather than a .test.ts, because every one of them
+      is a claim about a real PostgreSQL and a unit test could only assert against a mock of it'
+    - 'NOTE: the column is is_primary, not primary — `primary` is a reserved word in SQL. The partial
+      unique index google_capability_one_primary is on (connection_id, capability) WHERE is_primary, and
+      there is deliberately no plain unique on (connection_id, capability): one account may be verified
+      on several Search Console properties and manage several locations, and a unique pair would make the
+      primary flag meaningless and the rejected-second-insert test vacuous'
+    - 'NOTE: google_connection_events.connection_id is a plain uuid with no foreign key, as on audit_event.
+      An append-only log whose rows a DELETE can rewrite is not a log, and an ON DELETE SET NULL fires an
+      UPDATE that the append-only trigger correctly refuses — which made a connection with events
+      undeletable. Caught by the integration test, not by review'
+    - 'NOTE deferred to G-CONN-04: the advisory transaction lock and double-checked re-read from docs/10
+      §4. accessTokenFor refreshes proactively inside the 5-minute margin, but the serialisation belongs
+      around the whole read-refresh-write in a transaction, one level up. Taking the lock here would look
+      serialised without being it'
+    - 'NOTE deferred to G-CONN-06/07/08: deriveConnectionHealth in packages/core/src/google/connection.ts
+      computes the displayed state, the staleness window and the consent_at + 7 day Testing tripwire, and
+      returns the deduped notification decision. Nothing renders it and nothing sends an email yet — there
+      is no admin app shell until W-SYS-01, the daily check is G-CONN-06, the settings card G-CONN-07 and
+      the banner and notification ladder G-CONN-08'
     files:
-    - packages/db/migrations/0041_google_connections.sql
+    - packages/db/migrations/0016_google_connection.sql
     - packages/db/src/schema/google.ts
+    - packages/db/src/schema/google.itest.ts
+    - packages/core/src/google/connection.ts
     - packages/google/src/token-store.ts
-    - packages/db/src/schema/google.schema.test.ts
+    - packages/google/src/lifecycle.ts
+    - packages/google/src/rewrap.ts
+    - packages/google/src/postgres-store.ts
+    - packages/google/src/google-connection.itest.ts
   - id: G-CONN-02
     order: 152
     title: OAuth consent against the fake, granted-scope truth, sub-match reconnect semantics
