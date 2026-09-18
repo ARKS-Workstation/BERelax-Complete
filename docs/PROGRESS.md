@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**0 / 36 units complete.**
+**0 / 37 units complete.**
 
 ## Next up
 
@@ -28,7 +28,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |
 | [ ] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
 | [ ] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |
-| [ ] | 17 | `B-CAT` | Service catalogue and rooms *(expand)* | `F09`, `H03` | — | Y8-menu, Y8-rooms, Y9-turnaround |
+| [ ] | 17 | `B-CAT` | Service catalogue, styles, rooms and business day *(expand)* | `F09`, `H03` | — | Y8-rooms, Y9-turnaround, Y9-poa-prices |
 | [ ] | 18 | `B-AVAIL` | Availability engine *(expand)* | `B-CAT` | — | Y9-gender, Y9-windows |
 | [ ] | 19 | `B-LIFE` | Appointment lifecycle and phone-first identity *(expand)* | `B-AVAIL` | — | — |
 | [ ] | 20 | `B-UI` | Booking flow and admin calendar *(expand)* | `B-LIFE`, `H04` | M1 | — |
@@ -38,7 +38,8 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 24 | `C-CRM` | CRM, clinical intake, consent *(expand)* | `F08`, `B-LIFE` | — | — |
 | [ ] | 25 | `C-AUTO` | Automation engine and messaging compliance gate *(expand)* | `C-CRM`, `B-MSG` | M3 | — |
 | [ ] | 26 | `P-HR` | People, credentials gating availability, leave *(expand)* | `B-AVAIL`, `M-TILL` | M6 | — |
-| [ ] | 27 | `A-MEAS` | Analytics, server-side push, egress guard *(expand)* | `M-TILL`, `H02` | M7 | — |
+| [ ] | 26.5 | `A-FIRST` | First-party analytics, funnel and the WhatsApp ref loop *(expand)* | `B-LIFE`, `M-TILL` | — | — |
+| [ ] | 27 | `A-MEAS` | Analytics, server-side push, egress guard *(expand)* | `A-FIRST`, `H02` | M7 | — |
 | [ ] | 28 | `R-REP` | Reporting, KPIs, dashboards *(expand)* | `M-VAT`, `C-CRM`, `P-HR` | M5 | — |
 | [ ] | 29 | `W-SYS` | Component library, CMS, media pipeline *(expand)* | `F11`, `H04` | — | — |
 | [ ] | 30 | `W-SITE` | Public site, SEO, publication control plane *(expand)* | `W-SYS`, `B-CAT` | M4 | — |

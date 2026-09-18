@@ -97,9 +97,12 @@ Not exhaustive — the shape that matters.
 `premises_closures`, `room_types`, `rooms`, `resource_blocks`.
 
 **Catalogue**
-`service_category`, `service` (internal name + linted public display name, gross price in fils,
-turnaround minutes, taxability, gender delivery rules), `service_variant`, `add_on`,
-`service_room_type_compat`, `service_skill`, `price_list` with effective dating.
+`service_category`, `service` (**`style` enum: asian | arabic**, internal name + linted public display
+name, turnaround minutes, taxability, gender delivery rules), `service_variant` (duration + **gross price
+in fils**), `add_on`, `service_room_type_compat` (the wet room is a scarce resource),
+`service_skill` (style → required therapist skill), `service_resource_shape` (therapists and rooms
+required — 2 therapists + 1 room for Four Hands, 2 therapists + a capacity-2 room for Couple Massage),
+`price_list` with effective dating.
 
 **Booking**
 `customer` (E.164 phone, normalised, plus dedup match keys), `booking` (the commercial container),
@@ -136,9 +139,18 @@ status lifecycle, segments, cost), `campaign`, `flow_definition` (versioned JSON
 `gratuity_accrual`.
 
 **Platform**
-`audit_event` (append-only, monthly partitions), `outbox_event`, `analytics_event`,
-`analytics_dispatch` (retries), `obligation` + `obligation_instance` (compliance calendar),
-`publication_record`, `seo_gsc_daily`, `seo_suggestion`, `incident`.
+`audit_event` (append-only, monthly partitions), `outbox_event`,
+`obligation` + `obligation_instance` (compliance calendar), `publication_record`, `seo_gsc_daily`,
+`seo_suggestion`, `incident`, `business_day` (open/close instants per date, so a 01:30 appointment
+resolves to the previous day).
+
+**First-party analytics** (own schema, monthly partitions, 90-day raw retention)
+`visitor` (first-party id), `session` (entry page, referrer, UTM set, click ids `gclid`/`fbclid`/
+`wbraid`/`msclkid`, `fbp`/`fbc`, device, breakpoint, bot flag), `event` (page_view and every tracked
+interaction incl. WhatsApp and call clicks), `attribution` (first-touch and last-touch, persisted onto
+`customer` and `booking`), `whatsapp_ref` (short code → session, reconciled at booking),
+`funnel_step`, plus nightly rollups `daily_traffic`, `daily_funnel`, `daily_source_revenue` retained
+indefinitely, and `analytics_dispatch` for outbound GA4/Meta pushes with retries.
 
 **Reporting** (separate schema, materialised)
 `dim_date`, `dim_service`, `dim_staff`, `dim_customer`, `fact_appointment`, `fact_sale`,

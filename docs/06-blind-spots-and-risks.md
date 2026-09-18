@@ -58,6 +58,22 @@ twice annually. Built into the workstream R (Reporting) seasonality model.
 
 ---
 
+**B7. Trading hours cross midnight, and it breaks more than the calendar.** 11:00–02:00 means a 01:30
+appointment belongs to the *previous* business day for cash-up, rota, commission and every daily report.
+"Today" in the owner dashboard is not the calendar date. Modelled as a first-class `business_day`; see
+[13-business-profile.md](13-business-profile.md) §2.
+
+**B8. The busiest hours are the ones you may not market in.** TDRA restricts promotional SMS to
+07:00–21:00. With trading to 02:00, the marketing window excludes peak. Campaign scheduling has to live in
+late mornings and afternoons.
+
+**B9. The wet room is a single scarce resource.** Morocco Bath and Jacuzzi both need it, and it is
+probably the highest-margin line on the menu. One wet room means the constraint binds early and often —
+its utilisation deserves its own KPI, and mis-scheduling it is a real operational failure rather than a
+minor conflict.
+
+---
+
 ## C. Money: where the numbers go wrong quietly
 
 **C1. Packages are liabilities, not revenue.** Selling AED 10,000 of prepaid packages in December is not
@@ -202,6 +218,23 @@ notoriously hard. It is also a legal exposure, not only a courtesy.
 **F13. Licensing the platform to other spas.** You have not raised it, but a working spa platform is a
 sellable asset. It does not change the build — but it does argue for keeping domain logic in a
 framework-free `core` package, which the architecture already does.
+
+---
+
+**F14. Your brand name collides with an international chain.** `berelax.com` is an airport-spa group
+with an Abu Dhabi airport outlet. Bare-brand SEO is unwinnable; entity disambiguation is the strategy. See
+[09-ia-seo-and-settings.md](09-ia-seo-and-settings.md).
+
+**F15. Your two existing sites publish different phone numbers.** Already true today. It is the exact
+input that makes AI assistants give callers the wrong number.
+
+**F16. WhatsApp is the conversion event, and it is invisible.** Without the reference-code loop you can
+measure cost per click forever and never cost per booking. This is the single biggest measurement gap in
+the business.
+
+**F17. Allowing AI crawlers inflates your own analytics.** We allow GPTBot and friends deliberately for
+citation value; on a low-traffic local site they distort page views materially. Bot filtering is not
+optional if the funnel is to mean anything.
 
 ---
 

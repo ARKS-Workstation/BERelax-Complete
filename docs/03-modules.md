@@ -10,7 +10,11 @@ comparison.
 
 A slot is bookable only if **every** one of these holds simultaneously:
 
-1. Inside `premises_hours` for that weekday, and not inside a `premises_closure`.
+1. Inside the **business day's** open/close instants, and not inside a `premises_closure`. Trading is
+   11:00–02:00, so the business day **crosses midnight** — a naive `open <= t <= close` comparison is
+   wrong, and a 01:30 slot belongs to the previous business day. Last bookable start is
+   `close − duration − turnaround`, so a 120-minute treatment must begin by 23:40 with a 20-minute
+   turnaround.
 2. A therapist is on shift, has the required skill, has no expired mandatory credential, and
    has no overlapping appointment, block or approved leave.
 3. That therapist satisfies the **gender-matching constraint** against the client.
@@ -25,8 +29,12 @@ overlaps against appointments, blocks and shifts is fast at this data volume; ca
 30–60 seconds keyed on (date, service) and invalidate on any write to appointments, shifts, blocks
 or leave.
 
-**Couples bookings** are the case that breaks naive models: one booking, two appointments, two
-therapists, one capacity-2 room, both appointments must succeed or neither. That is why room
+**Three real resource shapes** break a one-appointment-per-booking model, and this business sells all
+three. **Couple Massage**: two therapists, one capacity-2 room, two clients. **Four Hands**: two
+therapists, one *standard* room, one client. **Morocco Bath / Jacuzzi**: one therapist and the **wet
+room**, which is a single scarce resource — mis-scheduling it is a real operational failure, which is why
+`service_room_type_compat` is load-bearing rather than defensive. In every case all appointments in the
+booking must succeed or none. That is why room
 capacity is a *deferred* constraint trigger evaluated at commit — an immediate trigger fires
 mid-insert and rejects the legitimate second row.
 
@@ -34,7 +42,8 @@ mid-insert and rejects the legitimate second row.
 *room* after the client leaves. They are different resources and different durations, and
 conflating them either over-books rooms or wastes 15 minutes of capacity per treatment.
 
-Edge cases that must be in the test suite: the last slot of the day with turnaround extending past
+Edge cases that must be in the test suite: **a slot after midnight resolving to the correct business
+day**; a booking at 01:55 when close is 02:00; the last slot of the day with turnaround extending past
 closing; a shift ending mid-treatment; leave approved over an existing booking; a therapist's
 certificate expiring between booking and appointment; two customers taking the last slot in the
 same millisecond; a service whose duration exceeds any single room's free window; DST (there is
@@ -131,27 +140,85 @@ The interpreter's difficult questions, all of which need answers before the buil
 - A drag-and-drop builder is exactly where an operator will try to route promotional content
   through a transactional template. The builder must make that **impossible**, not discouraged.
 
-## 6. Analytics: closing the loop to real revenue
+## 6. Analytics: a first-party funnel, and the WhatsApp problem
 
-The measurement plan comes before any tag. Events: `view_item_list`, `view_item`,
-`begin_checkout` (slot selected), `booking_confirmed`, and later `purchase` at the till — plus
-`otp_requested`, `slot_unavailable`, `booking_abandoned`.
+**The internal store is the source of truth.** Every page view and interaction is collected by our own
+`/api/collect` endpoint into our own Postgres — non-sampled, ad-blocker resilient, needing no third-party
+script, and joinable to completed and *paid* bookings. GA4 and Meta receive a push for ad-platform
+optimisation only. That ordering is the whole design.
 
-The structural point most implementations miss: **a booking is not revenue.** It becomes revenue
-when the client turns up and pays, and roughly 5–15% of bookings will not. So `booking_confirmed`
-carries a provisional value and the till emits the corrected one, with no-shows pushed as
-negative/void. Ad platforms optimising on booking confirmations optimise for a number that
-includes your no-shows.
+**The funnel**, ending at outcomes rather than clicks:
 
-Server-side push runs from the outbox, not from the browser: `event_id` shared for dedup, phone
-and email SHA-256 hashed after normalisation, `fbp`/`fbc` captured and forwarded, `action_source`
-set correctly. Walk-ins and phone bookings never touch the website, so they need offline
-conversion upload with a past event time, plus a "how did you hear about us" field as the
-attribution fallback.
+```
+landing → service viewed → price viewed → CTA click (WhatsApp | Call | Book)
+        → booking created → confirmed → attended → PAID
+```
 
-**Egress guard.** Service names map to opaque allowlisted category codes before any payload is
-constructed, and a unit test enumerates every service to prove nothing health-adjacent crosses the
-boundary. "Prenatal massage" as a GA4 item name is a health disclosure to a third party.
+The last three steps are what make it worth building. Roughly 5–15% of bookings do not turn up, so any
+funnel ending at "booking created" overstates itself and any ad platform optimising on that signal is
+optimising for no-shows too.
+
+### The WhatsApp attribution problem, and the fix
+
+WhatsApp is the real booking channel — the prototype's form opens a prefilled chat. So the site's
+conversion event is *"clicked WhatsApp"*, and the booking then happens in a conversation the system cannot
+see. You can measure cost per click and never cost per booking.
+
+**The fix: a short reference code in the prefilled message.** The `wa.me` text carries something like
+`Ref: 7K2Q`, tied to that visitor's session, source and landing page. The client sends it without
+thinking; staff paste it into the quick-book screen; the booking is attributed back to the original click.
+That is the only path from a Meta ad to a **paid, attended appointment**.
+
+It depends on staff actually pasting it, so **ref-capture rate is a first-class metric on the analytics
+page.** If it is low, the funnel reports the gap rather than silently inventing the join. A single
+prominent field on the quick-book screen and the code appearing at the top of the chat are what make it
+happen.
+
+### Origination
+
+Resolved in strict order: **UTM parameters → click ids (`gclid`, `fbclid`, `wbraid`, `msclkid`) →
+referrer → direct.** Click ids are more reliable than referrer for paid traffic and are what permits
+reconciliation with the ad platforms later, so they are stored even though nothing reads them yet.
+First-touch and last-touch are both persisted onto the customer and the booking.
+
+### Two things that would otherwise make the numbers fiction
+
+**Bot filtering.** We deliberately allow GPTBot, ClaudeBot and PerplexityBot for citation value. On a
+low-traffic local site they will inflate page views substantially. Without a filter list and a `bot` flag
+on every session, the funnel is meaningless.
+
+**Volume discipline.** "Every interaction" is unbounded. Raw events take monthly partitions with 90-day
+retention, rolled up nightly into daily aggregates kept indefinitely. Otherwise the event table becomes
+the largest object in the database and starts competing with the booking engine for I/O.
+
+### A privacy distinction that must not be blurred
+
+Internal first-party measurement with **no third-party sharing** is a materially different consent
+position from pushing hashed identifiers to Meta. They are governed separately: the outbound pushes stay
+consent-gated via Consent Mode v2, and the internal store's lawful basis is a question for the lawyer
+rather than an assumption. Conflating them either over-blocks internal reporting or under-protects the
+outbound push.
+
+### Server-side push
+
+Runs from the transactional outbox, not the browser: shared `event_id` for dedup, phone and email
+SHA-256 hashed after normalisation, `fbp`/`fbc` forwarded, `action_source` correct. The till emits
+corrected values and no-shows are pushed as void. Walk-ins and phone bookings never touch the website, so
+offline conversion upload with a past event time covers them, with "how did you hear about us" as the
+fallback.
+
+**Egress guard.** Service names map to opaque allowlisted category codes before any external payload is
+built, with a test enumerating every service. "Arabic Hot Oil Massage" is commercially sensitive and
+"prenatal massage" would be a health disclosure — neither leaves the building. The internal store keeps
+real names because it never shares them.
+
+### The analytics page
+
+Funnel with drop-off per step · traffic and conversion by source, medium and campaign · landing-page
+performance · every tracked interaction ranked · device and breakpoint split · **time-of-day conversion**,
+which matters given 11:00–02:00 trading and will likely reveal something the owner does not currently
+know · revenue by source joined to paid bookings · and a data-quality strip showing bot-filtered share and
+ref-capture rate.
 
 ## 7. Accounting: the parts that are actually hard
 

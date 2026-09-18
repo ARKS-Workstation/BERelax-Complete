@@ -21,88 +21,126 @@ centre-aligned body text · icon-only buttons without labels · full-bleed every
 
 The discipline that makes it work: **contrast comes from ink and photography, not from colour.**
 
+**On "Scandinavian" with a warm Gulf palette.** What is inherited from Scandinavian design here is the
+*method* — restraint, negative space, functionalism, one repeated grid, craft in small details. The
+*colour* is warm sand, clay and gold, inherited from the prototype and better suited to this market than
+a cool Nordic sage. Those are not in tension: Scandinavian minimalism is a set of constraints on how much
+you put on a page, not a mandate for cold colour.
+
 ---
 
-## 2. Palette — the pastel problem, solved
+## 2. Palette — evolved from the prototype, and validated
 
-Pastels are light and low-chroma, so pastel-on-pastel text fails WCAG 2.2 AA (4.5:1 body, 3:1 large
-text and UI). The rule, stated once and enforced:
+The palette is inherited from the prototype at `berelax.netlify.app` (see
+[13-business-profile.md](13-business-profile.md) §7), not invented. Its warm sand direction suits this
+market better than the cool Nordic sage originally specced, and its ground `#FDFAF5` was already within a
+hair of it. What this document adds is rigour: a measured ratio for every pair, a dark mode the prototype
+lacked, and a CI gate.
 
-> **Pastels carry surfaces and large shapes. Ink and accents carry text. A pastel is never
+The rule, unchanged and now enforced:
+
+> **Pastels and sands carry surfaces and large shapes. Ink and accents carry text. A pastel is never
 > load-bearing for text.**
 
-### Light
+**`scripts/palette.py` derives and validates every token and exits non-zero on any failure.** It runs in
+CI. The tables below are its output, not aspiration.
 
-| Token | OKLCH | Hex | Contrast on `--ground` |
+### Light — ground `#FDFAF5`
+
+| Token | Hex | Ratio | Role |
 |---|---|---|---|
-| `--ground` | `oklch(98.4% 0.006 85)` | `#FCF9F5` | — |
-| `--surface` | `oklch(100% 0 0)` | `#FFFFFF` | — |
-| `--ground-sunk` | `oklch(96.8% 0.008 85)` | `#F7F4EE` | — |
-| `--ink` | `oklch(24% 0.014 240)` | `#192025` | **15.68:1** |
-| `--ink-2` | `oklch(44% 0.013 240)` | `#4C5459` | **7.40:1** |
-| `--ink-3` | `oklch(54.5% 0.012 240)` | `#6A7177` | **4.72:1** |
-| `--surface-sage` | `oklch(93% 0.023 152)` | `#DDEDE0` | surface only |
-| `--surface-clay` | `oklch(93.5% 0.026 42)` | `#FAE4DC` | surface only |
-| `--surface-ochre` | `oklch(94.5% 0.030 88)` | `#F5ECD7` | surface only |
-| `--pastel-sage` | `oklch(86.5% 0.040 152)` | `#C0DBC6` | chips only |
-| `--pastel-clay` | `oklch(88% 0.044 42)` | `#F2CFC1` | chips only |
-| `--pastel-ochre` | `oklch(90% 0.050 88)` | `#ECDDB9` | chips only |
-| `--accent-sage` | `oklch(43% 0.056 155)` | `#365942` | **7.53:1** |
-| `--accent-clay` | `oklch(47% 0.090 38)` | `#854734` | **6.78:1** |
-| `--hairline` | `oklch(90.5% 0.008 85)` | `#E2DFDA` | 1.27:1 — decorative only |
-| `--border` | `oklch(84.5% 0.010 85)` | `#CFCCC5` | 1.53:1 |
-| `--border-strong` | `oklch(65.5% 0.012 85)` | `#949089` | 3.03:1 — UI boundaries |
-| `--focus` | `oklch(52% 0.130 250)` | `#1F6CB0` | — |
-| `--danger` | `oklch(45% 0.150 25)` | `#972527` | **7.68:1** |
-| `--success` | `oklch(43% 0.090 150)` | `#255D34` | **7.42:1** |
+| `--ground` | `#FDFAF5` | — | page |
+| `--surface` | `#FFFFFF` | — | cards |
+| `--ground-sunk` | `#F7F0E5` | — | recessed bands |
+| `--surface-sand` | `#F2E9DC` | — | section fills |
+| `--surface-clay` | `#E6D8C4` | 1.35:1 | large shapes, **never text** |
+| `--ink` | `#26241F` | **14.89:1** | body and headings |
+| `--ink-2` | `#6E675D` | **5.36:1** | secondary text |
+| `--ink-3` | `#90877B` | **3.40:1** | large text and meta only |
+| `--accent-gold` | `#946A32` | **4.62:1** | links, icons, text accents |
+| `--accent-gold-strong` | `#6E4E25` | **7.26:1** | emphasis, small text on sand |
+| `--accent-green` | `#4E7048` | **5.40:1** | accent text, success |
+| `--accent-teal` | `#2A6E66` | **5.73:1** | accent text, focus |
+| `--decor-gold` | `#C08A43` | 2.90:1 | **decorative only — carries no information** |
+| `--decor-tan` | `#C9AE8B` | 2.04:1 | decorative only |
+| `--hairline` | `#E6D8C4` | 1.35:1 | 1px rules |
+| `--border` | `#C9AE8B` | 2.04:1 | non-semantic borders |
+| `--border-strong` | `#B18A57` | **3.04:1** | input and control boundaries |
+| `--focus` | `#2A6E66` | **5.73:1** | focus ring |
+| `--danger` | `#C0392B` | **5.22:1** | errors |
+| `--success` | `#4E7048` | **5.40:1** | success |
 
-Note `--ink` is a near-black with a slight cool cast, never `#000`.
+**The prototype's signature gold `#C08A43` measures 2.90:1** — it fails the 4.5:1 body threshold *and*
+the 3:1 threshold for UI elements. So it cannot carry text, links, icons or any border that conveys
+meaning. Darkened along its own hue and saturation, **`#946A32` reaches 4.62:1** and still reads as gold.
+The bright original is retained as `--decor-gold` for large shapes and dividers where it carries no
+information. The prototype's teal `#5FB8AC` (2.26:1) is handled the same way, with `#2A6E66` for text.
 
-### Dark — warm, not inverted
+### Dark — ground `#141210`, warm not inverted
 
-Pastels are **re-derived** at lower lightness and higher relative chroma, not dimmed.
+The prototype has no dark mode. Warm darks derived from the ink hue; accents re-derived at higher
+lightness rather than dimmed.
 
-| Token | Hex | Contrast |
+| Token | Hex | Ratio |
 |---|---|---|
-| `--ground` | `#1A1612` | — |
-| `--ground-sunk` | `#13100C` | — |
-| `--surface` | `#24201A` | — |
-| `--surface-raised` | `#2D2822` | — |
-| `--ink` | `#EFECE7` | **15.26:1** |
-| `--ink-2` | `#B9B5AF` | **8.80:1** |
-| `--ink-3` | `#8F8C85` | **5.33:1** |
-| `--pastel-sage` | `#A5D1B3` | — |
-| `--pastel-clay` | `#EDBAA5` | — |
-| `--accent-text` | `#A0CAAD` | **9.83:1** |
-| `--hairline` / `--border` | `#332E29` / `#453F39` | — |
+| `--ground` | `#141210` | — |
+| `--ground-sunk` | `#0F0D0B` | — |
+| `--surface` | `#1F1C18` | — |
+| `--surface-raised` | `#292520` | — |
+| `--ink` | `#F0EBE3` | **15.75:1** |
+| `--ink-2` | `#B5AEA4` | **8.50:1** |
+| `--ink-3` | `#746F66` | **3.74:1** |
+| `--accent-gold` | `#C08A43` | **6.19:1** |
+| `--accent-green` | `#5F8958` | **4.63:1** |
+| `--accent-teal` | `#358C81` | **4.64:1** |
+| `--border-strong` | `#8B857B` | **5.11:1** |
+| `--focus` | `#5FB8AC` | **7.95:1** |
+| `--danger` | `#D55144` | **4.53:1** |
 
-**Accent polarity flips.** Light: `--accent-fill: #365942`, `--accent-on-fill: #FCF9F5` (7.53:1).
-Dark: `--accent-fill: #A5D1B3`, `--accent-on-fill: #1A1612` (10.52:1).
+Note the inversion: **the bright brand gold `#C08A43`, unusable for text in light mode, reaches 6.19:1 in
+dark mode** and becomes the primary accent there. Accent polarity flips with the theme.
+
+**Accent fills:** light `--accent-gold` `#946A32` with `#FDFAF5` text (4.62:1); dark `#C08A43` fill with
+`#141210` text (6.19:1).
 
 **Shadow.** Exactly one token, overlays only:
-`--shadow-overlay: 0 1px 2px oklch(24% 0.014 240 / .04), 0 12px 32px -8px oklch(24% 0.014 240 / .10)`.
+`--shadow-overlay: 0 1px 2px oklch(20% .01 60 / .05), 0 12px 32px -8px oklch(20% .01 60 / .12)`.
 None in dark mode — elevation there is surface lightness.
 
-A **hex mirror** of every semantic token is generated and committed, so designers, email templates and
-PDF generation share one source of truth.
-
----
+A **hex mirror** of every token is generated by the same script and committed, so email templates and PDF
+generation share one source of truth.
 
 ## 3. Typography
 
-| Role | Face | Notes |
+Inherited from the prototype, with one open question.
+
+| Role | Face | Status |
 |---|---|---|
-| UI / body | **Schibsted Grotesk** (variable) | Nordic provenance, humanist grotesque |
-| Display | **Newsreader** (variable, `opsz` 6–72) | Editorial serif for headlines only |
-| Arabic | **IBM Plex Sans Arabic** (400/500/600) | Static weights |
+| Display | **Cormorant Garamond** (variable, 300–600) | **Keep.** It does the elegance work and is genuinely good at large sizes |
+| Marketing UI, eyebrows | **Jost** (300–600) | Keep |
+| Body and admin | **Under review** — see below | Decision pending |
+| Arabic | **IBM Plex Sans Arabic** (400/500/600) | Added; the prototype has none |
+
+**The Jost question.** Jost is a geometric sans with a small x-height and narrow apertures. It looks
+right in marketing headings and is a legibility risk at 17px body size on a phone — and materially worse
+in dense admin tables where a receptionist reads numbers at speed. Cormorant Garamond is also a
+high-contrast display serif and a poor body face, so it is display-only regardless.
+
+Recommendation: **keep Jost for marketing display and eyebrows, and adopt a higher-x-height workhorse
+sans for body copy and the entire admin.** This is a reversible decision recorded in
+[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) as `Y12-body-face`, and the build proceeds with the workhorse sans
+as the provisional value because it is the safer default for a booking flow and a till screen.
 
 **Scale.** eyebrow `0.75rem/1.33/+0.08em` uppercase · xs `0.75/1.4` · sm `0.875/1.5` ·
 **base `1.0625rem` (17px) / `1.647` (28px)** · lg `1.25/1.6` · xl `1.5/1.333/−0.008em` ·
 2xl `1.875/1.267/−0.012em` · 3xl `clamp(2rem, 1.4rem + 2.2vw, 2.5rem)/1.15/−0.016em`.
 
+Cormorant Garamond runs optically small, so display sizes take a **+4% size adjustment** relative to the
+scale and its weights sit one step heavier than the sans equivalent.
+
 **Measure.** body 68ch · lede 56ch · h3 40ch · h2 34ch · h1 26ch · display 18ch · hard max 76ch.
 
-**Arabic adjustments** — not a font swap, a typographic recalibration:
+**Arabic adjustments** — a typographic recalibration, not a font swap:
 
 ```css
 :lang(ar) {
@@ -114,13 +152,15 @@ PDF generation share one source of truth.
 }
 ```
 
-**Loading.** `next/font/local`, woff2 only, variable roman files, `latin`+`latin-ext` subset on English
-routes, **preload exactly two files**, `font-display: swap`, and metric-matched fallbacks
-(`size-adjust`, `ascent-override`, `descent-override`) — without these a 96px display swap alone costs
-0.05–0.15 CLS. Budget ≤120KB Latin, ≤100KB Arabic, and **Arabic is never served on English pages**.
-*(Individual file sizes UNVERIFIED — measure at build.)*
+Cormorant Garamond has no Arabic coverage, so Arabic display uses IBM Plex Sans Arabic at a heavier
+weight rather than a mismatched serif.
 
----
+**Loading.** Self-hosted via `next/font/local`, woff2 only, variable roman files, `latin`+`latin-ext`
+subset on English routes, **preload exactly two files**, `font-display: swap`, and metric-matched
+fallbacks (`size-adjust`, `ascent-override`, `descent-override`) — without these a large Cormorant
+display swap alone costs 0.05–0.15 CLS. Budget ≤120KB Latin, ≤100KB Arabic, and **Arabic is never served
+on English pages**. Self-hosting also removes the prototype's third-party `fonts.googleapis.com` DNS,
+TLS and connect cost, typically 100–300ms on a cold mobile connection.
 
 ## 4. Space, radius, layout
 
@@ -429,7 +469,7 @@ Per the bounded model in [07](07-frontend-and-agents-requirements.md) §2.
 
 | Setting | Constraint |
 |---|---|
-| Accent | Enum of 3 curated pairings (sage / clay / ochre), each pre-validated AA in both themes |
+| Accent | Enum of 3 curated pairings (gold / green / teal), each pre-validated AA in both themes by `scripts/palette.py` |
 | Density | Enum: comfortable · compact |
 | Radius | Enum: sharp (2px) · soft (8px) |
 | Theme default | Enum: system · light · dark |

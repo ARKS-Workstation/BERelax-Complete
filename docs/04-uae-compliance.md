@@ -6,6 +6,15 @@ sources and must be checked before they are relied on. This document exists so t
 consequences* are designed in, not so it substitutes for professional advice.
 
 ## 1. The licence classification question
+**Emirate confirmed: Abu Dhabi.** The business trades at 250 Al Meena Street, Al Zahiyah, Abu Dhabi, so
+the relevant authorities are **ADDED**, **Abu Dhabi Municipality** and **DoH Abu Dhabi** — not Dubai DET
+or DHA. Earlier revisions of this document hedged across emirates; that hedge is removed. See
+[13-business-profile.md](13-business-profile.md) §1.
+
+**Trading hours are 11:00–02:00 daily**, which collides with the promotional SMS window in §5: marketing
+sends are prohibited from 21:00, i.e. throughout the busiest trading hours. Transactional confirmations
+and reminders at 01:00 are unaffected. Plan campaign scheduling around late mornings and afternoons.
+
 
 This is the most consequential single fact in the project — and because the business is already
 operating, **the answer is already on file.** Read the trade licence and any municipality health or
@@ -14,7 +23,7 @@ licence sits, so that the software can be configured from the document rather th
 
 | | Commercial wellness | Healthcare activity |
 |---|---|---|
-| Licensed by | Emirate economic department (DET / SEDD / ADDED) + municipality health approval | DHA / DoH / MOHAP, as a health facility |
+| Licensed by | **ADDED** (Abu Dhabi Department of Economic Development) + **Abu Dhabi Municipality** health approval | **DoH Abu Dhabi** (or MOHAP), as a health facility |
 | Practitioners | Trade-licence staff | Individually licensed practitioners |
 | Public wording | "Treatment", "therapy", "therapeutic", "pain relief", "rehabilitation" likely **not** permissible | Clinical language permitted within scope |
 | Records | Commercial retention | Clinical record-keeping duties, longer retention |

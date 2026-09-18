@@ -22,6 +22,10 @@ implementation plan only.
 | [docs/09-ia-seo-and-settings.md](docs/09-ia-seo-and-settings.md) | Page set, therapist pages, mobile booking flow, the location record that drives all SEO, and the settings spine |
 | [docs/10-google-connection.md](docs/10-google-connection.md) | The owner-consented Google OAuth connection: API access gating, token lifecycle, identity, and the fallback that is actually launch mode |
 | [docs/11-execution-plan.md](docs/11-execution-plan.md) | **The execution plan** — single-track build order, what only the owner can do, the operating model, and the migration |
+| [docs/12-autonomous-delivery.md](docs/12-autonomous-delivery.md) | The deferred-scope contract, fake provider layer, and how completion is evidenced |
+| [docs/13-business-profile.md](docs/13-business-profile.md) | Extracted business facts: entity, premises, the 32-price catalogue, therapists, existing web estate |
+| [docs/14-autonomous-run-plan.md](docs/14-autonomous-run-plan.md) | **The runbook** — the session loop, gates, critique pass, milestone stops and stop-and-ask conditions |
+| [docs/PROGRESS.md](docs/PROGRESS.md) · [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Live build ledger, and everything awaiting the owner |
 
 ## The one-paragraph summary
 

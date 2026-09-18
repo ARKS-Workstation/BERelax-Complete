@@ -24,9 +24,29 @@ that ties the frontend to the backend and the agents.
 | `/contact`, `/about`, legal | static | Trust, and the pages an acquirer requires |
 | `/(admin)/**` | dynamic | `noindex`, excluded from sitemap |
 
-**Deliberately absent: a `{treatment} in {area}` page matrix.** With one location that is a doorway-page
-pattern with no unique content behind it. The honest play is depth on treatments and therapists. One
-`/spa` location page carries the local signals.
+Add `/analytics` inside the admin route group — the first-party funnel dashboard
+([03-modules.md](03-modules.md) §6), `noindex`, excluded from the sitemap.
+
+### Routes versus anchors — the key evolution of the prototype
+
+The prototype is **one page with anchors** (`#about #services #team #gallery #reviews #contact`). That
+cannot rank: `#services` will never rank for "hot oil massage abu dhabi", because an anchor is not a
+document. Meanwhile the live WooCommerce site **already ranks** with real category pages.
+
+So evolving the prototype means keeping its anchored single-page *feel* for the homepage — it is good UX
+and it is the approved design — while adding **real indexable routes** for every treatment and every
+therapist. Anchors serve homepage navigation; routes earn the rankings.
+
+### On `{treatment} in {area}` pages — recommendation reversed
+
+An earlier revision argued against building these for a single-location business. **They already exist and
+already rank** on `berelaxmassage.com` (`/product-category/arabic-massage-abu-dhabi/`,
+`/product-category/thai-massage-abu-dhabi/`, plus `/product-tag/` pages). Deleting ranking pages to satisfy
+a general principle would be a self-inflicted loss.
+
+The correct move: **map each existing ranking URL to its new equivalent with a 301**, keep the ones with
+genuine search demand, and give them real differentiated content rather than a template fill. The crawl
+baseline from Stage 0 is what tells us which ones matter.
 
 ---
 
@@ -122,6 +142,10 @@ Everything below is **derived**, never hand-authored:
 | Integrity | Google Business Profile consistency check (§6) |
 
 **The rule: one source of truth.** No hard-coded address in a template, no hand-written schema block.
+
+This is not hypothetical here: the prototype and the live site currently publish **different WhatsApp
+numbers** (`052 510 8633` versus `+971 52 823 9069`). One canonical set must be agreed and then exist only
+in the `premises` row — see [13-business-profile.md](13-business-profile.md) §3.
 Divergence between the site, the schema and GBP is precisely what makes AI assistants state wrong hours
 and prices with total confidence.
 
@@ -136,6 +160,23 @@ Plus: `Service` + `Offer` with `priceSpecification` in AED · `Person` per thera
 and `knowsLanguage` · `FAQPage` · `BreadcrumbList` · `ImageObject` · `VideoObject` for the hero ·
 `Organization` with `sameAs`. On `AggregateRating`/`Review`: Google's rules on self-serving review
 markup are strict — surface genuine reviews, do not mark up your own testimonials as review snippets.
+
+### The brand collision — plan for it, do not discover it
+
+**`berelax.com` is an international airport-spa chain called Be Relax, with an outlet at Abu Dhabi
+International Airport.** Same name, same city, vastly more domain authority. Ask an assistant about "Be
+Relax Abu Dhabi" today and it will most likely describe the airport spa.
+
+Bare-brand queries are unwinnable and should not be the target. The entity strategy instead:
+
+- Always the full name **"Be Relax Massage Center and Spa"**, never the bare brand, in titles, schema,
+  GBP and every citation.
+- Always paired with locality — **Al Zahiyah / Al Mina / Tourist Club Area / Al Meena Street**.
+- A strong `Organization` block with `sameAs` binding site, GBP, TripAdvisor and socials into one entity,
+  so machines can tell the two businesses apart.
+- Target **"massage center Al Zahiyah"**-shaped intent, where proximity and prominence are winnable.
+- Track **brand-citation accuracy** in AI answers as a KPI, and treat "the assistant described the airport
+  spa" as a measurable defect with a fix, not bad luck.
 
 ### Local SEO
 

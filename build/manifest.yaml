@@ -149,7 +149,8 @@ units:
     acceptance:
       - "palette from docs/08 as CSS custom properties, light and dark"
       - "generated hex mirror committed and matching the OKLCH source"
-      - "an automated contrast test asserts every declared text/background pair meets its stated ratio"
+      - "scripts/palette.py exits zero; every text pair meets its stated ratio in both themes"
+      - "the brand gold #C08A43 is rejected by lint if used on a text-bearing element"
       - "Tailwind default palette removed; an un-tokened colour fails lint"
 
   # ---------- Order 2: repo-as-memory and the harness ----------
@@ -209,13 +210,19 @@ units:
   # ---------- Orders 3+ : product. Group-level, decompose before working. ----------
   - id: B-CAT
     order: 17
-    title: Service catalogue and rooms
+    title: Service catalogue, styles, rooms and business day
     owner: claude
     status: todo
     expand: true
     depends_on: [F09, H03]
     steps: [26, 27]
-    blocked_on_owner: [Y8-menu, Y8-rooms, Y9-turnaround]
+    blocked_on_owner: [Y8-rooms, Y9-turnaround, Y9-poa-prices]
+    acceptance:
+      - "8 services seeded as (style x treatment) with 32 duration variants at the real AED gross prices"
+      - "wet room modelled as a scarce resource; Morocco Bath/Jacuzzi cannot be booked without it"
+      - "resource shapes: Four Hands = 2 therapists + 1 room; Couple = 2 therapists + capacity-2 room"
+      - "business_day resolves an 01:30 instant to the previous trading date, proven by test"
+      - "last bookable start = close - duration - turnaround, proven at the 02:00 boundary"
 
   - id: B-AVAIL
     order: 18
@@ -230,6 +237,7 @@ units:
       - "property-based: no double-booked therapist, no room over capacity, no closure crossing"
       - "turnaround always respected; gender constraint never violated"
       - "two concurrent bookings for the last slot: exactly one succeeds"
+      - "no slot offered whose treatment plus turnaround would run past the 02:00 close"
 
   - id: B-LIFE
     order: 19
@@ -308,13 +316,31 @@ units:
     steps: [65, 66, 67, 68, 69, 70, 71, 72]
     milestone: M6
 
+  - id: A-FIRST
+    order: 26.5
+    title: First-party analytics, funnel and the WhatsApp ref loop
+    owner: claude
+    status: todo
+    expand: true
+    depends_on: [B-LIFE, M-TILL]
+    acceptance:
+      - "/api/collect records page views and every declared interaction without third-party script"
+      - "origination resolved UTM -> click id -> referrer -> direct; click ids persisted"
+      - "first-touch and last-touch attribution written onto customer and booking"
+      - "WhatsApp ref code round-trips: session -> prefilled message -> quick-book -> attributed booking"
+      - "ref-capture rate surfaced as a metric, not hidden"
+      - "bot sessions flagged and excluded from the funnel by default; AI crawlers detected"
+      - "raw events monthly-partitioned with 90-day retention; nightly rollups retained indefinitely"
+      - "funnel reaches PAID, not booking-created; no-shows excluded from conversion"
+      - "analytics page renders funnel, sources, interactions, time-of-day and revenue by source"
+
   - id: A-MEAS
     order: 27
     title: Analytics, server-side push, egress guard
     owner: claude
     status: todo
     expand: true
-    depends_on: [M-TILL, H02]
+    depends_on: [A-FIRST, H02]
     steps: [73, 74, 75, 76, 77]
     milestone: M7
 
@@ -346,6 +372,12 @@ units:
     depends_on: [W-SYS, B-CAT]
     steps: [91, 92, 93, 94, 95, 96, 97]
     milestone: M4
+    acceptance:
+      - "every treatment and every therapist has its own indexable route, not only a homepage anchor"
+      - "a therapist without a display name or photography consent renders as an unlinked card and is absent from the sitemap"
+      - "301 map covers every ranking URL from the existing WooCommerce site"
+      - "Organization sameAs disambiguates from the berelax.com airport chain"
+      - "NAP rendered only from the premises row; no hard-coded address anywhere (asserted by grep test)"
 
   - id: G-CONN
     order: 31
