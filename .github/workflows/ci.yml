@@ -93,6 +93,19 @@ jobs:
       - name: Job registry and cron declarations
         run: pnpm jobs
 
+      # Price, duration, bookability and VAT live in the catalogue and nowhere else. A `price` field on a
+      # CMS collection is a second place the number can be wrong, and the one that is wrong is the one
+      # nobody reconciles.
+      - name: Catalogue/CMS boundary
+        run: pnpm cms
+
+      # The Google refresh token is a durable bearer credential for control of the business's Google
+      # presence, and the scope it carries has no read-only variant. Three rules dependency-cruiser
+      # cannot express: a sealed column named outside the token modules, an accessor identifier, and a
+      # token interpolated into a template literal.
+      - name: Google token chokepoint
+        run: pnpm chokepoint
+
       # The editorial grid, the direction multiplier and the one shadow. Static rules, so they run with
       # the other cheap scans rather than after the browser work.
       - name: Layout, motion and elevation discipline

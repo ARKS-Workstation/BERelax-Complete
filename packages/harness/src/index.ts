@@ -10,6 +10,9 @@ export {
   AXE_TAGS,
   type AxeViolation,
   auditPage,
+  BLOCKING_IMPACTS,
+  blockingViolations,
+  describeViolation,
   type Impact,
   uniqueViolations,
 } from './accessibility.ts'

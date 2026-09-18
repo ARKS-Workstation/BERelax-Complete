@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./accessibility": "./src/accessibility.ts",
     "./touch-targets": "./src/touch-targets.ts"
   },
   "dependencies": {

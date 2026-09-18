@@ -89,6 +89,16 @@ function s256(verifier: string): string {
   return base64url(createHash('sha256').update(verifier, 'ascii').digest())
 }
 
+/**
+ * A short, non-reversible label for a secret, so a log line can say *which* token without carrying it.
+ *
+ * Twelve hex characters of a SHA-256: enough to tell two tokens apart in a support conversation, far too
+ * few to brute-force back to a bearer credential.
+ */
+function fingerprint(secret: string): string {
+  return createHash('sha256').update(secret, 'utf8').digest('hex').slice(0, 12)
+}
+
 /** One authorization the fake consent screen has issued but not yet exchanged. */
 interface PendingConsent {
   readonly codeChallenge: string | undefined
@@ -263,7 +273,15 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         operation: 'refresh',
         outcome: 'success',
         summary: `Access token refreshed for sub ${sub}`,
-        detail: { refreshToken, expiresAtIso: tokens.expiresAtIso },
+        // A FINGERPRINT, never the token. This log is rendered in the admin call-log pane and in the
+        // screenshot harness, and docs/10 §4 is explicit that the refresh token appears in no log line at
+        // any level. It recorded the token itself until G-CONN-03's leak detector was pointed at the
+        // provider log as well as at the application logger — which is exactly the place a detector
+        // looking only at its own logger would never have looked.
+        detail: {
+          refreshTokenFingerprint: fingerprint(refreshToken),
+          expiresAtIso: tokens.expiresAtIso,
+        },
       })
       return tokens
     },

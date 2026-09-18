@@ -33,6 +33,7 @@ a decision the table does not list.
 | [0021](0021-catalogue-shape-and-packages-only.md) | A service is (style × treatment); packages only | 19b, 21 |
 | [0022](0022-provider-ports-and-fakes.md) | Every external service behind a port, with a fake that fails on demand | 32 |
 | [0023](0023-gapless-numbering-row-locked-counter.md) | Gap-free document numbering from a row-locked counter, not a SEQUENCE | — |
+| [0024](0024-deferred-room-capacity-trigger.md) | The room-capacity trigger is deferred to COMMIT; the therapist exclusion constraint is not | — |
 
 ## Writing one
 

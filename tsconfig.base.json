@@ -24,6 +24,7 @@
     "paths": {
       "@berelax/auth": ["./packages/auth/src/index.ts"],
       "@berelax/clinical": ["./packages/clinical/src/index.ts"],
+      "@berelax/cms": ["./packages/cms/src/index.ts"],
       "@berelax/config": ["./packages/config/src/index.ts"],
       "@berelax/core": ["./packages/core/src/index.ts"],
       "@berelax/db": ["./packages/db/src/index.ts"],
@@ -45,6 +46,7 @@
       "@berelax/fixtures/*": ["./packages/fixtures/src/*"],
       "@berelax/google/*": ["./packages/google/src/*"],
       "@berelax/harness/*": ["./packages/harness/src/*"],
+      "@berelax/harness/accessibility": ["./packages/harness/src/accessibility.ts"],
       "@berelax/harness/touch-targets": ["./packages/harness/src/touch-targets.ts"],
       "@berelax/media/*": ["./packages/media/src/*"],
       "@berelax/messaging/*": ["./packages/messaging/src/*"],
@@ -55,10 +57,13 @@
       "@berelax/providers/google": ["./packages/providers/src/google/index.ts"],
       "@berelax/shared/*": ["./packages/shared/src/*"],
       "@berelax/ui/*": ["./packages/ui/src/*"],
+      "@berelax/ui/direction": ["./packages/ui/src/primitives/direction.tsx"],
       "@berelax/ui/layout": ["./packages/ui/src/layout/index.tsx"],
       "@berelax/ui/patterns": ["./packages/ui/src/patterns/index.tsx"],
+      "@berelax/ui/primitives": ["./packages/ui/src/primitives/index.tsx"],
       "@berelax/ui/theme-provider": ["./packages/ui/src/theme/theme-provider.tsx"],
-      "@berelax/worker/*": ["./apps/worker/src/*"]
+      "@berelax/worker/*": ["./apps/worker/src/*"],
+      "@berelax/ui/primitives/contract": ["./packages/ui/src/primitives/contract.ts"]
     },
     "types": ["node"]
   }

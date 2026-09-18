@@ -29,6 +29,7 @@ import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
 import { ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
+import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
 import { portraits } from './portraits.ts'
 
 export const metadata: Metadata = {
@@ -57,6 +58,72 @@ const SLOTS = [
 ] as const
 
 const UNNAMED = 'Name not yet published'
+
+/**
+ * The primitive set's copy, in English.
+ *
+ * Copy belongs to the route because the route is the locale; the gallery's structure belongs to
+ * `_dev/primitive-gallery.tsx`, which `/ar/kitchen-sink` renders with the Arabic copy. Two routes, one
+ * component, so the twelve-render axe sweep is auditing one page in two directions rather than two
+ * pages.
+ */
+const PRIMITIVE_COPY: PrimitiveGalleryCopy = {
+  buttons: {
+    primary: 'Book a treatment',
+    quiet: 'See the menu',
+    ghost: 'Call the desk',
+    withIcon: 'Choose a date',
+    // The icon-only button's whole accessible name. `Button` does not compile without it.
+    iconOnly: 'Search treatments',
+    disabled: 'Fully booked today',
+  },
+  nav: { label: 'On this page', today: 'Available today', hours: 'Treatments' },
+  chips: ['Asian', 'Arabic', '60 minutes'],
+  panel: {
+    title: 'A panel, at two pixels',
+    body:
+      'The corner radius is the most visible decision in docs/08 §7: a 2px corner on a warm ground ' +
+      'with a hairline border reads as printed matter, and 12px reads as an application. shadcn ships ' +
+      'this card at 12px and its badge fully rounded; both are replaced rather than themed.',
+  },
+  fields: {
+    mobile: 'Mobile number',
+    mobileHint: 'The booking is confirmed to this number by SMS.',
+    notes: 'Anything the therapist should know',
+    notesPlaceholder: 'Pressure, injuries, preferences',
+    duration: 'Duration',
+    durations: [
+      { value: '45', label: '45 minutes' },
+      { value: '60', label: '60 minutes' },
+      { value: '90', label: '90 minutes' },
+      { value: '120', label: '120 minutes' },
+    ],
+    durationDefault: '60',
+  },
+  popover: {
+    trigger: 'What is included?',
+    label: 'What is included in the price',
+    body:
+      'Every price is the gross amount including VAT, and the amount charged. VAT is derived from it ' +
+      'rather than added to it, so the figure never changes on the invoice.',
+  },
+  dialog: {
+    trigger: 'Cancellation policy',
+    title: 'Cancelling a booking',
+    description:
+      'A booking can be moved or cancelled up to two hours before it starts, at the desk or by ' +
+      'replying to the confirmation message.',
+    close: 'Close',
+  },
+  sheet: {
+    trigger: 'Choose a start time',
+    title: 'Start times available today',
+    description:
+      'Trading runs from 11:00 until 02:00, so the last start is earlier than the closing time by the ' +
+      'length of the treatment.',
+    close: 'Close',
+  },
+}
 
 export default function KitchenSinkPage() {
   return (
@@ -217,6 +284,24 @@ export default function KitchenSinkPage() {
                 request is possible once a therapist has a published profile.
               </Measure>
             </details>
+          </GridCell>
+        </Grid>
+      </Section>
+
+      <Section id="primitives">
+        <Grid>
+          <Measure cap="h2" as="h2" className="text-xl be-section__heading">
+            Primitives
+          </Measure>
+          <Measure cap="body">
+            The shadcn set over Radix, re-geometried: 48px targets rather than 36, a 2px corner on
+            cards and inputs and 8px on buttons and selects, 17px controls rather than 14px, and one
+            shadow that only the three overlays wear. The dialog, the sheet, the popover and the
+            select menu portal into the document body, so their direction comes from
+            DirectionProvider rather than from an ancestor.
+          </Measure>
+          <GridCell span="wide">
+            <PrimitiveGallery copy={PRIMITIVE_COPY} />
           </GridCell>
         </Grid>
       </Section>

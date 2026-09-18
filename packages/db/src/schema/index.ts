@@ -1,4 +1,5 @@
 export * from './agents.ts'
+export * from './booking.ts'
 export * from './catalogue.ts'
 export * from './customer.ts'
 export * from './document-series.ts'

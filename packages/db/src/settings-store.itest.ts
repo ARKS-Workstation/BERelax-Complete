@@ -16,6 +16,23 @@ if (!url)
 let sql: Sql
 const OWNER = { kind: 'staff', id: '44444444-4444-4444-4444-444444444444', label: 'Owner' } as const
 
+/**
+ * How many history rows exist for a key — counted in SQL, never by reading them.
+ *
+ * `settingHistory` is the admin panel's reader and takes a `limit`, which is right for a panel and wrong
+ * for a count. `app_setting_history` is append-only (ADR 0008) and this suite runs against a database
+ * other suites have already written to, so the row count for a key only ever grows; the first time it
+ * passed the limit, `history.length - startCount` became `500 - 500` and the delta assertion read zero
+ * changes as three. It had been passing for weeks and stopped for a reason that had nothing to do with
+ * the trigger it was testing.
+ */
+async function historyCount(key: string): Promise<number> {
+  const [row] = await sql<{ n: string }[]>`
+    select count(*)::text as n from app_setting_history where key = ${key}
+  `
+  return Number(row?.n ?? '0')
+}
+
 beforeAll(async () => {
   sql = createConnection({ url, max: 3 })
 })
@@ -178,8 +195,7 @@ describe('history', () => {
     // app_setting_history is append-only (rules in migration 0010), so it CANNOT be cleaned between
     // tests — the same constraint recorded in ADR 0008 for audit_event. Assert on the delta and on
     // the newest rows, never on a total.
-    const startCount = (await settingHistory(sql, 'booking.turnaround_minutes_standard', 500))
-      .length
+    const startCount = await historyCount('booking.turnaround_minutes_standard')
     for (const value of [21, 22, 23]) {
       await withUnitOfWork(sql, OWNER, (uow) =>
         writeSetting(uow, {
@@ -190,9 +206,10 @@ describe('history', () => {
         }),
       )
     }
-    const history = await settingHistory(sql, 'booking.turnaround_minutes_standard', 500)
     // startCount is taken after beforeEach has already seeded, so the delta is the three updates.
-    expect(history.length - startCount).toBe(3)
+    expect((await historyCount('booking.turnaround_minutes_standard')) - startCount).toBe(3)
+    // The three newest rows, read through the panel's reader — three is well inside any limit.
+    const history = await settingHistory(sql, 'booking.turnaround_minutes_standard', 3)
     expect(history[0]?.newValue).toBe(23)
     expect(history[0]?.oldValue).toBe(22)
     expect(history[0]?.changedBy).toBe('Owner')
@@ -207,11 +224,14 @@ describe('history', () => {
         actorLabel: 'Owner',
       }),
     )
-    const before = await settingHistory(sql, 'theme.density', 500)
+    // Counted, not read: a capped read would report the same length before and after a DELETE that
+    // really had emptied the table, which is a test that cannot fail.
+    const before = await historyCount('theme.density')
+    expect(before).toBeGreaterThan(0)
     await sql`update app_setting_history set changed_by = 'tampered' where key = 'theme.density'`
     await sql`delete from app_setting_history where key = 'theme.density'`
-    const after = await settingHistory(sql, 'theme.density', 500)
-    expect(after.length).toBe(before.length)
+    expect(await historyCount('theme.density')).toBe(before)
+    const after = await settingHistory(sql, 'theme.density', 10)
     expect(after.every((h) => h.changedBy !== 'tampered')).toBe(true)
   })
 })

@@ -5,6 +5,7 @@ import {
   type Locale,
   themeBootstrapScript,
 } from '@berelax/ui'
+import { DirectionProvider } from '@berelax/ui/direction'
 import { ThemeProvider } from '@berelax/ui/theme-provider'
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
@@ -63,7 +64,19 @@ export function DocumentShell({ locale, children }: { locale: Locale; children: 
         />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        {/*
+          `DirectionProvider` is imported from `@berelax/ui/direction` rather than from the primitives
+          barrel: every page in the application renders this shell, and importing the barrel here would
+          put a client reference to the dialog, the sheet, the popover and the select into the module
+          graph of routes that render none of them.
+
+          It is here as well as on `<html dir>` because Radix portals its overlays into `document.body`,
+          where an ancestor's direction cannot reach them, and because several of its behaviours are
+          direction-dependent in JavaScript rather than in CSS. See `primitives/direction.tsx`.
+        */}
+        <ThemeProvider>
+          <DirectionProvider locale={locale}>{children}</DirectionProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

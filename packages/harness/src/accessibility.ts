@@ -103,6 +103,40 @@ export async function auditPage(page: Page, target: CaptureTarget): Promise<Acce
   }
 }
 
+/**
+ * The impacts that stop a release.
+ *
+ * axe grades every rule it breaks. `serious` and `critical` are the two that mean somebody cannot use
+ * the page — no accessible name on a control, text below its contrast threshold, a form field with no
+ * label. `moderate` and `minor` are reported and not failed on, because a gate that fires on
+ * `region` — content outside a landmark, which a portalled overlay produces by construction — is a gate
+ * that gets suppressed, and then it is not a gate.
+ */
+export const BLOCKING_IMPACTS: readonly Impact[] = ['serious', 'critical']
+
+/** The violations that fail a build, in rule order. */
+export function blockingViolations(violations: readonly AxeViolation[]): readonly AxeViolation[] {
+  return violations
+    .filter((violation) => violation.impact !== null && BLOCKING_IMPACTS.includes(violation.impact))
+    .toSorted((a, b) => (a.id < b.id ? -1 : 1))
+}
+
+/**
+ * One line per violation, **with the rule id in brackets**.
+ *
+ * The brackets are load-bearing. `scripts/test-gates.mjs` asserts that a known-bad fixture was rejected
+ * by `[button-name]` and `[color-contrast]` specifically, because a fixture rejected by some other rule
+ * while the one under test has quietly stopped matching anything is how a gate reports PASS forever
+ * (ADR 0003). A count is not evidence; a rule id is.
+ */
+export function describeViolation(violation: AxeViolation): string {
+  const nodes = violation.nodes.slice(0, 4).join(', ')
+  return (
+    `[${violation.id}] ${violation.impact ?? 'unknown'} — ${violation.help}` +
+    `${nodes === '' ? '' : ` (${nodes})`}`
+  )
+}
+
 /** Violations across the matrix, deduplicated by rule and element. */
 export function uniqueViolations(results: readonly AccessibilityResult[]): AxeViolation[] {
   const seen = new Map<string, AxeViolation>()

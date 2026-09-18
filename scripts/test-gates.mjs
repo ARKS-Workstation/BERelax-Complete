@@ -1768,6 +1768,664 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// The Google token chokepoint (G-CONN-03), in the two halves it actually splits into.
+//
+// The refresh token is the second-most-valuable secret in this system after the clinical DEK, and the
+// scope it carries has no read-only variant: the token that reads reviews also rewrites the address and
+// the opening hours (docs/10 §3). So "who may hold a plaintext token" is worth a gate rather than a
+// convention — and the interesting part is that ONE gate cannot express it.
+//
+//   - dependency-cruiser sees module-to-module edges. It can close the import path to the accessors in
+//     token-store.ts, and that is all it can do: it cannot see an identifier and it cannot see the string
+//     `refresh_token_ct` inside a query.
+//   - So the other three rules live in scripts/check-google-token-chokepoint.mjs, which scans source.
+//
+// And the loophole that shaped both. A rule matching a MODULE is defeated by a re-export: exactly how
+// `messaging-providers-only-inside-a-transport` came to ban the providers barrel, because
+// `import { SMSALA } from '@berelax/providers'` reached SMSala while naming nothing forbidden. Here the
+// barrel could not be banned — it is the package entry point the consent route legitimately imports — so
+// the accessors were removed from it instead, and case (b) is what holds that shut.
+{
+  // (a) The dependency-cruiser half: a value import of the token accessors from a module that is not one
+  //     of the five permitted to hold a plaintext token. Asserted BY RULE NAME, because a fixture
+  //     rejected by some unrelated rule would leave this one free to stop matching anything.
+  const result = withFixture(
+    'packages/google/src/__gate_fixture__.ts',
+    [
+      "import { connectionBinding, openToken } from './token-store.ts'",
+      'export const decrypt = openToken',
+      'export const bind = connectionBinding',
+    ].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  checkRejectedBy(
+    'boundaries reject a token accessor import from outside the Google token modules',
+    result,
+    'google-tokens-only-in-with-google',
+  )
+}
+
+{
+  // (a-control) The same module, importing the same file for the TYPE of the five sealed columns, must
+  //             pass. `SealedToken` decrypts nothing, and connection-store, memory-store and
+  //             postgres-store all move those columns without ever holding a key. Without this case the
+  //             rule above is indistinguishable from "nothing may mention a token", and the only way to
+  //             satisfy that reading is to move the type somewhere worse.
+  const result = withFixture(
+    'packages/google/src/__gate_fixture__.ts',
+    [
+      "import type { SealedToken } from './token-store.ts'",
+      'export type Sealed = SealedToken',
+    ].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  check(
+    'boundaries allow a type-only import of the sealed-column shape',
+    !result.failed,
+    `rejected a type-only import:\n${result.output}`,
+  )
+}
+
+{
+  // (b) The re-export loophole, held shut by the type system rather than by a boundary rule. The
+  //     accessors are no longer exported from packages/google/src/index.ts, so reaching them through the
+  //     package barrel — the move dependency-cruiser could not have seen — does not compile.
+  const result = withFixture(
+    'packages/google/src/__gate_fixture__.ts',
+    ["import { openToken } from '@berelax/google'", 'export const leak = openToken'].join('\n'),
+    () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+  )
+  checkRejectedBy(
+    'tsc rejects reaching the token accessor through the @berelax/google barrel',
+    result,
+    "has no exported member 'openToken'",
+  )
+}
+
+{
+  // (c) A token column named in a query outside the store whose job is those columns. A SELECT of
+  //     refresh_token_ct somewhere else is a SELECT that intends to decrypt it somewhere else.
+  const result = withFixture(
+    'packages/db/src/repositories/__gate_fixture__.ts',
+    [
+      'export const query =',
+      "  'select refresh_token_ct, access_token_ct from google_connections where id = $1'",
+    ].join('\n'),
+    () => run('node', ['scripts/check-google-token-chokepoint.mjs']),
+  )
+  checkRejectedBy(
+    'the chokepoint gate rejects a token column named outside the store',
+    result,
+    'google-token-columns-outside-the-token-modules',
+  )
+}
+
+{
+  // (d) An accessor identifier outside the token modules. This is the half dependency-cruiser cannot do
+  //     at all — a rule matching an identifier is not something it can express — which is the whole
+  //     reason a source-scanning gate exists beside the boundary rule.
+  const result = withFixture(
+    'apps/web/app/api/v1/__gate_fixture__.ts',
+    ['export function handler(sealToken: unknown) {', '  return sealToken', '}'].join('\n'),
+    () => run('node', ['scripts/check-google-token-chokepoint.mjs']),
+  )
+  checkRejectedBy(
+    'the chokepoint gate rejects a token accessor identifier outside the token modules',
+    result,
+    'google-token-accessor-outside-the-token-modules',
+  )
+}
+
+{
+  // (e) docs/10 §4 asks for this rule by name: *a CI lint rule fails the build on any template literal
+  //     containing the token variable*. A template literal is how a token reaches a log line, a URL, an
+  //     error message and a job payload, and it is the one leak that is invisible in review because the
+  //     interpolation reads like a variable rather than like a secret.
+  const result = withFixture(
+    'packages/google/src/__gate_fixture__.ts',
+    [
+      'export const line = (accessToken: string, refreshToken: string) =>',
+      // Assembled rather than written out, because a literal `${…}` inside a plain string is
+      // itself a Biome warning (noTemplateCurlyInString) — and the fixture has to reach disk as a
+      // real template literal, not as an escaped one.
+      `  \`refreshed with ${'$'}{refreshToken} to get ${'$'}{accessToken}\``,
+    ].join('\n'),
+    () => run('node', ['scripts/check-google-token-chokepoint.mjs']),
+  )
+  checkRejectedBy(
+    'the chokepoint gate rejects a plaintext token in a template literal',
+    result,
+    'google-token-in-a-template-literal',
+  )
+}
+
+{
+  // (e-control) The same shape, interpolating a SEALED column instead. Every parameterised query in
+  //             postgres-store.ts looks like this, so a rule that condemned it would condemn the correct
+  //             code — and a gate that condemns the correct code is a gate somebody deletes.
+  const result = withFixture(
+    'packages/google/src/__gate_fixture__.ts',
+    [
+      "import type { SealedToken } from './token-store.ts'",
+      `export const bytes = (sealed: SealedToken) => \`ct=${'$'}{sealed.ct} kid=${'$'}{sealed.kid}\``,
+    ].join('\n'),
+    () => run('node', ['scripts/check-google-token-chokepoint.mjs']),
+  )
+  check(
+    'the chokepoint gate allows a sealed column interpolated into a query',
+    !result.failed,
+    `rejected a sealed-column interpolation:\n${result.output}`,
+  )
+}
+
+// W-SYS-08 — the catalogue/CMS boundary. Four rules, each with the fixture written for it, plus the
+//            controls. The boundary is the point of the unit: a CMS that owns price ends up being the
+//            second place a price lives, and the second place is the one the owner forgets to change.
+{
+  const CMS = ['exec', 'tsx', 'scripts/check-cms-boundary.mjs']
+  const FIXTURE = 'apps/web/src/collections/__gate_fixture__.ts'
+  const descriptor = (slug, fields) =>
+    [
+      'export const GATE_FIXTURE = {',
+      `  slug: '${slug}',`,
+      '  fields: [',
+      ...fields.map(([name, type]) => `    { name: '${name}', type: '${type}' },`),
+      '  ],',
+      '}',
+    ].join('\n')
+
+  {
+    // The spelling it would actually arrive in. Nobody adds a field called `price`; they add `price_from`
+    // because the treatment page needs a number beside the prose and the join felt like overkill.
+    const result = withFixture(FIXTURE, descriptor('pages', [['price_from', 'text']]), () =>
+      run('pnpm', CMS),
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects a catalogue-owned field on a CMS collection',
+      result,
+      '[no-catalogue-field-in-cms]',
+    )
+  }
+
+  {
+    // A Payload `relationship` is a foreign key. Across this line it couples the catalogue's migration
+    // chain to Payload's, which are deployed separately — see packages/db/migrations/0023.
+    const result = withFixture(
+      FIXTURE,
+      descriptor('service_narrative', [['catalogue_service_id', 'relationship']]),
+      () => run('pnpm', CMS),
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects a cross-boundary reference declared as a relationship',
+      result,
+      '[catalogue-reference-must-be-a-plain-uuid]',
+    )
+  }
+
+  {
+    // A therapist has no display name until an admin sets one, and the place it is set is the employee
+    // record. A second home for it is the one that reaches a public page unapproved.
+    const result = withFixture(
+      FIXTURE,
+      descriptor('therapist_narrative', [['display_name', 'text']]),
+      () => run('pnpm', CMS),
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects a name-shaped field on therapist_narrative',
+      result,
+      '[therapist-narrative-carries-no-name]',
+    )
+  }
+
+  {
+    // The control for the three above. The same file, the same shapes, spelled legitimately: a UUID
+    // reference as plain text, prose, and a name-shaped field on a collection that is not about a
+    // therapist. A gate that rejected this would be a gate nobody could author a collection under.
+    const result = withFixture(
+      FIXTURE,
+      [
+        descriptor('service_narrative', [
+          ['catalogue_service_id', 'uuidRef'],
+          ['aftercare', 'textarea'],
+        ]),
+        descriptor('pages', [['name', 'text']]).replace('GATE_FIXTURE', 'GATE_FIXTURE_TWO'),
+      ].join('\n'),
+      () => run('pnpm', CMS),
+    )
+    check(
+      'cms boundary gate allows a legitimately declared collection',
+      !result.failed,
+      `rejected a legitimate declaration:\n${result.output}`,
+    )
+  }
+
+  {
+    // The site stylesheet inside the admin's route group. `globals.css` clears Tailwind's colour,
+    // spacing, radius and font namespaces with `: initial`; Payload's admin brings its own reset and its
+    // own custom properties. Whichever lands second wins, and the symptom is an admin with no spacing.
+    const result = withFixture(
+      'apps/web/app/(payload)/__gate_fixture__.tsx',
+      "import '../globals.css'\n\nexport const GateFixture = () => null",
+      () => run('pnpm', CMS),
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects the site stylesheet inside the (payload) group',
+      result,
+      '[payload-admin-must-not-load-the-site-stylesheet]',
+    )
+  }
+
+  {
+    // The same rule in the other direction, which is the one that would reach a customer: Payload's admin
+    // stylesheet imported by a public page overrides the site's own reset on every route that renders it.
+    const result = withFixture(
+      'apps/web/app/(en)/__gate_fixture__.tsx',
+      "import '@payloadcms/next/css'\n\nexport const GateFixture = () => null",
+      () => run('pnpm', CMS),
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects the admin stylesheet outside the (payload) group',
+      result,
+      '[payload-admin-must-not-load-the-site-stylesheet]',
+    )
+  }
+
+  {
+    // The type-level half, mutation-tested on the shipped model rather than on a fixture file.
+    //
+    // `packages/cms/src/documents.ts` derives `ServiceNarrativeDocument` from this descriptor, and
+    // `boundary.test.ts` pins it with `// @ts-expect-error` on `narrative.price`. Add a `price` field and
+    // that directive becomes UNUSED — TS2578 — which is the only way to prove the assertion is still
+    // asserting something. A `@ts-expect-error` over an expression that has stopped being an error is
+    // indistinguishable from one over an expression that never was.
+    const model = 'packages/cms/src/collections/service-narrative.ts'
+    const anchor = "    { name: 'slug', type: 'slug', label: 'URL slug', required: true },"
+    const original = readFileSync(model, 'utf8')
+    let typecheck
+    let gate
+    try {
+      const mutated = original.replace(
+        anchor,
+        `    { name: 'price', type: 'text', label: 'Price' },\n${anchor}`,
+      )
+      if (mutated === original) throw new Error(`the anchor line is no longer in ${model}`)
+      writeFileSync(model, mutated)
+      typecheck = run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+      gate = run('pnpm', CMS)
+    } finally {
+      writeFileSync(model, original)
+    }
+    check(
+      'a price field in the content model leaves the boundary @ts-expect-error unused (TS2578)',
+      typecheck.failed && typecheck.output.includes('TS2578'),
+      typecheck.output,
+    )
+    checkRejectedBy(
+      'cms boundary gate rejects a price field added to the shipped content model',
+      gate,
+      '[no-catalogue-field-in-cms]',
+    )
+  }
+}
+
+// 27a-27b. The accessibility gate, on a document that breaks two rules, asserted **by rule id**.
+//
+//      This is the case that says `pnpm a11y` examined a rendered accessibility tree rather than a
+//      file. A count would not: any change to the page moves a count, and a gate whose evidence is a
+//      number reports PASS the day its rule stops matching. `button-name` and `color-contrast` are the
+//      two rule ids, and the fixture contains exactly one defect for each.
+//
+//      The colours are the token values written out, because a fixture page carries no stylesheet:
+//      `#C08A43` is `--color-decor-gold` and `#FDFAF5` is `--color-ground`. That pair measures 2.90:1,
+//      which is the ratio `decor-gold-never-carries-text` in `pnpm colours` exists to prevent and the
+//      reason the darkened `--color-accent-gold` (4.62:1) is what text uses. Writing them here rather
+//      than in a `.ts` or `.css` file under packages/ or apps/ is also what keeps `pnpm colours` out of
+//      this: its exemption list is by single file path, and a fixture that lives in `scripts/` for the
+//      length of one gate run needs no entry in it.
+{
+  const result = withFixture(
+    'scripts/__gate_fixture__.html',
+    [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>fixture</title></head>',
+      '<body style="background:#FDFAF5"><main>',
+      // An icon and nothing else: no text, no aria-label, no title. A screen reader announces "button".
+      '<button type="button" style="width:48px;height:48px">',
+      '<svg width="20" height="20" aria-hidden="true" focusable="false"></svg>',
+      '</button>',
+      '<p style="color:#C08A43;background:#FDFAF5;font-size:17px">',
+      'Body copy on the decorative gold, which measures 2.90:1 against the ground.',
+      '</p>',
+      '</main></body></html>',
+    ].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'tsx', 'scripts/accessibility.mjs', 'scripts/__gate_fixture__.html']),
+  )
+  checkRejectedBy('a11y gate rejects a button with no accessible name', result, '[button-name]')
+  checkRejectedBy('a11y gate rejects body text at 2.90:1', result, '[color-contrast]')
+}
+
+// 27c. The control for 27a-27b. The same two elements, labelled and on the ink colour, must pass — a
+//      gate that fails every document is not measuring anything, and this is the render that says the
+//      two rejections above came from the defects rather than from the harness.
+{
+  const result = withFixture(
+    'scripts/__gate_fixture__.html',
+    [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>fixture</title></head>',
+      '<body style="background:#FDFAF5"><main>',
+      '<button type="button" aria-label="Search treatments" style="width:48px;height:48px">',
+      '<svg width="20" height="20" aria-hidden="true" focusable="false"></svg>',
+      '</button>',
+      // #26241F is --color-ink: 13.7:1 on the ground, which is what body copy actually uses.
+      '<p style="color:#26241F;background:#FDFAF5;font-size:17px">Body copy on the ink colour.</p>',
+      '</main></body></html>',
+    ].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'tsx', 'scripts/accessibility.mjs', 'scripts/__gate_fixture__.html']),
+  )
+  check(
+    'a11y gate allows a labelled button and body copy on the ink colour',
+    !result.failed,
+    `rejected a compliant document:\n${result.output}`,
+  )
+}
+
+// 27d. Lucide imported anywhere but the icon wrapper. docs/08 §7 asks for one wrapped `<Icon>` at
+//      strokeWidth 1.5, 20px UI / 24px nav; a direct import gets Lucide's defaults instead — stroke 2
+//      at 24px — and nothing about that looks wrong in a diff.
+{
+  const result = withFixture(
+    'packages/ui/src/primitives/__gate_fixture__.tsx',
+    ["import { X } from 'lucide-react'", 'export const glyph = X'].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  checkRejectedBy(
+    'boundary gate rejects a Lucide import outside packages/ui/src/icon.tsx',
+    result,
+    'no-lucide-outside-the-icon-wrapper',
+  )
+}
+
+// 27e. The control for 27d, and it is not a formality: the rule was configured, green and **dead** when
+//      it was written, because `options.exclude` matched `(^|/)(dist|\.next|\.claude)/` and every
+//      installed package ships from `dist/` — so the dependency was dropped before any rule saw it. The
+//      fixture above reported nothing at all. Reaching the same glyph through the wrapper has to pass,
+//      or the rule bans the one legitimate path to an icon.
+{
+  const result = withFixture(
+    'packages/ui/src/primitives/__gate_fixture__.tsx',
+    ["import { Icon } from '../icon.tsx'", 'export const glyph = Icon'].join('\n'),
+    () =>
+      run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps']),
+  )
+  check(
+    'boundary gate allows an icon reached through the wrapper',
+    !result.failed,
+    `rejected the wrapper itself:\n${result.output}`,
+  )
+}
+
+// 26p. (B-AVAIL-01) The booking and appointment concurrency constraints, as known-bad fixtures
+//      against real PostgreSQL.
+//
+// These rules are database rules — an exclusion constraint, three CHECKs, a foreign key and two
+// triggers that raise — and a constraint is only a gate once something has been seen to bounce off
+// it. Each probe below is a statement the database must refuse **by the name of the rule written for
+// it**: a bare non-zero exit is also what a typo in a column name produces, and the rule under test
+// would then be dead while this file reported PASS for ever (ADR 0003).
+//
+// Every probe runs inside `begin; … ; rollback;`, so a probe that is wrongly *accepted* leaves
+// nothing behind either. The room-capacity probes need `set constraints all immediate` to make the
+// deferred trigger fire without committing — which is also, incidentally, a second proof that the
+// trigger really is deferred: an immediate one would have raised at the INSERT before that statement
+// was reached.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'gate fixture'
+  const TWIN = 'gate-fixture-twin'
+  const DATE = "'2099-04-01'"
+  const BOOKING = "'40000000-0000-4000-8000-000000000004'"
+  const CUSTOMER = "(select id from customer where phone_e164 = '+971500000199')"
+  const VARIANT =
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1)"
+  const COUPLES = "(select id from rooms where code = 'room-couples')"
+  const TWIN_ROOM = `(select id from rooms where code = '${TWIN}')`
+  const THERAPIST = (suffix) => `'40000000-0000-4000-8000-0000000000${suffix}'::uuid`
+  const slot = (from, to, bounds = '[)') =>
+    `tstzrange('2099-04-01 ${from}:00:00+00','2099-04-01 ${to}:00:00+00','${bounds}')`
+
+  // Fixtures the probes hang off, created inside the same rolled-back transaction. A capacity-2
+  // room of type `standard`, because 0012's `rooms_couples_holds_two` refuses any couples room below
+  // capacity 2 — testing the reduction against the seeded couples room would be rejected by that
+  // rule instead, and `capacity_below_committed` could have been dead for ever.
+  const setup = [
+    `insert into customer (phone_e164, created_via) values ('+971500000199', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${DATE}, '2099-04-01 07:00:00+00', '2099-04-01 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 45, 17000, '${MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes)
+       values ('${TWIN}', 'Gate twin', 'standard', 2, 91, '${MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${BOOKING}, ${CUSTOMER}, 'front_desk', '${MARKER}')`,
+  ].join('; ')
+
+  const appointment = ({ room, therapist, period, status = 'confirmed', price = 20000 }) =>
+    'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+    `room_id, period, status, gross_price_fils) values (${BOOKING}, ${DATE}, ${VARIANT}, 'solo', ` +
+    `${therapist}, ${room}, ${period}, '${status}', ${price})`
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits next to the statement that must trip it. Anything added
+  // here states its own rule, which is the only form of this test that cannot drift into "something
+  // failed".
+  const probes = [
+    {
+      name: 'booking gate rejects two overlapping appointments for one therapist',
+      rule: 'appointment_therapist_no_overlap',
+      // Two different rooms on purpose: the therapist is the constraint, not the room.
+      sql: [
+        appointment({ room: COUPLES, therapist: THERAPIST('01'), period: slot('19', '20') }),
+        appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('19', '20') }),
+      ].join('; '),
+    },
+    {
+      name: 'booking gate rejects an inclusive upper bound on a period',
+      rule: 'appointment_period_half_open',
+      sql: appointment({
+        room: TWIN_ROOM,
+        therapist: THERAPIST('01'),
+        period: slot('19', '20', '[]'),
+      }),
+    },
+    {
+      name: 'booking gate rejects an empty period, which upper > lower cannot catch',
+      rule: 'appointment_period_bounded',
+      // An empty range has null bounds, so `upper(period) > lower(period)` is NULL and passes. This
+      // is the probe that proves the two constraints are not one redundant pair.
+      sql: appointment({
+        room: TWIN_ROOM,
+        therapist: THERAPIST('01'),
+        period: slot('19', '19'),
+      }),
+    },
+    {
+      name: 'booking gate rejects a zero snapshotted price',
+      rule: 'appointment_price_positive',
+      sql: appointment({
+        room: TWIN_ROOM,
+        therapist: THERAPIST('01'),
+        period: slot('19', '20'),
+        price: 0,
+      }),
+    },
+    {
+      name: 'booking gate rejects an appointment on a date the premises does not trade',
+      rule: 'appointment_trading_date_fkey',
+      sql: appointment({
+        room: TWIN_ROOM,
+        therapist: THERAPIST('01'),
+        period: slot('19', '20'),
+      }).replace(`${DATE},`, "'2099-12-25',"),
+    },
+    {
+      name: 'booking gate rejects a third overlapping appointment in the capacity-2 couples room',
+      rule: 'room_over_capacity',
+      sql: [
+        appointment({ room: COUPLES, therapist: THERAPIST('01'), period: slot('19', '20') }),
+        appointment({ room: COUPLES, therapist: THERAPIST('02'), period: slot('19', '20') }),
+        appointment({ room: COUPLES, therapist: THERAPIST('03'), period: slot('19', '20') }),
+        'set constraints all immediate',
+      ].join('; '),
+    },
+    {
+      name: 'booking gate rejects reducing rooms.capacity below overlapping commitments',
+      rule: 'capacity_below_committed',
+      sql: [
+        appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('19', '20') }),
+        appointment({ room: TWIN_ROOM, therapist: THERAPIST('02'), period: slot('19', '20') }),
+        `update rooms set capacity = 1 where code = '${TWIN}'`,
+      ].join('; '),
+    },
+    {
+      name: 'booking gate rejects a status-history row that transitions to the same status',
+      rule: 'appointment_status_history_is_a_change',
+      sql:
+        'insert into appointment_status_history (appointment_id, from_status, to_status) values ' +
+        `(${THERAPIST('09')}, 'confirmed', 'confirmed')`,
+    },
+    {
+      name: 'booking gate rejects an UPDATE of appointment_status_history, for the owner too',
+      rule: 'appointment_status_history is append-only',
+      sql: [
+        appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('19', '20') }),
+        "update appointment_status_history set to_status = 'completed' " +
+          `where appointment_id in (select id from appointment where booking_id = ${BOOKING})`,
+      ].join('; '),
+    },
+  ]
+
+  try {
+    if (!dbUrl) {
+      check(
+        'booking constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      for (const { name, rule, sql: statement } of probes) {
+        checkRejectedBy(name, psqlProbe(statement), rule)
+      }
+
+      // The controls, and the reason the nine above mean anything: the same tables accept the
+      // legitimate row. Without these, a broken connection string or a renamed table would reject
+      // every probe and this gate would report nine passes while examining nothing.
+      const abutting = psqlProbe(
+        [
+          appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('19', '20') }),
+          appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('20', '21') }),
+        ].join('; '),
+      )
+      check(
+        'booking gate accepts two appointments abutting at a boundary for one therapist',
+        !abutting.failed,
+        `rejected a legitimate abutting pair — the half-open bound is not working:\n${abutting.output}`,
+      )
+
+      // Two rows in the capacity-2 couples room, with the deferred check forced to run. This is the
+      // couples booking the whole unit exists to allow.
+      const couplesPair = psqlProbe(
+        [
+          appointment({ room: COUPLES, therapist: THERAPIST('01'), period: slot('19', '20') }),
+          appointment({ room: COUPLES, therapist: THERAPIST('02'), period: slot('19', '20') }),
+          'set constraints all immediate',
+        ].join('; '),
+      )
+      check(
+        'booking gate accepts the two appointments of a couples booking in the capacity-2 room',
+        !couplesPair.failed,
+        `rejected a legitimate couples booking:\n${couplesPair.output}`,
+      )
+
+      // The same reduction as the probe above, with the two appointments at different times of one
+      // evening. A guard counting the day's total rather than the overlap would refuse this, and an
+      // admin who cannot correct a room's capacity is worse off than one with no guard at all.
+      const reducible = psqlProbe(
+        [
+          appointment({ room: TWIN_ROOM, therapist: THERAPIST('01'), period: slot('19', '20') }),
+          appointment({ room: TWIN_ROOM, therapist: THERAPIST('02'), period: slot('21', '22') }),
+          `update rooms set capacity = 1 where code = '${TWIN}'`,
+        ].join('; '),
+      )
+      check(
+        'booking gate allows a capacity reduction when the appointments do not overlap',
+        !reducible.failed,
+        `refused a legitimate capacity reduction:\n${reducible.output}`,
+      )
+
+      // A cancelled appointment releases its therapist and its room, which is the correction the
+      // front desk makes most often. Without the partial predicate on the exclusion constraint this
+      // is the statement that would be refused.
+      const rebooked = psqlProbe(
+        [
+          appointment({ room: COUPLES, therapist: THERAPIST('01'), period: slot('19', '20') }),
+          "update appointment set status = 'cancelled_by_customer' " +
+            `where booking_id = ${BOOKING}`,
+          appointment({ room: COUPLES, therapist: THERAPIST('01'), period: slot('19', '20') }),
+          'set constraints all immediate',
+        ].join('; '),
+      )
+      check(
+        'booking gate accepts re-booking the period a cancellation freed',
+        !rebooked.failed,
+        `refused a re-booking of a cancelled slot:\n${rebooked.output}`,
+      )
+    }
+  } finally {
+    if (dbUrl) {
+      // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for
+      // the case a probe is wrongly ACCEPTED and its transaction is still rolled back by psql — and
+      // because a fixture left in the booking tables would fail every later gate with an error about
+      // the wrong thing. appointment_status_history is deliberately absent: it refuses a DELETE from
+      // every role including the owner, and no probe commits a row into it.
+      run('psql', [
+        '--no-psqlrc',
+        '-q',
+        dbUrl,
+        '-c',
+        `delete from booking_idempotency where booking_id = ${BOOKING}; ` +
+          `delete from appointment where booking_id = ${BOOKING}; ` +
+          `delete from booking where notes = '${MARKER}'; ` +
+          `delete from rooms where code = '${TWIN}'; ` +
+          `delete from service_variant where provisional_note = '${MARKER}'; ` +
+          `delete from business_day where trading_date = ${DATE}; ` +
+          "delete from customer where phone_e164 = '+971500000199';",
+      ])
+    }
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -1781,6 +2439,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm palette',
     'pnpm tokens',
     'pnpm colours',
+    'pnpm cms',
+    'pnpm chokepoint',
     'pnpm layout',
     'pnpm jobs',
     'pnpm adr',

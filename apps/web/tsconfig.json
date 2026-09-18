@@ -15,6 +15,7 @@
     ],
     "paths": {
       "@berelax/clinical": ["../../packages/clinical/src/index.ts"],
+      "@berelax/cms": ["../../packages/cms/src/index.ts"],
       "@berelax/config": ["../../packages/config/src/index.ts"],
       "@berelax/core": ["../../packages/core/src/index.ts"],
       "@berelax/db": ["../../packages/db/src/index.ts"],
@@ -25,16 +26,20 @@
       "@berelax/providers": ["../../packages/providers/src/index.ts"],
       "@berelax/shared": ["../../packages/shared/src/index.ts"],
       "@berelax/ui": ["../../packages/ui/src/index.ts"],
+      "@berelax/harness/accessibility": ["../../packages/harness/src/accessibility.ts"],
       "@berelax/harness/touch-targets": ["../../packages/harness/src/touch-targets.ts"],
       "@berelax/media/*": ["../../packages/media/src/*"],
       "@berelax/providers/call-log": ["../../packages/providers/src/call-log.ts"],
       "@berelax/providers/failure": ["../../packages/providers/src/failure.ts"],
       "@berelax/providers/google": ["../../packages/providers/src/google/index.ts"],
       "@berelax/ui/*": ["../../packages/ui/src/*"],
+      "@berelax/ui/direction": ["../../packages/ui/src/primitives/direction.tsx"],
       "@berelax/ui/layout": ["../../packages/ui/src/layout/index.tsx"],
       "@berelax/ui/patterns": ["../../packages/ui/src/patterns/index.tsx"],
+      "@berelax/ui/primitives": ["../../packages/ui/src/primitives/index.tsx"],
       "@berelax/ui/theme-provider": ["../../packages/ui/src/theme/theme-provider.tsx"],
-      "@berelax/messaging/transports/smsala": ["../../packages/messaging/src/transports/smsala.ts"]
+      "@berelax/messaging/transports/smsala": ["../../packages/messaging/src/transports/smsala.ts"],
+      "@berelax/ui/primitives/contract": ["../../packages/ui/src/primitives/contract.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

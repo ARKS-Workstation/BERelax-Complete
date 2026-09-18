@@ -15,6 +15,8 @@
  * | `invalid_grant` | An OAuth refresh token revoked, expired, or aged out of Testing status |
  * | `quota_exhausted` | A Google API daily quota at zero |
  * | `access_not_granted` | The Business Profile API allowlist not yet approved |
+ * | `not_verified` | A Business Profile listing that is not verified with Google (Voice of Merchant) |
+ * | `admin_policy_enforced` | A Workspace admin marking the service Restricted for the whole org |
  * | `timeout` | The request that neither succeeds nor fails |
  * | `server_error` | The provider's own 5xx |
  *
@@ -29,6 +31,13 @@ export const FAILURE_MODES = [
   'invalid_grant',
   'quota_exhausted',
   'access_not_granted',
+  // The two that only Google produces, added for G-CONN-03's taxonomy. Both are in docs/10 — §4 lists
+  // a Workspace admin marking a service Restricted, and §4's state list names *Listing not verified with
+  // Google* — and neither could be reached from a test before, which meant two of the seven taxonomy
+  // classes were reachable only by constructing an error by hand. A class no fake can produce is a class
+  // whose handling is unproven.
+  'not_verified',
+  'admin_policy_enforced',
   'timeout',
   'server_error',
 ] as const
@@ -70,6 +79,20 @@ const SHAPES: Readonly<Record<FailureMode, FailureShape>> = {
     message:
       'The API is not enabled for this project. Access is granted by application review, not by ' +
       'enabling the API in the console.',
+    retryable: false,
+  },
+  not_verified: {
+    kind: 'forbidden',
+    message:
+      'The Business Profile listing is not verified with Google, so the resource behind this ' +
+      'capability cannot be read or written. Verification is an owner action, not a retry.',
+    retryable: false,
+  },
+  admin_policy_enforced: {
+    kind: 'forbidden',
+    message:
+      'admin_policy_enforced: a Google Workspace administrator has marked this service Restricted ' +
+      'for the organisation. It surfaces at authorisation, before any token exists.',
     retryable: false,
   },
   timeout: {

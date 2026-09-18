@@ -467,7 +467,7 @@ units:
       rooms.capacity, appointment_status_history and booking_idempotency. All tested against real Postgres
       because these cannot be tested against a mock.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-03
@@ -493,11 +493,63 @@ units:
     - Reducing rooms.capacity below the maximum number of concurrently booked appointments in that room
       is refused with a named `capacity_below_committed` error, asserted with a capacity-2 room holding
       a couples booking
+    - 'NOTE: the concrete file names this list left as placeholders. The migration is
+      packages/db/migrations/0024_appointment_constraints.sql and the record is
+      docs/adr/0024-deferred-room-capacity-trigger.md. The test suite is booking-constraints.itest.ts,
+      not .test.ts: packages/db has no database in the unit runner, so a database-backed suite there
+      must be an .itest.ts or it never connects - the same correction B-LIFE-02 made for otp.itest.ts.
+      SCHEMA_VERSION is 24.'
+    - 'NOTE: PostgreSQL 16 DOES accept a WHERE predicate on an EXCLUDE table constraint, both inline in
+      CREATE TABLE and through ALTER TABLE ... ADD CONSTRAINT; this was verified against the running
+      server rather than assumed. It is UNIQUE that has no partial constraint form and has to be a
+      partial unique INDEX instead. So "a partial exclusion index" is satisfied by a real named
+      constraint whose backing index carries the predicate, which is strictly better than a bare index:
+      a violation arrives as SQLSTATE 23P01 naming the rule, pg_constraint can be asserted against, and
+      an EXCLUDE cannot be enforced by an index alone in any case. The predicate reads one stored
+      generated column, appointment.holds_resources, so the exclusion constraint, the partial gist index
+      and the capacity trigger share one definition of "still holds its therapist and room" instead of
+      restating the status list three times.'
+    - 'NOTE: the IMMEDIATE-variant fixture rejects the legitimate second couples row exactly as this
+      list asks, but it has to do it on a rearrangement rather than on an insert-only couples booking,
+      and that is not a narrowing - it is the only shape in which the claim is true. A counting
+      constraint cannot be transiently violated by INSERTs alone, because counts only rise: two
+      appointments in a capacity-2 room are within capacity whether the trigger is immediate or
+      deferred. The fixture therefore swaps a couples booking at 19:00 with a single appointment at
+      20:00 in the one couples room. The first move is accepted, the second - the legitimate second row
+      of the couples booking - is refused by the IMMEDIATE variant with room_over_capacity, and the
+      identical trigger, deferred, accepts all three statements and commits. A third case proves the
+      deferred trigger is not merely a trigger that never fires. ADR 0024 sets this out as a table.'
+    - 'NOTE: the capacity_below_committed case uses a capacity-2 room of type standard created by the
+      fixture, NOT the seeded couples room this line names, and the difference is the whole point.
+      0012 rooms_couples_holds_two already refuses ANY couples room below capacity 2, so a reduction
+      of the seeded couples room is rejected by a constraint that has nothing to do with the
+      appointments in it - capacity_below_committed could have been dead code for ever while the test
+      reported success. Both rules are asserted, each by its own name, in separate cases. The guard
+      also counts only appointments that have not ENDED: a past appointment happened, and refusing a
+      reduction because of last year''s bookings is a room whose capacity can never be corrected.'
+    - 'NOTE: scoped where a dependency does not exist yet. (1) appointment.therapist_id is a plain uuid
+      with no foreign key, because there is no employee table - B-AVAIL-04 builds it and depends on
+      this unit. The exclusion constraint needs no parent: it compares the column to itself. (2) The
+      SELECT ... FOR UPDATE on the rooms row that docs/01 decision 9 pairs with this trigger is NOT
+      here. It belongs to the booking transaction (B-AVAIL-06), and without it two concurrent
+      transactions can each count two overlapping appointments and each commit a third. The trigger is
+      necessary and not sufficient under concurrency; ADR 0024 records that as a consequence rather
+      than leaving it implied. (3) appointment_status_history carries no actor, role or reason columns.
+      B-LIFE-01 asks for those on the transition and owns the API that knows them; this unit provides
+      the chain (from_status, to_status, occurred_at), written by a trigger so a transition without a
+      history row is unreachable, and attribution stays in audit_event - one fact, one source. (4) The
+      appointment carries shape but nothing enforces that (service, shape, room_type) is an eligible
+      triple: service_resource_shape is keyed on the service natural key, which this table reaches only
+      through service_variant, so the check needs either a denormalised key or the solver. It is
+      B-AVAIL-03''s assignment and B-AVAIL-06''s to enforce. (5) booking has no status column at all,
+      deliberately: a booking''s state is a projection of its appointments, and a second status column
+      makes "is this cancelled?" a question with two answers the first time a multi-appointment booking
+      is half-cancelled. B-LIFE-01 owns the lifecycle, B-LIFE-03 the partial-cancellation rule.'
     files:
     - packages/db/src/schema/booking.ts
-    - packages/db/migrations/000X_appointment_constraints.sql
-    - packages/db/src/schema/booking-constraints.test.ts
-    - docs/adr/00XX-deferred-room-capacity-trigger.md
+    - packages/db/migrations/0024_appointment_constraints.sql
+    - packages/db/src/schema/booking-constraints.itest.ts
+    - docs/adr/0024-deferred-room-capacity-trigger.md
   - id: B-AVAIL-02
     order: 21
     title: 'The pure availability solver: trading window, duration, turnaround, buffers, lead and advance'
@@ -4983,7 +5035,7 @@ units:
       17px/28px rhythm, wrapped in DirectionProvider, with the Icon wrapper and the accessibility gate plus
       its known-bad fixture.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H05
@@ -5005,12 +5057,100 @@ units:
       in nav
     - Computed border-radius equals --radius-1 on cards/inputs/chips, --radius-2 on buttons/selects, --radius-3
       on dialog/bottom sheet, --radius-handle only on the sheet handle
+    - 'NOTE: the twelve-render sweep is a second route, not a dir override. The English sink is
+      apps/web/app/(en)/(dev)/kitchen-sink/page.tsx (as W-SYS-02''s note says, not the app/(dev)/... path
+      this unit listed) and the RTL half is apps/web/app/(ar)/ar/kitchen-sink/page.tsx, under the (ar) root
+      layout. Both render one shared apps/web/app/_dev/primitive-gallery.tsx with their own copy, so the
+      sweep audits one component set in two directions. A dir attribute on a wrapper inside the English
+      document would have audited a mirrored *English* page — Latin font stack, --font-size-scalar 1, Latin
+      line-height, tracking still applied — because every rule in theme/arabic.css is inherited from
+      <html>, which is the defect W-SYS-01 already paid for. The Arabic route is an abbreviated sink: the
+      three container-query patterns and the whole primitive set, without the long-form copy W-SYS-02''s
+      measure assertions are taken against on the English route.'
+    - 'NOTE: the sweep itself lives in apps/web/src/primitives.itest.ts, not in `pnpm a11y`, because that
+      script has no server and starting one would make the cheapest gate in `pnpm verify` depend on a
+      `next build`. `pnpm a11y` instead gained an argv mode — each argument is a path to an HTML document,
+      audited once at 390px in the light theme — which is how the known-bad fixture is rejected by rule id
+      (cases 27a-27c in scripts/test-gates.mjs, two rejections and a passing control). Violations now print
+      as `[rule-id] impact — help` so `checkRejectedBy` can assert the id. The script still fails on any
+      violation; the itest asserts zero *serious or critical* because that is this unit''s acceptance
+      wording, and packages/harness/src/accessibility.ts now exports BLOCKING_IMPACTS/blockingViolations so
+      both agree on what blocking means. No third browser harness: the sweep uses the harness''s auditPage.'
+    - 'NOTE: `no-lucide-outside-the-icon-wrapper` was configured, green and dead when first written, and the
+      fix is in .dependency-cruiser.cjs''s options.exclude rather than in the rule. The exclude was
+      `(^|/)(dist|\.next|\.claude)/`, which also matched every installed package that ships from dist/ —
+      so the dependency was dropped before any rule could see it, and a fixture importing lucide-react was
+      cruised with no violation reported. Anchored to first-party paths it cruises 288 modules and 914
+      dependencies where it cruised 276 and 810. `react` resolves to react/index.js with no dist/ in its
+      path, which is why core-must-be-pure never noticed. Same class of defect as ADR 0002''s green tick on
+      zero modules, one layer down. Cases 27d-27e in scripts/test-gates.mjs are the rejection and the
+      passing control; it may have been hiding other dead branches
+      (messaging-providers-only-inside-a-transport''s /node_modules/(smsala|resend|twilio)/ branch is live
+      only because those packages are not installed).'
+    - 'NOTE: DirectionProvider is fed from the locale in apps/web/app/_document/shell.tsx and imported from
+      a subpath (@berelax/ui/direction) rather than the primitives barrel, so a marketing route does not
+      carry a client reference to the dialog. Radix Select reads direction from the provider itself and puts
+      it on both the trigger and the portalled listbox; Dialog and Popover carry no direction at all, so
+      those two pass dir={useDirection()} explicitly. This is also where the unit found a real defect:
+      @radix-ui/react-direction was installed at 1.1.2 while @radix-ui/react-select depends on 1.1.4, giving
+      two module instances and two contexts, and the Arabic select''s portal rendered dir="ltr" while every
+      other overlay was rtl. Pinned to 1.1.4. Nothing but an assertion on the rendered attribute would have
+      caught it, and the assertion covers all four overlays in both directions.'
+    - 'NOTE: the compile error lives in packages/ui/src/primitives/contract.ts, which is a .ts file on
+      purpose — the root typecheck project includes packages/**/*.ts and has no jsx, so the .tsx siblings are
+      invisible to `pnpm typecheck` while this one is not. IconLabelling is a discriminated union (icon-only
+      requires aria-label and forbids children; labelled requires children), generic over the icon and child
+      types so the file needs no React import. contract.test.ts asserts it with three @ts-expect-error
+      directives: mutation-tested both ways — deleting the first reports TS2322 "Type ''{ icon: "close"; }''
+      is not assignable", and a union that stopped rejecting would fail with TS2578 unused directive.'
+    - 'NOTE: Radix Select renders a hidden 1x1 native <select> that mirrors its value for form submission,
+      and it cannot know whether the trigger is inside a <form> until the trigger has mounted — so the
+      mirror is in the server-rendered HTML unconditionally. It is 1x1 with clip: rect(0,0,0,0), which
+      `pnpm touch-targets` reads as a control 47px under the floor, so field.tsx gives
+      `.be-select-field > select[aria-hidden="true"]` display: none. A display:none control still submits
+      its value, so nothing about form integration changes.'
+    - 'NOTE: docs/08 §4 assigns no radius to a popover or a select menu — its table covers cards/inputs/chips,
+      buttons/selects, dialog/bottom sheet and the sheet handle. Both take --radius-2 here, on the grounds
+      that each hangs off a control and reads as an extension of it; docs/08 §4 should say so either way.
+      The four assigned roles are asserted against the document itself by contract.test.ts, which parses the
+      radius table out of docs/08 rather than restating it.'
+    - 'NOTE: scoped rather than satisfied in full — the primitive set is Button, Icon, Field/Input/Textarea,
+      Select, Popover, Dialog, Sheet, Panel and Chip, which is every primitive the acceptance lines name and
+      no more. Tabs, tooltip, toast, accordion, checkbox, radio and switch arrive with the units that render
+      them; a component with no caller has no assertions to prove it. docs/08 §7''s tw-animate-css is not
+      installed either: the four entrance animations are authored keyframes in primitives/overlay.tsx using
+      the motion tokens, and W-SYS-04 owns the motion system. The twelve commissioned service pictograms
+      (§7, 24px grid, 1.25px stroke) are deferred to whichever unit receives the artwork — none exists in
+      assets/media today.'
+    - 'NOTE: this unit''s files list named tests/a11y/kitchen-sink.spec.ts. There is no Playwright test
+      runner in this repository — no playwright.config, no tests/ directory; Playwright is used as a library
+      from vitest (see packages/harness and every *.itest.ts) — so the sweep is
+      apps/web/src/primitives.itest.ts, in the integration suite that already builds and starts the
+      application. A second runner would have been a second CI step, a second set of timeouts and a second
+      way to start `next start`.'
     files:
-    - packages/ui/src/primitives/*.tsx
+    - packages/ui/src/primitives/contract.ts
+    - packages/ui/src/primitives/contract.test.ts
+    - packages/ui/src/primitives/button.tsx
+    - packages/ui/src/primitives/field.tsx
+    - packages/ui/src/primitives/surface.tsx
+    - packages/ui/src/primitives/overlay.tsx
+    - packages/ui/src/primitives/dialog.tsx
+    - packages/ui/src/primitives/popover.tsx
+    - packages/ui/src/primitives/select.tsx
+    - packages/ui/src/primitives/direction.tsx
+    - packages/ui/src/primitives/styles.tsx
+    - packages/ui/src/primitives/index.tsx
     - packages/ui/src/icon.tsx
-    - apps/web/app/(dev)/kitchen-sink/page.tsx
+    - apps/web/app/_dev/primitive-gallery.tsx
+    - apps/web/app/(en)/(dev)/kitchen-sink/page.tsx
+    - apps/web/app/(ar)/ar/kitchen-sink/page.tsx
+    - apps/web/app/_document/shell.tsx
+    - apps/web/src/primitives.itest.ts
+    - packages/harness/src/accessibility.ts
+    - scripts/accessibility.mjs
     - scripts/test-gates.mjs
-    - tests/a11y/kitchen-sink.spec.ts
+    - .dependency-cruiser.cjs
   - id: W-SITE-01
     order: 132
     title: Route spine, EN/AR locales, canonicalisation and the route registry
@@ -5423,7 +5563,7 @@ units:
       only, bind access to the F07 roles, and make the catalogue/CMS boundary a mechanical fact rather than
       a convention.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F07
@@ -5445,12 +5585,99 @@ units:
       (assertion on the audit table, F06)
     - 'Payload admin routes return `x-robots-tag: noindex`, are absent from every sitemap, and are absent
       from the public route registry (enumerated assertions)'
+    - 'NOTE: the content model, the catalogue-boundary rules, the CMS access policy and the route prefixes
+      live in a NEW package, packages/cms, not in apps/web. The reason is the compile-error half of the
+      boundary: the root typecheck project excludes apps/web (it has its own tsconfig with jsx and the DOM
+      lib), so a @ts-expect-error inside apps/web is never judged by pnpm typecheck. apps/web/src/collections
+      and apps/web/src/globals are thin adapters that turn each descriptor into a Payload CollectionConfig.'
+    - 'NOTE: the compile-error assertion is packages/cms/src/boundary.test.ts. ServiceNarrativeDocument is
+      DERIVED from the field descriptors by documents.ts, so adding a price field to the model makes the
+      @ts-expect-error unused and pnpm typecheck reports TS2578. Mutation-tested, and the mutation is a
+      permanent fixture in scripts/test-gates.mjs. The sample document is ANNOTATED rather than `satisfies`-ed
+      on purpose: with `as const satisfies`, its type stays the literal''s, so the directive would remain used
+      after a price field was added and the mutation would report only a missing property.'
+    - 'NOTE: a new gate, pnpm cms (scripts/check-cms-boundary.mjs), with four machine-readable rules —
+      no-catalogue-field-in-cms, catalogue-reference-must-be-a-plain-uuid, therapist-narrative-carries-no-name
+      and payload-admin-must-not-load-the-site-stylesheet. It runs over the descriptor sources AND over the
+      config buildConfig actually generated, and refuses to report success if either examined zero fields.
+      Eight new cases in scripts/test-gates.mjs, two of them controls. Added to pnpm verify and to ci.yml.'
+    - 'NOTE: Tailwind and Payload are kept apart by the route group itself. app/globals.css is imported by
+      the two locale root layouts and by nothing under (payload); @payloadcms/next/css is imported by
+      app/(payload)/layout.tsx and nowhere else. Next scopes a CSS import to the layout subtree, so the two
+      never load together — measured, not assumed: /admin and / share ZERO stylesheet chunks in the built
+      app, the admin bundle contains none of our tokens and the site bundle none of Payload''s
+      --theme-elevation-* variables. The fourth gate rule fails the build if either import crosses.'
+    - 'NOTE: Payload''s REST API is mounted at /cms-api, not at its default /api. /api belongs to the
+      application (docs/09 documents /api/facts as public) and Payload''s route is a catch-all, so the
+      default would put a catch-all in one root layout group and a static sibling in another. GraphQL is
+      disabled outright: every field it exposes is a field the access rules must be right about twice.'
+    - 'NOTE: SCOPED — the booking count behind the unpublish/delete refusal. The catalogue service table and the
+      appointment table do not exist yet (B-CAT-03 and B-AVAIL-01 are todo), so the real probe in
+      apps/web/src/payload/future-bookings.ts answers `unknowable` and the rule FAILS CLOSED — refused, with
+      the named error service_narrative_bookings_unknowable, rather than treated as zero. The counted
+      branches (refuse at >0, allow at 0, always allow archive) are proved in the integration test through an
+      injected probe, and the real probe''s `unknowable` answer is asserted against this database as it
+      stands. Deferred to B-CAT-03/B-AVAIL-01 to land public.appointment(service_id, starts_at); the archive
+      301 and sitemap removal are W-SITE-05''s.'
+    - 'NOTE: SCOPED — "absent from every sitemap" and "absent from the public route registry". Neither exists yet —
+      the route registry is W-SITE-01''s and the sitemaps are W-SITE-10''s, both todo. Delivered instead:
+      CMS_ROUTE_PREFIXES, isCmsRoute and cmsRoutesIn in @berelax/cms for those two units to assert against,
+      so the exclusion is written down once rather than as a second list in each; plus the enumerated
+      x-robots-tag assertions, which ARE satisfied in full — against the real next.config.ts object in
+      apps/web/src/payload-routes.test.ts (every prefix covered, with a control that no public path is) and
+      against a live response from the built app.'
+    - 'NOTE: SCOPED — the admin''s identity store and its second factor. F07 landed as packages/auth (password,
+      TOTP and session primitives) plus the matrix in packages/core, and it created NO staff_user table —
+      nothing in the migration chain holds a staff identity and no manifest unit declares one. Payload''s
+      admin needs an auth collection to exist at all, so cms_user lives in the payload schema with a role
+      constrained to the F07 ROLES set, and every access decision goes through can(role, permission). What
+      is therefore missing: ADR 0009 makes TOTP mandatory for owner, manager and accountant, and Payload''s
+      local strategy has no second factor, so this admin authenticates with a password alone. Deferred to
+      whichever unit introduces staff_user/staff_session, at which point cms_user becomes a custom
+      authStrategies projection of it and no access rule in apps/web changes.'
+    - 'NOTE: the manifest asks that "an editor cannot mutate a compliance-locked global". F07 has no `editor`
+      role; marketer and manager are the roles holding content:write, and both are refused on
+      compliance_notices (settings:write_compliance, owner-only) while both are allowed on
+      editorial_defaults — the control that stops the refusal being "deny every global". The related finding
+      is stronger than the acceptance line: content:publish appears in NO role''s grant list except the
+      owner''s wildcard, so manager and marketer DRAFT and only the owner publishes. Bound to the matrix as
+      it landed; widening an authorisation matrix from a CMS unit is how a matrix stops meaning anything.'
+    - 'NOTE: the audit row is written inside Payload''s OWN transaction, through the drizzle session for
+      req.transactionID, rather than through @berelax/db''s AuditWriter — which holds a postgres connection
+      of its own and would leave an audit row describing a change a rollback undid. Proved by rolling a
+      transaction back and asserting the row went with it, with the committing case as the control.
+      Unpublish and version revert are classified rather than recorded as plain updates: Payload reports all
+      three as `update`, and a trail in which they are indistinguishable cannot answer who took a page down.'
+    - 'NOTE: the content model has no numeric field type at all (CONTENT_FIELD_TYPES). Every number this
+      business cares about is money in integer fils (ADR 0007), a duration, or a count, and each has an
+      owner that is not the CMS. FAQ ordering uses Payload''s own orderable column instead of an editorial
+      order number.'
     files:
-    - apps/web/app/(payload)/admin/[[...segments]]/page.tsx
+    - packages/cms/package.json
+    - packages/cms/src/fields.ts
+    - packages/cms/src/collections/*.ts
+    - packages/cms/src/globals/*.ts
+    - packages/cms/src/documents.ts
+    - packages/cms/src/boundary.ts
+    - packages/cms/src/boundary.test.ts
+    - packages/cms/src/access.ts
+    - packages/cms/src/lifecycle.ts
+    - packages/cms/src/audit.ts
+    - packages/cms/src/routes.ts
     - apps/web/payload.config.ts
+    - apps/web/app/(payload)/layout.tsx
+    - apps/web/app/(payload)/admin/[[...segments]]/page.tsx
+    - apps/web/app/(payload)/admin/[[...segments]]/not-found.tsx
+    - apps/web/app/(payload)/cms-api/[...slug]/route.ts
     - apps/web/src/collections/*.ts
     - apps/web/src/globals/*.ts
-    - packages/db/migrations/00XX_payload_schema.sql
+    - apps/web/src/payload/*.ts
+    - apps/web/src/payload.itest.ts
+    - apps/web/src/payload-routes.test.ts
+    - apps/web/next.config.ts
+    - packages/db/migrations/0023_payload_schema.sql
+    - scripts/check-cms-boundary.mjs
+    - scripts/test-gates.mjs
   - id: W-SITE-07
     order: 142
     title: CMS-driven routes, internal linking and breadcrumbs
@@ -6044,7 +6271,7 @@ units:
       into the consumer's declared degraded mode. The CONSUMERS table from docs/10 SS2 is the only place
       a consumer names what it needs.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-02
@@ -6068,6 +6295,82 @@ units:
     - 'Every failure that affects a capability writes a row the owner dashboard reads (per docs/10 SS4:
       a pg-boss failure alone is not evidence); a test asserts the dashboard-visible row count increments
       and deliberately fails if only pgboss.job recorded the failure'
+    - 'NOTE: the chokepoint is TWO gates, because one cannot express it, and the split is the design.
+      dependency-cruiser sees module-to-module edges only: google-tokens-only-in-with-google closes the
+      import path to packages/google/src/token-store.ts and nothing else. It cannot see an identifier and
+      it cannot see the string refresh_token_ct inside a query, so those live in the new source-scanning
+      gate scripts/check-google-token-chokepoint.mjs (pnpm chokepoint) under three named rules:
+      google-token-columns-outside-the-token-modules, google-token-accessor-outside-the-token-modules and
+      google-token-in-a-template-literal — the last being the rule docs/10 §4 asks for by name. Each of
+      the four has a known-bad fixture in scripts/test-gates.mjs asserted by rule name, plus two controls'
+    - 'NOTE: the RE-EXPORT loophole the brief pointed at was real and open. packages/google/src/index.ts
+      re-exported openToken, sealToken, rewrapToken and connectionBinding, so
+      `import { openToken } from ''@berelax/google''` reached the decryption function while naming nothing
+      a module rule could match — the same shape as `import { SMSALA } from ''@berelax/providers''`.
+      Unlike the providers barrel this one cannot be banned: it is the package entry point the consent
+      route legitimately imports. So the accessors were removed from the barrel and only the SealedToken
+      TYPE is re-exported, which makes reaching them a tsc error (asserted by name in the gate harness).
+      Nothing outside packages/google imported them, so the removal cost nothing'
+    - 'NOTE scoped, not satisfied in full: the rule permits FIVE modules, not the two this line names.
+      lifecycle.ts (refresh), rewrap.ts (KEK rotation) and oauth/reconnect.ts (the consent write) each
+      legitimately hold a plaintext token today, and with-google.ts does not — it obtains its token
+      through accessTokenFor. Narrowing to two would mean moving the refresh into with-google.ts, which
+      G-CONN-04 immediately moves back out into token-refresh.ts. The rule also exempts type-only imports
+      via dependencyTypesNot, because connection-store/memory-store/postgres-store move the five sealed
+      columns without ever holding a key, and a rule that condemned the correct code would be relaxed'
+    - 'NOTE: NO MIGRATION, and 0028_google_capability_failures.sql was not used. SCHEMA_VERSION stays 21.
+      The failure ledger is google_connection_events from 0016, which is already append-only, already
+      mirrored into audit_event by a trigger in the same transaction, already refuses a payload carrying
+      a token by CHECK, and is already what the connection panel renders. agent_alert from G-AGT-01 was
+      the other candidate and is the wrong shape — keyed on agent_key, it answers ''which agent has gone
+      silent'', not ''which capability of which connection failed''. A third ledger would only create a
+      question about which one to believe. The event name is health_check_failed, the vocabulary 0016''s
+      CHECK already permits for an authenticated call that failed; a synonym would have cost a migration'
+    - 'NOTE: two failure modes were added to the shared FailureScript — not_verified and
+      admin_policy_enforced. Without them ListingNotVerified and AdminPolicyEnforced were reachable only
+      by hand-building an error, and a taxonomy class no fake can produce is a class whose handling is
+      unproven. Both are documented Google failures (docs/10 §4: a Workspace admin marking a service
+      Restricted; the *Listing not verified with Google* state). The conformance suite arms every mode
+      against every fake, so this widened that loop rather than needing a change to it'
+    - 'NOTE: the taxonomy is one class SHORT of the fake fault codes, and this is docs/10''s gap rather
+      than an implementation choice. The seven classes have no member for ''the provider rejected the
+      request and will reject it again'', so the fake mode `rejected` maps to TransientUpstream. The
+      retry decision therefore travels in details.retryable via isRetryableGoogleError rather than in the
+      class name, and a test asserts rejected is classified TransientUpstream AND not retryable, so a
+      caller reading the class name as a retry policy is contradicted by the test rather than by a bug'
+    - 'NOTE: withGoogle degrades on FIVE classes, not the two docs/10 §4 names. The rule is: a failure
+      the next attempt cannot fix degrades, a failure it might fix throws so pg-boss retries with
+      backoff. So GoogleReauthRequired and AccessNotGranted (named in §4) plus QuotaZero,
+      ListingNotVerified and AdminPolicyEnforced degrade, while RateLimited and TransientUpstream throw —
+      degrading a sixty-second rate limit into draft-only mode would cost a day of manual work. DEGRADES
+      is a total Record over the class union, so a new class cannot be added without deciding.
+      NotConnected and ResourceNotSelected degrade too (docs/10 §6: the fallback IS the launch mode) and
+      deliberately write no event row, because there is no connection row to hang one on and the panel
+      already renders never_connected from the absence itself'
+    - 'NOTE: the fake OAuth provider was recording the PLAINTEXT refresh token in its call-log detail on
+      every successful refresh — a log the admin call-log pane renders and the screenshot harness
+      photographs. Now a 12-hex-character SHA-256 fingerprint. Found only because the leak detector was
+      pointed at the provider call log as well as at the application logger, which is exactly the
+      wrong-surface failure the control in that test exists to catch'
+    - 'NOTE: withGoogle''s capability parameter is typed DeclaredCapability, derived from the CONSUMERS
+      table''s own contents, so withGoogle(''gbp_performance'') is a COMPILE error until a consumer
+      declares it — the strongest available form of ''the table is the only place a consumer names what
+      it needs''. indexByCapability also refuses two consumers declaring one capability, because the
+      degraded mode would otherwise resolve by object enumeration order'
+    - 'NOTE: the ledger row and the log line carry an upstream FINGERPRINT beside the class —
+      upstreamKind (the error''s class name), errorKind (AppError''s closed union), failureMode
+      (validated against FAILURE_MODES) and sqlState (matched against /^[0-9A-Z]{5}$/ and nothing else).
+      googleCallError deliberately drops the upstream message and its cause, because a library that built
+      its message from the request would carry an Authorization header into every log line quoting it —
+      and the cost of that showed up immediately: a TransientUpstream with nothing attached named nothing,
+      and 53300 (too_many_connections) was the value that would have. The SQLSTATE pattern is the
+      load-bearing part rather than a length cap: the first 64 characters of a bearer token are still most
+      of a token, and a test feeds a token-shaped `code` and asserts nothing comes back'
+    - 'NOTE deferred: nothing CALLS withGoogle yet. The review autoresponder (G-REV), the SEO agent
+      (G-SEO) and the consistency checker are its three consumers and none exists, so the CONSUMERS
+      table is exercised by tests rather than by callers. Nothing renders the failure rows either —
+      that is the settings card in G-CONN-07 — and the advisory transaction lock around the
+      read-refresh-write is G-CONN-04, as G-CONN-01''s NOTE already records'
     files:
     - packages/google/src/with-google.ts
     - packages/google/src/consumers.ts

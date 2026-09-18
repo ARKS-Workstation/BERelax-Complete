@@ -35,6 +35,7 @@ export default defineConfig({
       include: [
         'packages/core/src/**/*.ts',
         'packages/auth/src/**/*.ts',
+        'packages/cms/src/**/*.ts',
         'packages/config/src/**/*.ts',
         'packages/messaging/src/**/*.ts',
         'packages/providers/src/**/*.ts',

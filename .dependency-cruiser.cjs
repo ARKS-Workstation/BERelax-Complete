@@ -105,6 +105,62 @@ module.exports = {
       },
     },
     {
+      name: 'google-tokens-only-in-with-google',
+      comment:
+        'Only the Google token-handling modules may reach the token accessors in ' +
+        'packages/google/src/token-store.ts — openToken, sealToken, rewrapToken and connectionBinding. ' +
+        'The refresh token is a durable bearer credential for control of the business Google presence, ' +
+        'and the scope it carries has no read-only variant: the token that reads reviews also rewrites ' +
+        'the address and the opening hours (docs/10 §3). A consumer that decrypted one would also be ' +
+        'bypassing withGoogle, and with it the taxonomy, the correlation id, the declared degraded mode ' +
+        'and the dashboard row that makes a failure visible. ' +
+        'WHAT THIS RULE CAN AND CANNOT DO, because the difference is the whole design: ' +
+        'dependency-cruiser sees module-to-module edges, so it can close the import path to the ' +
+        'accessors and nothing else. It cannot see an identifier, and it cannot see the string ' +
+        'refresh_token_ct in a query — those halves are scripts/check-google-token-chokepoint.mjs, ' +
+        'whose rules are google-token-columns-outside-the-token-modules, ' +
+        'google-token-accessor-outside-the-token-modules and google-token-in-a-template-literal. ' +
+        'A rule matching a module is also defeated by a RE-EXPORT, which is how ' +
+        'messaging-providers-only-inside-a-transport came to ban the providers barrel; here the barrel ' +
+        'cannot be banned, because it is the package entry point the consent route legitimately imports, ' +
+        'so the accessors were removed from packages/google/src/index.ts instead and only the ' +
+        'SealedToken type is re-exported. A type decrypts nothing.',
+      severity: 'error',
+      from: {
+        // The four modules that legitimately hold a plaintext token, plus with-google.ts, the chokepoint
+        // this rule is named for. Tests are allowed because a fixture has to seal a token to exist, and
+        // a test file ships nowhere. Narrowing this to the two modules the manifest names would mean
+        // moving the refresh into with-google.ts, which G-CONN-04 immediately moves back out.
+        pathNot: [
+          '^packages/google/src/(with-google|token-store|lifecycle|rewrap|oauth/reconnect)\\.ts$',
+          '^packages/google/src/.*\\.(test|itest)\\.ts$',
+        ],
+      },
+      to: {
+        path: '^packages/google/src/token-store\\.ts$',
+        // The exemption that keeps the rule honest rather than merely strict. `SealedToken` is the five
+        // sealed columns as a type, and connection-store, memory-store and postgres-store all move those
+        // columns around without ever holding a key. Condemning a type-only import would have forced
+        // either a pointless type move or — far likelier — the rule being relaxed to nothing.
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'no-lucide-outside-the-icon-wrapper',
+      comment:
+        'Only packages/ui/src/icon.tsx may import Lucide. docs/08 §7 asks for it "behind a wrapped ' +
+        '<Icon> export at strokeWidth 1.5, 20px UI / 24px nav" — imported directly, those three numbers ' +
+        'are props somebody has to remember at every call site, and the ones they forget are the Lucide ' +
+        'defaults: stroke 2 at 24px, which is a heavier, geometrically different system sitting beside ' +
+        '17px humanist text. The wrapper also closes the set of names, so an icon nobody chose does not ' +
+        'compile and the bundle carries eight glyphs rather than the library. Two alternations, for the ' +
+        'same reason core-must-be-pure has three: an installed package resolves into node_modules, an ' +
+        'uninstalled one resolves to its bare name.',
+      severity: 'error',
+      from: { pathNot: '^packages/ui/src/icon\\.tsx$' },
+      to: { path: '(^|/)node_modules/lucide-react/|^lucide-react(/|$)' },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',
@@ -138,7 +194,15 @@ module.exports = {
     // `.next` is build output — 180-odd generated chunks, every one an orphan, which buries a real
     // finding in noise. `.claude/worktrees` is a parallel checkout of this same repository, so cruising
     // it would report every module twice.
-    exclude: { path: '(^|/)(dist|\\.next|\\.claude)/' },
+    //
+    // Anchored to first-party paths, which it was not. `(^|/)(dist|\.next|\.claude)/` also excluded
+    // every installed package that ships from `dist/` — which is most of them — so a rule whose `to.path`
+    // named such a package could never fire: the dependency was dropped before any rule saw it.
+    // `no-lucide-outside-the-icon-wrapper` was configured, green, and dead, and a fixture importing
+    // `lucide-react` was cruised with no violation reported. Same class of defect as ADR 0002's "green
+    // tick on zero modules", one layer down. `react` resolves to `react/index.js` and had no `dist/` in
+    // its path, which is why `core-must-be-pure` never noticed.
+    exclude: { path: '(^|/)\\.claude/|^(packages|apps)/[^/]+/(dist|\\.next)/' },
     tsPreCompilationDeps: true,
     tsConfig: { fileName: 'tsconfig.base.json' },
     enhancedResolveOptions: { exportsFields: ['exports'], conditionNames: ['import', 'require'] },

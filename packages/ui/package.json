@@ -5,15 +5,23 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./theme-provider": "./src/theme/theme-provider.tsx",
-    "./tokens.css": "./src/tokens/tokens.css",
-    "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",
     "./arabic.css": "./src/theme/arabic.css",
+    "./direction": "./src/primitives/direction.tsx",
+    "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",
     "./layout": "./src/layout/index.tsx",
-    "./patterns": "./src/patterns/index.tsx"
+    "./patterns": "./src/patterns/index.tsx",
+    "./primitives": "./src/primitives/index.tsx",
+    "./primitives/contract": "./src/primitives/contract.ts",
+    "./theme-provider": "./src/theme/theme-provider.tsx",
+    "./tokens.css": "./src/tokens/tokens.css"
   },
   "dependencies": {
     "@berelax/shared": "workspace:*",
+    "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-direction": "1.1.4",
+    "@radix-ui/react-popover": "1.1.16",
+    "@radix-ui/react-select": "2.3.7",
+    "lucide-react": "0.552.0",
     "react": "19.3.0"
   },
   "devDependencies": {

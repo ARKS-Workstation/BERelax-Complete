@@ -24,6 +24,30 @@ export type {
   StatusWrite,
 } from './connection-store.ts'
 export {
+  type CapabilityDeclaration,
+  CONSUMERS,
+  type ConsumerDeclaration,
+  type DeclaredCapability,
+  type DegradedMode,
+  declarationFor,
+  type GoogleConsumer,
+  indexByCapability,
+  isDeclaredCapability,
+} from './consumers.ts'
+export {
+  capabilityHealthFor,
+  classifyGoogleError,
+  DEGRADES,
+  FAILURE_MODE_CLASS,
+  GOOGLE_ERROR_CLASSES,
+  type GoogleErrorClass,
+  googleCallError,
+  isRetryableGoogleError,
+  UPSTREAM_CODE_CLASS,
+  type UpstreamFingerprint,
+  upstreamFingerprint,
+} from './errors.ts'
+export {
   type AccessTokenGrant,
   accessTokenFor,
   googleReauthRequired,
@@ -74,11 +98,29 @@ export {
 } from './oauth/reconnect.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
+/**
+ * The token *shape*, and deliberately not the token *accessors*.
+ *
+ * `openToken`, `sealToken`, `rewrapToken` and `connectionBinding` were re-exported here until G-CONN-03,
+ * which made the chokepoint rule unenforceable in exactly the way
+ * `messaging-providers-only-inside-a-transport` documents: a dependency-cruiser rule matching a *module*
+ * is defeated by a re-export, so `import { openToken } from '@berelax/google'` reached the decryption
+ * function while naming nothing forbidden. Unlike the providers barrel this one cannot simply be banned —
+ * it is the package's only entry point and the consent route legitimately imports from it — so the fix is
+ * the other direction: the accessors leave the barrel, and the only way to them is a relative import from
+ * inside this package, which is a module path a rule can match.
+ *
+ * `SealedToken` stays: it is the five sealed columns as a type, and a type decrypts nothing.
+ */
+export type { SealedToken } from './token-store.ts'
 export {
-  connectionBinding,
-  GOOGLE_CONNECTIONS_TABLE,
-  openToken,
-  rewrapToken,
-  type SealedToken,
-  sealToken,
-} from './token-store.ts'
+  type DegradationCause,
+  type GoogleCallContext,
+  type GoogleErrorSink,
+  type GoogleLogger,
+  type GoogleLogLine,
+  type LogLevel,
+  type WithGoogleDeps,
+  type WithGoogleOutcome,
+  withGoogle,
+} from './with-google.ts'
