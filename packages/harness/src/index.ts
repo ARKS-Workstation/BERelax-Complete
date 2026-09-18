@@ -6,6 +6,15 @@
  * against and a defect that has been there since the first commit is invisible.
  */
 export {
+  type AccessibilityResult,
+  AXE_TAGS,
+  type AxeViolation,
+  auditPage,
+  type Impact,
+  uniqueViolations,
+} from './accessibility.ts'
+export {
+  accessibilityResults,
   type Capture,
   type CaptureHarness,
   createCaptureHarness,

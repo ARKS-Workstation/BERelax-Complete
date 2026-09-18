@@ -283,7 +283,71 @@ const runExpectingFailure = (cmd, args) => {
   check('media gate rejects a cropped asset with no focal point', failed)
 }
 
-// 20. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 20. An accessibility violation must fail the axe gate.
+{
+  // The same non-compliant specimen. axe reports its 2.90:1 body text as a serious colour-contrast
+  // violation, independently of the critique pass — two implementations disagreeing would be a
+  // finding, and both agreeing is what makes either worth running.
+  const f = 'scripts/__gate_fixture__.mjs'
+  writeFileSync(
+    f,
+    [
+      "import { FIXTURE_NOW } from '../packages/fixtures/src/clock.ts'",
+      "import { uniqueViolations } from '../packages/harness/src/accessibility.ts'",
+      "import { accessibilityResults, createCaptureHarness } from '../packages/harness/src/capture.ts'",
+      "import { renderNonCompliantSpecimenHtml } from '../packages/harness/src/non-compliant.ts'",
+      'const harness = await createCaptureHarness({ nowMs: FIXTURE_NOW })',
+      'try {',
+      "  const captures = await harness.capture({ name: 'bad', html: renderNonCompliantSpecimenHtml })",
+      '  const violations = uniqueViolations(accessibilityResults(captures))',
+      '  if (violations.length === 0) process.exit(0)',
+      "  console.error(violations.length + ' violation(s)')",
+      '  process.exit(1)',
+      '} finally { await harness.close() }',
+      '',
+    ].join('\n'),
+  )
+  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', f])
+  rmSync(f, { force: true })
+  check('axe reports an inaccessible page as a violation', failed)
+}
+
+// 21. An uncovered file in packages/core must breach the coverage threshold.
+{
+  // packages/core carries a higher floor than the rest, because it is pure domain logic: money,
+  // time, business day, authorisation. Thirty uncovered statements there take it under 95%.
+  const f = 'packages/core/src/__gate_fixture__.ts'
+  const lines = ['export function uncovered(n: number): number {', '  let total = 0']
+  for (let i = 0; i < 30; i += 1) lines.push(`  if (n > ${i}) total += ${i}`)
+  lines.push('  return total', '}', '')
+  writeFileSync(f, lines.join('\n'))
+  const { failed } = runExpectingFailure('pnpm', [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    '--coverage.enabled',
+  ])
+  rmSync(f, { force: true })
+  check('coverage thresholds reject an uncovered file in packages/core', failed)
+}
+
+// 22. A breached byte budget must fail.
+{
+  const f = 'build/budgets.json'
+  const original = readFileSync(f, 'utf8')
+  const config = JSON.parse(original)
+  // Payload weight never regresses in one visible step. It regresses eight kilobytes at a time.
+  const tokens = config.budgets.find((budget) => budget.id === 'tokens-css')
+  tokens.maxBytes = 256
+  writeFileSync(f, `${JSON.stringify(config, null, 2)}\n`)
+  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/check-budgets.mjs'])
+  writeFileSync(f, original)
+  check('byte budgets reject an oversized artifact', failed)
+}
+
+// 23. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -301,11 +365,13 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm media',
     'pnpm fixtures',
     'pnpm critique',
-    'pnpm test',
+    'pnpm a11y',
+    'pnpm coverage',
     'pnpm test:integration',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',
+    'pnpm budgets',
     'pnpm gates:test',
     'postgres:16',
   ]

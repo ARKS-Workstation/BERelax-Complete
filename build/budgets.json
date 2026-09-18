@@ -1,0 +1,45 @@
+{
+  "note": "Byte budgets for everything shipped to a browser or embedded in a document. W-SYS adds the JavaScript bundles once apps/web exists; these are the artifacts that exist today and can regress today.",
+  "budgets": [
+    {
+      "id": "tokens-css",
+      "label": "Design tokens stylesheet",
+      "kind": "file",
+      "path": "packages/ui/src/tokens/tokens.css",
+      "maxBytes": 6144,
+      "why": "Loaded on every page and inlined into every generated document. It is 21 colours and five scales; a token layer past 6KB has stopped being a token layer."
+    },
+    {
+      "id": "tailwind-theme",
+      "label": "Tailwind theme",
+      "kind": "file",
+      "path": "packages/ui/src/tokens/tailwind.css",
+      "maxBytes": 4096,
+      "why": "A mapping, not a stylesheet. Growth here means utilities are being defined where components should be."
+    },
+    {
+      "id": "document-fonts",
+      "label": "Fonts embedded in every generated PDF",
+      "kind": "fonts",
+      "maxBytes": 143360,
+      "why": "Four woff2 subsets carried by every invoice. docs/08 budgets 120KB Latin and 100KB Arabic for the web; a document pays both at once, and a fifth face would put 40KB on every emailed invoice."
+    },
+    {
+      "id": "invoice-pdf",
+      "label": "A one-page tax invoice",
+      "kind": "file",
+      "path": "packages/pdf/fixtures/tax-invoice-en-ar.pdf",
+      "maxBytes": 90112,
+      "why": "Emailed to customers and kept for five years of FTA retention. Most of it is the font subsets; a sharp rise means an image or a second font crept in."
+    },
+    {
+      "id": "gallery-page",
+      "label": "Screenshot gallery page",
+      "kind": "file",
+      "path": "artifacts/screens/gallery.html",
+      "maxBytes": 65536,
+      "optional": true,
+      "why": "It references its captures rather than embedding them. Inlining took it to 24MB once the specimen carried photographs, over the Artifact limit; this budget is what notices if that returns."
+    }
+  ]
+}

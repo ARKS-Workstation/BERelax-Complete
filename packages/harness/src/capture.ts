@@ -9,6 +9,7 @@
  * the gallery and the defect listed beside it cannot disagree.
  */
 import { type Browser, chromium, type Page } from 'playwright'
+import { type AccessibilityResult, type AxeViolation, auditPage } from './accessibility.ts'
 import { type CritiqueResult, critiqueInPage, critiqueInputFor, type Finding } from './critique.ts'
 import { DETERMINISM_CSS, freezePageEnvironment } from './determinism.ts'
 import { type CaptureTarget, captureFilename, targetsFor } from './matrix.ts'
@@ -30,6 +31,9 @@ export interface Capture {
   readonly filename: string
   readonly png: Uint8Array
   readonly findings: readonly Finding[]
+  /** axe violations from the same render the image came from. */
+  readonly violations: readonly AxeViolation[]
+  readonly incomplete: readonly string[]
 }
 
 export interface PageSource {
@@ -90,9 +94,19 @@ export async function createCaptureHarness(options: HarnessOptions): Promise<Cap
       })
 
       const findings = await page.evaluate(critiqueInPage, critiqueInputFor(target.viewport))
+      // Before the screenshot, and in the same page: an audit of a different render is an audit of a
+      // different page, because theme, direction and viewport all change what is on screen.
+      const audit: AccessibilityResult = await auditPage(page, target)
       const png = await page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' })
 
-      return { target, filename: captureFilename(target), png, findings }
+      return {
+        target,
+        filename: captureFilename(target),
+        png,
+        findings,
+        violations: audit.violations,
+        incomplete: audit.incomplete,
+      }
     } finally {
       await context.close()
     }
@@ -113,6 +127,15 @@ export async function createCaptureHarness(options: HarnessOptions): Promise<Cap
       return browser.close()
     },
   }
+}
+
+/** The accessibility results for a set of captures, in matrix order. */
+export function accessibilityResults(captures: readonly Capture[]): AccessibilityResult[] {
+  return captures.map((capture) => ({
+    target: capture.target,
+    violations: capture.violations,
+    incomplete: capture.incomplete,
+  }))
 }
 
 /** The critique results for a set of captures, in matrix order. */

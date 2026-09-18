@@ -228,7 +228,7 @@ units:
     order: 16
     title: Quality gates wired into CI
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F02
     - H04

@@ -105,8 +105,11 @@ jobs:
       - name: Design self-critique
         run: pnpm critique
 
-      - name: Unit tests
-        run: pnpm test
+      - name: Accessibility (axe, WCAG 2.1/2.2 AA)
+        run: pnpm a11y
+
+      - name: Unit tests and coverage thresholds
+        run: pnpm coverage
 
       - name: Integration tests (real PostgreSQL)
         run: pnpm test:integration
@@ -119,6 +122,9 @@ jobs:
 
       - name: Schema conventions (timestamptz, integer money)
         run: pnpm db:conventions
+
+      - name: Byte budgets
+        run: pnpm budgets
 
       - name: Gates fire
         run: pnpm gates:test
