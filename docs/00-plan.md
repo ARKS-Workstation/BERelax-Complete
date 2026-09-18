@@ -15,8 +15,8 @@ WhatsApp and a diary or an incumbent app. Two consequences follow:
 1. **The build is under no revenue pressure.** The business keeps trading on its current process
    throughout. Nothing is lost by finishing the system before switching to it.
 2. **The end of the build is a migration, not a launch.** The hard part is not "going live" — it is
-   moving a live, operating business onto the system without losing a booking, a voucher liability or
-   a leave balance. §7 is therefore a work breakdown, not a risk-mitigation plea.
+   moving a live, operating business onto the system without losing a booking, an outstanding package
+   balance or a leave balance. §7 is therefore a work breakdown, not a risk-mitigation plea.
 
 **Changes.** No phased staff onboarding, one UAT, one training event, one cutover.
 Business-outcome-per-phase sequencing is gone, so the organising structure becomes **parallel
@@ -152,8 +152,9 @@ seconds, measured.
 Till/checkout with cash, in-salon card machine and bank transfer via a manual payments adapter, so
 the ledger is correct before any gateway exists. FTA-compliant bilingual tax invoices and simplified
 invoices with snapshotted issuer identity and **gapless sequential numbering allocated inside the
-insert transaction**. Credit notes as the only correction mechanism. Vouchers, packages and
-memberships as **deferred revenue liabilities** with redemption, balance, expiry and breakage. Cash
+insert transaction**. Credit notes as the only correction mechanism. **Packages** as the
+sole prepaid product and a **deferred revenue liability** — definitions configured in settings, with
+redemption, session balance, validity and breakage. No gift vouchers, no memberships. Cash
 drawer reconciliation per shift. Rebooking prompt at checkout. Chart of accounts, **append-only
 double-entry journal**, period locking, corrections by dated reversal. Suppliers, bills, expense
 capture, payables. **Recurring-cost register** with fixed/variable split and variance alerting.
@@ -210,7 +211,7 @@ Reporting schema in the same Postgres, refreshed by materialised views. P&L, bal
 cash-flow statement. The spa KPI set with explicit formulas: therapist and room utilisation, revenue
 per available room-hour, average ticket, retail attachment, rebooking rate, retention cohorts, LTV,
 no-show cost, discount leakage, labour cost %, **contribution margin per service**, break-even,
-voucher liability, CAC and payback. Seasonality including Ramadan and the summer exodus. Cash-flow
+outstanding package liability, CAC and payback. Seasonality including Ramadan and the summer exodus. Cash-flow
 forecast from recurring costs plus forward bookings and payroll. Pushed alerts. Role-scoped
 dashboards with drill-down and a data-quality view that refuses to show an unreconciled number.
 
@@ -308,15 +309,14 @@ diary, the accountant's ledger. Extracting it is the job.
 |---|---|
 | Customers | Phone normalisation to E.164 and duplicate merge. Expect 5–15% duplicates from a phone-and-WhatsApp process |
 | Historic bookings | Enough history for the reporting cohorts and each client's visit record |
-| **Unredeemed gift vouchers** | Real, enforceable liabilities held by real customers. Missing one produces an angry client at the desk and a wrong opening balance sheet |
-| **Outstanding packages and memberships** | Remaining session balances and expiry dates |
+| **Outstanding packages already sold** | Real, enforceable liabilities held by real customers, with remaining session balances and validity dates. Missing one produces an angry client at the desk and a wrong opening balance sheet |
 | Staff records | Contracts, skills, and **current visa / labour-card / certification expiry dates** |
 | **Leave balances as they stand today** | The accrual engine needs an opening balance per employee, not a zero |
 | Accounting opening balances | From the accountant, at a clean period boundary |
 | Existing site URLs | Into a 301 redirect map, if the site is being replaced |
 
 Run the migration three times against staging. Each run produces a reconciliation report — counts,
-totals, voucher liability, leave liability — compared against the source. The third run should have no
+totals, outstanding package liability, leave liability — compared against the source. The third run should have no
 unexplained variance. Then run it once for real during the freeze window.
 
 **Parallel run, two weeks.** Both the existing process and the new system record every booking, with
@@ -409,7 +409,7 @@ the flex list **now**, before the pressure arrives.
 **Frozen — never cut, because the cost of retrofitting is worse than the delay:**
 money correctness (integer fils, gross-first, snapshotting), the append-only journal and gapless
 numbering, the availability engine's correctness constraints, consent gating and the audit log, the
-clinical boundary, the compliance lints, and the migration reconciliation of voucher liabilities.
+clinical boundary, the compliance lints, and the migration reconciliation of outstanding package balances.
 
 **Flexible — ship a thinner version and extend after launch:**
 
@@ -419,7 +419,7 @@ clinical boundary, the compliance lints, and the migration reconciliation of vou
 | SEO agent (S) | The GSC data warehouse and weekly emailed report; no suggestion engine |
 | Payments (Y) | Cash, card machine and bank transfer only — already the plan for launch |
 | Arabic / RTL | English at launch, Arabic as the first post-launch release — but keep i18n plumbing and the RTL PDF proof from F |
-| Memberships | Vouchers and packages only |
+| Package complexity | Single flat package type (N sessions of one service) before multi-service or tiered packages |
 | Retail inventory | Sell retail as a simple line item; no stock or COGS |
 | Financial analysis (R) | P&L, cash flow and the five owner KPIs; defer cohorts and forecasting |
 | CMS editorial depth | A fixed set of page templates; defer the composable block library |

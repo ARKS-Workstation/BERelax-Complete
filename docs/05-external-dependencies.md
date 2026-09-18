@@ -82,7 +82,7 @@ A morning's work. No external wait.
 | Same-gender therapist matching requirement | Municipality approval conditions, or current operating practice — the business already knows how it operates. Confirm in writing if the licence is silent |
 | VAT registration status, TRN, assigned tax period, filing deadline | The accountant, and the FTA portal |
 | Exact tax-invoice format currently issued and accepted | Existing invoices. Compare against [04-uae-compliance.md](04-uae-compliance.md) §4 and have the accountant confirm any gaps |
-| Current VAT treatment of vouchers and packages | The accountant. This one is worth asking explicitly — it is commonly got wrong |
+| VAT treatment of prepaid packages — date of supply on sale versus on redemption | The accountant. Ask explicitly; it is commonly got wrong, and it decides the whole deferred-revenue model |
 | Whether offshore supplier invoices currently carry reverse charge | The accountant. Also commonly missed |
 | Mainland, DIFC, ADGM or free zone | Incorporation documents. Determines whether federal PDPL or a free-zone regime applies |
 | Insurance cover in force, and what the insurer requires to accept a claim | The existing policy and broker. The claim requirements define the incident record schema |
@@ -138,7 +138,7 @@ rather than deciding.
 - **Staff list** with skills, languages, gender, and certification expiry dates.
 - **Opening hours**, including Ramadan variations.
 - The **existing chart of accounts** and what the accountant expects to receive each month.
-- **Unredeemed gift vouchers and outstanding packages already sold** — with balances and expiry dates.
+- **Outstanding packages already sold** — holder, price paid, sessions remaining, purchase date, validity. The single most important migration artefact; see [11-execution-plan.md](11-execution-plan.md) §7.
 - **Current staff leave balances.**
 - **Customer list** for import, and the existing website's URLs for the redirect map.
 - If bookings currently run through an incumbent app (Fresha, Booksy, Zenoti or similar): what the

@@ -228,7 +228,7 @@ like this one.
 ## 10. Consumer protection and payments
 
 Price display obligations and honouring advertised prices; cancellation and refund rules;
-gift-voucher expiry rules.
+package validity and expiry rules, and what happens to an unredeemed balance.
 
 For workstream Y (Payments): the **merchant category code** matters. Massage and wellness sit in a category several
 acquirers treat as heightened risk, and the classification applied during onboarding — by people

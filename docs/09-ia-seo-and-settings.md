@@ -223,6 +223,30 @@ This is what "everything interconnected" actually means, concretely.
 | **Reminder timing** | Existing scheduled reminders rebuilt with new invalidation keys — not just future bookings |
 | **Quiet hours** | Campaign scheduler · automation engine send gate · **cannot be disabled, only shifted within legal bounds** |
 
+### Package definitions as settings
+
+Packages are the only prepaid product and are configured from day one, so they are a worked example of
+the tiered model rather than a footnote.
+
+| Field | Tier | Constraint |
+|---|---|---|
+| Package name (EN/AR) | Content | Public display name passes the compliance lint |
+| Included service(s) | **Operational** | Must reference live catalogue services; cannot reference an archived one |
+| Session count | **Operational** | Integer ≥ 1 |
+| Price | **Operational** | Gross integer fils, VAT-inclusive, like every other price |
+| Validity period | **Operational** | Months from purchase; confirm the consumer-protection position on expiry with the lawyer |
+| Transferable | **Operational** | Boolean. Affects whether a balance can move between customers |
+| Unredeemed-balance policy at expiry | **Compliance-locked** | Breakage recognition has a VAT and consumer-protection consequence; changing it is an audited action with the accountant's sign-off |
+
+Two rules that are code, not settings: a **price change never alters an already-sold package** (the sale
+snapshots its terms, exactly as bookings snapshot theirs), and **editing a template never retroactively
+changes outstanding balances** — an edit creates a new template version, and existing balances stay on
+the version they were sold under. Without both, one admin edit silently rewrites a liability.
+
+Add to the interconnection map: changing a **package template** creates a new version, leaves outstanding
+balances on their original version, updates the public package page and its `Offer` schema, and is
+audited.
+
 ### The agent console
 
 Where interconnection becomes visible and controllable. One screen listing every agent — SEO agent,

@@ -9,9 +9,10 @@ Confirmed alongside this:
 | Decision | Consequence |
 |---|---|
 | **Claude is the builder** | No parallelism. Strict dependency order. Verification, not typing, is the bottleneck |
-| **No incumbent platform** — phone, WhatsApp, paper diary | No export to audit. But no export also means **vouchers, packages and the customer list must be reconstructed** — see §7 |
+| **No incumbent platform** — phone, WhatsApp, paper diary | No export to audit. But no export also means **outstanding packages and the customer list must be reconstructed** — see §7 |
 | **Photo library already exists** | Removes the longest-lead dependency, **conditional on passing the week-0 audit** in §4 |
 | **Owner's personal Gmail for Google** | Accepted. Raises the OAuth risk profile and makes one week-0 experiment a hard blocker — see §6 |
+| **Packages only, configured in settings from day one** | No gift vouchers, no memberships. One prepaid product, one deferred-revenue liability, one migration artefact — see §7 |
 
 ---
 
@@ -218,13 +219,17 @@ to migrate from, so several things must be reconstructed by hand.** Two of them 
 
 | Item | Where it lives now | Risk |
 |---|---|---|
-| **Unredeemed gift vouchers** | Paper, a drawer, a notebook, memory | **Highest-risk item in the migration.** Real, enforceable liabilities held by real customers. Miss one and you get an angry client at the desk and a wrong opening balance sheet. There is no export to fall back on |
-| **Outstanding packages / prepaid sessions** | Same | As above, with remaining-session counts to reconstruct |
+| **Outstanding packages / prepaid sessions** | Paper, a drawer, a notebook, memory | **Highest-risk item in the migration.** Real, enforceable liabilities held by real customers, with remaining-session counts to reconstruct. There is no export to fall back on |
 | **Customer list** | Phone contacts, WhatsApp chats, paper cards | See the consent problem below |
 | **Current leave balances** | Informal | The accrual engine needs an opening balance per employee, not zero |
 | **Accounting opening balances** | The accountant | Needs a clean period boundary |
 | **Service menu and prices** | Whatever is current | Must be authoritative before the catalogue is seeded |
+| **Package definitions** | Whatever is sold today | Seeded as `package_template` rows in settings before any package balance is imported |
 | **Room inventory and honest turnaround times** | Operational knowledge | The availability engine is wrong without real numbers |
+
+Gift vouchers and memberships being out of scope removes two of the three prepaid liabilities and leaves
+a single artefact to reconstruct. That is a material reduction in migration risk — the remaining one
+still has to be right.
 
 ### The consent problem, which is not obvious
 
@@ -245,10 +250,24 @@ So the migration imports these contacts with:
 This is worth raising now because it is tempting to import 2,000 numbers and start marketing to them,
 and that is precisely the thing that gets a sender ID suspended and a fine issued.
 
-**Recommendation:** make voucher and package reconstruction a **named task with a deadline in week 0**,
-not a cutover-week scramble. Go through the physical records, build a spreadsheet of holder, value,
-purchase date and expiry, and have the owner sign it off as complete. That signed list becomes the
-opening liability balance and the defence when someone appears with a voucher nobody recorded.
+### The package reconstruction task
+
+Make this a **named task with a deadline in week 0**, not a cutover-week scramble.
+
+1. **Define the package templates first**, in settings: name, which service(s), number of sessions,
+   price paid, validity period, whether transferable, and what happens to an unredeemed balance at
+   expiry. Nothing can be imported until the shapes exist.
+2. **Go through the physical records** and build one spreadsheet: holder name and phone, package
+   template, price paid, purchase date, **sessions used to date**, sessions remaining, validity.
+3. **Reconcile the total** to whatever cash was actually taken — the accountant may be able to
+   corroborate from bank and till records. A package list that does not reconcile to money received is
+   incomplete.
+4. **Have the owner sign it off as complete.** That signed list becomes the opening liability balance,
+   and the defence when someone appears in month three with a package nobody recorded.
+
+Then decide — with the accountant — the policy for a package sold before the system existed whose paper
+trail is thin: honour it, honour it once on evidence, or decline. Deciding that **before** the first
+disputed case is much easier than during it.
 
 ---
 

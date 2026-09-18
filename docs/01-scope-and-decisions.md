@@ -17,6 +17,8 @@ financial analysis; and an agentic SEO system with Google Search Console access.
 | Automated statutory tax filing | The taxable person carries the liability. The system produces working papers; a human files |
 | A payroll calculation engine | Export to a reviewed WPS file instead of reimplementing UAE payroll law |
 | Native mobile apps | Responsive web and a PWA cover it at this scale |
+| **Gift vouchers** | Not sold. Removes voucher issuance, delivery, redemption, expiry/breakage and one prepaid liability |
+| **Memberships** | Not sold. Removes recurring billing, monthly revenue recognition and churn economics |
 
 ### What dropping outcall actually saved
 
@@ -86,6 +88,7 @@ Each of these should become an ADR in `docs/adr/` when workstream F starts.
 | 17 | Region | Frankfurt as the working assumption, **pending the health-data residency answer** | DigitalOcean has no UAE region. This is a documented legal decision, not a hosting default |
 | 18 | Extensions | `btree_gist`, `pgcrypto`, `pg_trgm`, `unaccent`. No PostGIS | PostGIS was only needed for outcall zones |
 | 19 | Gender matching | A hard constraint in the availability solver, **default strict**, downgradable to advisory only as an audited configuration change once the licensing authority confirms in writing | If it applies and the engine cannot express it, the system routinely generates bookings that must be cancelled by hand, and one non-compliant appointment at inspection is a licence risk. The safe behaviour is what happens if nobody configures anything |
+| 19b | Prepaid products | **Packages only**, defined as `package_template` rows configured in settings from day one | One prepaid product means one deferred-revenue path, one liability account, one migration artefact and one VAT date-of-supply question to settle with the accountant. Vouchers and memberships each add a distinct recognition pattern; declining both now is a real simplification, and adding one later is a new product rather than a variant |
 | 20 | Regulatory profile | A single versioned config row driving vocabulary, retention, permitted titles and credential requirements, defaulting to the **stricter** of wellness and healthcare | Makes the build immune to a late answer from the lawyer |
 
 ## 5. Things not to build at this scale

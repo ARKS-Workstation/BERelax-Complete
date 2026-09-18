@@ -60,11 +60,11 @@ twice annually. Built into the workstream R (Reporting) seasonality model.
 
 ## C. Money: where the numbers go wrong quietly
 
-**C1. Vouchers and packages are liabilities, not revenue.** Selling AED 10,000 of gift vouchers in
-December is not December revenue. Getting this wrong overstates profit, misstates VAT timing, and is
+**C1. Packages are liabilities, not revenue.** Selling AED 10,000 of prepaid packages in December is not
+December revenue; it is a liability drawn down as sessions are taken. Getting this wrong overstates profit, misstates VAT timing, and is
 discovered during a VAT reconciliation when it is already historical.
 
-**C2. Unredeemed vouchers already sold are a migration problem.** They are real, enforceable
+**C2. Packages already sold are a migration problem.** They are real, enforceable
 liabilities held by real customers. Miss them at cutover and you get angry clients and a wrong
 opening balance sheet. On the workstream F (Foundation) data-collection list.
 
@@ -166,8 +166,9 @@ line and needs stock, COGS, reorder points and stock takes (workstream M (Money)
 year one — needs contract rates, consolidated monthly invoicing and a referral code. Not built, but
 the model should not preclude it.
 
-**F3. Memberships.** Different economics from packages (recurring revenue, breakage, churn) and a
-different recognition pattern.
+**F3. Memberships — explicitly out of scope,** but worth knowing what you are declining: recurring
+revenue, different churn economics and monthly recognition rather than drawdown. If they ever come up,
+they are a new product with a new recognition pattern, not a package variant.
 
 **F4. Equipment maintenance and permit renewals** — beds, hydrotherapy equipment, insurance, trade
 licence, municipality permits. Covered by the compliance calendar, which is why it is in the first
@@ -249,7 +250,7 @@ order is chosen so that the earliest phases reduce the owner's daily workload ra
 | 4 | Promotional sender ID suspended, stopping booking confirmations | High | Two separately registered sender IDs; class-locked templates; marketing kill switch cannot affect transactional |
 | 5 | Double-booking under concurrency | High | `btree_gist` exclusion constraint + deferred room-capacity trigger + row lock + property-based tests |
 | 6 | Stale reminders after reschedule or cancellation | High | Invalidation keys on every scheduled step; tested as an invariant |
-| 7 | Revenue/VAT misstated by voucher and package treatment | High | Deferred revenue model with the VAT event separated from recognition, from workstream M (Money) |
+| 7 | Revenue/VAT misstated by package treatment | High | Deferred revenue model with the VAT event separated from recognition, from workstream M (Money) |
 | 8 | Staff reject the system as slower than paper | High | Front-desk speed as a measured acceptance criterion; super-user per shift; parallel run |
 | 9 | Client list exfiltrated by an insider | High | Export logging and alerting; narrow permissions; separate tamper-evident audit log |
 | 10 | Health data leaks to Google/Meta | High | Egress guard with an enumerating test; consent gating on both client and server paths |

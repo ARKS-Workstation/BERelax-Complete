@@ -156,10 +156,9 @@ boundary. "Prenatal massage" as a GA4 item name is a health disclosure to a thir
 ## 7. Accounting: the parts that are actually hard
 
 **Revenue recognition.** "Revenue = sum of bookings" is wrong in at least five ways here. A gift
-voucher sold today is a *liability* until redeemed. A package is a liability drawn down per
-session. A membership is recognised monthly. A deposit is a liability. Tips are pass-through, not
-revenue. The VAT event and the revenue event happen at **different times** for vouchers and
-packages, and getting that wrong is discovered during a VAT reconciliation, when it is historical.
+package sold today is a *liability*, drawn down per session as it is redeemed — not revenue on the day
+the customer pays. A deposit is a liability. Tips are pass-through, not revenue. The VAT event and the
+revenue event happen at **different times** for a package, and getting that wrong is discovered during a VAT reconciliation, when it is historical.
 
 **Gapless sequential numbering.** Tax authorities check for gaps. The number must be allocated from
 a Postgres sequence *inside the same transaction as the document insert* — allocate-then-insert

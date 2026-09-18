@@ -124,8 +124,8 @@ status lifecycle, segments, cost), `campaign`, `flow_definition` (versioned JSON
 
 **Money**
 `invoice` (snapshotted issuer name/address/TRN, gapless series number), `invoice_line`,
-`credit_note`, `payment`, `refund`, `cash_session`, `voucher`, `package`, `package_balance`,
-`membership`, `journal_entry` + `journal_line` (append-only), `account` (with `vat_box` tag),
+`credit_note`, `payment`, `refund`, `cash_session`, `package_template` (configured in settings),
+`package_sale`, `package_balance`, `package_redemption`, `journal_entry` + `journal_line` (append-only), `account` (with `vat_box` tag),
 `supplier`, `supplier_tax_profile` (offshore flag driving reverse charge), `bill`,
 `recurring_cost`, `expense_claim`, `stock_item`, `stock_movement`, `period_lock`.
 
