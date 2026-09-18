@@ -1,308 +1,289 @@
 # Execution Plan — Step by Step
 
-The ordered sequence from today to steady state, derived from
-[00-plan.md](00-plan.md) (workstreams and dependencies), [05](05-external-dependencies.md) (external
-queues) and [10](10-google-connection.md) (Google sequencing).
+**Claude builds this.** There is no engineering team, so this plan is not measured in engineer-weeks
+and has no parallel tracks. It is a single-threaded dependency order, decomposed into **work units**
+sized to one working session, with the repository as the memory between them.
 
-**Baseline assumption for the calendar: two engineers.** §9 gives the one- and three-engineer variants.
-Step numbers are stable; week numbers move with team size.
+Confirmed alongside this:
+
+| Decision | Consequence |
+|---|---|
+| **Claude is the builder** | No parallelism. Strict dependency order. Verification, not typing, is the bottleneck |
+| **No incumbent platform** — phone, WhatsApp, paper diary | No export to audit. But no export also means **vouchers, packages and the customer list must be reconstructed** — see §7 |
+| **Photo library already exists** | Removes the longest-lead dependency, **conditional on passing the week-0 audit** in §4 |
+| **Owner's personal Gmail for Google** | Accepted. Raises the OAuth risk profile and makes one week-0 experiment a hard blocker — see §6 |
 
 ---
 
-## Stage 0 — Week 0: discovery and starting the clocks
+## 1. What this model changes, and what it does not
 
-Nothing here is code. Every step either unblocks a later stage or starts an external queue that runs in
-the background for weeks. **Stage 0 is the highest-leverage week in the project** — skipping it is how
-month six becomes month nine.
+**Unchanged.** The dependency graph is physics: checkout cannot precede the catalogue, reporting cannot
+precede facts, reminders cannot precede the appointment lifecycle. The seven integration milestones,
+the definition of done, the compliance controls and the external clocks are all exactly as specified in
+[00-plan.md](00-plan.md).
 
-| # | Step | Output | Unblocks |
+**Changed.**
+
+- **No parallel tracks.** Work proceeds in one order. Ordering therefore optimises for something new:
+  putting work that needs *your* input early, so your review latency overlaps my build time rather than
+  blocking it.
+- **Engineer-weeks are the wrong unit.** Replaced by work units sized to a session, each independently
+  verifiable.
+- **The repository is the memory.** I do not carry context between sessions. Anything not written to the
+  repo — a decision, a rationale, a half-finished intent — is lost. That makes ADRs, a progress ledger
+  and tests load-bearing infrastructure rather than good practice.
+- **Verification is the bottleneck.** Writing code is fast; proving it correct is not. Tests and CI are
+  the deliverable alongside the code, not a follow-up.
+- **Some things I cannot do at all.** §2 is explicit about that, and it is the most important section
+  in this document.
+
+---
+
+## 2. The split — what only you can do
+
+I cannot act in the physical or legal world, hold your credentials, or certify UAE tax correctness.
+These are yours, and **the build stalls on several of them**:
+
+| # | Yours | Why it cannot be delegated | Blocks |
 |---|---|---|---|
-| 1 | **Collect the handover pack** — real service menu with durations and prices; actual room inventory (count, types, couples-capable, service compatibility, honest turnaround); staff list with skills, languages, gender, certification expiries; opening hours including Ramadan; existing chart of accounts; **unredeemed vouchers and outstanding packages with balances**; **current leave balances per employee**; customer list; existing site URLs | A populated seed dataset | B, M, P, and the migration |
-| 2 | **Read the trade licence** and any municipality / health-authority approval | `licence_class`, permitted public vocabulary, permitted staff titles, permitted room types | F (regulatory profile), W (lint lexicon) |
-| 3 | **Establish who owns the Google Business Profile listing and at what role**, and who is a Verified Owner of the Search Console property | The truth, which may be a former agency | Everything Google |
-| 4 | **Buy one Google Workspace seat** on the business domain; create the business account; add it as a **GBP Owner** | Starts Google's owner-promotion waiting period in the background | §3 of [10](10-google-connection.md) |
-| 5 | **Submit the GBP Basic API Access application** with the Cloud project number, from an owner/manager account | Approval clock starts (days to ~6 weeks) | Autoresponder API mode |
-| 6 | **Start the 9-day OAuth token-expiry experiment** — publish to Production, consent, record `consent_at`, assert the token still works on day 9 | Resolves the single biggest silent-failure risk | The OAuth publishing decision |
-| 7 | **Ask the lawyer the one health-data residency question** | The hosting region decision | F (region), and go-live with real intake data |
-| 8 | **Start two SMSala sender-ID registrations** (transactional + `AD-` promotional) with e& and du | Registration clock starts | C (campaigns) |
-| 9 | **Open the acquirer conversation**; get the MCC confirmed in writing. Ask two providers | Merchant onboarding clock starts | Y |
-| 10 | **Baseline the existing site** — full crawl, rank snapshot, GSC export, top-page inventory | The 301 map source, and the before/after evidence | W, and the cutover |
-| 11 | **Confirm `btree_gist`** is available on DO Managed Postgres, and that a standby is offered on the intended tier | Concurrency design validated | B |
-| 12 | **Brief the photographer and book the shoot** using the art-direction brief in [08](08-frontend-design.md) §6 | Real media, which has a **long lead time** | W — genuinely blocked without it |
-| 13 | **Audit the incumbent export**, if bookings run through Fresha / Booksy / Zenoti | What actually comes out, and what does not | The migration and the cutover date |
+| Y1 | **Send me the trade licence** and any municipality / health-authority approval | I need to read the actual document to set `licence_class` and the permitted vocabulary | Foundation, all public copy |
+| Y2 | **Find out which Google account owns the GBP listing**, and at what role | Requires signing into accounts I have no access to. May be a former agency | Everything Google |
+| Y3 | **Submit the GBP Basic API Access application** | Must come from an owner/manager account | Autoresponder API mode |
+| Y4 | **Run the 9-day OAuth token experiment** | Requires consenting with your Google account | **Hard blocker — see §6** |
+| Y5 | **Ask the lawyer the health-data residency question** | One question, but it must come from the client | Hosting region; loading real intake data |
+| Y6 | **Register two SMSala sender IDs** | Commercial application in the business's name | Campaigns |
+| Y7 | **Open the acquirer conversation**, two providers, MCC in writing | Commercial | Payments |
+| Y8 | **Provide the handover pack** — §7 | Only you have it | Booking, Money, People, migration |
+| Y9 | **Confirm the availability rules** — same-gender matching, turnaround times, cancellation windows | Business rules I must not invent | Booking engine sign-off |
+| Y10 | **Complete the OAuth consent** and confirm the location picker shows the right listing | Your account, your listing | Google connection |
+| Y11 | **Have an FTA-registered tax agent review the VAT working papers** | **I cannot certify tax correctness. This is not negotiable** | First VAT return |
+| Y12 | **Run the staff pilot** and tell me what the front desk complains about | Requires real staff on a real floor | Cutover |
+| Y13 | **Book the penetration test** | Commercial engagement | Go-live |
+| Y14 | **Test on real devices** — your phone, your staff's phones, real Safari on real iOS | I can test logic, not a specific device's rendering or SMS autofill | Launch confidence |
 
-**Gate out of Stage 0:** steps 1, 2, 3 and 11 answered. Steps 4–9 and 12 *started* — they do not need to
-finish, they need to be running.
-
----
-
-## Stage 1 — Weeks 1–3: Foundation (F), serial
-
-Both engineers. Nothing else starts until this merges; a moving schema spine costs more in rework than
-the three weeks saved.
-
-| # | Step |
-|---|---|
-| 14 | Monorepo, TypeScript strict, Biome/ESLint with the **module import-boundary rule** (`core` may not import `db`; `db` may not import `apps`) |
-| 15 | CI on GitHub Actions: typecheck, unit, integration **against real Postgres**, migration dry-run |
-| 16 | Four environments: local compose, PR preview, staging, production. **Separate OAuth client IDs per environment** — see [10](10-google-connection.md) §4 |
-| 17 | **The staging send guard** — a hard block preventing any non-production environment from messaging a real customer |
-| 18 | DO provisioning: App Platform (web ×2 + worker ×1), Managed Postgres 2 vCPU / 4 GB **with standby**, Spaces (two buckets: private originals, public derivatives), Cloudflare |
-| 19 | Schema spine: `legal_entity`, `premises`, `regulatory_profile`, `audit_event` (monthly partitions), `outbox_event`, pg-boss tables, roles and permissions |
-| 20 | Cross-cutting services: boot-time config validation, structured logging with correlation IDs, Sentry, audit service, outbox publisher, notification service, money (integer fils) and date (`timestamptz`, Asia/Dubai) utilities, feature flags, export service |
-| 21 | Staff auth with **mandatory TOTP 2FA**; the RBAC policy layer |
-| 22 | **The clinical schema boundary**: separate schema, separate DB role, envelope encryption, UUID-only references, **no cross-boundary foreign keys** |
-| 23 | **The settings registry** — declarative Zod schema per setting with type, constraint, role, and `onChange` cache-tag effects ([09](09-ia-seo-and-settings.md) §5) |
-| 24 | **Prove Arabic RTL PDF rendering.** Now, not in month five. It is the classic late surprise |
-| 25 | Design tokens from [08](08-frontend-design.md): palette as CSS custom properties, type scale, spacing, motion tokens, Tailwind v4 theme with the default palette deleted, generated hex mirror |
-
-**Gate out of Stage 1:** a migration ships through CI to production; an audited mutation appears in the
-audit log; an outbox event reaches a worker; 2FA login works; an Arabic PDF renders correctly.
+Everything else — schema, code, tests, migrations, infrastructure-as-config, documentation, the agents
+— is mine.
 
 ---
 
-## Stage 2 — Weeks 4–10: Booking engine (B) ∥ design system
+## 3. The operating model
 
-The hardest engineering in the project. **Engineer 1 owns B start to finish** — it is the critical path
-and should not be split.
+**Session protocol.** Every session: read `docs/PROGRESS.md` for state → pick the next unit in
+dependency order → build it with tests → run the full CI gate locally → update `PROGRESS.md` and write
+an ADR if a decision was made → commit and push. A session that ends without updating the ledger has
+lost work even if the code is committed.
 
-**Engineer 1 — B:**
+**Repo-as-memory artefacts**, created in the Foundation stage and maintained thereafter:
 
-| # | Step |
-|---|---|
-| 26 | Service catalogue: categories, services (internal + **linted public display name**), variants, add-ons, skill mapping, room-type compatibility, per-service turnaround, gross-fils pricing, effective-dated price lists |
-| 27 | Rooms as schedulable resources: types, capacity-2 couples rooms, service compatibility, **turnaround as room-occupying time distinct from therapist buffer** |
-| 28 | **The availability engine** — all five simultaneous constraints, including **same-gender matching, default strict**. Compute on demand, cache 30–60s, invalidate on any write to appointments, shifts, blocks or leave. No precomputed slot table |
-| 29 | **Concurrency correctness**: `btree_gist` exclusion constraint on `(therapist_id, period)`, **deferred** constraint trigger for room capacity, `FOR UPDATE` on the room row, idempotency keys on the public endpoint |
-| 30 | Appointment lifecycle state machine — every transition, actor and side effect. `COMPLETED` emits revenue events, not `CONFIRMED` |
-| 31 | Phone-first identity: E.164 normalisation, SMS OTP with rate limiting and enumeration resistance, guest booking, stable `customer_id` |
-| 32 | **Property-based tests** on the engine: no double-booking, no room over capacity, no closure crossing, turnaround respected, gender constraint never violated |
-| 33 | Public booking flow — plain but real, mobile-first, all edge states from [09](09-ia-seo-and-settings.md) §3 |
-| 34 | Admin calendar: **room × time primary**, therapist × time secondary, drag to reschedule, quick-book, walk-in entry |
-| 35 | Transactional messaging via SMSala and Resend on the durable queue, with **reminder invalidation on reschedule and cancel** |
-| 36 | Magic-link self-service manage-booking page |
+- `docs/PROGRESS.md` — the unit ledger: done, in progress, blocked and on what, plus the next three units.
+- `docs/adr/NNNN-*.md` — one per real decision, including the ones already locked in
+  [01-scope-and-decisions.md](01-scope-and-decisions.md).
+- `docs/OPEN-QUESTIONS.md` — everything waiting on you or on a third party, with what is blocked by each.
+- The test suite — the only durable proof that the money and compliance paths are right.
 
-**Engineer 2 — design system and CMS scaffolding (W, part 1):**
+**Definition of done per unit** (from [00-plan.md](00-plan.md) §6): tests written and passing · migration
+reviewed · permissions applied at field level where sensitive · audit logging where it applies · i18n
+keys extracted · analytics events emitted · accessibility checked · CI green · ledger updated.
 
-| # | Step |
-|---|---|
-| 37 | Component library in `packages/ui`: shadcn/ui copied in, Radix, geometry replaced per [08](08-frontend-design.md) §7 so it does not look like every other shadcn site |
-| 38 | Motion system implemented as tokens, including the reduced-motion override and the RTL direction multiplier |
-| 39 | Payload CMS v3 embedded, media collection with **named slots** (aspect ratio, min dimensions, max size, **required alt text**, junk-alt filter) |
-| 40 | Media pipeline: `sharp` derivative job, colour management for pastels, content-addressed immutable URLs, same-origin `/m/*` via Cloudflare, custom `next/image` loader |
-| 41 | **The breakpoint preview component** — shows editors the real crop at real widths. A week of work that prevents most bad publishes |
-| 42 | `next-intl` plumbing, EN/AR routing, RTL layout verified, `DirectionProvider` |
-
-**Milestone M1 Bookable** (~week 10): catalogue → availability → book online → confirmation SMS →
-appears on admin calendar → reschedule invalidates the old reminder. **Demo to the owner.**
+**Drift control.** If I find that something in the plan is wrong once real code meets it, I change the
+plan document and say so, rather than quietly diverging. The docs staying true is what makes the next
+session possible.
 
 ---
 
-## Stage 3 — Weeks 8–13: CRM, consent and automation (C) — Engineer 2
+## 4. Stage 0 — before any code
 
-Starts once B's event catalogue exists (~week 8), overlapping B's tail.
+Still a full stage, still the highest-leverage work in the project. The clocks here are external and
+cannot be compressed later.
 
-| # | Step |
-|---|---|
-| 43 | Client record: preferences, tags, lifecycle, source, spend history, VIP and **blocklist that blocks in the booking path**, not just a note |
-| 44 | **Intake and consent forms behind the clinical boundary.** Versioned templates, signature capture, re-consent interval. The booking layer sees **boolean contraindication flags only** |
-| 45 | Duplicate detection and **merge as a first-class operation** — re-points consents, suppressions, enrolments and frequency ledgers to the survivor |
-| 46 | Consent per channel × purpose × timestamp × **wording version shown**; preference centre reachable without login |
-| 47 | Automation engine: versioned flow DSL, enrolments pinned to a definition version, idempotency on `(flow_run, node, channel, contact)`, frequency caps, loop detection, kill switch, dry-run |
-| 48 | **The messaging compliance gate** — two sender IDs, immutable template `message_class`, consent / quiet-hours / suppression **in the send path as code**, fail closed |
-| 49 | Kanban pipeline (ship first — cheap, immediately useful) |
-| 50 | React Flow node-graph builder, which must make routing promotional content through a transactional template **impossible**, not discouraged |
-| 51 | Campaigns with audience from segment, throttling, spend caps. Review solicitation, win-back, birthday triggers |
-
-**Milestone M3 Reachable** (~week 13): booking event → enrolment → consented SMS → opt-out honoured →
-suppression blocks the next send. Consent gating tested as an **invariant**.
-
----
-
-## Stage 4 — Weeks 11–19: Money (M) — Engineer 1
-
-The longest workstream, and the one where a bug costs real money.
-
-| # | Step |
-|---|---|
-| 52 | Till / checkout: complete a visit, add retail, discount, record payment by cash / in-salon card machine / bank transfer via a **manual payments adapter** so the ledger is correct before any gateway exists |
-| 53 | Chart of accounts; **append-only double-entry journal**; period locking; corrections by dated reversal only. No UPDATE or DELETE on `journal_line` |
-| 54 | **FTA tax invoices** and simplified invoices: bilingual, snapshotted issuer name/address/TRN, **gapless sequence allocated inside the insert transaction**, per-line VAT, gross-first integer fils |
-| 55 | Credit notes as the only correction mechanism |
-| 56 | Vouchers, packages, memberships as **deferred revenue liabilities** — redemption, balance, expiry, breakage, and the **VAT event separated from the revenue event** |
-| 57 | Cash drawer reconciliation per shift; **rebooking prompt at checkout** |
-| 58 | Suppliers, bills, expense capture with receipts, approval limits, payables ageing |
-| 59 | **Recurring-cost register** with fixed/variable split, renewal reminders, budget-vs-actual variance alerting |
-| 60 | **Reverse-charge VAT** on offshore suppliers, with a nightly exception report on any bill missing the pair |
-| 61 | Blocked input VAT classification; inventory and COGS for retail and professional-use stock |
-| 62 | VAT201 working papers: accounts tagged with return-box codes, drill-down to source, preparer/reviewer sign-off. **No auto-file capability in the codebase** |
-| 63 | **The compliance calendar** — obligations, dated instances, escalation, and **blocking obligations that change system behaviour when overdue** |
-| 64 | Zoho Books export for statutory filing |
-
-**Milestone M2 Bankable** (~week 15): visit → invoice with correct VAT → payment → balanced journal →
-correct VAT201 box.
-**Milestone M5 Accountable** (~week 19, with R): a closed test month reconciles end to end.
-**An FTA-registered tax agent reviews the working papers.** Non-negotiable.
-
----
-
-## Stage 5 — Weeks 14–17: People (P) — Engineer 2
-
-| # | Step |
-|---|---|
-| 65 | Employee records with field-level encryption on bank details and identity document numbers; every read audited |
-| 66 | **Credential registry gating availability** — an expired labour card, visa or certification **automatically removes the therapist from bookable availability** and flags their future appointments for reassignment. This automation is the module's whole value |
-| 67 | Rota publishing, swaps, open shifts, labour-cost forecast against booked revenue |
-| 68 | Attendance and timesheets; scheduled vs actual vs billed hours |
-| 69 | **Leave management**: accrual, carry-over, UAE 30-day entitlement, sick-leave tiers, approval with delegation, minimum-coverage rules, team calendar — and **approving leave blocks availability and surfaces booking conflicts with a reassignment path, never a silent cancellation** |
-| 70 | Commission (versioned, reproducible, **therapist-visible derivation**), tips, deductions, payslips |
-| 71 | **Monthly gratuity accrual** posting to the ledger; WPS export as a bank-specific adapter over a reviewed payroll |
-| 72 | Ramadan reduced hours as a dated override; **provisional-vs-confirmed lunar holidays with an impact report** |
-
-**Milestone M6 Staffed** (~week 17): publish rota → approve leave over a booking → conflict surfaced →
-availability blocked → payroll and gratuity posted. One of the three most likely places for a surprise.
-
----
-
-## Stage 6 — Weeks 18–23: Analytics (A) then Reporting (R) — Engineer 2
-
-| # | Step |
-|---|---|
-| 73 | Measurement plan and event taxonomy **first**; one typed tracking SDK so events are not sprinkled ad hoc |
-| 74 | GA4 + Meta Pixel client-side; **Consent Mode v2** and a CMP gating client tags **and** server pushes |
-| 75 | Server-side push from the **transactional outbox** to GA4 Measurement Protocol and Meta CAPI — shared `event_id`, hashed user data, `fbp`/`fbc` forwarding. First-party `/api/collect`, **no sGTM container** |
-| 76 | **Offline conversion loop**: the till emits corrected values; no-shows pushed as void. Booking value is a guess, the till knows the truth |
-| 77 | **The egress guard** — services mapped to opaque category codes, health-adjacent parameters stripped, with a test **enumerating every service** |
-| 78 | Reporting schema and materialised views: `dim_*`, `fact_appointment`, `fact_sale`, `fact_shift`, nightly refresh |
-| 79 | P&L, balance sheet, **cash-flow statement** (profit and cash are different numbers and the owner will not otherwise see it) |
-| 80 | The spa KPI set with explicit formulas — utilisation, **revenue per available room-hour**, average ticket, retail attachment, **rebooking rate**, retention cohorts, LTV, no-show cost, discount leakage, labour %, **contribution margin per service**, break-even, voucher liability, CAC |
-| 81 | Seasonality including **Ramadan and the summer exodus**; cash-flow forecast from recurring costs + forward bookings + payroll |
-| 82 | Pushed alerts; role-scoped dashboards with drill-down; a **data-quality view that refuses to show an unreconciled number** |
-
-**Milestone M7 Attributable** (~week 20): booking → no-show → GA4 and Meta receive the corrected
-net-zero value; the egress test passes.
-
----
-
-## Stage 7 — Weeks 20–23: Payments (Y) — Engineer 1 · *gated on the merchant account*
-
-If the acquirer is slow, this slides to Stage 9 and launch proceeds on cash / card machine / transfer,
-which was always the launch plan.
-
-| # | Step |
-|---|---|
-| 83 | Gateway behind the payments abstraction from step 52 |
-| 84 | Deposits, first-time prepayment, saved cards, **no-show and late-cancellation fees with disclosed documented consent** |
-| 85 | PCI **SAQ-A** only — hosted fields, never touching PAN |
-| 86 | Webhooks: signature verification, idempotent handlers, replay protection, **a reconciliation job for missed events**. Client callbacks are never the source of truth |
-| 87 | Settlement reconciliation — gross vs net of fees, timing, refunds, chargebacks — **to the fils** |
-| 88 | A discreet, configurable statement descriptor |
-
----
-
-## Stage 8 — Weeks 24–30: public site, CMS content and the SEO agent
-
-Both engineers. **Photography must be delivered by now** (step 12).
-
-| # | Step |
-|---|---|
-| 89 | Content model with the boundary enforced: the **catalogue** owns price, duration and bookability; the **CMS** owns narrative, media and SEO copy |
-| 90 | Build the page set from [09](09-ia-seo-and-settings.md) §1 with the per-route rendering strategy |
-| 91 | **Therapist pages** — the differentiator. Consent captured, first-name/pseudonym option, and the **301-not-404 archival path** when a therapist leaves |
-| 92 | The hero: **real `<img>` as LCP element, `<video>` with no `src` attached by the ~1.4KB island after LCP is final**. Codec ladder, art-directed `<picture>`, WCAG pause control |
-| 93 | JSON-LD generated from the database — `DaySpa`, `Service`/`Offer` in AED, `Person` per therapist, `FAQPage`, `OpeningHoursSpecification` from the single `premises` row |
-| 94 | Sitemaps with CMS-driven `lastmod`, `hreflang`, `robots.txt` with the **allow-AI-crawlers** policy, IndexNow, `/api/facts`, `/llms.txt` |
-| 95 | **The publication control plane**: draft → banned-claims lint → named human approval → immutable publication record with content hash. Runs over service display names and alt text too |
-| 96 | Performance enforcement, all three layers: field RUM (`web-vitals` attribution), **Lighthouse CI budget that fails the build**, and a publish-time weight check |
-| 97 | **The 301 map** from the step-10 baseline, for every retired URL |
-| 98 | Google connection UI: OAuth flow, **account-then-location picker**, capability map, health check, the **not-dismissible re-auth banner** and escalating email ([07](07-frontend-and-agents-requirements.md) §6) |
-| 99 | Review autoresponder **in fallback/draft mode first** — nullable `google_review_id`, `delivery_mode` as a column, the safety routing table, the output linter, human approval |
-| 100 | SEO agent: GSC nightly snapshots into Postgres, deterministic analyses, LLM provider abstraction shared with the autoresponder, **publish denied at the permission layer**, weekly Resend report |
-| 101 | **The agent console** with heartbeats and the 2×-interval watchdog across every agent |
-
-**Milestone M4 Findable** (~week 28): publish a service in admin → page live with JSON-LD → sitemap
-updated → indexed in GSC.
-
----
-
-## Stage 9 — Weeks 31–34: hardening, migration, cutover
-
-| # | Step |
-|---|---|
-| 102 | Penetration test (**booked at the start of this stage, not the end**); triage findings |
-| 103 | **Restore drill from backup.** An untested backup is not a backup |
-| 104 | Runbooks: restore, rotate a leaked key, roll back a deploy, drain the queue, re-send failed messages, re-auth Google |
-| 105 | Incident-response plan with PDPL notification timelines; the processor register; the documentation set |
-| 106 | **Migration dry run ×3** against staging, each producing a reconciliation report — counts, totals, **voucher liability**, **leave liability** — against source. Run three: no unexplained variance |
-| 107 | **Parallel run, two weeks.** Old process and new system both record every booking, reconciled daily. The only way to discover the engine disagrees with how the salon actually works while the old process still exists |
-| 108 | **Staff pilot** on a quiet weekday, front desk on the new till, one super-user per shift. Fix what they complain about **before** cutover — the post-cutover version of that complaint is silent abandonment |
-| 109 | Training: admin guide, therapist quick guide, accountant guide, cheat sheets |
-| 110 | **Code freeze**, one week out. Launch-blocking fixes only |
-| 111 | **Go/no-go**: external items cleared, M1–M7 demonstrated, restore drill passed, pen-test findings triaged, rollback rehearsed, first-fortnight support rota agreed **including who answers at 8pm on a Friday** |
-| 112 | **Cutover**: final migration, DNS, 301s live, GBP booking link updated, monitoring on |
-
----
-
-## Stage 10 — Post-launch
-
-| # | Step |
-|---|---|
-| 113 | **Paper fallback fortnight** — printed day sheet each morning, documented manual process |
-| 114 | **SEO monitoring window, four weeks** — rankings, coverage, 404s, Core Web Vitals against the step-10 baseline |
-| 115 | Daily reconciliation for the first month: bookings vs invoices vs payments vs journal |
-| 116 | First VAT return prepared from the system, reviewed by the tax agent |
-| 117 | Flip the autoresponder to API mode when GBP access lands — **a row in the capability table, not a deploy** |
-| 118 | Then: WhatsApp Business API, Arabic launch if deferred, memberships, retail inventory depth, node-graph builder if thinned — from the flex list in [00-plan.md](00-plan.md) §10 |
-
----
-
-## Timeline at a glance — two engineers
-
-```
-Week      0    4    8   12   16   20   24   28   32   34
-          │    │    │    │    │    │    │    │    │    │
-Stage 0   ██
-F         ░████
-E1              ███████ B ──────┐
-                        ████████████ M ────────┐
-                                      ████ Y ──┤
-                                               ████████ W2 ──┐
-E2              ████ W1 ──┐                                  │
-                     █████████ C ──┐                         │
-                                ███████ P ──┐                │
-                                          ██████ A+R ──┐     │
-                                                       ████ S┤
-H                                                            █████
-Milestones           M1        M3   M2  M6   M7    M4       go-live
-External  ═══ GBP approval ═══════╗  ═══ sender IDs ═══╗  ═══ MCC ═══╗
-          ═══ photography ════════════════════════════╗
-```
-
-**Critical path: F → B → M → H.** Roughly 18–24 weeks of serial work that adding people does not
-compress.
-
----
-
-## §9 — Other team shapes
-
-| Team | To launch | Notes |
+| # | Step | Owner |
 |---|---|---|
-| **1 engineer** | 11–13 months | Works, but the highest-risk shape: bus factor of one for a year, and no second pair of eyes on the money paths. If this is the reality, take the flex list in [00-plan.md](00-plan.md) §10 up front rather than at month nine |
-| **2 engineers** (baseline) | 7–8 months | E1 owns the critical path F→B→M→Y; E2 owns W1→C→P→A→R. H shared |
-| **3 engineers** | 5–6 months | Diminishing returns — F is serial and M depends on B. The third is best on W, S and test coverage, **not** on splitting B or M |
+| 1 | **Handover pack** — see §7 for the full list, including the reconstruction work your setup implies | You |
+| 2 | **Trade licence** read; `regulatory_profile` inputs set | You send, I read |
+| 3 | **Who owns the GBP listing** | You |
+| 4 | *(Workspace seat — declined; see §6 for what replaces it)* | — |
+| 5 | **Submit GBP Basic API Access** | You |
+| 6 | **The 9-day token experiment — start it in week 0.** With a personal Gmail this is a hard blocker, not a curiosity | You |
+| 7 | **Lawyer: health-data residency** | You |
+| 8 | **Two SMSala sender IDs** | You |
+| 9 | **Acquirer / MCC, two providers** | You |
+| 10 | **Baseline the existing site** — crawl, ranks, GSC export. *I can do this if the site is public* | Me |
+| 11 | **Confirm `btree_gist`** on DO Managed Postgres | Me |
+| **12** | **AUDIT THE PHOTO LIBRARY — do this in week 0, not week 20** | Me, from what you send |
+| 13 | *(Incumbent export audit — not applicable)* | — |
 
-Also needed: a **designer for ~4 weeks, front-loaded** (before Stage 8, ideally during Stage 1–2 so W1
-is not blocked); an **FTA-registered tax agent** to review Stage 4's output; a **photographer** early;
-and a **penetration tester** booked for Stage 9.
+### Step 12 deserves its own note
+
+You have a full library, which removes the longest-lead dependency in the plan — **if it passes.**
+Existing libraries commonly fail on three things, and each has a different remedy:
+
+1. **Mobile portrait crops.** A landscape image CSS-cropped to a phone looks bad, and the design uses
+   genuine art direction via `<picture>` with a 4:5 mobile crop. If the library is all landscape with
+   subjects centre-framed, the mobile hero has no usable crop.
+2. **The pastel grade.** The palette expects the deepest in-frame value around `#3A3B37`, never pure
+   black, with greens desaturated 10–15%. A punchy high-contrast library fights the design and also
+   costs more bytes ([08](08-frontend-design.md) §8).
+3. **Negative space for text overlay.** Hero images need deliberate empty area. Photos composed to fill
+   the frame have nowhere for the headline to go.
+
+**So the audit happens in week 0 with a pass/fail verdict per slot.** If it fails, you still have the
+full lead time to shoot rather than discovering it when the site is being built. Send me a
+representative sample — 15–20 images covering hero candidates, therapist portraits, rooms, treatment
+detail — and I will report against each slot's constraints.
+
+Also needed regardless: **staff photography consent on record** for anyone identifiable, which connects
+to the therapist-page archival path in [09](09-ia-seo-and-settings.md) §2.
 
 ---
 
-## §10 — The five ways this slips, and the counter
+## 5. The build order
 
-| Risk | Counter |
+Single track. Steps 14–118 from the previous revision retain their numbers and content; what changes is
+that they run in one sequence rather than two. Grouped into units, ordered so your inputs land early.
+
+| Order | Units | Steps | Gate |
+|---|---|---|---|
+| **1** | Foundation | 14–25 | Migration through CI to prod · audited mutation logged · outbox reaches worker · 2FA login · **Arabic PDF renders** |
+| **2** | Repo-as-memory | new | `PROGRESS.md`, ADRs for the 20 locked decisions, `OPEN-QUESTIONS.md` |
+| **3** | Catalogue + rooms | 26–27 | Seeded from your real menu and room inventory |
+| **4** | **Availability engine** | 28–29, 32 | **Property-based tests green.** The single most important gate in the build |
+| **5** | Appointment lifecycle + identity | 30–31 | State machine transitions tested exhaustively |
+| **6** | Booking UI + admin calendar | 33–34 | **M1 Bookable** |
+| **7** | Transactional messaging | 35–36 | Reminder invalidation on reschedule proven |
+| **8** | Till + invoicing + ledger | 52–57 | **M2 Bankable** |
+| **9** | Purchases + recurring costs + VAT | 58–64 | Working papers generated → **Y11: tax agent review** |
+| **10** | CRM + clinical boundary + consent | 43–46 | Consent gating tested as an invariant |
+| **11** | Automation engine + compliance gate | 47–51 | **M3 Reachable** |
+| **12** | People: credentials, rota, leave | 65–72 | **M6 Staffed** |
+| **13** | Analytics + egress guard | 73–77 | **M7 Attributable** |
+| **14** | Reporting + dashboards | 78–82 | **M5 Accountable** |
+| **15** | Design system + CMS + media | 37–42, 89–90 | Photo library passing, breakpoint preview working |
+| **16** | Public site + SEO + publication plane | 91–97 | **M4 Findable** |
+| **17** | Google connection + health/re-auth | 98, 101 | **Y10: you complete consent and confirm the listing** |
+| **18** | Review autoresponder, fallback mode | 99 | Safety routing table enforced; linter blocking |
+| **19** | SEO agent | 100 | Publish denied at the permission layer; injection test fails to escalate |
+| **20** | Payments *(if MCC cleared)* | 83–88 | Settlement reconciles to the fils |
+| **21** | Hardening | 102–105 | Pen test triaged · **restore drill passed** |
+| **22** | Migration dry runs ×3 | 106 | No unexplained variance in the reconciliation report |
+| **23** | Parallel run + staff pilot | 107–109 | **Y12: front-desk feedback acted on** |
+| **24** | Freeze, go/no-go, cutover | 110–112 | Every external item cleared |
+| **25** | Post-launch | 113–118 | Paper fallback · 4-week SEO window · first VAT return |
+
+**Note the reordering.** Money moved ahead of CRM, and the public site moved late. Two reasons: the
+tax-agent review (Y11) has its own latency, so generating working papers early means that review runs in
+the background; and the photo-library verdict from step 12 may change what unit 15 involves.
+
+---
+
+## 6. The Google decision, and its cost
+
+You have chosen the owner's personal Gmail. That is your call and the plan accommodates it, but it is
+worth being precise about what it changes, because one item becomes a genuine blocker.
+
+**The OAuth app must be External.** With no Workspace organisation, the *Internal* audience is
+unavailable — so the app cannot sidestep verification, and the **7-day refresh-token expiry in Testing
+status is live**. Left unresolved, both agents stop every week with no correlated deploy.
+
+**Therefore step 6 is a hard blocker, not a curiosity.** Publish to Production, consent, record
+`consent_at`, and confirm on **day 9** that the same refresh token still works. Three outcomes:
+
+| Result | Consequence |
 |---|---|
-| **Stage 0 gets skipped** because it is not code | It is the highest-leverage week. Every external clock starts here; none can be compressed later |
-| **Photography arrives late** and blocks Stage 8 | Brief and book in week 0. It is the one dependency with no software workaround |
-| **M2 or M6 surprises** — VAT or leave/availability interaction wrong | They are milestones precisely because they are the likely surprises. Demo on real data; do not defer |
-| **The acquirer is slow** and Y blocks launch | Y was never launch-critical. Cash, card machine and bank transfer were always the launch payment set |
-| **Migration variance found late** | Three dry runs with reconciliation reports, starting in Stage 9 week 1, not launch week |
+| Token survives day 9 | Good. External + Production + unverified is the path. You see the "Google hasn't verified this app" screen once |
+| Token dies at day 7 | Then `business.manage` verification is required — scope justification, demo video, privacy policy on a verified domain, domain ownership. **Weeks, with round-trips.** The Workspace seat returns as the cheaper escape hatch, and I would re-raise it at that point |
+
+**Because it is a nine-day experiment, starting it in week 0 is what keeps it off the critical path.**
+Started in launch week, it becomes the thing that delays launch.
+
+**The safeguards now in scope**, from [10](10-google-connection.md) §5 — these move from "if they insist"
+to required work:
+
+- **A second GBP Owner** — spouse, co-founder or accountant — so the listing survives losing one account.
+- **Hardware-key 2FA, or printed recovery codes in the business safe.** Not SMS to one phone.
+- **Recovery email and phone the business controls.**
+- **Search Console verified by DNS TXT** on Cloudflare, so SEO data survives losing the Google account entirely. This one is free and I will do it.
+- **A note in the settings panel naming the connected account**, visible to whoever runs the business next.
+- The daily health check and pre-emptive email, which turn *"the agents stopped in March"* into *"we were told on the 3rd"*.
+
+One risk I previously overstated and will not repeat: a routine password change should **not** break the
+connection, because Google ties that revocation to Gmail scopes, which we do not request. The real risk
+is **offboarding** — which is also why Y2 matters so much.
+
+---
+
+## 7. The migration, with no incumbent platform
+
+No export to audit is genuinely simpler in one way and harder in another: **there is no system of record
+to migrate from, so several things must be reconstructed by hand.** Two of them are liabilities.
+
+| Item | Where it lives now | Risk |
+|---|---|---|
+| **Unredeemed gift vouchers** | Paper, a drawer, a notebook, memory | **Highest-risk item in the migration.** Real, enforceable liabilities held by real customers. Miss one and you get an angry client at the desk and a wrong opening balance sheet. There is no export to fall back on |
+| **Outstanding packages / prepaid sessions** | Same | As above, with remaining-session counts to reconstruct |
+| **Customer list** | Phone contacts, WhatsApp chats, paper cards | See the consent problem below |
+| **Current leave balances** | Informal | The accrual engine needs an opening balance per employee, not zero |
+| **Accounting opening balances** | The accountant | Needs a clean period boundary |
+| **Service menu and prices** | Whatever is current | Must be authoritative before the catalogue is seeded |
+| **Room inventory and honest turnaround times** | Operational knowledge | The availability engine is wrong without real numbers |
+
+### The consent problem, which is not obvious
+
+A customer list reconstructed from **WhatsApp chat history and phone contacts is not a marketing consent
+list.** Someone messaging to book an appointment has given you a phone number for that purpose; it is
+not opt-in to promotional SMS under PDPL, and under the TDRA rules in
+[04-uae-compliance.md](04-uae-compliance.md) §5 promotional SMS needs demonstrable prior consent with
+penalties reported up to AED 400,000.
+
+So the migration imports these contacts with:
+
+- **`marketing_consent = false`** on every reconstructed record, without exception.
+- **Transactional messaging permitted** — booking confirmations and reminders for appointments they
+  actually make.
+- **A consent capture step** at the next booking or visit, storing the wording version shown.
+- A one-time **opt-in campaign only if** your lawyer confirms a lawful basis for it. Do not assume one.
+
+This is worth raising now because it is tempting to import 2,000 numbers and start marketing to them,
+and that is precisely the thing that gets a sender ID suspended and a fine issued.
+
+**Recommendation:** make voucher and package reconstruction a **named task with a deadline in week 0**,
+not a cutover-week scramble. Go through the physical records, build a spreadsheet of holder, value,
+purchase date and expiry, and have the owner sign it off as complete. That signed list becomes the
+opening liability balance and the defence when someone appears with a voucher nobody recorded.
+
+---
+
+## 8. What actually gates the calendar
+
+Not typing speed. In order of real impact:
+
+1. **Your inputs (Y1–Y14).** Most of the build can proceed without most of them, but Y1, Y8 and Y9 gate
+   the first real units, and Y11 gates the VAT sign-off.
+2. **External clocks.** GBP API approval (days to ~6 weeks), sender-ID registration, merchant
+   onboarding, and possibly OAuth verification if the day-9 test fails.
+3. **Verification depth.** The availability engine, VAT, leave accrual, commission and the ledger get
+   property-based and worked-example tests because a bug in them costs money or breaks the law. That is
+   deliberate time, not overhead.
+4. **Review cycles.** Each milestone is demoed. Your feedback on M1, M2 and M6 in particular will change
+   things, and it is cheaper to change them at the milestone than after.
+
+I will not give you a month count for a build of this size under this model — it would be invented. What
+I will do is keep `docs/PROGRESS.md` current so that progress is a fact you can read rather than an
+estimate you have to trust, and flag in every session what is blocked and on whom.
+
+---
+
+## 9. The honest limits of this arrangement
+
+Stated plainly, because they matter more than any schedule:
+
+- **I cannot certify tax or legal correctness.** I can build a VAT engine that ties to the ledger and
+  produces auditable working papers with tests for every rate and rounding case. Whether it satisfies the
+  FTA for your business is a question for an FTA-registered tax agent, and Y11 is not optional.
+- **I cannot test the physical world.** Real SMS arriving on a real UAE handset, SMS autofill on a
+  specific iOS version, a receipt printer, how fast a receptionist can actually work. Y12 and Y14 cover
+  what I cannot.
+- **Nothing is in my head between sessions.** If the ledger and ADRs are not maintained, work is lost and
+  decisions get silently re-made differently. That is why unit 2 exists.
+- **A single builder has no second reviewer.** Tests are the substitute, and it is an imperfect one. On
+  the money paths specifically, a human reading the VAT and commission logic before launch is worth
+  buying even if nobody writes code.

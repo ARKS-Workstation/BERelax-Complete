@@ -21,17 +21,16 @@ implementation plan only.
 | [docs/08-frontend-design.md](docs/08-frontend-design.md) | The design system: accessible pastel palette with measured ratios, type, motion tokens, media/hero technique, performance budget |
 | [docs/09-ia-seo-and-settings.md](docs/09-ia-seo-and-settings.md) | Page set, therapist pages, mobile booking flow, the location record that drives all SEO, and the settings spine |
 | [docs/10-google-connection.md](docs/10-google-connection.md) | The owner-consented Google OAuth connection: API access gating, token lifecycle, identity, and the fallback that is actually launch mode |
-| [docs/11-execution-plan.md](docs/11-execution-plan.md) | **The step-by-step execution sequence**, 118 numbered steps across ten stages, with the timeline and team shapes |
+| [docs/11-execution-plan.md](docs/11-execution-plan.md) | **The execution plan** — single-track build order, what only the owner can do, the operating model, and the migration |
 
 ## The one-paragraph summary
 
 Nine modules were requested: booking engine, CRM with SMS marketing and a drag-and-drop flow builder,
-GA4 + Meta analytics with server-side push, a CMS, a frontend, HR with leave management, accounting
-with VAT and recurring costs, financial analysis, and an agentic SEO system with Google Search Console
-access. The whole system is built in one go and launched once, so the plan is organised as **eleven
-parallel workstreams against a dependency graph**, with seven internal integration milestones that
-prove the system end to end. Total scope is roughly **40–52 engineer-weeks** — about 7–8 months with
-two engineers. The business is already operating, so it keeps trading on its current process
-throughout the build, and the end of the build is a **data migration and cutover**, not a launch.
-Two of the nine modules are recommended as *integrate, not build*: statutory tax filing and payroll
-mechanics.
+GA4 + Meta analytics with server-side push, a CMS, a frontend, HR with leave management, accounting with
+VAT and recurring costs, financial analysis, and an agentic SEO system with Google Search Console access.
+The whole system is built in one go and launched once. The business is already operating, so it keeps
+trading on its current process throughout the build, and the end of the build is a **data migration and
+cutover**, not a launch. Claude is the builder, so the plan is a single-threaded dependency order of work
+units with the repository as the memory between sessions — see
+[docs/11-execution-plan.md](docs/11-execution-plan.md), whose §2 lists the fourteen things only the owner
+can do. Two of the nine modules are *integrate, not build*: statutory tax filing and payroll mechanics.
