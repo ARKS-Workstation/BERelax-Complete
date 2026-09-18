@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**24 / 206 units complete.**
+**25 / 207 units complete.**
 
 ## Next up
 
@@ -25,6 +25,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 9 | `F09` | Settings registry | `F04`, `F07` | — | — |
 | [x] | 10 | `F10` | Arabic RTL PDF proof | `F01` | — | — |
 | [x] | 11 | `F11` | Design tokens | `F01` | — | — |
+| [x] | 11.5 | `F12` | The worker app — pg-boss on the primary Postgres, the job registry and transactional enqueue | `F03`, `F04`, `F06`, `F09` | — | — |
 | [x] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
 | [x] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
 | [x] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |

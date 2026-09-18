@@ -122,6 +122,24 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@types/node@26.6.1)(@vitest/coverage-v8@5.0.1)(vite@8.3.0(@types/node@26.6.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))
 
+  apps/worker:
+    dependencies:
+      '@berelax/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@berelax/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      pg-boss:
+        specifier: 12.33.1
+        version: 12.33.1
+
   packages/auth:
     dependencies:
       '@berelax/core':

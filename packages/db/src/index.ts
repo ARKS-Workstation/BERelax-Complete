@@ -22,6 +22,7 @@ export {
 } from './connection.ts'
 export {
   createJobQueue,
+  DEFAULT_QUEUE_OPTIONS,
   type JobQueueOptions,
   MAINTENANCE_JOBS,
   PGBOSS_SCHEMA,

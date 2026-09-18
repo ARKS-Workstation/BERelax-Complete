@@ -1,0 +1,19 @@
+{
+  "name": "@berelax/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/run.ts"
+  },
+  "dependencies": {
+    "@berelax/config": "workspace:*",
+    "@berelax/core": "workspace:*",
+    "@berelax/db": "workspace:*",
+    "@berelax/shared": "workspace:*",
+    "pg-boss": "12.33.1"
+  }
+}

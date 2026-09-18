@@ -43,6 +43,8 @@
       "@berelax/ui": ["./packages/ui/src/index.ts"],
       "@berelax/ui/theme-provider": ["./packages/ui/src/theme/theme-provider.tsx"],
       "@berelax/ui/*": ["./packages/ui/src/*"],
+      "@berelax/worker": ["./apps/worker/src/index.ts"],
+      "@berelax/worker/*": ["./apps/worker/src/*"],
       "@berelax/providers": ["./packages/providers/src/index.ts"],
       "@berelax/providers/google": ["./packages/providers/src/google/index.ts"],
       "@berelax/providers/failure": ["./packages/providers/src/failure.ts"],

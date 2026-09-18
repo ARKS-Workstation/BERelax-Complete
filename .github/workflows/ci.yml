@@ -88,6 +88,11 @@ jobs:
       - name: Colour token discipline
         run: pnpm colours
 
+      # Every cron this system runs is one array a person can read, and a malformed expression is
+      # accepted by pg-boss and then never fires.
+      - name: Job registry and cron declarations
+        run: pnpm jobs
+
       - name: Every locked decision has an ADR
         run: pnpm adr
 

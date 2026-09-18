@@ -631,6 +631,63 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   }
 }
 
+// 27. A malformed cron declaration must fail the job-registry gate, and a `boss.schedule` outside the
+//      registry must fail it too. Both are invisible at runtime: pg-boss accepts a bad expression and
+//      never fires it, and a schedule created outside the registry is never unscheduled when the job is
+//      removed — it keeps firing from an upserted row nothing in the codebase mentions.
+{
+  const JOBS = ['exec', 'tsx', 'scripts/check-job-registry.mjs']
+
+  {
+    // Six fields. The plausible mistake: somebody writes a seconds field out of habit, and `0 0 3 * * *`
+    // read as five fields is nonsense rather than a daily 03:00 job.
+    const result = withFixture(
+      'apps/worker/src/__gate_fixture__.ts',
+      ['export const job = {', "  name: 'gate-fixture',", "  cron: '0 0 3 * * *',", '}'].join('\n'),
+      () => run('pnpm', JOBS),
+    )
+    checkRejectedBy(
+      'job gate rejects a 6-field cron declaration',
+      result,
+      '[invalid-cron-declaration]',
+    )
+  }
+
+  {
+    const result = withFixture(
+      'apps/worker/src/__gate_fixture__.ts',
+      [
+        'export async function register(boss) {',
+        "  await boss.schedule('gate-fixture', '0 3 * * *')",
+        '}',
+      ].join('\n'),
+      () => run('pnpm', JOBS),
+    )
+    checkRejectedBy(
+      'job gate rejects a schedule declared outside the registry',
+      result,
+      '[no-schedule-outside-the-registry]',
+    )
+  }
+
+  {
+    // The control. A valid declaration that does not schedule anything must pass, or the two cases above
+    // are satisfied by a gate that rejects every file it sees.
+    const result = withFixture(
+      'apps/worker/src/__gate_fixture__.ts',
+      ['export const job = {', "  name: 'gate-fixture',", "  cron: '*/15 * * * *',", '}'].join(
+        '\n',
+      ),
+      () => run('pnpm', JOBS),
+    )
+    check(
+      'job gate allows a valid cron declaration',
+      !result.failed,
+      `rejected a legitimate declaration:\n${result.output}`,
+    )
+  }
+}
+
 // 27. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -644,6 +701,7 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     'pnpm palette',
     'pnpm tokens',
     'pnpm colours',
+    'pnpm jobs',
     'pnpm adr',
     'pnpm progress:check',
     'pnpm media',

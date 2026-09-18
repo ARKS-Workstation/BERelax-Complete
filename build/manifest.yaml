@@ -169,6 +169,81 @@ units:
     - scripts/palette.py exits zero; every text pair meets its stated ratio in both themes
     - 'the brand gold #C08A43 is rejected by lint if used on a text-bearing element'
     - Tailwind default palette removed; an un-tokened colour fails lint
+  - id: F12
+    order: 11.5
+    title: The worker app — pg-boss on the primary Postgres, the job registry and transactional enqueue
+    summary: apps/worker, which forty later units name in their files list and none of them creates. pg-boss
+      mounted on the same database in its own schema, a declarative job registry that is the single place a
+      cron or a queue is declared, transactional enqueue through the unit of work so a job cannot outlive a
+      rolled-back write, graceful drain on SIGTERM, and a test harness that runs a job body against a real
+      database under a frozen clock.
+    owner: claude
+    status: done
+    size: M
+    depends_on:
+    - F03
+    - F04
+    - F06
+    - F09
+    acceptance:
+    - 'Transactional enqueue, which is the whole reason decision 4 chose pg-boss over Redis: a job sent
+      inside withUnitOfWork on a transaction that then throws is absent from pgboss.job, and the same send
+      on a transaction that commits is present — both asserted by counting rows, with the rollback case
+      proving the enqueue reached the database at all by reading it inside the transaction before the throw'
+    - 'The registry is the only way a job exists: registerJobs() creates every queue and schedules every
+      cron declared in JOB_REGISTRY, and a test asserts the set of queues in pgboss.queue and the set of
+      names in pgboss.schedule equal the registry exactly — a job added to the registry and not registered,
+      or registered and not declared, both fail'
+    - Every cron declaration is validated at import time against a 5-field expression and the Asia/Dubai
+      timezone, and a malformed expression throws naming the job; a known-bad fixture in scripts/test-gates.mjs
+      adds an invalid cron and asserts the gate rejects it by rule name
+    - 'Graceful shutdown: SIGTERM stops accepting work, waits for in-flight handlers up to the declared
+      drain deadline, and resolves; a job that is mid-handler at SIGTERM completes and is marked completed
+      rather than being left active, asserted against pgboss.job'
+    - 'A handler that throws is retried with the declared backoff and lands in the dead-letter queue after
+      the attempt cap, asserted by exact attempt count and by the dead-letter row — not by "an error was
+      logged"'
+    - pnpm db:drift and pnpm db:conventions stay green with the pgboss schema present, and a test asserts
+      the drift checker''s schema list does not include pgboss, so widening it later is a deliberate act
+      rather than an accident
+    - 'The test harness runs a job body directly with an injected clock and a real Sql, and a control proves
+      the harness can fail: a body that does not write its expected row is detected'
+    - 'NOTE: apps/worker builds on @berelax/db''s existing createJobQueue and MAINTENANCE_JOBS rather than
+      declaring a second pg-boss factory. F04 had declared audit.ensure-partitions as a cron and nothing
+      had ever registered it, because until this unit there was no worker to register it in — which is
+      exactly the gap this unit exists to close, and it is the registry''s first real entry rather than an
+      empty array that would make every set-equality assertion pass vacuously.'
+    - 'NOTE: the cron-declaration rule ships as a gate, scripts/check-job-registry.mjs (pnpm jobs), with
+      two named rules — invalid-cron-declaration and no-schedule-outside-the-registry — and three fixtures
+      in scripts/test-gates.mjs including a passing control. It is a static scan as well as a runtime
+      assertion because a job in a module nothing has imported yet is a job whose cron has never been
+      validated, and a malformed expression is accepted by pg-boss and then simply never fires. The
+      validator is imported from the worker rather than reimplemented, so the gate and the boot check
+      cannot disagree.'
+    - 'NOTE: two pg-boss 12 API facts worth recording, both found by a failing test rather than by reading
+      the types. createQueue validates that the queue named in deadLetter already exists, so the dead-letter
+      queue has to be created first. And there is no pgboss.job_archive in 12 — retention keeps completed
+      and failed jobs in pgboss.job itself, which is the first place a reader of older documentation will
+      not look.'
+    - 'NOTE: the retry/dead-letter assertion needs boss.supervise() to have run. Without it an exhausted
+      job sits in the failed state and the dead-letter count reads 0 for a reason that has nothing to do
+      with dead-lettering.'
+    - 'NOTE: deferred to G-AGT-01 — the heartbeat contract, the agent_definition table and the
+      2x-interval watchdog. This unit exposes cronRegistrations() for that unit''s registry-completeness
+      gate to enumerate, and JobDefinition carries an optional agent field naming the agent_definition a
+      job reports to, but nothing writes a heartbeat yet.'
+    files:
+    - apps/worker/package.json
+    - apps/worker/src/boss.ts
+    - apps/worker/src/registry.ts
+    - apps/worker/src/enqueue.ts
+    - apps/worker/src/run.ts
+    - apps/worker/src/testing/harness.ts
+    - apps/worker/src/worker.itest.ts
+    - apps/worker/src/index.ts
+    - scripts/check-job-registry.mjs
+    - scripts/test-gates.mjs
+    - .github/workflows/ci.yml
   - id: H01
     order: 12
     title: Progress ledger, ADRs for locked decisions, open questions
