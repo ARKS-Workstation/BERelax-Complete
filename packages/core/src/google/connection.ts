@@ -72,10 +72,59 @@ export const GOOGLE_SCOPE_BUSINESS_MANAGE = 'https://www.googleapis.com/auth/bus
 export const GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY =
   'https://www.googleapis.com/auth/webmasters.readonly'
 
-export const REQUESTED_GOOGLE_SCOPES: readonly string[] = [
+/**
+ * The only two scopes this system may ever request.
+ *
+ * A union of the two literals rather than `string`, so widening the consent is a **compile** error
+ * rather than a review comment. `scripts/test-gates.mjs` writes a fixture requesting a Gmail scope and
+ * asserts `tsc` rejects it by name — the type is the gate, and a gate nobody has watched fail is not
+ * a gate (ADR 0003).
+ */
+export type GoogleRequestedScope =
+  | typeof GOOGLE_SCOPE_BUSINESS_MANAGE
+  | typeof GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY
+
+export const REQUESTED_GOOGLE_SCOPES: readonly GoogleRequestedScope[] = [
   GOOGLE_SCOPE_BUSINESS_MANAGE,
   GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY,
 ]
+
+/**
+ * Scopes that must never appear in an authorization request, and why each one is here.
+ *
+ * `webmasters` without the `.readonly` suffix is the read-write Search Console scope. It is listed
+ * first because it is the one that would be added by accident: it differs from the scope we do want by
+ * nine characters, and sitemap submission — the only thing it buys — is a one-time manual action in
+ * the Search Console UI (docs/10 §3).
+ *
+ * The Gmail scopes are worse than unnecessary. They are the reason a *password change* revokes a
+ * refresh token: Google ties that revocation to tokens carrying Gmail scopes, so requesting one turns
+ * an invalidation cause that does not apply to us into one that does (docs/10 §4).
+ *
+ * The Analytics scopes are here because GA4 is a separate consent in a later unit, and a scope
+ * requested speculatively is a scope on the consent screen the owner has to be talked through.
+ */
+export const FORBIDDEN_GOOGLE_SCOPES: readonly string[] = [
+  'https://www.googleapis.com/auth/webmasters',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/analytics',
+  'https://www.googleapis.com/auth/analytics.readonly',
+]
+
+/**
+ * The forbidden scopes present in a scope list, compared as whole scopes.
+ *
+ * Whole scopes, not substrings, and that is the entire subtlety: `auth/webmasters` is a prefix of
+ * `auth/webmasters.readonly`, so a containment check would report the scope we *do* want as
+ * forbidden — and the natural fix for that false positive is to delete the check.
+ */
+export function forbiddenScopesIn(scopes: readonly string[]): readonly string[] {
+  const requested = new Set(scopes)
+  return FORBIDDEN_GOOGLE_SCOPES.filter((scope) => requested.has(scope))
+}
 
 /** The scope each capability needs. One scope covers every Business Profile API; there is no other. */
 export const CAPABILITY_SCOPE: Readonly<Record<GoogleCapability, string>> = {
@@ -175,6 +224,33 @@ export function capabilityHealthFromScopes(
   grantedScopes: readonly string[],
 ): 'ok' | 'permission_missing' {
   return grantedScopes.includes(CAPABILITY_SCOPE[capability]) ? 'ok' : 'permission_missing'
+}
+
+/**
+ * The health a capability should carry immediately after a consent, which is not the same question.
+ *
+ * `capabilityHealthFromScopes` answers *"is the scope there"*. This answers *"what do we now know"*,
+ * and the difference is `ok`. A fresh grant proves the owner ticked the product; it proves nothing
+ * about the resource behind it — the listing may be unverified, the Business Profile quota may still
+ * be zero, the Search Console property may belong to another account. Writing `ok` here would put a
+ * green tick on a capability nothing has exercised, and the first thing that reads it is the panel
+ * telling the owner everything is fine.
+ *
+ * So a granted scope resolves to `unknown` and the daily health check (G-CONN-06) decides. An
+ * existing health survives, because a re-consent is not evidence that a previously observed failure
+ * has gone away — except for `permission_missing`, which the consent has by definition just fixed.
+ */
+export function capabilityHealthAtConsent(args: {
+  readonly capability: GoogleCapability
+  readonly grantedScopes: readonly string[]
+  /** Null for a capability that has no row yet. */
+  readonly existingHealth: GoogleCapabilityHealth | null
+}): GoogleCapabilityHealth {
+  if (capabilityHealthFromScopes(args.capability, args.grantedScopes) === 'permission_missing') {
+    return 'permission_missing'
+  }
+  if (args.existingHealth === null || args.existingHealth === 'permission_missing') return 'unknown'
+  return args.existingHealth
 }
 
 export interface CapabilityState {

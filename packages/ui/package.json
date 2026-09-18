@@ -8,7 +8,9 @@
     "./theme-provider": "./src/theme/theme-provider.tsx",
     "./tokens.css": "./src/tokens/tokens.css",
     "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",
-    "./arabic.css": "./src/theme/arabic.css"
+    "./arabic.css": "./src/theme/arabic.css",
+    "./layout": "./src/layout/index.tsx",
+    "./patterns": "./src/patterns/index.tsx"
   },
   "dependencies": {
     "@berelax/shared": "workspace:*",

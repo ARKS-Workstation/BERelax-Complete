@@ -5,6 +5,7 @@ import type {
   GoogleCapabilityRecord,
   GoogleConnectionRecord,
   GoogleConnectionStore,
+  GoogleConsentStore,
 } from './connection-store.ts'
 import type { SealedToken } from './token-store.ts'
 
@@ -31,7 +32,13 @@ const FORBIDDEN_DETAIL_KEYS = [
   'token',
 ]
 
-export interface MemoryConnectionStore extends GoogleConnectionStore {
+/** Same shape as the jsonb comparison the database does, so the fake keys capability rows identically. */
+const sameResource = (
+  a: Readonly<Record<string, unknown>> | null,
+  b: Readonly<Record<string, unknown>> | null,
+): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+export interface MemoryConnectionStore extends GoogleConnectionStore, GoogleConsentStore {
   put(record: GoogleConnectionRecord): void
   putCapability(capability: GoogleCapabilityRecord): void
   records(): readonly GoogleConnectionRecord[]
@@ -44,6 +51,7 @@ export function createMemoryConnectionStore(
   const connections = new Map<string, GoogleConnectionRecord>(seed.map((r) => [r.id, r]))
   const capabilities: GoogleCapabilityRecord[] = []
   const events: ConnectionEventInput[] = []
+  let allocated = 0
 
   const mutate = (id: string, patch: Partial<GoogleConnectionRecord>): void => {
     const existing = connections.get(id)
@@ -72,6 +80,110 @@ export function createMemoryConnectionStore(
 
     async load(connectionId) {
       return connections.get(connectionId) ?? null
+    },
+
+    async loadBySub(googleSub) {
+      return [...connections.values()].find((r) => r.googleSub === googleSub) ?? null
+    },
+
+    async authorizationCodeSeen(fingerprint) {
+      return events.some((e) => e.detail?.['authorizationCodeFingerprint'] === fingerprint)
+    },
+
+    async allocateId() {
+      allocated += 1
+      // Zero-padded so `listAll`'s lexicographic sort matches the insertion order, the way a UUIDv7's
+      // time prefix does in the database. An unpadded counter sorts 10 before 2.
+      return `memory-connection-${String(allocated).padStart(6, '0')}`
+    },
+
+    async insert(connection) {
+      // UNIQUE(google_sub), reproduced. A fake that let two rows share a sub would make the whole
+      // "matching sub is a re-auth" question undecidable in a unit test and decidable only in
+      // production.
+      const clash = [...connections.values()].find((r) => r.googleSub === connection.googleSub)
+      if (clash !== undefined) {
+        throw new AppError(
+          'conflict',
+          `A Google connection for sub ${connection.googleSub} already exists (${clash.id}).`,
+        )
+      }
+      connections.set(
+        connection.id,
+        connectionRecord({
+          id: connection.id,
+          googleSub: connection.googleSub,
+          googleEmail: connection.googleEmail,
+          grantedScopes: connection.grantedScopes,
+          refreshToken: connection.refreshToken,
+          consentAt: connection.consentAt,
+        }),
+      )
+      return connection.id
+    },
+
+    async recordConsent(write) {
+      mutate(write.connectionId, {
+        googleEmail: write.googleEmail,
+        grantedScopes: write.grantedScopes,
+        refreshToken: write.refreshToken,
+        consentAt: write.consentAt,
+        status: 'active',
+        statusReason: null,
+        // Cleared, exactly as the SQL does: the cached token carries the OLD scope set and would keep
+        // working against a product the owner has just removed.
+        accessToken: null,
+        accessExpiresAt: null,
+      })
+    },
+
+    async upsertCapability(capability) {
+      const clash = capabilities.find(
+        (c) =>
+          c.connectionId === capability.connectionId &&
+          c.capability === capability.capability &&
+          sameResource(c.resourceRef, capability.resourceRef),
+      )
+      if (clash !== undefined) {
+        throw new AppError(
+          'conflict',
+          `A ${capability.capability} capability for that resource already exists on ` +
+            `${capability.connectionId} (google_capability_resource_unique).`,
+        )
+      }
+      const primaryClash =
+        capability.isPrimary &&
+        capabilities.some(
+          (c) =>
+            c.connectionId === capability.connectionId &&
+            c.capability === capability.capability &&
+            c.isPrimary,
+        )
+      if (primaryClash) {
+        throw new AppError(
+          'conflict',
+          `${capability.capability} already has a primary resource on ${capability.connectionId} ` +
+            '(google_capability_one_primary).',
+        )
+      }
+      capabilities.push(capability)
+    },
+
+    async updateCapabilityHealth(write) {
+      const index = capabilities.findIndex(
+        (c) =>
+          c.connectionId === write.connectionId &&
+          c.capability === write.capability &&
+          sameResource(c.resourceRef, write.resourceRef),
+      )
+      const existing = capabilities[index]
+      if (existing === undefined) {
+        throw new AppError(
+          'not_found',
+          `No ${write.capability} capability on connection ${write.connectionId} for that resource`,
+        )
+      }
+      capabilities[index] = { ...existing, health: write.health }
     },
 
     async listAll() {

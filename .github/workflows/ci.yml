@@ -93,6 +93,11 @@ jobs:
       - name: Job registry and cron declarations
         run: pnpm jobs
 
+      # The editorial grid, the direction multiplier and the one shadow. Static rules, so they run with
+      # the other cheap scans rather than after the browser work.
+      - name: Layout, motion and elevation discipline
+        run: pnpm layout
+
       - name: Every locked decision has an ADR
         run: pnpm adr
 
@@ -118,8 +123,19 @@ jobs:
       - name: Accessibility (axe, WCAG 2.1/2.2 AA)
         run: pnpm a11y
 
+      # docs/08 §4's two numbers nobody checks: 48px on a phone, 40px on a desk, 8px between targets.
+      # A mis-tap is not visible in code review and is the whole booking flow on a phone.
+      - name: Touch targets
+        run: pnpm touch-targets
+
       - name: Unit tests and coverage thresholds
         run: pnpm coverage
+
+      # The integration suite drives the *built* application: shell.itest.ts and kitchen-sink.itest.ts
+      # both spawn `next start`, which needs a build to start at all. Without this step those two files
+      # fail in CI on a missing `.next` while passing for anybody who had built locally.
+      - name: Build the web application
+        run: pnpm --filter @berelax/web build
 
       - name: Integration tests (real PostgreSQL)
         run: pnpm test:integration

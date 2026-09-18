@@ -10,6 +10,7 @@ export {
   createFakeBusinessProfile,
   createFakeGoogleOAuth,
   createFakeSearchConsole,
+  FAKE_GRANTED_SCOPES,
   type FakeGoogleOptions,
   GOOGLE_BUSINESS_PROFILE,
   GOOGLE_OAUTH,
@@ -18,7 +19,9 @@ export {
   TESTING_REFRESH_TOKEN_DAYS,
 } from './fake-google.ts'
 export type {
+  AuthorizationUrlArgs,
   BusinessProfileProvider,
+  ExchangeCodeOptions,
   GoogleOAuthProvider,
   GoogleSub,
   GoogleTokens,

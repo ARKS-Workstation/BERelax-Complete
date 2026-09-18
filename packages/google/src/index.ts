@@ -12,10 +12,14 @@
  * package is the I/O around it.
  */
 export type {
+  CapabilityHealthWrite,
   ConnectionEventInput,
+  ConsentWrite,
   GoogleCapabilityRecord,
   GoogleConnectionRecord,
   GoogleConnectionStore,
+  GoogleConsentStore,
+  NewConnection,
   RefreshWrite,
   StatusWrite,
 } from './connection-store.ts'
@@ -32,7 +36,43 @@ export {
   createMemoryConnectionStore,
   type MemoryConnectionStore,
 } from './memory-store.ts'
-export { createPostgresConnectionStore, type NewConnection } from './postgres-store.ts'
+export {
+  type AuthorizationRequest,
+  buildAuthorizationRequest,
+  CONSENT_WINDOW_MINUTES,
+  type ConsentDeps,
+  codeChallengeFor,
+  consentWindowExpired,
+  type PendingConsent,
+  parsePendingConsent,
+  serialisePendingConsent,
+} from './oauth/consent.ts'
+export {
+  authorizationCodeFingerprint,
+  CONSENT_CODE_REPLAYED,
+  CONSENT_DENIED,
+  CONSENT_IDENTITY_MISMATCH,
+  CONSENT_STATE_MISMATCH,
+  CONSENT_WINDOW_CLOSED,
+  type ConsentCallback,
+  type ConsentGrant,
+  claimsFromIdToken,
+  consentCodeReplayed,
+  type ExchangeDeps,
+  exchangeConsentCode,
+  type GoogleIdentity,
+  identityFrom,
+} from './oauth/exchange.ts'
+export {
+  type ApplyConsentDeps,
+  applyConsent,
+  type CompleteConsentDeps,
+  type ConsentOutcome,
+  type ConsentOutcomeKind,
+  completeGoogleConsent,
+  type GoogleAccountMismatch,
+} from './oauth/reconnect.ts'
+export { createPostgresConnectionStore } from './postgres-store.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
 export {
   connectionBinding,

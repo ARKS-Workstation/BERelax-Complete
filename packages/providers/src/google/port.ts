@@ -15,16 +15,51 @@ export interface GoogleTokens {
   readonly expiresAtIso: string
   /** Absent on a refresh: Google returns a new refresh token only on first consent. */
   readonly refreshToken?: string
+  /**
+   * What Google **granted**, which is not what was requested.
+   *
+   * A consent screen where the owner unticks one product returns fewer scopes with an otherwise
+   * successful exchange, so this is the only honest source for `granted_scopes` (docs/10 §3).
+   */
   readonly scopes: readonly string[]
   readonly sub: GoogleSub
+  /**
+   * The OIDC id_token, present on a code exchange when `openid` was granted.
+   *
+   * It is the only place the exchange carries the account's **email**, and it carries `sub` a second
+   * time — which is worth cross-checking, because `sub` is the identity every stored token is bound
+   * to and a mismatch between the two means the response was assembled from two accounts.
+   */
+  readonly idToken?: string
+}
+
+/** What a caller sends to the authorization endpoint. PKCE is not optional: see `codeChallenge`. */
+export interface AuthorizationUrlArgs {
+  readonly state: string
+  readonly scopes: readonly string[]
+  /**
+   * The S256 PKCE challenge. Optional on the port only because the *shape* is shared with the
+   * refresh path; `packages/google` always sends one, and the fake refuses an exchange whose
+   * verifier does not hash to the challenge it issued the code against.
+   */
+  readonly codeChallenge?: string
+  readonly codeChallengeMethod?: 'S256'
+  /** Where Google sends the browser back. Derived from the request, never configured per environment. */
+  readonly redirectUri?: string
+}
+
+export interface ExchangeCodeOptions {
+  /** The PKCE verifier whose S256 hash must equal the challenge the code was issued against. */
+  readonly codeVerifier?: string
+  readonly redirectUri?: string
 }
 
 export interface GoogleOAuthProvider {
   readonly name: string
   /** The URL a browser is sent to. The real adapter builds it; the fake returns a local stand-in. */
-  authorizationUrl(args: { state: string; scopes: readonly string[] }): string
-  /** Exchanges the one-time code for tokens. */
-  exchangeCode(code: string): Promise<GoogleTokens>
+  authorizationUrl(args: AuthorizationUrlArgs): string
+  /** Exchanges the one-time code for tokens. A code may be exchanged exactly once. */
+  exchangeCode(code: string, options?: ExchangeCodeOptions): Promise<GoogleTokens>
   /**
    * Trades a refresh token for a new access token.
    *

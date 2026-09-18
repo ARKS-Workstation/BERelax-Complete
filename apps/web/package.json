@@ -9,10 +9,14 @@
     "start": "next start"
   },
   "dependencies": {
+    "@berelax/clinical": "workspace:*",
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",
     "@berelax/db": "workspace:*",
+    "@berelax/google": "workspace:*",
     "@berelax/messaging": "workspace:*",
+    "@berelax/providers": "workspace:*",
+    "@berelax/shared": "workspace:*",
     "@berelax/ui": "workspace:*",
     "@fontsource-variable/cormorant-garamond": "^5.3.0",
     "@fontsource-variable/ibm-plex-sans": "5.3.0",
@@ -25,6 +29,7 @@
   },
   "devDependencies": {
     "@berelax/fixtures": "workspace:*",
+    "@berelax/harness": "workspace:*",
     "@tailwindcss/postcss": "4.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

@@ -42,6 +42,8 @@
       "@berelax/pdf/*": ["./packages/pdf/src/*"],
       "@berelax/ui": ["./packages/ui/src/index.ts"],
       "@berelax/ui/theme-provider": ["./packages/ui/src/theme/theme-provider.tsx"],
+      "@berelax/ui/layout": ["./packages/ui/src/layout/index.tsx"],
+      "@berelax/ui/patterns": ["./packages/ui/src/patterns/index.tsx"],
       "@berelax/ui/*": ["./packages/ui/src/*"],
       "@berelax/worker": ["./apps/worker/src/index.ts"],
       "@berelax/worker/*": ["./apps/worker/src/*"],
@@ -53,6 +55,7 @@
       "@berelax/fixtures": ["./packages/fixtures/src/index.ts"],
       "@berelax/fixtures/*": ["./packages/fixtures/src/*"],
       "@berelax/harness": ["./packages/harness/src/index.ts"],
+      "@berelax/harness/touch-targets": ["./packages/harness/src/touch-targets.ts"],
       "@berelax/harness/*": ["./packages/harness/src/*"]
     },
     "types": ["node"]

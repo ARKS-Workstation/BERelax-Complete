@@ -20,6 +20,14 @@ caught a real defect in this repository.
 
    Apply your own migration to that database only.
 
+   **Two things that will cost you a false failure when several units are in flight.** The integration
+   suite drives the built web application, so run `pnpm --filter @berelax/web build` once in your
+   worktree before `pnpm verify` — `.next` is gitignored and a fresh worktree has none. And the suite
+   opens a 64-connection pool to prove a row lock under concurrency; if you see
+   `sorry, too many clients already` or `ERR_CONNECTION_REFUSED`, another worktree was running the
+   integration suite at the same time. Neither is yours. Re-run, and say so in your report rather than
+   changing the test.
+
 2. **Every gate needs a known-bad fixture** (ADR 0003). If you add a check, add a case to
    `scripts/test-gates.mjs` that deliberately breaks it and asserts it fails. A passing check that has
    never been seen to fail may not be a check at all — TypeScript 7 once reduced `pnpm boundaries` to

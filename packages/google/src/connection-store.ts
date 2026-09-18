@@ -83,8 +83,56 @@ export interface StatusWrite {
   readonly lastCheckedAt: Instant
 }
 
+/**
+ * Input for the first write of a connection. Used by the seed path and by G-CONN-02's consent flow.
+ *
+ * The id is supplied rather than defaulted, because the AAD binds the ciphertext to its own row: the
+ * id has to exist before the token can be sealed. `allocateId` produces one.
+ */
+export interface NewConnection {
+  readonly id: string
+  readonly googleSub: string
+  readonly googleEmail: string
+  readonly grantedScopes: readonly string[]
+  readonly refreshToken: SealedToken
+  readonly consentAt: Instant
+  readonly createdBy?: string
+}
+
+/**
+ * A re-consent of an existing connection: a new refresh token and a new granted-scope set.
+ *
+ * Deliberately cannot express a change of `google_sub`. A re-consent that arrived with a different sub
+ * is a **different Google account**, and the only safe thing to do with it is insert a second row and
+ * say so loudly — silently swapping the sub under a connection's capabilities is how a review reply
+ * reaches another business's listing (docs/10 §5).
+ */
+export interface ConsentWrite {
+  readonly connectionId: string
+  /** Display only, but it does change: a Workspace rename arrives on the next consent. */
+  readonly googleEmail: string
+  readonly grantedScopes: readonly string[]
+  readonly refreshToken: SealedToken
+  readonly consentAt: Instant
+}
+
+export interface CapabilityHealthWrite {
+  readonly connectionId: string
+  readonly capability: GoogleCapability
+  /** Identifies the row together with the capability; never overwritten by a consent. */
+  readonly resourceRef: Readonly<Record<string, unknown>> | null
+  readonly health: GoogleCapabilityHealth
+}
+
 export interface GoogleConnectionStore {
   load(connectionId: string): Promise<GoogleConnectionRecord | null>
+  /**
+   * The connection for a Google account, by the identity key.
+   *
+   * `google_sub` is UNIQUE, so this returns at most one row — which is what makes "matching sub is a
+   * re-auth" a decidable question rather than a heuristic over email addresses.
+   */
+  loadBySub(googleSub: string): Promise<GoogleConnectionRecord | null>
   /** Every connection, for the re-wrap job and the daily health check. */
   listAll(): Promise<readonly GoogleConnectionRecord[]>
   capabilitiesFor(connectionId: string): Promise<readonly GoogleCapabilityRecord[]>
@@ -100,5 +148,34 @@ export interface GoogleConnectionStore {
     readonly connectionId: string
     readonly refreshToken: SealedToken
   }): Promise<void>
+  appendEvent(event: ConnectionEventInput): Promise<void>
+}
+
+/**
+ * What the consent flow needs on top of the lifecycle store.
+ *
+ * A separate interface rather than more methods on `GoogleConnectionStore`, so the re-wrap job and the
+ * health check cannot reach an insert: the narrowest seam that expresses a job's needs is the cheapest
+ * way to guarantee it does nothing else (the same argument as `rewrapRefreshToken`).
+ */
+export interface GoogleConsentStore {
+  loadBySub(googleSub: string): Promise<GoogleConnectionRecord | null>
+  /** Every connection, so a second account's arrival can name the incumbent it did not replace. */
+  listAll(): Promise<readonly GoogleConnectionRecord[]>
+  capabilitiesFor(connectionId: string): Promise<readonly GoogleCapabilityRecord[]>
+  /**
+   * Whether an authorization code with this fingerprint has already produced a connection.
+   *
+   * The durable half of replay rejection. A `state` cookie is cleared by a successful exchange, so it
+   * can only report *"no authorization in flight"* — which is the same answer a CSRF attempt gets, and
+   * conflating the two leaves nobody able to tell a replay from a forgery. The fingerprint is recorded
+   * on the append-only event the consent wrote, so the evidence outlives the browser.
+   */
+  authorizationCodeSeen(fingerprint: string): Promise<boolean>
+  allocateId(): Promise<string>
+  insert(connection: NewConnection): Promise<string>
+  recordConsent(write: ConsentWrite): Promise<void>
+  upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
+  updateCapabilityHealth(write: CapabilityHealthWrite): Promise<void>
   appendEvent(event: ConnectionEventInput): Promise<void>
 }

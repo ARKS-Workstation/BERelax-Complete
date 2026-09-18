@@ -25,6 +25,7 @@
     "gates:test": "node scripts/test-gates.mjs",
     "invisibles": "node scripts/check-invisible-chars.mjs",
     "jobs": "tsx scripts/check-job-registry.mjs",
+    "layout": "node scripts/check-layout-rules.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "media": "node scripts/check-media.mjs",
@@ -37,12 +38,13 @@
     "purity": "node scripts/check-core-purity.mjs",
     "screens": "tsx scripts/screenshots.mjs",
     "seed": "tsx scripts/seed.mjs",
+    "touch-targets": "tsx scripts/check-touch-targets.mjs",
     "test": "vitest run -c vitest.config.ts",
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

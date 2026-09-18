@@ -10,8 +10,11 @@ import {
   type CapabilityState,
   CONNECTION_STALE_AFTER_HOURS,
   type ConnectionSnapshot,
+  capabilityHealthAtConsent,
   capabilityHealthFromScopes,
   deriveConnectionHealth,
+  FORBIDDEN_GOOGLE_SCOPES,
+  forbiddenScopesIn,
   GOOGLE_SCOPE_BUSINESS_MANAGE,
   GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY,
   hoursBetween,
@@ -340,5 +343,83 @@ describe('refresh success', () => {
     // Offboarding revoked the token at Google on purpose. A stray job reviving the row would hide that
     // from whoever runs the business next.
     expect(() => applyRefreshSuccess({ status: 'disconnected' })).toThrow(AppError)
+  })
+})
+
+describe('the forbidden scope list', () => {
+  it('flags the read-write webmasters scope without flagging the read-only one', () => {
+    // `auth/webmasters` is a prefix of `auth/webmasters.readonly`, so a substring check would report
+    // the scope we DO want as forbidden — and the natural fix for that false positive is deleting the
+    // check. Whole-scope comparison is the point of the function, so it is what is asserted.
+    expect(forbiddenScopesIn([GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY])).toEqual([])
+    expect(forbiddenScopesIn(['https://www.googleapis.com/auth/webmasters'])).toEqual([
+      'https://www.googleapis.com/auth/webmasters',
+    ])
+  })
+
+  it('passes the two scopes this system requests and rejects Gmail and Analytics', () => {
+    expect(forbiddenScopesIn(REQUESTED_GOOGLE_SCOPES)).toEqual([])
+    for (const scope of [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://mail.google.com/',
+      'https://www.googleapis.com/auth/analytics.readonly',
+    ]) {
+      expect(forbiddenScopesIn([scope])).toEqual([scope])
+    }
+  })
+
+  it('never lists a forbidden scope that is also one of the two requested', () => {
+    // A list that forbade a requested scope would make every consent impossible, and the symptom would
+    // be a refusal in the connect route rather than a failing test here.
+    for (const scope of REQUESTED_GOOGLE_SCOPES) {
+      expect(FORBIDDEN_GOOGLE_SCOPES).not.toContain(scope)
+    }
+  })
+})
+
+describe('capability health at consent', () => {
+  it('is permission_missing when the scope was not granted, whatever was there before', () => {
+    for (const existingHealth of ['ok', 'quota_zero', 'not_verified', null] as const) {
+      expect(
+        capabilityHealthAtConsent({
+          capability: 'gbp_reviews',
+          grantedScopes: [GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY],
+          existingHealth,
+        }),
+      ).toBe('permission_missing')
+    }
+  })
+
+  it('is unknown rather than ok for a freshly granted scope', () => {
+    // The control that matters: `capabilityHealthFromScopes` says `ok` for the same input, and using
+    // that here would put a green tick on a capability nothing has exercised. A fresh grant proves the
+    // owner ticked the product, not that the listing is verified or the quota is above zero.
+    expect(capabilityHealthFromScopes('gsc', [GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY])).toBe('ok')
+    expect(
+      capabilityHealthAtConsent({
+        capability: 'gsc',
+        grantedScopes: [GOOGLE_SCOPE_SEARCH_CONSOLE_READONLY],
+        existingHealth: null,
+      }),
+    ).toBe('unknown')
+  })
+
+  it('clears a previous permission_missing but preserves every other observed failure', () => {
+    expect(
+      capabilityHealthAtConsent({
+        capability: 'gsc',
+        grantedScopes: BOTH_SCOPES,
+        existingHealth: 'permission_missing',
+      }),
+    ).toBe('unknown')
+    for (const existingHealth of ['ok', 'quota_zero', 'not_verified'] as const) {
+      expect(
+        capabilityHealthAtConsent({
+          capability: 'gsc',
+          grantedScopes: BOTH_SCOPES,
+          existingHealth,
+        }),
+      ).toBe(existingHealth)
+    }
   })
 })

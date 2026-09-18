@@ -53,3 +53,12 @@ export {
 } from './matrix.ts'
 export { renderNonCompliantSpecimenHtml } from './non-compliant.ts'
 export { renderSpecimenHtml, type SpecimenOptions } from './specimen.ts'
+export {
+  auditTouchTargetsInPage,
+  TOUCH_TARGET_SELECTOR,
+  type TouchTargetFinding,
+  type TouchTargetInput,
+  type TouchTargetRule,
+  touchTargetInputFor,
+  uniqueTouchTargetFindings,
+} from './touch-targets.ts'

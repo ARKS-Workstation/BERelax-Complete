@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**30 / 207 units complete.**
+**32 / 207 units complete.**
 
 ## Next up
 
@@ -144,7 +144,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 127 | `R-REP-07` | The data-quality gate that refuses to show an unreconciled number | `A-FIRST-09`, `A-MEAS-07`, `R-REP-02`, `R-REP-04` | — | — |
 | [ ] | 128 | `R-REP-08` | Role-scoped dashboards, drill-down and pushed alerts | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F07`, `H04`, `R-REP-05`, `R-REP-06`, `R-REP-07` | M5 | Y6-sender-ids |
 | [x] | 129 | `W-SYS-01` | Next.js app shell, Tailwind v4 token mapping and the type stack | `F11`, `H04` | — | Y12-body-face |
-| [ ] | 130 | `W-SYS-02` | Editorial grid, layout primitives and the container-query component set | `W-SYS-01` | — | — |
+| [x] | 130 | `W-SYS-02` | Editorial grid, layout primitives and the container-query component set | `W-SYS-01` | — | — |
 | [ ] | 131 | `W-SYS-03` | Radix/shadcn primitive set and an axe gate that provably fires | `H05`, `W-SYS-01`, `W-SYS-02` | — | — |
 | [ ] | 132 | `W-SITE-01` | Route spine, EN/AR locales, canonicalisation and the route registry | `W-SYS-01`, `W-SYS-03` | — | — |
 | [ ] | 133 | `W-SITE-02` | The premises row as the only NAP source: /api/facts, /llms.txt, robots policy | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `F09`, `W-SITE-01` | — | Y1-nap |
@@ -166,7 +166,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 149 | `W-SYS-10` | Breakpoint preview in the CMS admin | `W-SYS-09` | — | — |
 | [x] | 150 | `G-AGT-01` | Agent registry, heartbeat contract and 2x-interval watchdog | `F09`, `H02` | — | — |
 | [x] | 151 | `G-CONN-01` | google_connections schema: one-to-many, sub-keyed, envelope-encrypted | `F04`, `F08`, `F09` | — | Y2-listing-owner, Y2-gbp-status |
-| [ ] | 152 | `G-CONN-02` | OAuth consent against the fake, granted-scope truth, sub-match reconnect semantics | `G-CONN-01`, `H02` | — | Y10-consent |
+| [x] | 152 | `G-CONN-02` | OAuth consent against the fake, granted-scope truth, sub-match reconnect semantics | `G-CONN-01`, `H02` | — | Y10-consent |
 | [ ] | 153 | `G-CONN-03` | withGoogle: the single chokepoint, error taxonomy and declared degradation | `G-CONN-02` | — | — |
 | [ ] | 154 | `G-CONN-04` | Proactive token refresh under an advisory transaction lock, double-checked | `G-CONN-03` | — | — |
 | [ ] | 155 | `G-CONN-05` | Account and location picker, LOCATION_GROUP enumeration, GSC selected independently | `G-CONN-03` | — | Y10-consent, Y2-listing-owner |

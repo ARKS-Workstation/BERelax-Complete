@@ -4799,7 +4799,7 @@ units:
       multiplier, and the three container-query components (TherapistCard, ServiceRow, SlotGrid shells)
       so no page invents its own layout.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - W-SYS-01
@@ -4823,6 +4823,61 @@ units:
       these three files contain no `@media (min-width` rule
     - Grep asserts `box-shadow` appears only as `var(--shadow-overlay)`, only in overlay components, and
       zero times in dark-theme CSS
+    - 'NOTE: the kitchen sink is at apps/web/app/(en)/(dev)/kitchen-sink/page.tsx, not app/(dev)/…, because
+      W-SYS-01 landed two root layouts — (en) and (ar) — and a route outside a locale group has no <html>
+      to be rendered into. W-SYS-03 lists the old path and should use this one. The portraits are served
+      by a sibling route handler, portrait/[index]/route.ts, reading assets/media/ so the card crops real
+      photography rather than a grey box; three base64 portraits would have added ~400KB to the markup of
+      the page every measurement in this unit is taken against.'
+    - 'NOTE: docs/08 §4 is internally inconsistent about slot buttons. It sets the mobile minimum at 48px
+      and then says "Slot buttons 48×44", and this unit''s own acceptance line asks for a 390px audit where
+      every control is at least 48×48 — which a 44px-tall slot fails. The floor won: .be-slot is 48×48 at
+      every width. The cost is four pixels of vertical rhythm; the alternative was a rule that cannot be
+      enforced. docs/08 §4 should drop the 48×44.'
+    - 'NOTE: two new gates, both in pnpm verify and in CI, each with known-bad fixtures asserted by rule
+      name in scripts/test-gates.mjs (cases 26a-26m: nine rejections and four passing controls).
+      `pnpm layout` (scripts/check-layout-rules.mjs) carries the three grep acceptance lines as named
+      rules: no-rtl-inside-keyframes, no-mirrored-keyframes-pair, no-media-query-in-container-component,
+      shadow-must-use-overlay-token, shadow-only-in-overlay-components, no-shadow-in-dark-theme.
+      `pnpm touch-targets` (scripts/check-touch-targets.mjs) runs the audit from
+      packages/harness/src/touch-targets.ts over the specimen at 390 and 1280 in both directions, and over
+      any HTML document given on argv, which is how the 32px fixture button is rejected by name. The same
+      audit runs against the live route in apps/web/src/kitchen-sink.itest.ts.'
+    - 'NOTE: the shadow rules are scoped to packages/ui and apps/web. packages/pdf/src/render.ts uses
+      box-shadow: var(--shadow-overlay) on the screen-only preview of a document sheet, which is a page
+      floating on a backdrop rather than a web component, and it already uses the token. "Only in overlay
+      components" is enforced by filename (overlay|dialog|sheet|toast|popover|tooltip|menu|drawer|modal)
+      because no overlay component exists yet — W-SYS-03 ships the first one, and until then the rule reads
+      as "nowhere", which is exactly right.'
+    - 'NOTE: deferred to W-SYS-04 — the reveal''s trigger. [data-reveal] carries the one authored keyframe
+      set whose inline distance is calc(var(--move-lg) * var(--dir)), and the itest proves it yields
+      numerically mirrored matrices in both directions, but it plays on load rather than on intersection.
+      W-SYS-04 owns animation-timeline, the IntersectionObserver fallback and packages/ui/src/motion/reveal.tsx;
+      wiring a scroll trigger here would have put a second implementation in the path of that unit.'
+    - 'NOTE: deferred to W-SYS-05 — image derivatives. The portrait route serves the original JPEG with
+      cache-control: no-store; there are no responsive sources, no AVIF/WebP derivatives and no immutable
+      URL, because that is W-SYS-05''s pipeline. What this unit asserts about photography is only the crop:
+      4:5 around the per-image focal point from assets/media/manifest.json.'
+    - 'NOTE: deferred to W-SYS-03 — axe on this route. The kitchen sink is audited here for touch targets,
+      measure, focus rings, the grid and the container queries; the twelve-render axe sweep across
+      390/768/1440 x light/dark x ltr/rtl is W-SYS-03''s acceptance, and `pnpm a11y` still audits the
+      specimen only. ServiceRow also takes formatted strings rather than a catalogue row: the menu on the
+      page is the docs/13 §4 price list as literals, and the real service data arrives with W-SITE.'
+    - 'NOTE: CI never built apps/web. `pnpm test:integration` includes apps/web/src/shell.itest.ts, which
+      spawns `next start` and therefore needs a `.next`, so that file has been failing in CI since W-SYS-01
+      while passing for anybody who had built locally. A build step was added before the integration step
+      and asserted by the CI-completeness case. Found while adding a second itest with the same dependency.'
+    - 'NOTE: the layout and pattern components are reached through two new subpath exports,
+      @berelax/ui/layout and @berelax/ui/patterns, whose barrels are .tsx files. The root typecheck
+      project has no jsx and its include glob is packages/**/*.ts, which does not match .tsx — so a .tsx
+      barrel is invisible to it, while a .ts barrel would be matched by that glob, drag every component
+      into a project with no jsx, and fail `pnpm typecheck`. Same reasoning as W-SYS-01''s
+      @berelax/ui/theme-provider, applied to a directory. The components are typechecked by the app that
+      renders them: `next build` runs tsc over apps/web/tsconfig.json, which has jsx, the DOM lib and
+      React''s types.'
+    - 'NOTE: Measure''s prop is `cap`, not `role`. Biome''s useValidAriaRole reads a `role` attribute on a
+      component as the ARIA one and rejects role="body" — correctly, because a reader would make the same
+      mistake.'
     files:
     - packages/ui/src/layout/grid.tsx
     - packages/ui/src/layout/section.tsx
@@ -4830,7 +4885,18 @@ units:
     - packages/ui/src/patterns/therapist-card.tsx
     - packages/ui/src/patterns/service-row.tsx
     - packages/ui/src/patterns/slot-grid.tsx
-    - apps/web/app/(dev)/kitchen-sink/page.tsx
+    - packages/ui/src/layout/styles.tsx
+    - packages/ui/src/layout/index.tsx
+    - packages/ui/src/patterns/index.tsx
+    - apps/web/app/(en)/(dev)/kitchen-sink/page.tsx
+    - apps/web/app/(en)/(dev)/kitchen-sink/portraits.ts
+    - apps/web/app/(en)/(dev)/kitchen-sink/portrait/[index]/route.ts
+    - apps/web/src/kitchen-sink.itest.ts
+    - packages/harness/src/touch-targets.ts
+    - scripts/check-layout-rules.mjs
+    - scripts/check-touch-targets.mjs
+    - scripts/test-gates.mjs
+    - .github/workflows/ci.yml
   - id: W-SYS-03
     order: 131
     title: Radix/shadcn primitive set and an axe gate that provably fires
@@ -5779,7 +5845,7 @@ units:
       creates a new connection row and warns loudly, because silently swapping accounts is how replies reach
       the wrong listing.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-01
@@ -5804,10 +5870,59 @@ units:
     - 'Scope change on re-consent is atomic: a fault injected between the token write and the capability
       write rolls back both, proven by asserting the pre-existing token ciphertext is unchanged after the
       failed transaction'
+    - 'NOTE: the scope set is closed by the TYPE SYSTEM, not only by a test. REQUESTED_GOOGLE_SCOPES
+      is typed readonly GoogleRequestedScope[] — a union of exactly the two scopes — and
+      buildAuthorizationRequest accepts nothing else, so widening the consent is a compile error.
+      scripts/test-gates.mjs writes fixtures requesting the read-write webmasters scope and a Gmail
+      scope, asserts tsc rejects both by name, and asserts a permitted scope still compiles, because a
+      union that rejected everything would make both rejections meaningless. forbiddenScopesIn in
+      packages/core repeats the check at runtime for a scope list that arrived as data'
+    - 'NOTE: replay rejection is durable, keyed on a SHA-256 fingerprint of the authorization code
+      recorded in the google_connection_events detail that the consent wrote, and checked again inside
+      the transaction. A state cookie could not do this: a successful exchange clears it, so a cleared
+      cookie reports the same thing for a reloaded callback tab and for a forged callback, and those are
+      the two cases an operator most needs told apart. No new table and no migration — G-CONN-01 created
+      everything used here and SCHEMA_VERSION is untouched'
+    - 'NOTE: the fake OAuth provider gained what the flow needs and could not be tested without — a fake
+      id_token carrying sub and email (the exchange has no other source for the address), configurable
+      granted scopes so the partial-consent path is exercisable, PKCE, and single-use authorization codes
+      minted by the consent stand-in and carried in its URL as dev_code. GoogleTokens.idToken,
+      AuthorizationUrlArgs and ExchangeCodeOptions are additive; every existing caller still compiles'
+    - 'NOTE deferred to H-HARD-03: the connect route reads GOOGLE_TOKEN_KEK from the environment rather
+      than from @berelax/config, and refuses the callback loudly when it is absent. Nothing in this
+      system loads a KEK at runtime yet — every existing use is generateKek() in a test — so naming the
+      app-wide key (one KEK for clinical payloads and Google tokens, or two) belongs with the secret
+      inventory in H-HARD-03, and a config key invented here would be the wrong name to migrate away
+      from. The start of the consent needs no key and works today'
+    - 'NOTE deferred to W-SYS-01: the route is NOT authenticated and the consent cookie is NOT signed.
+      There is no admin session to bind either to. The cookie is HttpOnly, SameSite=Lax, Secure and
+      ten-minute; the state is compared double-submit, which is the standard OAuth defence, and what it
+      does not close is an attacker who can set a cookie on this origin. apps/web/app/(admin)/layout.tsx
+      is a minimal root layout mirroring (en) so the route group has a document to render in; the real
+      admin shell, and the settings card that reads the outcome query parameters, are W-SYS-01 and
+      G-CONN-07'
+    - 'NOTE: capability rows created by a consent get health unknown, never ok, when the scope IS
+      granted. A consent proves the owner ticked the product and proves nothing about the resource behind
+      it — the listing may be unverified, the Business Profile quota is zero until Google approves
+      access. ok is G-CONN-06''s to write. capabilityHealthAtConsent in packages/core also preserves a
+      previously observed quota_zero or not_verified, because a re-consent is not evidence a failure went
+      away'
     files:
     - packages/google/src/oauth/consent.ts
     - packages/google/src/oauth/exchange.ts
     - packages/google/src/oauth/reconnect.ts
+    - packages/google/src/oauth/consent.test.ts
+    - packages/google/src/oauth/exchange.test.ts
+    - packages/google/src/oauth/reconnect.test.ts
+    - packages/google/src/google-oauth.itest.ts
+    - packages/google/src/connection-store.ts
+    - packages/google/src/postgres-store.ts
+    - packages/google/src/memory-store.ts
+    - packages/core/src/google/connection.ts
+    - packages/providers/src/google/port.ts
+    - packages/providers/src/google/fake-google.ts
+    - scripts/test-gates.mjs
+    - apps/web/app/(admin)/layout.tsx
     - apps/web/app/(admin)/settings/integrations/google/connect/route.ts
   - id: G-CONN-03
     order: 153

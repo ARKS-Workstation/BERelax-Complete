@@ -18,6 +18,7 @@
  *   gap: summed rows deliberately total less than `totalsFor`, so a report that reconciles them
  *   finds the discrepancy here rather than in a meeting.
  */
+import { createHash } from 'node:crypto'
 import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
 import type {
@@ -43,28 +44,110 @@ export const TESTING_REFRESH_TOKEN_DAYS = 7
 
 const ACCESS_TOKEN_SECONDS = 3600
 
+/**
+ * What the fake consent screen grants when nobody says otherwise.
+ *
+ * The two product scopes from docs/10 §3, plus the two OIDC scopes every Google consent returns.
+ * `openid` is what makes the id_token — and therefore the email — arrive at all.
+ */
+export const FAKE_GRANTED_SCOPES: readonly string[] = [
+  'openid',
+  'email',
+  'https://www.googleapis.com/auth/business.manage',
+  'https://www.googleapis.com/auth/webmasters.readonly',
+]
+
+/** The account the fake consents as when the caller names no other. A role address, not a person. */
+const DEFAULT_FAKE_EMAIL = 'google-admin@berelax.ae'
+
 export interface FakeGoogleOptions {
   readonly log: CallLog
   readonly failures: FailureScript
   readonly now: () => string
   /** The account the fake consents as. One account, many APIs — see docs/10. */
   readonly sub?: string
+  /** The address in the fake id_token. Display only; `sub` is the identity. */
+  readonly email?: string
+  /**
+   * What the fake consent screen GRANTS, which the caller sets independently of what it requests.
+   *
+   * This is the whole point of a fake here: the interesting case is the owner unticking one product,
+   * which returns an otherwise successful exchange with a scope missing. A fake that always granted
+   * everything requested would leave that path unbuilt until launch day.
+   */
+  readonly grantedScopes?: readonly string[]
 }
 
 function addSeconds(iso: string, seconds: number): string {
   return new Date(new Date(iso).getTime() + seconds * 1000).toISOString()
 }
 
+const base64url = (input: Buffer): string => input.toString('base64url')
+
+/** S256, as RFC 7636 defines it: base64url of the SHA-256 of the verifier's ASCII bytes. */
+function s256(verifier: string): string {
+  return base64url(createHash('sha256').update(verifier, 'ascii').digest())
+}
+
+/** One authorization the fake consent screen has issued but not yet exchanged. */
+interface PendingConsent {
+  readonly codeChallenge: string | undefined
+  readonly scopes: readonly string[]
+}
+
 export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthProvider {
-  const { log, failures, now, sub = '104729518362094771533' } = options
+  const {
+    log,
+    failures,
+    now,
+    sub = '104729518362094771533',
+    email = DEFAULT_FAKE_EMAIL,
+    grantedScopes = FAKE_GRANTED_SCOPES,
+  } = options
   let issuedRefreshTokens = 0
+  let issuedCodes = 0
+  /** Codes the fake itself minted, and the PKCE challenge each was issued against. */
+  const pending = new Map<string, PendingConsent>()
+  /** Codes already exchanged. A Google authorization code is single-use; so is this one. */
+  const spent = new Set<string>()
+
+  /**
+   * A stand-in id_token: a real JWT's three dot-separated segments, with an unverifiable signature.
+   *
+   * Not signed, and deliberately so. A consumer that verified this signature would be testing the
+   * fake's key handling rather than its own, and the real flow does not verify it either: the token
+   * arrives over TLS directly from Google's token endpoint in response to a request carrying the
+   * client secret, which is exactly the case Google's own documentation says needs no verification.
+   */
+  const idTokenFor = (scopes: readonly string[]): string | undefined => {
+    if (!scopes.includes('openid')) return undefined
+    const issuedAt = Math.floor(Date.parse(now()) / 1000)
+    const header = base64url(Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' }), 'utf8'))
+    const payload = base64url(
+      Buffer.from(
+        JSON.stringify({
+          iss: 'https://accounts.google.com',
+          aud: 'fake-oauth-client.apps.googleusercontent.com',
+          sub,
+          email,
+          email_verified: true,
+          iat: issuedAt,
+          exp: issuedAt + ACCESS_TOKEN_SECONDS,
+        }),
+        'utf8',
+      ),
+    )
+    return `${header}.${payload}.fake-unverifiable-signature`
+  }
 
   const issue = (scopes: readonly string[], withRefresh: boolean): GoogleTokens => {
+    const idToken = idTokenFor(scopes)
     const base: GoogleTokens = {
       accessToken: `fake-access-${Date.parse(now())}`,
       expiresAtIso: addSeconds(now(), ACCESS_TOKEN_SECONDS),
       scopes,
       sub,
+      ...(idToken === undefined ? {} : { idToken }),
     }
     if (!withRefresh) return base
     issuedRefreshTokens += 1
@@ -74,19 +157,39 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
   return {
     name: GOOGLE_OAUTH,
 
-    authorizationUrl({ state, scopes }) {
+    authorizationUrl({ state, scopes, codeChallenge, codeChallengeMethod, redirectUri }) {
       // Local stand-in for accounts.google.com. The consent screen is part of the fake so the whole
       // connect flow is walkable without a Google account.
+      //
+      // `dev_code` is the one parameter a real authorization URL does not carry, and it is here
+      // because there is no consent server to mint a code later: binding the code to this
+      // authorization at issue time is what lets the fake reject a wrong PKCE verifier and a replayed
+      // code the way Google does. A fake that accepted any code would leave both paths unproven.
+      issuedCodes += 1
+      // The state is in the code because a real authorization code is unique across every consent ever
+      // issued, and a bare counter is only unique within one fake instance. Two instances — two
+      // accounts in one test, or two requests in one process — would otherwise mint the same code, and
+      // the replay check that keys on the code would refuse a legitimate second consent.
+      const code = `fake-auth-code-${issuedCodes}-${state}`
+      pending.set(code, { codeChallenge, scopes: grantedScopes })
       const params = new URLSearchParams({
         state,
         scope: scopes.join(' '),
+        response_type: 'code',
         access_type: 'offline',
         prompt: 'consent',
+        include_granted_scopes: 'true',
+        dev_code: code,
       })
+      if (codeChallenge !== undefined) {
+        params.set('code_challenge', codeChallenge)
+        params.set('code_challenge_method', codeChallengeMethod ?? 'S256')
+      }
+      if (redirectUri !== undefined) params.set('redirect_uri', redirectUri)
       return `/dev/google/consent?${params.toString()}`
     },
 
-    async exchangeCode(code: string): Promise<GoogleTokens> {
+    async exchangeCode(code: string, exchangeOptions): Promise<GoogleTokens> {
       const armed = failures.take()
       if (armed !== undefined) {
         log.record({
@@ -98,11 +201,37 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         })
         throw failureError(GOOGLE_OAUTH, armed)
       }
+
+      // Only codes this fake minted are tracked. A caller that made one up — every conformance
+      // exercise does — still gets a successful exchange, because the alternative is a fake that only
+      // works for callers who walked the whole browser flow.
+      const authorization = pending.get(code)
+      const reject = (reason: string): never => {
+        log.record({
+          provider: GOOGLE_OAUTH,
+          operation: 'exchangeCode',
+          outcome: 'failure',
+          summary: `Code exchange rejected: ${reason}`,
+          detail: { failureMode: 'invalid_grant', reason },
+        })
+        throw failureError(GOOGLE_OAUTH, 'invalid_grant')
+      }
+      if (spent.has(code)) {
+        reject('the authorization code has already been exchanged')
+      }
+      if (authorization?.codeChallenge !== undefined) {
+        const verifier = exchangeOptions?.codeVerifier
+        if (verifier === undefined || s256(verifier) !== authorization.codeChallenge) {
+          reject('the PKCE verifier does not match the challenge the code was issued against')
+        }
+      }
+
       // Only the first consent returns a refresh token; a second one without prompt=consent does not.
-      const tokens = issue(
-        ['openid', 'email', 'https://www.googleapis.com/auth/business.manage'],
-        true,
-      )
+      const tokens = issue(authorization?.scopes ?? grantedScopes, true)
+      if (authorization !== undefined) {
+        pending.delete(code)
+        spent.add(code)
+      }
       log.record({
         provider: GOOGLE_OAUTH,
         operation: 'exchangeCode',
@@ -128,10 +257,7 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         })
         throw failureError(GOOGLE_OAUTH, armed)
       }
-      const tokens = issue(
-        ['openid', 'email', 'https://www.googleapis.com/auth/business.manage'],
-        false,
-      )
+      const tokens = issue(grantedScopes, false)
       log.record({
         provider: GOOGLE_OAUTH,
         operation: 'refresh',

@@ -20,7 +20,9 @@ const config: NextConfig = {
     // The API routes reach the database and the send choke point, which pull in their own workspace
     // dependencies. Every package in the chain has to be listed: a package that is only a transitive
     // dependency still arrives as untranspiled TypeScript.
+    '@berelax/clinical',
     '@berelax/db',
+    '@berelax/google',
     '@berelax/messaging',
     '@berelax/providers',
     '@berelax/shared',

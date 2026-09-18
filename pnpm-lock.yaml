@@ -72,6 +72,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@berelax/clinical':
+        specifier: workspace:*
+        version: link:../../packages/clinical
       '@berelax/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -81,9 +84,18 @@ importers:
       '@berelax/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@berelax/google':
+        specifier: workspace:*
+        version: link:../../packages/google
       '@berelax/messaging':
         specifier: workspace:*
         version: link:../../packages/messaging
+      '@berelax/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@berelax/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -115,6 +127,9 @@ importers:
       '@berelax/fixtures':
         specifier: workspace:*
         version: link:../../packages/fixtures
+      '@berelax/harness':
+        specifier: workspace:*
+        version: link:../../packages/harness
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3

@@ -973,6 +973,8 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   )
 }
 
+const LAYOUT = ['scripts/check-layout-rules.mjs']
+
 // 26a. (B-LIFE-02) The OTP route must not reach an SMS provider directly.
 //
 //      The rule already exists — `messaging-providers-only-inside-a-transport`, with its fixture in
@@ -1017,6 +1019,297 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   )
 }
 
+// The Google consent scope set is closed by the TYPE SYSTEM, and the type is the gate (G-CONN-02).
+//
+// `business.manage` has no read-only variant — the scope that reads reviews also rewrites the address
+// and the opening hours — so the consent screen is the only place the owner limits what this system can
+// do to their Google presence. A future unit adding a scope "while it is in there" is the realistic way
+// that gets widened, and a code review is a weak defence against a one-line array change.
+//
+// So `REQUESTED_GOOGLE_SCOPES` is typed as `readonly GoogleRequestedScope[]`, a union of exactly the two
+// scopes docs/10 §3 permits, and `buildAuthorizationRequest` accepts nothing else. These fixtures prove
+// the compiler rejects the two additions that would actually be attempted, and — the case that makes the
+// other two mean something — that a permitted scope written out as a bare string still compiles.
+{
+  const f = 'packages/google/src/oauth/__gate_fixture__.ts'
+  const fixture = (scope) =>
+    [
+      "import { fixedClock } from '@berelax/core'",
+      "import { createCallLog } from '@berelax/providers/call-log'",
+      "import { FailureScript } from '@berelax/providers/failure'",
+      "import { createFakeGoogleOAuth } from '@berelax/providers/google'",
+      "import { buildAuthorizationRequest } from './consent.ts'",
+      "const at = '2026-09-18T10:00:00.000Z'",
+      'const oauth = createFakeGoogleOAuth({',
+      '  log: createCallLog(() => at),',
+      '  failures: new FailureScript(),',
+      '  now: () => at,',
+      '})',
+      'export const request = buildAuthorizationRequest(',
+      '  { oauth, clock: fixedClock(at) },',
+      `  { scopes: ['${scope}'] },`,
+      ')',
+    ].join('\n')
+
+  const rejected = "is not assignable to type 'GoogleRequestedScope'"
+  const widenings = [
+    [
+      'the read-write Search Console scope',
+      'https://www.googleapis.com/auth/webmasters',
+      // Nine characters from the scope we do want, and all it buys is sitemap submission — a one-time
+      // manual action in the Search Console UI.
+    ],
+    [
+      'a Gmail scope',
+      'https://www.googleapis.com/auth/gmail.readonly',
+      // Worse than unnecessary: Google ties password-change revocation to refresh tokens carrying Gmail
+      // scopes, so adding one turns an invalidation cause that does not apply to us into one that does.
+    ],
+  ]
+
+  for (const [label, scope] of widenings) {
+    const result = withFixture(f, fixture(scope), () =>
+      run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(`tsc rejects ${label} in the Google authorization request`, result, rejected)
+  }
+
+  // The control. If tsc rejected this too, the union would be broken rather than strict, and both cases
+  // above would be passing for the wrong reason.
+  const permitted = withFixture(
+    f,
+    fixture('https://www.googleapis.com/auth/webmasters.readonly'),
+    () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+  )
+  check(
+    'tsc accepts the read-only Search Console scope, so the union is strict and not broken',
+    !permitted.failed,
+    permitted.output,
+  )
+}
+
+// 26a. A direction selector inside a keyframes block. It is not even valid there, so the animation
+//      plays unmirrored and nothing reports anything: the RTL page slides in from the wrong side.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.css',
+    [
+      '@keyframes gate-fixture-slide {',
+      '  from { transform: translateX(32px); }',
+      '  [dir="rtl"] & { transform: translateX(-32px); }',
+      '}',
+    ].join('\n'),
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects a direction selector inside @keyframes',
+    result,
+    '[no-rtl-inside-keyframes]',
+  )
+}
+
+// 26b. The same animation authored twice, as a name suffix. This is the shape it actually ships in.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.css',
+    '@keyframes gate-fixture-reveal-rtl {\n  from { transform: translateX(-32px); }\n}',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects a per-direction copy of one animation',
+    result,
+    '[no-mirrored-keyframes-pair]',
+  )
+}
+
+// 26c. And as a direction rule that swaps which animation plays.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.css',
+    '[dir="rtl"] .gate-fixture {\n  animation-name: gate-fixture-mirrored;\n}',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects an RTL rule that selects a different animation',
+    result,
+    '[no-mirrored-keyframes-pair]',
+  )
+}
+
+// 26d. The control for 26a-26c: the mechanism docs/08 §5 actually specifies. One keyframe set whose
+//      inline distance is multiplied by --dir, and an RTL rule that sets something other than an
+//      animation. If this were rejected the whole direction multiplier would be unusable.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.css',
+    [
+      '@keyframes gate-fixture-good {',
+      '  from { transform: translateX(calc(var(--move-lg) * var(--dir))); }',
+      '  to { transform: translateX(0); }',
+      '}',
+      '[dir="rtl"] .gate-fixture { text-align: start; }',
+    ].join('\n'),
+    () => run('node', LAYOUT),
+  )
+  check(
+    'layout gate allows one keyframe set mirrored by var(--dir)',
+    !result.failed,
+    `rejected the mechanism docs/08 §5 specifies:\n${result.output}`,
+  )
+}
+
+// 26e. A page breakpoint inside a container-query component. The card is used four-across on the home
+//      page, in the measure column of a treatment page and in a 300px admin rail — three widths at one
+//      viewport, so a @media rule is right in one place and wrong in two.
+{
+  const result = withFixture(
+    'packages/ui/src/patterns/__gate_fixture__.tsx',
+    'export const CSS = `@media (min-width: 768px) { .be-card__link { grid-template-columns: 1fr 1fr; } }`',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects a viewport breakpoint in a container-query component',
+    result,
+    '[no-media-query-in-container-component]',
+  )
+}
+
+// 26f. The control for 26e. The same rule as a container query is the correct spelling.
+{
+  const result = withFixture(
+    'packages/ui/src/patterns/__gate_fixture__.tsx',
+    'export const CSS = `@container therapist-card (min-width: 340px) { .be-card__link { grid-template-columns: 1fr 1fr; } }`',
+    () => run('node', LAYOUT),
+  )
+  check(
+    'layout gate allows a container query in a container-query component',
+    !result.failed,
+    `rejected a legitimate @container rule:\n${result.output}`,
+  )
+}
+
+// 26g. A second shadow. docs/08 §2 specifies exactly one, and a system stops being flat at the first
+//      hand-rolled `0 2px 6px`. The fixture is named as an overlay so that only rule 4 can fire.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__-dialog.css',
+    '.gate-fixture-dialog { box-shadow: 0 2px 6px var(--color-ink); }',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects a shadow that is not the overlay token',
+    result,
+    '[shadow-must-use-overlay-token]',
+  )
+}
+
+// 26h. The one shadow, on something that does not float. A card has a hairline and a surface already.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.css',
+    '.be-card { box-shadow: var(--shadow-overlay); }',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects the overlay shadow outside an overlay component',
+    result,
+    '[shadow-only-in-overlay-components]',
+  )
+}
+
+// 26i. A shadow in the dark theme, where `--shadow-overlay` is already `none`: at best dead code, at
+//      worst a literal that defeats the token. On a dark ground a shadow reads as a smudge.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__-sheet.css',
+    ':root[data-theme="dark"] .gate-fixture-sheet { box-shadow: var(--shadow-overlay); }',
+    () => run('node', LAYOUT),
+  )
+  checkRejectedBy(
+    'layout gate rejects a shadow inside a dark-theme block',
+    result,
+    '[no-shadow-in-dark-theme]',
+  )
+}
+
+// 26j. The control for 26g-26i. The overlay token, on an overlay, in the light theme, is the one
+//      elevation the system has — and a gate that rejected it would ban the dialog.
+{
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__-dialog.css',
+    '.gate-fixture-dialog { box-shadow: var(--shadow-overlay); border-radius: var(--radius-3); }',
+    () => run('node', LAYOUT),
+  )
+  check(
+    'layout gate allows the overlay shadow on an overlay component',
+    !result.failed,
+    `rejected the one legitimate elevation:\n${result.output}`,
+  )
+}
+
+const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
+
+// 26k. A 32px button must fail the touch-target audit **by name**. This is what `padding: 4px 10px`
+//      produces, it looks deliberate, and it is a mis-tap on a phone at half past midnight on the one
+//      page that takes a booking. docs/08 §4 puts the mobile floor at 48px.
+{
+  const result = withFixture(
+    'scripts/__gate_fixture__.html',
+    [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>fixture</title></head>',
+      '<body><main><button type="button" style="width:32px;height:32px">Book</button></main></body>',
+      '</html>',
+    ].join('\n'),
+    () => run('pnpm', [...TOUCH, 'scripts/__gate_fixture__.html']),
+  )
+  checkRejectedBy('touch-target gate rejects a 32px button', result, '[touch-target-too-small]')
+}
+
+// 26l. Two targets that are each big enough and 4px apart. Size alone passes this, which is why the
+//      gap is a separate rule: a thumb aimed at the join lands on whichever one it lands on.
+{
+  const result = withFixture(
+    'scripts/__gate_fixture__.html',
+    [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>fixture</title></head>',
+      '<body><main style="display:flex;gap:4px;padding:40px">',
+      '<button type="button" style="width:48px;height:48px">11:00</button>',
+      '<button type="button" style="width:48px;height:48px">12:30</button>',
+      '</main></body></html>',
+    ].join('\n'),
+    () => run('pnpm', [...TOUCH, 'scripts/__gate_fixture__.html']),
+  )
+  checkRejectedBy(
+    'touch-target gate rejects a 4px gap between targets',
+    result,
+    '[touch-target-gap]',
+  )
+}
+
+// 26m. The control for 26k and 26l. Two 48x48 targets 12px apart is the slot grid, and it has to pass
+//      at both floors or the gate is unshippable.
+{
+  const result = withFixture(
+    'scripts/__gate_fixture__.html',
+    [
+      '<!doctype html>',
+      '<html lang="en"><head><meta charset="utf-8"><title>fixture</title></head>',
+      '<body><main style="display:flex;gap:12px;padding:40px">',
+      '<button type="button" style="width:88px;height:48px">11:00</button>',
+      '<button type="button" style="width:88px;height:48px">12:30</button>',
+      '</main></body></html>',
+    ].join('\n'),
+    () => run('pnpm', [...TOUCH, 'scripts/__gate_fixture__.html']),
+  )
+  check(
+    'touch-target gate allows 48x48 targets 12px apart',
+    !result.failed,
+    `rejected a compliant pair:\n${result.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -1030,6 +1323,7 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     'pnpm palette',
     'pnpm tokens',
     'pnpm colours',
+    'pnpm layout',
     'pnpm jobs',
     'pnpm adr',
     'pnpm progress:check',
@@ -1038,7 +1332,9 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     'pnpm fonts',
     'pnpm critique',
     'pnpm a11y',
+    'pnpm touch-targets',
     'pnpm coverage',
+    'pnpm --filter @berelax/web build',
     'pnpm test:integration',
     'pnpm db:migrate:dry',
     'pnpm db:drift',

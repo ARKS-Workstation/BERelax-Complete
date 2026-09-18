@@ -7,10 +7,14 @@ import type {
 import type { Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import type {
+  CapabilityHealthWrite,
   ConnectionEventInput,
+  ConsentWrite,
   GoogleCapabilityRecord,
   GoogleConnectionRecord,
   GoogleConnectionStore,
+  GoogleConsentStore,
+  NewConnection,
   RefreshWrite,
   StatusWrite,
 } from './connection-store.ts'
@@ -97,27 +101,15 @@ const SELECT_COLUMNS = `
   access_token_nonce, access_token_wrapped_key, access_token_kid, access_token_aad_fp
 `
 
-/**
- * Input for the first write of a connection. Used by the seed path and by G-CONN-02's consent flow.
- *
- * The id is supplied rather than defaulted, because the AAD binds the ciphertext to its own row: the
- * id has to exist before the token can be sealed. `allocateId` produces one.
- */
-export interface NewConnection {
-  readonly id: string
-  readonly googleSub: string
-  readonly googleEmail: string
-  readonly grantedScopes: readonly string[]
-  readonly refreshToken: SealedToken
-  readonly consentAt: Instant
-  readonly createdBy?: string
-}
+/** Re-exported for the callers that imported it from here before the consent flow existed. */
+export type { NewConnection } from './connection-store.ts'
 
-export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore & {
-  allocateId(): Promise<string>
-  insert(connection: NewConnection): Promise<string>
-  upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
-} {
+export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
+  GoogleConsentStore & {
+    allocateId(): Promise<string>
+    insert(connection: NewConnection): Promise<string>
+    upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
+  } {
   return {
     async load(connectionId) {
       const rows = await sql<ConnectionRow[]>`
@@ -125,6 +117,27 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
       `
       const row = rows[0]
       return row === undefined ? null : toRecord(row)
+    },
+
+    async loadBySub(googleSub) {
+      const rows = await sql<ConnectionRow[]>`
+        select ${sql.unsafe(SELECT_COLUMNS)} from google_connections where google_sub = ${googleSub}
+      `
+      const row = rows[0]
+      return row === undefined ? null : toRecord(row)
+    },
+
+    async authorizationCodeSeen(fingerprint) {
+      // No index: this table holds a handful of rows per connection for the lifetime of the business,
+      // and an index on a jsonb path that one query reads once per consent would cost more to maintain
+      // than it saves. The fingerprint, not the code — a code is a bearer credential even after it is
+      // spent, and its SHA-256 is enough to recognise a replay without storing one.
+      const rows = await sql<{ one: number }[]>`
+        select 1 as one from google_connection_events
+        where detail->>'authorizationCodeFingerprint' = ${fingerprint}
+        limit 1
+      `
+      return rows.length > 0
     },
 
     async listAll() {
@@ -184,6 +197,59 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
       `
       if (rows.length === 0) {
         throw new AppError('not_found', `No Google connection with id ${write.connectionId}`)
+      }
+    },
+
+    async recordConsent(write: ConsentWrite) {
+      // One statement, and it CLEARS the cached access token rather than leaving it.
+      //
+      // The old access token is still valid for up to an hour, and it carries the *old* scope set. A
+      // re-consent that removed a product would otherwise keep working against the removed API until
+      // the cache expired, and the failure would arrive an hour later with nothing to correlate it to.
+      // The five columns plus the expiry go to null together; the CHECK constraint in 0016 requires it.
+      const rows = await sql`
+        update google_connections set
+          google_email              = ${write.googleEmail},
+          granted_scopes            = ${sql.array(write.grantedScopes as string[])},
+          refresh_token_ct          = ${write.refreshToken.ct},
+          refresh_token_nonce       = ${write.refreshToken.nonce},
+          refresh_token_wrapped_key = ${write.refreshToken.wrappedKey},
+          refresh_token_kid         = ${write.refreshToken.kid},
+          refresh_token_aad_fp      = ${write.refreshToken.aadFingerprint},
+          access_token_ct           = null,
+          access_token_nonce        = null,
+          access_token_wrapped_key  = null,
+          access_token_kid          = null,
+          access_token_aad_fp       = null,
+          access_expires_at         = null,
+          consent_at                = ${new Date(write.consentAt)},
+          status                    = 'active',
+          status_reason             = null
+        where id = ${write.connectionId}
+        returning id
+      `
+      if (rows.length === 0) {
+        throw new AppError('not_found', `No Google connection with id ${write.connectionId}`)
+      }
+    },
+
+    async updateCapabilityHealth(write: CapabilityHealthWrite) {
+      // `is not distinct from` rather than `=`: resource_ref is null for a capability whose resource
+      // nobody has chosen yet, and `null = null` is null, so `=` would match no row and the write would
+      // silently do nothing. The index this mirrors is NULLS NOT DISTINCT for the same reason.
+      const resourceRef = write.resourceRef === null ? null : sql.json(write.resourceRef as never)
+      const rows = await sql`
+        update google_capabilities set health = ${write.health}
+        where connection_id = ${write.connectionId}
+          and capability = ${write.capability}
+          and resource_ref is not distinct from ${resourceRef}::jsonb
+        returning id
+      `
+      if (rows.length === 0) {
+        throw new AppError(
+          'not_found',
+          `No ${write.capability} capability on connection ${write.connectionId} for that resource`,
+        )
       }
     },
 
