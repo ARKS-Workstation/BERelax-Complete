@@ -238,7 +238,36 @@ const runExpectingFailure = (cmd, args) => {
   check('fixture gate rejects a changed fixture salon', failed)
 }
 
-// 18. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 18. A design defect must fail the critique pass.
+{
+  // The non-compliant specimen exists for exactly this: body text on the 2.90:1 brand gold, a
+  // measure with no cap, a 32px touch target and a physical margin. If the pass reports it clean,
+  // the pass is decoration.
+  const f = 'scripts/__gate_fixture__.mjs'
+  writeFileSync(
+    f,
+    [
+      "import { FIXTURE_NOW } from '../packages/fixtures/src/clock.ts'",
+      "import { createCaptureHarness, critiqueResults } from '../packages/harness/src/capture.ts'",
+      "import { summarise } from '../packages/harness/src/critique.ts'",
+      "import { renderNonCompliantSpecimenHtml } from '../packages/harness/src/non-compliant.ts'",
+      'const harness = await createCaptureHarness({ nowMs: FIXTURE_NOW })',
+      'try {',
+      "  const captures = await harness.capture({ name: 'bad', html: renderNonCompliantSpecimenHtml })",
+      '  const counts = summarise(critiqueResults(captures))',
+      '  if (counts.defects === 0) process.exit(0)',
+      "  console.error(counts.defects + ' defect(s)')",
+      '  process.exit(1)',
+      '} finally { await harness.close() }',
+      '',
+    ].join('\n'),
+  )
+  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', f])
+  rmSync(f, { force: true })
+  check('critique pass reports a deliberately non-compliant page as a defect', failed)
+}
+
+// 19. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -254,6 +283,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm adr',
     'pnpm progress:check',
     'pnpm fixtures',
+    'pnpm critique',
     'pnpm test',
     'pnpm test:integration',
     'pnpm db:migrate:dry',

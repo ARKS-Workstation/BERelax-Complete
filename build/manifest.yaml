@@ -210,7 +210,7 @@ units:
     order: 15
     title: Screenshot harness and gallery
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - H03
     - F11

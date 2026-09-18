@@ -2,11 +2,11 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**14 / 206 units complete.**
+**15 / 206 units complete.**
 
 ## Next up
 
-1. **H04 — Screenshot harness and gallery**
+1. **H05 — Quality gates wired into CI**
 1. **B-CAT-01 — Premises hours, closures and the first-class business_day**  — **needs owner input:** Y8-hours
 1. **B-MSG-01 — Channel-shaped template model, encoding, segment count and cost**
 
@@ -28,7 +28,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
 | [x] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
 | [x] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |
-| [ ] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
+| [x] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
 | [ ] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |
 | [ ] | 17 | `B-CAT-01` | Premises hours, closures and the first-class business_day | `F04`, `F05`, `F09`, `H03` | — | Y8-hours |
 | [ ] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |

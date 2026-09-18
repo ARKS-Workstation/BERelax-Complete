@@ -29,18 +29,23 @@ const EXTENSIONS = new Set(['.css', '.ts', '.tsx'])
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.next', 'fixtures'])
 
 /**
- * Files allowed to contain literal colours.
+ * Files exempt from these rules, and why each one is.
  *
- * The generated palette and the script that derives it, plus the one place the prototype's original
- * values are recorded. Nothing else.
+ * Two kinds only: the token layer, which is where literal colours are supposed to be, and the known-
+ * bad design fixture, whose purpose is to contain the violations. Each entry is a single file rather
+ * than a directory, so an exemption cannot quietly widen.
  */
-const COLOUR_LITERAL_ALLOWLIST = [
+const EXEMPT = [
   'packages/ui/src/tokens/palette.generated.ts',
   'packages/ui/src/tokens/tokens.css',
   'packages/ui/src/tokens/palette.test.ts',
   // The one shadow token. A shadow carries no contrast requirement, so there is nothing for
   // palette.py to derive or measure; see the file's own note on why the exception is scoped to it.
   'packages/ui/src/tokens/shadow.ts',
+  // The known-bad design fixture. Its entire purpose is to contain the violations this gate exists
+  // to catch, and `scripts/test-gates.mjs` fails the build if the critique pass reports it clean.
+  // It is a separate file precisely so this exemption covers the smallest possible surface.
+  'packages/harness/src/non-compliant.ts',
 ]
 
 /** The prototype gold. Decorative only — see rule 2. */
@@ -78,9 +83,15 @@ const TEXT_BEARING_DECLARATION = new RegExp(
   'gi',
 )
 
-/** Any literal colour: hex, or a functional notation with numeric arguments. */
+/**
+ * Any literal colour: hex, or a functional notation whose arguments are all literal.
+ *
+ * `[^)$]*` rather than `[^)]*` on purpose. `rgb(${r}, ${g}, ${b})` inside a diagnostic message is not
+ * a colour anybody chose — it is a template hole reporting one back — and flagging it sends the
+ * reader to fix a string. The gate found that in its own critique pass's error message.
+ */
 const COLOUR_LITERAL =
-  /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(\s*(?:from\s+)?[^)]*\)/gi
+  /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(\s*(?:from\s+)?[^)$]*\)/gi
 
 /**
  * Tailwind's default palette as utility class names.
@@ -154,7 +165,7 @@ for (const root of ROOTS) {
     continue
   }
   for (const file of walk(root)) {
-    const allowed = COLOUR_LITERAL_ALLOWLIST.some((entry) => file.endsWith(entry))
+    const exempt = EXEMPT.some((entry) => file.endsWith(entry))
     // Comments are blanked, strings are not: the CSS this gate exists to police lives inside
     // template literals. Without this, the sentence explaining why Tailwind defaults are banned is
     // itself reported as a Tailwind default.
@@ -167,7 +178,7 @@ for (const root of ROOTS) {
       const at = `${file}:${index + 1}`
 
       // Rule 1 — un-tokened colour.
-      if (!allowed) {
+      if (!exempt) {
         for (const match of line.matchAll(COLOUR_LITERAL)) {
           if (HARMLESS.test(match[0])) continue
           violations.push(
@@ -175,6 +186,10 @@ for (const root of ROOTS) {
           )
         }
       }
+
+      // Rules 2 and 3 are exempt on the same files. A fixture that cannot contain the defect it
+      // exists to demonstrate is not a fixture.
+      if (exempt) continue
 
       // Rule 2 — the decorative gold on something that carries meaning.
       for (const match of line.matchAll(TEXT_BEARING_DECLARATION)) {

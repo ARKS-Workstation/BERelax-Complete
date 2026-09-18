@@ -8,6 +8,7 @@
 :root {
   --color-ground: #FDFAF5;
   --color-surface: #FFFFFF;
+  --color-surface-raised: #FFFFFF;
   --color-ground-sunk: #F7F0E5;
   --color-surface-sand: #F2E9DC;
   --color-surface-clay: #E6D8C4;
@@ -35,17 +36,23 @@
     --color-ground-sunk: #0F0D0B;
     --color-surface: #1F1C18;
     --color-surface-raised: #292520;
+    --color-surface-sand: #231F1A;
+    --color-surface-clay: #2F2A24;
     --color-ink: #F0EBE3;
     --color-ink-2: #B5AEA4;
     --color-ink-3: #746F66;
     --color-accent-gold: #C08A43;
+    --color-accent-gold-strong: #C69656;
     --color-accent-green: #5F8958;
     --color-accent-teal: #358C81;
+    --color-decor-gold: #C08A43;
+    --color-decor-tan: #C9AE8B;
     --color-hairline: #2A2621;
     --color-border: #3A352E;
     --color-border-strong: #8B857B;
     --color-focus: #5FB8AC;
     --color-danger: #D55144;
+    --color-success: #5F8958;
   }
 }
 
@@ -54,17 +61,23 @@
   --color-ground-sunk: #0F0D0B;
   --color-surface: #1F1C18;
   --color-surface-raised: #292520;
+  --color-surface-sand: #231F1A;
+  --color-surface-clay: #2F2A24;
   --color-ink: #F0EBE3;
   --color-ink-2: #B5AEA4;
   --color-ink-3: #746F66;
   --color-accent-gold: #C08A43;
+  --color-accent-gold-strong: #C69656;
   --color-accent-green: #5F8958;
   --color-accent-teal: #358C81;
+  --color-decor-gold: #C08A43;
+  --color-decor-tan: #C9AE8B;
   --color-hairline: #2A2621;
   --color-border: #3A352E;
   --color-border-strong: #8B857B;
   --color-focus: #5FB8AC;
   --color-danger: #D55144;
+  --color-success: #5F8958;
 }
 
 :root {

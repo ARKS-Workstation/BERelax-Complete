@@ -97,6 +97,11 @@ jobs:
       - name: Fixture salon unchanged
         run: pnpm fixtures
 
+      # The critique pass reads the rendered DOM against docs/08. It catches what a pixel diff
+      # cannot: a defect present since the first commit, when there is no baseline to diff against.
+      - name: Design self-critique
+        run: pnpm critique
+
       - name: Unit tests
         run: pnpm test
 

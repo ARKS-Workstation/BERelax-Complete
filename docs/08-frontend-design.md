@@ -51,6 +51,7 @@ CI. The tables below are its output, not aspiration.
 |---|---|---|---|
 | `--ground` | `#FDFAF5` | — | page |
 | `--surface` | `#FFFFFF` | — | cards |
+| `--surface-raised` | `#FFFFFF` | — | elevated surfaces; in light the cue is `--shadow-overlay`, in dark it is lightness |
 | `--ground-sunk` | `#F7F0E5` | — | recessed bands |
 | `--surface-sand` | `#F2E9DC` | — | section fills |
 | `--surface-clay` | `#E6D8C4` | 1.35:1 | large shapes, **never text** |
@@ -93,6 +94,12 @@ lightness rather than dimmed.
 | `--accent-gold` | `#C08A43` | **6.19:1** |
 | `--accent-green` | `#5F8958` | **4.63:1** |
 | `--accent-teal` | `#358C81` | **4.64:1** |
+| `--surface-sand` | `#231F1A` | — |
+| `--surface-clay` | `#2F2A24` | — |
+| `--accent-gold-strong` | `#C69656` | **7.03:1** |
+| `--decor-gold` | `#C08A43` | — |
+| `--decor-tan` | `#C9AE8B` | — |
+| `--success` | `#5F8958` | **4.63:1** |
 | `--hairline` | `#2A2621` | — |
 | `--border` | `#3A352E` | — |
 | `--border-strong` | `#8B857B` | **5.11:1** |
@@ -101,6 +108,12 @@ lightness rather than dimmed.
 
 Note the inversion: **the bright brand gold `#C08A43`, unusable for text in light mode, reaches 6.19:1 in
 dark mode** and becomes the primary accent there. Accent polarity flips with the theme.
+
+**Both themes define the same 21 tokens, and `scripts/palette.py` fails if they do not.** A token
+present in light and absent in dark is not undefined in dark mode — it silently keeps its *light*
+value, because the custom property is simply never redefined. The self-critique pass found exactly
+that on its first run: the sand band rendered at `#F2E9DC` under `#F0EBE3` ink, measuring **1.01:1**,
+with the whole section invisible. The parity check is what stops it recurring.
 
 **Accent fills:** light `--accent-gold` `#946A32` with `#FDFAF5` text (4.62:1); dark `#C08A43` fill with
 `#141210` text (6.19:1).

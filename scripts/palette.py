@@ -64,6 +64,10 @@ LIGHT = {
   # role                      value        min ratio (None = surface/decorative only)
   "ground":                  ("#FDFAF5", None),
   "surface":                  ("#FFFFFF", None),
+  # In light there is nowhere above white, so elevation is carried by --shadow-overlay rather than by
+  # lightness; in dark it is the reverse (docs/08 section 2). The token exists in both themes anyway,
+  # because a component should not have to know which theme it is in to pick a surface.
+  "surface-raised":           ("#FFFFFF", None),
   "ground-sunk":              ("#F7F0E5", None),
   "surface-sand":             ("#F2E9DC", None),
   "surface-clay":             ("#E6D8C4", None),
@@ -89,17 +93,29 @@ DARK = {
   "ground-sunk":              ("#0F0D0B", None),
   "surface":                  ("#1F1C18", None),
   "surface-raised":           ("#292520", None),
+  # Every token the light theme uses needs a dark counterpart, or it keeps its LIGHT value in dark
+  # mode — the variable is simply not redefined. That is not a subtle bug: a sand band at #F2E9DC
+  # under #F0EBE3 ink measures 1.01:1, and the section is invisible. The self-critique pass found
+  # exactly that on its first run, which is what these five rows are.
+  "surface-sand":             ("#231F1A", None),
+  "surface-clay":             ("#2F2A24", None),
   "ink":                      ("#F0EBE3", 4.5),
   "ink-2":                    (derive("#B5AEA4", DARK_GROUND, 4.5, lighten=True), 4.5),
   "ink-3":                    (derive_band("#8B857B", DARK_GROUND, 3.2, 3.8, lighten=False), 3.0),
   "accent-gold":              (derive("#C08A43", DARK_GROUND, 4.5, lighten=True), 4.5),
+  "accent-gold-strong":       (derive("#C08A43", DARK_GROUND, 7.0, lighten=True), 7.0),
   "accent-green":             (derive("#4E7048", DARK_GROUND, 4.5, lighten=True), 4.5),
   "accent-teal":              (derive("#2A6E66", DARK_GROUND, 4.5, lighten=True), 4.5),
+  # The brand gold needs no darkening here: on the dark ground it reaches 6.19:1 unchanged, which is
+  # the polarity flip that makes theme-aware tokens worth the trouble.
+  "decor-gold":               ("#C08A43", None),
+  "decor-tan":                ("#C9AE8B", None),
   "hairline":                 ("#2A2621", None),
   "border":                   ("#3A352E", None),
   "border-strong":            (derive("#8B857B", DARK_GROUND, 3.0, lighten=True), 3.0),
   "focus":                    (derive("#5FB8AC", DARK_GROUND, 3.0, lighten=True), 3.0),
   "danger":                   (derive("#C0392B", DARK_GROUND, 4.5, lighten=True), 4.5),
+  "success":                  (derive("#4E7048", DARK_GROUND, 4.5, lighten=True), 4.5),
 }
 
 def report(name, tokens, ground):
@@ -281,6 +297,18 @@ def main():
         failures += 1
     else:
         print(f"PASS  {GENERATED.relative_to(REPO)} matches ({len(light)+len(dark)} tokens)")
+
+    print(f"\n{'='*74}\nTHEME PARITY\n{'='*74}")
+    missing = sorted(set(light) - set(dark))
+    extra = sorted(set(dark) - set(light))
+    if missing or extra:
+        for token in missing:
+            print(f"FAIL  --color-{token} exists in light and not in dark, so it keeps its LIGHT value")
+        for token in extra:
+            print(f"FAIL  --color-{token} exists in dark and not in light, so it is undefined in light")
+        failures += len(missing) + len(extra)
+    else:
+        print(f"PASS  both themes define the same {len(light)} tokens")
 
     print(f"\n{'='*74}\nDOCS/08 TABLES\n{'='*74}")
     problems = check_doc_tables(light, dark)

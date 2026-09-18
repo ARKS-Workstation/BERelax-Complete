@@ -100,6 +100,24 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/harness:
+    dependencies:
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
+      '@berelax/fixtures':
+        specifier: workspace:*
+        version: link:../fixtures
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@berelax/ui':
+        specifier: workspace:*
+        version: link:../ui
+      playwright:
+        specifier: 1.56.1
+        version: 1.56.1
+
   packages/messaging:
     dependencies:
       '@berelax/config':

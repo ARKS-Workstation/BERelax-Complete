@@ -11,6 +11,7 @@
     "boundaries": "depcruise --config .dependency-cruiser.cjs packages apps",
     "boundaries:test": "node scripts/test-boundaries.mjs",
     "colours": "node scripts/check-colour-tokens.mjs",
+    "critique": "tsx scripts/screenshots.mjs --critique-only",
     "db:conventions": "node scripts/check-schema-conventions.mjs",
     "db:drift": "node scripts/check-schema-drift.mjs",
     "db:migrate:dry": "node scripts/migrate-dry-run.mjs",
@@ -26,13 +27,14 @@
     "progress": "python3 scripts/progress.py",
     "progress:check": "python3 scripts/progress.py --check",
     "purity": "node scripts/check-core-purity.mjs",
+    "screens": "tsx scripts/screenshots.mjs",
     "seed": "tsx scripts/seed.mjs",
     "test": "vitest run -c vitest.config.ts",
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm adr && pnpm progress:check && pnpm fixtures && pnpm test && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm adr && pnpm progress:check && pnpm fixtures && pnpm critique && pnpm test && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

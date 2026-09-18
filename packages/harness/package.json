@@ -1,0 +1,16 @@
+{
+  "name": "@berelax/harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@berelax/core": "workspace:*",
+    "@berelax/fixtures": "workspace:*",
+    "@berelax/shared": "workspace:*",
+    "@berelax/ui": "workspace:*",
+    "playwright": "1.56.1"
+  }
+}

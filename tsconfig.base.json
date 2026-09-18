@@ -43,7 +43,9 @@
       "@berelax/providers": ["./packages/providers/src/index.ts"],
       "@berelax/providers/*": ["./packages/providers/src/*"],
       "@berelax/fixtures": ["./packages/fixtures/src/index.ts"],
-      "@berelax/fixtures/*": ["./packages/fixtures/src/*"]
+      "@berelax/fixtures/*": ["./packages/fixtures/src/*"],
+      "@berelax/harness": ["./packages/harness/src/index.ts"],
+      "@berelax/harness/*": ["./packages/harness/src/*"]
     },
     "types": ["node"]
   }

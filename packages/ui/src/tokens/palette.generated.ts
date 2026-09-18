@@ -19,6 +19,8 @@ export const LIGHT_PALETTE = {
   'ground': '#FDFAF5',
   /** 1.04:1 against the ground — surface or decorative only. */
   'surface': '#FFFFFF',
+  /** 1.04:1 against the ground — surface or decorative only. */
+  'surface-raised': '#FFFFFF',
   /** 1.09:1 against the ground — surface or decorative only. */
   'ground-sunk': '#F7F0E5',
   /** 1.15:1 against the ground — surface or decorative only. */
@@ -71,6 +73,10 @@ export const DARK_PALETTE = {
   'surface': '#1F1C18',
   /** 1.23:1 against the ground — surface or decorative only. */
   'surface-raised': '#292520',
+  /** 1.14:1 against the ground — surface or decorative only. */
+  'surface-sand': '#231F1A',
+  /** 1.31:1 against the ground — surface or decorative only. */
+  'surface-clay': '#2F2A24',
   /** 15.75:1 against the ground — requires 4.5:1. */
   'ink': '#F0EBE3',
   /** 8.5:1 against the ground — requires 4.5:1. */
@@ -79,10 +85,16 @@ export const DARK_PALETTE = {
   'ink-3': '#746F66',
   /** 6.19:1 against the ground — requires 4.5:1. */
   'accent-gold': '#C08A43',
+  /** 7.03:1 against the ground — requires 7.0:1. */
+  'accent-gold-strong': '#C69656',
   /** 4.63:1 against the ground — requires 4.5:1. */
   'accent-green': '#5F8958',
   /** 4.64:1 against the ground — requires 4.5:1. */
   'accent-teal': '#358C81',
+  /** 6.19:1 against the ground — surface or decorative only. */
+  'decor-gold': '#C08A43',
+  /** 8.82:1 against the ground — surface or decorative only. */
+  'decor-tan': '#C9AE8B',
   /** 1.24:1 against the ground — surface or decorative only. */
   'hairline': '#2A2621',
   /** 1.54:1 against the ground — surface or decorative only. */
@@ -93,6 +105,8 @@ export const DARK_PALETTE = {
   'focus': '#5FB8AC',
   /** 4.53:1 against the ground — requires 4.5:1. */
   'danger': '#D55144',
+  /** 4.63:1 against the ground — requires 4.5:1. */
+  'success': '#5F8958',
 } as const
 
 /** Measured contrast against each theme's ground, for the tests and the docs gate. */
@@ -100,6 +114,7 @@ export const PALETTE_RATIOS = {
   light: {
     'ground': 1.0,
     'surface': 1.04,
+    'surface-raised': 1.04,
     'ground-sunk': 1.09,
     'surface-sand': 1.15,
     'surface-clay': 1.35,
@@ -124,16 +139,22 @@ export const PALETTE_RATIOS = {
     'ground-sunk': 1.04,
     'surface': 1.1,
     'surface-raised': 1.23,
+    'surface-sand': 1.14,
+    'surface-clay': 1.31,
     'ink': 15.75,
     'ink-2': 8.5,
     'ink-3': 3.74,
     'accent-gold': 6.19,
+    'accent-gold-strong': 7.03,
     'accent-green': 4.63,
     'accent-teal': 4.64,
+    'decor-gold': 6.19,
+    'decor-tan': 8.82,
     'hairline': 1.24,
     'border': 1.54,
     'border-strong': 5.11,
     'focus': 7.95,
     'danger': 4.53,
+    'success': 4.63,
   },
 } as const
