@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**33 / 207 units complete.**
+**34 / 207 units complete.**
 
 ## Next up
 
@@ -151,7 +151,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 134 | `W-SITE-03` | JSON-LD generated from the database | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-02` | — | Y1-licence, Y2-gbp-status |
 | [ ] | 135 | `W-SITE-05` | Catalogue-derived routes: /treatments, /treatments/[slug], /pricing | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-03`, `W-SYS-02` | — | Y9-poa-prices |
 | [ ] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
-| [ ] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
+| [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
 | [ ] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
 | [ ] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
 | [ ] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |

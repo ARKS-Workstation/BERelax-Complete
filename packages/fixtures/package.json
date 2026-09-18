@@ -11,5 +11,8 @@
     "@berelax/core": "workspace:*",
     "@berelax/db": "workspace:*",
     "@berelax/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@berelax/media": "workspace:*"
   }
 }

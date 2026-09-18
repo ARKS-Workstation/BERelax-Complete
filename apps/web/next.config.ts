@@ -21,12 +21,22 @@ const config: NextConfig = {
     // dependencies. Every package in the chain has to be listed: a package that is only a transitive
     // dependency still arrives as untranspiled TypeScript.
     '@berelax/clinical',
+    '@berelax/media',
     '@berelax/db',
     '@berelax/google',
     '@berelax/messaging',
     '@berelax/providers',
     '@berelax/shared',
   ],
+  images: {
+    // DigitalOcean Spaces has no image transformation (docs/08 §6), so there is no origin that could
+    // answer an arbitrary width. Every width that will ever be served was encoded by the derivative
+    // job, and `src/image-loader.ts` maps a requested width onto the nearest rung that exists. Next's
+    // built-in optimiser is turned off rather than left as a fallback: it would happily serve a width
+    // the bucket does not hold, from the app server, at full CPU cost, and nothing would say so.
+    loader: 'custom',
+    loaderFile: './src/image-loader.ts',
+  },
   typedRoutes: true,
   experimental: {
     // Font and image optimisation write into .next; nothing else needs to.

@@ -15,11 +15,34 @@
  *
  * Dimensions are read from the file headers directly. A dependency for that would be a dependency for
  * nothing: a JPEG SOF marker and a PNG IHDR are both a fixed offset away.
+ *
+ * Two further rules, added by W-SYS-05, are about how the library is *referenced* rather than what is in
+ * it. Both are reported with their rule name first, so `scripts/test-gates.mjs` can assert a known-bad
+ * fixture was rejected by the rule written for it rather than by an unrelated one (ADR 0003).
+ *
+ * **`[no-blurhash]`.** docs/08 §6 chose a flat OKLCH placeholder over a blurhash, on the grounds that a
+ * blurhash costs a dependency, a decoder and a canvas paint per image and buys a smear of the photograph.
+ * A decision not to add something is the kind a dependency silently reverses, so the absence is checked:
+ * no package may depend on one, and no source file may mention one.
+ *
+ * **`[no-private-origin-url]`.** Originals live in a private bucket with no CDN and no public read, and
+ * derivatives are served same-origin (docs/08 §6). Neither `/originals/` nor a `digitaloceanspaces.com`
+ * hostname may appear in source. The private half is about consent — the nineteen portraits are
+ * photographs of real employees, and `Y12-consent-photo` is open — and the same-origin half is the
+ * requests-to-LCP budget in docs/08 §8, which a third-party origin spends on DNS, TCP and TLS before the
+ * first byte of the hero.
+ *
+ * Both source rules skip `*.test.ts` and `*.itest.ts`, the same exemption `scripts/check-job-registry.mjs`
+ * makes and for the same reason: the tests that prove a private path is *rejected* have to contain one.
+ * Nothing in a test is served, and the dependency half of `[no-blurhash]` covers every package.json
+ * whether or not a test mentions the name.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { stripNonCode } from './lib/strip-non-code.mjs'
 
-const ROOT = join(import.meta.dirname, '..', 'assets', 'media')
+const REPO = join(import.meta.dirname, '..')
+const ROOT = join(REPO, 'assets', 'media')
 const MANIFEST = join(ROOT, 'manifest.json')
 
 /** How far a native ratio may sit from its slot's target before the crop needs a stated focal point. */
@@ -135,10 +158,104 @@ if (problems.length > 0) {
   process.exit(1)
 }
 
+// ---------------------------------------------------------------------------------------------------
+// How the library is referenced: `[no-blurhash]` and `[no-private-origin-url]`. See the file header.
+// ---------------------------------------------------------------------------------------------------
+
+const SOURCE_ROOTS = ['apps', 'packages']
+const SKIP_DIRECTORIES = new Set(['.claude', 'node_modules', 'dist', '.next', 'artifacts'])
+const SOURCE_EXTENSIONS = /\.(ts|tsx|css|mjs)$/
+const TEST_FILE = /\.(test|itest)\.tsx?$/
+
+/** The forbidden URL shapes, spelled once. */
+const PRIVATE_ORIGIN = [
+  { pattern: /\/originals\//, why: 'the private bucket holds originals; no URL may reach one' },
+  {
+    pattern: /digitaloceanspaces\.com/,
+    why: 'derivatives are served same-origin; a Spaces host costs DNS, TCP and TLS before the hero',
+  },
+]
+
+const BLURHASH = /\bblurhash\b/i
+
+function* walkSource(dir, prefix) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (SKIP_DIRECTORIES.has(entry.name)) continue
+    const full = join(dir, entry.name)
+    const relative = `${prefix}/${entry.name}`
+    if (entry.isDirectory()) yield* walkSource(full, relative)
+    else yield { full, relative }
+  }
+}
+
+const referenceProblems = []
+let scanned = 0
+
+for (const root of SOURCE_ROOTS) {
+  for (const { full, relative } of walkSource(join(REPO, root), root)) {
+    if (relative.endsWith('/package.json')) {
+      const manifestJson = JSON.parse(readFileSync(full, 'utf8'))
+      for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+        for (const name of Object.keys(manifestJson[field] ?? {})) {
+          if (BLURHASH.test(name)) {
+            referenceProblems.push(
+              `${relative}  [no-blurhash] depends on '${name}' — docs/08 §6 chose a flat OKLCH ` +
+                'placeholder, which costs no decoder and cannot flash a dark smear',
+            )
+          }
+        }
+      }
+      continue
+    }
+    if (!SOURCE_EXTENSIONS.test(relative)) continue
+    scanned += 1
+
+    // Comments blanked, strings kept. Without this, the paragraph in `placeholder.ts` explaining why
+    // blurhash was rejected is itself reported as a blurhash — the failure the colour gate hit first.
+    const text = stripNonCode(readFileSync(full, 'utf8'), {
+      lineComments: !relative.endsWith('.css'),
+    })
+    if (TEST_FILE.test(relative)) continue
+
+    for (const [index, line] of text.split('\n').entries()) {
+      const at = `${relative}:${index + 1}`
+      if (BLURHASH.test(line)) {
+        referenceProblems.push(
+          `${at}  [no-blurhash] mentions a blurhash — the placeholder is one flat OKLCH colour ` +
+            '(docs/08 §6), and a decision not to add a dependency is one a dependency reverses',
+        )
+      }
+      for (const { pattern, why } of PRIVATE_ORIGIN) {
+        const match = pattern.exec(line)
+        if (match !== null) {
+          referenceProblems.push(`${at}  [no-private-origin-url] '${match[0]}' — ${why}`)
+        }
+      }
+    }
+  }
+}
+
+if (referenceProblems.length > 0) {
+  console.error('Media reference problems:\n')
+  for (const problem of referenceProblems) console.error(`  ${problem}`)
+  console.error(`\n${referenceProblems.length} problem(s).`)
+  process.exit(1)
+}
+
 const portraits = manifest.assets.filter((asset) => asset.slot === 'therapist-portrait')
 const ratios = portraits.map((asset) => asset.width / asset.height)
 console.log(
   `Media library holds: ${manifest.assets.length} assets, all present and measured. ` +
     `${portraits.length} portraits span ratios ${Math.min(...ratios).toFixed(3)}–${Math.max(...ratios).toFixed(3)}, ` +
     'each with a focal point.',
+)
+console.log(
+  `No blurhash and no private-origin URL across ${scanned} source files: the placeholder is one flat ` +
+    'OKLCH colour, and every media URL is same-origin and content-addressed.',
 )

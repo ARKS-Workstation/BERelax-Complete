@@ -33,6 +33,7 @@ describe('parseConfig', () => {
     expect(cfg.EMAIL_PROVIDER).toBe('fake')
     expect(cfg.GOOGLE_PROVIDER).toBe('fake')
     expect(cfg.PAYMENT_PROVIDER).toBe('fake')
+    expect(cfg.MEDIA_STORAGE).toBe('fake')
     expect(cfg.BUSINESS_TIMEZONE).toBe('Asia/Dubai')
   })
 
@@ -52,6 +53,15 @@ describe('parseConfig', () => {
       it(`REFUSES GOOGLE_PROVIDER=real when APP_ENV=${env} — protects real refresh tokens`, () => {
         expect(() => parseConfig({ ...base, APP_ENV: env, GOOGLE_PROVIDER: 'real' })).toThrow(
           /GOOGLE_PROVIDER=real is refused/,
+        )
+      })
+
+      // The private bucket holds nineteen full-resolution photographs of real employees whose
+      // photography consent is not on record. A staging run writing those to the real bucket is the
+      // failure this refusal exists for.
+      it(`REFUSES MEDIA_STORAGE=real when APP_ENV=${env}`, () => {
+        expect(() => parseConfig({ ...base, APP_ENV: env, MEDIA_STORAGE: 'real' })).toThrow(
+          /MEDIA_STORAGE=real is refused/,
         )
       })
     }
@@ -80,8 +90,12 @@ describe('parseConfig', () => {
         APP_ENV: 'production',
         SMS_PROVIDER: 'real',
         EMAIL_PROVIDER: 'real',
+        MEDIA_STORAGE: 'real',
       })
       expect(cfg.SMS_PROVIDER).toBe('real')
+      // The control for the refusals above: a rule that rejected `real` everywhere would pass all of
+      // them while making the flag useless.
+      expect(cfg.MEDIA_STORAGE).toBe('real')
     })
   })
 

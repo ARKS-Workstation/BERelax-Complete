@@ -6,15 +6,20 @@
  */
 export { type BossOptions, createBoss, DRAIN_DEADLINE_MS, PGBOSS_SCHEMA, shutdown } from './boss.ts'
 export { enqueue, type TransactionalEnqueue, transactionalEnqueue } from './enqueue.ts'
+export type { JobContext, JobDefinition, JobHandler } from './job.ts'
+export {
+  BUILD_DERIVATIVES_JOB,
+  type BuildDerivativesData,
+  createMediaStorageFor,
+  runBuildDerivatives,
+  setMediaStorage,
+} from './jobs/build-derivatives.ts'
 export {
   assertRegistry,
   cronRegistrations,
   deadLetterFor,
   isValidCron,
   JOB_REGISTRY,
-  type JobContext,
-  type JobDefinition,
-  type JobHandler,
   type RegisterResult,
   registerJobs,
   SCHEDULE_TIMEZONE,

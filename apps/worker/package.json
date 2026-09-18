@@ -13,6 +13,7 @@
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",
     "@berelax/db": "workspace:*",
+    "@berelax/media": "workspace:*",
     "@berelax/shared": "workspace:*",
     "pg-boss": "12.33.1"
   }

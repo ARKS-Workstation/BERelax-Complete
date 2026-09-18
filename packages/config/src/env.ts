@@ -32,6 +32,15 @@ const schema = z
     GOOGLE_PROVIDER: providerMode.default('fake'),
     PAYMENT_PROVIDER: providerMode.default('fake'),
     LLM_PROVIDER: providerMode.default('fake'),
+    /**
+     * Where media derivatives are written.
+     *
+     * In the refused-outside-production list below, and the reason is the private bucket rather than
+     * the public one: it holds the nineteen staff portraits at full resolution, and their photography
+     * consent is not yet on record (`Y12-consent-photo`). A test run that wrote real originals of real
+     * employees into the real bucket would be a data incident nothing would report.
+     */
+    MEDIA_STORAGE: providerMode.default('fake'),
 
     /**
      * Recipients a non-production environment is permitted to reach, so a developer can test
@@ -63,6 +72,7 @@ const schema = z
         ['EMAIL_PROVIDER', cfg.EMAIL_PROVIDER],
         ['GOOGLE_PROVIDER', cfg.GOOGLE_PROVIDER],
         ['PAYMENT_PROVIDER', cfg.PAYMENT_PROVIDER],
+        ['MEDIA_STORAGE', cfg.MEDIA_STORAGE],
       ] as const
     ).filter(([, mode]) => mode === 'real')
 

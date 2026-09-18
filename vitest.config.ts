@@ -39,6 +39,7 @@ export default defineConfig({
         'packages/messaging/src/**/*.ts',
         'packages/providers/src/**/*.ts',
         'packages/google/src/**/*.ts',
+        'packages/media/src/**/*.ts',
         'packages/fixtures/src/**/*.ts',
         'packages/ui/src/**/*.ts',
         'packages/shared/src/**/*.ts',
@@ -55,6 +56,11 @@ export default defineConfig({
         // SQL only. Its behaviour — including that a re-wrap touches five columns and nothing else — is
         // proved against a real PostgreSQL by packages/google/src/google-connection.itest.ts.
         'packages/google/src/postgres-store.ts',
+        // The sharp pipeline. Twenty-four encodes is half a minute of libvips, which is the integration
+        // suite's job — packages/media/src/derivatives.itest.ts drives it, and packages/fixtures's does it
+        // again against the real photography. The pure halves it sits on, the ladders and the URL builder,
+        // are counted above.
+        'packages/media/src/derivatives.ts',
       ],
       thresholds: {
         statements: 88,

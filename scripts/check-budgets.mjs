@@ -14,12 +14,50 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { encodeRendition } from '../packages/media/src/derivatives.ts'
 import { embeddedFontBytes } from '../packages/pdf/src/fonts.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const { budgets } = JSON.parse(readFileSync(join(ROOT, 'build', 'budgets.json'), 'utf8'))
 
 const kb = (bytes) => `${(bytes / 1024).toFixed(1)}KB`
+
+/**
+ * The media manifest, for the focal point a derivative budget has to crop around.
+ *
+ * A budget measured on a centre crop would be measuring a file the site never serves: the portraits are
+ * full-length shots whose subject sits in the top fifth, and the crop that keeps the face in frame is a
+ * different set of pixels with a different byte count.
+ */
+const mediaAssets = JSON.parse(
+  readFileSync(join(ROOT, 'assets', 'media', 'manifest.json'), 'utf8'),
+).assets
+
+/**
+ * A `derivative` budget encodes the real original through the real encoder and measures the result.
+ *
+ * It is built rather than read off disk because no derivative is committed (`assets/media/README.md`) —
+ * they are produced at deploy time. Measuring a checked-in copy would measure whatever was last committed,
+ * which is the thing a budget is supposed to notice changing.
+ *
+ * `encodeRendition` is the function `buildDerivatives` itself calls. A second copy of the encoder settings
+ * here would let this pass while the file the site serves is over.
+ */
+async function derivativeBytes(budget) {
+  const relative = budget.source.replace(/^assets\/media\//, '')
+  const asset = mediaAssets.find((candidate) => candidate.path === relative)
+  if (asset === undefined) {
+    throw new Error(`${budget.id}: ${budget.source} is not in the media manifest`)
+  }
+  const encoded = await encodeRendition({
+    source: readFileSync(join(ROOT, budget.source)),
+    crop: budget.crop,
+    width: budget.width,
+    format: budget.format,
+    focal: { x: asset.focalX ?? 50, y: asset.focalY ?? 50 },
+  })
+  return encoded.length
+}
 
 let failures = 0
 let skipped = 0
@@ -28,6 +66,8 @@ for (const budget of budgets) {
   let actual
   if (budget.kind === 'fonts') {
     actual = embeddedFontBytes()
+  } else if (budget.kind === 'derivative') {
+    actual = await derivativeBytes(budget)
   } else {
     try {
       actual = statSync(join(ROOT, budget.path)).size
@@ -52,7 +92,17 @@ for (const budget of budgets) {
     `${status}  ${budget.label.padEnd(42)} ${kb(actual).padStart(9)} of ${kb(budget.maxBytes).padStart(9)}` +
       `  (${headroom >= 0 ? `${kb(headroom)} left` : `${kb(-headroom)} over`})`,
   )
-  if (headroom < 0) console.error(`      ${budget.why}`)
+  if (headroom < 0) {
+    // The rule name and the exact byte count, in that order. `scripts/test-gates.mjs` asserts a known-bad
+    // fixture was rejected *by this rule* rather than by a missing file or a thrown encoder — the ADR 0003
+    // failure mode — and the number has to be the measurement rather than a rounded kilobyte, because the
+    // first question anybody asks of a breached budget is by how much.
+    console.error(
+      `      [over-budget] ${budget.id}: measured ${actual} bytes against a budget of ` +
+        `${budget.maxBytes} bytes`,
+    )
+    console.error(`      ${budget.why}`)
+  }
 }
 
 if (failures > 0) {

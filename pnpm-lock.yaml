@@ -87,6 +87,9 @@ importers:
       '@berelax/google':
         specifier: workspace:*
         version: link:../../packages/google
+      '@berelax/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@berelax/messaging':
         specifier: workspace:*
         version: link:../../packages/messaging
@@ -160,6 +163,9 @@ importers:
       '@berelax/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@berelax/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@berelax/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -220,6 +226,10 @@ importers:
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      '@berelax/media':
+        specifier: workspace:*
+        version: link:../media
 
   packages/google:
     dependencies:
@@ -256,6 +266,19 @@ importers:
       axe-core:
         specifier: 4.13.0
         version: 4.13.0
+      playwright:
+        specifier: 1.56.1
+        version: 1.56.1
+
+  packages/media:
+    dependencies:
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+      sharp:
+        specifier: ^0.35.4
+        version: 0.35.4(@types/node@26.6.1)
+    devDependencies:
       playwright:
         specifier: 1.56.1
         version: 1.56.1

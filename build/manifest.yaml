@@ -5191,7 +5191,7 @@ units:
       output, the OKLCH placeholder, content-addressed immutable URLs across the private/public bucket split
       behind a fake storage adapter, and the custom next/image loader.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F06
@@ -5219,6 +5219,39 @@ units:
     - A crawl of all routes finds zero URLs containing `/originals/` or `cdn.digitaloceanspaces.com`; the
       fake storage adapter writes every put to a visible local outbox directory and never returns success
       silently (docs/12 §1 prohibition)
+    - 'NOTE: the route crawl in the seventh criterion is scoped to W-SITE. apps/web has two placeholder
+      pages and no image on either, so a crawl of the rendered routes today would pass by having nothing to
+      examine. What is asserted instead: a static gate over all of apps/ and packages/
+      (scripts/check-media.mjs, [no-private-origin-url], with a known-bad fixture for each spelling), and a
+      Playwright network assertion over a rendered page whose srcset comes from the real loader
+      (packages/media/src/served.itest.ts), which also asserts the served Cache-Control header. Crawling the
+      real site routes belongs with the first route that renders an image.'
+    - 'NOTE: the Playwright half of the fifth criterion runs against a page this unit renders rather than a
+      site route, for the same reason. The declared set, the widths the loader resolves out of a srcset, the
+      response headers and the absence of any private-origin request are all asserted in
+      packages/media/src/served.itest.ts. Re-running that assertion over W-SITE''s own routes is W-SITE''s.'
+    - 'NOTE: the fourth criterion states the OKLCH band as a measurement, and it is not one — it is the
+      clamp docs/08 §6 specifies. All twelve fixture images measure OUTSIDE the band: dominant-colour
+      lightness runs from 0.134 (team/team-05.jpg, a near-black frame) to 0.783 (team/team-06.jpg), every
+      one below the 0.86 floor, and photos/spa-02.jpg is also over the chroma bound at 0.0755. The bound was
+      not weakened and nothing is clamped silently: placeholderFor() keeps the raw measurement and a clamped
+      flag, and packages/fixtures/src/media-derivatives.itest.ts asserts that all twelve had to be clamped,
+      so replacing the photography with images that really are pastel makes that assertion fail and this
+      note get revisited. docs/08 §8''s claim that ''pastel photography is a performance asset'' does not
+      hold of this library''s dominant colours. Y12-photos.'
+    - 'NOTE: no migration. The reserved packages/db/migrations/0022_media.sql is unused and SCHEMA_VERSION
+      stays at 21. Every criterion here is about files, URLs and bytes; idempotence comes from the
+      content-addressed path plus a storage head(), not from a row. The media row itself — id, slot, alt
+      text, focal point, derivative manifest — belongs to W-SYS-09, which owns
+      apps/web/src/collections/media.ts.'
+    - 'NOTE: derivative filenames are {slot}-{crop}-{width}.{ext} rather than docs/08''s {slot}-{width}.
+      Both satisfy the pattern this unit is held to ([a-z0-9-]+-\d+). Naming the crop is what stops the two
+      art-directed ladders colliding the first time a width appears in both, which {slot}-{width} makes a
+      silent overwrite.'
+    - 'NOTE: added beyond the list, because docs/12 §1.3 requires it — MEDIA_STORAGE=fake|real in
+      @berelax/config, defaulting to fake and refused as real outside production. There is no DigitalOcean
+      Spaces adapter yet, so real throws [no-real-media-storage-adapter] rather than falling back to the
+      fake and reporting uploads that never happened.'
     files:
     - packages/media/src/derivatives.ts
     - packages/media/src/placeholder.ts

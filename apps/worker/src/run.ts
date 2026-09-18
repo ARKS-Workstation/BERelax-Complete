@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import { createConnection } from '@berelax/db'
 import { createBoss, shutdown } from './boss.ts'
+import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { JOB_REGISTRY, registerJobs, setMaintenanceSql, startWorkers } from './registry.ts'
 
 /**
@@ -46,6 +47,9 @@ async function main(): Promise<void> {
   })
 
   setMaintenanceSql(sql)
+  // Before `startWorkers`, for the same reason as the SQL connection: a handler that attached first
+  // would take a job off the queue and fail on a missing adapter, burning a retry on nothing.
+  setMediaStorage(createMediaStorageFor(config.MEDIA_STORAGE))
   await boss.start()
   const registered = await registerJobs(boss, JOB_REGISTRY)
   await startWorkers(boss, () => new Date().toISOString(), JOB_REGISTRY)

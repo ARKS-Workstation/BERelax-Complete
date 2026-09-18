@@ -37,3 +37,22 @@ kind of work a placeholder at the correct ratio is supposed to expose rather tha
 
 None are committed. Sized and re-encoded variants are built at deploy time into the public media
 bucket, per [docs/08](../../docs/08-frontend-design.md) §6; these are the masters.
+
+`packages/media` builds them: two art-directed crops (4:5 for phones, 16:9 above them), four widths
+each, AVIF / WebP / JPEG, into content-addressed immutable paths. `apps/worker`'s
+`media.build-derivatives` queue runs it on upload, and with `MEDIA_STORAGE=fake` — the default — every
+put lands in `artifacts/media-outbox/` where it can be opened and looked at.
+
+Two of these numbers are gated rather than documented. `pnpm budgets` builds the widest AVIF rung of
+`photos/hero-team.jpg` at both crops and fails over 95KB / 170KB; `packages/fixtures/src/media-derivatives.itest.ts`
+does the same for all four interiors. The worst of them is `photos/spa-03.jpg` at 156KB on the 16:9
+crop — about 90% of its budget, so a higher-contrast replacement for that frame would breach it.
+
+## What the placeholder colour turned out to be
+
+[docs/08](../../docs/08-frontend-design.md) §6 asks for a flat OKLCH placeholder, "clamped to chroma
+≤0.06, lightness 0.86–0.94". The clamp is doing all the work here: the dominant colour of every one of
+the twelve rendered images is **below** that lightness floor, from 0.134 (`team/team-05.jpg`) to 0.783
+(`team/team-06.jpg`), and `photos/spa-02.jpg` is over the chroma bound at 0.0755. §8's "pastel
+photography is a performance asset" is not a description of these files. The raw measurement and a
+`clamped` flag are kept rather than discarded, and `Y12-photos` is where it gets settled.

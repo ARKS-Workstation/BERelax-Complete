@@ -1376,6 +1376,141 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 28a. W-SYS-05's media reference rules. Both are decisions that a single import silently reverses: a
+//       blurhash dependency undoes the flat-OKLCH placeholder, and one hard-coded `/originals/` or Spaces
+//       hostname undoes both the consent boundary on the private bucket and the same-origin requirement
+//       the requests-to-LCP budget depends on.
+{
+  const MEDIA = ['scripts/check-media.mjs']
+  const f = 'packages/media/src/__gate_fixture__.ts'
+
+  {
+    const result = withFixture(
+      f,
+      ["import { decode } from 'blurhash'", 'export const placeholder = decode'].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy('media gate rejects a blurhash in source', result, '[no-blurhash]')
+  }
+
+  {
+    // The dependency half, which is the one that matters: a package.json is where a blurhash actually
+    // arrives. Written inside `packages/media/src` because `withFixture` needs an existing directory, and
+    // removed by its `finally` — nothing resolves modules out of that directory during this gate.
+    const result = withFixture(
+      'packages/media/src/package.json',
+      JSON.stringify({ name: 'gate-fixture', dependencies: { blurhash: '2.0.5' } }),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy('media gate rejects a blurhash dependency', result, '[no-blurhash]')
+  }
+
+  {
+    const result = withFixture(
+      f,
+      'export const hero = `/originals/0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f.jpg`',
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a URL that reaches a private original',
+      result,
+      '[no-private-origin-url]',
+    )
+  }
+
+  {
+    const result = withFixture(
+      f,
+      "export const hero = 'https://berelax-media.fra1.cdn.digitaloceanspaces.com/hero.avif'",
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy('media gate rejects a Spaces CDN hostname', result, '[no-private-origin-url]')
+  }
+
+  {
+    // The first control. A legitimate media URL — same-origin, content-addressed — must pass, or the four
+    // cases above are satisfied by a gate that rejects every file it is shown.
+    const result = withFixture(
+      f,
+      'export const hero = `/m/0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f/9f86d081884c7d65/hero-mobile-1080.avif`',
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate allows a content-addressed same-origin derivative URL',
+      !result.failed,
+      `rejected a legitimate media URL:\n${result.output}`,
+    )
+  }
+
+  {
+    // The second control, and it is the exemption rather than a happy path. `url.test.ts` and
+    // `port.test.ts` assert that a private path is *rejected* by the parser and by the header helper, which
+    // means they have to contain one. A rule without this exemption would make those tests impossible to
+    // write — the failure mode `check-job-registry.mjs` documents for the 6-field cron in `worker.itest.ts`.
+    const result = withFixture(
+      'packages/media/src/__gate_fixture__.itest.ts',
+      'export const privateKey = `/originals/0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f.jpg`',
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate exempts a test that has to contain a private path',
+      !result.failed,
+      `rejected a test file:\n${result.output}`,
+    )
+  }
+}
+
+// 28b. W-SYS-05's derivative byte budget. docs/08 §8 caps the hero poster at 95KB on the 4:5 crop and
+//       170KB on the 16:9 crop, and no derivative is committed — so `pnpm budgets` builds them with the
+//       same encoder the job uses and measures. The fixture below replaces the hero original with a
+//       high-entropy one, which is the only way this budget can be seen to fail.
+{
+  const hero = 'assets/media/photos/hero-team.jpg'
+  const original = readFileSync(hero)
+  // An SVG, deliberately: `withFixture` writes text, and sharp identifies a source by its content rather
+  // than its extension, so a `.jpg` holding an `feTurbulence` fill renders as dense noise. Noise is what
+  // an oversized fixture needs — AVIF at q52 spends about 214KB on this at the widest mobile rung against
+  // a 95KB budget. Restored in the `finally`; `pnpm media` also fails on a leftover, because the manifest
+  // records this file's exact byte count.
+  const noise = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1100">',
+    '<filter id="n">',
+    '<feTurbulence type="fractalNoise" baseFrequency="0.2" numOctaves="1" seed="7"/>',
+    '</filter>',
+    '<rect width="1400" height="1100" filter="url(#n)"/>',
+    '</svg>',
+  ].join('')
+  let result
+  try {
+    writeFileSync(hero, noise)
+    result = run('pnpm', ['budgets'])
+  } finally {
+    writeFileSync(hero, original)
+  }
+  checkRejectedBy(
+    'budget gate rejects an oversized hero derivative',
+    result,
+    '[over-budget] hero-avif-mobile',
+  )
+  // The measured byte count, not a rounded kilobyte: the first question anybody asks of a breached budget
+  // is by how much, and a budget that reported only "over" would send them to run it again by hand.
+  check(
+    'budget gate reports the measured byte count',
+    /\[over-budget] hero-avif-mobile: measured \d{6} bytes against a budget of 97280 bytes/.test(
+      result.output,
+    ),
+    result.output,
+  )
+  // The control. A gate that failed everything would satisfy both assertions above, so the same run must
+  // still report the unrelated budgets as passing.
+  check(
+    'budget gate still passes the budgets the fixture did not touch',
+    result.output.includes('PASS  Design tokens stylesheet') &&
+      result.output.includes('PASS  A one-page tax invoice'),
+    result.output,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

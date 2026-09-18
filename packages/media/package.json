@@ -1,0 +1,19 @@
+{
+  "name": "@berelax/media",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ladders": "./src/ladders.ts",
+    "./loader": "./src/loader.ts",
+    "./url": "./src/url.ts"
+  },
+  "dependencies": {
+    "@berelax/shared": "workspace:*",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

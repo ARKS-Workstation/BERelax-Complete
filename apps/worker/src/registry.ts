@@ -1,9 +1,3 @@
-import { instantFromIso } from '@berelax/core'
-import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
-import { AppError } from '@berelax/shared'
-import type { Job, PgBoss } from 'pg-boss'
-import { runWatchdog } from './jobs/agent-watchdog.ts'
-
 /**
  * The job registry: the single place a queue or a cron exists.
  *
@@ -21,45 +15,15 @@ import { runWatchdog } from './jobs/agent-watchdog.ts'
  * `agent_definition` row a job belongs to, and its registry-completeness gate enumerates
  * `cronRegistrations()` and fails naming any cron with no such row.
  */
-export interface JobContext {
-  readonly jobId: string
-  /** The instant the handler started, injected so a job body never reads the clock itself. */
-  readonly now: () => string
-}
+import { instantFromIso } from '@berelax/core'
+import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
+import { AppError } from '@berelax/shared'
+import type { Job, PgBoss } from 'pg-boss'
+import type { JobContext, JobDefinition, JobHandler } from './job.ts'
+import { runWatchdog } from './jobs/agent-watchdog.ts'
+import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 
-export type JobHandler<Data> = (data: Data, context: JobContext) => Promise<void>
-
-export interface JobDefinition<Data = unknown> {
-  /** Queue name. Kebab-case, and the same string the cron schedules. */
-  readonly name: string
-  /** Why this job exists. Not optional — an unexplained cron is one nobody dares delete. */
-  readonly purpose: string
-  /**
-   * A 5-field cron expression in Asia/Dubai, or `undefined` for a queue that is only sent to.
-   *
-   * Validated at import time by `assertRegistry`, because a malformed expression is accepted by
-   * `boss.schedule` and simply never fires.
-   */
-  readonly cron?: string
-  /**
-   * The `agent_definition` this job reports to.
-   *
-   * **Required on any job with a `cron`**, and that is the load-bearing part of this type. A scheduled
-   * job with no agent row has no declared interval and no budget, so nothing is watching it and nothing
-   * is capping it — and a cron nobody watches is the failure G-AGT-01 exists to remove. `pnpm jobs`
-   * rejects a cron without one, and `agents.itest.ts` asserts every registered cron's agent has a row.
-   *
-   * A queue that is only sent to needs none: its caller is a request or another job, and that caller is
-   * the thing being watched.
-   */
-  readonly agent?: string
-  readonly retryLimit: number
-  readonly retryDelaySeconds: number
-  readonly retryBackoff: boolean
-  /** Seconds a handler may run before pg-boss reclaims the job as expired. */
-  readonly expireInSeconds: number
-  readonly handler: JobHandler<Data>
-}
+export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
 /** Asia/Dubai for every schedule. The business day is 11:00–02:00 local; UTC would split it. */
 export const SCHEDULE_TIMEZONE = 'Asia/Dubai'
@@ -195,6 +159,9 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 120,
     handler: watchdogHandler,
   },
+  // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
+  // upload that produced the original, so the thing being watched is the request that accepted the file.
+  BUILD_DERIVATIVES_JOB,
 ]
 
 /**

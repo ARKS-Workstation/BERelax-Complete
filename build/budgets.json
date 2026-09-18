@@ -1,5 +1,5 @@
 {
-  "note": "Byte budgets for everything shipped to a browser or embedded in a document. W-SYS adds the JavaScript bundles once apps/web exists; these are the artifacts that exist today and can regress today.",
+  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. W-SYS adds the JavaScript bundles once apps/web ships a route with script on it.",
   "budgets": [
     {
       "id": "tokens-css",
@@ -40,6 +40,28 @@
       "maxBytes": 65536,
       "optional": true,
       "why": "It references its captures rather than embedding them. Inlining took it to 24MB once the specimen carried photographs, over the Artifact limit; this budget is what notices if that returns."
+    },
+    {
+      "id": "hero-avif-mobile",
+      "label": "Hero poster, AVIF, widest mobile rung",
+      "kind": "derivative",
+      "source": "assets/media/photos/hero-team.jpg",
+      "crop": "mobile",
+      "width": 1080,
+      "format": "avif",
+      "maxBytes": 97280,
+      "why": "docs/08 \u00a78: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
+    },
+    {
+      "id": "hero-avif-desktop",
+      "label": "Hero poster, AVIF, widest desktop rung",
+      "kind": "derivative",
+      "source": "assets/media/photos/hero-team.jpg",
+      "crop": "desktop",
+      "width": 2560,
+      "format": "avif",
+      "maxBytes": 174080,
+      "why": "docs/08 \u00a78, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
     }
   ]
 }

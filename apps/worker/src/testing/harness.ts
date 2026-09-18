@@ -1,6 +1,6 @@
 import type { Sql } from '@berelax/db'
 import type { PgBoss } from 'pg-boss'
-import type { JobDefinition } from '../registry.ts'
+import type { JobDefinition } from '../job.ts'
 
 /**
  * Runs a job body directly, with an injected clock and a real database.
