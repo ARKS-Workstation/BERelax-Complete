@@ -7,7 +7,7 @@
  * identity everything else depends on; and **delivery is asynchronous**, reported by a later DLR
  * rather than by the send call, so `send` returns "accepted" and never "delivered".
  */
-import type { MessageClass } from '@berelax/messaging'
+import type { MessageClass } from '@berelax/shared'
 
 /** A TDRA-registered sender identity. Promotional identities are prefixed `AD-`. */
 export interface SenderId {

@@ -1,18 +1,13 @@
-import type { Brand } from '@berelax/shared'
-
-/** Channels the platform can send on. WhatsApp is later but the model is channel-shaped now,
- *  because retrofitting it into a flat SMS-shaped type means touching every send path. */
-export type Channel = 'sms' | 'email' | 'whatsapp'
+import type { Brand, Channel, MessageClass } from '@berelax/shared'
 
 /**
- * Transactional or promotional. This is the most consequential field in the messaging module.
- *
- * It is an immutable property of the TEMPLATE, never of the send call, so an automation cannot
- * route promotional content down a transactional path. UAE promotional SMS must carry an AD-
- * prefixed sender id and is confined to 07:00–21:00; getting it wrong risks sender-id suspension,
- * which would stop every booking confirmation. See docs/04-uae-compliance.md §5.
+ * `Channel` and `MessageClass` are declared in `@berelax/shared` and re-exported here, which is where
+ * every consumer expects to find them. They moved because `@berelax/providers` needs `MessageClass` in
+ * its port signatures while this package needs those ports — declaring them here made the two packages
+ * cyclic workspace dependencies, which pnpm links and warns about and which leaves any future build step
+ * for either one with no valid order. See `packages/shared/src/messaging.ts`.
  */
-export type MessageClass = 'transactional' | 'promotional'
+export type { Channel, MessageClass }
 
 export type MessageId = Brand<string, 'MessageId'>
 

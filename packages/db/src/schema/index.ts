@@ -1,4 +1,6 @@
+export * from './document-series.ts'
 export * from './identity.ts'
 export * from './messaging.ts'
 export * from './platform.ts'
+export * from './rooms.ts'
 export * from './trading.ts'

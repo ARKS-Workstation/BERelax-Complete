@@ -11,7 +11,7 @@
       "!**/dist",
       "!**/node_modules",
       "!**/.next",
-      "!**/.claude/worktrees",
+      "!.claude/worktrees",
       "!packages/ui/src/tokens/palette.generated.ts",
       "!packages/ui/src/tokens/tokens.css",
       "!packages/ui/src/tokens/tailwind.css",

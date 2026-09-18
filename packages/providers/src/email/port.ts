@@ -8,7 +8,7 @@
  * even if our own consent record says yes, so the port exposes it rather than pretending it does not
  * exist.
  */
-import type { MessageClass } from '@berelax/messaging'
+import type { MessageClass } from '@berelax/shared'
 
 export interface EmailAddress {
   readonly address: string

@@ -544,7 +544,94 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   check('business-day resolution is identical under UTC, UTC+14 and UTC-7', !broke)
 }
 
-// 24. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 24. `Date` and `Intl` under packages/core/src/ledger must fail the purity gate — and the same code
+//     must still be allowed elsewhere in core, or the ledger rule is not the thing doing the work.
+{
+  const outside = 'packages/core/src/__gate_fixture__.ts'
+  const inside = 'packages/core/src/ledger/__gate_fixture__.ts'
+  const source = (call) => `export const derived = ${call}`
+
+  const cases = [
+    ["new Date('2026-10-02T00:00:00Z').getUTCDay()", 'a Date built from a string'],
+    [
+      "new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(0)",
+      'an Intl zone lookup',
+    ],
+  ]
+
+  for (const [call, label] of cases) {
+    // The control first. `packages/core/src/time.ts` needs exactly these two calls to render an
+    // injected instant as wall-clock time in a named zone, so the general rule bans only the clock
+    // *reads* — `Date.now()` and an argument-less `new Date()`. If purity rejected this fixture outside
+    // the ledger as well, case 4 would already cover it and the ledger rule would be dead weight.
+    const general = withFixture(outside, source(call), () =>
+      run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(`purity gate allows ${label} elsewhere in packages/core`, !general.failed, general.output)
+
+    // A ledger entry carries a LocalDate its caller already resolved on business_day. Re-deriving it
+    // here disagrees with the caller for the nine hours either side of midnight and files the 01:30
+    // sale under the wrong trading day.
+    const scoped = withFixture(inside, source(call), () =>
+      run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(`purity gate rejects ${label} under packages/core/src/ledger`, scoped.failed)
+  }
+}
+
+// 25/26. Ledger amounts are branded integer fils, and the type system must say so. Both fixtures assert
+//        on the *message*, not merely on a non-zero exit: a fixture that stopped compiling for an
+//        unrelated reason would otherwise keep this gate green forever.
+{
+  const f = 'packages/core/src/ledger/__gate_fixture__.ts'
+  const fixture = (imports, amount) =>
+    [
+      ...imports,
+      "import { localDate } from '../time.ts'",
+      "import { ACCOUNTS, STANDARD_SPA_CHART } from './chart-of-accounts.ts'",
+      "import { credit, debit, entryId, postEntry } from './entry.ts'",
+      'export const entry = postEntry(',
+      '  {',
+      "    entryId: entryId('JE-FIXTURE'),",
+      "    entryDate: localDate('2026-10-02'),",
+      "    narrative: 'fixture',",
+      "    source: 'sale',",
+      '    lines: [',
+      `      debit(ACCOUNTS.cashInDrawer, ${amount}),`,
+      `      credit(ACCOUNTS.treatmentRevenue, ${amount}),`,
+      '    ],',
+      '  },',
+      '  STANDARD_SPA_CHART,',
+      ')',
+    ].join('\n')
+
+  const typeErrors = [
+    {
+      name: 'tsc rejects a fractional amount passed to postEntry',
+      // `IntegerLiteral<1.5>` is `never`, because `${1.5}` is "1.5" and that does not extend
+      // `${bigint}`. AED 1.50 in fils is 150; a float in a money column surfaces during a VAT
+      // reconciliation, by which point it is history.
+      source: fixture(["import { aed } from '../money.ts'"], 'aed(1.5)'),
+      expect: "Argument of type '1.5' is not assignable to parameter of type 'never'",
+    },
+    {
+      name: 'tsc rejects a bare number passed to postEntry',
+      // A bare number carries no currency and no statement about what unit it is in. Half the world's
+      // money bugs are a figure in the wrong unit.
+      source: fixture([], '15_000'),
+      expect: "Argument of type 'number' is not assignable to parameter of type 'Money'",
+    },
+  ]
+
+  for (const { name, source, expect: wanted } of typeErrors) {
+    const { failed, output } = withFixture(f, source, () =>
+      run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(name, failed && output.includes(wanted), output)
+  }
+}
+
+// 27. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [

@@ -39,6 +39,55 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // The ledger is the one directory in core whose purity has a statutory consequence: an append-only
+  // journal that reached for a driver, a framework or the filesystem would be recording figures
+  // derived from something other than its arguments, and the entries cannot be edited afterwards.
+  // Each of the four forbidden shapes is asserted separately, because the rule's `to.path` is a
+  // single alternation and a typo in one branch is invisible while the other three still fire.
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/ledger/__boundary_fixture__.ts',
+    source: [
+      "import { pgTable } from 'drizzle-orm/pg-core'",
+      'export const illegal = pgTable',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/ledger/__boundary_fixture__.ts',
+    source: ["import pg from 'pg'", 'export const illegal = pg', ''].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/ledger/__boundary_fixture__.ts',
+    source: [
+      "import { NextResponse } from 'next/server'",
+      'export const illegal = NextResponse',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/ledger/__boundary_fixture__.ts',
+    source: [
+      "import { readFileSync } from 'node:fs'",
+      'export const illegal = readFileSync',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'providers-only-inside-a-transport',
+    // A feature reaching SMSala directly bypasses the sender-ID class rule, the promotional gate and
+    // the staging send guard at once. packages/messaging is the closest legal caller there is — one
+    // directory away from src/transports — so it is the fixture most likely to be waved through.
+    file: 'packages/messaging/src/__boundary_fixture__.ts',
+    source: [
+      "import { SMSALA } from '@berelax/providers'",
+      'export const illegal = SMSALA',
+      '',
+    ].join('\n'),
+  },
   {
     rule: 'db-must-not-import-core',
     file: 'packages/db/src/__boundary_fixture__.ts',
@@ -53,6 +102,8 @@ const CASES = [
 let failures = 0
 
 for (const { rule, file, source } of CASES) {
+  // The first import line is what distinguishes cases that share a rule name.
+  const what = source.split('\n')[0]
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, source)
   let output = ''
@@ -72,7 +123,8 @@ for (const { rule, file, source } of CASES) {
 
   const caught = exitCode !== 0 && output.includes(rule)
   console.log(
-    `${caught ? 'PASS' : 'FAIL'}  ${rule} — violation ${caught ? 'rejected' : 'NOT rejected'}`,
+    `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${file.includes('/ledger/') ? 'ledger: ' : ''}` +
+      `${what} ${caught ? 'rejected' : 'NOT rejected'}`,
   )
   if (!caught) {
     failures += 1

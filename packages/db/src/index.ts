@@ -43,7 +43,18 @@ export {
   publishEvent,
   type StoredEvent,
 } from './outbox.ts'
+export {
+  type AllocatedDocumentNumber,
+  allocateDocumentNumber,
+  DOCUMENT_SERIES_CODES,
+  type DocumentSeriesCode,
+  type DocumentSeriesRow,
+  findNumberingGaps,
+  listDocumentSeries,
+  NUMBERING_LEDGER_COLUMNS,
+  type NumberingGap,
+} from './repositories/numbering.ts'
 export * as schema from './schema/index.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 14 as const
+export const SCHEMA_VERSION = 15 as const

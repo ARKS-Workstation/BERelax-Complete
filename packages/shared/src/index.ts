@@ -3,6 +3,8 @@
  * Types, branded primitives and error taxonomy. No I/O, no framework imports.
  */
 
+export type { Channel, MessageClass } from './messaging.ts'
+
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }
 

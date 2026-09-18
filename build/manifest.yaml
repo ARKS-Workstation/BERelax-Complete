@@ -288,7 +288,7 @@ units:
       standard | couples | wet, resource_blocks for maintenance and holds, and the load-bearing service_room_type_compat
       join. The wet room is modelled as a single scarce resource, not as a room with an attribute.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - B-CAT-01
@@ -309,9 +309,25 @@ units:
       / Jacuzzi (Asian and Arabic) resolve only to the wet room type'
     - The pure roomBusyDuring() predicate returns true for an overlapping resource_block and false for a
       block that merely abuts the period (tstzrange '[)' semantics), asserted at the boundary minute
+    - 'NOTE: service_room_type_compat is keyed on the service NATURAL key (service_style,
+      service_treatment_key) rather than on a service_id, because no service table exists yet. B-CAT-03
+      builds it and declares (style, treatment_key) UNIQUE, at which point these two columns become a
+      composite FOREIGN KEY with no data migration. 0012_rooms.sql therefore also creates the
+      treatment_style enum (asian|arabic) that B-CAT-03 must REUSE rather than redeclare — a composite
+      foreign key requires identical types on both sides. The 8 compat row sets are seeded against the
+      treatment keys normal_massage, hot_oil_balm_massage, morocco_bath_jacuzzi and
+      massage_with_shaving, which B-CAT-03 must use as its treatment_key values or the FK will not
+      attach.'
+    - 'NOTE: resource_block carries room_id only. Therapist unavailability is leave or a shift gap with
+      its own approval path (P-HR), not a second nullable foreign key on this table, so the generic
+      name is honoured by the row shape rather than by a polymorphic parent.'
+    - 'NOTE: the table is named rooms, plural, against the singular convention of every other table.
+      ADR 0015 and docs/01 decision 9 both pin rooms.capacity as the column B-AVAIL-01''s deferred
+      room-capacity trigger counts against.'
     files:
     - packages/db/src/schema/rooms.ts
     - packages/db/migrations/
+    - packages/db/src/rooms.itest.ts
     - packages/core/src/availability/room-predicates.ts
     - packages/core/src/availability/room-predicates.test.ts
   - id: B-CAT-03
@@ -838,7 +854,7 @@ units:
       The marketing kill switch cannot touch transactional traffic, and two sender IDs mean a suspended
       promotional identity does not stop booking confirmations.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-MSG-01
@@ -867,12 +883,22 @@ units:
       attempt on the quiet_hours setting is rejected while a narrowing change is accepted'
     - With APP_ENV != production the transport refuses and the message is written to the local outbox instead,
       asserted end to end through the F03 guard
+    - 'NOTE: nothing here is persisted - no message-send table exists yet, so every outcome is the returned
+      SendResult plus the provider call log, and "recorded as blocked_unevaluable" is asserted on those.
+      The queued promotional send returns a queued outcome carrying its release instant; the durable
+      queued_for_window row, the worker that releases it and the stale-queue expiry are C-AUTO-04, and
+      scheduled steps are B-MSG-03 - the 07:00 delivery here is the same message re-attempted under a
+      clock moved to the release instant. The marketing kill switch is a gate input; the persisted switch,
+      its owner/manager permission check and its audit_event are C-AUTO-05. Consent, suppression and the
+      frequency cap are injected evaluators; their stores are C-CRM-03/04 and C-AUTO-03'
     files:
     - packages/messaging/src/send.ts
     - packages/messaging/src/gate.ts
     - packages/messaging/src/send.test.ts
     - packages/messaging/src/gate.fail-closed.test.ts
+    - packages/messaging/src/transports/smsala.ts
     - .dependency-cruiser.cjs
+    - scripts/test-boundaries.mjs
   - id: B-LIFE-02
     order: 34
     title: 'Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP'
@@ -1201,7 +1227,7 @@ units:
       later (gratuity liability, commission expense, gateway clearing, tips payable, cash over/short, package
       deferred revenue).'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F05
@@ -1224,13 +1250,41 @@ units:
       with a known-bad fixture proving the rule fires'
     - the chart contains the gratuity-liability, commission-expense, tips-payable, cash-over-short, package-deferred-revenue
       and gateway-clearing accounts, asserted by name, so P-HR and Y-PAY need no second chart migration
+    - 'NOTE: the no-clock criterion is met by a ledger-scoped rule added to scripts/check-core-purity.mjs,
+      not by the pre-existing core-wide one. The core-wide rule bans only clock *reads* (Date.now, argument-less
+      new Date) because packages/core/src/time.ts legitimately needs new Date(instant) and Intl.DateTimeFormat
+      to render an injected instant in a named zone. The ledger needs neither: entry_date arrives as a LocalDate
+      the caller already resolved on business_day, and any Date arithmetic here would silently re-derive it.
+      Gate case 24 in scripts/test-gates.mjs proves the scoped rule fires under packages/core/src/ledger
+      AND that the same code still passes elsewhere in core, so the new rule is demonstrably the thing doing
+      the work'
+    - 'NOTE: the ledger boundary fixtures exposed a dead rule branch, per ADR 0003. core-must-be-pure matched
+      drizzle-orm by bare module name only, and dependency-cruiser matches the *resolved* path — an installed
+      drizzle-orm resolves into node_modules and was never rejected, so that branch had never fired. .dependency-cruiser.cjs
+      now also matches node_modules/(next|react|drizzle-orm|pg|postgres)/, and scripts/test-boundaries.mjs
+      asserts all four shapes from packages/core/src/ledger by rule name'
+    - 'NOTE: deferred — no period-lock predicate is exported. Period locking is enforced in M-TILL-02 as a
+      period_lock table plus a trigger, and a pure predicate here would only have to be replaced by it'
+    - 'NOTE: deferred to the unit that first reads the chart from configuration — the Y8-coa provisional marker
+      lives on ChartOfAccounts.provisional in packages/core, not as a provisional:true entry in the packages/config
+      settings registry, because packages/core may not import packages/config (core-must-not-import-infrastructure)'
+    - 'NOTE: the branded-fils criterion is proved by gate cases 25 and 26 in scripts/test-gates.mjs rather than
+      by tsd. tsd is not a dependency and would be a second typechecker to keep in step with tsconfig.base.json;
+      the fixtures write a real file under packages/core/src/ledger, run the project typecheck, and assert on
+      the exact tsc message ("1.5 is not assignable to never" for the float, "number is not assignable to Money"
+      for the bare number) so a fixture that stopped compiling for an unrelated reason cannot keep them green'
     files:
     - packages/core/src/ledger/account.ts
     - packages/core/src/ledger/entry.ts
     - packages/core/src/ledger/reverse.ts
     - packages/core/src/ledger/chart-of-accounts.ts
+    - packages/core/src/ledger/index.ts
     - packages/core/src/ledger/*.test.ts
+    - packages/core/src/index.ts
     - .dependency-cruiser.cjs
+    - scripts/check-core-purity.mjs
+    - scripts/test-boundaries.mjs
+    - scripts/test-gates.mjs
   - id: M-TILL-02
     order: 44
     title: Append-only journal schema, period locks and the posting repository
@@ -1273,7 +1327,7 @@ units:
       for tax invoices, simplified invoices and credit notes, with prefix, year-reset policy and zero-padding
       held as data.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04
@@ -1290,9 +1344,16 @@ units:
       asserts every stored display_number is byte-identical afterwards (no UPDATE grant on the column)'
     - an ADR records why a row-locked counter is used instead of a bare Postgres SEQUENCE, because nextval
       is non-transactional and leaks a number on every rollback
+    - 'NOTE: no document or invoice table exists yet, so every acceptance line about issued documents is
+      proved against a test-local table (schema numbering_itest, created and dropped by the itest) shaped
+      as the invoice table will be. Deferred to M-TILL-04: the real invoice table, its unique (series_code,
+      period_key, number) and unique (display_number) constraints, the FK to document_series, and the
+      revoke of UPDATE on invoice.display_number from berelax_app. What IS proved durably here is the
+      equivalent grant on the counter itself: berelax_app holds no UPDATE on document_series.next_number
+      or period_key, only on prefix, padding and reset_policy, so a format change can never renumber.'
     files:
     - packages/db/src/schema/document-series.ts
-    - packages/db/migrations/00xx_document_series.sql
+    - packages/db/migrations/0013_document_series.sql
     - packages/db/src/repositories/numbering.ts
     - packages/db/src/repositories/numbering.itest.ts
     - docs/adr/00xx-gapless-numbering-row-locked-counter.md

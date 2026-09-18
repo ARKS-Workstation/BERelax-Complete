@@ -27,7 +27,19 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/core/' },
       to: {
-        path: '^(node:)?(fs|http|https|net|dns|child_process|worker_threads)$|^(next|react|drizzle-orm|pg|postgres)(/|$)',
+        // Three alternations, because dependency-cruiser matches `path` against the *resolved* path and
+        // what that is depends on whether the module is installed:
+        //
+        //   1. a Node builtin resolves to its own name, so `node:fs` matches by name;
+        //   2. an *uninstalled* package also resolves to its bare name, which is why `pg` and `next`
+        //      appeared to be covered — neither was a dependency of this repo;
+        //   3. an installed one resolves into node_modules, which is why the bare `drizzle-orm` branch
+        //      never fired: `drizzle-orm/pg-core` resolves to
+        //      `node_modules/.pnpm/drizzle-orm@…/node_modules/drizzle-orm/pg-core/index.js`.
+        //
+        // The third branch is what M-TILL-01's ledger fixture in scripts/test-boundaries.mjs caught: the
+        // rule was configured, green, and dead for every framework actually installed. ADR 0003.
+        path: '^(node:)?(fs|http|https|net|dns|child_process|worker_threads)$|^(next|react|drizzle-orm|pg|postgres)(/|$)|(^|/)node_modules/(next|react|drizzle-orm|pg|postgres)/',
       },
     },
     {
@@ -64,6 +76,21 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/' },
       to: { path: '^apps/' },
+    },
+    {
+      name: 'providers-only-inside-a-transport',
+      comment:
+        'Only packages/messaging/src/transports may import a provider package or a provider SDK. ' +
+        'Everything else reaches a provider through the sendMessage() choke point, which is where the ' +
+        'sender-ID class rule, the promotional gate and the staging send guard live. A feature that ' +
+        'calls SMSala directly bypasses all three: it can send promotional content from the ' +
+        'transactional identity, inside quiet hours, to a real customer from a staging run. See ' +
+        'ADR 0016 and docs/03 §4.',
+      severity: 'error',
+      from: { pathNot: '^packages/(providers|messaging/src/transports)/' },
+      to: {
+        path: '^packages/providers/|/node_modules/(smsala|resend|googleapis|stripe|twilio)/',
+      },
     },
     {
       name: 'no-circular',

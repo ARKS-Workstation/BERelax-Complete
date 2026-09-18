@@ -205,6 +205,9 @@ importers:
       '@berelax/core':
         specifier: workspace:*
         version: link:../core
+      '@berelax/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
@@ -242,9 +245,6 @@ importers:
       '@berelax/core':
         specifier: workspace:*
         version: link:../core
-      '@berelax/messaging':
-        specifier: workspace:*
-        version: link:../messaging
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared

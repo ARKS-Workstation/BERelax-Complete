@@ -28,17 +28,53 @@ const FORBIDDEN = [
   { re: /\bconsole\s*\./g, why: 'core must not log; return a result and let the caller decide' },
 ]
 
+/**
+ * Directories that are stricter than the rest of core.
+ *
+ * The rules above ban *reading* the clock and nothing more, because they have to: `packages/core/src/
+ * time.ts` legitimately calls `new Date(instant)` and `Intl.DateTimeFormat` to render an **injected**
+ * instant as wall-clock time in a named zone. Both are deterministic there and both are necessary.
+ *
+ * The ledger is different, and the general rule is not enough for it. A journal entry carries a
+ * `LocalDate` that its caller already resolved on `business_day` — trading runs 11:00 to 02:00, so a
+ * 01:30 sale belongs to the previous trading date. Any `Date` or `Intl` in the ledger would be
+ * re-deriving that date from a calendar date, which silently disagrees with the caller for the nine
+ * hours either side of midnight, and puts the takings on the wrong day. There is no legitimate use to
+ * balance against, so the whole surface is banned here rather than only the clock reads.
+ */
+const SCOPED = [
+  {
+    root: join(ROOT, 'ledger'),
+    forbidden: [
+      {
+        re: /\bDate\b/g,
+        why: 'the ledger takes dates as LocalDate from its caller; re-deriving one moves the 01:30 sale to the wrong trading day',
+      },
+      {
+        re: /\bIntl\b/g,
+        why: 'no timezone or locale lookup in the ledger; YYYY-MM-DD compares and sorts as a string',
+      },
+    ],
+  },
+]
+
 const walk = (dir) =>
   readdirSync(dir).flatMap((entry) => {
     const p = join(dir, entry)
     return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : []
   })
 
+const rulesFor = (file) => [
+  ...FORBIDDEN,
+  ...SCOPED.filter((scope) => file.startsWith(`${scope.root}/`)).flatMap((s) => s.forbidden),
+]
+
 let violations = 0
 for (const file of walk(ROOT)) {
   const code = stripNonCode(readFileSync(file, 'utf8'), { blankStrings: true })
+  const rules = rulesFor(file)
   code.split('\n').forEach((line, i) => {
-    for (const { re, why } of FORBIDDEN) {
+    for (const { re, why } of rules) {
       re.lastIndex = 0
       if (re.test(line)) {
         console.log(`${file}:${i + 1}  ${line.trim()}`)
@@ -53,4 +89,8 @@ if (violations > 0) {
   console.error(`\n${violations} purity violation(s) in packages/core. See docs/adr/0001.`)
   process.exit(1)
 }
-console.log(`packages/core is pure (${walk(ROOT).length} files checked).`)
+const ledgerFiles = walk(ROOT).filter((f) => f.startsWith(`${join(ROOT, 'ledger')}/`))
+console.log(
+  `packages/core is pure (${walk(ROOT).length} files checked, ` +
+    `${ledgerFiles.length} of them under the no-Date/no-Intl ledger rule).`,
+)

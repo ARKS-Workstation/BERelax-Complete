@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**19 / 206 units complete.**
+**23 / 206 units complete.**
 
 ## Next up
 
-1. **B-CAT-02 — Rooms, room types, capacity and service/room compatibility**  — **needs owner input:** Y8-rooms, Y1-rooms, Y9-shaving-room
-1. **B-MSG-02 — The single send choke point, sender-ID class routing and fail-closed evaluation**  — **needs owner input:** Y6-sender-ids
-1. **M-TILL-01 — Chart of accounts and the pure double-entry ledger kernel**  — **needs owner input:** Y8-coa
+1. **B-CAT-03 — Service catalogue schema: style x treatment, variants, skills and resource shapes**  — **needs owner input:** Y9-turnaround
+1. **B-LIFE-02 — Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP**
+1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
 
 ## All units
 
@@ -31,7 +31,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
 | [x] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |
 | [x] | 17 | `B-CAT-01` | Premises hours, closures and the first-class business_day | `F04`, `F05`, `F09`, `H03` | — | Y8-hours |
-| [ ] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |
+| [x] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |
 | [ ] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
 | [ ] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |
 | [ ] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
@@ -46,7 +46,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 30 | `B-LIFE-01` | Appointment lifecycle state machine with actor permissions and declared side effects | `B-AVAIL-06`, `F06`, `F07` | — | — |
 | [ ] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
 | [x] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
-| [ ] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
+| [x] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
 | [ ] | 34 | `B-LIFE-02` | Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP | `B-MSG-02`, `F04`, `F06` | — | — |
 | [ ] | 35 | `B-MSG-03` | Scheduled steps with invalidation keys, and reminder rebuilds | `B-LIFE-03`, `B-MSG-02` | — | — |
 | [ ] | 36 | `B-MSG-04` | Delivery receipts, message lifecycle and the admin Messages inbox | `B-MSG-02`, `F11`, `H02` | — | — |
@@ -56,9 +56,9 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 40 | `B-UI-04` | Quick-book, walk-in entry and the WhatsApp ref field | `B-LIFE-02`, `B-UI-03` | M1 | Y12-ref-loop |
 | [ ] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
-| [ ] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
+| [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [ ] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
-| [ ] | 45 | `M-TILL-03` | Gap-free sequential document numbering allocated inside the insert transaction | `F04` | — | — |
+| [x] | 45 | `M-TILL-03` | Gap-free sequential document numbering allocated inside the insert transaction | `F04` | — | — |
 | [ ] | 46 | `M-TILL-04` | Invoice document model: immutable per-line tax derivation and issuer snapshot | `F05`, `M-TILL-02`, `M-TILL-03` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 47 | `M-TILL-05` | Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01` | — | — |
 | [ ] | 48 | `M-TILL-06` | Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F06`, `M-TILL-04`, `M-TILL-05` | — | — |

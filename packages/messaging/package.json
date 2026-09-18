@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./transports/smsala": "./src/transports/smsala.ts"
   },
   "dependencies": {
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",
+    "@berelax/providers": "workspace:*",
     "@berelax/shared": "workspace:*"
   }
 }
