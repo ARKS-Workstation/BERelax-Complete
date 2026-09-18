@@ -414,7 +414,7 @@ units:
       maps style to a required therapist skill for eligibility only. service_resource_shape declares therapists_required,
       rooms_required and the minimum room capacity.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-CAT-02
@@ -436,11 +436,29 @@ units:
     - service_skill is total over the style enum (asian -> asian_style, arabic -> arabic_style), asserted
       by an exhaustiveness test; a type-level test asserts no price field is reachable from the skill mapping
       type, encoding the pricing/assignment decoupling of locked decision 21
+    - 'NOTE: the 32 price points are NOT seeded by 0017_catalogue.sql. The 8 service rows are, because
+      service_room_type_compat already held 12 rows keyed on those pairs and the composite FK cannot be
+      attached without the parent. The prices are business data transcribed from docs/13 section 4 and
+      stay with B-CAT-06 seed, which already owns that acceptance line; two sources for the same 32
+      numbers is one too many. The variant CHECKs are therefore asserted against probe rows.'
+    - 'NOTE: Four Hands and Couple Massage are modelled as service_resource_shape rows (shape enum solo
+      | four_hands | couple) over the four existing treatment keys, not as extra services. Full Body
+      Shaving, the third price-on-request item in docs/13 section 4, is NOT modelled here at all: it is
+      neither one of the four treatment keys B-CAT-02 seeded compatibility rows against nor a shape of
+      one, and its room requirement is still open (Y9-shaving-room). Deferred to B-CAT-06, whose
+      acceptance calls the three of them services while also requiring exactly 8 service rows - that
+      line needs rewording there, because a fifth treatment key would break the composite FK.'
+    - 'NOTE: shape-specific pricing for the two-therapist footprints is deliberately absent. ADR 0021
+      allows no third pricing axis, so no multiplier column was added; B-CAT-06 records the derived
+      price-on-request figures on service_variant.is_provisional + provisional_note, which is the column
+      its acceptance line calls price_provisional. The lexicon lint over public_display_name remains
+      B-CAT-05; this unit provides the separate column and the structural constraints only.'
     files:
     - packages/db/src/schema/catalogue.ts
-    - packages/db/migrations/
+    - packages/db/migrations/0017_catalogue.sql
     - packages/shared/src/schemas/catalogue.ts
-    - packages/db/src/schema/catalogue.test.ts
+    - packages/shared/src/schemas/catalogue.test.ts
+    - packages/db/src/schema/catalogue.itest.ts
   - id: B-AVAIL-01
     order: 20
     title: Booking and appointment schema with the concurrency constraints

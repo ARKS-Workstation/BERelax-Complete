@@ -4,6 +4,39 @@
  */
 
 export type { Channel, MessageClass } from './messaging.ts'
+export {
+  type Assert,
+  grossPriceFilsSchema,
+  type PriceFreeShape,
+  REQUIRED_SKILL_BY_STYLE,
+  ROOM_TYPE_NAMES,
+  type RoomTypeName,
+  requiredSkillFor,
+  roomTypeNameSchema,
+  SERVICE_DURATIONS,
+  SERVICE_SHAPES,
+  type ServiceDuration,
+  type ServiceInput,
+  type ServiceResourceShapeInput,
+  type ServiceShape,
+  type ServiceSkillRequirement,
+  type ServiceVariantInput,
+  serviceDurationSchema,
+  serviceResourceShapeSchema,
+  serviceSchema,
+  serviceShapeSchema,
+  serviceVariantSchema,
+  skillRequirements,
+  THERAPIST_SKILLS,
+  type TherapistSkill,
+  TREATMENT_KEYS,
+  TREATMENT_STYLES,
+  type TreatmentKey,
+  type TreatmentStyle,
+  therapistSkillSchema,
+  treatmentKeySchema,
+  treatmentStyleSchema,
+} from './schemas/catalogue.ts'
 
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }

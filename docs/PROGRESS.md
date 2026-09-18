@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**27 / 207 units complete.**
+**28 / 207 units complete.**
 
 ## Next up
 
-1. **B-CAT-03 — Service catalogue schema: style x treatment, variants, skills and resource shapes**  — **needs owner input:** Y9-turnaround
-1. **B-LIFE-02 — Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP**
-1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
+1. **B-AVAIL-01 — Booking and appointment schema with the concurrency constraints**
+1. **B-AVAIL-02 — The pure availability solver: trading window, duration, turnaround, buffers, lead and advance**  — **needs owner input:** Y9-turnaround, Y9-buffer, Y9-lead
+1. **B-CAT-04 — Price resolution chain and effective-dated price lists**
 
 ## All units
 
@@ -33,7 +33,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |
 | [x] | 17 | `B-CAT-01` | Premises hours, closures and the first-class business_day | `F04`, `F05`, `F09`, `H03` | — | Y8-hours |
 | [x] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |
-| [ ] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
+| [x] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
 | [ ] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |
 | [ ] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
 | [ ] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |

@@ -1,4 +1,5 @@
 export * from './agents.ts'
+export * from './catalogue.ts'
 export * from './document-series.ts'
 export * from './google.ts'
 export * from './identity.ts'

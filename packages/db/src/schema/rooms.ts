@@ -135,9 +135,14 @@ export const resourceBlock = pgTable(
  * be booked into a dry room the first time somebody forgot a row, and the failure would be
  * discovered by the customer rather than by a test.
  *
- * Keyed on the service natural key `(style, treatment_key)` because there is no `service` table yet.
- * B-CAT-03 declares `(style, treatment_key)` UNIQUE on `service`, at which point these two columns
- * become a composite foreign key with no data migration.
+ * Keyed on the service natural key `(style, treatment_key)` because there was no `service` table when
+ * B-CAT-02 wrote it. B-CAT-03 declared `(style, treatment_key)` UNIQUE on `service` and
+ * `0017_catalogue.sql` attached the composite foreign key — no data migration, because these columns
+ * were always the parent's key.
+ *
+ * The foreign key is deliberately **not** declared here: pointing this mirror at `./catalogue.ts`, which
+ * imports the two enums from this file, is a cyclic import that `pnpm boundaries` fails. Its presence is
+ * asserted against the live database in `packages/db/src/schema/catalogue.itest.ts` instead.
  */
 export const serviceRoomTypeCompat = pgTable(
   'service_room_type_compat',

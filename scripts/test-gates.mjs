@@ -744,6 +744,148 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   )
 }
 
+// 26b. The catalogue constraints, as known-bad fixtures against real PostgreSQL.
+//
+// B-CAT-03's rules are database rules — a UNIQUE, two composite foreign keys and four CHECKs — and a
+// constraint is only a gate once something has been seen to bounce off it. Each probe below is a statement
+// the database must refuse **by the name of the rule written for it**: a bare non-zero exit is also what a
+// typo in a column name produces, and the rule under test would then be dead while this file reported PASS
+// for ever (ADR 0003).
+//
+// Every probe runs inside `begin; … ; rollback;`, so a probe that is wrongly *accepted* leaves nothing
+// behind either — and the `finally` sweeps the four tables by marker regardless, because a fixture left in
+// the catalogue fails every later gate with an error about the wrong thing.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const ASIAN_NORMAL =
+    "(select id from service where style = 'asian' and treatment_key = 'normal_massage')"
+  const MARKER = 'gate fixture'
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statement}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits next to the statement that must trip it. Anything added here
+  // states its own rule, which is the only form of this test that cannot drift into "something failed".
+  const probes = [
+    {
+      name: 'catalogue gate rejects a ninth service duplicating a (style, treatment_key) pair',
+      rule: 'service_style_treatment_key_unique',
+      sql:
+        'insert into service (style, treatment_key, slug, internal_name, public_display_name, ' +
+        "turnaround_minutes) values ('asian', 'normal_massage', 'gate-fixture-duplicate', 'Gate', " +
+        "'Gate', 20)",
+    },
+    {
+      name: 'catalogue gate rejects a compatibility row for a service that does not exist',
+      rule: 'service_room_type_compat_service_fk',
+      sql:
+        'insert into service_room_type_compat (service_style, service_treatment_key, room_type) ' +
+        "values ('asian', 'gate_fixture_ghost', 'standard')",
+    },
+    {
+      name: 'catalogue gate rejects a resource shape demanding an incompatible room type',
+      rule: 'service_resource_shape_room_type_compat_fk',
+      sql:
+        'insert into service_resource_shape (service_style, service_treatment_key, shape, ' +
+        'therapists_required, rooms_required, min_room_capacity, required_room_type, ' +
+        "therapist_buffer_minutes, provisional_note) values ('asian', 'morocco_bath_jacuzzi', " +
+        `'couple', 2, 1, 2, 'couples', 10, '${MARKER}')`,
+    },
+    {
+      name: 'catalogue gate rejects a couple shape that fits in a single room',
+      rule: 'service_resource_shape_couple_holds_two',
+      sql:
+        'insert into service_resource_shape (service_style, service_treatment_key, shape, ' +
+        'therapists_required, rooms_required, min_room_capacity, required_room_type, ' +
+        "therapist_buffer_minutes, provisional_note) values ('arabic', 'massage_with_shaving', " +
+        `'couple', 2, 1, 1, 'standard', 10, '${MARKER}')`,
+    },
+    {
+      name: 'catalogue gate rejects a zero price',
+      rule: 'service_variant_price_positive',
+      sql:
+        'insert into service_variant (service_id, duration_minutes, gross_price_fils, ' +
+        `provisional_note) values (${ASIAN_NORMAL}, 60, 0, '${MARKER}')`,
+    },
+    {
+      name: 'catalogue gate rejects a duration the price list has no column for',
+      rule: 'service_variant_duration_allowed',
+      sql:
+        'insert into service_variant (service_id, duration_minutes, gross_price_fils, ' +
+        `provisional_note) values (${ASIAN_NORMAL}, 50, 20000, '${MARKER}')`,
+    },
+    {
+      name: 'catalogue gate rejects a provisional value that names no open question',
+      rule: 'service_provisional_names_a_question',
+      sql:
+        'insert into service (style, treatment_key, slug, internal_name, public_display_name, ' +
+        "turnaround_minutes, is_provisional) values ('asian', 'gate_fixture_unflagged', " +
+        "'gate-fixture-unflagged', 'Gate', 'Gate', 20, true)",
+    },
+  ]
+
+  try {
+    if (!dbUrl) {
+      check(
+        'catalogue constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      for (const { name, rule, sql: statement } of probes) {
+        checkRejectedBy(name, psqlProbe(statement), rule)
+      }
+
+      // The controls, and the reason the seven above mean anything: the same tables accept a legitimate
+      // row. Without these, a broken connection string or a renamed table would reject every probe and
+      // this gate would report seven passes while examining nothing.
+      const legitimateVariant = psqlProbe(
+        'insert into service_variant (service_id, duration_minutes, gross_price_fils, ' +
+          `provisional_note) values (${ASIAN_NORMAL}, 45, 17000, '${MARKER}')`,
+      )
+      check(
+        'catalogue gate accepts a 45-minute variant at a positive price',
+        !legitimateVariant.failed,
+        `rejected a legitimate variant:\n${legitimateVariant.output}`,
+      )
+
+      // A room type the service has a compatibility row for. Massage with Shaving is seeded standard-only,
+      // so this is the shape foreign key being satisfied rather than bypassed.
+      const legitimateShape = psqlProbe(
+        'insert into service_resource_shape (service_style, service_treatment_key, shape, ' +
+          'therapists_required, rooms_required, min_room_capacity, required_room_type, ' +
+          "therapist_buffer_minutes, provisional_note) values ('arabic', 'massage_with_shaving', " +
+          `'four_hands', 2, 1, 1, 'standard', 10, '${MARKER}')`,
+      )
+      check(
+        'catalogue gate accepts a shape whose room type the service is compatible with',
+        !legitimateShape.failed,
+        `rejected a legitimate resource shape:\n${legitimateShape.output}`,
+      )
+    }
+  } finally {
+    if (dbUrl) {
+      run('psql', [
+        '--no-psqlrc',
+        '-q',
+        dbUrl,
+        '-c',
+        `delete from service_variant where provisional_note = '${MARKER}'; ` +
+          `delete from service_resource_shape where provisional_note = '${MARKER}'; ` +
+          "delete from service where slug like 'gate-fixture%';",
+      ])
+    }
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

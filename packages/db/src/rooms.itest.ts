@@ -29,6 +29,9 @@ beforeAll(() => {
 afterAll(async () => {
   await sql`delete from rooms where code like ${`${PROBE}%`}`
   await sql`delete from service_room_type_compat where service_treatment_key like ${`${PROBE}%`}`
+  // B-CAT-03 attached the composite foreign key from those two columns to `service`, so a probe
+  // compatibility row now needs a probe parent — and the parent has to go last.
+  await sql`delete from service where treatment_key like ${`${PROBE.replace(/-/g, '_')}%`}`
   await sql?.end({ timeout: 5 })
 })
 
@@ -167,7 +170,9 @@ describe('acceptance — service_room_type_compat has no default and no fall-bac
   })
 
   it('starts returning rooms the moment a compatibility row is added, and stops when it is removed', async () => {
-    const key = `${PROBE}-latecomer`
+    // Underscored, because `service.treatment_key` is snake_case-checked by 0017 and this key now needs
+    // a parent row.
+    const key = `${PROBE.replace(/-/g, '_')}_latecomer`
     const count = async (): Promise<number> => {
       const [row] = await sql<{ n: string }[]>`
         select count(*)::text as n from service_bookable_room
@@ -177,6 +182,15 @@ describe('acceptance — service_room_type_compat has no default and no fall-bac
     }
 
     expect(await count()).toBe(0)
+    // The parent service. B-CAT-03's `service_room_type_compat_service_fk` refuses a compatibility row
+    // for a service nobody defined, which is the orphan this table could hold while B-CAT-02 was the
+    // only half of the pair that existed. The assertion below is still about the view, not about the
+    // catalogue: it is the compatibility row appearing and disappearing that moves the count.
+    await sql`
+      insert into service
+        (style, treatment_key, slug, internal_name, public_display_name, turnaround_minutes)
+      values ('arabic', ${key}, ${key.replace(/_/g, '-')}, 'Probe', 'Probe', 20)
+    `
     await sql`
       insert into service_room_type_compat (service_style, service_treatment_key, room_type)
       values ('arabic', ${key}, 'wet')
@@ -184,6 +198,7 @@ describe('acceptance — service_room_type_compat has no default and no fall-bac
     expect(await count()).toBe(1)
     await sql`delete from service_room_type_compat where service_treatment_key = ${key}`
     expect(await count()).toBe(0)
+    await sql`delete from service where treatment_key = ${key}`
   })
 
   it('excludes a decommissioned room from the bookable set', async () => {
