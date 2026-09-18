@@ -4487,7 +4487,7 @@ units:
       via next/font/local, and install the theme + direction providers. This is the unit that makes any
       rendered route exist at all.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F11
@@ -4517,6 +4517,35 @@ units:
       used at any font-size below `lg`
     - On /ar, computed styles show letter-spacing 0, text-transform none, --font-size-scalar 1.06 and body
       line-height >=1.85
+    - 'NOTE: the body face ships as the variable cut (@fontsource-variable/ibm-plex-sans, 45.7KB, wght
+      100-700) rather than the static 400 + 600 pair. next/font/local preloads every file in a src array,
+      so ''exactly two preloads'' requires the body face to be one file; the variable cut is 1.2KB smaller
+      in total across one request instead of two, and makes font-weight 500 a real weight rather than a
+      synthesised one.'
+    - 'NOTE: the Arabic face ships the 500 and 600 cuts, not 400 and 600. theme/arabic.css sets Arabic body
+      copy to weight 500, and with 400 shipped CSS weight matching resolved 500 downwards to 400 — the
+      recalibration silently did nothing and the 42KB 400 file was the only one ever drawn. /ar now totals
+      91KB of Arabic, under the 100KB budget, asserted from the wire.'
+    - 'NOTE: two root layouts, app/(en)/layout.tsx and app/(ar)/layout.tsx, sharing app/_document/shell.tsx.
+      The (public) group moved under (en). An earlier draft set lang/dir on a <main> wrapper inside one
+      English root layout: it built, rendered mirrored text, and did none of the four things
+      theme/arabic.css exists to do, because every rule there is inherited from the document element. The
+      (admin) and (payload) groups are W-SITE/W-SYS-08''s; only the locale split is here.'
+    - 'NOTE: the type scale is mapped onto Tailwind''s --text-* namespace in globals.css with
+      --text-*: initial first, because Tailwind''s own ramp starts at 16px and ours at 17px. Pinned to
+      TYPE_SCALE by apps/web/src/type-scale.test.ts.'
+    - 'NOTE: ThemeProvider is exported from @berelax/ui/theme-provider rather than the package barrel. It is
+      a .tsx file and the root typecheck project deliberately has neither jsx nor the DOM lib — that
+      absence is what stops a document.querySelector compiling inside packages/core — so re-exporting it
+      from the barrel pulled the .tsx into every project that imports a colour token.'
+    - 'NOTE: a fourth rule, no-display-font-below-lg, was added to scripts/check-colour-tokens.mjs, and all
+      four rules now report a machine-readable rule name so a known-bad fixture can be asserted to have
+      been rejected by the rule written for it. Six new fixtures in scripts/test-gates.mjs, three of them
+      passing controls.'
+    - 'NOTE: pnpm fonts / pnpm fonts:emit added; emit-font-metrics.mjs gained a check mode and now measures
+      each pairing on the script it will actually draw. Measuring the Arabic face on Latin ''Hxp'' had given
+      it size-adjust 96.84% where Arabic gives 88.72% — an 8% error in the one number that exists to stop
+      the swap reflowing the page.'
     files:
     - apps/web/package.json
     - apps/web/next.config.ts
@@ -4525,6 +4554,15 @@ units:
     - apps/web/app/_fonts/index.ts
     - packages/ui/src/theme/tokens.css
     - packages/ui/src/theme/theme-provider.tsx
+    - apps/web/app/_document/shell.tsx
+    - apps/web/app/(en)/layout.tsx
+    - apps/web/app/(ar)/layout.tsx
+    - apps/web/src/shell.itest.ts
+    - apps/web/src/type-scale.test.ts
+    - packages/ui/src/theme/arabic.css
+    - packages/ui/src/theme/font-fallbacks.test.ts
+    - scripts/check-colour-tokens.mjs
+    - scripts/emit-font-metrics.mjs
     - scripts/test-gates.mjs
     - .dependency-cruiser.cjs
   - id: W-SYS-02

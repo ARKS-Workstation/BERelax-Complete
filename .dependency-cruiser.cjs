@@ -76,13 +76,30 @@ module.exports = {
       name: 'no-orphans',
       comment: 'An unreferenced module is either dead code or a missing wire-up.',
       severity: 'warn',
-      from: { orphan: true, pathNot: ['\\.d\\.ts$', '(^|/)index\\.ts$', '\\.test\\.ts$'] },
+      from: {
+        orphan: true,
+        pathNot: [
+          '\\.d\\.ts$',
+          '(^|/)index\\.ts$',
+          '\\.test\\.ts$',
+          '\\.itest\\.ts$',
+          // Next.js resolves these by file-system convention rather than by import, so every route in
+          // the App Router is an orphan by construction. Scoped to the names Next actually reserves, so
+          // a genuinely unreferenced component in `app/` is still reported.
+          '^apps/[^/]+/(app|src)/.*(^|/)(page|layout|template|loading|error|not-found|global-error|route|default|sitemap|robots|opengraph-image|icon|apple-icon|manifest|middleware|instrumentation)\\.(ts|tsx)$',
+          // Build-tool configuration, loaded by the tool rather than imported.
+          '^apps/[^/]+/(next|postcss|tailwind|vitest)\\.config\\.(ts|mjs|js)$',
+        ],
+      },
       to: {},
     },
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
-    exclude: { path: '(^|/)dist/' },
+    // `.next` is build output — 180-odd generated chunks, every one an orphan, which buries a real
+    // finding in noise. `.claude/worktrees` is a parallel checkout of this same repository, so cruising
+    // it would report every module twice.
+    exclude: { path: '(^|/)(dist|\\.next|\\.claude)/' },
     tsPreCompilationDeps: true,
     tsConfig: { fileName: 'tsconfig.base.json' },
     enhancedResolveOptions: { exportsFields: ['exports'], conditionNames: ['import', 'require'] },

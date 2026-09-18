@@ -5,9 +5,17 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./src/tokens/tokens.css"
+    "./theme-provider": "./src/theme/theme-provider.tsx",
+    "./tokens.css": "./src/tokens/tokens.css",
+    "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",
+    "./arabic.css": "./src/theme/arabic.css"
   },
   "dependencies": {
-    "@berelax/shared": "workspace:*"
+    "@berelax/shared": "workspace:*",
+    "react": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
   }
 }

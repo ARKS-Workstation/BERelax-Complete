@@ -1,5 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/**/*.ts", "apps/**/*.ts", "vitest.config.ts"],
-  "exclude": ["**/node_modules", "**/dist", "**/.next"]
+  "include": ["packages/**/*.ts", "vitest.config.ts"],
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    "**/.next",
+    ".claude/worktrees",
+    "packages/ui/src/theme/theme-provider.tsx"
+  ]
 }

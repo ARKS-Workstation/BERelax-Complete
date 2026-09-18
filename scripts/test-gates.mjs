@@ -29,6 +29,49 @@ const runExpectingFailure = (cmd, args) => {
   }
 }
 
+const run = (cmd, args) => {
+  try {
+    return {
+      failed: false,
+      output: execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+    }
+  } catch (err) {
+    return { failed: true, output: `${err.stdout ?? ''}${err.stderr ?? ''}` }
+  }
+}
+
+/**
+ * Writes a known-bad fixture, runs something against it, and removes it in a `finally`.
+ *
+ * The `finally` is the point. A fixture left behind fails every subsequent gate in this file with a
+ * violation that has nothing to do with the case being tested, and the first person to see it spends an
+ * hour on the wrong bug. It has happened.
+ */
+const withFixture = (path, contents, body) => {
+  writeFileSync(path, contents.endsWith('\n') ? contents : `${contents}\n`)
+  try {
+    return body()
+  } finally {
+    rmSync(path, { force: true })
+  }
+}
+
+/**
+ * Asserts a gate rejected a fixture **by the rule written for it**.
+ *
+ * A bare non-zero exit is not enough: a fixture can be rejected by an unrelated rule while the one
+ * under test has quietly stopped matching anything, and the gate then reports PASS forever. ADR 0003.
+ */
+const checkRejectedBy = (name, result, rule) => {
+  check(
+    name,
+    result.failed && result.output.includes(rule),
+    result.failed
+      ? `exited non-zero but did not report ${rule}:\n${result.output}`
+      : `exited zero; nothing was rejected:\n${result.output}`,
+  )
+}
+
 // 1. A failing unit test must fail the runner.
 {
   const f = 'packages/core/src/__gate_fixture__.test.ts'
@@ -156,32 +199,164 @@ const runExpectingFailure = (cmd, args) => {
   check('tokens gate rejects a hand-edited generated stylesheet', failed)
 }
 
+const COLOURS = ['scripts/check-colour-tokens.mjs']
+
 // 11. An un-tokened colour must fail the colour gate.
 {
-  const f = 'packages/ui/src/__gate_fixture__.ts'
-  writeFileSync(f, ['export const css = `.x { color: #123456; }`', ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
-  rmSync(f, { force: true })
-  check('colour gate rejects an un-tokened colour', failed)
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.ts',
+    'export const css = `.x { color: #123456; }`',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy('colour gate rejects an un-tokened colour', result, '[no-untokened-colour]')
+}
+
+// 11b. The prototype gold as a literal, which is the exact hex docs/08 names. Separate from 11 because
+// it is also the value rule 2 is about, and a rule that caught it as "some hex" would be indistinguishable
+// from one that understood it.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.css',
+    '.promise { color: #C08A43; }',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects a literal brand gold under apps/web',
+    result,
+    '[no-untokened-colour]',
+  )
+}
+
+// 11c. The control for 11b. The same colour, as a token, on a property that carries no text, must pass —
+// otherwise rule 1 is just "no gold anywhere" and the decorative half of the palette is unusable.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.css',
+    '.rule { background: var(--color-decor-gold); block-size: 1px; }',
+    () => run('node', COLOURS),
+  )
+  check(
+    'colour gate allows the decorative gold as a background',
+    !result.failed,
+    `rejected a legitimate decorative use:\n${result.output}`,
+  )
 }
 
 // 12. The decorative brand gold on a text-bearing property must fail the colour gate.
 {
-  const f = 'packages/ui/src/__gate_fixture__.ts'
   // 2.90:1. This is the specific mistake the whole classification exists to prevent.
-  writeFileSync(f, ['export const css = `.x { color: var(--color-decor-gold); }`', ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
-  rmSync(f, { force: true })
-  check('colour gate rejects the decorative gold on a text-bearing property', failed)
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.ts',
+    'export const css = `.x { color: var(--color-decor-gold); }`',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects the decorative gold on a text-bearing property',
+    result,
+    '[decor-gold-never-carries-text]',
+  )
 }
 
 // 13. A Tailwind default palette utility must fail the colour gate.
 {
-  const f = 'packages/ui/src/__gate_fixture__.tsx'
-  writeFileSync(f, ['export const cls = ', '  "rounded p-2 " + "text-slate-700"', ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
-  rmSync(f, { force: true })
-  check('colour gate rejects a Tailwind default palette utility', failed)
+  const result = withFixture(
+    'packages/ui/src/__gate_fixture__.tsx',
+    ['export const cls = ', '  "rounded p-2 " + "text-slate-700"'].join('\n'),
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects a Tailwind default palette utility',
+    result,
+    '[no-tailwind-default-palette]',
+  )
+}
+
+// 13b. The same rule, in the app, spelled the way it actually arrives: a class attribute copied from a
+// snippet. `--color-*: initial` means `bg-red-500` produces no colour at all, so the page renders with a
+// transparent background and nothing reports anything.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.tsx',
+    'export const Bad = () => <div className="rounded bg-red-500 p-4">sale</div>',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects bg-red-500 under apps/web',
+    result,
+    '[no-tailwind-default-palette]',
+  )
+}
+
+// 13c. The display serif below the `lg` step, in CSS.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.css',
+    '.quote {\n  font-family: var(--font-display);\n  font-size: 0.875rem;\n}',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects the display serif below the lg step',
+    result,
+    '[no-display-font-below-lg]',
+  )
+}
+
+// 13d. The same mistake as utilities, which is how it will actually be written.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.tsx',
+    'export const Bad = () => <p className="font-display text-sm">Al Zahiyah</p>',
+    () => run('node', COLOURS),
+  )
+  checkRejectedBy(
+    'colour gate rejects the display serif at a small text utility',
+    result,
+    '[no-display-font-below-lg]',
+  )
+}
+
+// 13e. The control for 13c and 13d. The display face at and above `lg` is the whole reason it is in the
+// system, so a rule that rejected it there would be a rule nobody could ship with.
+{
+  const result = withFixture(
+    'apps/web/app/__gate_fixture__.css',
+    '.quote {\n  font-family: var(--font-display);\n  font-size: var(--text-xl);\n}',
+    () => run('node', COLOURS),
+  )
+  check(
+    'colour gate allows the display serif at the xl step',
+    !result.failed,
+    `rejected a legitimate display use:\n${result.output}`,
+  )
+}
+
+// 13f. dependency-cruiser must actually see apps/web. ADR 0002 is here because a toolchain change
+// reduced the cruise to zero modules and reported success; a rule set that examines nothing passes every
+// rule. The count is asserted against the app specifically, not against the repository total, because
+// packages alone would keep the total comfortably non-zero.
+{
+  const result = run('pnpm', [
+    'exec',
+    'depcruise',
+    '--config',
+    '.dependency-cruiser.cjs',
+    '--output-type',
+    'json',
+    'apps/web',
+  ])
+  let modules = 0
+  try {
+    modules = JSON.parse(result.output).modules.filter((m) =>
+      m.source.startsWith('apps/web/'),
+    ).length
+  } catch {
+    modules = 0
+  }
+  check(
+    'boundaries cruise reaches apps/web',
+    modules > 0,
+    `cruised ${modules} modules under apps/web — a green tick on zero modules is ADR 0002`,
+  )
 }
 
 // 14. A locked decision with no ADR must fail the coverage gate.
@@ -386,6 +561,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm progress:check',
     'pnpm media',
     'pnpm fixtures',
+    'pnpm fonts',
     'pnpm critique',
     'pnpm a11y',
     'pnpm coverage',

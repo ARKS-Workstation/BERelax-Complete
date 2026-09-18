@@ -1,0 +1,51 @@
+/*
+ * Arabic typographic recalibration — docs/08 §3.
+ *
+ * Not a font swap. Arabic runs optically smaller at the same point size, has no uppercase, and is
+ * never tracked: letter-spacing on a cursive script pulls the joins apart and produces text that is
+ * hard to read and looks broken. These are the four rules that make an Arabic page read as Arabic
+ * rather than as English with different glyphs.
+ */
+:root {
+  --font-size-scalar: 1;
+}
+
+[lang="ar"],
+[dir="rtl"] {
+  --font-size-scalar: 1.06;
+  line-height: 1.85;
+  letter-spacing: 0;
+  text-transform: none;
+  /* Where Latin uses 400. The Arabic face reads lighter at the same nominal weight. */
+  font-weight: 500;
+}
+
+[lang="ar"] h1,
+[lang="ar"] h2,
+[lang="ar"] h3,
+[dir="rtl"] h1,
+[dir="rtl"] h2,
+[dir="rtl"] h3 {
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+/*
+ * The same line-height again, aimed at `body` rather than inherited into it.
+ *
+ * `apps/web/app/globals.css` sets `body { line-height: 1.647 }` for Latin copy. That is a (0,0,1)
+ * selector matching `body` directly, so it beats the 1.85 inherited from `[lang='ar']` on `<html>` no
+ * matter which stylesheet loads first, and every descendant then inherits the Latin value. Arabic
+ * ascenders and descenders are taller and the script needs the extra leading, so the rule is restated
+ * at (0,1,1) where it cannot be lost to import order.
+ */
+[lang="ar"] body,
+[dir="rtl"] body {
+  line-height: 1.85;
+}
+
+/* Tracking is applied by an eyebrow style; on Arabic it must not survive. */
+[lang="ar"] *,
+[dir="rtl"] * {
+  letter-spacing: 0;
+}

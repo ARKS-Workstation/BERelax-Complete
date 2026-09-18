@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "incremental": true,
+    "types": ["node", "react", "react-dom"],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@berelax/shared": ["../../packages/shared/src/index.ts"],
+      "@berelax/core": ["../../packages/core/src/index.ts"],
+      "@berelax/config": ["../../packages/config/src/index.ts"],
+      "@berelax/ui": ["../../packages/ui/src/index.ts"],
+      "@berelax/ui/theme-provider": ["../../packages/ui/src/theme/theme-provider.tsx"],
+      "@berelax/ui/*": ["../../packages/ui/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

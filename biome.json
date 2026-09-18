@@ -15,6 +15,7 @@
       "!packages/ui/src/tokens/palette.generated.ts",
       "!packages/ui/src/tokens/tokens.css",
       "!packages/ui/src/tokens/tailwind.css",
+      "!packages/ui/src/theme/font-fallbacks.generated.css",
       "!assets/media/manifest.json"
     ]
   },
@@ -51,6 +52,13 @@
       "quoteStyle": "single",
       "semicolons": "asNeeded",
       "trailingCommas": "all"
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": false,
+      "allowWrongLineComments": false,
+      "tailwindDirectives": true
     }
   }
 }

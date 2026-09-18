@@ -100,6 +100,11 @@ jobs:
       - name: Fixture salon unchanged
         run: pnpm fixtures
 
+      # The metric-matched font fallbacks are measured in Chromium and committed. A face changed
+      # without regenerating them reflows every line on swap, which is the CLS this gate exists to stop.
+      - name: Font fallback metrics current
+        run: pnpm fonts
+
       # The critique pass reads the rendered DOM against docs/08. It catches what a pixel diff
       # cannot: a defect present since the first commit, when there is no baseline to diff against.
       - name: Design self-critique

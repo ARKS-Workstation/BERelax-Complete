@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**18 / 206 units complete.**
+**19 / 206 units complete.**
 
 ## Next up
 
@@ -142,7 +142,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 126 | `R-REP-06` | Seasonality and the 13-week cash-flow forecast | `R-REP-02`, `R-REP-04` | — | Y8-hours, Y9-windows |
 | [ ] | 127 | `R-REP-07` | The data-quality gate that refuses to show an unreconciled number | `A-FIRST-09`, `A-MEAS-07`, `R-REP-02`, `R-REP-04` | — | — |
 | [ ] | 128 | `R-REP-08` | Role-scoped dashboards, drill-down and pushed alerts | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F07`, `H04`, `R-REP-05`, `R-REP-06`, `R-REP-07` | M5 | Y6-sender-ids |
-| [ ] | 129 | `W-SYS-01` | Next.js app shell, Tailwind v4 token mapping and the type stack | `F11`, `H04` | — | Y12-body-face |
+| [x] | 129 | `W-SYS-01` | Next.js app shell, Tailwind v4 token mapping and the type stack | `F11`, `H04` | — | Y12-body-face |
 | [ ] | 130 | `W-SYS-02` | Editorial grid, layout primitives and the container-query component set | `W-SYS-01` | — | — |
 | [ ] | 131 | `W-SYS-03` | Radix/shadcn primitive set and an axe gate that provably fires | `H05`, `W-SYS-01`, `W-SYS-02` | — | — |
 | [ ] | 132 | `W-SITE-01` | Route spine, EN/AR locales, canonicalisation and the route registry | `W-SYS-01`, `W-SYS-03` | — | — |

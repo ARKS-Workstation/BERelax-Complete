@@ -11,6 +11,8 @@ export default defineConfig({
   test: {
     name: 'integration',
     include: ['packages/**/*.itest.ts', 'apps/**/*.itest.ts'],
+    // The app shell test starts a production server; nothing else in the suite is that slow.
+    hookTimeout: 180_000,
     exclude: ['**/node_modules/**', '**/dist/**'],
     environment: 'node',
     clearMocks: true,

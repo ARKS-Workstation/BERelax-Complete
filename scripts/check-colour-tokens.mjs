@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * Three colour rules a design document cannot enforce on its own.
+ * Four rules a design document cannot enforce on its own.
+ *
+ * Each violation is reported with its **rule name** first, so `scripts/test-gates.mjs` can assert that a
+ * known-bad fixture was rejected *by the rule it was written for*. Asserting only a non-zero exit is how
+ * a gate ends up passing because of an unrelated rule while the one under test has quietly stopped
+ * matching anything — the ADR 0003 failure mode.
  *
  * **1. No un-tokened colour.** A raw `#946A32`, `rgb(...)` or `oklch(...)` anywhere outside the token
  * layer is a colour nobody derived and nobody measured. The palette's whole value is that every
@@ -16,6 +21,11 @@
  * **3. No Tailwind default palette.** `tailwind.css` clears the defaults with `--color-*: initial`,
  * but a stale build or a copied snippet can still carry `bg-red-500`. Catching the class name is
  * cheaper than discovering it rendered grey.
+ *
+ * **4. The display face is never small.** Cormorant Garamond is a high-contrast serif: its thin strokes
+ * approach a hairline, and below the `lg` step (1.25rem / 20px) they thin out to the point where the
+ * letterforms stop resolving on a low-density screen and fail 1.4.3 for readers who need contrast. It is
+ * a display face, and this is the fence around it. `--font-sans` is what small text uses.
  *
  * Scanned: every CSS and TS/TSX source outside the token layer itself. The token layer is where
  * literal colours are supposed to be.
@@ -137,6 +147,121 @@ const TAILWIND_DEFAULT_UTILITY = new RegExp(
  */
 const HARMLESS = /^(transparent|currentcolor|inherit|initial|unset|none)$/i
 
+/**
+ * The type scale, read from the one place it is written down as CSS.
+ *
+ * `apps/web/app/globals.css` maps `scale.ts` onto Tailwind's `--text-*` namespace, and
+ * `apps/web/src/type-scale.test.ts` fails if the two disagree — so reading it here gives this gate the
+ * real scale without a second copy of it, and without this script having to load TypeScript.
+ *
+ * If the file is missing the map is empty, and rule 4 then judges only literal sizes. That is a
+ * degradation rather than a silent pass: a `font-size: 0.875rem` is still caught, and
+ * `scripts/test-gates.mjs` asserts the rule fires on a fixture that uses a literal.
+ */
+const TYPE_STEPS = (() => {
+  const steps = new Map()
+  try {
+    const css = readFileSync('apps/web/app/globals.css', 'utf8')
+    for (const match of css.matchAll(/--text-([a-z0-9]+)\s*:\s*([^;]+);/gi)) {
+      const [, name = '', value = ''] = match
+      steps.set(name.toLowerCase(), value.trim())
+    }
+  } catch {
+    // No app yet, or it moved. Literal sizes are still judged.
+  }
+  return steps
+})()
+
+/** The `lg` step, 1.25rem. Below this the display serif's thin strokes stop resolving. */
+const DISPLAY_FLOOR_REM = 1.25
+const ROOT_FONT_SIZE_PX = 16
+
+/**
+ * A font-size in rem, or `undefined` when it cannot be known statically.
+ *
+ * `undefined` is not a pass — it is an abstention, and it is the honest answer for `calc()`, for a
+ * percentage, and for a custom property this gate has never heard of. A rule that guessed would either
+ * fail builds over arithmetic it cannot do, or report a number it made up.
+ */
+function remOf(raw, seen = new Set()) {
+  const value = raw.trim().toLowerCase()
+
+  const step = value.match(/^var\(\s*--text-([a-z0-9]+)\s*\)$/)
+  if (step) {
+    const name = step[1] ?? ''
+    // A `--text-x: var(--text-y)` chain would otherwise recurse forever.
+    if (seen.has(name)) return undefined
+    const mapped = TYPE_STEPS.get(name)
+    return mapped === undefined ? undefined : remOf(mapped, new Set([...seen, name]))
+  }
+
+  // A clamp's first argument is its floor, which is the size a narrow phone actually gets.
+  const clamped = value.match(/^clamp\(\s*([^,]+),/)
+  const scalar = (clamped?.[1] ?? value).trim()
+
+  const rem = scalar.match(/^([\d.]+)\s*r?em$/)
+  if (rem) return Number.parseFloat(rem[1] ?? '')
+  const px = scalar.match(/^([\d.]+)\s*px$/)
+  if (px) return Number.parseFloat(px[1] ?? '') / ROOT_FONT_SIZE_PX
+  const pt = scalar.match(/^([\d.]+)\s*pt$/)
+  if (pt) return (Number.parseFloat(pt[1] ?? '') * 4) / 3 / ROOT_FONT_SIZE_PX
+  return undefined
+}
+
+const USES_DISPLAY_FAMILY = /\bfont(?:-family)?\s*:[^;]*var\(\s*--font-display\s*\)/i
+const FONT_SIZE_DECLARATION = /\bfont-size\s*:\s*([^;}\n]+)/i
+
+/** Every `{ ... }` body in a stylesheet or a template literal, with the line it starts on. */
+function* declarationBlocks(text) {
+  for (const match of text.matchAll(/\{([^{}]*)\}/g)) {
+    yield { body: match[1] ?? '', line: text.slice(0, match.index).split('\n').length }
+  }
+}
+
+/**
+ * Every quoted string, for the Tailwind half of rule 4.
+ *
+ * A class list is a string, and `font-display text-sm` in one is the utility spelling of the same
+ * mistake. Scanning strings rather than whole lines keeps a sentence in prose from matching, and keeps
+ * a wrapped `className={...}` from splitting a class list across two scans.
+ */
+const STRING_LITERAL = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g
+const SMALL_TEXT_UTILITY = new RegExp(
+  `\\btext-(${[...TYPE_STEPS.keys()]
+    .filter((name) => {
+      const rem = remOf(TYPE_STEPS.get(name) ?? '')
+      return rem !== undefined && rem < DISPLAY_FLOOR_REM
+    })
+    .join('|')})\\b`,
+)
+const DISPLAY_UTILITY = /\bfont-display\b/
+
+/** Rule 4 — the display face below the `lg` step. */
+function* displayFontTooSmall(file, text) {
+  for (const { body, line } of declarationBlocks(text)) {
+    if (!USES_DISPLAY_FAMILY.test(body)) continue
+    const size = body.match(FONT_SIZE_DECLARATION)?.[1]
+    if (size === undefined) continue
+    const rem = remOf(size)
+    if (rem === undefined || rem >= DISPLAY_FLOOR_REM) continue
+    const shown = size.trim()
+    const resolved = shown.endsWith('rem') ? '' : ` (${rem}rem)`
+    yield `${file}:${line}  [no-display-font-below-lg] var(--font-display) at font-size ${shown}` +
+      `${resolved} — the display serif's strokes stop resolving below ${DISPLAY_FLOOR_REM}rem; ` +
+      'use var(--font-sans)'
+  }
+
+  if (file.endsWith('.css') || TYPE_STEPS.size === 0) return
+  for (const match of text.matchAll(STRING_LITERAL)) {
+    const literal = match[1] ?? match[2] ?? match[3] ?? ''
+    if (!DISPLAY_UTILITY.test(literal) || !SMALL_TEXT_UTILITY.test(literal)) continue
+    const line = text.slice(0, match.index).split('\n').length
+    yield `${file}:${line}  [no-display-font-below-lg] 'font-display' with ` +
+      `'${literal.match(SMALL_TEXT_UTILITY)?.[0]}' — the display serif's strokes stop resolving below ` +
+      `${DISPLAY_FLOOR_REM}rem; use 'font-sans'`
+  }
+}
+
 function* walk(dir) {
   let entries
   try {
@@ -182,7 +307,8 @@ for (const root of ROOTS) {
         for (const match of line.matchAll(COLOUR_LITERAL)) {
           if (HARMLESS.test(match[0])) continue
           violations.push(
-            `${at}  un-tokened colour ${match[0]} — use a token from @berelax/ui, or add it to the palette`,
+            `${at}  [no-untokened-colour] ${match[0]} — use a token from @berelax/ui, or add it ` +
+              'to the palette',
           )
         }
       }
@@ -196,8 +322,8 @@ for (const root of ROOTS) {
         const [, property, value = ''] = match
         if (DECOR_GOLD.test(value) || DECOR_GOLD_TOKEN.test(value)) {
           violations.push(
-            `${at}  decorative gold used for '${property}' — it measures 2.90:1 and carries no ` +
-              'information; use --color-accent-gold (4.62:1)',
+            `${at}  [decor-gold-never-carries-text] used for '${property}' — it measures 2.90:1 and ` +
+              'carries no information; use --color-accent-gold (4.62:1)',
           )
         }
       }
@@ -205,10 +331,16 @@ for (const root of ROOTS) {
       // Rule 3 — Tailwind's default palette.
       for (const match of line.matchAll(TAILWIND_DEFAULT_UTILITY)) {
         violations.push(
-          `${at}  Tailwind default palette utility '${match[0]}' — the defaults are cleared in ` +
+          `${at}  [no-tailwind-default-palette] utility '${match[0]}' — the defaults are cleared in ` +
             'tailwind.css and this colour was never measured',
         )
       }
+    }
+
+    // Rule 4 — the display face at a small size. Whole-file rather than line-by-line: a declaration
+    // block spans lines, and the family and the size are rarely on the same one.
+    if (!exempt) {
+      for (const violation of displayFontTooSmall(file, text)) violations.push(violation)
     }
   }
 }
@@ -221,5 +353,6 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `Colour tokens hold across ${scanned} source files: no un-tokened colour, no decorative gold on text, no Tailwind defaults.`,
+  `Design tokens hold across ${scanned} source files: no un-tokened colour, no decorative gold on ` +
+    'text, no Tailwind defaults, no display serif below the lg step.',
 )

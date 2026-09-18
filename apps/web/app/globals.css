@@ -1,0 +1,134 @@
+/*
+ * The one stylesheet the application loads.
+ *
+ * Order matters and each line is deliberate:
+ *
+ *  1. The generated tokens — colours, scales, shadow. The source of truth is `scripts/palette.py`.
+ *  2. The measured font fallbacks, so a swap reflows nothing.
+ *  3. The Arabic recalibration.
+ *  4. Tailwind, and the theme that replaces its defaults.
+ */
+@import "@berelax/ui/tokens.css";
+@import "@berelax/ui/font-fallbacks.css";
+@import "@berelax/ui/arabic.css";
+
+@import "tailwindcss";
+
+/*
+ * Tailwind's entire default palette, spacing ramp and radius scale are removed before ours are
+ * defined. `initial` clears a namespace; without it `text-gray-400` remains one keystroke away from
+ * every component, and it is a colour nobody derived and nobody measured.
+ */
+@theme inline {
+  --color-*: initial;
+  --spacing-*: initial;
+  --radius-*: initial;
+  --breakpoint-*: initial;
+  --font-*: initial;
+
+  --color-ground: var(--color-ground);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-ground-sunk: var(--color-ground-sunk);
+  --color-surface-sand: var(--color-surface-sand);
+  --color-surface-clay: var(--color-surface-clay);
+  --color-ink: var(--color-ink);
+  --color-ink-2: var(--color-ink-2);
+  --color-ink-3: var(--color-ink-3);
+  --color-accent-gold: var(--color-accent-gold);
+  --color-accent-gold-strong: var(--color-accent-gold-strong);
+  --color-accent-green: var(--color-accent-green);
+  --color-accent-teal: var(--color-accent-teal);
+  --color-decor-gold: var(--color-decor-gold);
+  --color-decor-tan: var(--color-decor-tan);
+  --color-hairline: var(--color-hairline);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-focus: var(--color-focus);
+  --color-danger: var(--color-danger);
+  --color-success: var(--color-success);
+
+  --spacing-1: var(--space-1);
+  --spacing-2: var(--space-2);
+  --spacing-3: var(--space-3);
+  --spacing-4: var(--space-4);
+  --spacing-5: var(--space-5);
+  --spacing-6: var(--space-6);
+  --spacing-7: var(--space-7);
+  --spacing-8: var(--space-8);
+  --spacing-9: var(--space-9);
+  --spacing-10: var(--space-10);
+  --spacing-11: var(--space-11);
+  --spacing-12: var(--space-12);
+
+  --radius-1: var(--radius-1);
+  --radius-2: var(--radius-2);
+  --radius-3: var(--radius-3);
+  --radius-handle: var(--radius-handle);
+
+  --breakpoint-xs: 360px;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-xxl: 1600px;
+
+  /*
+   * The type scale, from `packages/ui/src/tokens/scale.ts`.
+   *
+   * `--text-*: initial` first, because Tailwind's own ramp starts at 16px and ours at 17px. Leaving the
+   * defaults in place leaves `text-base` meaning 1rem, and then the scale in `scale.ts` is a document
+   * nothing reads. `apps/web/src/type-scale.test.ts` fails if these stop matching it.
+   */
+  --text-*: initial;
+  --text-eyebrow: 0.75rem;
+  --text-eyebrow--line-height: 1.33;
+  --text-eyebrow--letter-spacing: 0.08em;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.647;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.6;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 1.333;
+  --text-xl--letter-spacing: -0.008em;
+  --text-2xl: 1.875rem;
+  --text-2xl--line-height: 1.267;
+  --text-2xl--letter-spacing: -0.012em;
+  --text-3xl: clamp(2rem, 1.4rem + 2.2vw, 2.5rem);
+  --text-3xl--line-height: 1.15;
+  --text-3xl--letter-spacing: -0.016em;
+
+  --font-sans: var(--font-sans), "IBM Plex Sans Fallback", Arial, sans-serif;
+  --font-display: var(--font-display), "Cormorant Garamond Fallback", serif;
+  --font-eyebrow: var(--font-eyebrow), "Jost Fallback", Arial, sans-serif;
+  --font-arabic: var(--font-arabic), "IBM Plex Sans Arabic Fallback", Arial, sans-serif;
+}
+
+html {
+  background: var(--color-ground);
+  color: var(--color-ink);
+}
+
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: calc(1.0625rem * var(--font-size-scalar, 1));
+  line-height: 1.647;
+}
+
+[lang="ar"] body,
+[dir="rtl"] body {
+  font-family: var(--font-arabic);
+}
+
+/* docs/08 §4: every section sets its own ring offset against its own background. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

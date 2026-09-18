@@ -19,6 +19,8 @@
     "db:drift": "node scripts/check-schema-drift.mjs",
     "db:migrate:dry": "node scripts/migrate-dry-run.mjs",
     "fixtures": "tsx scripts/fixture-digest.mjs",
+    "fonts": "node scripts/emit-font-metrics.mjs",
+    "fonts:emit": "node scripts/emit-font-metrics.mjs --emit",
     "fixtures:emit": "tsx scripts/fixture-digest.mjs --emit",
     "gates:test": "node scripts/test-gates.mjs",
     "invisibles": "node scripts/check-invisible-chars.mjs",
@@ -39,20 +41,26 @@
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm critique && pnpm a11y && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm palette && pnpm tokens && pnpm colours && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@fontsource-variable/cormorant-garamond": "^5.3.0",
+    "@fontsource-variable/jost": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@fontsource/ibm-plex-sans-arabic": "5.3.0",
     "@types/node": "26.6.1",
     "@vitest/coverage-v8": "5.0.1",
     "dependency-cruiser": "18.3.1",
     "drizzle-kit": "0.31.10",
     "fast-check": "4.10.1",
+    "playwright": "1.56.1",
     "tsx": "4.23.13",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
   },
   "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
     "drizzle-orm": "0.45.2",
     "pg-boss": "12.33.1",
     "postgres": "3.4.9",
