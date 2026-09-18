@@ -197,7 +197,7 @@ units:
     order: 14
     title: Deterministic seed and frozen clock
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F04
     - F05
@@ -205,6 +205,7 @@ units:
     - seed produces the fixture salon described in docs/12 section 5, reproducibly
     - seeded twice from clean yields byte-identical reporting output
     - no real personal data; health fixtures obviously synthetic
+    - 'NOTE: the product schema does not exist until B-CAT/B-AVAIL/B-LIFE/M-VAT, so the durable artifact is the deterministic generator plus a loader registry. Loaders for premises, trading hours and settings run today; later units register their own. The committed fixture digest fails the build when the dataset changes'
   - id: H04
     order: 15
     title: Screenshot harness and gallery

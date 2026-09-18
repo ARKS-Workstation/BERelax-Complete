@@ -38,7 +38,7 @@ module.exports = {
         'and receives what it needs as arguments.',
       severity: 'error',
       from: { path: '^packages/core/' },
-      to: { path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers)/' },
+      to: { path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers|fixtures)/' },
     },
     {
       name: 'db-must-not-import-core',
@@ -52,7 +52,9 @@ module.exports = {
       comment: 'packages/shared is the leaf. Nothing internal may be imported into it.',
       severity: 'error',
       from: { path: '^packages/shared/' },
-      to: { path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers)|apps)/' },
+      to: {
+        path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers|fixtures)|apps)/',
+      },
     },
     {
       name: 'nothing-imports-an-app',

@@ -41,7 +41,9 @@
       "@berelax/ui": ["./packages/ui/src/index.ts"],
       "@berelax/ui/*": ["./packages/ui/src/*"],
       "@berelax/providers": ["./packages/providers/src/index.ts"],
-      "@berelax/providers/*": ["./packages/providers/src/*"]
+      "@berelax/providers/*": ["./packages/providers/src/*"],
+      "@berelax/fixtures": ["./packages/fixtures/src/index.ts"],
+      "@berelax/fixtures/*": ["./packages/fixtures/src/*"]
     },
     "types": ["node"]
   }

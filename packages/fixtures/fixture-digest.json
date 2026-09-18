@@ -1,0 +1,25 @@
+{
+  "seed": 20260918,
+  "generatedForIso": "2026-09-18T10:00:00.000Z",
+  "counts": {
+    "services": 12,
+    "rooms": 5,
+    "therapists": 8,
+    "customers": 140,
+    "shifts": 1018,
+    "appointments": 250,
+    "historical": 204,
+    "forward": 46,
+    "packages": 12,
+    "invoices": 188,
+    "lockedInvoices": 47
+  },
+  "totals": {
+    "gross": "AED 62,490.00",
+    "net": "AED 59,514.29",
+    "vat": "AED 2,975.71",
+    "completed": 188
+  },
+  "datasetDigest": "c6b8da89f5408d3bac52711a58790657bb59b819cb46c8ca41c71a9969a44912",
+  "reportDigest": "d450f069c73faa28b9cc22a4f862828ad88551bee9f9e7c1d0788b6bc4e5e03c"
+}

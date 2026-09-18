@@ -220,7 +220,25 @@ const runExpectingFailure = (cmd, args) => {
   check('progress gate rejects a hand-edited ledger', failed)
 }
 
-// 17. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 17. A changed fixture salon must fail the fixture gate.
+{
+  const f = 'packages/fixtures/src/salon.ts'
+  const original = readFileSync(f, 'utf8')
+  // One digit. Every committed screenshot was taken against the old dataset, and without this gate
+  // the only symptom would be a gallery that diffs everywhere for no apparent reason.
+  writeFileSync(
+    f,
+    original.replace(
+      'export const DEFAULT_SEED = 20260918',
+      'export const DEFAULT_SEED = 20260919',
+    ),
+  )
+  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/fixture-digest.mjs'])
+  writeFileSync(f, original)
+  check('fixture gate rejects a changed fixture salon', failed)
+}
+
+// 18. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -235,6 +253,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm colours',
     'pnpm adr',
     'pnpm progress:check',
+    'pnpm fixtures',
     'pnpm test',
     'pnpm test:integration',
     'pnpm db:migrate:dry',

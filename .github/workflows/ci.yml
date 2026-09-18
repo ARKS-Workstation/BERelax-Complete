@@ -94,6 +94,9 @@ jobs:
       - name: Progress ledger matches the manifest
         run: pnpm progress:check
 
+      - name: Fixture salon unchanged
+        run: pnpm fixtures
+
       - name: Unit tests
         run: pnpm test
 
