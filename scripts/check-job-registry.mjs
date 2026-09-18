@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Two rules about scheduled work, neither of which a runtime check can cover.
+ * Three rules about scheduled work, none of which a runtime check can cover on its own.
  *
  * **1. `invalid-cron-declaration`.** Every `cron:` literal in a job declaration is a 5-field expression.
  * `assertRegistry` checks this at import time, which is the right place — but a job in a module nothing
@@ -9,7 +9,13 @@
  * anything imported it. The validator is imported from the worker rather than reimplemented, so the gate
  * and the runtime cannot disagree.
  *
- * **2. `no-schedule-outside-the-registry`.** `boss.schedule` and `boss.createQueue` appear only in
+ * **2. `cron-without-an-agent`.** Every job with a `cron` names the `agent_definition` it reports to. A
+ * scheduled job with no agent row has no declared interval and no budget, so nothing is watching it and
+ * nothing is capping it — a cron nobody watches is the failure G-AGT-01 exists to remove. This is the
+ * static half; the runtime half, that the named agent actually has a row, needs a database and lives in
+ * `apps/worker/src/jobs/agent-watchdog.itest.ts`.
+ *
+ * **3. `no-schedule-outside-the-registry`.** `boss.schedule` and `boss.createQueue` appear only in
  * `apps/worker/src/registry.ts`. The registry exists so that "every cron this system runs" is one array
  * a person can read, and so that a job removed from it is unscheduled rather than left firing from an
  * upserted row nothing in the codebase mentions. A `boss.schedule(...)` in the module that owns a feature
@@ -17,7 +23,12 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { assertRegistry, isValidCron, JOB_REGISTRY } from '../apps/worker/src/registry.ts'
+import {
+  assertRegistry,
+  cronRegistrations,
+  isValidCron,
+  JOB_REGISTRY,
+} from '../apps/worker/src/registry.ts'
 import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const ROOTS = ['apps', 'packages']
@@ -90,12 +101,23 @@ for (const root of ROOTS) {
   }
 }
 
-// And the registry's own declarations, through the same validator the worker uses at boot.
+// And the registry's own declarations, through the same validator the worker uses at boot — which is
+// where `cron-without-an-agent` is enforced for the shipped registry.
 try {
   assertRegistry(JOB_REGISTRY)
 } catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  const rule = /must name the agent_definition/.test(message)
+    ? '[cron-without-an-agent]'
+    : '[invalid-job-declaration]'
+  violations.push(`${REGISTRY}  ${rule} ${message}`)
+}
+
+for (const cron of cronRegistrations(JOB_REGISTRY)) {
+  if ((cron.agent ?? '').trim().length > 0) continue
   violations.push(
-    `${REGISTRY}  [invalid-job-declaration] ${error instanceof Error ? error.message : String(error)}`,
+    `${REGISTRY}  [cron-without-an-agent] '${cron.name}' declares a cron and no agent. ` +
+      'Nothing would watch it and nothing would cap it.',
   )
 }
 

@@ -16,6 +16,7 @@
       "!packages/ui/src/tokens/tokens.css",
       "!packages/ui/src/tokens/tailwind.css",
       "!packages/ui/src/theme/font-fallbacks.generated.css",
+      "!apps/web/next-env.d.ts",
       "!assets/media/manifest.json"
     ]
   },

@@ -5540,7 +5540,7 @@ units:
       alerts when any enabled agent has had no success within 2x its declared interval, whatever the cause.
       Built before any Google agent so no agent can be added without a heartbeat.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F09
@@ -5564,12 +5564,54 @@ units:
       the partial cost as integer fils, and does not set last_success_at'
     - 'Known-bad fixture per ADR 0003: scripts/test-gates.mjs registers a cron job with no agent_definition
       row and asserts the registry gate fails by name, then removes the fixture in a finally block'
+    - 'NOTE: the registry-completeness criterion is met in two halves, because one check cannot cover both
+      sides. The static half is the cron-without-an-agent rule in scripts/check-job-registry.mjs (pnpm
+      jobs), with a known-bad fixture in scripts/test-gates.mjs that removes the agent declaration from the
+      real registry and restores it in a finally — asserted by rule name. The runtime half, that the named
+      agent actually has an agent_definition row, needs a database and lives in
+      apps/worker/src/jobs/agent-watchdog.itest.ts, paired with a control in the same shape that must fail.
+      JobDefinition.agent is required whenever cron is set, enforced by assertRegistry at import time.'
+    - 'NOTE: ten agent_definition rows are seeded, not eight. The ninth is audit_partitions — migration
+      0005 creates audit_event with no DEFAULT partition on purpose, so that job stopping means audit
+      inserts FAIL rather than landing somewhere nobody prunes, and it had been declared since F04 and
+      watched by nothing. The tenth is agent_watchdog itself: a watchdog exempt from its own contract is a
+      watchdog whose failure is invisible, which is the exact shape of failure this table set removes. What
+      reads its stale heartbeat is the alerting ladder in H-HARD-05.'
+    - 'NOTE: "re-enabling does not emit a backdated alert" is structural rather than a special case.
+      agent_definition.enabled_since is moved by setEnabled only on a disabled-to-enabled transition, and
+      the watchdog measures silence from greatest(last_success_at, enabled_since). An idempotent settings
+      save therefore does not reset the clock — which would otherwise have reported the whole system
+      healthy for two intervals after any admin page was saved.'
+    - 'NOTE: alert deduplication is a unique (agent_key, incident_key) with on conflict do nothing, where
+      the incident key is derived from the instant silence began. Two watchdog passes can overlap, and the
+      loser of a check-then-insert race would throw inside a cron nobody watches — the same class of silent
+      failure this unit removes.'
+    - 'NOTE: withAgentRun is deliberately NOT one transaction around the body. The run row and the
+      heartbeat must survive a body that throws, and a single transaction would roll back the evidence
+      along with the work — precisely the case the heartbeat contract exists to make visible.'
+    - 'NOTE: the integration test for the run paths lives in packages/fixtures/src/agents.itest.ts, not
+      beside the repository, because it needs withAgentRun from @berelax/db AND createRunBudget from
+      @berelax/core. db may not import core and the pairing is what is under test — withAgentRun classifies
+      an abort as budget_exceeded by recognising the error the real budget throws, so a test supplying its
+      own budget would prove nothing about the pair. docs/CONTRIBUTING-AGENT-BRIEF.md rule 4 names fixtures
+      as the home for exactly this.'
+    - 'NOTE: deferred — nothing notifies. An alert is a row in agent_alert with a deduplicated incident
+      key; the escalation ladder, the email and the console are H-HARD-05 and the per-module admin units.
+      The eight named agents also have no job bodies yet: their agent_definition rows exist so the
+      completeness rule has something to satisfy, and each later unit registers its own cron against the
+      row already there.'
+    - 'NOTE: the migration is 0021_agent_registry.sql, not the 0040 the files list guessed at.'
     files:
-    - packages/db/migrations/0040_agent_registry.sql
+    - packages/db/migrations/0021_agent_registry.sql
     - packages/db/src/schema/agents.ts
     - packages/core/src/agents/watchdog.ts
     - apps/worker/src/jobs/agent-watchdog.ts
-    - apps/worker/src/agents/registry.ts
+    - apps/worker/src/registry.ts
+    - apps/worker/src/jobs/agent-watchdog.itest.ts
+    - packages/db/src/repositories/agents.ts
+    - packages/fixtures/src/agents.itest.ts
+    - packages/core/src/agents/watchdog.test.ts
+    - scripts/check-job-registry.mjs
   - id: G-CONN-01
     order: 151
     title: 'google_connections schema: one-to-many, sub-keyed, envelope-encrypted'
@@ -5995,7 +6037,7 @@ units:
       is a real column so submitted_at/confirmed_at and posted_manually_at coexist instead of overloading
       one posted_at. Includes the reconciliation path for when API access arrives.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-01
@@ -6017,6 +6059,54 @@ units:
       exactly one review row and one audit_event'
     - source is constrained to api|email_parse|paste|manual and every review row carries the connection_id
       and placeId it belongs to, so a second connection cannot cross-contaminate the queue
+    - 'NOTE: the migration is 0020_reviews.sql, not the 0043 guessed at above — 0016 is the highest applied and
+      0017-0019 are reserved by units in flight, so 0020 is the next number reserved for this unit. SCHEMA_VERSION
+      in packages/db/src/index.ts is 20. The table is google_reviews, in the google_* family of 0016'
+    - 'NOTE: the schema assertions live in packages/db/src/schema/reviews.itest.ts, not a .test.ts, for the same
+      reason as G-CONN-01 — every one of them is a claim about a real PostgreSQL (information_schema,
+      pg_constraint, pg_indexes, and an insert that must be refused), and a unit test could only assert against a
+      mock of it. The repository behaviour test is packages/google/src/review-queue.itest.ts: it needs both
+      @berelax/db and REVIEW_FIXTURES from @berelax/providers/google (the subpath, never the barrel), and
+      packages/google is the package that already depends on both. packages/db depends on @berelax/shared only and
+      a test is not a licence to widen that'
+    - 'NOTE: delivery_mode carries three timestamps rather than two — submitted_at and confirmed_at for the API,
+      because Google acknowledges separately from the submission, and posted_manually_at for a human. One check
+      constraint makes them mutually exclusive per row, and its `else false` arm means a third delivery mode added
+      later fails the constraint until somebody writes its rules rather than inheriting none. PostgreSQL promises
+      no order over a row''s checks, so a bad delivery_mode may be reported by either that constraint or the enum
+      check; the test accepts either name and asserts the row cannot be stored'
+    - 'NOTE: reconciliation on reviewer name + rating + date is genuinely ambiguous, so reconcileApiReviewId
+      returns an `ambiguous` outcome with the candidate ids and writes nothing rather than guessing. Two star-only
+      four-star reviews from ''A Google user'' on one day is an ordinary Saturday — REVIEW_FIXTURES carries
+      exactly that reviewer twice — and a wrong backfill would move the google_review_id, and every later API
+      reply, onto another review''s draft with nothing downstream able to notice. The date is matched in an IANA
+      zone passed as an argument: rev-1-star-only''s 2026-09-15T23:58Z is 2026-09-16 in Asia/Dubai, which is the
+      date Google shows the owner, and matching on the UTC date misses every review left after 20:00 local'
+    - 'NOTE: the ''preserved delivery history'' the reconciliation test asserts is delivery_mode plus its
+      timestamps on the row itself, and the audit_event trail (google_review.recorded, .ingested, .reconciled,
+      .reply_posted_manually). There is deliberately no second append-only review_event table: audit_event already
+      carries the per-action trail, and a second log for one entity would need its own mirror to stay consistent
+      with it'
+    - 'NOTE: cross-contamination is prevented by a trigger, not only by carrying the two columns.
+      google_reviews_place_belongs_to_connection refuses a place_id that is not a gbp_reviews
+      resource_ref->>''placeId'' of that connection, on insert and on an update of either column, because a row is
+      already wrong by the time any queue filter runs. Two consequences for later units: a review insert requires
+      that capability row to exist (health ''permission_missing'' is fine, which is the launch-day state), and the
+      connection foreign key is ON DELETE RESTRICT, so a test that clears google_connections must clear
+      google_reviews first'
+    - 'NOTE: a new gate rule review-no-overloaded-posted-at in scripts/check-schema-conventions.mjs fails a
+      migration that puts posted_at on a table whose name contains ''review'', with a known-bad fixture and an
+      allowed-elsewhere control in scripts/test-gates.mjs (cases 27/28). The information_schema assertion required
+      by the acceptance line covers the applied schema; the gate covers the migration before it is applied
+      anywhere'
+    - 'NOTE deferred to G-REV-02: nothing calls this unit''s repository yet. The paste form, the defensive email
+      parse, the Places count tripwire and the Monday nudge are G-REV-02, and the job that walks the API list and
+      calls reconcileApiReviewId belongs with the unit that gets API access. This unit ships the shape, the
+      constraints, ingestApiReview, recordManualReview, reconcileApiReviewId, the three delivery recorders and the
+      connection-scoped queue read'
+    - 'NOTE deferred to G-REV-03 and G-REV-04: reply_draft exists as a column here but nothing generates, lints or
+      approves it (G-REV-04), and the routing verdict columns — matched rule id and lexicon version — belong to
+      G-REV-03''s own migration. Adding either here would be a column no code writes'
     files:
     - packages/db/migrations/0043_reviews.sql
     - packages/db/src/schema/reviews.ts

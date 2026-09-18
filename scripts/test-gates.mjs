@@ -671,7 +671,29 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   }
 
   {
-    // The control. A valid declaration that does not schedule anything must pass, or the two cases above
+    // A cron with no agent. G-AGT-01: without an agent_definition row a scheduled job has no declared
+    // interval and no budget, so nothing is watching it and nothing is capping it. The fixture is a
+    // declaration in the registry itself, because that is the only place the rule can see the pairing.
+    const registry = 'apps/worker/src/registry.ts'
+    const original = readFileSync(registry, 'utf8')
+    let result
+    try {
+      writeFileSync(
+        registry,
+        original.replace(
+          "    agent: 'agent_watchdog',",
+          '    // gate fixture: the agent declaration removed',
+        ),
+      )
+      result = run('pnpm', JOBS)
+    } finally {
+      writeFileSync(registry, original)
+    }
+    checkRejectedBy('job gate rejects a cron with no agent', result, '[cron-without-an-agent]')
+  }
+
+  {
+    // The control. A valid declaration that does not schedule anything must pass, or the cases above
     // are satisfied by a gate that rejects every file it sees.
     const result = withFixture(
       'apps/worker/src/__gate_fixture__.ts',
@@ -688,7 +710,41 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
   }
 }
 
-// 27. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 27/28. The review delivery shape. `posted_at` on a review table must fail the schema-conventions
+//        gate, and the identical column must still be allowed on a table that is not a review — or the
+//        rule is banning a word rather than protecting a decision.
+{
+  const f = 'packages/db/migrations/__gate_fixture__.sql'
+  const table = (name) =>
+    [`create table ${name} (`, '  id uuid primary key,', '  posted_at timestamptz', ');'].join('\n')
+
+  // The known-bad case. One `posted_at` reads identically whether the system submitted the reply through
+  // the API or a human pasted it into Google and said so, which is the only question anybody asks of that
+  // column afterwards — and it has no room for the API's separate acknowledgement. docs/10 §6 calls this
+  // out as a decision that must be right on day one.
+  const overloaded = withFixture(f, table('review_gate_fixture'), () =>
+    run('node', ['scripts/check-schema-conventions.mjs']),
+  )
+  checkRejectedBy(
+    'schema conventions reject posted_at on a review table',
+    overloaded,
+    'review-no-overloaded-posted-at',
+  )
+
+  // The control, which must PASS. `posted_at` is an honest name on a table that posts something, and a
+  // gate that banned the string everywhere would prove nothing about the review decision while blocking
+  // unrelated migrations.
+  const elsewhere = withFixture(f, table('outbox_gate_fixture'), () =>
+    run('node', ['scripts/check-schema-conventions.mjs']),
+  )
+  check(
+    'schema conventions allow posted_at on a table that is not a review',
+    !elsewhere.failed,
+    elsewhere.output,
+  )
+}
+
+// 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [

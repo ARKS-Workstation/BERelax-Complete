@@ -1,6 +1,8 @@
+import { instantFromIso } from '@berelax/core'
 import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import type { Job, PgBoss } from 'pg-boss'
+import { runWatchdog } from './jobs/agent-watchdog.ts'
 
 /**
  * The job registry: the single place a queue or a cron exists.
@@ -39,7 +41,17 @@ export interface JobDefinition<Data = unknown> {
    * `boss.schedule` and simply never fires.
    */
   readonly cron?: string
-  /** The `agent_definition` this job reports to, for G-AGT-01's heartbeat and watchdog. */
+  /**
+   * The `agent_definition` this job reports to.
+   *
+   * **Required on any job with a `cron`**, and that is the load-bearing part of this type. A scheduled
+   * job with no agent row has no declared interval and no budget, so nothing is watching it and nothing
+   * is capping it — and a cron nobody watches is the failure G-AGT-01 exists to remove. `pnpm jobs`
+   * rejects a cron without one, and `agents.itest.ts` asserts every registered cron's agent has a row.
+   *
+   * A queue that is only sent to needs none: its caller is a request or another job, and that caller is
+   * the thing being watched.
+   */
   readonly agent?: string
   readonly retryLimit: number
   readonly retryDelaySeconds: number
@@ -113,6 +125,12 @@ export function assertRegistry(jobs: readonly JobDefinition<never>[]): void {
           'pg-boss accepts a malformed one and then never fires it.',
       )
     }
+    if (job.cron !== undefined && (job.agent ?? '').trim().length === 0) {
+      problems.push(
+        `${job.name}: a cron job must name the agent_definition it reports to. Without one it has no ` +
+          'declared interval and no budget, so nothing is watching it and nothing is capping it.',
+      )
+    }
     if (job.retryLimit < 1) {
       problems.push(`${job.name}: retryLimit must be at least 1`)
     }
@@ -145,20 +163,64 @@ export function assertRegistry(jobs: readonly JobDefinition<never>[]): void {
  * inserts fail loudly rather than landing somewhere nobody prunes. F04 declared the cron; nothing had
  * ever registered it, because until now there was no worker to register it in.
  */
-export const JOB_REGISTRY: readonly JobDefinition<never>[] = MAINTENANCE_JOBS.map((job) => ({
-  name: job.name,
-  purpose:
-    'Migration 0005 creates no DEFAULT partition on audit_event, so a missing partition fails the ' +
-    'insert rather than hiding the row. This keeps the next month ahead of the clock.',
-  cron: job.cron,
-  retryLimit: DEFAULT_QUEUE_OPTIONS.retryLimit,
-  retryDelaySeconds: DEFAULT_QUEUE_OPTIONS.retryDelay,
-  retryBackoff: DEFAULT_QUEUE_OPTIONS.retryBackoff,
-  // Partition creation is DDL against one table. A minute is generous; a job still running after that
-  // is blocked on a lock, and reclaiming it is the right answer.
-  expireInSeconds: 60,
-  handler: maintenanceHandler(job.sql),
-}))
+export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
+  ...MAINTENANCE_JOBS.map((job) => ({
+    name: job.name,
+    purpose:
+      'Migration 0005 creates no DEFAULT partition on audit_event, so a missing partition fails the ' +
+      'insert rather than hiding the row. This keeps the next month ahead of the clock.',
+    cron: job.cron,
+    agent: 'audit_partitions',
+    retryLimit: DEFAULT_QUEUE_OPTIONS.retryLimit,
+    retryDelaySeconds: DEFAULT_QUEUE_OPTIONS.retryDelay,
+    retryBackoff: DEFAULT_QUEUE_OPTIONS.retryBackoff,
+    // Partition creation is DDL against one table. A minute is generous; a job still running after that
+    // is blocked on a lock, and reclaiming it is the right answer.
+    expireInSeconds: 60,
+    handler: maintenanceHandler(job.sql),
+  })),
+  {
+    name: 'agent.watchdog',
+    purpose:
+      'Alerts when any enabled agent has had no success within twice its declared interval, whatever ' +
+      'the cause. The absence of a success is the signal; docs/10 §6.',
+    // Every fifteen minutes. The alert itself is deduplicated by incident, so a frequent pass costs a
+    // query rather than ninety-six notifications — and the shortest declared interval in the registry is
+    // five minutes, so a slower watchdog would be the thing delaying its own alert.
+    cron: '*/15 * * * *',
+    agent: 'agent_watchdog',
+    retryLimit: 3,
+    retryDelaySeconds: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    handler: watchdogHandler,
+  },
+]
+
+/**
+ * The watchdog's own handler.
+ *
+ * It watches itself, which is not circular in the way it first looks: if this job stops running, its own
+ * heartbeat goes stale and no pass raises the alert — so something outside this process has to notice,
+ * which is the alerting ladder in H-HARD-05. What this unit guarantees is that the evidence exists and is
+ * a row rather than a log line nobody reads.
+ */
+async function watchdogHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The watchdog ran before setMaintenanceSql() supplied a connection. run.ts calls it before ' +
+        'startWorkers().',
+    )
+  }
+  const result = await runWatchdog(sql, instantFromIso(context.now()))
+  if (result.raised.length > 0) {
+    console.warn(
+      `agent watchdog raised ${result.raised.length} alert(s): ${result.raised.join(', ')}`,
+    )
+  }
+}
 
 /**
  * A handler that runs one statement.

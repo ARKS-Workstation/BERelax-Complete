@@ -45,6 +45,23 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  type AgentDefinitionRow,
+  type AgentHeartbeatRow,
+  type AgentOutcome,
+  type AgentRunResult,
+  type AlertToRaise,
+  agentsWithHeartbeat,
+  findAgent,
+  openAlerts,
+  type RunBody,
+  type RunOptions,
+  raiseAlert,
+  recordHeartbeat,
+  setEnabled,
+  setKillSwitch,
+  withAgentRun,
+} from './repositories/agents.ts'
+export {
   type AllocatedDocumentNumber,
   allocateDocumentNumber,
   DOCUMENT_SERIES_CODES,
@@ -55,7 +72,24 @@ export {
   NUMBERING_LEDGER_COLUMNS,
   type NumberingGap,
 } from './repositories/numbering.ts'
+export {
+  type ApiIngestOutcome,
+  type ApiReviewPayload,
+  getReview,
+  type IngestedReview,
+  ingestApiReview,
+  listReviewQueue,
+  type ManualReviewInput,
+  type QueuedReview,
+  type ReconciliationInput,
+  type ReconciliationOutcome,
+  reconcileApiReviewId,
+  recordManualReview,
+  recordReplyConfirmedByGoogle,
+  recordReplyPostedManually,
+  recordReplySubmittedToApi,
+} from './repositories/reviews.ts'
 export * as schema from './schema/index.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 16 as const
+export const SCHEMA_VERSION = 21 as const

@@ -36,10 +36,29 @@ for (const dir of SCHEMA_DIRS) {
   }
 }
 
+/**
+ * Rule `review-no-overloaded-posted-at`.
+ *
+ * A review table records its reply delivery as `delivery_mode` plus `submitted_at`/`confirmed_at` and
+ * `posted_manually_at` (docs/10 §6, migration 0020). A single `posted_at` is the mistake this exists to
+ * stop: it reads identically whether the system submitted the reply through the API or a human says
+ * they pasted it in, which is the only question anybody asks of that column afterwards — and it has no
+ * room for the API's separate acknowledgement.
+ *
+ * Scoped to the SQL, because SQL-first is where a column comes into existence (ADR 0006). The applied
+ * schema is asserted separately, by introspecting `information_schema` in
+ * `packages/db/src/schema/reviews.itest.ts`; the Drizzle mirror is compared to the live database by
+ * `pnpm db:drift`. This gate is the one that fires before the column has been applied anywhere.
+ */
+const POSTED_AT_RULE = 'review-no-overloaded-posted-at'
+const REVIEW_TABLE = /review/
+
 // --- SQL migrations -----------------------------------------------------------------------------
 const MIGRATIONS_DIR = 'packages/db/migrations'
 for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))) {
   const path = join(MIGRATIONS_DIR, file)
+  /** The table whose definition the scan is currently inside, so the rule can be table-scoped. */
+  let table = null
   readFileSync(path, 'utf8')
     .split('\n')
     .forEach((line, i) => {
@@ -57,6 +76,20 @@ for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))
             'amounts are integer fils (see the `fils` domain in 0002_conventions.sql)',
         )
       }
+      // Which table is this line part of? `create table` opens a definition, the closing `)` of the
+      // column list ends it, and an `alter table` names its own target on the same line.
+      const opened = /^\s*create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z0-9_.]+)/i.exec(code)
+      const altered = /^\s*alter\s+table\s+(?:if\s+exists\s+)?([a-z0-9_.]+)/i.exec(code)
+      if (opened !== null) table = opened[1]
+      else if (altered !== null) table = altered[1]
+      else if (/^\s*\)\s*;?\s*$/.test(code)) table = null
+      if (table !== null && REVIEW_TABLE.test(table) && /\bposted_at\b/.test(code)) {
+        problems.push(
+          `${path}:${i + 1}  ${POSTED_AT_RULE}: posted_at on "${table}" — a review's delivery is ` +
+            'delivery_mode plus submitted_at/confirmed_at and posted_manually_at (docs/10 SS6), never ' +
+            'one column that cannot say which of the two happened',
+        )
+      }
     })
 }
 
@@ -65,4 +98,7 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`)
   process.exit(1)
 }
-console.log('Schema conventions hold: all timestamps are timestamptz, no floating-point amounts.')
+console.log(
+  'Schema conventions hold: all timestamps are timestamptz, no floating-point amounts, ' +
+    'no overloaded posted_at on a review table.',
+)

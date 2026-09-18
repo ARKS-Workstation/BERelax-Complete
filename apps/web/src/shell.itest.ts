@@ -1,4 +1,6 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { DARK_PALETTE, LIGHT_PALETTE } from '@berelax/ui'
 import { type Browser, chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -14,8 +16,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * So the built application is started and driven. It is slower than a unit test and it is the only
  * honest way to assert any of this.
  */
-const PORT = 3123
+/**
+ * A port chosen at random, not a constant.
+ *
+ * 3123 was hard-coded, and two agents running `pnpm verify` at the same time collided on it — one of
+ * them saw a server that was not its own and the other could not bind. The range avoids the ephemeral
+ * range Linux allocates from, so nothing else is handing this port out while the test holds it.
+ */
+const PORT = 3200 + Math.floor(Math.random() * 600)
 const BASE = `http://127.0.0.1:${PORT}`
+const APP_DIR = new URL('..', import.meta.url).pathname
 
 let server: ChildProcess
 let browser: Browser
@@ -34,9 +44,33 @@ async function waitForServer(timeoutMs = 60_000): Promise<void> {
   throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
 }
 
+/**
+ * Builds the app if it has not been built.
+ *
+ * `next start` serves `.next`, which is gitignored — so on a fresh checkout, in CI, and in every agent
+ * worktree there is nothing to serve and this file failed with "the app did not start", 60 seconds after
+ * the real cause. Nothing in `pnpm verify` or the CI workflow ran a build, and this test is the only
+ * thing that needs one, so it builds for itself rather than adding a step every other unit pays for.
+ *
+ * Skipped when the output is already present, which is the normal local case.
+ */
+function buildIfNeeded(): void {
+  if (existsSync(join(APP_DIR, '.next', 'BUILD_ID'))) return
+  const result = spawnSync('pnpm', ['exec', 'next', 'build'], {
+    cwd: APP_DIR,
+    stdio: 'pipe',
+    encoding: 'utf8',
+    env: { ...process.env, NODE_ENV: 'production' },
+  })
+  if (result.status !== 0) {
+    throw new Error(`next build failed:\n${result.stdout ?? ''}${result.stderr ?? ''}`)
+  }
+}
+
 beforeAll(async () => {
+  buildIfNeeded()
   server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
-    cwd: new URL('..', import.meta.url).pathname,
+    cwd: APP_DIR,
     stdio: 'ignore',
     env: { ...process.env, NODE_ENV: 'production' },
   })

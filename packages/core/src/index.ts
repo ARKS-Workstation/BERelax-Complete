@@ -9,6 +9,7 @@
  */
 
 export * from './access/permissions.ts'
+export * from './agents/index.ts'
 export { assertNever } from './assert-never.ts'
 export * from './availability/index.ts'
 export * from './business-day/index.ts'

@@ -146,7 +146,13 @@ describe('acceptance — the registry is the only way a job exists', () => {
   it('removes a schedule the registry no longer declares', async () => {
     // A redeploy that drops a job. `boss.schedule` is an upsert, so without the unschedule half the old
     // row keeps firing forever.
-    const retired: JobDefinition<never> = { ...probe, name: 'f12-probe-retired', cron: '0 4 * * *' }
+    const retired: JobDefinition<never> = {
+      ...probe,
+      name: 'f12-probe-retired',
+      cron: '0 4 * * *',
+      // A cron must name its agent (G-AGT-01): without one nothing watches it and nothing caps it.
+      agent: 'audit_partitions',
+    }
     await registerJobs(boss, [...JOB_REGISTRY, retired] as never)
     expect((await boss.getSchedules()).map((schedule) => schedule.name)).toContain(
       'f12-probe-retired',
