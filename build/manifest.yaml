@@ -105,7 +105,7 @@ units:
     order: 8
     title: Clinical schema boundary
     owner: claude
-    status: todo
+    status: done
     depends_on: [F04, F07]
     steps: [22]
     acceptance:

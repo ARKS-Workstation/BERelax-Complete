@@ -20,7 +20,17 @@ if (!url) {
   process.exit(1)
 }
 
-const SCHEMA_DIR = 'packages/db/src/schema'
+/**
+ * Each Postgres schema and the directory holding its Drizzle mirrors.
+ *
+ * The `clinical` schema's mirrors live in @berelax/clinical, not @berelax/db, because the package
+ * that owns the boundary owns its own shape. Leaving it out of this gate would have left an entire
+ * schema — the most sensitive one — undrift-checked.
+ */
+const MIRROR_DIRS = [
+  { schema: 'public', dir: 'packages/db/src/schema' },
+  { schema: 'clinical', dir: 'packages/clinical/src/schema' },
+]
 const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intentionally not mirrored
 
 // --- what Drizzle declares -------------------------------------------------------------------
@@ -32,7 +42,8 @@ const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intent
  * which made a single-line table definition invisible to this gate — caught by the known-bad
  * fixture in scripts/test-gates.mjs, which is exactly what that fixture is for.
  */
-const TABLE_OPEN_RE = /pgTable\(\s*'([a-z0-9_]+)'\s*,\s*\{/g
+// Matches both `pgTable('x', {` and `someSchema.table('x', {`.
+const TABLE_OPEN_RE = /(?:pgTable|\.table)\(\s*'([a-z0-9_]+)'\s*,\s*\{/g
 const COLUMN_RE =
   /(?:^|[,{]|\n)\s*(?:'[^']+'|[A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$]*\(\s*'([a-z0-9_]+)'/g
 
@@ -57,14 +68,16 @@ function extractTables(src) {
   return out
 }
 
-const declared = new Map() // table -> Set(column)
-for (const file of readdirSync(SCHEMA_DIR).filter((f) => f.endsWith('.ts') && f !== 'index.ts')) {
-  const src = readFileSync(join(SCHEMA_DIR, file), 'utf8')
-  for (const [table, cols] of extractTables(src)) declared.set(table, cols)
+const declared = new Map() // "schema.table" -> Set(column)
+for (const { schema, dir } of MIRROR_DIRS) {
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))) {
+    const src = readFileSync(join(dir, file), 'utf8')
+    for (const [table, cols] of extractTables(src)) declared.set(`${schema}.${table}`, cols)
+  }
 }
 
 if (declared.size === 0) {
-  console.error(`No pgTable definitions found in ${SCHEMA_DIR}. Refusing to report success.`)
+  console.error('No table definitions found in any mirror directory. Refusing to report success.')
   process.exit(1)
 }
 
@@ -79,12 +92,12 @@ const psql = (sqlText) =>
   )
 
 const rows = psql(`
-  select c.table_name, c.column_name
+  select c.table_schema || '.' || c.table_name as qualified, c.column_name
   from information_schema.columns c
   join information_schema.tables t
     on t.table_name = c.table_name and t.table_schema = c.table_schema
-  where c.table_schema = 'public' and t.table_type = 'BASE TABLE'
-  order by c.table_name, c.ordinal_position
+  where c.table_schema in ('public', 'clinical') and t.table_type = 'BASE TABLE'
+  order by c.table_schema, c.table_name, c.ordinal_position
 `)
   .trim()
   .split('\n')
@@ -117,7 +130,11 @@ for (const [table, cols] of declared) {
 }
 
 // Partitions of audit_event appear as base tables; they are not separately mirrored.
-const ignorable = (t) => IGNORED_TABLES.has(t) || /^audit_event_\d{4}_\d{2}$/.test(t)
+// Monthly partitions of audit_event are created by a scheduled job and are not separately mirrored.
+const ignorable = (qualified) => {
+  const bare = qualified.replace(/^[a-z_]+\./, '')
+  return IGNORED_TABLES.has(bare) || /^audit_event_\d{4}_\d{2}$/.test(bare)
+}
 for (const table of actual.keys()) {
   if (!declared.has(table) && !ignorable(table)) {
     problems.push(`Database has table "${table}" with no Drizzle mirror`)

@@ -15,19 +15,25 @@ import { join } from 'node:path'
 const problems = []
 
 // --- Drizzle definitions ------------------------------------------------------------------------
-const SCHEMA_DIR = 'packages/db/src/schema'
-for (const file of readdirSync(SCHEMA_DIR).filter((f) => f.endsWith('.ts'))) {
-  const path = join(SCHEMA_DIR, file)
-  readFileSync(path, 'utf8')
-    .split('\n')
-    .forEach((line, i) => {
-      if (/\btimestamp\s*\(/.test(line) && !/withTimezone:\s*true/.test(line)) {
-        problems.push(`${path}:${i + 1}  timestamp() without { withTimezone: true }`)
-      }
-      if (/\b(?:real|doublePrecision)\s*\(/.test(line)) {
-        problems.push(`${path}:${i + 1}  floating-point column — money and counts must be integer`)
-      }
-    })
+// Both mirror directories. The clinical schema's mirrors live in @berelax/clinical, and leaving
+// them out would exempt the most sensitive schema from the convention.
+const SCHEMA_DIRS = ['packages/db/src/schema', 'packages/clinical/src/schema']
+for (const dir of SCHEMA_DIRS) {
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))) {
+    const path = join(dir, file)
+    readFileSync(path, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (/\btimestamp\s*\(/.test(line) && !/withTimezone:\s*true/.test(line)) {
+          problems.push(`${path}:${i + 1}  timestamp() without { withTimezone: true }`)
+        }
+        if (/\b(?:real|doublePrecision)\s*\(/.test(line)) {
+          problems.push(
+            `${path}:${i + 1}  floating-point column — money and counts must be integer`,
+          )
+        }
+      })
+  }
 }
 
 // --- SQL migrations -----------------------------------------------------------------------------
