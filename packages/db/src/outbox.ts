@@ -85,19 +85,80 @@ export interface DrainResult {
  * A handler that throws leaves the event unpublished so it is retried; its error is recorded against
  * that handler only, so one broken consumer cannot block the others.
  */
+/**
+ * Delivers one event to every interested handler, claiming each (event, handler) pair first.
+ *
+ * Extracted from `drainOutbox` so each function does one thing: this one owns per-handler
+ * idempotency and failure isolation, the caller owns batching and claiming.
+ */
+async function deliverToHandlers(
+  tx: Sql,
+  event: StoredEvent,
+  handlers: readonly HandlerRegistration[],
+): Promise<{ delivered: number; skipped: number; failed: number }> {
+  let delivered = 0
+  let skipped = 0
+  let failed = 0
+
+  const interested = handlers.filter(
+    (h) => h.eventTypes.includes('*') || h.eventTypes.includes(event.eventType),
+  )
+
+  for (const handler of interested) {
+    // Claim the pair BEFORE invoking the handler. A PK conflict means another worker already
+    // delivered it, so this attempt is skipped rather than duplicating the side effect.
+    const claimed = await tx<{ event_id: string }[]>`
+      insert into outbox_delivery (event_id, handler)
+      values (${event.id}, ${handler.name})
+      on conflict (event_id, handler) do nothing
+      returning event_id
+    `
+    if (claimed.length === 0) {
+      skipped += 1
+      continue
+    }
+
+    try {
+      await handler.handle(event)
+      delivered += 1
+    } catch (error) {
+      failed += 1
+      // Release the claim so the event is retried, and keep the reason for the operator.
+      await tx`delete from outbox_delivery where event_id = ${event.id} and handler = ${handler.name}`
+      await tx`
+        update outbox_event
+           set attempts = attempts + 1,
+               last_error = ${error instanceof Error ? error.message : String(error)}
+         where id = ${event.id}
+      `
+    }
+  }
+
+  return { delivered, skipped, failed }
+}
+
+/**
+ * Claims and dispatches a batch of unpublished events.
+ *
+ * `for update skip locked` lets several workers drain concurrently without either blocking on each
+ * other or claiming the same row — which is what makes horizontal scaling safe without a broker.
+ *
+ * An event is marked published only once EVERY interested handler has succeeded, so one broken
+ * consumer cannot cause the others to miss an event, and cannot be silently skipped either.
+ */
 export async function drainOutbox(
   sql: Sql,
   handlers: readonly HandlerRegistration[],
   options: { readonly batchSize?: number } = {},
 ): Promise<DrainResult> {
   const batchSize = options.batchSize ?? 50
+  let claimed = 0
   let delivered = 0
   let skipped = 0
   let failed = 0
-  let claimed = 0
 
   await sql.begin(async (tx) => {
-    const events = await tx<
+    const rows = await tx<
       {
         id: string
         occurred_at: Date
@@ -117,9 +178,9 @@ export async function drainOutbox(
       limit ${batchSize}
       for update skip locked
     `
-    claimed = events.length
+    claimed = rows.length
 
-    for (const row of events) {
+    for (const row of rows) {
       const event: StoredEvent = {
         id: row.id,
         occurredAt: row.occurred_at,
@@ -131,46 +192,12 @@ export async function drainOutbox(
         idempotencyKey: row.idempotency_key,
       }
 
-      const interested = handlers.filter(
-        (h) => h.eventTypes.includes('*') || h.eventTypes.includes(event.eventType),
-      )
+      const result = await deliverToHandlers(tx as unknown as Sql, event, handlers)
+      delivered += result.delivered
+      skipped += result.skipped
+      failed += result.failed
 
-      let allSucceeded = true
-
-      for (const handler of interested) {
-        // Claim the (event, handler) pair first. A PK conflict means another worker already
-        // delivered it, so this attempt is skipped rather than duplicating the side effect.
-        const claimRows = await tx<{ event_id: string }[]>`
-          insert into outbox_delivery (event_id, handler)
-          values (${event.id}, ${handler.name})
-          on conflict (event_id, handler) do nothing
-          returning event_id
-        `
-        if (claimRows.length === 0) {
-          skipped += 1
-          continue
-        }
-
-        try {
-          await handler.handle(event)
-          delivered += 1
-        } catch (error) {
-          allSucceeded = false
-          failed += 1
-          // Release the claim so the event is retried, and keep the reason.
-          await tx`
-            delete from outbox_delivery where event_id = ${event.id} and handler = ${handler.name}
-          `
-          await tx`
-            update outbox_event
-               set attempts = attempts + 1,
-                   last_error = ${error instanceof Error ? error.message : String(error)}
-             where id = ${event.id}
-          `
-        }
-      }
-
-      if (allSucceeded) {
+      if (result.failed === 0) {
         await tx`update outbox_event set published_at = now() where id = ${event.id}`
       }
     }

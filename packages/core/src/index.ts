@@ -7,6 +7,8 @@
  *   - MUST NOT import @berelax/db, any app, any framework, or any I/O
  *   - MUST NOT read the clock directly; time is always injected
  */
+
+export * from './access/permissions.ts'
 export { assertNever } from './assert-never.ts'
 export * from './money.ts'
 export * from './time.ts'

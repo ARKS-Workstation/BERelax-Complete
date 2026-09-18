@@ -31,7 +31,9 @@
       "@berelax/config": ["./packages/config/src/index.ts"],
       "@berelax/config/*": ["./packages/config/src/*"],
       "@berelax/messaging": ["./packages/messaging/src/index.ts"],
-      "@berelax/messaging/*": ["./packages/messaging/src/*"]
+      "@berelax/messaging/*": ["./packages/messaging/src/*"],
+      "@berelax/auth": ["./packages/auth/src/index.ts"],
+      "@berelax/auth/*": ["./packages/auth/src/*"]
     },
     "types": ["node"]
   }

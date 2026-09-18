@@ -93,7 +93,7 @@ units:
     order: 7
     title: Staff auth with mandatory TOTP and the RBAC policy layer
     owner: claude
-    status: todo
+    status: done
     depends_on: [F04]
     steps: [21]
     acceptance:

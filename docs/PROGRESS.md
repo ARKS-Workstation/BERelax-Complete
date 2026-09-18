@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**6 / 37 units complete.**
+**7 / 37 units complete.**
 
 ## Next up
 
-1. **F07 — Staff auth with mandatory TOTP and the RBAC policy layer**
+1. **F08 — Clinical schema boundary**
+1. **F09 — Settings registry**
 1. **F10 — Arabic RTL PDF proof**
-1. **F11 — Design tokens**
 
 ## All units
 
@@ -20,7 +20,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 4 | `F04` | Database spine and migration pipeline | `F02` | — | — |
 | [x] | 5 | `F05` | Money, time and identifier primitives | `F01` | — | — |
 | [x] | 6 | `F06` | Audit service and domain event outbox | `F04` | — | — |
-| [ ] | 7 | `F07` | Staff auth with mandatory TOTP and the RBAC policy layer | `F04` | — | — |
+| [x] | 7 | `F07` | Staff auth with mandatory TOTP and the RBAC policy layer | `F04` | — | — |
 | [ ] | 8 | `F08` | Clinical schema boundary | `F04`, `F07` | — | — |
 | [ ] | 9 | `F09` | Settings registry | `F04`, `F07` | — | — |
 | [ ] | 10 | `F10` | Arabic RTL PDF proof | `F01` | — | — |
