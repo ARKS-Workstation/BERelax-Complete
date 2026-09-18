@@ -10,6 +10,7 @@
     "@berelax/config": "workspace:*",
     "@berelax/core": "workspace:*",
     "@berelax/db": "workspace:*",
+    "@berelax/messaging": "workspace:*",
     "@berelax/shared": "workspace:*"
   },
   "devDependencies": {

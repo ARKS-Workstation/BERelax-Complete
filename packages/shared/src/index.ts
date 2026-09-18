@@ -11,7 +11,22 @@ export {
   genderMatchingModeSchema,
   STRICT_GENDER_MATCHING,
 } from './gender-matching.ts'
-export type { Channel, MessageClass } from './messaging.ts'
+export {
+  advanceMessageStatus,
+  type Channel,
+  DELIVERY_REPORTED_FAILED,
+  isTerminalMessageStatus,
+  MESSAGE_FAILURE_REASONS,
+  MESSAGE_ROW_FAILURE_REASONS,
+  MESSAGE_STATUS_RANK,
+  MESSAGE_STATUSES,
+  type MessageClass,
+  type MessageFailureReason,
+  type MessageRowFailureReason,
+  type MessageStatus,
+  type ReceiptIgnoredReason,
+  type StatusAdvance,
+} from './messaging.ts'
 export {
   type Assert,
   grossPriceFilsSchema,
@@ -80,3 +95,43 @@ export class AppError extends Error {
 }
 
 export const isAppError = (e: unknown): e is AppError => e instanceof AppError
+export {
+  addressLines,
+  addressOneLine,
+  directionsLinkFor,
+  formatUaePhone,
+  type MapTarget,
+  mapLinkFor,
+  type PostalAddress,
+  telLinkFor,
+} from './premises-links.ts'
+export {
+  addressSchema,
+  catalogueSchema,
+  FACTS_SCHEMA_VERSION,
+  type Facts,
+  type FactsAddress,
+  type FactsCatalogue,
+  type FactsHours,
+  type FactsHoursException,
+  type FactsOpeningHoursDay,
+  type FactsPhone,
+  type FactsWhatsapp,
+  factsSchema,
+  filsStringSchema,
+  geoSchema,
+  hoursExceptionSchema,
+  hoursSchema,
+  isoDateSchema,
+  localTimeSchema,
+  openingHoursDaySchema,
+  type ProvisionalFact,
+  phoneSchema,
+  priceOnRequestSchema,
+  priceServiceSchema,
+  priceVariantSchema,
+  provisionalFactSchema,
+  type UnansweredFact,
+  unansweredFactSchema,
+  whatsappSchema,
+} from './schemas/facts.ts'

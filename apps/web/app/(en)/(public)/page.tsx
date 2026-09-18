@@ -6,6 +6,20 @@
  * the locale switch, and the canonical and `hreflang` block that `routeMetadata` builds from the route
  * registry. `/` and `/ar` are one registry entry, so the alternate set is reciprocal by construction
  * rather than by two pages agreeing.
+ *
+ * ## Why the locality is no longer in the copy
+ *
+ * This paragraph named the district and the emirate after the trading name, and
+ * `packages/db/src/seed/premises.test.ts` exempted this file for it. W-SITE-02 retired that exemption by
+ * deleting the literal rather than by reading the row, and the reason is the registry entry beside it: this
+ * route is `rendering: 'static'`, so everything on it is evaluated during `next build`, and the build has
+ * no database by design (`app/api/v1/otp/route.ts` records why). A build-time read would bake an address
+ * that nothing could then correct — a hard-coded address with extra steps.
+ *
+ * It is a deferral and not a loss. docs/09 §"The brand collision" wants the name paired with the locality
+ * on this page, and W-SITE-04 renders it under ISR from the catalogue and the premises row, where a
+ * revalidation propagates a correction. Until then the address is published where it can be kept true:
+ * `/api/facts`, `/llms.txt`, and `@berelax/ui`'s NAP block on any route that reads the row per request.
  */
 import { DesignSystemStyles, Grid, Section } from '@berelax/ui/layout'
 import type { Metadata } from 'next'
@@ -23,7 +37,7 @@ export default function HomePage() {
       <Section>
         <Grid>
           <h1>BE RELAX</h1>
-          <p>Massage Center and Spa, Al Zahiyah, Abu Dhabi.</p>
+          <p>Massage Center and Spa.</p>
         </Grid>
       </Section>
     </main>

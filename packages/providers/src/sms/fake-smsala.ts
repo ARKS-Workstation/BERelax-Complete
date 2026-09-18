@@ -19,6 +19,7 @@
  *
  * **Idempotency.** The same key returns the same message id and does not bill twice.
  */
+import { createHash } from 'node:crypto'
 import { segmentSms } from '@berelax/core'
 import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
@@ -47,7 +48,6 @@ export function createFakeSmsala(options: FakeSmsalaOptions): SmsProvider {
   const { log, failures, now } = options
   const byIdempotencyKey = new Map<string, SmsAccepted>()
   let pendingReceipts: DeliveryReceipt[] = []
-  let counter = 0
 
   return {
     name: SMSALA,
@@ -98,9 +98,8 @@ export function createFakeSmsala(options: FakeSmsalaOptions): SmsProvider {
       }
 
       const segmentation = segmentSms(request.body)
-      counter += 1
       const accepted: SmsAccepted = {
-        providerMessageId: `smsala-${String(counter).padStart(6, '0')}`,
+        providerMessageId: providerMessageIdFor(SMSALA, request.idempotencyKey),
         segments: segmentation.segments,
         encoding: segmentation.encoding,
         estimatedCostFils: segmentation.segments * PROVISIONAL_COST_PER_SEGMENT_FILS,
@@ -150,6 +149,25 @@ export function createFakeSmsala(options: FakeSmsalaOptions): SmsProvider {
       return drained
     },
   }
+}
+
+/**
+ * A provider message id, derived from the idempotency key rather than counted.
+ *
+ * It was a per-instance counter, and B-MSG-04 made that a defect rather than a simplification: message
+ * ids are now **persisted** with a `(vendor, provider_message_id)` uniqueness constraint, and a delivery
+ * receipt finds its message row by that id. A counter repeats — across processes, so a second run of a
+ * suite reissues `smsala-000001`, and across instances, and the SMSala transport deliberately holds two
+ * (one per registered identity, so a promotional suspension does not stop booking confirmations). Two
+ * messages sharing an id means a receipt lands on an arbitrary one of them.
+ *
+ * A digest of the idempotency key is stable for the same message in any process, distinct for different
+ * messages, and deterministic — which the counter also was, and which a random id would not be: the
+ * screenshot harness needs byte-identical output across runs. It also models the vendor more closely,
+ * since the real id is stable for an accepted message and is what a support query quotes.
+ */
+function providerMessageIdFor(prefix: string, idempotencyKey: string): string {
+  return `${prefix}-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 12)}`
 }
 
 /** Last four digits only. The log is shown on screen and in screenshots. */

@@ -22,6 +22,7 @@ import type { Job, PgBoss } from 'pg-boss'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
+import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
@@ -183,6 +184,9 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
+  // The same shape, for the same reason. B-MSG-04: a delivery receipt is announced by the vendor's
+  // webhook, so a cron here would be a poller looking for work an enqueue already announced.
+  RECONCILE_DLR_JOB,
 ]
 
 /**

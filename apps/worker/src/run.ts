@@ -1,7 +1,9 @@
 import { loadConfig } from '@berelax/config'
-import { createConnection } from '@berelax/db'
+import { createConnection, createPostgresMessageStore } from '@berelax/db'
+import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
 import { createBoss, shutdown } from './boss.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
+import { setReceiptSources } from './jobs/reconcile-dlr.ts'
 import { JOB_REGISTRY, registerJobs, setMaintenanceSql, startWorkers } from './registry.ts'
 
 /**
@@ -50,6 +52,16 @@ async function main(): Promise<void> {
   // Before `startWorkers`, for the same reason as the SQL connection: a handler that attached first
   // would take a job off the queue and fail on a missing adapter, burning a retry on nothing.
   setMediaStorage(createMediaStorageFor(config.MEDIA_STORAGE))
+  // The DLR pass drains the transports the sends went through, which with the fakes means *this*
+  // process's instances: a fake queues the receipt it will report inside the instance that accepted the
+  // send. SMS only for now, deliberately — the Resend transport takes its verified sending address as a
+  // required argument and no address exists yet (OPEN-QUESTIONS Y6-email-sender). Adding it here is one
+  // line on the day it does, and until then an email receipt is not silently reported as drained: the
+  // pass names the vendors it read.
+  setReceiptSources({
+    store: createPostgresMessageStore(sql),
+    sources: [createSmsalaTransport({ config, now: () => new Date().toISOString() }).receipts],
+  })
   await boss.start()
   const registered = await registerJobs(boss, JOB_REGISTRY)
   await startWorkers(boss, () => new Date().toISOString(), JOB_REGISTRY)

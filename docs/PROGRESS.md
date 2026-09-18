@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**55 / 207 units complete.**
+**57 / 207 units complete.**
 
 ## Next up
 
 1. **B-AVAIL-06 — The booking transaction: room row lock, idempotency, all-or-none, price snapshot**
-1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
 1. **M-VAT-03 — Reverse charge on offshore suppliers and the nightly exception report**
+1. **W-SITE-03 — JSON-LD generated from the database**  — **needs owner input:** Y1-licence, Y2-gbp-status
 
 ## All units
 
@@ -50,7 +50,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
 | [x] | 34 | `B-LIFE-02` | Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP | `B-MSG-02`, `F04`, `F06` | — | — |
 | [ ] | 35 | `B-MSG-03` | Scheduled steps with invalidation keys, and reminder rebuilds | `B-LIFE-03`, `B-MSG-02` | — | — |
-| [ ] | 36 | `B-MSG-04` | Delivery receipts, message lifecycle and the admin Messages inbox | `B-MSG-02`, `F11`, `H02` | — | — |
+| [x] | 36 | `B-MSG-04` | Delivery receipts, message lifecycle and the admin Messages inbox | `B-MSG-02`, `F11`, `H02` | — | — |
 | [ ] | 37 | `B-UI-01` | Public booking flow: service, therapist and slot selection | `B-AVAIL-07`, `F11`, `H04` | M1 | — |
 | [ ] | 38 | `B-UI-02` | Public booking flow: details, OTP, confirm and the nine enumerated edge states | `B-LIFE-01`, `B-LIFE-02`, `B-UI-01` | M1 | — |
 | [ ] | 39 | `B-UI-03` | Admin calendar: room x time primary, therapist x time secondary, drag to reschedule | `B-LIFE-03`, `B-UI-01` | M1 | — |
@@ -147,7 +147,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 130 | `W-SYS-02` | Editorial grid, layout primitives and the container-query component set | `W-SYS-01` | — | — |
 | [x] | 131 | `W-SYS-03` | Radix/shadcn primitive set and an axe gate that provably fires | `H05`, `W-SYS-01`, `W-SYS-02` | — | — |
 | [x] | 132 | `W-SITE-01` | Route spine, EN/AR locales, canonicalisation and the route registry | `W-SYS-01`, `W-SYS-03` | — | — |
-| [ ] | 133 | `W-SITE-02` | The premises row as the only NAP source: /api/facts, /llms.txt, robots policy | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `F09`, `W-SITE-01` | — | Y1-nap |
+| [x] | 133 | `W-SITE-02` | The premises row as the only NAP source: /api/facts, /llms.txt, robots policy | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `F09`, `W-SITE-01` | — | Y1-nap |
 | [ ] | 134 | `W-SITE-03` | JSON-LD generated from the database | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-02` | — | Y1-licence, Y2-gbp-status |
 | [ ] | 135 | `W-SITE-05` | Catalogue-derived routes: /treatments, /treatments/[slug], /pricing | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-03`, `W-SYS-02` | — | Y9-poa-prices |
 | [ ] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |

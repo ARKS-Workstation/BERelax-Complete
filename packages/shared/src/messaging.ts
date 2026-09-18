@@ -26,3 +26,128 @@ export type Channel = 'sms' | 'email' | 'whatsapp'
  * booking confirmation. See docs/04-uae-compliance.md §5.
  */
 export type MessageClass = 'transactional' | 'promotional'
+
+/**
+ * The status lifecycle of one outbound message, and the order it may move in.
+ *
+ * ## Why this is here rather than in `@berelax/core`
+ *
+ * It is a calculation, and calculations belong in `core` — except that `packages/db` needs it (the
+ * repository's guarded UPDATE, and the Drizzle mirror of the `message_status` enum) and `packages/db`
+ * must never import `packages/core`; the dependency direction is `core <- db`. `shared` is the leaf
+ * every package may depend on, which is exactly the reason `Channel` and `MessageClass` are above:
+ * four packages need this vocabulary — db writes it, messaging maps onto it, the worker advances it and
+ * the admin inbox renders it — and `shared` is the only place all four can see one copy.
+ *
+ * ## Why the vocabulary is ours
+ *
+ * SMSala reports `accepted / delivered / failed / expired / rejected`; Resend reports
+ * `delivered / bounced / complained / opened`. Neither set is this list, and a third vendor would bring
+ * a fourth. The mapping from a vendor's word onto one of these lives beside that vendor's transport
+ * (`packages/messaging/src/transports`), so changing vendor is a change to a mapping and not to every
+ * badge, report and query in the system. A vendor word we do not recognise maps to nothing at all — see
+ * `advanceMessageStatus`, and `message_delivery_receipt.ignored_reason` in migration 0035.
+ */
+export const MESSAGE_STATUSES = ['queued', 'sent', 'delivered', 'failed'] as const
+
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
+
+/**
+ * The lifecycle order. Higher is later.
+ *
+ * `delivered` and `failed` share the top rank deliberately, so neither can displace the other: the
+ * first terminal receipt wins and a later one is recorded and ignored. A handset that acknowledged a
+ * message cannot be un-acknowledged by an expiry notice queued behind it, and a vendor that rejected a
+ * message cannot be talked into having delivered it.
+ *
+ * `message_status_rank` in migration 0035 is the same function in SQL, and the trigger that uses it is
+ * what makes the rule hold for a writer that never came through this module.
+ */
+export const MESSAGE_STATUS_RANK: Readonly<Record<MessageStatus, number>> = {
+  queued: 0,
+  sent: 1,
+  delivered: 2,
+  failed: 2,
+}
+
+/** True when no further transition is possible. */
+export function isTerminalMessageStatus(status: MessageStatus): boolean {
+  return MESSAGE_STATUS_RANK[status] === MESSAGE_STATUS_RANK.delivered
+}
+
+/** Why a receipt did not change the status. The values of `message_delivery_receipt.ignored_reason`. */
+export type ReceiptIgnoredReason =
+  /** The vendor sent a status word this system does not map. It must not become `delivered`. */
+  | 'vendor_status_unrecognised'
+  /** Out of order, a duplicate, or a second terminal state. The stored value already wins. */
+  | 'status_would_not_advance'
+  /** Recognised, and not about delivery: Resend's `opened`, and its `complained`. */
+  | 'vendor_status_carries_no_lifecycle_change'
+
+/** The outcome of applying one receipt to one message. */
+export type StatusAdvance =
+  | { readonly applied: true; readonly status: MessageStatus }
+  | {
+      readonly applied: false
+      readonly status: MessageStatus
+      readonly reason: ReceiptIgnoredReason
+    }
+
+/**
+ * What a receipt does to a stored status.
+ *
+ * `next` is `null` for a vendor word this system does not recognise, which is the case that must not
+ * default to anything: a receipt whose meaning is unknown leaves the status alone and says why.
+ */
+export function advanceMessageStatus(
+  current: MessageStatus,
+  next: MessageStatus | null,
+): StatusAdvance {
+  if (next === null) {
+    return { applied: false, status: current, reason: 'vendor_status_unrecognised' }
+  }
+  if (MESSAGE_STATUS_RANK[next] <= MESSAGE_STATUS_RANK[current]) {
+    return { applied: false, status: current, reason: 'status_would_not_advance' }
+  }
+  return { applied: true, status: next }
+}
+
+/**
+ * Why a send did not leave, in this system's words.
+ *
+ * Declared here rather than in `@berelax/messaging` — where `TransportFailure` aliases it — for the
+ * same reason as `MessageStatus`: these four values are the value set of the
+ * `message.last_failure_reason` CHECK in migration 0035, so `packages/db` needs them, and the retry
+ * policy in `packages/core` is keyed by them. One list, three packages, no copy to keep in step.
+ */
+export const MESSAGE_FAILURE_REASONS = [
+  'provider_rejected',
+  'provider_rate_limited',
+  'provider_unavailable',
+  'provider_error',
+] as const
+
+export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number]
+
+/**
+ * The fifth reason a message row can carry, and why it is not one of the four above.
+ *
+ * The four are transport failures: the message did **not leave**. This one is a delivery failure: it
+ * left, a vendor accepted it, and the network later said it did not arrive — SMSala's `expired` or
+ * `rejected`, Resend's `bounced`. Conflating the two would make the cost report and the failure
+ * breakdown unable to tell a rate limit from an absent subscriber, which are the two things an operator
+ * does completely different work about.
+ *
+ * It is deliberately absent from `MESSAGE_FAILURE_REASONS`, which keys the retry policy: a message the
+ * network has already rejected is terminal, so there is no policy for it to have. The vendor's own word
+ * survives on the receipt row.
+ */
+export const DELIVERY_REPORTED_FAILED = 'delivery_reported_failed'
+
+/** Every value `message.last_failure_reason` may hold. The four transport failures plus the fifth. */
+export const MESSAGE_ROW_FAILURE_REASONS = [
+  ...MESSAGE_FAILURE_REASONS,
+  DELIVERY_REPORTED_FAILED,
+] as const
+
+export type MessageRowFailureReason = (typeof MESSAGE_ROW_FAILURE_REASONS)[number]

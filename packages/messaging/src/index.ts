@@ -8,6 +8,7 @@
  * deliberately absent from this barrel so no feature reaches a provider by autocomplete.
  */
 
+export { renderEmailHtml } from './email-html.ts'
 export {
   campaignCost,
   costOf,
@@ -29,6 +30,28 @@ export {
   TDRA_PROMOTIONAL_WINDOW,
   withinPromotionalWindow,
 } from './gate.ts'
+export {
+  type AttemptOutcome,
+  type DeliveryDeps,
+  type DeliveryOutcome,
+  type DeliveryReceiptRecord,
+  deliverMessage,
+  MAX_ATTEMPTS_ANY_POLICY,
+  MESSAGE_VENDORS,
+  type MessageLifecycleStore,
+  type MessageRecord,
+  type MessageVendor,
+  type ReceiptApplication,
+  type ReceiptSource,
+  type RecordedMessage,
+  type RecordedSendRequest,
+  vendorFor,
+} from './lifecycle.ts'
+export {
+  createInMemoryMessageStore,
+  type InMemoryMessageStore,
+  type StoredMessage,
+} from './lifecycle-memory.ts'
 export { createGuardedTransport, InMemoryOutbox, type OutboxEntry } from './outbox.ts'
 export type {
   Channel,
@@ -52,6 +75,7 @@ export {
   type ClassifiedTemplate,
   type ClassRoutedTransport,
   idempotencyKeyFor,
+  outboundMessageFor,
   PROMOTIONAL_SENDER_PREFIX,
   PROVISIONAL_SENDER_IDS,
   type SendContext,

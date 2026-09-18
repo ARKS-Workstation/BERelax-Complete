@@ -98,6 +98,23 @@ export const ROUTES = [
       'does not change teaches a crawler to ignore the hint.',
   },
   {
+    id: 'facts',
+    path: '/api/facts',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-02s canonical machine-readable fact sheet (docs/09 §4). Indexable, which reads oddly for ' +
+      'JSON and is the decision: the whole point of the endpoint is that a crawler and an assistant may ' +
+      'fetch and cite it, and `indexable: false` here would put `noindex` on the one response this site ' +
+      'most wants quoted. Absent from the sitemap because a sitemap lists documents — this has no ' +
+      '<html>, no hreflang and nothing for a changefreq to describe. Locale-neutral: one endpoint, one ' +
+      'URL, and the payload carries both locales worth of nothing, because a fact has no language.',
+  },
+  {
     id: 'otp',
     path: '/api/v1/otp',
     kind: 'handler',
@@ -114,7 +131,7 @@ export const ROUTES = [
     id: 'kitchen-sink',
     path: '/kitchen-sink',
     kind: 'document',
-    rendering: 'static',
+    rendering: 'dynamic',
     locales: LOCALES,
     indexable: false,
     sitemap: false,
@@ -123,7 +140,10 @@ export const ROUTES = [
       'W-SYS-02 and W-SYS-03s proving ground, in both locales because the RTL half of the ' +
       'twelve-render sweep has to be a real Arabic document. A development surface, so noindex and ' +
       'absent from every sitemap — but still in the registry, because it is a route, and a route the ' +
-      'registry does not know about is the failure this file exists to prevent.',
+      'registry does not know about is the failure this file exists to prevent. Dynamic since ' +
+      'W-SITE-02: it renders the NAP block from the premises row, and a statically prerendered copy ' +
+      'would bake the address at build time — the staleness that unit exists to remove. It is the one ' +
+      'document that can afford to be dynamic, because nobody outside the team ever requests it.',
   },
   {
     id: 'kitchen-sink-portrait',
@@ -138,6 +158,37 @@ export const ROUTES = [
       'Serves one staff portrait to both kitchen sinks from `assets/media/`. Locale-neutral because ' +
       'route groups do not appear in a URL and a photograph has no language; dynamic because the ' +
       'index is a segment and the bytes are read at request time.',
+  },
+  {
+    id: 'llms-txt',
+    path: '/llms.txt',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-02s LLM-SEO index (docs/09 §"LLM SEO"), a different artefact from robots.txt and from the ' +
+      'sitemap: it says what the business IS and which pages are worth reading, in prose, for a reader ' +
+      'that will not run JavaScript. Indexable for the same reason as /api/facts, and its page list is ' +
+      'derived from this registry, so docs/09 §1s eleven planned routes appear in it the day they land.',
+  },
+  {
+    id: 'robots-txt',
+    path: '/robots.txt',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-02s crawl policy: what a crawler may FETCH, which is a different question from what may be ' +
+      'indexed — that is this registrys `indexable` flag and the x-robots-tag the proxy serves. The two ' +
+      'are alternatives rather than layers, so the noindex prefixes here are deliberately not disallowed ' +
+      'there: a crawler forbidden to fetch them could never read the header. Dynamic because SITE_ORIGIN ' +
+      'is read at request time, so a build promoted between environments cannot serve the wrong host.',
   },
   {
     id: 'google-connect',
@@ -168,6 +219,25 @@ export const ROUTES = [
       'than a document because a document has to be served in both locales and needs the admin shell ' +
       'W-SYS-01 builds; the settings card that will call this is G-CONN-07. Covered by the /settings ' +
       'noindex prefix, like the consent route beside it.',
+  },
+  {
+    id: 'messages-inbox',
+    path: '/settings/messages',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-MSG-04s admin Messages inbox: every message a vendor was asked to send, with its body, ' +
+      'encoding, segments, cost, status and delivery receipts, plus an HTML preview pane for a Resend ' +
+      'email. A handler answering text/html rather than a document, for the reason G-CONN-05s picker ' +
+      'gives: a document must be served in both locales, which would need an Arabic admin document and ' +
+      'the W-SYS-01 shell, and would join a screenshot matrix whose RTL half has to be a real Arabic ' +
+      'route. This surface is English-only on purpose and is screenshotted at 3 viewports x 2 themes by ' +
+      'apps/web/src/messages-inbox.itest.ts. Covered by the /settings noindex prefix, like the two ' +
+      'Google routes beside it; dynamic because it reads the message rows on every request.',
   },
   {
     id: 'treatment-path',

@@ -27,12 +27,24 @@
  */
 import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
-import { ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
+import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
+import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import { NAP_COPY_EN } from '../../../_dev/nap-copy.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
 import { RouteNav } from '../../../_routes/route-nav.tsx'
 import { portraits } from './portraits.ts'
+
+/**
+ * Rendered per request, not prerendered, since W-SITE-02.
+ *
+ * The NAP block below reads the `premises` row, and a statically prerendered copy of this page would bake
+ * the address into the build output — the staleness the row exists to remove. It is the one document in the
+ * registry that can afford this: nobody outside the team ever requests it, so the cost of rendering it per
+ * request is zero and the benefit is that the gallery shows the address the database actually holds.
+ */
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'Kitchen sink — the BE RELAX design system',
@@ -49,9 +61,19 @@ const MENU = [
   { name: 'Morocco Bath or Jacuzzi', minutes: 60, price: aed(300), style: 'Asian' },
 ] as const
 
-/** Trading runs 11:00 to 02:00, so the first start is 11:00. */
+/**
+ * Eight start times, as a layout specimen for `SlotGrid`.
+ *
+ * Deliberately **not** the trading hours. They used to begin at the opening time, which made this page a
+ * second place the opening time was written down — the duplication `packages/db/src/seed/premises.test.ts`
+ * greps for, and the reason this file was on its exemption list until W-SITE-02. What the grid needs is
+ * eight plausible labels of the right shape to lay out at three, four and six columns; what time the
+ * premises opens is a fact about the business and is rendered below, from the row, by `NapBlock`.
+ *
+ * Which start is bookable is B-AVAIL's question (`close - duration - turnaround`), and answering it here
+ * would be a third copy of the hours plus a rota this page does not have.
+ */
 const SLOTS = [
-  { label: '11:00', available: true },
   { label: '12:30', available: true },
   { label: '14:00', available: true, selected: true },
   { label: '15:30', available: false },
@@ -59,6 +81,7 @@ const SLOTS = [
   { label: '18:30', available: true },
   { label: '20:00', available: true },
   { label: '21:30', available: true },
+  { label: '23:00', available: true },
 ] as const
 
 const UNNAMED = 'Name not yet published'
@@ -123,13 +146,15 @@ const PRIMITIVE_COPY: PrimitiveGalleryCopy = {
     trigger: 'Choose a start time',
     title: 'Start times available today',
     description:
-      'Trading runs from 11:00 until 02:00, so the last start is earlier than the closing time by the ' +
-      'length of the treatment.',
+      'The session crosses midnight, so the last start is earlier than the closing time by the length ' +
+      'of the booking. The hours themselves are below, read from the premises record.',
     close: 'Close',
   },
 }
 
-export default function KitchenSinkPage() {
+export default async function KitchenSinkPage() {
+  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
+  const facts = await readFactsForPage()
   return (
     <main>
       <DesignSystemStyles />
@@ -147,10 +172,11 @@ export default function KitchenSinkPage() {
             nothing on it is a mock-up that agrees with the system today.
           </Measure>
           <Measure cap="body">
-            A massage centre on Al Meena Street in Al Zahiyah, Abu Dhabi, open every day from 11am
-            until 2am. The grid below repeats one asymmetry — a twelve-rem column on one side of the
-            measure and a twenty-rem column on the other — rather than inventing a layout per
-            section, which is what makes eleven pages look like one site.
+            A massage and spa centre in Abu Dhabi. Where it is and when it opens are rendered
+            further down from the one record that holds them, never typed into this page. The grid
+            below repeats one asymmetry — a twelve-rem column on one side of the measure and a
+            twenty-rem column on the other — rather than inventing a layout per section, which is
+            what makes eleven pages look like one site.
           </Measure>
           <GridCell>
             <div className="be-actions">
@@ -290,6 +316,44 @@ export default function KitchenSinkPage() {
               </Measure>
             </details>
           </GridCell>
+        </Grid>
+      </Section>
+
+      {/*
+        The page ground, deliberately, and not the sand band this section first used.
+
+        `.be-action--quiet` is teal on transparent, and `packages/ui/src/tokens/palette.generated.ts`
+        measures every accent against `--color-ground` only: teal is 5.73:1 there in light and 4.64:1 in
+        dark. On `--color-surface-sand` in dark (#231F1A) the same colour is 4.07:1, under the 4.5:1 body
+        threshold — and `apps/web/src/primitives.itest.ts` caught it, as a serious axe colour-contrast
+        violation on the map and directions links at `/kitchen-sink dark ltr 390px`. The two links stay
+        quiet actions, because four gold actions in a row is not a design, and the band moves to the
+        ground where the measured figure applies. A quiet action on a sand band is a token question for
+        W-SYS-03 rather than something to work around per page.
+      */}
+      <Section id="nap">
+        <Grid>
+          <Measure cap="h2" as="h2" className="text-xl be-section__heading">
+            Where we are
+          </Measure>
+          <GridCell span="wide">
+            {facts === null ? (
+              <Measure cap="body" className="text-sm text-ink-2">
+                The premises record has not been loaded into this database, so there is nothing to
+                render. Run the seed. Nothing on this page invents an address to fill the gap.
+              </Measure>
+            ) : (
+              <NapBlock copy={NAP_COPY_EN} facts={facts} />
+            )}
+          </GridCell>
+          <Measure cap="body" className="text-sm text-ink-2">
+            Every line of that block — the street, the district and its other names, the numbers,
+            the session and the note about parking — comes from one database row, and the same row
+            is published as JSON at /api/facts and summarised at /llms.txt. The WhatsApp line says
+            no number is published because two different ones appear on this business's older web
+            properties and neither has been confirmed; a block that picked one would be
+            indistinguishable from a block that knew.
+          </Measure>
         </Grid>
       </Section>
 

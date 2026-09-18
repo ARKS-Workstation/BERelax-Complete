@@ -14,6 +14,7 @@
  * **Events arrive later.** `send` returns an id; delivered, bounced or complained is drained
  * afterwards, so the webhook-handling path has something to run against with no webhook.
  */
+import { createHash } from 'node:crypto'
 import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
 import type { EmailAccepted, EmailEvent, EmailProvider, EmailRequest } from './port.ts'
@@ -43,7 +44,6 @@ export function createFakeResend(options: FakeResendOptions): EmailProvider {
   const suppressed = new Set<string>()
   const byIdempotencyKey = new Map<string, EmailAccepted>()
   let pendingEvents: EmailEvent[] = []
-  let counter = 0
 
   const normalise = (address: string): string => address.trim().toLowerCase()
 
@@ -104,9 +104,8 @@ export function createFakeResend(options: FakeResendOptions): EmailProvider {
         throw failureError(RESEND, 'rejected')
       }
 
-      counter += 1
       const accepted: EmailAccepted = {
-        providerMessageId: `resend-${String(counter).padStart(6, '0')}`,
+        providerMessageId: providerMessageIdFor(RESEND, request.idempotencyKey),
       }
       byIdempotencyKey.set(request.idempotencyKey, accepted)
 
@@ -163,6 +162,25 @@ export function createFakeResend(options: FakeResendOptions): EmailProvider {
       return suppressed.has(normalise(address))
     },
   }
+}
+
+/**
+ * A provider message id, derived from the idempotency key rather than counted.
+ *
+ * It was a per-instance counter, and B-MSG-04 made that a defect rather than a simplification: message
+ * ids are now **persisted** with a `(vendor, provider_message_id)` uniqueness constraint, and a delivery
+ * receipt finds its message row by that id. A counter repeats — across processes, so a second run of a
+ * suite reissues `resend-000001`, and across instances, and the SMSala transport deliberately holds two
+ * (one per registered identity, so a promotional suspension does not stop booking confirmations). Two
+ * messages sharing an id means a receipt lands on an arbitrary one of them.
+ *
+ * A digest of the idempotency key is stable for the same message in any process, distinct for different
+ * messages, and deterministic — which the counter also was, and which a random id would not be: the
+ * screenshot harness needs byte-identical output across runs. It also models the vendor more closely,
+ * since the real id is stable for an accepted message and is what a support query quotes.
+ */
+function providerMessageIdFor(prefix: string, idempotencyKey: string): string {
+  return `${prefix}-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 12)}`
 }
 
 /** First character and domain only. The log appears on screen and in screenshots. */

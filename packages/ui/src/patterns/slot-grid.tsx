@@ -88,7 +88,7 @@ ${SLOT_GRID_COLUMNS.filter((step) => step.minInlineSize > 0)
 `
 
 export interface Slot {
-  /** `11:00`. Formatted by the caller, because the zone is always an argument. */
+  /** A wall-clock label such as `19:45`. Formatted by the caller: the zone is always an argument. */
   readonly label: string
   readonly available: boolean
   readonly selected?: boolean

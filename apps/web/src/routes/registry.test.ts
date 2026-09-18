@@ -217,8 +217,12 @@ describe('the registry is internally consistent', () => {
     }
     // Asserted against `.next/prerender-manifest.json` — what the build produced — in the itest. Here it
     // is only the shape, so the itest's comparison has something to compare.
+    //
+    // One entry, and the list is here rather than derived so that a route becoming dynamic is a decision
+    // somebody made rather than a diff nobody read. `kitchen-sink` left it in W-SITE-02: it renders the
+    // NAP block from the premises row, and a prerendered copy would bake the address into the build.
     expect(ROUTES.filter((route) => route.rendering === 'static').map((route) => route.id)).toEqual(
-      ['home', 'kitchen-sink'],
+      ['home'],
     )
   })
 

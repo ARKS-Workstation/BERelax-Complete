@@ -11,10 +11,36 @@ import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import { fontVariables } from '../_fonts/index.ts'
 
+/**
+ * The document's fallback title and description — and the address it deliberately no longer carries.
+ *
+ * The title used to end with the district and the emirate, and the description carried the street and the
+ * hours. Both came off docs/13 by hand, and `packages/db/src/seed/premises.test.ts` exempted this file for
+ * it. W-SITE-02 retired that exemption, and the fix is a deletion rather than a lookup. The reason is the
+ * one the `SITE_ORIGIN` guard in
+ * `apps/web/src/route-spine.itest.ts` records for canonical URLs, applied to the address:
+ *
+ * `/` and `/ar` are statically prerendered, so a root layout's `metadata` is evaluated during `next build`
+ * and **baked into the HTML**. A build-time read of the `premises` row would therefore either fail the
+ * build on a machine with no database — which includes CI, where the build step runs before the migrations
+ * (see `app/api/v1/otp/route.ts` on exactly this) — or bake whatever that machine's database happened to
+ * hold, which is a hard-coded address with extra steps and no way to tell it had gone stale.
+ *
+ * So the shared document metadata carries the **name only**. The name is the one NAP element that is also
+ * the brand, docs/09 §"The brand collision" requires the *full* name in every title because
+ * `berelax.com` is an unrelated airport-spa chain with an outlet in the same city, and there is nowhere
+ * else for a fallback title to get it. The locality that docs/09 also wants in titles belongs to the
+ * per-route metadata of the routes that are rendered from the catalogue and the CMS — W-SITE-04's home
+ * page, W-SITE-05's treatment pages, W-SITE-07's `/contact` and `/spa` — each of which reads the row.
+ *
+ * The address, the area aliases and the hours are published today by `/api/facts` and `/llms.txt`, and
+ * rendered by `@berelax/ui`'s NAP block wherever a route can read the row at request time.
+ */
 export const documentMetadata: Metadata = {
-  title: 'BE RELAX — Massage Center and Spa, Al Zahiyah, Abu Dhabi',
+  title: 'BE RELAX — Massage Center and Spa',
   description:
-    'A massage centre on Al Meena Street in Al Zahiyah, Abu Dhabi. Open every day from 11am until 2am.',
+    'A massage and spa centre in Abu Dhabi. Private rooms, a wet room, and one session that runs from ' +
+    'late morning until the small hours.',
 }
 
 export const documentViewport: Viewport = {

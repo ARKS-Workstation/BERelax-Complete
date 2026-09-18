@@ -34,7 +34,7 @@
  */
 import type { AppEnv } from '@berelax/config'
 import { type Clock, type Instant, instantToIso } from '@berelax/core'
-import { AppError } from '@berelax/shared'
+import { AppError, type MessageFailureReason } from '@berelax/shared'
 import { costOf } from './encoding.ts'
 import { evaluateGate, type GateContext, type GateEvaluatorName, type GateRefusal } from './gate.ts'
 import type { InMemoryOutbox } from './outbox.ts'
@@ -173,11 +173,17 @@ export interface TransportRequest {
   readonly idempotencyKey: string
 }
 
-export type TransportFailure =
-  | 'provider_rejected'
-  | 'provider_rate_limited'
-  | 'provider_unavailable'
-  | 'provider_error'
+/**
+ * Why a send did not leave.
+ *
+ * An alias rather than a second spelling of the union: the same four values are the value set of the
+ * `message.last_failure_reason` CHECK in migration 0035, which `packages/db` needs and cannot get from
+ * here, and the key of `MESSAGE_RETRY_POLICY` in `packages/core`, which cannot import this package
+ * either. The list therefore lives in `@berelax/shared` as `MessageFailureReason`, and the name stays
+ * `TransportFailure` here because that is what a transport returns. Two spellings of one vocabulary is
+ * a retry policy keyed by a value the database will not store.
+ */
+export type TransportFailure = MessageFailureReason
 
 export type TransportOutcome =
   | {
@@ -301,6 +307,18 @@ const detailOf = (error: unknown): string =>
 /** `template.key:message.id`. The provider must not bill the same message twice on a retry. */
 export function idempotencyKeyFor(message: OutboundMessage): string {
   return `${message.templateKey}:${message.id}`
+}
+
+/**
+ * The message a request becomes, rendered.
+ *
+ * Exported for one caller: `lifecycle.ts`, which writes the durable row. The row stores the body, the
+ * subject and the HTML part, and it must store the bytes the transport was given — so it calls this
+ * rather than rendering the template a second time. Two renders of one template with one set of values
+ * agree today and are two places to change tomorrow.
+ */
+export function outboundMessageFor(request: SendRequest): OutboundMessage {
+  return buildMessage(request)
 }
 
 function buildMessage(request: SendRequest): OutboundMessage {

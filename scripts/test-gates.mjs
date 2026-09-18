@@ -6709,6 +6709,710 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 34a-34k. (W-SITE-02) The premises row is the only NAP source, and the three surfaces built on it.
+//
+// Four different gates, and each fails in a way the other three cannot see.
+//
+// The **grep**, twice. B-CAT-06 shipped `nap-literal-outside-the-seed` with three exemptions marked
+// "W-SITE-02's to retire" — the document shell, the home page and the component gallery. This unit retired
+// them, so the fixtures below are what proves the retirement rather than the claim: one puts the street into
+// a `packages/ui` template, and one puts it back into the very file that used to be exempt. Beside it,
+// `nap-hours-literal-outside-the-seed` is this unit's own rule and covers `apps/web` and `packages/ui` only
+// — the acceptance criterion's scope, and a deliberate one: `11:00` and `02:00` appear in about forty doc
+// comments across the rest of the repository, every one of them explaining why the close is less than the
+// open, and refusing those would take forty exemptions and refuse the documentation.
+//
+// The **bijection**, for a route whose folder name contains a dot. `/llms.txt` and `/robots.txt` are served
+// by `app/llms.txt/route.ts` and `app/robots.txt/route.ts`, which is a shape `routes/discover.ts` had never
+// seen: every route before this unit had a slug for a folder. A scanner that skipped a dotted folder would
+// report a clean bijection over a site with three routes missing from it.
+//
+// The **contract**. `/api/facts` publishes `factsSchema`, and the one thing it must never publish is a
+// WhatsApp number, because docs/13 §3 records two and Y1-nap asks which is canonical. So the schema is
+// mutation-tested from the direction that matters: a builder that treats the placeholder as a number has to
+// be refused by the contract, not merely absent from it.
+//
+// The **derivations** that hold a policy together: every robots.txt group carrying the whole policy (a
+// named group replaces the wildcard rather than adding to it), and the publication lint on `/llms.txt`.
+// Both are asserted by `apps/web/src/facts.test.ts`, so both are neutered here to prove those assertions
+// are load-bearing rather than decorative.
+{
+  const NAP_TEST = 'packages/db/src/seed/premises.test.ts'
+  const FACTS_TEST = 'apps/web/src/facts.test.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const suite = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // The street, assembled at runtime so this gate file does not itself become a second hard-coded address.
+  const STREET = `250 ${'Al'} ${'Meena'} Street`
+  const AREA = `${'Al'} ${'Zahiyah'}`
+
+  // 34a. A hard-coded address in a rendered template. The acceptance criterion's own fixture: "adding a
+  //      hard-coded address to a template fails the gate by name and is removed in a finally block".
+  {
+    const result = withFixture(
+      'packages/ui/src/patterns/__gate_fixture__.tsx',
+      [
+        'export function GateFixtureFooter() {',
+        `  return <address>${STREET}, ${AREA}, Abu Dhabi</address>`,
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', suite(NAP_TEST)),
+    )
+    checkRejectedBy(
+      'the NAP grep rejects a hard-coded address in a packages/ui template',
+      result,
+      'nap-literal-outside-the-seed',
+    )
+  }
+
+  // 34b. The same literal, in the file whose exemption this unit removed. This is the fixture that proves
+  //      the retirement: before W-SITE-02 the identical edit passed, because `_document/shell.tsx` was on
+  //      the exemption list with "W-SITE-02 (metadata)" beside it.
+  {
+    const SHELL = 'apps/web/app/_document/shell.tsx'
+    const result = withEditedFile(
+      SHELL,
+      (original) => {
+        const anchor = "  title: 'BE RELAX — Massage Center and Spa',"
+        if (!original.includes(anchor)) throw new Error(`the title line is no longer in ${SHELL}`)
+        return original.replace(anchor, `  title: 'BE RELAX — ${STREET}, ${AREA}',`)
+      },
+      () => runExpectingFailure('pnpm', suite(NAP_TEST)),
+    )
+    checkRejectedBy(
+      'the NAP grep rejects an address in the document shell, whose exemption W-SITE-02 retired',
+      result,
+      'nap-literal-outside-the-seed',
+    )
+  }
+
+  // 34c. The trading hours typed into an application surface. A page with the opening time in it goes on
+  //      showing it after an owner has changed the row, which is the whole failure the row exists to stop.
+  {
+    const result = withFixture(
+      'apps/web/src/__gate_fixture__.ts',
+      "export const OPENS = '11:00'\nexport const CLOSES = '02:00'\n",
+      () => runExpectingFailure('pnpm', suite(NAP_TEST)),
+    )
+    checkRejectedBy(
+      'the hours grep rejects an opening time typed into apps/web',
+      result,
+      'nap-hours-literal-outside-the-seed',
+    )
+  }
+
+  // 34d. And in the component library, which is the other half of the rule's scope. A pattern is reused on
+  //      every route, so a literal in one is a literal on all of them.
+  {
+    const result = withFixture(
+      'packages/ui/src/patterns/__gate_fixture__.tsx',
+      "export const HOURS = 'Open daily 11:00 until 02:00'\n",
+      () => runExpectingFailure('pnpm', suite(NAP_TEST)),
+    )
+    checkRejectedBy(
+      'the hours grep rejects an opening time typed into packages/ui',
+      result,
+      'nap-hours-literal-outside-the-seed',
+    )
+  }
+
+  // 34e. The control for 34a-34d, and the proof that every fixture above was cleaned up: with the tree as
+  //      it stands, both rules pass over a non-empty scan. A fixture left behind would fail every later
+  //      run with an address nobody added.
+  {
+    const result = run('pnpm', suite(NAP_TEST))
+    check(
+      'the NAP and hours greps pass on this tree, over a non-empty scan',
+      !result.failed,
+      `the seed is not the only spelling of the address and the hours:\n${result.output}`,
+    )
+  }
+
+  // 34f. A route whose folder name contains a dot, with no registry entry. `/llms.txt` and `/robots.txt`
+  //      are the first routes of that shape in this application, and a scanner that treated the dot as a
+  //      file extension and skipped the folder would report a clean bijection over a site missing three
+  //      routes — including the two whose whole job is to be fetched by a crawler.
+  {
+    const dir = 'apps/web/app/gate-fixture.txt'
+    run('mkdir', ['-p', dir])
+    try {
+      const result = withFixture(
+        `${dir}/route.ts`,
+        "export function GET(): Response {\n  return new Response('gate fixture')\n}\n",
+        () => run('pnpm', suite(REGISTRY_TEST)),
+      )
+      checkRejectedBy(
+        'the route registry gate rejects a dotted route folder with no registry entry',
+        result,
+        'route-without-registry-entry',
+      )
+    } finally {
+      run('rm', ['-rf', dir])
+    }
+  }
+
+  // 34g. The other direction, for a handler rather than a document: the registry declares `/llms.txt` and
+  //      the file is gone. A registry that claims a route the site does not serve puts a URL a crawler
+  //      trusts in front of a 404.
+  {
+    const route = 'apps/web/app/llms.txt/route.ts'
+    const parked = `${route}.gate-fixture-parked`
+    run('mv', [route, parked])
+    let result
+    try {
+      result = run('pnpm', suite(REGISTRY_TEST))
+    } finally {
+      run('mv', [parked, route])
+    }
+    checkRejectedBy(
+      'the route registry gate rejects a declared handler whose route file is gone',
+      result,
+      'registry-entry-without-route',
+    )
+  }
+
+  // 34h. The contract refuses to publish the placeholder as a number.
+  //
+  //      `premises.phone_whatsapp` holds `WHATSAPP-PENDING-Y1-NAP` because docs/13 §3 records two numbers
+  //      and neither is confirmed (Y1-nap). The builder asks the DATABASE whether the column is a
+  //      placeholder — `is_placeholder_text()`, the same predicate the schema's own CHECK constraints use —
+  //      and publishes the open question instead of a digit. Deleting that check is the plausible mistake,
+  //      and `factsSchema` has to be what stops it: the confirmed branch requires E.164, so the placeholder
+  //      is refused by the contract rather than served to an assistant that would repeat it.
+  {
+    const BUILD = 'apps/web/src/facts/build.ts'
+    const result = withEditedFile(
+      BUILD,
+      (original) => {
+        const anchor = '  if (whatsappIsPlaceholder || phoneWhatsapp === null) {'
+        if (!original.includes(anchor))
+          throw new Error(`the placeholder guard is no longer in ${BUILD}`)
+        return original.replace(anchor, '  if (phoneWhatsapp === null) {')
+      },
+      () => runExpectingFailure('pnpm', suite(FACTS_TEST)),
+    )
+    checkRejectedBy(
+      'the facts contract refuses to publish the WhatsApp placeholder as a number',
+      result,
+      'e164',
+    )
+  }
+
+  // 34i. Every robots.txt group has to carry the whole policy, because a named user-agent group REPLACES
+  //      the wildcard group rather than adding to it. A `User-agent: GPTBot` group containing only
+  //      `Allow: /` therefore grants GPTBot the entire admin while reading as one line more permissive.
+  //      Neutering the repetition must fail the suite, or the assertion is counting lines it never reads.
+  {
+    const ROBOTS = 'apps/web/src/facts/robots.ts'
+    const result = withEditedFile(
+      ROBOTS,
+      (original) => {
+        const anchor = 'function ruleLines(): readonly string[] {\n  return ['
+        if (!original.includes(anchor)) throw new Error(`ruleLines is no longer in ${ROBOTS}`)
+        return original.replace(
+          anchor,
+          "function ruleLines(): readonly string[] {\n  return ['Allow: /'] ?? [",
+        )
+      },
+      () => runExpectingFailure('pnpm', suite(FACTS_TEST)),
+    )
+    checkRejectedBy(
+      'a robots.txt group that drops the policy fails the group-completeness assertion',
+      result,
+      'Disallow: /admin',
+    )
+  }
+
+  // 34j. `/llms.txt` is published copy, so docs/09 §"E-E-A-T" makes it the publication lint's business:
+  //      "no copy makes a medical claim the licence does not support — enforced by the publication lint, not
+  //      by good intentions". A lint that returned nothing would satisfy the passing assertion for ever, so
+  //      the control has to be the one that fails when it is neutered.
+  {
+    const LLMS = 'apps/web/src/facts/llms.ts'
+    const result = withEditedFile(
+      LLMS,
+      (original) => {
+        const anchor = '  return lintPublicDisplayName(lintableProse(body), policy)'
+        if (!original.includes(anchor)) throw new Error(`lintLlmsTxt is no longer in ${LLMS}`)
+        return original.replace(anchor, '  void body\n  void policy\n  return []')
+      },
+      () => runExpectingFailure('pnpm', suite(FACTS_TEST)),
+    )
+    checkRejectedBy(
+      'neutering the llms.txt publication lint fails the banned-claim control',
+      result,
+      'banned_claim_term',
+    )
+  }
+
+  // 34k. The control for 34h-34j: with every mutation restored, the suite passes. Without this, a file left
+  //      edited would fail a later gate with a defect nobody introduced.
+  {
+    const result = run('pnpm', suite(FACTS_TEST))
+    check(
+      'the facts, llms.txt and robots.txt suite passes once every mutation is restored',
+      !result.failed,
+      result.output,
+    )
+  }
+}
+
+// 39a-39t. (B-MSG-04) The message lifecycle's constraints, as known-bad fixtures against real
+//           PostgreSQL, and the boundary that keeps a provider inside a transport now that the worker
+//           imports @berelax/messaging.
+//
+// The lifecycle this unit owns is OURS, mapped from two vendors' vocabularies — SMSala's
+// accepted/delivered/failed/expired/rejected and Resend's delivered/bounced/complained/opened. The
+// mapping is TypeScript and is asserted exhaustively in packages/messaging/src/transports/receipts.test.ts.
+// What is asserted here is the half a mapping cannot enforce: the shapes the database refuses whatever
+// wrote them, because a delivery receipt arrives from outside the system and the writer that gets it
+// wrong will not be this unit's code.
+//
+// Each probe runs inside `begin; … ; rollback;`, so one that is wrongly ACCEPTED leaves nothing behind,
+// and each asserts its constraint BY NAME — a bare non-zero exit is also what a typo in a column name
+// produces, and the constraint under test would then be dead while this file reported PASS for ever
+// (ADR 0003).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const KEY = 'gate-fixture-bmsg04-lifecycle'
+  const SENT_ID = 'smsala-gate-fixture-0001'
+
+  const seed =
+    'insert into message_template (template_key, version, message_class, purpose, is_current) ' +
+    `values ('${KEY}', 1, 'transactional', 'B-MSG-04 gate fixture', true)`
+
+  /** The columns a legitimate sent SMS row carries. Each probe overrides one of them. */
+  const SENT_SMS = {
+    channel: "'sms'::message_channel",
+    message_class: "'transactional'::message_class",
+    locale: "'en'",
+    vendor: "'smsala'",
+    recipient: "'+971500000001'",
+    sender_id: "'BERELAX'",
+    subject: 'null',
+    body: "'Your appointment is confirmed.'",
+    body_html: 'null',
+    encoding: "'GSM-7'",
+    segments: '1',
+    cost_fils: '9',
+    status: "'sent'::message_status",
+    provider_message_id: `'${SENT_ID}'`,
+    attempts: '1',
+    last_failure_reason: 'null',
+    next_attempt_at: 'null',
+    queued_at: 'now()',
+    sent_at: 'now()',
+    delivered_at: 'null',
+    failed_at: 'null',
+  }
+
+  /** A legitimate email row: both parts, and no segments, because email is not segment-billed. */
+  const SENT_EMAIL = {
+    ...SENT_SMS,
+    channel: "'email'::message_channel",
+    vendor: "'resend'",
+    recipient: "'guest@example.com'",
+    sender_id: 'null',
+    subject: "'Your tax invoice'",
+    body_html: "'<!doctype html><html><body><p>Attached.</p></body></html>'",
+    segments: '0',
+    cost_fils: '0',
+    provider_message_id: "'resend-gate-fixture-0001'",
+  }
+
+  const messageRow = (base, overrides = {}) => {
+    const columns = { ...base, ...overrides }
+    return (
+      `insert into message (template_id, ${Object.keys(columns).join(', ')}) ` +
+      `select id, ${Object.values(columns).join(', ')} from message_template where template_key = '${KEY}'`
+    )
+  }
+
+  const RECEIPT = {
+    vendor: "'smsala'",
+    vendor_status: "'delivered'",
+    mapped_status: "'delivered'::message_status",
+    applied: 'true',
+    ignored_reason: 'null',
+    reason: 'null',
+    occurred_at: "'2026-09-18T10:00:12Z'::timestamptz",
+  }
+
+  const receiptRow = (overrides = {}) => {
+    const columns = { ...RECEIPT, ...overrides }
+    return (
+      `insert into message_delivery_receipt (message_id, ${Object.keys(columns).join(', ')}) ` +
+      `select id, ${Object.values(columns).join(', ')} from message ` +
+      `where provider_message_id = '${SENT_ID}'`
+    )
+  }
+
+  /**
+   * An UPDATE wrapped so the probe fails unless it addressed exactly one row.
+   *
+   * An update that matched nothing is reported as success by psql, which is the one outcome that would
+   * make a "the trigger refused it" assertion vacuous — the same trap G-CONN-05's selection probe names.
+   */
+  const updateOneRow = (setClause) =>
+    'do $$ declare touched int; begin ' +
+    `update message set ${setClause} where provider_message_id = '${SENT_ID}'; ` +
+    'get diagnostics touched = row_count; ' +
+    "if touched <> 1 then raise exception 'the update addressed % rows, not one', touched; end if; " +
+    'end $$'
+
+  const psqlProbe = (...statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statements.join('; ')}; rollback;`,
+    ])
+
+  if (!dbUrl) {
+    check(
+      'message lifecycle constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 39a. Two rows sharing one vendor id. A delivery receipt is matched on (vendor, provider id), so a
+    //      duplicate makes "the message this receipt belongs to" an arbitrary choice — and the symptom is
+    //      a delivered flag on a message that was never sent.
+    checkRejectedBy(
+      'message gate rejects two messages sharing one vendor message id',
+      psqlProbe(messageRow(SENT_SMS), messageRow(SENT_SMS, { recipient: "'+971500000002'" })),
+      'message_provider_id_unique',
+    )
+
+    // 39b. Delivered with no vendor id: exactly what a receipt applied to the wrong row looks like.
+    checkRejectedBy(
+      'message gate rejects a delivered message that no vendor ever accepted',
+      psqlProbe(
+        messageRow(SENT_SMS, {
+          status: "'delivered'::message_status",
+          provider_message_id: 'null',
+          delivered_at: 'now()',
+        }),
+      ),
+      'message_sent_requires_acceptance',
+    )
+
+    // 39c. Sent with zero attempts. docs/12 §1: a stub must never look like it worked, and a row that
+    //      claims to have been sent without a counted attempt is a send path that called no transport.
+    checkRejectedBy(
+      'message gate rejects a sent message with no counted attempt',
+      psqlProbe(messageRow(SENT_SMS, { attempts: '0' })),
+      'message_sent_counts_an_attempt',
+    )
+
+    // 39d. Failed with no reason is a failure nobody can act on.
+    checkRejectedBy(
+      'message gate rejects a failed message with no reason',
+      psqlProbe(
+        messageRow(SENT_SMS, {
+          status: "'failed'::message_status",
+          failed_at: 'now()',
+          last_failure_reason: 'null',
+        }),
+      ),
+      'message_failed_requires_reason',
+    )
+
+    // 39e. A reason outside the closed set. This column is what a failure breakdown groups by, so free
+    //      text in it is a report with a category of one.
+    checkRejectedBy(
+      'message gate rejects a failure reason nobody declared',
+      psqlProbe(
+        messageRow(SENT_SMS, {
+          status: "'failed'::message_status",
+          failed_at: 'now()',
+          last_failure_reason: "'provider_was_grumpy'",
+        }),
+      ),
+      'message_failure_reason_known',
+    )
+
+    // 39f. A delivered_at on a message that is not delivered — the shape of a half-applied receipt.
+    checkRejectedBy(
+      'message gate rejects a delivery instant on a message that is not delivered',
+      psqlProbe(messageRow(SENT_SMS, { delivered_at: 'now()' })),
+      'message_delivered_at_iff_delivered',
+    )
+
+    // 39g. And the mirror of it: a failure instant with no failure.
+    checkRejectedBy(
+      'message gate rejects a failure instant on a message that has not failed',
+      psqlProbe(messageRow(SENT_SMS, { failed_at: 'now()' })),
+      'message_failed_at_iff_failed',
+    )
+
+    // 39h. A pending retry on a message that already arrived. This is the row that sends a delivered
+    //      booking confirmation a second time.
+    checkRejectedBy(
+      'message gate rejects a scheduled retry on a message that is not queued',
+      psqlProbe(messageRow(SENT_SMS, { next_attempt_at: 'now()' })),
+      'message_retry_only_while_queued',
+    )
+
+    // 39i. An email billed by segment: the Arabic-SMS arithmetic — 70 characters to a segment, not 160 —
+    //      applied to a channel that is billed per message, landing in the same cost report.
+    checkRejectedBy(
+      'message gate rejects an email billed as SMS segments',
+      psqlProbe(messageRow(SENT_EMAIL, { segments: '3', cost_fils: '27' })),
+      'message_segments_billed_on_sms_only',
+    )
+
+    // 39j. And an SMS billed as nothing, which is the same constraint from the other side: a zero-cost
+    //      SMS would quietly make a campaign look free.
+    checkRejectedBy(
+      'message gate rejects an SMS with no billable segment',
+      psqlProbe(messageRow(SENT_SMS, { segments: '0', cost_fils: '0' })),
+      'message_segments_billed_on_sms_only',
+    )
+
+    // 39k. An email with no subject and no HTML part. Resend requires both (an HTML-only transactional
+    //      email is a deliverability problem), and a subjectless message is one nobody can find again.
+    checkRejectedBy(
+      'message gate rejects an email missing its subject and HTML part',
+      psqlProbe(messageRow(SENT_EMAIL, { subject: 'null', body_html: 'null' })),
+      'message_email_carries_both_parts',
+    )
+
+    // 39l. The no-regression rule, as the trigger rather than as the repository's predicate. An
+    //      out-of-order DLR is the normal case for a webhook; this is the writer that never came through
+    //      the repository at all — a migration, or a psql session at 2am.
+    checkRejectedBy(
+      'message gate rejects a status that moves backwards, by trigger',
+      psqlProbe(
+        messageRow(SENT_SMS, {
+          status: "'delivered'::message_status",
+          delivered_at: 'now()',
+        }),
+        updateOneRow("status = 'sent'::message_status"),
+      ),
+      'message_status_must_not_regress',
+    )
+
+    // 39m. And a second terminal state cannot displace the first: a late expiry notice must not
+    //      un-deliver a message the handset acknowledged.
+    checkRejectedBy(
+      'message gate rejects a second terminal status on a delivered message',
+      psqlProbe(
+        messageRow(SENT_SMS, {
+          status: "'delivered'::message_status",
+          delivered_at: 'now()',
+        }),
+        updateOneRow(
+          "status = 'failed'::message_status, failed_at = now(), " +
+            "delivered_at = null, last_failure_reason = 'delivery_reported_failed'",
+        ),
+      ),
+      'message_status_must_not_regress',
+    )
+
+    // 39n. The replay guard. Both vendors re-deliver a webhook they did not see a 2xx for, and without
+    //      this the third copy is a third receipt and a third transition.
+    checkRejectedBy(
+      'message gate rejects the same delivery receipt twice',
+      psqlProbe(messageRow(SENT_SMS), receiptRow(), receiptRow()),
+      'message_delivery_receipt_replay_unique',
+    )
+
+    // 39o. A receipt that claims to have been applied with nothing to apply. It would read as a
+    //      transition nobody can name — and `vendor_status_unrecognised` is exactly the case that must
+    //      NOT be storable as applied.
+    checkRejectedBy(
+      'message gate rejects an applied receipt with no mapped status',
+      psqlProbe(messageRow(SENT_SMS), receiptRow({ mapped_status: 'null' })),
+      'message_delivery_receipt_applied_needs_mapping',
+    )
+
+    // 39p. And an ignored receipt with no reason, which is the same constraint from the other side: a
+    //      receipt that changed nothing and does not say why is a receipt nobody can use to explain why
+    //      a message still says `sent` three days later.
+    checkRejectedBy(
+      'message gate rejects an ignored receipt with no reason',
+      psqlProbe(
+        messageRow(SENT_SMS),
+        receiptRow({ applied: 'false', mapped_status: 'null', ignored_reason: 'null' }),
+      ),
+      'message_delivery_receipt_applied_needs_mapping',
+    )
+
+    // 39q. A receipt is evidence: it cannot be edited, it cannot be deleted, and the message it belongs
+    //      to cannot be deleted under it. The third is why every test of this table asserts deltas and
+    //      narrows its reads instead of cleaning up (CONTRIBUTING-AGENT-BRIEF §12).
+    checkRejectedBy(
+      'message gate rejects an UPDATE of a delivery receipt',
+      psqlProbe(
+        messageRow(SENT_SMS),
+        receiptRow(),
+        `update message_delivery_receipt set applied = false where vendor_status = 'delivered'`,
+      ),
+      'append-only',
+    )
+    checkRejectedBy(
+      'message gate rejects a DELETE of a delivery receipt',
+      psqlProbe(
+        messageRow(SENT_SMS),
+        receiptRow(),
+        `delete from message_delivery_receipt where vendor_status = 'delivered'`,
+      ),
+      'append-only',
+    )
+    checkRejectedBy(
+      'message gate rejects deleting a message that a receipt refers to',
+      psqlProbe(
+        messageRow(SENT_SMS),
+        receiptRow(),
+        `delete from message where provider_message_id = '${SENT_ID}'`,
+      ),
+      'message_delivery_receipt_message_id_fkey',
+    )
+
+    // The acceptance controls. Without them a renamed table or a broken connection string would reject
+    // every probe above and this gate would report eighteen passes while examining nothing.
+    //
+    // 39r. The rows the store really writes: a sent SMS, a sent email, a queued message with a retry
+    //      scheduled, and a failed one with its reason.
+    const legitimate = psqlProbe(
+      messageRow(SENT_SMS),
+      messageRow(SENT_EMAIL),
+      messageRow(SENT_SMS, {
+        status: "'queued'::message_status",
+        provider_message_id: 'null',
+        sent_at: 'null',
+        attempts: '1',
+        last_failure_reason: "'provider_rate_limited'",
+        next_attempt_at: "now() + interval '1 minute'",
+      }),
+      messageRow(SENT_SMS, {
+        provider_message_id: "'smsala-gate-fixture-0002'",
+        status: "'failed'::message_status",
+        failed_at: 'now()',
+        last_failure_reason: "'delivery_reported_failed'",
+      }),
+    )
+    check(
+      'message gate accepts the four row shapes the store writes',
+      !legitimate.failed,
+      `a legitimate lifecycle row was refused:\n${legitimate.output}`,
+    )
+
+    // 39s. The forward transitions, and the receipts either side of them: sent -> delivered applied, an
+    //      unrecognised vendor word recorded and ignored, and Resend's `opened` recorded as carrying no
+    //      lifecycle change. All three on one message, which is what a real DLR stream looks like.
+    const forward = psqlProbe(
+      messageRow(SENT_SMS),
+      receiptRow({
+        applied: 'false',
+        mapped_status: 'null',
+        vendor_status: "'DELIVRD'",
+        ignored_reason: "'vendor_status_unrecognised'",
+        occurred_at: "'2026-09-18T10:00:05Z'::timestamptz",
+      }),
+      receiptRow({
+        applied: 'false',
+        mapped_status: 'null',
+        vendor: "'resend'",
+        vendor_status: "'opened'",
+        ignored_reason: "'vendor_status_carries_no_lifecycle_change'",
+        occurred_at: "'2026-09-18T10:00:08Z'::timestamptz",
+      }),
+      receiptRow(),
+      updateOneRow("status = 'delivered'::message_status, delivered_at = now()"),
+    )
+    check(
+      'message gate accepts sent -> delivered with an unrecognised and a non-lifecycle receipt beside it',
+      !forward.failed,
+      `the forward path a real DLR stream produces was refused:\n${forward.output}`,
+    )
+
+    // 39t. `message_provider_id_unique` is (vendor, provider id), not (provider id) — two vendors may
+    //      each issue `1`, and many queued rows have no id at all. NULLS DISTINCT is the half a reader
+    //      skips, and without this control the uniqueness probe would pass a constraint that forbade
+    //      more than one unsent message in the table.
+    const perVendor = psqlProbe(
+      messageRow(SENT_SMS, { provider_message_id: "'1'" }),
+      messageRow(SENT_EMAIL, { provider_message_id: "'1'" }),
+      messageRow(SENT_SMS, {
+        status: "'queued'::message_status",
+        provider_message_id: 'null',
+        sent_at: 'null',
+        attempts: '0',
+      }),
+      messageRow(SENT_SMS, {
+        status: "'queued'::message_status",
+        provider_message_id: 'null',
+        sent_at: 'null',
+        attempts: '0',
+        recipient: "'+971500000009'",
+      }),
+    )
+    check(
+      'message gate accepts one id per vendor and any number of messages with no id yet',
+      !perVendor.failed,
+      `the uniqueness constraint is narrower than (vendor, provider_message_id):\n${perVendor.output}`,
+    )
+  }
+}
+
+// 39u-39v. (B-MSG-04) The worker now imports @berelax/messaging, so the boundary that keeps a provider
+//          inside a transport has a new place to leak from.
+//
+// `messaging-providers-only-inside-a-transport` is the rule, and it was verified for a route directory by
+// B-LIFE-02. The DLR job is the first module in apps/worker to live one import away from a provider: it
+// needs delivery receipts, the receipts come from a fake, and the shortest path to one is
+// `@berelax/providers`. The rule bans the barrel as well as the ports for exactly that reason — the
+// barrel re-exports both, so `import { SMSALA } from '@berelax/providers'` reaches SMSala while naming
+// nothing forbidden.
+{
+  const fixture = 'apps/worker/src/jobs/__gate_fixture__.ts'
+  const rejected = withFixture(
+    fixture,
+    [
+      "import { createFakeSmsala } from '@berelax/providers'",
+      'export const leaked = createFakeSmsala',
+      '',
+    ].join('\n'),
+    () =>
+      runExpectingFailure('pnpm', [
+        'exec',
+        'depcruise',
+        '--config',
+        '.dependency-cruiser.cjs',
+        'apps',
+      ]),
+  )
+  checkRejectedBy(
+    'boundary gate rejects a provider import from the DLR job directory',
+    rejected,
+    'messaging-providers-only-inside-a-transport',
+  )
+
+  // The control, and it is not a formality: the worker is *supposed* to reach a transport, which is the
+  // one module that may reach a provider. A rule that rejected this too would have to be relaxed, and a
+  // relaxed rule is the one that stops meaning anything.
+  const allowed = withFixture(
+    fixture,
+    [
+      "import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'",
+      "import { reconcileDeliveryReceipts } from './reconcile-dlr.ts'",
+      'export const wired = [createSmsalaTransport, reconcileDeliveryReceipts]',
+      '',
+    ].join('\n'),
+    () => run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'apps']),
+  )
+  check(
+    'boundary gate accepts the transport and the DLR pass imported from the worker',
+    !allowed.failed,
+    `the wiring this unit actually ships was rejected:\n${allowed.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

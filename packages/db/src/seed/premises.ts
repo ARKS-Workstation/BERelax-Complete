@@ -57,6 +57,42 @@ export const WHATSAPP_CANDIDATES = Object.freeze([
 ])
 
 /**
+ * The other names the district is known by, keyed on the name the row holds.
+ *
+ * docs/13 §2: "Al Zahiyah — also known as Al Mina / Tourist Club Area". docs/09 §4 needs all three on
+ * every citation, because the locality is what tells a machine this business apart from the airport-spa
+ * chain of the same name, and a customer searching "massage tourist club area" is searching for this
+ * street.
+ *
+ * ## Why a mapping and not a list
+ *
+ * `premises` has no column for an alias and this unit adds no migration, so the aliases cannot be in the
+ * row. Keyed on the area rather than listed beside it, they still cannot contradict it:
+ * {@link areaAliasesFor} returns **nothing** for an area this mapping does not know, so an owner who
+ * corrects `premises.area` gets no aliases rather than the previous district's. A bare
+ * `AREA_ALIASES: string[]` would have gone on publishing "Tourist Club Area" for a business that had
+ * moved to Khalifa City.
+ */
+export const AREA_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'Al Zahiyah': Object.freeze(['Al Mina', 'Tourist Club Area']),
+})
+
+/**
+ * Every other name for the district the row names, or an empty list.
+ *
+ * Case-insensitive on the key, because the alias set is a fact about a place and not about a spelling,
+ * and an owner retyping the area with different capitalisation should not silently lose two of the three
+ * names docs/09 §4 requires on every citation.
+ */
+export function areaAliasesFor(area: string): readonly string[] {
+  const wanted = area.trim().toLowerCase()
+  for (const [key, aliases] of Object.entries(AREA_ALIASES)) {
+    if (key.toLowerCase() === wanted) return aliases
+  }
+  return Object.freeze([])
+}
+
+/**
  * Trading hours, docs/13 §2: **daily 11:00–02:00**.
  *
  * The close is less than the open, which is the whole reason `premises_hours.crosses_midnight` is a

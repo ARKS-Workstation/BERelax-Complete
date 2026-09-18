@@ -15,6 +15,23 @@ if (!url)
 
 let sql: Sql
 
+/**
+ * This file's own template keys, and why they are now prefixed.
+ *
+ * It used to seed the shipped keys — `booking.confirmed`, `invoice.issued` — and clear the table with
+ * `delete from message_template` in `beforeEach`. Both assumed this file owned the table, and B-MSG-04
+ * ended that: `message.template_id` references it ON DELETE RESTRICT, because a sent message is
+ * evidence and its template is the words it went out with. The blanket delete then failed against rows
+ * another suite had every right to leave behind — the third case in
+ * `docs/CONTRIBUTING-AGENT-BRIEF.md` §12, arriving from the other direction.
+ *
+ * So the keys are namespaced and the cleanup removes only those. A fixed prefix rather than a
+ * per-run one, deliberately: a random suffix would leave every previous run's rows behind for ever,
+ * where a fixed one means each run tidies up its predecessor's.
+ */
+const PREFIX = 'bmsg01-itest.'
+const key = (name: string) => `${PREFIX}${name}`
+
 beforeAll(() => {
   sql = createConnection({ url, max: 2 })
 })
@@ -24,7 +41,9 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql`delete from message_template`
+  // This file's templates only. Narrowing what the test can see is the fix; deleting rows a foreign
+  // key protects is not.
+  await sql`delete from message_template where template_key like ${`${PREFIX}%`}`
 })
 
 async function seedTemplate(
@@ -43,7 +62,7 @@ describe('acceptance — message_class is immutable', () => {
   it('refuses an UPDATE of the column, with a named error', () => {
     // A class chosen per send puts the compliance decision at the least reviewed point in the system.
     // A class that can be edited afterwards is the same failure, slower.
-    return seedTemplate('booking.confirmed').then(async (id) => {
+    return seedTemplate(key('booking.confirmed')).then(async (id) => {
       await expect(
         sql`update message_template set message_class = 'promotional' where id = ${id}`,
       ).rejects.toThrow(/message_class is immutable/)
@@ -51,7 +70,7 @@ describe('acceptance — message_class is immutable', () => {
   })
 
   it('permits an update that leaves the class alone, so the table is not read-only', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     await sql`update message_template set purpose = 'revised' where id = ${id}`
     const [row] = await sql<{ purpose: string }[]>`
       select purpose from message_template where id = ${id}
@@ -64,13 +83,13 @@ describe('acceptance — message_class is immutable', () => {
     // template as far as the regulator is concerned, so inheriting the approval it was granted as
     // transactional would launder it. Doing this as a function rather than three statements is the
     // point: the third statement is the one that gets skipped at 9pm.
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     await sql`
       insert into message_template_variant (template_id, channel, locale, body, approval_state, variables)
       values (${id}, 'sms', 'en', 'Confirmed {{date}}', 'approved', '{"date"}')
     `
     const [created] = await sql<{ reclassify_template: string }[]>`
-      select reclassify_template('booking.confirmed', 'promotional', 'reclassified')
+      select reclassify_template(${key('booking.confirmed')}, 'promotional', 'reclassified')
     `
     const newId = created?.reclassify_template ?? ''
 
@@ -82,7 +101,7 @@ describe('acceptance — message_class is immutable', () => {
 
     const rows = await sql<{ version: number; is_current: boolean; message_class: string }[]>`
       select version, is_current, message_class from message_template
-      where template_key = 'booking.confirmed' order by version
+      where template_key = ${key('booking.confirmed')} order by version
     `
     expect(rows).toHaveLength(2)
     expect(rows[0]?.is_current).toBe(false)
@@ -90,24 +109,24 @@ describe('acceptance — message_class is immutable', () => {
   })
 
   it('refuses a reclassification to the class it already has', async () => {
-    await seedTemplate('booking.reminder')
+    await seedTemplate(key('booking.reminder'))
     await expect(
-      sql`select reclassify_template('booking.reminder', 'transactional', 'no-op')`,
+      sql`select reclassify_template(${key('booking.reminder')}, 'transactional', 'no-op')`,
     ).rejects.toThrow(/already transactional/)
   })
 
   it('refuses to reclassify a template that does not exist', async () => {
-    await expect(sql`select reclassify_template('nope', 'promotional', 'x')`).rejects.toThrow(
-      /No current template/,
-    )
+    await expect(
+      sql`select reclassify_template(${key('nope')}, 'promotional', 'x')`,
+    ).rejects.toThrow(/No current template/)
   })
 
   it('permits exactly one current version per key', async () => {
-    await seedTemplate('booking.reminder')
+    await seedTemplate(key('booking.reminder'))
     await expect(
       sql`
         insert into message_template (template_key, version, message_class, purpose, is_current)
-        values ('booking.reminder', 2, 'transactional', 'second current', true)
+        values (${key('booking.reminder')}, 2, 'transactional', 'second current', true)
       `,
     ).rejects.toThrow(/message_template_one_current|unique/i)
   })
@@ -115,7 +134,7 @@ describe('acceptance — message_class is immutable', () => {
 
 describe('acceptance — adding WhatsApp needs no migration', () => {
   it('accepts a whatsapp variant against the shipped schema', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     const [row] = await sql<{ channel: string; customer_care_window: boolean }[]>`
       insert into message_template_variant
         (template_id, channel, locale, body, category, customer_care_window, variables)
@@ -128,7 +147,7 @@ describe('acceptance — adding WhatsApp needs no migration', () => {
   })
 
   it('refuses a channel the enum does not know, at the database level', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     await expect(
       sql`
         insert into message_template_variant (template_id, channel, locale, body, variables)
@@ -138,7 +157,7 @@ describe('acceptance — adding WhatsApp needs no migration', () => {
   })
 
   it('keeps one variant per channel per locale', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     await sql`
       insert into message_template_variant (template_id, channel, locale, body, variables)
       values (${id}, 'sms', 'en', 'first', '{}')
@@ -154,7 +173,7 @@ describe('acceptance — adding WhatsApp needs no migration', () => {
   it('requires a subject for email and refuses one for SMS', async () => {
     // An email without a subject is a deliverability problem; an SMS has nowhere to put one, and a
     // subject silently stored and never sent is a field somebody will eventually rely on.
-    const id = await seedTemplate('invoice.issued')
+    const id = await seedTemplate(key('invoice.issued'))
     await expect(
       sql`
         insert into message_template_variant (template_id, channel, locale, body, variables)
@@ -172,7 +191,7 @@ describe('acceptance — adding WhatsApp needs no migration', () => {
 
 describe('the variant carries what a send path needs', () => {
   it('defaults approval to draft, so nothing is sendable by existing', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     const [row] = await sql<{ approval_state: string; customer_care_window: boolean }[]>`
       insert into message_template_variant (template_id, channel, locale, body, variables)
       values (${id}, 'sms', 'en', 'Confirmed', '{}')
@@ -183,7 +202,7 @@ describe('the variant carries what a send path needs', () => {
   })
 
   it('stores the declared variables as an array the render path can check against', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     const [row] = await sql<{ variables: string[] }[]>`
       insert into message_template_variant (template_id, channel, locale, body, variables)
       values (${id}, 'sms', 'en', 'Confirmed {{date}} {{time}}', '{"date","time"}')
@@ -193,14 +212,22 @@ describe('the variant carries what a send path needs', () => {
   })
 
   it('cascades variants when a template is deleted', async () => {
-    const id = await seedTemplate('booking.confirmed')
+    const id = await seedTemplate(key('booking.confirmed'))
     await sql`
       insert into message_template_variant (template_id, channel, locale, body, variables)
       values (${id}, 'sms', 'en', 'Confirmed', '{}')
     `
+    // The control on the count below: the variant is there before the delete. A count of zero scoped
+    // to a deleted id passes just as happily when the variant was never inserted.
+    const [before] = await sql<{ n: string }[]>`
+      select count(*)::text as n from message_template_variant where template_id = ${id}
+    `
+    expect(before?.n).toBe('1')
     await sql`delete from message_template where id = ${id}`
+    // Scoped to this template, not the whole table: other units seed variants of their own, and a
+    // global count here would read them.
     const [row] = await sql<{ n: string }[]>`
-      select count(*)::text as n from message_template_variant
+      select count(*)::text as n from message_template_variant where template_id = ${id}
     `
     expect(row?.n).toBe('0')
   })

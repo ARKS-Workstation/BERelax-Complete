@@ -6,6 +6,11 @@
  * here on a wrapper — `theme/arabic.css` inherits the whole recalibration from the document element,
  * and a wrapper leaves `body` Latin.
  *
+ * The locality has left this paragraph for the reason the English route records: `/` and `/ar` are
+ * statically prerendered, so their copy is baked at `next build`, and the build has no database. The
+ * Arabic spelling of the district was also a NAP literal the grep gate could not see, since its patterns
+ * are Latin — the same defect one script further from anything that would catch it.
+ *
  * It is the same registry entry as `/`, which is what makes the two documents' `hreflang` sets
  * identical: `routeMetadata('home', 'ar')` and `routeMetadata('home', 'en')` differ only in which URL is
  * canonical. The editorial grid is here rather than on a bare `<main>` because mirroring is a claim about
@@ -28,7 +33,7 @@ export default function ArabicHomePage() {
       <Section>
         <Grid>
           <h1>بي ريلاكس</h1>
-          <p>مركز مساج في الزاهية، أبوظبي.</p>
+          <p>مركز مساج وسبا.</p>
         </Grid>
       </Section>
     </main>

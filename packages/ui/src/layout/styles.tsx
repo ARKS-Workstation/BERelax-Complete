@@ -16,6 +16,7 @@
  * The reveal and the focus ring live here rather than beside a component because they are properties of
  * the system: one keyframe set, one ring, applied to whatever asks for them.
  */
+import { NAP_BLOCK_CSS } from '../patterns/nap-block.tsx'
 import { SERVICE_ROW_CSS } from '../patterns/service-row.tsx'
 import { SLOT_GRID_CSS } from '../patterns/slot-grid.tsx'
 import { THERAPIST_CARD_CSS } from '../patterns/therapist-card.tsx'
@@ -178,6 +179,7 @@ export const DESIGN_SYSTEM_CSS = [
   THERAPIST_CARD_CSS,
   SERVICE_ROW_CSS,
   SLOT_GRID_CSS,
+  NAP_BLOCK_CSS,
   DISCLOSURE_CSS,
   FOCUS_CSS,
   MOTION_CSS,

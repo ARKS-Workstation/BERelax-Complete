@@ -1574,7 +1574,7 @@ units:
       backoff against fake provider failures, and the admin Messages inbox that makes every fake send visible
       in the UI and in screenshots — the docs/12 §1 rule that a stub must never look like it worked.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-02
@@ -1594,12 +1594,113 @@ units:
       on the route, and screenshots at 3 viewports x 2 themes produce zero pixel diff on a repeat run
     - Cost aggregated per day and per template matches a literal expected total over the seeded fixture,
       giving the agent console a tested query
+    - 'NOTE: the inbox is a route HANDLER serving text/html, at apps/web/app/(admin)/settings/messages/route.ts,
+      not the page.tsx this entry''s files list named. Same reason G-CONN-05''s picker is one, one directory
+      along: W-SITE-01''s registry requires every *document* to be served in both locales, so a page.tsx
+      would need an Arabic admin document and the admin shell to render it (W-SYS-01), and it would join a
+      screenshot matrix whose RTL half must be a real Arabic route. The criterion above asks for 3 viewports
+      x 2 themes with no direction axis, which is the same decision read from the other end. It is declared
+      in apps/web/src/routes/registry.ts as a handler covered by the /settings noindex prefix, and
+      apps/web/src/messages-inbox.itest.ts asserts the header on the live response. The route is read-only
+      (GET) and, like the two Google routes beside it, is NOT authenticated until W-SYS-01: there is no
+      actor to record because it writes nothing, and none is invented. The recipient is masked in the
+      rendering because the page is screenshotted and the gallery is published as a link'
+    - 'NOTE: the vendor-status mapping, which is the substance of "the lifecycle is ours". SMSala:
+      accepted->sent, delivered->delivered, failed/expired/rejected->failed. Resend: delivered->delivered,
+      bounced->failed, and complained/opened->no lifecycle change — a complaint happens AFTER a successful
+      delivery, so recording it as failed would tell an operator a message never arrived, and the suppression
+      it actually costs is the provider''s and already enforced by it. Both tables are
+      `satisfies Record<VendorUnion, …>` inside packages/messaging/src/transports, so a sixth vendor status
+      fails to compile rather than falling into a default. An UNRECOGNISED vendor status maps to null: the
+      receipt is recorded with the vendor''s word verbatim, applied=false and
+      ignored_reason=vendor_status_unrecognised, and the stored status is unchanged. It can never become
+      delivered — asserted positively and negatively, with a control that a recognised word in the same batch
+      does advance. A vendor change is therefore a change to one table and to message_delivery_receipt.vendor_status,
+      not to every badge, report and query'
+    - 'NOTE: the attempt caps differ per failure mode, deliberately, and that is how "a fake rejection and a
+      fake rate-limit response each produce retries" is answered: each produces its DECLARED attempt count,
+      and the declared count for a rejection is one. packages/providers'' own taxonomy already says so —
+      `rejected` carries retryable:false, because it is an invalid recipient, a malformed payload or a
+      suspended sender identity, none of which changes in sixty seconds, and against a suspended promotional
+      identity a retry loop is a few thousand charges for a guaranteed failure (ADR 0016). So
+      MESSAGE_RETRY_POLICY in packages/core/src/messaging/retry.ts declares provider_rejected and
+      provider_error at 1 attempt and provider_rate_limited and provider_unavailable at 3 with waits of 60s
+      then 300s, each measured from the failure it follows. The waits are a declared list rather than
+      2**n, so no wait is a number nobody chose. Asserted by exact attempt counts and exact instants, in the
+      unit suite and again through the Postgres store'
+    - 'NOTE: migration 0035_message_lifecycle.sql taken; SCHEMA_VERSION is 35. Two tables — `message` and the
+      append-only `message_delivery_receipt` — one enum, one IMMUTABLE rank function and two triggers. The
+      no-regression rule is enforced twice on purpose: the repository''s UPDATE carries
+      `where message_status_rank(status) < message_status_rank($new)` so an out-of-order receipt is a no-op
+      rather than an exception (a webhook arriving out of order is the normal case), and
+      refuse_message_status_regression raises for any other writer. message.last_failure_reason accepts a
+      fifth value beyond the four a transport returns — delivery_reported_failed — because "it did not leave"
+      and "it left and did not arrive" are different pieces of work for whoever reads the report; the retry
+      policy is keyed by the four, so a delivery failure has no policy and is terminal by construction'
+    - 'NOTE: what the inbox deliberately does NOT list, because a row means "a vendor was asked to send
+      this". (1) A gate refusal: nothing was sent, and a row for it would appear in the cost report and count
+      against the frequency cap. Its stores are C-CRM-03, C-CRM-04 and C-AUTO-03, per B-MSG-02''s NOTE.
+      (2) A staging diversion: F03''s local outbox already holds it and makes it visible, and a durable row
+      for a message deliberately never sent would be charged for. Both are asserted as producing no row, each
+      with a control that the same context does produce one when it should. (3) B-LIFE-02''s OTP route, which
+      still calls the bare sendMessage: a row needs a message_template id and nothing yet seeds the shipped
+      templates into the database (packages/db/src/seed/templates.ts, which B-MSG-01''s files list named, does
+      not exist). Once B-MSG-03 adds that seed — it needs the same thing to resolve a template per scheduled
+      step — the OTP send becomes a one-line deliverMessage call'
+    - 'NOTE: a defect found and fixed in existing code. Both fakes numbered provider message ids with a
+      per-instance counter, which was harmless while nothing persisted them. This unit persists them under a
+      (vendor, provider_message_id) uniqueness constraint AND matches incoming receipts on them, and a
+      counter repeats: across processes, so a second run of the suite reissues smsala-000001, and across
+      instances — the SMSala transport deliberately holds two, one per registered identity. Two messages
+      sharing an id means a receipt lands on an arbitrary one of them. Both fakes now derive the id from the
+      idempotency key (a sha256 prefix): stable for one message in any process, distinct for two, and still
+      deterministic, which a random id would not be. The alternative — qualifying the id in the transport —
+      was rejected because provider_message_id is the string somebody quotes at SMSala support, and a prefix
+      this system invented would be an id the vendor never issued'
+    - 'NOTE: file placement, against this entry''s files list. The DLR pass is
+      apps/worker/src/jobs/reconcile-dlr.ts with the named reconcile-dlr.test.ts beside it (in-memory store,
+      so ordering and counting run in the unit suite), and the database half is
+      packages/fixtures/src/message-lifecycle.itest.ts — packages/db has no database in the unit runner, the
+      same split B-LIFE-02 recorded, and packages/fixtures is where a test that exercises core-and-db
+      together belongs. The job is registered as a QUEUE WITH NO CRON, like W-SYS-05''s derivative build: a
+      receipt is announced by the vendor''s webhook, and a cron would be a poller looking for work an enqueue
+      already announced — which is also why it needs no agent_definition row. run.ts wires the SMS receipt
+      source only: the Resend transport takes its verified sending address as a required argument with no
+      default, and no address exists yet (OPEN-QUESTIONS Y6-email-sender, added by this unit). The pass names
+      the vendors it read, so a vendor nobody wired is not silently reported as drained'
+    - 'NOTE: a second defect found and fixed, in packages/db/src/schema/messaging.itest.ts (B-MSG-01). Its
+      beforeEach was `delete from message_template` and one assertion counted `message_template_variant`
+      across the whole table — both assuming the file owned it. Giving `message` a template_id ended that:
+      the reference is ON DELETE RESTRICT because a sent message is evidence and its template is the words
+      it went out with, so the blanket delete began failing against rows another suite had every right to
+      leave behind. This is CONTRIBUTING-AGENT-BRIEF §12 arriving from the other direction, and the fix is
+      the one §12 names: the file now namespaces its keys under a fixed `bmsg01-itest.` prefix, deletes
+      only those, and scopes the cascade count to the template it deleted — with a control asserting the
+      variant was there beforehand, because a count of zero scoped to a deleted id passes just as happily
+      when nothing was ever inserted. A fixed prefix rather than a per-run one so each run tidies up its
+      predecessor''s rows'
+    - 'NOTE: MessageStatus, the status rank, advanceMessageStatus and the failure-reason vocabulary live in
+      @berelax/shared rather than in @berelax/core, for the structural reason Channel and MessageClass moved
+      there: packages/db needs them (the Drizzle enum mirror and the guarded UPDATE) and db must never import
+      core. TransportFailure in packages/messaging is now an ALIAS of MessageFailureReason rather than a
+      second spelling of the same four values, so the retry policy cannot be keyed by a value the CHECK will
+      not store. The store is a port declared in @berelax/messaging and implemented in
+      packages/db/src/repositories/message.ts with no import in either direction — structural typing, checked
+      by the compiler where the two meet (the worker''s pass, and the itest)'
     files:
+    - packages/db/migrations/0035_message_lifecycle.sql
     - packages/db/src/schema/message.ts
+    - packages/db/src/repositories/message.ts
+    - packages/shared/src/messaging.ts
+    - packages/core/src/messaging/retry.ts
+    - packages/messaging/src/lifecycle.ts
+    - packages/messaging/src/transports/resend.ts
     - apps/worker/src/jobs/reconcile-dlr.ts
     - apps/worker/src/jobs/reconcile-dlr.test.ts
-    - apps/web/app/(admin)/messages/page.tsx
-    - apps/web/app/(admin)/messages/page.test.ts
+    - apps/web/app/(admin)/settings/messages/route.ts
+    - apps/web/app/(admin)/settings/messages/render.ts
+    - apps/web/src/messages-inbox.itest.ts
+    - packages/fixtures/src/message-lifecycle.itest.ts
   - id: B-UI-01
     order: 37
     title: 'Public booking flow: service, therapist and slot selection'
@@ -6015,7 +6116,7 @@ units:
       facts endpoint, /llms.txt and the AI-crawler robots policy — with a grep gate that makes a hard-coded
       address a red build.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-01
@@ -6051,6 +6152,148 @@ units:
       the banned-claims lint
     - Every provisional value in /api/facts (the canonical WhatsApp number) is flagged provisional:true
       and is returned by the Unconfirmed Assumptions query (assertion)
+    - 'NOTE: the concrete files. The read path is packages/db/src/queries/premises-facts.ts
+      (readPremisesFacts: the premises singleton, legal_entity, premises_hours, premises_closure, the
+      published price grid and price_on_request in one round trip, with is_placeholder_text(phone_whatsapp)
+      evaluated by PostgreSQL rather than re-implemented at the edge). The contract is
+      packages/shared/src/schemas/facts.ts and the derivations every consumer shares are
+      packages/shared/src/premises-links.ts (address lines, the one-line form, the map and directions URLs,
+      the display spelling of an E.164 number). apps/web/src/facts/{build,llms,robots,handlers,runtime,
+      page-facts}.ts compose and serve them; the routes are thin wiring, as app/api/v1/otp/route.ts is. The
+      area aliases are AREA_ALIASES/areaAliasesFor in packages/db/src/seed/premises.ts, keyed on the area so
+      an area the mapping does not know publishes nothing rather than the previous district''s names.'
+    - 'NOTE: scripts/test-nap-grep.mjs was NOT created. The grep already exists as
+      packages/db/src/seed/premises.test.ts, which B-CAT-06 shipped with three exemptions marked "W-SITE-02''s
+      to retire"; a second scanner in scripts/ would be a second pattern list and a second exemption list, and
+      the one that went stale would be the one nobody ran. This unit retired the three exemptions and added a
+      second rule to the same file, nap-hours-literal-outside-the-seed, so both rules share one closed
+      exemption list and one non-empty-scan guard. No new pnpm script, so case 29''s required array and the CI
+      workflow are unchanged.'
+    - 'NOTE: SCOPED — the phone half of the grep. The acceptance line asks for the pattern
+      `\+9715|05\d ?\d{3}|02 ?\d{3}`. B-CAT-06''s gate deliberately does NOT use it, and its own comment says
+      why: `05\d ?\d{3} ?\d{4}` matches packages/core/src/identity/normalise-phone.ts, whose doc comment uses a
+      number as a worked example of the four spellings that module exists to normalise, and a rule that
+      refused its own documentation is a rule somebody switches off. The four numbers this business actually
+      publishes are matched exactly instead, in both the E.164 and the spaced form, repository-wide. The
+      street, area, building and floor patterns are also repository-wide rather than scoped to apps/web and
+      packages/ui, which is stricter than the line asks.'
+    - 'NOTE: the hours rule IS scoped to apps/web and packages/ui, as the acceptance line says, and the scope
+      is the rule''s design. `11:00` and `02:00` appear in about forty doc comments across packages/core,
+      packages/db and packages/messaging, every one of them explaining why the close is less than the open —
+      that 01:30 belongs to the previous trading date, that crosses_midnight is a generated column, that the
+      TDRA promotional window sits inside trading hours. Refusing those would take forty exemptions, which
+      turns a closed list into a blanket, and would refuse the documentation that makes the model legible.
+      What the rule refuses is a RENDERED surface with the hours typed into it, and only two packages hold
+      one. A lookbehind keeps a timestamp''s `T11:02:00` out of it; the control asserts that.'
+    - 'NOTE: the three retired exemptions, and how each was retired. app/(en)/(dev)/kitchen-sink/page.tsx and
+      app/(ar)/ar/kitchen-sink/page.tsx now READ the row: they render @berelax/ui''s NapBlock from
+      readFactsForPage(), which is why the registry entry for /kitchen-sink became rendering: ''dynamic'' and
+      why registry.test.ts''s static list is now [''home''] alone. app/_document/shell.tsx and
+      app/(en)/(public)/page.tsx were retired by DELETION rather than by a lookup, and that is a decision
+      rather than a shortcut: both are statically prerendered, a root layout''s metadata is evaluated during
+      `next build`, and the build has no database by design — app/api/v1/otp/route.ts records why, and the CI
+      workflow runs the build BEFORE pnpm db:apply. A build-time read would therefore either fail the build or
+      bake whatever that machine''s database happened to hold, which is a hard-coded address with extra steps
+      and nothing to say it had gone stale. The shared document metadata keeps the full trading name (docs/09
+      §"The brand collision" requires it in every title and there is nowhere else for a fallback to get it) and
+      asserts no address, no district and no hours. The locality docs/09 also wants in titles arrives with
+      W-SITE-04/05/07, whose routes are ISR and read the row.'
+    - 'NOTE: a defect found, in code this unit did not own. app/(ar)/layout.tsx and app/(ar)/ar/page.tsx
+      carried the street and the district in ARABIC — a second hard-coded NAP that the grep gate could not
+      see, because its patterns are Latin script. Both were removed with their English counterparts. Extending
+      the gate to Arabic is not the fix and was not done: `premises` holds one spelling of the address and it
+      is the English one, so an Arabic address would have to come from an Arabic column that does not exist,
+      and the honest state is not to assert one in a baked title. If an Arabic NAP is ever wanted, it is a
+      column and a migration, not a translation in a template.'
+    - 'NOTE: SCOPED — acceptance line 2''s five surfaces. /contact and /spa are W-SITE-07''s and do not exist,
+      and there is no footer component or layout yet either. Delivered and asserted as five surfaces changed
+      by ONE field edit in ONE test run (apps/web/src/facts.itest.ts, "one field, every surface"): the NAP
+      block rendered to HTML, /api/facts, /llms.txt, the map link and the directions link — each compared
+      against the row''s new value, each asserted NOT to still carry the old one, and the edit rolled back with
+      a control proving the surfaces returned. packages/ui/src/patterns/nap-block.tsx is the footer NAP block
+      docs/09 §4 names; it takes the /api/facts payload rather than a shape of its own, so "the footer and the
+      fact sheet agree" is true by construction. "Revalidating" does not appear in the test because it is not
+      needed: every surface that reads the row is dynamic. Cache-tag revalidation belongs to the first ISR
+      route that renders NAP, which is W-SITE-04''s.'
+    - 'NOTE: what /api/facts does about the unanswered WhatsApp number, since the acceptance line and this
+      entry''s `provisional:` field both assume the earlier decision. It publishes NEITHER candidate.
+      contact.whatsapp is a discriminated union and the unanswered branch carries { status: ''unconfirmed'',
+      provisional: true, openQuestionId: ''Y1-nap'', number: null } — the schema types that field as z.null(),
+      so a number cannot be published while the status says unconfirmed. This entry''s `provisional:` line
+      ("the prototype WhatsApp number is used as canonical") is SUPERSEDED: B-CAT-06 reversed it and seeded
+      WHATSAPP-PENDING-Y1-NAP, which is_placeholder_text() refuses, and this unit follows that rather than
+      re-promoting a candidate. The reason is docs/09 §4''s own: this is the one endpoint built to end the
+      divergence between the site, the schema and GBP, so serving both numbers from it would BE the
+      divergence with a schema attached, and serving one would publish a number that may not reach the
+      business and would be indistinguishable from one the owner had confirmed. The two candidates stay in
+      WHATSAPP_CANDIDATES for the Unconfirmed Assumptions panel, which is a screen for the person who can
+      answer the question. The mechanism is the database''s: whether the column is a placeholder is decided by
+      is_placeholder_text(), the same predicate the invoice CHECK constraints use, so answering Y1-nap is one
+      UPDATE and no code change — asserted in both directions, with a gate fixture (34h) proving the contract
+      refuses the placeholder if the guard is ever deleted.'
+    - 'NOTE: SCOPED — the fields of /api/facts that docs/13 does not state. geo.latitude, geo.longitude,
+      geo.plusCode, geo.placeId, contact.email, address.poBox, address.makaniNumber and directionsNotes are
+      NULL, because `premises` holds NULL for all of them and a plausible coordinate would put a map pin on
+      the wrong building. They are not silently absent: `unanswered` enumerates each one with what it is
+      waiting on, so a consumer is told rather than left to infer that the endpoint is incomplete. hours.
+      exceptions and hours.ramadan are empty arrays for the same reason — no premises_closure row exists, and
+      docs/13 states no Ramadan hours (Y8-hours is resolved only for the ordinary week). The map and
+      directions links therefore identify the building by its full address rather than by place_id, which is
+      what Google''s URL API is for.'
+    - 'NOTE: SCOPED — "sitemap index referenced" in robots.txt. There is no sitemap: W-SITE-08 owns the index
+      and the per-type sitemaps, and a `Sitemap:` line pointing at a 404 is a reported error in Search Console
+      and a crawler spending its budget on nothing. The line is DERIVED instead: robotsResponse() emits it
+      only when the route registry declares a route at /sitemap.xml, and because the registry is in exact
+      bijection with the filesystem, "the registry knows that path" and "something serves it" are the same
+      statement. Both branches are asserted (apps/web/src/facts.test.ts), so the line appears the day
+      W-SITE-08 lands with no change to this file.'
+    - 'NOTE: SCOPED — /llms.txt "links the treatment and therapist indexes". Neither route exists: /treatments
+      is W-SITE-05''s and /therapists is W-SITE-06''s, and /treatments/[slug] is currently a text/plain
+      redirect stub the registry marks indexable: false. The page list is derived from the registry —
+      indexable documents only, in the default locale, with the other locale as an alternate — so both indexes
+      appear the day their routes land, with no change to the builder and none to the test, which asserts the
+      list EQUALS the registry''s indexable documents rather than a literal. Today that is / and /ar.'
+    - 'NOTE: the URLs in /llms.txt are excluded from the banned-claims lint, and the reason is load-bearing.
+      lexiconTokens splits on every non-alphanumeric character, so a link to the catalogue index contributes
+      the token `treatments` — and `treatment` is on regulatory_profile.banned_claim_terms under the stricter
+      default licence (0004). Linting the URLs would refuse the file for linking the most valuable pages on
+      the site, and the only remedies would be to stop linking them or to rename the route; renaming is not
+      available, because the live site''s category URLs already rank and the relaunch exists to preserve them
+      (docs/13 §6). A path is a locator, not a claim. The prose around it IS linted, and publishLlmsTxt
+      refuses to serve rather than warning — the same fail-closed shape seedCatalogue uses for a public
+      display name. Gate 34j neuters the lint and proves the control fails.'
+    - 'NOTE: robots.txt repeats the whole policy in every user-agent group, which looks redundant and is the
+      one thing this file has to get right: a crawler obeys exactly ONE group, the most specific that names
+      it, and a named group REPLACES the wildcard group rather than adding to it. A `User-agent: GPTBot` group
+      containing only `Allow: /` would therefore grant GPTBot the entire admin and the CMS REST API while
+      reading as one line more permissive. It is also why the route handler is used rather than Next''s
+      app/robots.ts metadata convention: MetadataRoute.Robots cannot express per-group completeness. The
+      registry''s noindex prefixes (/settings, /analytics, /kitchen-sink) are deliberately NOT disallowed —
+      Disallow and noindex are alternatives, not layers, and a crawler forbidden to fetch a page can never
+      read its x-robots-tag, so a URL found through an inbound link would stay indexable for ever.'
+    - 'NOTE: a second defect found, in the token layer rather than in this unit. The NAP band was first
+      rendered on a sand section, and apps/web/src/primitives.itest.ts failed it: a serious axe
+      colour-contrast violation on the map and directions links at /kitchen-sink dark ltr 390px.
+      `.be-action--quiet` is teal on transparent, and packages/ui/src/tokens/palette.generated.ts measures
+      every accent against `--color-ground` ONLY — teal is 5.73:1 there in light and 4.64:1 in dark. On
+      `--color-surface-sand` in dark (#231F1A) the same colour is 4.07:1, under the 4.5:1 body threshold. So
+      `pnpm palette` can pass while a component fails on a sand or clay band, and a quiet action is the
+      first thing to hit it. Worked around correctly rather than papered over: the band moved to the page
+      ground, where the measured figure applies, with the reasoning in a comment beside it. The token
+      question — whether `.be-action--quiet` should carry a colour that clears 4.5:1 on every surface — is
+      W-SYS-03''s, and scripts/palette.py measuring accents against the banded surfaces as well as the
+      ground is the gate that would have caught it before a page did.'
+    - 'NOTE: the tests. apps/web/src/facts.test.ts is the pure half (the payload''s shape, the ETag''s
+      independence from the clock, the robots groups, the lint and its control, the WhatsApp union in both
+      states) and apps/web/src/facts.itest.ts is the database half (every field compared against the row, the
+      32 price points counted from the same predicate, 304 on a conditional request and 200 on a stale
+      validator, 01:30 inside opening hours and 03:00 outside via resolveTradingDate over the PUBLISHED hours,
+      the Unconfirmed Assumptions correspondence in both directions, one field changing five surfaces, 503
+      when the singleton is missing, and robots.txt line by line). The handlers are called directly rather
+      than over HTTP, exactly as apps/web/src/otp-route.itest.ts drives handleOtpRequest: the ETag, the 304
+      and the content types are decided in the handler, and route-spine.itest.ts already asserts the three
+      paths are served by comparing the registry against .next/app-path-routes-manifest.json. Every write in
+      the itest is either the idempotent seed or inside a transaction that ends in a rollback.'
     files:
     - apps/web/app/api/facts/route.ts
     - apps/web/app/llms.txt/route.ts

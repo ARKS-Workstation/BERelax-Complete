@@ -18,19 +18,27 @@
  *
  * Both handles share one `CallLog`, because the admin Messages inbox is one inbox.
  *
- * The fake numbers provider message ids per instance, so a transactional and a promotional id can
- * coincide in a test. Nothing in the send path compares ids across identities, and the real SMSala
- * account numbers them itself.
+ * ## The provider message id is the vendor's own, unqualified
+ *
+ * It was tempting to qualify it here with the message class, because this transport holds two provider
+ * instances and the fake used to number them per instance — so `smsala-000001` could be issued twice.
+ * That was the wrong place to fix it: `message.provider_message_id` is persisted, it is matched against
+ * incoming delivery receipts, and it is the string somebody quotes at SMSala support. A prefix this
+ * system invented would be an id the vendor never issued. The fake was fixed instead, and derives the id
+ * from the idempotency key — stable for one message, distinct for two, in any process.
  */
 import type { Config } from '@berelax/config'
 import {
   type CallLog,
   createCallLog,
   createProviders,
+  type DeliveryStatus,
   FailureScript,
   failureModeOf,
   type SmsProvider,
 } from '@berelax/providers'
+import type { MessageStatus } from '@berelax/shared'
+import type { DeliveryReceiptRecord, ReceiptSource } from '../lifecycle.ts'
 import type { MessageClass } from '../port.ts'
 import type {
   ClassRoutedTransport,
@@ -63,12 +71,51 @@ export function transportFailureFor(failureMode: string | undefined): TransportF
   }
 }
 
+/**
+ * SMSala's delivery vocabulary, mapped onto ours. Exhaustive by construction.
+ *
+ * `satisfies Record<DeliveryStatus, MessageStatus>` is the point: `DeliveryStatus` is the vendor's
+ * union in `packages/providers/src/sms/port.ts`, so the day SMSala grows a sixth status this stops
+ * compiling and somebody decides what it means. A `switch` with a `default` would have swallowed it.
+ *
+ * `expired` and `rejected` both become `failed` and both keep their own word in
+ * `message_delivery_receipt.vendor_status`: they are the same fact for the lifecycle — the message did
+ * not arrive — and different facts for an operator, because an expiry is a handset that was off for
+ * 48 hours and a rejection is a number that will never work.
+ */
+export const SMSALA_STATUS_MAP = {
+  accepted: 'sent',
+  delivered: 'delivered',
+  failed: 'failed',
+  expired: 'failed',
+  rejected: 'failed',
+} as const satisfies Record<DeliveryStatus, MessageStatus>
+
+/**
+ * One SMSala status word, mapped.
+ *
+ * `null` for anything else, and that is the answer the acceptance criterion turns on: an unrecognised
+ * vendor status must not become `delivered`. It is recorded with the vendor's word intact and
+ * `ignored_reason = 'vendor_status_unrecognised'`, so a vocabulary change shows up as a queue of
+ * receipts nobody applied rather than as a wall of messages reported as delivered.
+ *
+ * Takes a `string` rather than `DeliveryStatus` on purpose: the argument comes off the wire, and typing
+ * it as the union would mean the only way to reach this function is to have already assumed the answer.
+ */
+export function mapSmsalaStatus(vendorStatus: string): MessageStatus | null {
+  return Object.hasOwn(SMSALA_STATUS_MAP, vendorStatus)
+    ? SMSALA_STATUS_MAP[vendorStatus as DeliveryStatus]
+    : null
+}
+
 export interface SmsalaTransport {
   readonly transport: ClassRoutedTransport
   /** Every provider call either identity made, in order. The admin inbox and the tests read this. */
   readonly calls: CallLog
   /** One script per registered identity, so a suspension can be armed for one class alone. */
   readonly failures: Readonly<Record<MessageClass, FailureScript>>
+  /** The delivery receipts both identities have reported since the last drain, already mapped. */
+  readonly receipts: ReceiptSource
 }
 
 export function createSmsalaTransport(args: {
@@ -123,5 +170,28 @@ export function createSmsalaTransport(args: {
     },
   }
 
-  return { transport, calls, failures }
+  const receipts: ReceiptSource = {
+    vendor: 'smsala',
+    async drain(): Promise<readonly DeliveryReceiptRecord[]> {
+      const drained: DeliveryReceiptRecord[] = []
+      // Both identities, in a declared order rather than `Object.values`: the promotional identity's
+      // receipts and the transactional identity's are two queues, and a drain that read one of them
+      // would leave the other growing silently until a suspension test noticed.
+      for (const messageClass of ['transactional', 'promotional'] as const) {
+        for (const receipt of await providers[messageClass].drainDeliveryReceipts()) {
+          drained.push({
+            vendor: 'smsala',
+            providerMessageId: receipt.providerMessageId,
+            vendorStatus: receipt.status,
+            mapped: mapSmsalaStatus(receipt.status),
+            occurredAtIso: receipt.occurredAtIso,
+            reason: receipt.reason ?? null,
+          })
+        }
+      }
+      return drained
+    },
+  }
+
+  return { transport, calls, failures, receipts }
 }

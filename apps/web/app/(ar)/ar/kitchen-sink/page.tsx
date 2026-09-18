@@ -23,12 +23,17 @@
  */
 import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
-import { ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
+import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
+import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import { NAP_COPY_AR } from '../../../_dev/nap-copy.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
 import { RouteNav } from '../../../_routes/route-nav.tsx'
 import { portraits } from '../../../(en)/(dev)/kitchen-sink/portraits.ts'
+
+/** Per request, not prerendered: the NAP block reads the premises row. See the English sink. */
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'معرض المكونات — نظام التصميم لبي ريلاكس',
@@ -45,8 +50,14 @@ const MENU = [
   { name: 'حمام مغربي أو جاكوزي', minutes: 60, price: aed(300) },
 ] as const
 
+/**
+ * A layout specimen for `SlotGrid`, and deliberately not the trading hours.
+ *
+ * The same eight labels as the English sink, for the same reason: they used to begin at the opening time,
+ * which made this page a second place the hours were written down. The hours are rendered below from the
+ * premises row. See the English route for the longer note.
+ */
 const SLOTS = [
-  { label: '11:00', available: true },
   { label: '12:30', available: true },
   { label: '14:00', available: true, selected: true },
   { label: '15:30', available: false },
@@ -54,6 +65,7 @@ const SLOTS = [
   { label: '18:30', available: true },
   { label: '20:00', available: true },
   { label: '21:30', available: true },
+  { label: '23:00', available: true },
 ] as const
 
 /** No therapist has a display name until an admin sets one and records a consent. ADR 0020. */
@@ -110,12 +122,15 @@ const PRIMITIVE_COPY: PrimitiveGalleryCopy = {
     trigger: 'اختر وقت البداية',
     title: 'أوقات البداية المتاحة اليوم',
     description:
-      'يمتد العمل من الساعة 11:00 حتى 02:00، لذا يسبق آخر موعد للبداية وقت الإغلاق بمقدار مدة الجلسة.',
+      'تمتد الجلسة إلى ما بعد منتصف الليل، لذا يسبق آخر موعد للبداية وقت الإغلاق بمقدار مدة الحجز. ' +
+      'وأوقات العمل نفسها معروضة أدناه، مقروءة من سجل المقر.',
     close: 'إغلاق',
   },
 }
 
-export default function ArabicKitchenSinkPage() {
+export default async function ArabicKitchenSinkPage() {
+  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
+  const facts = await readFactsForPage()
   return (
     <main>
       <DesignSystemStyles />
@@ -182,6 +197,36 @@ export default function ArabicKitchenSinkPage() {
                 />
               </li>
             ))}
+          </GridCell>
+        </Grid>
+      </Section>
+
+      {/*
+        The page ground, deliberately, and not the sand band this section first used.
+
+        `.be-action--quiet` is teal on transparent, and `packages/ui/src/tokens/palette.generated.ts`
+        measures every accent against `--color-ground` only: teal is 5.73:1 there in light and 4.64:1 in
+        dark. On `--color-surface-sand` in dark (#231F1A) the same colour is 4.07:1, under the 4.5:1 body
+        threshold — and `apps/web/src/primitives.itest.ts` caught it, as a serious axe colour-contrast
+        violation on the map and directions links at `/kitchen-sink dark ltr 390px`. The two links stay
+        quiet actions, because four gold actions in a row is not a design, and the band moves to the
+        ground where the measured figure applies. A quiet action on a sand band is a token question for
+        W-SYS-03 rather than something to work around per page.
+      */}
+      <Section id="nap">
+        <Grid>
+          <Measure cap="h2" as="h2" className="text-xl be-section__heading">
+            موقعنا
+          </Measure>
+          <GridCell span="wide">
+            {facts === null ? (
+              <Measure cap="body" className="text-sm text-ink-2">
+                لم يُحمَّل سجل المقر في قاعدة البيانات هذه، فلا يوجد ما يُعرض. لا شيء في هذه الصفحة
+                يختلق عنوانًا لتعويض النقص.
+              </Measure>
+            ) : (
+              <NapBlock copy={NAP_COPY_AR} facts={facts} />
+            )}
           </GridCell>
         </Grid>
       </Section>

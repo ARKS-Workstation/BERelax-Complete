@@ -68,6 +68,16 @@ export {
   payablesAging,
 } from './queries/payables-aging.ts'
 export {
+  type CataloguePriceRow,
+  type HoursExceptionRow,
+  type LegalNamesRow,
+  type PremisesFacts,
+  type PremisesFactsRow,
+  type PriceOnRequestRow,
+  readPremisesFacts,
+  type TradingHoursRow,
+} from './queries/premises-facts.ts'
+export {
   type ForecastFilter,
   type ForecastPeriod,
   type ForecastRow,
@@ -198,6 +208,27 @@ export {
   type StoredProvisionalMarker,
 } from './repositories/journal.ts'
 export {
+  type CostByTemplate,
+  type CostByTradingDate,
+  type CostWindow,
+  countPromotionalMessagesSince,
+  createPostgresMessageStore,
+  type InboxEntry,
+  type InboxFilter,
+  type InboxReceipt,
+  listMessageInbox,
+  listMessageReceipts,
+  type MessageAttemptOutcome,
+  type MessageRow,
+  type MessageToRecord,
+  messageCostByTemplate,
+  messageCostByTradingDate,
+  type PostgresMessageStore,
+  type ReceiptOutcome,
+  type ReceiptToApply,
+  readMessageRow,
+} from './repositories/message.ts'
+export {
   type AllocatedDocumentNumber,
   allocateDocumentNumber,
   DOCUMENT_SERIES_CODES,
@@ -271,6 +302,8 @@ export {
   seedProvisionalOpeningBalances,
 } from './seed/opening-balances.ts'
 export {
+  AREA_ALIASES,
+  areaAliasesFor,
   ensureLegalEntity,
   LEGAL_ENTITY_ID,
   LEGAL_ENTITY_SEED,
