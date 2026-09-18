@@ -4,15 +4,11 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 
 **0 / 37 units complete.**
 
-## Next up
-
-1. **F01 — Monorepo scaffold and toolchain**
-
 ## All units
 
 | | Order | ID | Unit | Depends on | Milestone | Owner input |
 |---|---|---|---|---|---|---|
-| [ ] | 1 | `F01` | Monorepo scaffold and toolchain | — | — | — |
+| [~] | 1 | `F01` | Monorepo scaffold and toolchain | — | — | — |
 | [ ] | 2 | `F02` | CI pipeline with real Postgres | `F01` | — | — |
 | [ ] | 3 | `F03` | Environments, config validation, staging send guard | `F01` | — | — |
 | [ ] | 4 | `F04` | Database spine and migration pipeline | `F02` | — | — |
