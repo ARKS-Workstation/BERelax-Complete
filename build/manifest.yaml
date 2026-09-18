@@ -2012,7 +2012,7 @@ units:
       or rejected, with provisional zeros flagged in the Unconfirmed Assumptions panel, plus the trial balance
       query every later gate depends on.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - M-TILL-02
@@ -2031,11 +2031,46 @@ units:
       import raise'
     - a posting dated before the opening date is refused with BeforeOpeningBalance from every posting path
       (invoice, bill, credit note, payment, redemption), asserted for all five
+    - 'NOTE: the five posting paths (invoice, bill, credit note, payment, redemption) do not exist yet —
+      M-TILL-04 and the M-VAT units build them — so BeforeOpeningBalance is enforced once, as a BEFORE
+      INSERT trigger on journal_entry raising ZL004, and asserted for all five by posting through
+      postJournalEntry with each path''s `source`. A rule enforced in five places has five chances to be
+      forgotten, and the one that is forgotten posts into the period the opening entry already summarises.
+      Nothing is deferred: when those units land they post through the same choke point and are already
+      covered.'
+    - 'NOTE: opening_date_for() returns min(opening_date), not the row''s. The unique key the acceptance
+      asks for is on (legal_entity, opening_date), which permits a second import at a different date — and
+      with two rows an unaggregated select returns whichever the planner reaches first, so the guard''s
+      threshold would depend on the query plan. The earliest date is the right answer: the books opened
+      when they first opened.'
+    - 'NOTE: a zero opening position cannot be expressed. journal_line_exactly_one_side (0018) requires
+      exactly one side of a line to be non-zero and postJournalEntry refuses an entry with fewer than two
+      lines, both correctly — so the provisional seed posts the smallest balanced non-vacuous entry the
+      ledger permits, 1 fils of cash against 1 fils of owner''s capital, flagged provisional against
+      Y8-opening-balances and replaceable wholesale by a dated reversal. Relaxing the constraint so a zero
+      line could exist would let every future posting path write a line somebody forgot to fill in.'
+    - 'NOTE: the trial balance returns bigint, not number. It was written with number and its own test
+      caught the consequence: a ledger holding 2^53 + 1 fils on each side reported a difference of -4 fils
+      out of nothing, because the two sides round independently. 2^53 fils is about 900 billion dirhams so
+      no real balance reaches it — the argument is that this is the function every later gate asserts
+      against, and one that can report a non-zero difference for a sound ledger is a gate that fires on a
+      sound ledger.'
+    - 'NOTE: the itest deletes nothing from the ledger and asserts only deltas. The refusal triggers in
+      0018 refuse the OWNER too, not merely the application role, so a reset between tests is impossible —
+      discovered by trying. An earlier draft used fixed date windows instead and passed on a clean database
+      while failing at exactly 4x on the fourth run, because the entry ids were unique per run and the
+      dates were not.'
+    - 'NOTE: deferred — nothing imports real figures. The import service, its guard, the seed and the
+      trial balance are here; the file format, the upload screen and the reconciliation against the
+      previous arrangement''s closing position belong with the migration units (H-MIG).'
     files:
     - packages/db/src/services/opening-balances.ts
     - packages/db/src/services/opening-balances.itest.ts
     - packages/db/src/queries/trial-balance.ts
     - packages/db/src/seed/opening-balances.ts
+    - packages/db/migrations/0027_opening_balances.sql
+    - packages/db/src/schema/opening-balances.ts
+    - scripts/test-gates.mjs
   - id: M-VAT-06
     order: 61
     title: Period close and lock workflow, corrections by dated reversal

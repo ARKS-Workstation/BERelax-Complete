@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**32 / 207 units complete.**
+**33 / 207 units complete.**
 
 ## Next up
 
@@ -74,7 +74,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
 | [ ] | 58 | `M-VAT-03` | Reverse charge on offshore suppliers and the nightly exception report | `F06`, `M-VAT-01`, `M-VAT-02` | — | — |
 | [ ] | 59 | `M-VAT-04` | Recurring cost register with fixed/variable split and variance alerting | `H03`, `M-VAT-01` | — | — |
-| [ ] | 60 | `M-VAT-05` | Opening balances and the trial balance | `M-TILL-02` | — | Y8-opening-balances, Y8-coa |
+| [x] | 60 | `M-VAT-05` | Opening balances and the trial balance | `M-TILL-02` | — | Y8-opening-balances, Y8-coa |
 | [ ] | 61 | `M-VAT-06` | Period close and lock workflow, corrections by dated reversal | `M-TILL-08`, `M-VAT-05` | — | — |
 | [ ] | 62 | `M-VAT-07` | VAT201 box mapping and working papers with drill-down | `M-TILL-10`, `M-VAT-02`, `M-VAT-03`, `M-VAT-06` | — | Y11-tax-agent, Y11-vat-package |
 | [ ] | 63 | `M-VAT-08` | Immutable VAT return snapshot with preparer and reviewer sign-off | `F07`, `M-VAT-07` | — | Y11-tax-agent |

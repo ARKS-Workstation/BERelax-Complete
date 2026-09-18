@@ -1310,6 +1310,72 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 28b. Nothing may be posted before the books open (M-VAT-05), and the opening entry itself may.
+//
+//       The rule is a trigger rather than a check in each of the five posting paths (invoice, bill, credit
+//       note, payment, redemption), because a rule enforced in five places has five chances to be
+//       forgotten — and the one that is forgotten is the one that posts into the period the opening
+//       balances already summarise, so the figure is counted twice. Both cases run against real
+//       PostgreSQL inside `begin ... rollback`, because a trigger is only a gate once something has been
+//       seen to bounce off it.
+{
+  const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
+  const psql = (statements) => run('psql', ['-v', 'ON_ERROR_STOP=1', url, '-c', statements])
+
+  if (url === '') {
+    // Loudly, not silently. A gate that skips when its environment is absent is the ADR 0002 failure.
+    check(
+      'opening-balance guard rejects a backdated posting',
+      false,
+      'TEST_DATABASE_URL is not set',
+    )
+  } else {
+    // A date far enough back that nothing else in any database this runs against has imported there —
+    // the unique key is on (entity, date), and a shared development database will already hold the real
+    // import. `opening_date_for` takes the **earliest**, so this row is the binding floor inside the
+    // transaction whatever else exists, which is exactly what the two cases below need.
+    const opening = `
+      begin;
+      insert into legal_entity (id, legal_name, trading_name)
+        values (1, 'gate fixture', 'gate fixture') on conflict (id) do nothing;
+      insert into journal_entry (entry_id, entry_date, narrative, source)
+        values ('JE-GATE-OPEN', '2020-01-01', 'gate fixture opening', 'opening_balance');
+      insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils)
+        values ('JE-GATE-OPEN', 1, '1010', 100, 0), ('JE-GATE-OPEN', 2, '3010', 0, 100);
+      insert into opening_balance_import
+        (legal_entity_id, opening_date, entry_id, total_debit_fils, total_credit_fils, imported_by)
+        values (1, '2020-01-01', 'JE-GATE-OPEN', 100, 100, 'gate');
+    `
+
+    const backdated = psql(`${opening}
+      insert into journal_entry (entry_id, entry_date, narrative, source)
+        values ('JE-GATE-EARLY', '2019-12-31', 'a sale before the books open', 'sale');
+      rollback;
+    `)
+    checkRejectedBy(
+      'opening-balance guard rejects a backdated posting',
+      backdated,
+      'BeforeOpeningBalance',
+    )
+
+    // The control, which must succeed. A guard that refused everything would satisfy the case above and
+    // make the system unusable on its first trading day — and the opening entry itself predates the import
+    // row that creates the guard, so it has to be possible at all.
+    const onOpeningDay = psql(`${opening}
+      insert into journal_entry (entry_id, entry_date, narrative, source)
+        values ('JE-GATE-OK', '2020-01-01', 'a sale on the opening date', 'sale');
+      insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils)
+        values ('JE-GATE-OK', 1, '1010', 50, 0), ('JE-GATE-OK', 2, '4010', 0, 50);
+      rollback;
+    `)
+    check(
+      'opening-balance guard allows a posting on the opening date',
+      !onOpeningDay.failed,
+      `refused a legitimate posting on the opening date:\n${onOpeningDay.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

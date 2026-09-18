@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from './connection.ts'
 import {
   drainOutbox,
@@ -22,6 +22,20 @@ const STAFF = {
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 4 })
+})
+
+beforeEach(async () => {
+  // Every undelivered event, not only this file's.
+  //
+  // `drainOutbox` is the worker's drain: it claims the oldest undelivered rows across the whole table,
+  // deliberately, because that is what a worker has to do. So a test of it cannot coexist with another
+  // unit's leftovers — and the moment a second unit started publishing (M-VAT-05's thousand journal
+  // postings were the first), five assertions here began reading that unit's events instead of their own.
+  // The symptom was "expected 1, got 50", in a file that had passed for weeks.
+  //
+  // `outbox_event` is not append-only, so unlike `audit_event` it can be cleared. Scoping the cleanup to
+  // `aggregate_type = 'f06_test'` was not enough and could not have been: the reads are global.
+  await sql`delete from outbox_event where published_at is null`
 })
 
 afterEach(async () => {

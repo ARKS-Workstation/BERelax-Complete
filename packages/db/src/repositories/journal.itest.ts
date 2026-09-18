@@ -77,7 +77,7 @@ afterAll(async () => {
 let testStartedAt: Date
 
 beforeEach(async () => {
-  await sql.unsafe('truncate journal_line, journal_entry')
+  await sql.unsafe('truncate journal_line, journal_entry cascade')
   await sql`delete from period_lock`
   // audit_event is append-only and shared with every other unit, so it cannot be truncated and a
   // TOTAL would be a different number on every machine and on every re-run of this file. Every count
@@ -263,7 +263,7 @@ describe('posting', () => {
     }
 
     // Control: the original alone does NOT net to nothing, so the loop above is asserting something.
-    await sql.unsafe('truncate journal_line, journal_entry')
+    await sql.unsafe('truncate journal_line, journal_entry cascade')
     await post(saleOf('JE-ALONE', 10_500))
     const alone = await accountTotals(sql)
     expect(alone.some((row) => row.debitFils !== row.creditFils)).toBe(true)

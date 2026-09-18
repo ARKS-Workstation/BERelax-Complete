@@ -45,6 +45,13 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  isBalanced,
+  type TrialBalance,
+  type TrialBalanceRow,
+  trialBalanceAsAt,
+  trialBalanceMovement,
+} from './queries/trial-balance.ts'
+export {
   type AgentDefinitionRow,
   type AgentHeartbeatRow,
   type AgentOutcome,
@@ -148,6 +155,22 @@ export {
   recordReplySubmittedToApi,
 } from './repositories/reviews.ts'
 export * as schema from './schema/index.ts'
+export {
+  PROVISIONAL_OPENING_DATE,
+  PROVISIONAL_OPENING_LINES,
+  seedProvisionalOpeningBalances,
+} from './seed/opening-balances.ts'
+export {
+  type ImportedOpeningBalances,
+  importOpeningBalances,
+  isBeforeOpeningBalance,
+  OPENING_BALANCE_SQLSTATE,
+  type OpeningBalanceImport,
+  type OpeningBalanceLine,
+  openingDate,
+  openingImbalanceFils,
+  provisionalOpeningBalances,
+} from './services/opening-balances.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 21 as const
+export const SCHEMA_VERSION = 27 as const
