@@ -91,8 +91,9 @@ export const premisesClosure = pgTable(
     kind: text('kind').notNull(),
     /** UAE public holidays are lunar and announced late; provisional must be distinguishable. */
     isConfirmed: boolean('is_confirmed').notNull(),
-    openTime: time('open_time'),
-    closeTime: time('close_time'),
+    /** Start of a partial-day closure, local time. Null with the pair means the whole date. */
+    closedFromTime: time('closed_from_time'),
+    closedUntilTime: time('closed_until_time'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },

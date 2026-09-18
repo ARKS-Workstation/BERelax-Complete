@@ -2,11 +2,11 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**16 / 206 units complete.**
+**17 / 206 units complete.**
 
 ## Next up
 
-1. **B-CAT-01 — Premises hours, closures and the first-class business_day**  — **needs owner input:** Y8-hours
+1. **B-CAT-02 — Rooms, room types, capacity and service/room compatibility**  — **needs owner input:** Y8-rooms, Y1-rooms, Y9-shaving-room
 1. **B-MSG-01 — Channel-shaped template model, encoding, segment count and cost**
 1. **M-TILL-01 — Chart of accounts and the pure double-entry ledger kernel**  — **needs owner input:** Y8-coa
 
@@ -30,7 +30,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |
 | [x] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
 | [x] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |
-| [ ] | 17 | `B-CAT-01` | Premises hours, closures and the first-class business_day | `F04`, `F05`, `F09`, `H03` | — | Y8-hours |
+| [x] | 17 | `B-CAT-01` | Premises hours, closures and the first-class business_day | `F04`, `F05`, `F09`, `H03` | — | Y8-hours |
 | [ ] | 18 | `B-CAT-02` | Rooms, room types, capacity and service/room compatibility | `B-CAT-01` | — | Y8-rooms, Y1-rooms, Y9-shaving-room |
 | [ ] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
 | [ ] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |

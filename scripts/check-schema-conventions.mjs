@@ -43,7 +43,10 @@ for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))
   readFileSync(path, 'utf8')
     .split('\n')
     .forEach((line, i) => {
-      const code = line.replace(/--.*$/, '')
+      // `--` comments and single-quoted strings are blanked before the scan. SQL `comment on`
+      // statements are prose about the schema, and prose about a schema says the word "timestamp" —
+      // which the first version of this gate reported as a naive timestamp column.
+      const code = line.replace(/'(?:[^']|'')*'/g, "''").replace(/--.*$/, '')
       // `timestamp` not followed by `tz` or `with time zone`.
       if (/\btimestamp\b(?!tz)(?!\s+with\s+time\s+zone)/i.test(code)) {
         problems.push(`${path}:${i + 1}  naive timestamp — use timestamptz`)

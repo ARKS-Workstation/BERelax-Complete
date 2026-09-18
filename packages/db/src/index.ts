@@ -27,6 +27,13 @@ export {
   PGBOSS_SCHEMA,
 } from './jobs/boss.ts'
 export {
+  type BusinessDayInput,
+  businessDayFingerprint,
+  type GenerationResult,
+  generateBusinessDays,
+  type WriteOptions,
+} from './jobs/generate-business-days.ts'
+export {
   type DomainEvent,
   type DrainResult,
   drainOutbox,
@@ -39,4 +46,4 @@ export {
 export * as schema from './schema/index.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 10 as const
+export const SCHEMA_VERSION = 11 as const

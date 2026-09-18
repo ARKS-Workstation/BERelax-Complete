@@ -347,7 +347,29 @@ const runExpectingFailure = (cmd, args) => {
   check('byte budgets reject an oversized artifact', failed)
 }
 
-// 23. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 23. The business-day suite must pass under a hostile process timezone.
+{
+  // Asia/Dubai has no DST, which makes a fixed +04:00 offset tempting and wrong: the assumption
+  // survives every test until the day somebody runs the worker in another region. Kiritimati is
+  // UTC+14 and Los Angeles is UTC-7, so a resolver that read the process timezone anywhere would
+  // return a different trading date in one of them.
+  let broke = false
+  for (const tz of ['UTC', 'Pacific/Kiritimati', 'America/Los_Angeles']) {
+    try {
+      execFileSync(
+        'pnpm',
+        ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', 'packages/core/src/business-day'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TZ: tz } },
+      )
+    } catch {
+      broke = true
+      console.log(`      failed under TZ=${tz}`)
+    }
+  }
+  check('business-day resolution is identical under UTC, UTC+14 and UTC-7', !broke)
+}
+
+// 24. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [

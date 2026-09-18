@@ -246,7 +246,7 @@ units:
       packages/core resolver that maps an arbitrary instant to its trading date and enumerates the trading
       windows for a date net of closures. A horizon generator materialises business_day rows idempotently.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04

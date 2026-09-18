@@ -11,8 +11,15 @@
  * is the acceptance criterion and also what makes a developer's `pnpm seed` safe to run twice when
  * they are not sure whether it worked the first time.
  */
-import type { Sql } from '@berelax/db'
-import { FIXTURE_CLOSE, FIXTURE_OPEN } from './clock.ts'
+import { horizonDates, horizonRows, hoursFromSchedule, localDate, localTime } from '@berelax/core'
+import { generateBusinessDays, type Sql } from '@berelax/db'
+import {
+  FIXTURE_CLOSE,
+  FIXTURE_FORWARD_DAYS,
+  FIXTURE_HISTORY_DAYS,
+  FIXTURE_OPEN,
+  FIXTURE_TODAY,
+} from './clock.ts'
 import type { FixtureSalon } from './salon.ts'
 
 export interface Loader {
@@ -92,7 +99,47 @@ const settingsLoader: Loader = {
   },
 }
 
-const LOADERS: Loader[] = [premisesLoader, settingsLoader]
+/**
+ * The trading calendar, over the fixture's own horizon.
+ *
+ * Every report joins to `business_day`, so a fixture without it has no days to report on. The horizon
+ * matches the appointments — history behind, forward book ahead — because a calendar shorter than the
+ * data is a join that silently drops rows.
+ */
+const businessDayLoader: Loader = {
+  name: 'business-days',
+  after: ['premises'],
+  async load(sql, salon) {
+    void salon
+    const hours = { open: localTime(FIXTURE_OPEN), close: localTime(FIXTURE_CLOSE) }
+    const from = shift(FIXTURE_TODAY, -FIXTURE_HISTORY_DAYS)
+    const days = FIXTURE_HISTORY_DAYS + FIXTURE_FORWARD_DAYS + 1
+    const rows = horizonRows({
+      from,
+      days,
+      hoursFor: hoursFromSchedule({ weekly: Array.from({ length: 7 }, () => hours) }),
+    })
+    const result = await generateBusinessDays(
+      sql,
+      rows.map((row) => ({
+        tradingDate: row.tradingDate,
+        opensAt: row.opensAt,
+        closesAt: row.closesAt,
+        source: row.source,
+      })),
+      { from, to: horizonDates(from, days).at(-1) ?? from },
+    )
+    return result.inserted + result.updated
+  },
+}
+
+function shift(date: string, offsetDays: number) {
+  const value = new Date(`${date}T00:00:00Z`)
+  value.setUTCDate(value.getUTCDate() + offsetDays)
+  return localDate(value.toISOString().slice(0, 10))
+}
+
+const LOADERS: Loader[] = [premisesLoader, settingsLoader, businessDayLoader]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */
 export function registerLoader(loader: Loader): void {
