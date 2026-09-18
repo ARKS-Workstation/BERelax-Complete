@@ -68,6 +68,33 @@ caught a real defect in this repository.
 11. **Colours come from `@berelax/ui` tokens.** `pnpm colours` rejects a literal hex anywhere outside
     the token layer.
 
+12. **The integration suite runs sequentially against ONE database, and earlier files leave rows
+    behind.** A test that assumes it is the only row in a table passes until another unit lands and then
+    fails on somebody else's branch. Three real cases, all of which were green for weeks:
+
+    - `with-google.itest.ts` assumed it held the only Google connection. `resolveTarget` scans every
+      connection serving a capability and orders by id — production behaviour, and why a consumer never
+      has to know which account is wired up — so a completed consent left behind by `google-oauth.itest.ts`
+      sorted first and won every test in the file. Isolate by narrowing what the code under test can
+      *see* (that file disconnects the others), not by deleting rows a foreign key protects:
+      `google_reviews.connection_id` is `ON DELETE RESTRICT`, and a `delete` there is a different false
+      failure, not a fix.
+    - `settings-store.itest.ts` read a **delta through a capped reader**. `settingHistory` takes a
+      `limit`, `app_setting_history` is append-only so it only grows, and the first time a key passed
+      500 rows both sides of the subtraction pinned at 500 — three recorded changes read as zero. Count
+      in SQL. A limit is right for a panel and wrong for a count, and its sibling assertion had gone
+      vacuous the same way.
+    - `opening-balances.itest.ts` ensured the `legal_entity` **singleton** with an invented spelling of
+      the legal name, reasoning that `on conflict do nothing` would discard it against a seeded
+      database. It then ran against a database that predated the seed, won the race, and left the wrong
+      registered name in the row every later suite reads — and that column is snapshotted onto every tax
+      invoice. If you ensure a singleton, ensure it with the values the migration seeds.
+
+13. **Do not invent a value that the real system will one day hold.** A plausible-looking TRN, licence
+    number, legal name or address is worse than a blank one: blank is visibly unanswered, and plausible
+    is indistinguishable from configured. Provisional values carry a marker the schema refuses
+    (`is_placeholder_text`, migration 0026) and an `OPEN-QUESTIONS` id.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy
