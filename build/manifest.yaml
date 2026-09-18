@@ -68,7 +68,7 @@ units:
     order: 5
     title: Money, time and identifier primitives
     owner: claude
-    status: todo
+    status: done
     depends_on: [F01]
     steps: [20]
     acceptance:

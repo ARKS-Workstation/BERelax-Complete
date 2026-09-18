@@ -85,5 +85,8 @@ jobs:
       - name: Schema drift (Drizzle vs database)
         run: pnpm db:drift
 
+      - name: Schema conventions (timestamptz, integer money)
+        run: pnpm db:conventions
+
       - name: Gates fire
         run: pnpm gates:test

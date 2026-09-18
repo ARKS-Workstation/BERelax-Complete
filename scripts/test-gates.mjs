@@ -97,7 +97,23 @@ const runExpectingFailure = (cmd, args) => {
   check('drift gate rejects a Drizzle table the database does not have', failed)
 }
 
-// 6. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 6. A naive timestamp column must fail the conventions gate.
+{
+  const f = 'packages/db/src/schema/__gate_fixture__.ts'
+  writeFileSync(
+    f,
+    [
+      "import { pgTable, timestamp } from 'drizzle-orm/pg-core'",
+      "export const naive = pgTable('naive_table', { at: timestamp('at') })",
+      '',
+    ].join('\n'),
+  )
+  const { failed } = runExpectingFailure('node', ['scripts/check-schema-conventions.mjs'])
+  rmSync(f, { force: true })
+  check('conventions gate rejects a timestamp without withTimezone', failed)
+}
+
+// 7. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -111,6 +127,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm test:integration',
     'pnpm db:migrate:dry',
     'pnpm db:drift',
+    'pnpm db:conventions',
     'pnpm gates:test',
     'postgres:16',
   ]
