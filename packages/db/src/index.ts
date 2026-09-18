@@ -45,6 +45,18 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  type BlockedInputVatLine,
+  blockedInputVatLines,
+  disclosureFor,
+  INPUT_VAT_NON_RECOVERY_REASONS,
+  type InputVatAccountRow,
+  type InputVatDisclosureRow,
+  type InputVatNonRecoveryReason,
+  type InputVatPeriod,
+  type InputVatRecoveryWorkingPaper,
+  inputVatRecovery,
+} from './queries/input-vat-recovery.ts'
+export {
   bucketTotalFils,
   type OutstandingPayable,
   outstandingPayables,
@@ -289,6 +301,9 @@ export {
   type BillTaxTreatment,
   type BillToPost,
   findSupplierByCode,
+  INPUT_VAT_RECOVERABILITIES,
+  type InputVatRecoverability,
+  isBlockedRecoverabilityRefusal,
   isDuplicateSupplierReference,
   isInputVatWithoutTrn,
   PLACE_OF_SUPPLY_RULES,
@@ -307,6 +322,16 @@ export {
   type SupplierResidency,
   TRADE_PAYABLES_ACCOUNT_CODE,
 } from './services/post-bill.ts'
+export {
+  ACCOUNT_VAT_BOXES,
+  type AccountClassification,
+  type AccountVatBox,
+  blockedInputVatAccountCodes,
+  type ReclassifyAccountInput,
+  readAccountClassification,
+  reclassifyAccountRecoverability,
+  recoverabilityOfPair,
+} from './services/reclassify-account.ts'
 export {
   findRecurringCostByCode,
   type GeneratedInstance,
@@ -347,4 +372,6 @@ export {
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
+// 33 and 35 are units in flight alongside this one; 34 is 0034_blocked_input_vat.sql and 36 is
+// 0036_setting_justification.sql.
 export const SCHEMA_VERSION = 36 as const

@@ -67,8 +67,11 @@ export const recurringCost = pgTable(
       .references(() => account.code),
     /**
      * The treatment the bill line is **expected** to carry, from `bill_line.tax_treatment`'s
-     * vocabulary. Expected, not authoritative: `postBill` reads the supplier's TRN snapshot and refuses
-     * a claim without one.
+     * vocabulary — including `blocked_not_recoverable` since 0034, because staff transport at 02:00 is a
+     * monthly contract and so a recurring cost in a blocked category.
+     *
+     * Expected, not authoritative: `postBill` reads the supplier's TRN snapshot and refuses a claim
+     * without one, and the account's own classification decides whether a claim is possible at all.
      */
     taxTreatment: text('tax_treatment').notNull(),
 
@@ -108,10 +111,12 @@ export const recurringCost = pgTable(
     index('recurring_cost_supplier_idx').on(t.supplierId),
     check('recurring_cost_code_check', sql`${t.code} ~ '^[a-z0-9][a-z0-9-]*$'`),
     check('recurring_cost_description_check', sql`btrim(${t.description}) <> ''`),
+    // Named by 0034, where the blocked treatment joined the vocabulary: 0031 left the CHECK anonymous,
+    // so the next unit extending it had to guess what PostgreSQL had called it.
     check(
-      'recurring_cost_tax_treatment_check',
-      sql`${t.taxTreatment} in ('standard_recoverable', 'no_trn_not_recoverable', 'zero_rated',
-                               'exempt', 'out_of_scope')`,
+      'recurring_cost_tax_treatment_allowed',
+      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable',
+                               'no_trn_not_recoverable', 'zero_rated', 'exempt', 'out_of_scope')`,
     ),
     check('recurring_cost_cadence_check', sql`${t.cadence} in ('monthly', 'quarterly', 'annual')`),
     check('recurring_cost_cost_kind_check', sql`${t.costKind} in ('fixed', 'variable')`),

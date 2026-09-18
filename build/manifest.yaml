@@ -2590,7 +2590,7 @@ units:
       blocked (entertainment and the other blocked categories) or out_of_scope. Blocked VAT posts to expense,
       never to the recoverable input VAT account, and is disclosed rather than dropped.'
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - M-VAT-01
@@ -2605,11 +2605,86 @@ units:
       re-queries, and asserts historic lines keep their original treatment'
     - a blocked-category bill appears in the VAT201 working papers under an explicit non-recoverable disclosure
       line; a test asserts the line exists and is non-zero rather than the bill being absent
+    - 'NOTE: the blocked categories are the two this business actually incurs, each named on an account with
+      the docs line it comes from (BLOCKED_INPUT_VAT_CATEGORIES in packages/core/src/tax/recoverability.ts).
+      6090 Entertainment and staff hospitality was already blocked_input_tax in 0018 — docs/04 §4 names
+      entertainment, and docs/13 §2 says the premises serve complimentary herbal tea, so the category is a
+      real monthly cost. 5060 Staff accommodation and transport is RECLASSIFIED from recoverable to blocked
+      by 0034: an employee benefit is recoverable only where the business is obliged to provide it, docs/04
+      §7 names mandatory unemployment and health insurance (which is why 6110 Insurance stays recoverable)
+      and names no obligation to house or transport staff, while docs/13 §2 says transport at 02:00 "is a
+      safety matter". Conservative reading, OPEN-QUESTIONS Y11-blocked-vat.'
+    - 'NOTE: no motor-vehicle category is invented. UAE VAT blocks recovery on a vehicle available for
+      personal use and this business operates none — docs/01 records that outcall and mobile therapists were
+      dropped, which "removes ... vehicle and mileage records" — so there is no such account in the chart and
+      0034 does not add one. The absence is stated as BLOCKED_CATEGORIES_NOT_INCURRED and asserted against
+      the chart, so it reads as a decision rather than an oversight; an account that could only ever hold
+      zero would appear in every working paper as a figure nobody can explain.'
+    - 'NOTE: the classification is recorded on the LINE, not read back through the account. bill_line gains
+      tax_treatment = blocked_not_recoverable and blocked_input_vat_fils, and
+      packages/db/src/queries/input-vat-recovery.ts never joins `account` to decide what was claimed — only
+      to LABEL the detail. The same argument 0026 makes for snapshotting the issuer: a return recomputing
+      recoverability from today''s chart would restate a filed period the day Y11-blocked-vat is answered,
+      and that day is expected rather than hypothetical.'
+    - 'NOTE: the acceptance''s "audited settings change" is an audited OWNER-level service, not a settings
+      screen. The application role holds SELECT on `account` and nothing else (0018), and
+      packages/db/src/repositories/journal.itest.ts asserts it — granting the web role UPDATE would make a
+      tax position something an authenticated request can change. reclassifyAccountRecoverability writes the
+      audit_event (before, after, reason, open question) in the same transaction as the UPDATE and runs on
+      the same footing as a migration. 0034 grants nothing.'
+    - 'NOTE: the VAT201 box numbering, the output side and the full drill-down stay M-VAT-07''s. What this
+      unit builds is the INPUT side it will read: one claim figure, one non-recoverable disclosure figure and
+      the three reasons nothing was claimed (blocked_category, no_supplier_trn, no_vat_charged), every reason
+      reported as a row so a zero is evidence rather than a gap — the same argument PAYABLES_AGING_BUCKETS
+      makes about an empty bucket. The acceptance''s "appears in the VAT201 working papers" is satisfied
+      against that working paper, with blockedInputVatLines() as the box-to-line-to-document drill-down.'
+    - 'NOTE: four files outside this unit changed. bill_line_only_a_standard_rated_line_carries_vat is
+      RENAMED to bill_line_only_a_vat_bearing_treatment_carries_vat — two treatments carry VAT now, and a
+      constraint whose name asserts something false is what a reviewer reads first — so the mirror in
+      packages/db/src/schema/bill.ts and the M-VAT-01 probe in scripts/test-gates.mjs move with it. 0031''s
+      anonymous recurring_cost tax_treatment CHECK is dropped and re-added as
+      recurring_cost_tax_treatment_allowed (the same thing 0028 did for document_series), because the
+      register posts through the same postBill and staff transport at 02:00 is a monthly contract.
+      packages/core/src/ledger/chart-of-accounts.test.ts expected the blocked set to be exactly [6090], and
+      the vacuity guard in packages/fixtures/src/purchases.test.ts — "exercises every tax treatment the unit
+      supports" — now reads BOTH fixture files, because the blocked treatment''s committed worked example
+      lives next to the disclosure figures it exists for rather than inside M-VAT-01''s aging example.'
+    - 'NOTE: postBill''s no-TRN and offshore refusals now cover every line that CARRIES VAT rather than only
+      the ones that claim it. Only a registered supplier can charge UAE VAT, so a blocked line standing on no
+      tax invoice overstates the non-recoverable disclosure — the same rule (isInputVatWithoutTrn, ZV001,
+      bill_recoverable_needs_a_trn) extended to the new figure by bill_blocked_needs_a_trn rather than
+      restated. The sentence keeps "claims input VAT on line(s)" where a line would have reached 1080 and
+      says "carries UAE VAT on line(s)" where the tax is only ever cost.'
+    - 'NOTE: bill_line.blocked_input_vat_fils and bill.blocked_input_vat_fils carry `default 0`, unlike
+      recoverable_input_vat_fils which has none. Every row that exists predates the treatment, so 0 is the
+      only value any of them can have, and bill_line_blocked_matches_treatment pins the column to gross - net
+      for a blocked line — so the default cannot stand in for a decision on a row where the figure matters.
+      Dropping it would refuse every INSERT that does not name the column, including the known-bad fixtures
+      in scripts/test-gates.mjs, and a probe refused by a missing column no longer tests the rule it names.'
+    - 'NOTE: a blocked-ONLY divergence between a bill header and its lines is structurally impossible — the
+      line CHECK pins each line''s blocked figure to its own VAT — so the ZV002 probe for it states a header
+      the rows do not support and asserts the message names the blocked figure. What that proves is that the
+      deferred trigger READS the column; before 0034 it summed three figures and such a bill would have
+      committed with a disclosure figure no line produced.'
+    - 'NOTE: this unit took migration 0034 and SCHEMA_VERSION ends at 34. 0033 belongs to another unit in
+      flight, so this worktree has 0001-0032 plus 0034 and the comment in packages/db/src/index.ts says so.'
     files:
     - packages/core/src/tax/recoverability.ts
-    - packagesis/db/src/schema/account.ts
-    - packages/db/src/services/post-bill.ts
     - packages/core/src/tax/recoverability.test.ts
+    - packages/core/src/tax/index.ts
+    - packages/core/src/purchases/bill.ts
+    - packages/core/src/ledger/chart-of-accounts.ts
+    - packages/db/migrations/0034_blocked_input_vat.sql
+    - packages/db/src/schema/bill.ts
+    - packages/db/src/schema/recurring-cost.ts
+    - packages/db/src/services/post-bill.ts
+    - packages/db/src/services/reclassify-account.ts
+    - packages/db/src/queries/input-vat-recovery.ts
+    - packages/fixtures/src/recoverability.ts
+    - packages/fixtures/src/recoverability.test.ts
+    - packages/fixtures/src/recoverability.itest.ts
+    - scripts/test-gates.mjs
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-03
     order: 58
     title: Reverse charge on offshore suppliers and the nightly exception report

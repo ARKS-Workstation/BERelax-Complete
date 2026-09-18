@@ -3172,8 +3172,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       }),
     },
     {
-      name: 'purchases gate rejects VAT on a line that is not standard-rated',
-      rule: 'bill_line_only_a_standard_rated_line_carries_vat',
+      name: 'purchases gate rejects VAT on a line whose treatment cannot carry it',
+      // Renamed by 0034 (M-VAT-02) with the arrival of the second treatment that DOES carry VAT: the old
+      // name, bill_line_only_a_standard_rated_line_carries_vat, asserted something that had stopped being
+      // true. The probe is unchanged — an exempt line with a gross above its net.
+      rule: 'bill_line_only_a_vat_bearing_treatment_carries_vat',
       // An exempt supply has no VAT to carve out. A gross above net on one is an amount the preparer
       // has mis-described, and it is the description that decides what is claimed.
       sql: bill({
@@ -6274,6 +6277,436 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     !real.failed,
     `the committed settings store failed its own suite:\n${real.output}`,
   )
+}
+
+// 37a-37s. (M-VAT-02) Blocked input VAT: the classification the database refuses to let a bill
+//          contradict, as known-bad fixtures against real PostgreSQL.
+//
+// The rule this unit exists to enforce is that some input VAT is NOT recoverable — entertainment, and a
+// staff benefit the business is not obliged to provide (docs/04 §4, §7) — and that the classification is a
+// property of the account, recorded onto the line, rather than a judgement made at return time.
+//
+// The failure it prevents is quiet. An entertainment invoice coded to 6090 and recorded
+// `standard_recoverable` posts, balances, carries a valid TRN and is arithmetically correct; it simply
+// claims 5% the FTA will disallow. Neither existing layer sees it, which is why the classification is
+// enforced in four places and each is probed separately here:
+//
+//   the CHECKs on `bill_line`      what the blocked figure must be, and that a blocked line carries VAT
+//   the CHECKs on `bill`           the header cannot claim or block more VAT than it was charged, and
+//                                  cannot block any without a tax invoice
+//   the ZV005/ZV006 trigger        a claim needs a recoverable account; a blocked line needs a blocked one
+//   the deferred totals trigger    the header's blocked figure is a summary of the lines, at COMMIT
+//
+// `VERBOSITY=verbose` is set so psql prints the SQLSTATE, which is what lets the not-null probe assert
+// `23502` by code rather than by prose. Every probe asserts the **name of the rule written for it** — a
+// constraint name or a ZV code — because a bare non-zero exit is also what a typo in a column name
+// produces, and the rule under test would then be dead while this file reported PASS for ever (ADR 0003).
+//
+// Every probe runs inside `begin; … ; rollback;`, which matters here more than elsewhere: `bill` and
+// `bill_line` refuse DELETE for every role including the owner, so a committed fixture could not be swept
+// up afterwards by anything — and one probe UPDATEs the chart, which must not survive the transaction.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // After the provisional opening date (2026-09-01) and before any period this suite's siblings lock, so a
+  // refusal below is the rule under test rather than ZL002 or ZL004.
+  const DATE = "'2026-09-18'"
+  const TRN = "'000000000000003'"
+  const WITH_TRN = 'gate-mvat02-registered'
+  const NO_TRN = 'gate-mvat02-unregistered'
+  // The two blocked categories, and one of each of the other two classifications. Spelled as codes
+  // because that is what the fixtures insert; which classification each one carries is asserted against
+  // the applied chart by the last two controls, so a renumbered account fails here rather than silently
+  // probing the wrong rule.
+  const ENTERTAINMENT = '6090'
+  const STAFF_TRANSPORT = '5060'
+  const RENT = '6010'
+  const BANK_CHARGES = '6085'
+
+  const supplier = (code, trn) =>
+    `insert into supplier (code, legal_name) values ('${code}', 'gate fixture supplier'); ` +
+    'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+    `select supplier_id, 'domestic', 'domestic_uae', ${trn} from supplier where code = '${code}'`
+
+  // Two suppliers, identical but for the TRN: only a registered supplier can charge the VAT that is then
+  // blocked, and the pair is what proves the rule is about the tax invoice rather than the category.
+  const setup = [supplier(WITH_TRN, TRN), supplier(NO_TRN, 'null')].join('; ')
+
+  /**
+   * A bill with its journal entry and, optionally, one line.
+   *
+   * The journal side is posted as **Dr expense (gross), Cr payables (gross)**, which is what a blocked
+   * bill looks like: the tax is in the expense. `number` is distinct per call and `display_number` derived
+   * from it, so a probe is refused by the rule it names rather than by `bill_internal_number_unique` —
+   * which is a real constraint and the wrong one to be testing by accident.
+   */
+  const bill = ({
+    n,
+    code = WITH_TRN,
+    reference = `GATE-MVAT02-${n}`,
+    account = ENTERTAINMENT,
+    net = 20000,
+    gross = 21000,
+    recoverable = 0,
+    blocked = 1000,
+    line = null,
+  }) => {
+    const entryId = `JE-GATE-MVAT02-${n}`
+    const statements = [
+      'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('${entryId}', ${DATE}, 'gate fixture blocked bill', 'supplier_bill')`,
+      'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+        `('${entryId}', 1, '${account}', ${gross}, 0), ('${entryId}', 2, '2010', 0, ${gross})`,
+      'insert into bill (supplier_id, supplier_reference, series_code, period_key, number, ' +
+        'display_number, bill_date, due_date, entry_id, net_fils, gross_fils, ' +
+        'recoverable_input_vat_fils, blocked_input_vat_fils, received_by) select supplier_id, ' +
+        `'${reference}', 'SUPP-BILL', '', ${950000 + n}, 'BILL-GATE-MVAT02-${n}', ${DATE}, ${DATE}, ` +
+        `'${entryId}', ${net}, ${gross}, ${recoverable}, ${blocked}, 'gate' ` +
+        `from supplier where code = '${code}'`,
+    ]
+    if (line !== null) {
+      const {
+        treatment = 'blocked_not_recoverable',
+        lineAccount = account,
+        rate = 500,
+        lineNet = net,
+        lineGross = gross,
+        lineRecoverable = recoverable,
+        lineBlocked = blocked,
+      } = line
+      statements.push(
+        'insert into bill_line (bill_id, line_no, description, expense_account_code, tax_treatment, ' +
+          'vat_rate_bp, net_fils, gross_fils, recoverable_input_vat_fils, blocked_input_vat_fils) ' +
+          `select bill_id, 1, 'Gate fixture line', '${lineAccount}', '${treatment}', ${rate}, ` +
+          `${lineNet}, ${lineGross}, ${lineRecoverable}, ${lineBlocked} ` +
+          `from bill where supplier_reference = '${reference}'`,
+      )
+    }
+    return statements.join('; ')
+  }
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      // So the SQLSTATE is printed and a probe can assert `23502` rather than a sentence that a future
+      // PostgreSQL release is free to reword.
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  const probes = [
+    {
+      name: 'blocked VAT gate rejects an expense account that leaves input_vat_recoverable unset',
+      rule: '23502',
+      // The acceptance criterion's database half: the column is NOT NULL with NO DEFAULT, so an account
+      // that never stated whether its input VAT is recoverable cannot exist. There is no safe default —
+      // true over-claims on entertainment, false under-claims on rent.
+      sql:
+        'insert into account (chart_id, code, name, type, normal_balance, contra, vat_box) values ' +
+        "('standard-spa-uae', '6999', 'Gate fixture expense', 'expense', 'debit', false, null)",
+    },
+    {
+      name: 'blocked VAT gate rejects a blocked line whose blocked figure is not its own VAT',
+      rule: 'bill_line_blocked_matches_treatment',
+      // The claim and the disclosure partition the VAT. A blocked figure that is not `gross - net` leaves
+      // tax in neither, which is a fils that vanishes from the return without appearing anywhere else.
+      sql: bill({ n: 1, line: { lineBlocked: 900 } }),
+    },
+    {
+      name: 'blocked VAT gate rejects a blocked figure on a line that is not blocked',
+      rule: 'bill_line_blocked_matches_treatment',
+      // The other hole in the same rule: a recoverable line claiming its VAT *and* disclosing it, which
+      // would double-count the tax across box 9 and the non-recoverable line.
+      sql: bill({
+        n: 2,
+        account: RENT,
+        recoverable: 1000,
+        blocked: 0,
+        line: { treatment: 'standard_recoverable', lineRecoverable: 1000, lineBlocked: 1000 },
+      }),
+    },
+    {
+      name: 'blocked VAT gate rejects a blocked line that carries no VAT at all',
+      rule: 'bill_line_blocked_line_carries_vat',
+      // `blocked_not_recoverable` says the supplier charged tax that cannot be reclaimed. With no tax it
+      // is the treatment being used as a catch-all for "not recoverable", which the other four already
+      // say — each for a different reason and each with a different disclosure.
+      sql: bill({
+        n: 3,
+        net: 21000,
+        gross: 21000,
+        blocked: 0,
+        line: { lineNet: 21000, lineGross: 21000, lineBlocked: 0 },
+      }),
+    },
+    {
+      name: 'blocked VAT gate rejects a claim on an account classified blocked',
+      rule: 'BlockedInputVatIsNotRecoverable',
+      // The whole unit in one probe: an entertainment invoice recorded standard_recoverable. It posts, it
+      // balances, the TRN is present and the arithmetic is right — and it claims 5% the FTA disallows.
+      sql: bill({
+        n: 4,
+        recoverable: 1000,
+        blocked: 0,
+        line: { treatment: 'standard_recoverable', lineRecoverable: 1000, lineBlocked: 0 },
+      }),
+    },
+    {
+      name: 'blocked VAT gate rejects a claim on an account classified out of scope',
+      rule: 'BlockedInputVatIsNotRecoverable',
+      // Bank charges on an exempt financial service carry no recoverable input VAT. Blocked and
+      // out-of-scope are different classifications, and the same trigger refuses a claim on either.
+      sql: bill({
+        n: 5,
+        account: BANK_CHARGES,
+        recoverable: 1000,
+        blocked: 0,
+        line: {
+          treatment: 'standard_recoverable',
+          lineAccount: BANK_CHARGES,
+          lineRecoverable: 1000,
+          lineBlocked: 0,
+        },
+      }),
+    },
+    {
+      name: 'blocked VAT gate rejects a blocked line on an account that is not a blocked category',
+      rule: 'BlockedTreatmentNeedsABlockedAccount',
+      // The mirror image, and the under-claim: rent recorded blocked leaves recoverable tax in the
+      // expense. Money left on the table is not a compliance failure and is still wrong, and it is the
+      // ACCOUNT that decides the category.
+      sql: bill({ n: 6, account: RENT, line: { lineAccount: RENT } }),
+    },
+    {
+      name: 'blocked VAT gate rejects blocked VAT on a bill whose supplier holds no TRN',
+      rule: 'bill_blocked_needs_a_trn',
+      // Only a registered supplier can charge UAE VAT, so blocked tax with no tax invoice behind it is a
+      // figure that would overstate the non-recoverable disclosure — which a tax agent reads.
+      sql: bill({ n: 7, code: NO_TRN }),
+    },
+    {
+      name: 'blocked VAT gate rejects a bill blocking more VAT than it was charged',
+      rule: 'bill_blocked_not_above_vat',
+      // Over the SUM of the claim and the disclosure, because the two partition the VAT: 1,500 blocked on
+      // a bill charged 1,000 is tax nobody charged appearing in the working papers.
+      sql: bill({ n: 8, blocked: 1500 }),
+    },
+    {
+      name: 'blocked VAT gate rejects a header whose blocked figure its lines do not support, at COMMIT',
+      rule: 'BillTotalsDoNotMatchLines',
+      // The line-level CHECKs pin each line's blocked figure to its own VAT, so a header that disagrees
+      // about the blocked total is the only way to state one the rows do not support. What this proves is
+      // that the deferred trigger READS the column: before 0034 it summed three figures and this bill
+      // would have committed with a disclosure figure no line produced.
+      sql: [
+        bill({
+          n: 9,
+          account: RENT,
+          line: {
+            treatment: 'standard_recoverable',
+            lineAccount: RENT,
+            lineRecoverable: 1000,
+            lineBlocked: 0,
+          },
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    },
+    {
+      name: 'blocked VAT gate rejects an invented treatment, so the vocabulary grew by exactly one value',
+      rule: 'bill_line_tax_treatment_check',
+      // 'blocked' is not 'blocked_not_recoverable'. A CHECK widened to anything containing the word would
+      // accept a treatment no posting path implements, which is the failure 0028 refused to risk by
+      // leaving the value out until this unit.
+      //
+      // The row satisfies every other CHECK on the table — no VAT carved out, no rate, nothing claimed
+      // and nothing blocked — because PostgreSQL evaluates CHECKs in no particular order, and a fixture
+      // that broke two rules would be reported against whichever one it happened to reach first.
+      sql: bill({
+        n: 10,
+        net: 21000,
+        gross: 21000,
+        blocked: 0,
+        line: {
+          treatment: 'blocked',
+          rate: 0,
+          lineNet: 21000,
+          lineGross: 21000,
+          lineBlocked: 0,
+        },
+      }),
+    },
+    {
+      name: 'blocked VAT gate rejects reclassifying an account to blocked while leaving it recoverable',
+      rule: 'account_blocked_input_vat_is_not_recoverable',
+      // The contradiction the audited reclassification path could otherwise write: 0018 only ever
+      // INSERTed the chart, and this is the same CHECK proved over the UPDATE that
+      // `reclassifyAccountRecoverability` performs.
+      sql:
+        "update account set vat_box = 'blocked_input_tax', input_vat_recoverable = true " +
+        `where code = '${RENT}'`,
+    },
+    {
+      name: 'blocked VAT gate rejects an invented treatment in the recurring cost register too',
+      rule: 'recurring_cost_tax_treatment_allowed',
+      // 0031 posts recurring bills through the same postBill, so the register speaks the same vocabulary.
+      // A register that could name a treatment the bill path cannot post would generate a bill that looks
+      // complete and understates the return.
+      sql:
+        'insert into recurring_cost (code, description, supplier_id, expense_account_code, ' +
+        'tax_treatment, cadence, first_due_date, cost_kind, expected_amount_fils, ' +
+        "variance_tolerance_bp) select 'gate-mvat02-invented', 'Gate fixture cost', supplier_id, " +
+        `'${STAFF_TRANSPORT}', 'blocked', 'monthly', ${DATE}, 'fixed', 2100000, 0 ` +
+        `from supplier where code = '${WITH_TRN}'`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'blocked input VAT constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement } of probes) {
+      checkRejectedBy(name, psqlProbe(statement), rule)
+    }
+
+    // The controls, and the reason the thirteen above mean anything: the same tables accept the
+    // legitimate row. Without these, a broken connection string or a renamed column would reject every
+    // probe and this gate would report thirteen passes while examining nothing.
+    const blockedBill = psqlProbe(
+      [bill({ n: 20, line: {} }), 'set constraints all immediate'].join('; '),
+    )
+    check(
+      'blocked VAT gate accepts an entertainment bill whose VAT is blocked and disclosed',
+      !blockedBill.failed,
+      `rejected a legitimate blocked bill:\n${blockedBill.output}`,
+    )
+
+    // The second blocked category, because "every blocked account in the chart" is one of the acceptance
+    // criteria and a gate that only ever exercised 6090 would not notice 5060 losing its classification.
+    const staffTransport = psqlProbe(
+      [
+        bill({ n: 21, account: STAFF_TRANSPORT, line: { lineAccount: STAFF_TRANSPORT } }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'blocked VAT gate accepts a staff transport bill on the other blocked account',
+      !staffTransport.failed,
+      `rejected a legitimate blocked bill on 5060:\n${staffTransport.output}`,
+    )
+
+    // And the unchanged path: an ordinary recoverable bill still posts and still claims. A guard that
+    // refused every claim would satisfy every probe above and leave the whole purchase ledger
+    // unclaimable.
+    const recoverableBill = psqlProbe(
+      [
+        bill({
+          n: 22,
+          account: RENT,
+          recoverable: 1000,
+          blocked: 0,
+          line: {
+            treatment: 'standard_recoverable',
+            lineAccount: RENT,
+            lineRecoverable: 1000,
+            lineBlocked: 0,
+          },
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'blocked VAT gate accepts an ordinary recoverable bill, claim intact',
+      !recoverableBill.failed,
+      `rejected a legitimate recoverable bill:\n${recoverableBill.output}`,
+    )
+
+    // An expense account that DOES state its classification is accepted, so the 23502 probe above is
+    // about the omission rather than about the INSERT being impossible.
+    const classifiedAccount = psqlProbe(
+      'insert into account (chart_id, code, name, type, normal_balance, contra, vat_box, ' +
+        "input_vat_recoverable) values ('standard-spa-uae', '6999', 'Gate fixture expense', " +
+        "'expense', 'debit', false, null, false)",
+    )
+    check(
+      'blocked VAT gate accepts an expense account that states its recovery classification',
+      !classifiedAccount.failed,
+      `rejected a fully classified account:\n${classifiedAccount.output}`,
+    )
+
+    // The register accepts the new treatment, which is the other half of the vocabulary probe: staff
+    // transport at 02:00 is a monthly contract, so a blocked category IS a recurring cost.
+    const blockedRecurring = psqlProbe(
+      'insert into recurring_cost (code, description, supplier_id, expense_account_code, ' +
+        'tax_treatment, cadence, first_due_date, cost_kind, expected_amount_fils, ' +
+        "variance_tolerance_bp) select 'gate-mvat02-transport', 'Gate fixture cost', supplier_id, " +
+        `'${STAFF_TRANSPORT}', 'blocked_not_recoverable', 'monthly', ${DATE}, 'fixed', 2100000, 0 ` +
+        `from supplier where code = '${WITH_TRN}'`,
+    )
+    check(
+      'blocked VAT gate accepts a recurring cost in a blocked category',
+      !blockedRecurring.failed,
+      `rejected a blocked recurring cost:\n${blockedRecurring.output}`,
+    )
+
+    // The classification itself, read back from the APPLIED schema rather than from the TypeScript: the
+    // blocked population is exactly the two categories docs/04 §4 and §7 describe. A migration that
+    // forgot to reclassify 5060 — or a later one that quietly reclassified something else — fails here.
+    const blockedPopulation = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(code, ',' order by code) from account where vat_box = 'blocked_input_tax'",
+    ])
+    check(
+      'blocked VAT gate finds exactly the two blocked categories in the applied chart',
+      !blockedPopulation.failed && blockedPopulation.output.trim() === '5060,6090',
+      `the blocked population is not 5060,6090: ${blockedPopulation.output}`,
+    )
+
+    // And the control on that: neither of them is in the recoverable population, while the population
+    // itself is not empty. A chart where nothing was recoverable would satisfy the assertion above.
+    const recoverablePopulation = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select count(*) || ':' || coalesce(string_agg(code, ',' order by code) " +
+        "filter (where code in ('5060', '6090')), 'none') from account where input_vat_recoverable",
+    ])
+    const [recoverableCount, blockedAmongThem] = recoverablePopulation.output.trim().split(':')
+    check(
+      'blocked VAT gate finds neither blocked account among the recoverable ones',
+      !recoverablePopulation.failed && Number(recoverableCount) > 5 && blockedAmongThem === 'none',
+      `the recoverable population is ${recoverablePopulation.output.trim()}`,
+    )
+
+    // Mandatory employee health insurance IS recoverable, because the business is obliged to provide it
+    // (docs/04 §7). This is the contrast that makes the employee-benefit classification a rule rather
+    // than "staff costs are blocked": without it, blocking every staff account would pass every probe
+    // above and under-claim on the one the law requires.
+    const insurance = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select vat_box || ':' || input_vat_recoverable from account where code = '6110'",
+    ])
+    check(
+      'blocked VAT gate finds mandatory insurance still recoverable, unlike the staff benefit',
+      !insurance.failed && insurance.output.trim() === 'recoverable_input_tax:true',
+      `account 6110 is not recoverable: ${insurance.output}`,
+    )
+  }
 }
 
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.

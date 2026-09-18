@@ -10,11 +10,13 @@ import { OPENING_BALANCE_SQLSTATE } from './opening-balances.ts'
  *
  * ## What a bill posts
  *
- * **Dr expense (net) per line, Dr recoverable input VAT (the claim), Cr trade payables (gross).**
+ * **Dr expense (net, plus any blocked VAT) per line, Dr recoverable input VAT (the claim), Cr trade
+ * payables (gross).**
  *
  * Debits equal credits by construction rather than by arithmetic luck: a line that carries no VAT has
- * `net === gross`, and a line that does contributes its net plus its VAT, so the debit side sums to the
- * gross whatever mix of treatments a bill holds. The deferred balance trigger in `0018_ledger.sql`
+ * `net === gross`, a recoverable line contributes its net plus its claim, and a blocked line contributes
+ * its net plus the tax it cannot reclaim — which is its gross. So the debit side sums to the gross
+ * whatever mix of treatments a bill holds. The deferred balance trigger in `0018_ledger.sql`
  * checks it anyway at COMMIT, because this service is not the only thing that can reach a `psql`
  * prompt.
  *
@@ -30,6 +32,16 @@ import { OPENING_BALANCE_SQLSTATE } from './opening-balances.ts'
  * service **validates the relationship** rather than re-deriving it, which is deliberate. A second
  * `gross × 20 / 21` here would be a second rounding rule, and the day the two disagree is the day a
  * filed return is out by a fils per line.
+ *
+ * ## Blocked input VAT
+ *
+ * `blocked_not_recoverable` is the treatment for a category UAE VAT denies recovery on — entertainment,
+ * or a staff benefit the business is not obliged to provide (docs/04 §4, §7). The supplier charged the
+ * tax; it simply cannot be reclaimed, so it is **debited to the expense** and disclosed rather than
+ * dropped. Which accounts those are is a property of the chart (`account.vat_box` and
+ * `account.input_vat_recoverable`), read from the database here rather than spelled as a list of codes:
+ * this package may not import core's `BLOCKED_INPUT_VAT_CATEGORIES`, and a second list of codes would be
+ * a second thing to keep in step with the chart the migration seeds.
  *
  * The rule that a supplier with no TRN supports no claim is enforced three times, and each layer
  * covers a hole the others leave:
@@ -58,6 +70,10 @@ export const PURCHASES_SQLSTATE = {
   supplierHasNoTaxProfile: 'ZV003',
   /** A bill or bill line was UPDATEd or DELETEd. */
   appendOnly: 'ZV004',
+  /** A claim on an account the chart does not classify as recoverable (0034). */
+  blockedInputVatIsNotRecoverable: 'ZV005',
+  /** A blocked line on an account that is not a blocked category (0034). */
+  blockedTreatmentNeedsABlockedAccount: 'ZV006',
 } as const
 
 /** `23505`: a unique constraint refused the row. Which one is read from the constraint name. */
@@ -80,12 +96,29 @@ export const TRADE_PAYABLES_ACCOUNT_CODE = '2010'
 /** Mirrors the CHECK on `bill_line.tax_treatment`, and core's `BILL_TAX_TREATMENTS`. */
 export const BILL_TAX_TREATMENTS = [
   'standard_recoverable',
+  'blocked_not_recoverable',
   'no_trn_not_recoverable',
   'zero_rated',
   'exempt',
   'out_of_scope',
 ] as const
 export type BillTaxTreatment = (typeof BILL_TAX_TREATMENTS)[number]
+
+/**
+ * The two treatments a supplier charged VAT under, and the one of them that supports a claim.
+ *
+ * Kept as two named sets rather than compared inline, because the difference between "VAT was charged"
+ * and "VAT may be claimed" is the whole of this unit: a blocked line satisfies the first and not the
+ * second, and code that tests the wrong one either loses the tax or claims it.
+ */
+const VAT_BEARING_TREATMENTS: readonly BillTaxTreatment[] = [
+  'standard_recoverable',
+  'blocked_not_recoverable',
+]
+
+/** The three positions the chart takes on input VAT recovery. Mirrors core's `recoverabilityOf`. */
+export const INPUT_VAT_RECOVERABILITIES = ['recoverable', 'blocked', 'out_of_scope'] as const
+export type InputVatRecoverability = (typeof INPUT_VAT_RECOVERABILITIES)[number]
 
 export const SUPPLIER_RESIDENCIES = ['domestic', 'offshore'] as const
 export type SupplierResidency = (typeof SUPPLIER_RESIDENCIES)[number]
@@ -161,6 +194,10 @@ export interface PostedBillLine {
   readonly vatFils: number
   readonly grossFils: number
   readonly recoverableInputVatFils: number
+  /** The VAT this line was charged and cannot reclaim. Zero unless the line is blocked. */
+  readonly blockedInputVatFils: number
+  /** What the expense account was debited: the net, plus any blocked VAT. */
+  readonly expenseDebitFils: number
 }
 
 export interface PostedBill {
@@ -182,6 +219,8 @@ export interface PostedBill {
   readonly vatFils: number
   readonly grossFils: number
   readonly recoverableInputVatFils: number
+  /** The non-recoverable disclosure figure: the sum of the blocked lines. */
+  readonly blockedInputVatFils: number
   readonly lines: readonly PostedBillLine[]
 }
 
@@ -248,6 +287,22 @@ export function purchaseError(err: unknown): AppError | null {
       )
     case PURCHASES_SQLSTATE.appendOnly:
       return new AppError('forbidden', message, { details: { sqlState: code } })
+    case PURCHASES_SQLSTATE.blockedInputVatIsNotRecoverable:
+      return new AppError(
+        'validation',
+        `${message} — UAE VAT blocks recovery on this category (docs/04 §4), so record the line as ` +
+          'blocked_not_recoverable: the tax is part of the cost, disclosed in the return rather than ' +
+          'claimed in it.',
+        { details: { sqlState: code } },
+      )
+    case PURCHASES_SQLSTATE.blockedTreatmentNeedsABlockedAccount:
+      return new AppError(
+        'validation',
+        `${message} — blocked recovery is a property of the category of spend, so it is the account that ` +
+          'decides it. Code the line to the blocked account, or record the treatment this account ' +
+          'supports.',
+        { details: { sqlState: code } },
+      )
     case OPENING_BALANCE_SQLSTATE.beforeOpeningBalance:
       return new AppError(
         'conflict',
@@ -279,6 +334,22 @@ export function purchaseError(err: unknown): AppError | null {
 /** True when `err` is the no-tax-invoice refusal. */
 export function isInputVatWithoutTrn(err: unknown): boolean {
   return sqlState(err) === PURCHASES_SQLSTATE.inputVatWithoutSupplierTrn
+}
+
+/**
+ * True when `err` is a refusal about the account's recovery classification: a claim on an account that
+ * does not support one, or a blocked line on an account that is not a blocked category.
+ *
+ * One predicate over both codes, because a caller answers them identically — the line was coded to the
+ * wrong account or recorded under the wrong treatment, and either way a person has to look at the
+ * invoice. The two SQLSTATEs stay distinct so the *message* can say which mistake it was.
+ */
+export function isBlockedRecoverabilityRefusal(err: unknown): boolean {
+  const code = sqlState(err)
+  return (
+    code === PURCHASES_SQLSTATE.blockedInputVatIsNotRecoverable ||
+    code === PURCHASES_SQLSTATE.blockedTreatmentNeedsABlockedAccount
+  )
 }
 
 /** True when `err` is the duplicate-supplier-reference refusal. */
@@ -405,15 +476,19 @@ interface LineFigures {
   readonly vatFils: number
   readonly grossFils: number
   readonly recoverableInputVatFils: number
+  readonly blockedInputVatFils: number
+  /** The net plus any blocked VAT: what the expense account is debited. */
+  readonly expenseDebitFils: number
   readonly vatRateBp: number
 }
 
 /**
- * Validates one line's figures and derives its claim.
+ * Validates one line's figures and derives its claim, its blocked tax and its expense debit.
  *
  * `vat = gross - net` and nothing else, which is the whole of ADR 0007's derivation: the caller
  * supplies both sides and the remainder is the VAT, so `net + vat === gross` cannot fail to hold. The
- * claim is the VAT of a recoverable line and zero for every other treatment.
+ * VAT then goes to exactly one place — the claim for a recoverable line, the expense for a blocked one —
+ * and to neither for a treatment that carries no VAT at all.
  */
 function figuresFor(line: BillLineToPost, position: string): LineFigures {
   if (!Number.isInteger(line.grossFils) || !Number.isInteger(line.netFils)) {
@@ -442,14 +517,16 @@ function figuresFor(line: BillLineToPost, position: string): LineFigures {
   if (!BILL_TAX_TREATMENTS.includes(line.taxTreatment)) {
     throw new AppError(
       'validation',
-      `${position} has an unknown tax treatment "${line.taxTreatment}". Blocked input VAT is M-VAT-02 ` +
-        'and the imported-services reverse charge is M-VAT-03; neither can be posted correctly yet.',
+      `${position} has an unknown tax treatment "${line.taxTreatment}". The imported-services reverse ` +
+        'charge is M-VAT-03 and cannot be posted correctly yet.',
     )
   }
 
   const vatFils = line.grossFils - line.netFils
   const recoverable = line.taxTreatment === 'standard_recoverable'
-  if (!recoverable && vatFils !== 0) {
+  const blocked = line.taxTreatment === 'blocked_not_recoverable'
+  const carriesVat = VAT_BEARING_TREATMENTS.includes(line.taxTreatment)
+  if (!carriesVat && vatFils !== 0) {
     throw new AppError(
       'validation',
       `${position} is ${line.taxTreatment} but its gross exceeds its net by ${vatFils} fils. An ` +
@@ -457,8 +534,19 @@ function figuresFor(line: BillLineToPost, position: string): LineFigures {
         'none — so the whole amount is cost.',
     )
   }
-  const vatRateBp = line.vatRateBp ?? (recoverable ? 500 : 0)
-  if (!recoverable && vatRateBp !== 0) {
+  if (blocked && vatFils === 0) {
+    // `blocked_not_recoverable` says the supplier charged VAT that cannot be reclaimed. With no VAT
+    // there is nothing blocked, and the treatment would be a catch-all for "not recoverable" — which the
+    // other four already say, each for a different reason and each with a different disclosure.
+    throw new AppError(
+      'validation',
+      `${position} is blocked_not_recoverable and its gross equals its net, so no VAT was charged and ` +
+        'nothing is blocked. Record why nothing is claimable: no_trn_not_recoverable, zero_rated, ' +
+        'exempt or out_of_scope.',
+    )
+  }
+  const vatRateBp = line.vatRateBp ?? (carriesVat ? 500 : 0)
+  if (!carriesVat && vatRateBp !== 0) {
     throw new AppError(
       'validation',
       `${position} is ${line.taxTreatment} but carries a rate of ${vatRateBp} bp. A line that cannot ` +
@@ -477,7 +565,94 @@ function figuresFor(line: BillLineToPost, position: string): LineFigures {
     vatFils,
     grossFils: line.grossFils,
     recoverableInputVatFils: recoverable ? vatFils : 0,
+    blockedInputVatFils: blocked ? vatFils : 0,
+    // Blocked VAT is part of what the thing cost, so it is debited with the expense rather than to 1080.
+    expenseDebitFils: blocked ? line.grossFils : line.netFils,
     vatRateBp,
+  }
+}
+
+/**
+ * Refuses a line whose treatment contradicts the classification of the account it is coded to.
+ *
+ * Two mistakes, and the database refuses both row by row (ZV005 and ZV006 in
+ * `0034_blocked_input_vat.sql`): a claim on an account that is not classified recoverable, and a blocked
+ * line on an account that is not a blocked category. This is the layer a person reads. It names the
+ * account, its name, the classification and the alternative — and it runs BEFORE anything is written,
+ * where the trigger runs after the number has been allocated.
+ *
+ * `account.vat_box` and `account.input_vat_recoverable` are read rather than assumed: the chart is the
+ * authority on which categories are blocked, this package may not import core's copy of it, and a list
+ * of codes here would be a third statement of the classification to keep in step with the chart.
+ */
+async function assertLinesMatchAccountRecoverability(
+  uow: UnitOfWork,
+  input: BillToPost,
+  figures: readonly LineFigures[],
+): Promise<void> {
+  const codes = [...new Set(input.lines.map((line) => line.expenseAccountCode))]
+  const rows = await uow.sql<
+    { code: string; name: string; vat_box: string | null; input_vat_recoverable: boolean }[]
+  >`
+    select code, name, vat_box, input_vat_recoverable from account where code = any(${codes})
+  `
+  const classOf = new Map(
+    rows.map((row) => [
+      row.code,
+      {
+        name: row.name,
+        // The same derivation as recoverabilityOf in @berelax/core and as the CASE in 0034. The
+        // contradictory pair is refused by account_blocked_input_vat_is_not_recoverable, so the order
+        // of these two tests is a consequence of the chart rather than a precedence decision.
+        recoverability: (row.vat_box === 'blocked_input_tax'
+          ? 'blocked'
+          : row.input_vat_recoverable
+            ? 'recoverable'
+            : 'out_of_scope') as InputVatRecoverability,
+      },
+    ]),
+  )
+
+  for (const [index, line] of input.lines.entries()) {
+    const derived = figures[index] as LineFigures
+    const account = classOf.get(line.expenseAccountCode)
+    // An unknown code is the foreign key's refusal to make, not this one's: it would name the wrong
+    // problem, and `bill_line.expense_account_code references account (code)` names the right one.
+    if (account === undefined) continue
+    const position = `Bill "${input.supplierReference}" line ${index + 1}`
+    if (derived.recoverableInputVatFils > 0 && account.recoverability !== 'recoverable') {
+      throw new AppError(
+        'validation',
+        `${position} claims ${derived.recoverableInputVatFils} fils of input VAT on account ` +
+          `${line.expenseAccountCode} (${account.name}), which the chart classifies ` +
+          `${account.recoverability} for input VAT recovery. ` +
+          (account.recoverability === 'blocked'
+            ? 'UAE VAT blocks recovery on this category (docs/04 §4): record the line as ' +
+              'blocked_not_recoverable, which posts the VAT to the expense and discloses it.'
+            : 'No recoverable input VAT arises on this account, so the amount is cost.'),
+        {
+          details: {
+            sqlState: PURCHASES_SQLSTATE.blockedInputVatIsNotRecoverable,
+            account: line.expenseAccountCode,
+          },
+        },
+      )
+    }
+    if (line.taxTreatment === 'blocked_not_recoverable' && account.recoverability !== 'blocked') {
+      throw new AppError(
+        'validation',
+        `${position} is blocked_not_recoverable on account ${line.expenseAccountCode} ` +
+          `(${account.name}), which the chart classifies ${account.recoverability} rather than a ` +
+          'blocked category. Blocked recovery is a property of the category of spend, so it is the ' +
+          'account that decides it.',
+        {
+          details: {
+            sqlState: PURCHASES_SQLSTATE.blockedTreatmentNeedsABlockedAccount,
+            account: line.expenseAccountCode,
+          },
+        },
+      )
+    }
   }
 }
 
@@ -545,27 +720,44 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
   // The refusal this unit exists to make legible, raised BEFORE anything is written. The CHECK and the
   // trigger would both catch it; neither can name the supplier and the lines in one sentence, and that
   // sentence is what tells the bookkeeper to re-enter the line as cost rather than chase the invoice.
-  const claiming = figures
+  //
+  // Every line that carries VAT, not only the ones that claim it. Only a registered supplier can charge
+  // UAE VAT at all, so a blocked line standing on no tax invoice is the same mistake with a different
+  // consequence: it overstates the non-recoverable disclosure instead of the claim, and a tax agent
+  // reads both. This is the rule `bill_blocked_needs_a_trn` states in SQL.
+  const vatBearing = figures
     .map((line, index) => ({ line, lineNo: index + 1 }))
-    .filter(({ line }) => line.recoverableInputVatFils > 0)
-  if (claiming.length > 0 && supplier.trn === null) {
+    .filter(({ line }) => line.vatFils > 0)
+  // "claims" where a line would have gone to 1080 and "carries" where the VAT is only ever cost. One
+  // sentence for both cases would have to pick a verb that is wrong for one of them, and the verb is the
+  // part the bookkeeper reads first.
+  const verb = vatBearing.some(({ line }) => line.recoverableInputVatFils > 0)
+    ? 'claims input VAT on'
+    : 'carries UAE VAT on'
+  if (vatBearing.length > 0 && supplier.trn === null) {
     throw new AppError(
       'validation',
-      `Bill "${input.supplierReference}" claims input VAT on line(s) ` +
-        `${claiming.map(({ lineNo }) => lineNo).join(', ')}, but supplier "${supplier.code}" held no ` +
+      `Bill "${input.supplierReference}" ${verb} line(s) ` +
+        `${vatBearing.map(({ lineNo }) => lineNo).join(', ')}, but supplier "${supplier.code}" held no ` +
         'TRN when the bill was recorded, so there is no valid tax invoice to claim against. Record ' +
         'those lines as no_trn_not_recoverable: the VAT is part of the cost.',
-      { details: { supplierCode: supplier.code, lines: claiming.map(({ lineNo }) => lineNo) } },
+      { details: { supplierCode: supplier.code, lines: vatBearing.map(({ lineNo }) => lineNo) } },
     )
   }
-  if (claiming.length > 0 && supplier.residency === 'offshore') {
+  if (vatBearing.length > 0 && supplier.residency === 'offshore') {
     throw new AppError(
       'validation',
-      `Bill "${input.supplierReference}" claims input VAT from offshore supplier "${supplier.code}". ` +
-        'An offshore supplier charges no UAE VAT, so there is nothing to reclaim from them — the tax ' +
-        'on an imported service is self-accounted through the reverse charge (M-VAT-03).',
+      `Bill "${input.supplierReference}" ${verb} line(s) ` +
+        `${vatBearing.map(({ lineNo }) => lineNo).join(', ')} from offshore supplier ` +
+        `"${supplier.code}". ` +
+        'An offshore supplier charges no UAE VAT, so there is nothing to reclaim from them and nothing ' +
+        'to block — the tax on an imported service is self-accounted through the reverse charge ' +
+        '(M-VAT-03).',
+      { details: { supplierCode: supplier.code, lines: vatBearing.map(({ lineNo }) => lineNo) } },
     )
   }
+
+  await assertLinesMatchAccountRecoverability(uow, input, figures)
 
   const netFils = figures.reduce((total, line) => total + line.netFils, 0)
   const grossFils = figures.reduce((total, line) => total + line.grossFils, 0)
@@ -573,6 +765,7 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
     (total, line) => total + line.recoverableInputVatFils,
     0,
   )
+  const blockedInputVatFils = figures.reduce((total, line) => total + line.blockedInputVatFils, 0)
   const vatFils = grossFils - netFils
 
   // Allocated inside this transaction, so a refusal below returns the number to the range instead of
@@ -585,7 +778,10 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
 
   const journalLines: JournalLineInput[] = figures.map((line, index) => ({
     accountCode: input.lines[index]?.expenseAccountCode as string,
-    debitFils: line.netFils,
+    // The net, plus any blocked VAT. Debiting the net alone would leave the entry short of the payable
+    // by exactly the tax that cannot be reclaimed, and the deferred balance trigger would refuse the
+    // whole bill at COMMIT with an arithmetic message naming no category.
+    debitFils: line.expenseDebitFils,
     creditFils: 0,
     memo: input.lines[index]?.description ?? null,
   }))
@@ -623,12 +819,14 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
     const [bill] = await uow.sql<{ bill_id: string }[]>`
       insert into bill (
         supplier_id, supplier_reference, series_code, period_key, number, display_number,
-        bill_date, due_date, entry_id, net_fils, gross_fils, recoverable_input_vat_fils, received_by
+        bill_date, due_date, entry_id, net_fils, gross_fils, recoverable_input_vat_fils,
+        blocked_input_vat_fils, received_by
       ) values (
         ${input.supplierId}::uuid, ${input.supplierReference}, ${allocated.seriesCode},
         ${allocated.periodKey}, ${allocated.number}, ${allocated.displayNumber},
         ${input.billDate}::date, ${input.dueDate}::date, ${posted.entryId},
-        ${netFils}, ${grossFils}, ${recoverableInputVatFils}, ${input.receivedBy}
+        ${netFils}, ${grossFils}, ${recoverableInputVatFils}, ${blockedInputVatFils},
+        ${input.receivedBy}
       )
       returning bill_id::text as bill_id
     `
@@ -645,11 +843,12 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
       await uow.sql`
         insert into bill_line (
           bill_id, line_no, description, expense_account_code, tax_treatment, vat_rate_bp,
-          net_fils, gross_fils, recoverable_input_vat_fils
+          net_fils, gross_fils, recoverable_input_vat_fils, blocked_input_vat_fils
         ) values (
           ${billId}::uuid, ${index + 1}, ${line.description}, ${line.expenseAccountCode},
           ${line.taxTreatment}, ${derived.vatRateBp},
-          ${derived.netFils}, ${derived.grossFils}, ${derived.recoverableInputVatFils}
+          ${derived.netFils}, ${derived.grossFils}, ${derived.recoverableInputVatFils},
+          ${derived.blockedInputVatFils}
         )
       `
     }
@@ -669,6 +868,8 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
       vatFils: derived.vatFils,
       grossFils: derived.grossFils,
       recoverableInputVatFils: derived.recoverableInputVatFils,
+      blockedInputVatFils: derived.blockedInputVatFils,
+      expenseDebitFils: derived.expenseDebitFils,
     }
   })
 
@@ -689,6 +890,7 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
     vatFils,
     grossFils,
     recoverableInputVatFils,
+    blockedInputVatFils,
     lines,
   }
 
@@ -713,6 +915,7 @@ export async function postBill(uow: UnitOfWork, input: BillToPost): Promise<Post
       dueDate: input.dueDate,
       grossFils,
       recoverableInputVatFils,
+      blockedInputVatFils,
       lineCount: lines.length,
     },
     // Derived from the business fact — this supplier, this invoice — so a retry cannot enqueue twice.
@@ -742,6 +945,7 @@ export async function readBill(sql: Sql, billId: string): Promise<PostedBill | n
       vat_fils: string
       gross_fils: string
       recoverable_input_vat_fils: string
+      blocked_input_vat_fils: string
     }[]
   >`
     select bill_id::text as bill_id, supplier_id::text as supplier_id, supplier_reference,
@@ -749,7 +953,8 @@ export async function readBill(sql: Sql, billId: string): Promise<PostedBill | n
            supplier_trn, supplier_residency,
            bill_date::text as bill_date, due_date::text as due_date,
            net_fils::text as net_fils, vat_fils::text as vat_fils, gross_fils::text as gross_fils,
-           recoverable_input_vat_fils::text as recoverable_input_vat_fils
+           recoverable_input_vat_fils::text as recoverable_input_vat_fils,
+           blocked_input_vat_fils::text as blocked_input_vat_fils
     from bill where bill_id = ${billId}::uuid
   `
   if (!bill) return null
@@ -765,11 +970,13 @@ export async function readBill(sql: Sql, billId: string): Promise<PostedBill | n
       vat_fils: string
       gross_fils: string
       recoverable_input_vat_fils: string
+      blocked_input_vat_fils: string
     }[]
   >`
     select line_no, description, expense_account_code, tax_treatment, vat_rate_bp,
            net_fils::text as net_fils, vat_fils::text as vat_fils, gross_fils::text as gross_fils,
-           recoverable_input_vat_fils::text as recoverable_input_vat_fils
+           recoverable_input_vat_fils::text as recoverable_input_vat_fils,
+           blocked_input_vat_fils::text as blocked_input_vat_fils
     from bill_line where bill_id = ${billId}::uuid order by line_no
   `
 
@@ -793,6 +1000,7 @@ export async function readBill(sql: Sql, billId: string): Promise<PostedBill | n
     vatFils: Number(bill.vat_fils),
     grossFils: Number(bill.gross_fils),
     recoverableInputVatFils: Number(bill.recoverable_input_vat_fils),
+    blockedInputVatFils: Number(bill.blocked_input_vat_fils),
     lines: lines.map((line) => ({
       lineNo: line.line_no,
       description: line.description,
@@ -803,6 +1011,10 @@ export async function readBill(sql: Sql, billId: string): Promise<PostedBill | n
       vatFils: Number(line.vat_fils),
       grossFils: Number(line.gross_fils),
       recoverableInputVatFils: Number(line.recoverable_input_vat_fils),
+      blockedInputVatFils: Number(line.blocked_input_vat_fils),
+      // Derived on the way out rather than stored: it is the net plus the blocked tax, and a stored
+      // copy would be a fourth figure per line that can disagree with the three it is made of.
+      expenseDebitFils: Number(line.net_fils) + Number(line.blocked_input_vat_fils),
     })),
   }
 }

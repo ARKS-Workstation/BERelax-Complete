@@ -8,9 +8,10 @@ import {
   BILL_TAX_TREATMENTS,
   billDebitTotal,
   billEntryDraft,
+  carriesVat,
   deriveBill,
   deriveBillLine,
-  isRecoverable,
+  isBlocked,
   RECOVERABLE_INPUT_VAT_ACCOUNT,
   TRADE_PAYABLES_ACCOUNT,
 } from './bill.ts'
@@ -74,9 +75,12 @@ describe('gross is authoritative and VAT is the remainder', () => {
   })
 })
 
-describe('only a standard-rated line carries VAT', () => {
-  it('leaves net equal to gross for every non-recoverable treatment, and claims nothing', () => {
-    for (const treatment of BILL_TAX_TREATMENTS.filter((t) => !isRecoverable(t))) {
+describe('only a VAT-bearing treatment carries VAT', () => {
+  it('leaves net equal to gross for every treatment that carries none, and claims nothing', () => {
+    // Two of the six treatments carry VAT: a recoverable line and a blocked one. For the other four
+    // there is nothing to carve out — an unregistered supplier cannot charge VAT at all, and a
+    // zero-rated, exempt or out-of-scope supply has none.
+    for (const treatment of BILL_TAX_TREATMENTS.filter((t) => !carriesVat(t))) {
       const line = deriveBillLine({
         description: `A ${treatment} supply`,
         account: ACCOUNTS.licenceAndGovernmentFees,
@@ -87,7 +91,24 @@ describe('only a standard-rated line carries VAT', () => {
       expect(line.vat.fils).toBe(0)
       expect(line.gross.fils).toBe(20_000)
       expect(line.recoverableInputVat.fils).toBe(0)
+      expect(line.blockedInputVat.fils).toBe(0)
+      expect(line.expenseDebit.fils).toBe(20_000)
       expect(line.rateBp).toBe(0)
+    }
+    // The control, and the reason the loop means anything: the two treatments left out of it DO carve
+    // VAT out of the same gross. A `carriesVat` that answered false for everything would satisfy the
+    // loop above, and a treatment quietly dropped out of the VAT-bearing pair is a line whose tax
+    // disappears from both the claim and the disclosure.
+    for (const treatment of BILL_TAX_TREATMENTS.filter(carriesVat)) {
+      const line = deriveBillLine({
+        description: `A ${treatment} supply`,
+        account: isBlocked(treatment) ? ACCOUNTS.entertainment : ACCOUNTS.rent,
+        gross: aed(200),
+        treatment,
+      })
+      expect(line.net.fils, treatment).toBe(19_048)
+      expect(line.vat.fils, treatment).toBe(952)
+      expect(line.rateBp, treatment).toBe(UAE_STANDARD_VAT_BP)
     }
   })
 
@@ -270,5 +291,162 @@ describe('the journal entry a bill posts', () => {
   it('names the two accounts a bill always touches, so a posting rule never spells a code', () => {
     expect(RECOVERABLE_INPUT_VAT_ACCOUNT).toBe(ACCOUNTS.recoverableInputVat)
     expect(TRADE_PAYABLES_ACCOUNT).toBe(ACCOUNTS.tradePayables)
+  })
+})
+
+describe('blocked input VAT is charged, not recoverable, and part of the cost', () => {
+  /**
+   * The entertainment bill the acceptance names: 5% charged on a category UAE VAT denies recovery on.
+   *
+   * 21,000 fils gross at 5% is 20,000 net and 1,000 of VAT exactly, so the figures are checkable by eye
+   * and any change to the split shows up immediately.
+   */
+  const entertainment = deriveBillLine({
+    description: 'Herbal tea and refreshments for the treatment rooms',
+    account: ACCOUNTS.entertainment,
+    gross: money(filsFrom(21_000)),
+    treatment: 'blocked_not_recoverable',
+  })
+
+  it('carves the VAT out of the gross and then claims none of it', () => {
+    expect(entertainment.net.fils).toBe(20_000)
+    expect(entertainment.vat.fils).toBe(1_000)
+    expect(entertainment.net.fils + entertainment.vat.fils).toBe(entertainment.gross.fils)
+    // The whole point: the tax exists, and the claim does not.
+    expect(entertainment.recoverableInputVat.fils).toBe(0)
+    expect(entertainment.blockedInputVat.fils).toBe(1_000)
+    // The control: the identical gross on a recoverable treatment claims all of it, so the zero above is
+    // the treatment rather than the arithmetic.
+    const recoverable = deriveBillLine({
+      description: 'Rent',
+      account: ACCOUNTS.rent,
+      gross: money(filsFrom(21_000)),
+      treatment: 'standard_recoverable',
+    })
+    expect(recoverable.recoverableInputVat.fils).toBe(1_000)
+    expect(recoverable.blockedInputVat.fils).toBe(0)
+  })
+
+  it('debits the expense with the gross, because tax nobody can reclaim is cost', () => {
+    expect(entertainment.expenseDebit.fils).toBe(21_000)
+    // And the figure the wrong answer would produce, named so it can be asserted absent: debiting the
+    // net would leave the entry 1,000 fils short of the payable, which the deferred balance trigger in
+    // 0018 refuses at COMMIT with an arithmetic message that names no category.
+    expect(entertainment.expenseDebit.fils - entertainment.net.fils).toBe(1_000)
+  })
+
+  it('posts a mixed bill that balances, with the blocked VAT nowhere near account 1080', () => {
+    // One bill, two categories — the ordinary case a per-BILL treatment could not express: consumables
+    // that are recoverable and refreshments that are not.
+    const mixed = deriveBill([
+      {
+        description: 'Treatment consumables',
+        account: ACCOUNTS.consumablesUsed,
+        gross: money(filsFrom(10_500)),
+        treatment: 'standard_recoverable',
+      },
+      {
+        description: 'Customer refreshments',
+        account: ACCOUNTS.entertainment,
+        gross: money(filsFrom(4_200)),
+        treatment: 'blocked_not_recoverable',
+      },
+    ])
+    expect(mixed.gross.fils).toBe(14_700)
+    expect(mixed.net.fils).toBe(10_000 + 4_000)
+    expect(mixed.vat.fils).toBe(700)
+    expect(mixed.recoverableInputVat.fils).toBe(500)
+    expect(mixed.blockedInputVat.fils).toBe(200)
+    // The VAT partitions exactly: every fils of it is either claimed or disclosed, never both and never
+    // neither. This is the equality the deferred totals trigger in 0034 proves against the stored rows.
+    expect(mixed.recoverableInputVat.fils + mixed.blockedInputVat.fils).toBe(mixed.vat.fils)
+
+    const mixedDraft = billEntryDraft({
+      entryId: 'JE-BILL-2026-00003',
+      entryDate: ENTRY_DATE,
+      narrative: 'Supplier bill BILL-2026-00003',
+      bill: mixed,
+    })
+    expect(mixedDraft.lines.map((line) => [line.account, line.side, line.amount.fils])).toEqual([
+      [ACCOUNTS.consumablesUsed, 'debit', 10_000],
+      // The gross, not the net: the 200 fils of blocked VAT is inside this figure.
+      [ACCOUNTS.entertainment, 'debit', 4_200],
+      [RECOVERABLE_INPUT_VAT_ACCOUNT, 'debit', 500],
+      [TRADE_PAYABLES_ACCOUNT, 'credit', 14_700],
+    ])
+    expect(isBalanced(postEntry(mixedDraft, STANDARD_SPA_CHART))).toBe(true)
+    expect(billDebitTotal(mixed).fils).toBe(mixed.gross.fils)
+    // Only the recoverable half reaches 1080. A report that read `vat` instead of `recoverableInputVat`
+    // would claim 700 here, which is the over-claim this treatment exists to prevent.
+    const claimed = mixedDraft.lines
+      .filter((line) => line.account === RECOVERABLE_INPUT_VAT_ACCOUNT)
+      .reduce((total, line) => total + line.amount.fils, 0)
+    expect(claimed).toBe(500)
+    expect(claimed).not.toBe(mixed.vat.fils)
+  })
+
+  it('posts no VAT debit at all for a bill that is entirely blocked', () => {
+    const blockedOnly = deriveBill([
+      {
+        description: 'Staff transport, night shift',
+        account: ACCOUNTS.staffAccommodation,
+        gross: money(filsFrom(52_500)),
+        treatment: 'blocked_not_recoverable',
+      },
+    ])
+    expect(blockedOnly.recoverableInputVat.fils).toBe(0)
+    expect(blockedOnly.blockedInputVat.fils).toBe(2_500)
+    const entry = postEntry(
+      billEntryDraft({
+        entryId: 'JE-BILL-2026-00004',
+        entryDate: ENTRY_DATE,
+        narrative: 'Supplier bill BILL-2026-00004',
+        bill: blockedOnly,
+      }),
+      STANDARD_SPA_CHART,
+    )
+    expect(entry.lines.map((line) => line.account)).toEqual([
+      ACCOUNTS.staffAccommodation,
+      TRADE_PAYABLES_ACCOUNT,
+    ])
+    expect(isBalanced(entry)).toBe(true)
+  })
+
+  it('refuses a blocked line at a zero rate, which is a line with nothing blocked', () => {
+    // `blocked_not_recoverable` says the supplier charged VAT that cannot be reclaimed. At zero rate
+    // there is no such VAT, and the treatment would be a preparer using it as a catch-all for "not
+    // recoverable" — which the other four treatments already say, each for a different reason.
+    expect(() =>
+      deriveBillLine({
+        description: 'Customer refreshments',
+        account: ACCOUNTS.entertainment,
+        gross: aed(100),
+        treatment: 'blocked_not_recoverable',
+        rateBp: vatRateBp(0),
+      }),
+    ).toThrow(/blocked_not_recoverable at 0 bp/)
+  })
+
+  it('holds claim + blocked === vat for every gross, which is what makes the disclosure complete', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 1_000_000_000 }),
+        fc.constantFrom(...BILL_TAX_TREATMENTS),
+        (grossFils, treatment) => {
+          const line = deriveBillLine({
+            description: 'Anything',
+            account: isBlocked(treatment) ? ACCOUNTS.entertainment : ACCOUNTS.rent,
+            gross: money(filsFrom(grossFils)),
+            treatment,
+            ...(carriesVat(treatment) ? {} : { rateBp: vatRateBp(0) }),
+          })
+          expect(line.recoverableInputVat.fils + line.blockedInputVat.fils).toBe(line.vat.fils)
+          expect(line.expenseDebit.fils + line.recoverableInputVat.fils).toBe(line.gross.fils)
+          // Never both: a fils of tax cannot be claimed and disclosed at once.
+          expect(line.recoverableInputVat.fils === 0 || line.blockedInputVat.fils === 0).toBe(true)
+        },
+      ),
+      { numRuns: 500 },
+    )
   })
 })

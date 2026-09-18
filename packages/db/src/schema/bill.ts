@@ -98,6 +98,14 @@ export const bill = pgTable(
     vatFils: bigint('vat_fils', { mode: 'bigint' }).notNull(),
     /** The claim this bill supports: the sum of its recoverable lines, zero without a supplier TRN. */
     recoverableInputVatFils: bigint('recoverable_input_vat_fils', { mode: 'bigint' }).notNull(),
+    /**
+     * The VAT this bill was charged and cannot reclaim: the sum of its blocked lines (0034).
+     *
+     * A summary of the lines like every other header figure, and the figure the non-recoverable
+     * disclosure line of the VAT201 working papers is summed from — never dropped, because a category
+     * the business bore tax on and cannot claim is a disclosure rather than an absence.
+     */
+    blockedInputVatFils: bigint('blocked_input_vat_fils', { mode: 'bigint' }).notNull(),
     /** A label. The `audit_event` row written in the same transaction carries the full actor (F06). */
     receivedBy: text('received_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
@@ -120,6 +128,19 @@ export const bill = pgTable(
       sql`${t.recoverableInputVatFils} <= ${t.grossFils} - ${t.netFils}`,
     ),
     check('bill_due_not_before_bill_date', sql`${t.dueDate} >= ${t.billDate}`),
+    // Nothing beyond the bill's own VAT can be claimed or blocked. Over the SUM, because the two figures
+    // partition the VAT: every line's VAT is recoverable, blocked or zero.
+    check(
+      'bill_blocked_not_above_vat',
+      sql`${t.recoverableInputVatFils} + ${t.blockedInputVatFils} <= ${t.grossFils} - ${t.netFils}`,
+    ),
+    // Blocked VAT is VAT somebody charged us, and only a registered supplier can charge it. The same
+    // rule and the same shape as bill_recoverable_needs_a_trn: without a tax invoice the whole amount is
+    // cost, and a blocked figure standing on none would overstate the disclosure a tax agent reads.
+    check(
+      'bill_blocked_needs_a_trn',
+      sql`${t.blockedInputVatFils} = 0 or ${t.supplierTrn} is not null`,
+    ),
     // No TRN, no claim — as a row-level CHECK so it holds for every role and survives any trigger
     // being dropped.
     check(
@@ -141,13 +162,17 @@ export const bill = pgTable(
 /**
  * The tax treatment of one bill line, stored on the line and never recomputed.
  *
- * Blocked input VAT (entertainment, M-VAT-02) and the imported-services reverse charge (M-VAT-03) are
- * absent on purpose rather than declared and unimplemented: each needs posting behaviour this unit
- * does not have, and a value the schema accepts but no code path posts correctly would record a bill
- * that looks complete and understates the return.
+ * Two of them carry VAT: `standard_recoverable`, whose VAT is claimed, and `blocked_not_recoverable`
+ * (0034), whose VAT is cost because UAE VAT denies recovery on the category — entertainment, or a staff
+ * benefit the business is not obliged to provide (docs/04 §4, §7).
+ *
+ * The imported-services reverse charge (M-VAT-03) is still absent on purpose rather than declared and
+ * unimplemented: it needs posting behaviour no code path here has, and a value the schema accepts but
+ * nothing posts correctly would record a bill that looks complete and understates the return.
  */
 export const BILL_TAX_TREATMENTS = [
   'standard_recoverable',
+  'blocked_not_recoverable',
   'no_trn_not_recoverable',
   'zero_rated',
   'exempt',
@@ -180,21 +205,43 @@ export const billLine = pgTable(
     /** Database-generated as `gross_fils - net_fils`. See the note on `bill.vatFils`. */
     vatFils: bigint('vat_fils', { mode: 'bigint' }).notNull(),
     recoverableInputVatFils: bigint('recoverable_input_vat_fils', { mode: 'bigint' }).notNull(),
+    /**
+     * The VAT this line was charged and cannot recover, and the reason the claim and the tax are two
+     * columns rather than one: for a blocked line they differ, and a report reading `vatFils` would
+     * claim it.
+     */
+    blockedInputVatFils: bigint('blocked_input_vat_fils', { mode: 'bigint' }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     index('bill_line_account_idx').on(t.expenseAccountCode, t.billId),
+    // The population the non-recoverable disclosure line is derived from.
+    index('bill_line_blocked_idx').on(t.billId).where(sql`${t.blockedInputVatFils} > 0`),
     check('bill_line_net_positive', sql`${t.netFils} > 0`),
     check('bill_line_gross_not_below_net', sql`${t.grossFils} >= ${t.netFils}`),
-    // Only a standard-rated line carries VAT: an unregistered supplier cannot charge it, and a
-    // zero-rated, exempt or out-of-scope supply has none.
+    // Only a VAT-bearing treatment carries VAT: an unregistered supplier cannot charge it, and a
+    // zero-rated, exempt or out-of-scope supply has none. Renamed in 0034 with the second treatment that
+    // carries it — the old name asserted something that had stopped being true.
     check(
-      'bill_line_only_a_standard_rated_line_carries_vat',
-      sql`${t.taxTreatment} = 'standard_recoverable' or ${t.grossFils} = ${t.netFils}`,
+      'bill_line_only_a_vat_bearing_treatment_carries_vat',
+      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable')
+            or ${t.grossFils} = ${t.netFils}`,
     ),
     check(
       'bill_line_rate_matches_treatment',
-      sql`${t.taxTreatment} = 'standard_recoverable' or ${t.vatRateBp} = 0`,
+      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable')
+            or ${t.vatRateBp} = 0`,
+    ),
+    // A blocked line is one the supplier DID charge VAT on. With no VAT there is nothing blocked, and
+    // the treatment would be a preparer using it as a catch-all for "not recoverable".
+    check(
+      'bill_line_blocked_line_carries_vat',
+      sql`${t.taxTreatment} <> 'blocked_not_recoverable' or ${t.grossFils} > ${t.netFils}`,
+    ),
+    check(
+      'bill_line_blocked_matches_treatment',
+      sql`${t.blockedInputVatFils} = case when ${t.taxTreatment} = 'blocked_not_recoverable'
+            then ${t.grossFils} - ${t.netFils} else 0 end`,
     ),
     check(
       'bill_line_recoverable_matches_treatment',
@@ -206,8 +253,8 @@ export const billLine = pgTable(
     check('bill_line_vat_rate_bp_check', sql`${t.vatRateBp} between 0 and 10000`),
     check(
       'bill_line_tax_treatment_check',
-      sql`${t.taxTreatment} in ('standard_recoverable', 'no_trn_not_recoverable', 'zero_rated',
-                               'exempt', 'out_of_scope')`,
+      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable',
+                               'no_trn_not_recoverable', 'zero_rated', 'exempt', 'out_of_scope')`,
     ),
   ],
 )

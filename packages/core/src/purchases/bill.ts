@@ -42,9 +42,20 @@ import type { LocalDate } from '../time.ts'
  * thing to keep in agreement with the other two, and this module cannot see a supplier's TRN anyway:
  * what matters is the TRN **at the time of the bill**, which is a snapshot on the row.
  *
- * Blocked input VAT (entertainment, M-VAT-02) and the imported-services reverse charge (M-VAT-03) are
- * absent for the same reason the database vocabulary omits them: a treatment nothing posts correctly
- * would produce a bill that looks complete and understates the return.
+ * The imported-services reverse charge (M-VAT-03) is absent for the same reason the database vocabulary
+ * omits it: a treatment nothing posts correctly would produce a bill that looks complete and understates
+ * the return.
+ *
+ * ## Blocked input VAT is charged, is not recoverable, and is cost
+ *
+ * `blocked_not_recoverable` is the one treatment where the VAT a supplier charged and the VAT that may
+ * be reclaimed differ. UAE VAT denies recovery on some categories of spend — entertainment, and a staff
+ * benefit the business is not obliged to provide (docs/04 §4, §7) — and which accounts those are is
+ * `../tax/recoverability.ts`. The consequence here is arithmetic: the line's VAT lands in
+ * `blockedInputVat` rather than `recoverableInputVat`, and the expense is debited with the **gross**,
+ * because tax the business cannot reclaim is part of what the thing cost. It is disclosed rather than
+ * dropped: {@link DerivedBill.blockedInputVat} is the figure the non-recoverable line of the VAT201
+ * working papers is summed from.
  */
 
 /**
@@ -76,6 +87,11 @@ export type PlaceOfSupplyRule = (typeof PLACE_OF_SUPPLY_RULES)[number]
 export const BILL_TAX_TREATMENTS = [
   /** 5% UAE VAT from a TRN-holding supplier. The VAT is recoverable input tax. */
   'standard_recoverable',
+  /**
+   * 5% UAE VAT the supplier charged on a category recovery is denied on: entertainment, or a staff
+   * benefit the business is not obliged to provide (docs/04 §4, §7). The VAT is cost, and disclosed.
+   */
+  'blocked_not_recoverable',
   /** The supplier is not registered, so nothing is claimable and the whole amount is cost. */
   'no_trn_not_recoverable',
   /** A zero-rated supply: the rate is 0 and there is nothing to claim. */
@@ -90,6 +106,23 @@ export type BillTaxTreatment = (typeof BILL_TAX_TREATMENTS)[number]
 /** True for the one treatment that carries VAT and supports a claim. */
 export function isRecoverable(treatment: BillTaxTreatment): boolean {
   return treatment === 'standard_recoverable'
+}
+
+/** True for the one treatment that carries VAT and supports no claim. */
+export function isBlocked(treatment: BillTaxTreatment): boolean {
+  return treatment === 'blocked_not_recoverable'
+}
+
+/**
+ * True for the two treatments a supplier charged VAT under.
+ *
+ * The split that matters to the arithmetic is "was VAT charged", not "may it be claimed": an exempt,
+ * zero-rated, out-of-scope or TRN-less line has no VAT to carve out of its gross, and a blocked line
+ * does. Deriving the gross of a blocked line as if no VAT had been charged would lose the figure the
+ * non-recoverable disclosure is made of.
+ */
+export function carriesVat(treatment: BillTaxTreatment): boolean {
+  return isRecoverable(treatment) || isBlocked(treatment)
 }
 
 export interface BillLineDraft {
@@ -115,10 +148,26 @@ export interface DerivedBillLine {
   readonly rateBp: VatRateBp
   readonly gross: Money
   readonly net: Money
-  /** `gross - net`. Zero for every treatment but `standard_recoverable`. */
+  /** `gross - net`. Zero for every treatment but the two that carry VAT. */
   readonly vat: Money
   /** The input tax this line supports a claim for. Zero unless the line is recoverable. */
   readonly recoverableInputVat: Money
+  /**
+   * The VAT charged on this line that may not be reclaimed. Zero unless the line is blocked.
+   *
+   * Its own field rather than "the VAT that is not the claim", because the difference between a blocked
+   * line and a line that was never charged VAT is the whole content of the non-recoverable disclosure:
+   * one is tax the business bore and the other is tax that never existed.
+   */
+  readonly blockedInputVat: Money
+  /**
+   * What the expense account is debited: the net, plus any blocked VAT.
+   *
+   * Carried rather than recomputed by each caller, because "the expense is the net" is true for every
+   * treatment but one, and the caller that forgets the exception posts an entry that does not balance —
+   * or, worse, balances by dropping the blocked tax into the claim.
+   */
+  readonly expenseDebit: Money
 }
 
 export interface DerivedBill {
@@ -127,15 +176,16 @@ export interface DerivedBill {
   readonly vat: Money
   readonly gross: Money
   readonly recoverableInputVat: Money
+  /** The period's non-recoverable disclosure figure, summed from the lines. */
+  readonly blockedInputVat: Money
 }
 
 /**
- * Splits one line's gross into net, VAT and the recoverable claim.
+ * Splits one line's gross into net, VAT, the recoverable claim and the blocked remainder.
  *
- * Only a standard-rated line has VAT to split. For every other treatment `net === gross`: an
- * unregistered supplier cannot charge VAT at all, and a zero-rated, exempt or out-of-scope supply has
- * none — so there is nothing to carve out, and carving something out anyway would claim tax nobody
- * charged.
+ * Only a VAT-bearing line has VAT to split. For every other treatment `net === gross`: an unregistered
+ * supplier cannot charge VAT at all, and a zero-rated, exempt or out-of-scope supply has none — so there
+ * is nothing to carve out, and carving something out anyway would claim tax nobody charged.
  */
 export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
   if (draft.description.trim().length === 0) {
@@ -150,7 +200,7 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
     )
   }
 
-  if (!isRecoverable(draft.treatment)) {
+  if (!carriesVat(draft.treatment)) {
     if (draft.rateBp !== undefined && draft.rateBp !== 0) {
       throw new AppError(
         'validation',
@@ -167,6 +217,8 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
       net: draft.gross,
       vat: ZERO_AED,
       recoverableInputVat: ZERO_AED,
+      blockedInputVat: ZERO_AED,
+      expenseDebit: draft.gross,
     }
   }
 
@@ -174,11 +226,12 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
   if (rateBp === 0) {
     throw new AppError(
       'validation',
-      `Bill line "${draft.description}" is standard_recoverable at 0 bp. A recoverable line is one ` +
-        'the supplier charged VAT on; at zero rate the treatment is zero_rated.',
+      `Bill line "${draft.description}" is ${draft.treatment} at 0 bp. A line under that treatment is ` +
+        'one the supplier charged VAT on; at zero rate the treatment is zero_rated.',
     )
   }
   const breakdown = splitGross(draft.gross, rateBp)
+  const blocked = isBlocked(draft.treatment)
   return {
     description: draft.description,
     account: draft.account,
@@ -187,10 +240,13 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
     gross: breakdown.gross,
     net: breakdown.net,
     vat: breakdown.vat,
-    // The claim IS the line's VAT. Stated as its own field rather than read off `vat` at report time,
-    // because M-VAT-02 adds a treatment where the two differ — blocked VAT is charged and not
-    // recoverable — and a report that reads `vat` would silently claim it.
-    recoverableInputVat: breakdown.vat,
+    // The claim is the line's VAT, or nothing. Stated as its own field rather than read off `vat` at
+    // report time, because the blocked treatment is exactly the case where the two differ — the VAT was
+    // charged and may not be reclaimed — and a report that read `vat` would silently claim it.
+    recoverableInputVat: blocked ? ZERO_AED : breakdown.vat,
+    blockedInputVat: blocked ? breakdown.vat : ZERO_AED,
+    // A blocked line's tax is part of the cost, so the expense carries the whole gross.
+    expenseDebit: blocked ? breakdown.gross : breakdown.net,
   }
 }
 
@@ -215,6 +271,7 @@ export function deriveBill(drafts: readonly BillLineDraft[]): DerivedBill {
     vat: subtract(gross, net),
     gross,
     recoverableInputVat: sum(lines.map((line) => line.recoverableInputVat)),
+    blockedInputVat: sum(lines.map((line) => line.blockedInputVat)),
   }
 }
 
@@ -228,8 +285,8 @@ export interface BillEntryInput {
 }
 
 /**
- * The journal entry a bill posts: **Dr expense (net) per line, Dr recoverable input VAT (total VAT
- * recoverable), Cr trade payables (gross)**.
+ * The journal entry a bill posts: **Dr expense (net, plus any blocked VAT) per line, Dr recoverable
+ * input VAT (total VAT recoverable), Cr trade payables (gross)**.
  *
  * One credit, not one per line: the payable is what is owed to the supplier for this invoice, and a
  * per-line credit would make the payables ledger a list of line items nobody can pay against. One
@@ -244,7 +301,10 @@ export interface BillEntryInput {
  */
 export function billEntryDraft(input: BillEntryInput): EntryDraft {
   const lines: EntryLineDraft[] = input.bill.lines.map((line) =>
-    debit(line.account, line.net, line.description),
+    // `expenseDebit`, not `net`: a blocked line's VAT is cost and belongs in the expense. Reading `net`
+    // here would leave the entry short by the blocked tax, and the deferred balance trigger would refuse
+    // the whole bill at COMMIT with an arithmetic message that named no category.
+    debit(line.account, line.expenseDebit, line.description),
   )
   if (input.bill.recoverableInputVat.fils > 0) {
     lines.push(
@@ -268,13 +328,13 @@ export function billEntryDraft(input: BillEntryInput): EntryDraft {
 /**
  * The debit side of the entry, as a figure a caller can assert against without building the draft.
  *
- * Equal to the gross by construction: the non-recoverable lines have `net === gross`, and the
- * recoverable ones contribute their net plus their VAT. Exported because "it balances" is the property
- * every later gate asserts, and a test that re-adds the lines itself would be asserting its own
- * arithmetic.
+ * Equal to the gross by construction for every mix of treatments: a line with no VAT has `net === gross`,
+ * a recoverable line contributes its net plus its claim, and a blocked line contributes its net plus its
+ * blocked tax — which is its gross. Exported because "it balances" is the property every later gate
+ * asserts, and a test that re-adds the lines itself would be asserting its own arithmetic.
  */
 export function billDebitTotal(bill: DerivedBill): Money {
-  return add(bill.net, bill.recoverableInputVat)
+  return add(add(bill.net, bill.recoverableInputVat), bill.blockedInputVat)
 }
 
 /** The account a recoverable claim is debited to. Exported so a caller need not spell '1080'. */

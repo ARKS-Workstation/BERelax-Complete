@@ -139,10 +139,20 @@ describe('internal consistency', () => {
 
   it('treats blocked input VAT as blocked', () => {
     const blocked = CHART.accounts.filter((a) => a.vatBox === 'blocked_input_tax')
-    // Entertainment is the case docs/04 section 4 names, and it must exist for the rule to mean
-    // anything.
-    expect(blocked.map((a) => a.code as string)).toEqual([ACCOUNTS.entertainment as string])
+    // Entertainment is the case docs/04 section 4 names, and staff accommodation and transport is the
+    // employee benefit no document records an obligation to provide (docs/04 SS7, docs/13 SS2), which
+    // M-VAT-02 reclassified on the conservative reading. Which accounts these are, and the documentation
+    // each one comes from, is ../tax/recoverability.ts; the set is asserted there against this chart, so
+    // the two cannot drift.
+    expect(blocked.map((a) => a.code as string)).toEqual([
+      ACCOUNTS.staffAccommodation as string,
+      ACCOUNTS.entertainment as string,
+    ])
     for (const account of blocked) expect(account.inputVatRecoverable).toBe(false)
+    // The control: mandatory employee health insurance IS recoverable, because the business is obliged
+    // to provide it (docs/04 SS7). Without this the rule above would be satisfied by a chart that
+    // blocked every staff cost, which under-claims on the one the law requires.
+    expect(findAccount(CHART, ACCOUNTS.insurance)?.inputVatRecoverable).toBe(true)
   })
 
   it('marks recoverable input VAT only on expenses and on the input VAT asset itself', () => {

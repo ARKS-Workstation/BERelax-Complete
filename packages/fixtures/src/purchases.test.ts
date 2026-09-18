@@ -27,6 +27,7 @@ import {
   SYNTHETIC_TRN,
   shiftDate,
 } from './purchases.ts'
+import { RECOVERABILITY_BILL_SHAPES } from './recoverability.ts'
 
 /**
  * The committed purchase fixtures, checked against the pure derivation before any database is involved.
@@ -82,8 +83,22 @@ describe('every committed bill shape', () => {
   it('exercises every tax treatment the unit supports', () => {
     // The vacuity guard on the whole file: without it, a shape silently dropped would leave a treatment
     // with no coverage at all and every assertion below would still pass.
-    const exercised = new Set(FIXTURE_BILL_SHAPES.flatMap((s) => s.lines.map((l) => l.treatment)))
+    //
+    // Over BOTH fixture files, because `blocked_not_recoverable` arrived with M-VAT-02 and its committed
+    // worked example lives in ./recoverability.ts — next to the disclosure figures it is the whole point
+    // of. Narrowing this assertion to the shapes in this file instead would have been the smaller edit
+    // and would have turned the guard into "the treatments we happen to cover are covered".
+    const exercised = new Set(
+      [...FIXTURE_BILL_SHAPES, ...RECOVERABILITY_BILL_SHAPES].flatMap((s) =>
+        s.lines.map((l) => l.treatment),
+      ),
+    )
     expect([...exercised].sort()).toEqual([...BILL_TAX_TREATMENTS].sort())
+    // And the one this file owns is still the one it names: a blocked shape here would post VAT to an
+    // expense the aging worked example below does not expect.
+    expect(FIXTURE_BILL_SHAPES.flatMap((s) => s.lines.map((l) => l.treatment))).not.toContain(
+      'blocked_not_recoverable',
+    )
   })
 
   it('names a supplier that exists, and a reference unique to that supplier', () => {

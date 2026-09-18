@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**54 / 207 units complete.**
+**55 / 207 units complete.**
 
 ## Next up
 
 1. **B-AVAIL-06 — The booking transaction: room row lock, idempotency, all-or-none, price snapshot**
 1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
-1. **M-VAT-02 — Input VAT recoverability classification, including blocked categories**
+1. **M-VAT-03 — Reverse charge on offshore suppliers and the nightly exception report**
 
 ## All units
 
@@ -71,7 +71,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
 | [x] | 56 | `M-VAT-01` | Suppliers, supplier tax profile, bills and payables | `M-TILL-02`, `M-TILL-03` | — | — |
-| [ ] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
+| [x] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
 | [ ] | 58 | `M-VAT-03` | Reverse charge on offshore suppliers and the nightly exception report | `F06`, `M-VAT-01`, `M-VAT-02` | — | — |
 | [x] | 59 | `M-VAT-04` | Recurring cost register with fixed/variable split and variance alerting | `H03`, `M-VAT-01` | — | — |
 | [x] | 60 | `M-VAT-05` | Opening balances and the trial balance | `M-TILL-02` | — | Y8-opening-balances, Y8-coa |

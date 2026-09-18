@@ -527,13 +527,19 @@ const STANDARD_SPA_ACCOUNTS: readonly Account[] = [
     inputVatRecoverable: false,
   }),
   defineAccount({
+    // Blocked input VAT, and the reclassification M-VAT-02 made (migration 0034). An employee benefit
+    // is recoverable only where the business is OBLIGED to provide it: docs/04 §7 names mandatory
+    // unemployment and health insurance — which is why 6110 below stays recoverable — and names no
+    // obligation to house or transport staff. docs/13 §2 says staff transport at 02:00 "is a safety
+    // matter", so the cost is real and the obligation is unconfirmed. OPEN-QUESTIONS Y11-blocked-vat
+    // holds the conservative answer: not recoverable. See ../tax/recoverability.ts for the category.
     code: ACCOUNTS.staffAccommodation,
     name: 'Staff accommodation and transport',
     type: 'expense',
     normalBalance: 'debit',
     contra: false,
-    vatBox: 'recoverable_input_tax',
-    inputVatRecoverable: true,
+    vatBox: 'blocked_input_tax',
+    inputVatRecoverable: false,
   }),
 
   // --- 6xxx operating cost -------------------------------------------------------------------
@@ -633,7 +639,8 @@ const STANDARD_SPA_ACCOUNTS: readonly Account[] = [
   }),
   defineAccount({
     // Blocked input VAT (docs/04 section 4). `defineAccount` refuses this row if anyone ever sets
-    // inputVatRecoverable true on it.
+    // inputVatRecoverable true on it. The premises serve complimentary herbal tea (docs/13 §2), so this
+    // is a cost from the first month rather than a category held open for completeness.
     code: ACCOUNTS.entertainment,
     name: 'Entertainment and staff hospitality',
     type: 'expense',
