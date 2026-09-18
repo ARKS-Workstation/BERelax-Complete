@@ -33,6 +33,30 @@
       "why": "Emailed to customers and kept for five years of FTA retention. Most of it is the font subsets; a sharp rise means an image or a second font crept in."
     },
     {
+      "id": "tax-invoice-ar-pdf",
+      "label": "A one-page tax invoice, Arabic-primary",
+      "kind": "file",
+      "path": "packages/pdf/fixtures/tax-invoice-ar.pdf",
+      "maxBytes": 90112,
+      "why": "The heaviest of the six M-TILL-12 documents: the full field set, three lines, and the Arabic-primary render, which draws more of the Arabic face than the English one. Most of the file is the four font subsets, so a sharp rise means an image, a fifth face or an embedded logo crept onto a document that is emailed to customers and kept for five years of FTA retention."
+    },
+    {
+      "id": "simplified-invoice-ar-pdf",
+      "label": "A one-page simplified invoice, Arabic-primary",
+      "kind": "file",
+      "path": "packages/pdf/fixtures/simplified-invoice-ar.pdf",
+      "maxBytes": 86016,
+      "why": "Budgeted below the full form on purpose: the simplified invoice drops the customer block and two columns, so if it ever costs as much as the tax invoice then something is being rendered that its field list does not declare."
+    },
+    {
+      "id": "receipt-ar-pdf",
+      "label": "A one-page receipt, Arabic-primary",
+      "kind": "file",
+      "path": "packages/pdf/fixtures/receipt-ar.pdf",
+      "maxBytes": 83968,
+      "why": "The form issued most often — every walk-in gets one — and the shortest. The floor is the embedded fonts, so this budget is really a fence around the document furniture."
+    },
+    {
       "id": "gallery-page",
       "label": "Screenshot gallery page",
       "kind": "file",
@@ -50,7 +74,7 @@
       "width": 1080,
       "format": "avif",
       "maxBytes": 97280,
-      "why": "docs/08 \u00a78: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
+      "why": "docs/08 §8: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
     },
     {
       "id": "hero-avif-desktop",
@@ -61,7 +85,7 @@
       "width": 2560,
       "format": "avif",
       "maxBytes": 174080,
-      "why": "docs/08 \u00a78, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
+      "why": "docs/08 §8, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
     }
   ]
 }

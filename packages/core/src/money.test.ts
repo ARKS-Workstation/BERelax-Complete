@@ -8,6 +8,7 @@ import {
   compare,
   fils,
   filsFrom,
+  formatAmount,
   formatMoney,
   grossFromNet,
   money,
@@ -226,5 +227,17 @@ describe('formatting', () => {
 
   it('renders a negative amount with a leading minus', () => {
     expect(toDecimalString(subtract(aed(0), aed(12)))).toBe('-12.00')
+  })
+
+  it('formats a bare figure for a column whose header states the currency', () => {
+    // Grouped, two decimals, and no currency at all: a tax invoice carries six numeric columns across
+    // A4 and AED in every cell of every one of them does not fit, so the code goes in the column head.
+    expect(formatAmount(aed(1234))).toBe('1,234.00')
+    expect(formatAmount(money(filsFrom(11)))).toBe('0.11')
+    expect(formatAmount(aed(1234))).not.toContain('AED')
+    // The pair, and the reason both exist: formatMoney is what states the currency, so no amount is
+    // ever bare by accident.
+    expect(formatMoney(aed(1234))).toContain('AED')
+    expect(formatMoney(aed(1234))).toContain('1,234.00')
   })
 })

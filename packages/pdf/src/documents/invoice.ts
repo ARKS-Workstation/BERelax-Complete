@@ -242,13 +242,19 @@ body {
 }
 
 /* Arabic is optically smaller at the same point size and never tracked or uppercased.
-   docs/08 §3 records the recalibration; this is its print form. */
+   docs/08 §3 records the recalibration; this is its print form.
+
+   Weight 400, not 500. fonts.ts embeds the 400 and 600 Arabic cuts, and CSS weight matching resolves a
+   request for 500 *downwards* to 400 when 500 is absent — so this rule declared 500 and drew 400 for as
+   long as it existed, which is the same defect apps/web/app/_fonts/index.ts records on the web side.
+   Declaring what renders changes no pixel of the committed fixture and stops the stylesheet claiming a
+   face the document does not carry. scripts/check-tax-documents.mjs now fails the build on it. */
 .ar, [lang='ar'] {
   font-size: 1.06em;
   line-height: 1.85;
   letter-spacing: 0;
   text-transform: none;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 header {
@@ -305,7 +311,8 @@ table { width: 100%; border-collapse: collapse; }
 .totals .label-pair { display: flex; justify-content: space-between; gap: 12pt; }
 .totals .label-pair .ar { color: var(--color-ink-2); font-size: 9pt; }
 .totals .emphasis th, .totals .emphasis td { border-top: 1pt solid var(--color-ink); font-weight: 600; font-size: 11.5pt; padding-top: 5pt; }
-.totals .emphasis .label-pair .ar { font-size: 10pt; font-weight: 500; color: var(--color-ink); }
+/* 400 for the same reason as the rule above: 500 is not a cut this document carries. */
+.totals .emphasis .label-pair .ar { font-size: 10pt; font-weight: 400; color: var(--color-ink); }
 
 .inclusive { display: flex; justify-content: space-between; gap: 14pt; margin-top: 8pt; color: var(--color-ink-2); font-size: 9pt; }
 

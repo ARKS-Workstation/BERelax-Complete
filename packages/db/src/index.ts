@@ -90,6 +90,7 @@ export {
 } from './repositories/agents.ts'
 export {
   archiveService,
+  assertPublicDisplayNameLinted,
   CATALOGUE_REFUSALS,
   CATALOGUE_SQLSTATE,
   type CatalogueRefusal,
@@ -127,6 +128,20 @@ export {
   findCustomerByPhone,
   markPhoneVerified,
 } from './repositories/customer.ts'
+export {
+  type EligibilityQueryInput,
+  type EligibleTherapistRow,
+  EXCLUSION_REASONS,
+  type ExcludedTherapistRow,
+  type ExclusionReason,
+  exclusionReasonFrom,
+  readCommittedAppointments,
+  readEligibleTherapists,
+  readMandatoryDocumentTypes,
+  type ScheduledAppointmentRow,
+  type TherapistPoolRead,
+  type TherapistShiftRow,
+} from './repositories/eligibility.ts'
 export {
   type CustomerSnapshotInput,
   INVOICE_DOCUMENT_KINDS,
@@ -224,10 +239,38 @@ export {
 } from './repositories/reviews.ts'
 export * as schema from './schema/index.ts'
 export {
+  type CatalogueSeedResult,
+  PRICE_ON_REQUEST_SEED,
+  seedCatalogue,
+} from './seed/catalogue.ts'
+export {
+  comparePriceCells,
+  DOCS_13_PRICE_POINT_COUNT,
+  DOCS_13_PRICES_AED,
+  type Docs13PriceCell,
+  docs13PriceCells,
+  FILS_PER_AED,
+  type PriceMismatch,
+  type StoredPricePoint,
+} from './seed/fixtures/prices-docs-13.ts'
+export {
   PROVISIONAL_OPENING_DATE,
   PROVISIONAL_OPENING_LINES,
   seedProvisionalOpeningBalances,
 } from './seed/opening-balances.ts'
+export {
+  ensureLegalEntity,
+  LEGAL_ENTITY_ID,
+  LEGAL_ENTITY_SEED,
+  PREMISES_ID,
+  PREMISES_NAP,
+  seedPremises,
+  TRADING_CLOSE_TIME,
+  TRADING_DAYS_OF_WEEK,
+  TRADING_OPEN_TIME,
+  WHATSAPP_CANDIDATES,
+  WHATSAPP_PENDING,
+} from './seed/premises.ts'
 export {
   type ImportedOpeningBalances,
   importOpeningBalances,
@@ -293,6 +336,10 @@ export {
   sweepRecurringCostAlerts,
   tradingDateAt,
 } from './services/recurring-cost.ts'
+export {
+  type UnconfirmedAssumptionRow,
+  unconfirmedAssumptionRows,
+} from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 31 as const
+export const SCHEMA_VERSION = 32 as const

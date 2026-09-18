@@ -12,6 +12,7 @@
   "dependencies": {
     "@berelax/core": "workspace:*",
     "@berelax/fixtures": "workspace:*",
+    "@berelax/media": "workspace:*",
     "@berelax/shared": "workspace:*",
     "@berelax/ui": "workspace:*",
     "axe-core": "4.13.0",

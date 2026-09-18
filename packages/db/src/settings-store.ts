@@ -143,6 +143,99 @@ export async function unconfirmedAssumptions(sql: Sql): Promise<
   `
 }
 
+/** One unanswered assumption, wherever in the database it is recorded. */
+export interface UnconfirmedAssumptionRow {
+  /** The table it came from, so the panel can group and a reader can go and look at it. */
+  readonly source: string
+  /** Which row: a setting key, a service natural key, a menu label. Human-readable, not an id. */
+  readonly reference: string
+  readonly openQuestionId: string | null
+  readonly note: string | null
+}
+
+/**
+ * Every unanswered assumption in the database, settings and data alike.
+ *
+ * ## Why this exists alongside `unconfirmedAssumptions`
+ *
+ * `app_setting` (0010), `service` and `service_variant` (0017), `service_room_type_compat` (0012),
+ * `price_list` (0025) and `price_on_request` (0032) all carry the same provenance trio —
+ * `is_provisional`, `provisional_note`, `open_question_id` — and four of those migrations say in so many
+ * words that the Unconfirmed Assumptions panel reads their rows "the same way it reads app_setting".
+ * Until B-CAT-06 nothing did: the only reader was {@link unconfirmedAssumptions}, which reads
+ * `app_setting` alone. So the turnaround assumptions on all 8 services, the Y9-shaving-room room
+ * restriction and every derived price were flagged, in the right columns, and invisible on the one
+ * screen built to show them.
+ *
+ * {@link unconfirmedAssumptions} stays as it is and is the settings screen's reader: it returns the
+ * value and the `tier`, both of which mean something for a setting and nothing for a catalogue row —
+ * there is no tier at which a customer may edit a price-on-request label. This function is the panel's,
+ * and returns the four fields every source really has.
+ *
+ * ## The two singletons are matched on the placeholder, not on a flag
+ *
+ * `premises` and `legal_entity` carry no provenance trio, and adding one would be a row-level flag on a
+ * row that is mostly confirmed: the address is a fact, the canonical WhatsApp number is not. So those
+ * two sources are matched per COLUMN, by `is_placeholder_text()` — the same function
+ * `invoice_issuer_trn_not_placeholder` uses — against a small literal mapping from the column to its
+ * open question. The mapping is spelled in the query rather than derived, because there is nothing to
+ * derive it from: that `phone_whatsapp` is Y1-nap and `trn` is Y1-trn is knowledge, not structure.
+ */
+export async function unconfirmedAssumptionRows(
+  sql: Sql,
+): Promise<readonly UnconfirmedAssumptionRow[]> {
+  return sql<UnconfirmedAssumptionRow[]>`
+    with singleton as (
+      -- (table, column, value, question). One row per column that may stand in for an answer.
+      select 'premises' as source, 'phone_whatsapp' as column_name,
+             p.phone_whatsapp as value, 'Y1-nap' as question
+        from premises p
+      union all
+      select 'legal_entity', 'trn', e.trn, 'Y1-trn' from legal_entity e
+      union all
+      select 'legal_entity', 'trade_licence_number', e.trade_licence_number, 'Y1-trn'
+        from legal_entity e
+    )
+    select source, reference, "openQuestionId", note from (
+      select 'app_setting' as source, key as reference,
+             open_question_id as "openQuestionId", provisional_note as note
+        from app_setting where is_provisional
+      union all
+      select 'service', style::text || '/' || treatment_key,
+             open_question_id, provisional_note
+        from service where is_provisional
+      union all
+      select 'service_variant',
+             s.style::text || '/' || s.treatment_key || ' ' || v.duration_minutes::text || 'min',
+             v.open_question_id, v.provisional_note
+        from service_variant v join service s on s.id = v.service_id where v.is_provisional
+      union all
+      select 'service_room_type_compat',
+             service_style::text || '/' || service_treatment_key || ' -> ' || room_type::text,
+             open_question_id, null
+        from service_room_type_compat where is_provisional
+      union all
+      select 'service_resource_shape',
+             service_style::text || '/' || service_treatment_key || ' ' || shape::text,
+             open_question_id, provisional_note
+        from service_resource_shape where is_provisional
+      union all
+      select 'price_list', label, open_question_id, provisional_note
+        from price_list where is_provisional
+      union all
+      select 'price_on_request', menu_label, open_question_id, provisional_note
+        from price_on_request where is_provisional
+      union all
+      select source, column_name, question,
+             -- The value itself is the note: 'WHATSAPP-PENDING-Y1-NAP' says what it is, and a NULL
+             -- licence number says it by being absent.
+             coalesce(value, '(not set)')
+        from singleton where is_placeholder_text(value)
+    ) as rows
+    order by source, reference
+  `
+}
+
 export async function settingHistory(
   sql: Sql,
   key: string,

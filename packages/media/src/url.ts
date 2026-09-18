@@ -20,27 +20,37 @@
  */
 import { AppError } from '@berelax/shared'
 import { CROP_NAMES, type CropName, type DerivativeFormat, FORMATS } from './ladders.ts'
+import {
+  CROPPED_SLOT_NAMES,
+  MEDIA_SLOT_NAMES,
+  type MediaSlotName as SlotName,
+} from './slots/registry.ts'
 
 /**
- * The slots the media library declares.
+ * The slots a derivative URL may name.
  *
- * Duplicating `assets/media/manifest.json` here would be drift waiting to happen, so it is not
- * duplicated silently: `packages/fixtures/src/media-derivatives.itest.ts` asserts this list equals the
- * manifest's own keys. `packages/media` cannot import `@berelax/fixtures` — production code must not
- * depend on the fixture library — and `packages/fixtures` may see both, which makes it the place the
- * pair is checked.
+ * Read from the slot registry (W-SYS-09), which is the one declaration of what a slot is — its ratio, its
+ * minimum dimensions, its byte cap, its mime types and its alt requirement. This module used to carry its
+ * own copy of the names, which made three places agree by hand — here, the manifest and the emit script —
+ * and a slot renamed in one of them produced an `[unknown-slot]` failure on a real upload and nowhere
+ * else.
+ *
+ * `packages/fixtures/src/media-derivatives.itest.ts` asserts this list equals the keys of
+ * `assets/media/manifest.json` — `packages/media` may not import `@berelax/fixtures`, so the pair is
+ * checked from the side that may see both.
  */
-export const MEDIA_SLOTS = ['therapist-portrait', 'hero', 'logo'] as const
-export type MediaSlotName = (typeof MEDIA_SLOTS)[number]
+export const MEDIA_SLOTS = MEDIA_SLOT_NAMES
+export type MediaSlotName = SlotName
 
 /**
  * The slots this pipeline crops.
  *
  * A logo is a wordmark: it has no declared ratio, cropping it to 4:5 would cut the brand name in half,
  * and it is served as authored. Passing one to the derivative job is a programming error rather than a
- * reason to produce twenty-four bad crops, so it is refused by name.
+ * reason to produce twenty-four bad crops, so it is refused by name. Derived from the registry's
+ * `cropped` flag so the two cannot disagree.
  */
-export const CROPPED_SLOTS: readonly MediaSlotName[] = ['therapist-portrait', 'hero']
+export const CROPPED_SLOTS: readonly MediaSlotName[] = CROPPED_SLOT_NAMES
 
 /** Where originals live in the private bucket. No CDN, no public read (docs/08 §6). */
 export const PRIVATE_ORIGINALS_PREFIX = 'originals'

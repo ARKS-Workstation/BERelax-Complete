@@ -17,6 +17,7 @@
     "./tokens.css": "./src/tokens/tokens.css"
   },
   "dependencies": {
+    "@berelax/media": "workspace:*",
     "@berelax/shared": "workspace:*",
     "@radix-ui/react-dialog": "1.1.23",
     "@radix-ui/react-direction": "1.1.4",

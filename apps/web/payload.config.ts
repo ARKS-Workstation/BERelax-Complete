@@ -1,4 +1,5 @@
 import { CMS_ROBOTS_TAG, PAYLOAD_ADMIN_ROUTE, PAYLOAD_API_ROUTE } from '@berelax/cms'
+import { sharp } from '@berelax/media/sharp'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig } from 'payload'
@@ -79,6 +80,16 @@ export default buildConfig({
   collections: [...PAYLOAD_COLLECTIONS],
   globals: [...PAYLOAD_GLOBALS],
   editor: lexicalEditor({}),
+  /**
+   * The same libvips the derivative pipeline uses — literally the same, through `@berelax/media/sharp`.
+   *
+   * Payload reads an upload's pixel dimensions through this, and the `media` collection's slot constraints
+   * are checks on those numbers. Without it `width` and `height` arrive null and `assertMediaRowAcceptable`
+   * refuses every upload with `[unmeasured-original]` — unusable rather than unsafe, but the right answer
+   * is to measure. Imported through the media package rather than as a dependency of this app so there is
+   * one declared `sharp` range and therefore one libvips build; see that module for what two would cost.
+   */
+  sharp,
   // Off. GraphQL doubles the public surface of the CMS for no requirement this project has, and every
   // field it exposes is a field the access rules have to be right about twice.
   graphQL: { disable: true },

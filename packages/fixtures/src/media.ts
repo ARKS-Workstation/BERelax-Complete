@@ -20,7 +20,21 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AppError } from '@berelax/shared'
 
-export type MediaSlot = 'therapist-portrait' | 'hero' | 'logo'
+/**
+ * The slot names, as `@berelax/media`'s registry declares them.
+ *
+ * Restated here as a union rather than imported, for the reason the whole file exists: this module reads
+ * a JSON manifest from disk and is loaded by the harness with a browser, and `@berelax/media` is a
+ * devDependency of this package. `media-derivatives.itest.ts` asserts this list equals the registry's, so
+ * a name added there and not here fails a test rather than turning up as an unrenderable asset.
+ */
+export type MediaSlot =
+  | 'hero'
+  | 'therapist-portrait'
+  | 'service-card'
+  | 'gallery'
+  | 'testimonial-background'
+  | 'logo'
 
 export interface MediaAsset {
   /** Path relative to `assets/media/`. */
@@ -34,10 +48,21 @@ export interface MediaAsset {
   readonly focalY?: number
 }
 
+/**
+ * One slot's constraints, as the manifest records them.
+ *
+ * A projection of the slot registry, written into `assets/media/manifest.json` by
+ * `scripts/emit-media-manifest.mjs` and drift-checked by `pnpm media`
+ * (`[slot-spec-must-mirror-the-registry]`) — so this is a mirror to read, never a place to change a
+ * number.
+ */
 export interface SlotSpec {
   /** Target ratio as [w, h], or null for a slot that is never cropped. */
   readonly ratio: readonly [number, number] | null
   readonly minWidth: number
+  readonly minHeight: number
+  readonly maxBytes: number
+  readonly mimeTypes: readonly string[]
   readonly focalRequired: boolean
 }
 

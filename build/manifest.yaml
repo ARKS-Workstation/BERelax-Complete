@@ -698,7 +698,7 @@ units:
       from bookable availability here, so P-HR extends these tables rather than inventing a second source
       of truth.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-01
@@ -722,12 +722,101 @@ units:
       does not exclude them
     - dependency-cruiser proves packages/core holds only the port and packages/db holds the implementation,
       with no core -> db import
+    - 'NOTE: the concrete names this list left open. The migration is
+      packages/db/migrations/0030_staff_availability.sql and SCHEMA_VERSION is 30. The db-backed suite is
+      eligibility.itest.ts, NOT .test.ts - packages/db has no database in the unit runner, so a
+      database-backed suite there never connects, the same correction B-AVAIL-01 made for
+      booking-constraints and B-LIFE-02 for otp. eligibility.test.ts exists as well and holds the half
+      that needs no database (the reason-name translation, which refuses an unknown reason rather than
+      passing it through as undefined). The pair - core''s pure rule against the SQL implementation - is
+      packages/fixtures/src/therapist-eligibility.itest.ts, because packages/fixtures is the only package
+      that may import both. Three tables the list did not name were needed and are here: leave_request
+      (the approved-leave view is a projection of it, and the view is what availability reads),
+      employee_skill''s is_provisional/open_question_id pair, and the regulatory_profile column below.'
+    - 'NOTE: the credential rule shipped is STRICTER than the acceptance line, deliberately, and two
+      boundaries in it are decisions rather than details. (1) A mandatory document type with NO row at all
+      is credential_missing, not a pass: a therapist whose file was never completed is not more eligible
+      than one whose licence lapsed yesterday, and the permissive reading makes the two
+      indistinguishable - the same fail-closed argument 0012 makes for service_room_type_compat
+      ("structural absence is a loud failure; a fall-back is a quiet one"). (2) Expiry is compared to the
+      TRADING date, inclusively, and never to the slot instant. 01:30 belongs to the previous trading
+      date, so a licence valid through the 18th covers the 18th''s 01:30 appointment whose calendar date
+      is the 19th; comparing against lower(period)::date takes the last two hours of every trading day
+      away from a therapist licensed for all of them. Employment is compared the same way, which is also
+      why employee carries an employment PERIOD rather than an is_active flag - a flag answers "now" and
+      availability is asked about past and future dates. (3) The latest expiry per (employee, type) is
+      what counts, because a renewal is a new row rather than an edit; reading any other row reports a
+      therapist as expired on the strength of a licence they have already replaced.'
+    - 'NOTE: regulatory_profile gained mandatory_therapist_document_types, an employee_document_type[]
+      with a default rather than a superseding row - introducing a column is not a change to the profile,
+      and superseding the seeded row to carry it would record a decision nobody took. The default IS the
+      provisional answer (professional_licence + health_certificate), which is the stricter reading 0004
+      says an unconfirmed licence resolves to, and it is carried by the profile''s own is_provisional
+      against Y1-licence and Y8-staff. An enum array and not text[]: a typo in a text[] is a mandatory
+      type nothing matches, so every therapist passes the check meant to exclude them. One consequence
+      cost a run to find and is recorded here for the next unit that adds a column to that table:
+      regulatory_profile_current was created in 0004 as `select *`, and a view''s column list is FIXED at
+      CREATE time, so the column was invisible to every consumer until 0030 re-issued the view with
+      create or replace.'
+    - 'NOTE: scoped where a dependency does not exist yet. (1) appointment.therapist_id still has NO
+      foreign key, although its parent now exists. `references employee (id)` is the constraint that
+      fits and it is not the claim worth making: employee holds every employee, so it would accept a
+      receptionist as the therapist of a massage while reading as though it had proved otherwise. The
+      claim is "an employee holding the skill this appointment''s style requires, on shift, not on leave,
+      credentialled", which is this read model re-applied inside the booking transaction - B-AVAIL-06''s.
+      Attaching the weaker constraint now would also require three integration suites and gate 26q to
+      invent an employment record for a synthetic uuid. (2) appointment snapshots neither
+      turnaround_minutes nor therapist_buffer_minutes, so readCommittedAppointments re-derives both from
+      service and service_resource_shape at today''s figures. solve.ts states the opposite ("both figures
+      are snapshotted onto the appointment when it is booked") and the columns are not there to read;
+      adding them belongs with the transaction that would write them, B-AVAIL-06. The error is uniform
+      across appointments rather than selective, so it cannot produce a double booking. (3) Gender is
+      read, carried on every pooled therapist and deliberately NOT applied: same-gender matching is
+      B-AVAIL-05''s rule. employee.gender is NULLABLE, because a NOT NULL would have this migration
+      invent nineteen people''s genders (Y8-staff), and the port omits the key rather than answering
+      null so that B-AVAIL-05 has one spelling of "unknown" to handle.'
+    - 'NOTE: the "19 unnamed therapists" provisional roster is NOT seeded, and that is a departure from
+      this entry''s own provisional line. 0012 seeds five provisional rooms because a room is premises
+      data; an employee row is an employment record, and nineteen fabricated ones in every database is
+      brief rule 15 in its worst form - a fabricated person can be rostered, paid and reported on, and
+      P-HR''s import would then be the second source for the same nineteen people. An empty employee
+      table means availability offers nothing until HR data exists, which is the loud failure rather than
+      the quiet one. The fixture salon''s eight therapists (packages/fixtures/src/salon.ts, digest-locked)
+      remain the dataset; the two integration suites build the small, purpose-named probe rosters their
+      assertions need, including the deliberately expired credential. Skills are split across both styles
+      and genders assigned across those probe employees, which is what the provisional line describes.'
+    - 'NOTE: a defect found in shipped code, worked around here rather than fixed here.
+      assign-shape.ts''s roomPlacesTaken counts ScheduledAppointment RECORDS, while the SQL it says it
+      mirrors (room_peak_concurrency, 0024) counts appointment ROWS - and 0024 writes one row per
+      therapist. A Four Hands already committed in a capacity-2 room is therefore 2 rows and 2 places to
+      the database and 1 place to core if the two rows are merged into one record with two therapistIds,
+      which is the reading ScheduledAppointment.therapistIds'' own comment invites ("two for Four Hands
+      and Couple Massage"). remainingRoomPlaces then reports a free place the deferred trigger refuses at
+      COMMIT. It is unreachable through assignShapeSlots, because roomsFreeFor is stricter and drops the
+      room first (B-AVAIL-03''s own NOTE), but it IS reachable through the direct assignShape call
+      B-AVAIL-06 makes inside the booking transaction. readCommittedAppointments therefore returns ONE
+      record per appointment row, which is the unit the trigger counts, and eligibility.itest.ts asserts
+      that shape. Resolving it properly - either the comment or the counting rule - is B-AVAIL-03''s or
+      B-AVAIL-06''s.'
+    - 'NOTE: what P-HR must supply to fill the port, stated as the seam rather than as a schema.
+      EligibilityFacts in packages/core/src/availability/eligibility-port.ts is the contract written as a
+      type: per therapist an employment period, the skills held, the credentials with their expiry dates;
+      plus the rostered spans for a trading date, the APPROVED leave periods, and the mandatory document
+      types. P-HR extends employee, employee_skill, shift, shift_assignment, leave_request and
+      employee_document rather than introducing its own tables, and replaces
+      readEligibleTherapists''s query or the provider wiring - not solveAvailability, which this unit does
+      not touch. The division that must not be blurred: day-level facts are the port''s and interval
+      arithmetic is the solver''s, which is why approved leave is subtracted into the shifts the port
+      returns (poolSolverInput) rather than added as a second input the solver would have to reconcile.'
     files:
     - packages/core/src/availability/eligibility-port.ts
+    - packages/core/src/availability/eligibility-port.test.ts
+    - packages/db/migrations/0030_staff_availability.sql
     - packages/db/src/schema/staff.ts
     - packages/db/src/repositories/eligibility.ts
-    - packages/db/migrations/
     - packages/db/src/repositories/eligibility.test.ts
+    - packages/db/src/repositories/eligibility.itest.ts
+    - packages/fixtures/src/therapist-eligibility.itest.ts
   - id: B-AVAIL-05
     order: 24
     title: Gender matching as a hard constraint, default strict
@@ -955,7 +1044,7 @@ units:
       the three price-on-request services with derived provisional prices flagged for the Unconfirmed Assumptions
       panel.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-CAT-05
@@ -983,11 +1072,103 @@ units:
       covering all 8 services and zero services left with an empty compat set
     - The TRN placeholder is a value that fails invoice-field validation, asserted by a test that invoice
       issuance refuses it, so an unset TRN cannot silently reach a document
+    - 'NOTE: SCHEMA_VERSION is 32. One migration was needed and it is
+      packages/db/migrations/0032_price_on_request.sql. Everything else is seeded through scripts/seed.mjs,
+      because prices are business data and a migration cannot be re-run when one changes - which is
+      exactly what 0017 says when it seeds the 8 services and deliberately not their 32 prices. The
+      migration exists for the one fact that had nowhere to live: docs/13 section 4 has a fourth table
+      headed "Price on request", and the schema had no place to record an offering that exists and has no
+      figure.'
+    - 'NOTE: the provisional field above says the price-on-request prices are "derived as 1.8x the
+      single-therapist equivalent". That was NOT implemented, and the reversal is deliberate. A derived
+      figure would be quoted to a customer, taken at the till and printed on a tax invoice, and nothing on
+      any of those surfaces distinguishes it from a price the owner set - the same reason legal_entity.trn
+      carries TRN-PENDING-Y1-TRN rather than fifteen plausible digits. There is also nowhere to put it:
+      service_variant is (service x duration) and duration is the ONLY pricing axis (ADR 0021), so a Four
+      Hands figure is a price for a SHAPE, which needs a third axis that 0017 and 0025 each refused to add.
+      price_on_request therefore has NO price column and its rows carry is_provisional (pinned true by
+      price_on_request_row_is_always_unanswered), the resource requirement docs/13 states, and
+      Y9-poa-prices. Answering Y9-poa-prices deletes the row and adds ordinary catalogue data; it is never
+      a cleared flag. Y9-poa-prices is unchanged and still open - this unit narrows nothing about it.'
+    - 'NOTE: the second acceptance line needed the rewording B-CAT-03 predicted, and here is what it now
+      means. The three are not services: Four Hands and Couple Massage are the four_hands and couple rows
+      of service_resource_shape (0017), and Full Body Shaving is modelled as nothing at all - it is not one
+      of the four treatment keys, not a shape of one, and docs/13 names it once with no style, so a
+      (style x treatment) row would invent an Asian and an Arabic version of it. The three are recorded as
+      price_on_request rows, which is what keeps the catalogue at exactly 8 services and 32 variants. The
+      column the line calls price_provisional is price_on_request.is_provisional; no service_variant row is
+      flagged provisional, because all 32 prices are transcribed from docs/13 section 4 and none is derived.
+      Y9-shaving-room is named in the Full Body Shaving note and remains open.'
+    - 'NOTE: Y8-rooms is decided, against seeding a two-place standard room. B-AVAIL-03 left the choice as
+      "either B-CAT-06''s measured inventory includes a two-place standard room, or the capacity count moves
+      off appointment rows onto a per-booking places figure". There is no measured inventory: docs/13
+      section 8 lists "room count and room types" among the things still unknown, and section 4 states the
+      Four Hands footprint as "2 therapists, 1 standard room, 1 CLIENT" - one client, so
+      rooms.capacity (documented in 0012 as clients the room holds at once) is correctly 1 and
+      min_room_capacity is correctly 1. The unbookability is 0024 counting appointment ROWS against that
+      column, not a gap in the inventory. Inventing a capacity-2 standard room would invent an inventory
+      fact to make a test pass AND would let the scheduler put two unrelated clients in one room. The 5-room
+      stub from 0012 is therefore seeded unchanged - 3 standard at capacity 1, 1 couples at capacity 2,
+      1 wet - and packages/fixtures/src/business-seed.itest.ts asserts both halves as a tripwire: every
+      four_hands shape needs 2 therapists and 1 client, and no standard room has capacity >= 2. Resolution
+      is B-AVAIL-06''s, with the booking transaction. packages/fixtures/src/salon.ts was not touched and the
+      fixture digest is unchanged.'
+    - 'NOTE: Y1-nap is also decided against the provisional value above. No canonical WhatsApp number is
+      seeded: docs/13 section 3 records 052 510 8633 on the prototype and +971 52 823 9069 on the live site
+      and asks which is correct, and premises.phone_whatsapp is the single source every footer, schema block
+      and facts endpoint reads. Promoting either would publish a number that may not reach the business and
+      would be indistinguishable from one the owner had confirmed. The column holds
+      WHATSAPP-PENDING-Y1-NAP, which is_placeholder_text() (0026) recognises and isPlaceholderText()
+      agrees on, asserted both ways. Both candidates are recorded in WHATSAPP_CANDIDATES with their source,
+      neither ranked. The landline and the mobile ARE seeded - docs/13 section 3 gives the mobile in two
+      formats of one number and the landline with nothing contradicting it - in E.164.'
+    - 'NOTE: the repo-wide grep is packages/db/src/seed/premises.test.ts, in the unit suite, over every
+      .ts/.tsx/.mjs file under packages/, apps/ and scripts/ with a CLOSED exemption list naming the unit
+      that owns each entry. It found and removed two real duplicates: packages/fixtures/src/invoice.ts
+      spelled the address again and used the PROTOTYPE WhatsApp number as the issuer phone, and
+      packages/fixtures/src/synthetic.ts restated the business numbers - and had fallen behind, holding both
+      WhatsApp numbers and the mobile but NOT the landline, so a synthetic fixture number could have
+      collided with a number that rings the front desk. Both now compose from PREMISES_NAP. The remaining
+      exemptions are apps/web (3 files) and the pdf and harness specimens; the apps/web half is W-SITE-02''s
+      own acceptance line and its own known-bad fixture, and W-SITE-02 depends on this unit.'
+    - 'NOTE: the F09 Unconfirmed Assumptions query had to be extended, because it did not exist in the form
+      the acceptance line assumes. 0010, 0012, 0017, 0025 and now 0032 each carry the same provenance trio
+      and four of them say in so many words that the panel reads their rows "the same way it reads
+      app_setting" - but the only reader, unconfirmedAssumptions() in packages/db/src/settings-store.ts,
+      read app_setting alone. So every provisional row in the catalogue was flagged, in the right columns,
+      and invisible on the one screen built to show them. unconfirmedAssumptionRows() is the panel''s reader
+      and unions all of them plus the two singletons whose columns stand in for an answer (premises.
+      phone_whatsapp -> Y1-nap, legal_entity.trn and trade_licence_number -> Y1-trn, matched by
+      is_placeholder_text). unconfirmedAssumptions() is unchanged and remains the settings screen''s, which
+      needs the value and the tier.'
+    - 'NOTE: the last acceptance line was already satisfied before this unit.
+      packages/fixtures/src/invoice-document.itest.ts reads legal_entity.trn from the database and proves
+      both layers refuse it - core before the input can be built, and invoice_issuer_trn_is_fifteen_digits
+      if it ever reached an insert - with the correct TRN as the control. This unit adds only the link from
+      the seed module to that row (LEGAL_ENTITY_SEED.trn === PLACEHOLDER_TRN === the seeded value) rather
+      than a second copy of the claim. legal_entity is ensured with 0026''s exact values and
+      on conflict (id) do nothing, so trade_licence_number stays NULL.'
+    - 'NOTE: the concrete files. The seed is packages/db/src/seed/{catalogue,premises}.ts with the
+      transcription in packages/db/src/seed/fixtures/prices-docs-13.ts; the pure tests are
+      packages/db/src/seed/{catalogue,premises}.test.ts and the database-backed suite is
+      packages/fixtures/src/business-seed.itest.ts - it has to live in fixtures because the compliance
+      lexicon is in packages/core, packages/db may never import it, and fixtures is the only package
+      allowed to depend on both. seedCatalogue takes the lint as a required function and refuses to publish
+      a public display name without one (public_display_name_unlinted), the same fail-closed shape
+      setPublicDisplayName uses; packages/fixtures/src/load.ts assembles it from readCompliancePolicy and
+      assertPublicDisplayNameCompliant, so pnpm seed stays one command.'
     files:
+    - packages/db/migrations/0032_price_on_request.sql
+    - packages/db/src/schema/price-on-request.ts
     - packages/db/src/seed/catalogue.ts
     - packages/db/src/seed/premises.ts
     - packages/db/src/seed/fixtures/prices-docs-13.ts
     - packages/db/src/seed/catalogue.test.ts
+    - packages/db/src/seed/premises.test.ts
+    - packages/db/src/settings-store.ts
+    - packages/fixtures/src/load.ts
+    - packages/fixtures/src/business-seed.itest.ts
+    - scripts/test-gates.mjs
   - id: B-AVAIL-07
     order: 29
     title: Availability query service, brief cache with write invalidation, alternatives and waitlist
@@ -2052,7 +2233,7 @@ units:
       by rule from the document total and customer presence, deterministic output for diffable fixtures,
       and private storage served only through signed URLs.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F10
@@ -2075,11 +2256,107 @@ units:
       is diffable
     - 'the PDF is stored privately and served only via a signed URL: an unsigned fetch returns 403 in the
       integration test, and every download writes an audit_event'
+    - 'NOTE: which document forms can be issued TODAY, and why it is not the two this unit is named for.
+      legal_entity.trn holds the Y1-trn placeholder ''TRN-PENDING-Y1-TRN'', which fails
+      invoice_issuer_trn_is_fifteen_digits, fails invoice_issuer_trn_not_placeholder and fails
+      requireIssuerTrn() with TrnNotConfigured. A TAX INVOICE and a SIMPLIFIED INVOICE both state the
+      supplier TRN — a simplified tax invoice is still a tax document, and invoice.document_kind''s two
+      values share those CHECK constraints — so NEITHER can be issued from the real business profile
+      until Y1-trn is answered. Nothing provisional was rendered onto a document to work around it: the
+      refusal is the deliverable, asserted against the TRN read out of the seeded row rather than a
+      constant typed into the test (packages/fixtures/src/tax-document.itest.ts). A RECEIPT can be
+      issued today, because it is not a tax document: it states no TRN, no VAT and no registration
+      claim, and it carries the sentence saying so. The layout of the two invoice forms is proved with a
+      fifteen-digit fixture TRN that reaches nothing but a fixture.'
+    - 'NOTE: a third form beyond the two in the title, and it needed one. RECEIPT is modelled as a form
+      of its own with its own field list (DOCUMENT_FORM_FIELDS in packages/core/src/documents/invoice-template.ts)
+      rather than as a tax invoice with fields hidden, because the difference is what the document
+      claims: no TRN, no VAT breakdown, no net total, plus ''This is a receipt for payment. It is not a
+      tax invoice.'' in both languages. It has no table of its own either — a receipt acknowledges a
+      payment and the till sale and tender rows are M-TILL-05 to M-TILL-11 — so today it renders from
+      the same stored document shape with its tax statement suppressed. RECEIPT_SOURCE records that.'
+    - 'NOTE: deferred to M-TILL-13 and M-VAT-11 — private storage and the signed URL. Nothing in the
+      repository can sign a URL: MediaStorage (packages/media/src/storage/port.ts) exposes put, head,
+      get and list and no signing, there is no DigitalOcean Spaces adapter at all (W-SYS-05''s
+      [no-real-media-storage-adapter]), and there is no document route to return 403 from. The unsigned
+      fetch and the audit_event on download are therefore unimplemented and untested here rather than
+      half-built: writeTaxDocumentPdf() writes bytes to a path a caller chooses, and the caller that
+      stores and serves them is the till (M-TILL-13). M-VAT-11 needs the identical 403-and-audit pair
+      for evidence attachments, so whichever lands first should own the capability rather than build a
+      second one.'
+    - 'NOTE: "byte-identical" holds only modulo the timestamp Skia writes, and the exception is measured
+      rather than assumed. Chromium stamps /CreationDate and /ModDate into every page.pdf and Playwright
+      exposes no way to fix them. Two renders of one document in the same second are byte-identical;
+      across a second boundary they differ in exactly TWO bytes, both inside those two fields, and are
+      identical once the fields are masked. The itest forces the second to tick so the mask is exercised
+      rather than coincidentally satisfied, asserts the differing-byte count, and pairs it with a control
+      that a different document differs after masking too. The HTML the template produces IS
+      byte-identical, and that is the part this unit''s code owns — the renderer reads no clock at all,
+      because every date on a document is a stored column, so there is nothing for a frozen clock to
+      freeze.'
+    - 'NOTE: the Arabic half of the field assertions is made against the HTML, not the extracted PDF
+      text, and the reason is a measurement. Chromium draws Arabic as Presentation Forms-B and the
+      extraction reconstructs lines geometrically left to right, so an Arabic phrase comes back as
+      shaped glyphs in the reverse of its logical order: the supplier label matches only after NFKC
+      normalisation AND reversal, and the two-word title matches neither way because the inter-word
+      spacing differs. Any "the PDF contains this Arabic string" assertion is therefore false or
+      accidental. What pins the Arabic in the PDF is the committed golden — every Arabic line, byte for
+      byte, in visual order, in packages/pdf/fixtures/tax-document-golden.json — with the
+      presentation-form count and the geometric right-to-left assertions.'
+    - 'NOTE: the Arabic-language requirement is rendered but not yet SOURCED. issuer_legal_name_ar,
+      issuer_address_snapshot_ar and invoice_line.description_ar are null on every document issued today
+      (the NOTE on M-TILL-04), so the Arabic party name, address and line descriptions on a rendered
+      document come from caller-supplied fallbacks (ArabicFallbacks) rather than from the record. Every
+      label, title, footnote and settlement sentence IS in the template. B-CAT-06 seeds the source
+      columns and the stored value then wins over the fallback, which is asserted.'
+    - 'NOTE: added beyond the list — `pnpm documents` (scripts/check-tax-documents.mjs), three rules with
+      six known-bad fixtures and two controls in scripts/test-gates.mjs. It caught a real defect on its
+      first run: packages/pdf/src/documents/invoice.ts declared font-weight 500 on Arabic body copy while
+      fonts.ts embeds only 400 and 600, so CSS resolved it downwards to 400 and the declaration had been
+      dead since F10 — the same defect apps/web/app/_fonts/index.ts records on the web side. Changed to
+      400, which is what it was already drawing: the committed F10 fixture is unchanged in size and its
+      PNG is pixel-identical.'
+    - 'NOTE: three fields are printed that a customer will never read, so that the Y11 enumeration is
+      honest rather than fudged: series_code, period_key and issuer_emirate. The first two are columns
+      the superset lists and a document that states its number without stating the range it came from
+      cannot be tied to a gap report by the person holding the paper; the emirate is what the licensing
+      authority follows from (docs/04 §1). All three sit in the document furniture at 8pt.'
+    - 'NOTE: file paths differ from the list below, which is recorded rather than quietly done. The
+      renderer is packages/pdf/src/documents/tax-document.ts and not apps/web/src/services/pdf/invoice.ts:
+      ADR 0011 puts the Chromium binary in the WORKER, and importing @berelax/pdf into apps/web would
+      pull Playwright into the Next build for a page that does not render PDFs. The db-to-view mapping
+      lives in packages/core/src/documents/invoice-template.ts as named, taking the stored shape
+      structurally so core stays pure; packages/fixtures is where the two are proved to be the same
+      shape, because it is the one package allowed to see both. The fixtures are in
+      packages/pdf/fixtures/ beside F10''s rather than artifacts/fixtures/, which is where
+      scripts/render-pdf-fixtures.mjs writes and where the byte budgets point.'
     files:
     - packages/core/src/documents/invoice-template.ts
-    - apps/web/src/services/pdf/invoice.ts
-    - artifacts/fixtures/invoice-en-ar.pdf
-    - apps/web/src/services/pdf/invoice.itest.ts
+    - packages/core/src/documents/invoice-template.test.ts
+    - packages/core/src/money.ts
+    - packages/core/src/index.ts
+    - packages/pdf/src/documents/tax-document.ts
+    - packages/pdf/src/documents/tax-document.itest.ts
+    - packages/pdf/src/documents/invoice.ts
+    - packages/pdf/src/render-document.ts
+    - packages/pdf/src/testing/stored-documents.ts
+    - packages/pdf/src/testing/geometry.ts
+    - packages/pdf/src/testing/index.ts
+    - packages/pdf/src/index.ts
+    - packages/pdf/package.json
+    - packages/fixtures/src/tax-document.itest.ts
+    - packages/fixtures/package.json
+    - packages/pdf/fixtures/tax-invoice-en.pdf
+    - packages/pdf/fixtures/tax-invoice-ar.pdf
+    - packages/pdf/fixtures/simplified-invoice-en.pdf
+    - packages/pdf/fixtures/simplified-invoice-ar.pdf
+    - packages/pdf/fixtures/receipt-en.pdf
+    - packages/pdf/fixtures/receipt-ar.pdf
+    - packages/pdf/fixtures/tax-document-golden.json
+    - scripts/check-tax-documents.mjs
+    - scripts/render-pdf-fixtures.mjs
+    - scripts/test-gates.mjs
+    - build/budgets.json
   - id: M-TILL-13
     order: 55
     title: Till, cash-up and package screens, and the M2 Bankable vertical slice
@@ -6134,7 +6411,7 @@ units:
       with aspect ratio, minimum dimensions, maximum bytes and required alt enforced server-side, plus the
       junk-alt filter and Payload focal point.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-05
@@ -6163,12 +6440,178 @@ units:
     - Every slot has a palette-matched placeholder at the correct ratio, and a test asserts no placeholder
       is served on a published route unless a provisional:true flag for it is returned by the Unconfirmed
       Assumptions query
+    - 'NOTE: the registry is the single source in the strong sense, so three things now read it rather than
+      restating a slot. `MEDIA_SLOTS` and `CROPPED_SLOTS` in packages/media/src/url.ts are derived from it
+      (they were a hand-written copy of three names); `assets/media/manifest.json`''s `slots` block is
+      projected from it by scripts/emit-media-manifest.mjs and drift-checked by a new `pnpm media` rule,
+      `[slot-spec-must-mirror-the-registry]`, the same generated-and-committed arrangement as tokens.css;
+      and every committed asset is measured by `validateUpload` rather than by a second, looser set of
+      checks written inside check-media.mjs — which is what revealed that the old checks looked at minimum
+      width and a ratio tolerance of their own and never at the byte cap or the mime type at all. The slot
+      list grew from three names to six: the five docs/08 §6 names plus `logo`. Two assertions in
+      packages/media/src/url.test.ts moved with it — 48 distinct derivative paths became 5 cropped slots x
+      24 renditions, and the "unknown slot" fixture moved from `gallery` (now a real slot) to `carousel`,
+      because a refusal fixture that has become valid is a refusal nobody is testing.'
+    - 'NOTE: the ±0.5% ratio tolerance in the second criterion cannot be applied as a flat rejection, and
+      this is the same shape of finding as W-SYS-05''s OKLCH band. 20 of the 23 assets in a slot that
+      declares a ratio are outside it — the portraits run 0.461–0.799 against the 4:5 slot''s 0.800, and
+      only photos/hero-team.jpg, photos/spa-02.jpg and team/team-16.jpg land inside, the first two at 0.053%
+      and the third at 0.125%. What is enforced instead is the tolerance doing the work it can do — a source more
+      than 0.5% from its slot''s ratio is refused UNLESS a focal point is declared
+      (`[slot-ratio-out-of-tolerance]`), because a centre crop of a full-length portrait is a torso and the
+      focal point is the answer that makes the crop a decision. A second finding sits under it, measured in
+      apps/web/src/media-slots.itest.ts: Payload 3.89 defaults the focal point to {x:50,y:50} on every
+      create (`parseUploadEditsFromReqOrIncomingData`), so `focal === undefined` is never true for an upload
+      through the admin and the rule fires only on the path with no Payload in it —
+      assets/media/manifest.json, where `pnpm media` checks it and gate case 29a proves it by rule name.
+      Treating a centre focal point as "no answer" was considered and rejected: it would refuse
+      photos/spa-01.jpg, whose 2.50 frame is correctly centred horizontally. Y12-photos.'
+    - 'NOTE: a rule was deliberately NOT written, and the reason is worth keeping. The obvious third ratio
+      check — "the crop window at the declared ratio must itself meet the slot minimum" — cannot fire:
+      `minHeight` is `minWidth` scaled by the slot''s own ratio, so the window taken out of any source that
+      clears minWidth x minHeight clears them too, at every focal point. It was written, found to be
+      unreachable by any fixture, and replaced by the implication it actually is — asserted over every slot
+      and a sweep of 36 focal points in validate.test.ts, with the converse as the control. A check no
+      fixture can trip is the ADR 0003 failure one layer in.'
+    - 'NOTE: SCOPED — the fifth criterion, "refused before publication ... integration test through the
+      W-SITE-10 gate". W-SITE-10 is todo: there is no draft -> lint_passed -> approved -> published state
+      machine and no synthetic weight check to hook into. Delivered for it instead:
+      `publicationRefusals` / `assertSlotImagesPublishable` in packages/media/src/slots/validate.ts, which
+      take a page''s slot images and answer with `[media-slot-alt-fails-validation]` and
+      `[media-slot-over-byte-budget]` carrying the measured weight — unit-tested with the accepting control.
+      What IS satisfied in full is the refusal before the row exists: apps/web/src/media-slots.itest.ts
+      proves through Payload that a junk-alt or over-cap upload is refused with no row written, and that an
+      accepted row is checked again on update, which is the case an upload-time-only check walks past. Note
+      also that only the hero has a published byte budget in docs/08 §8 (95KB/170KB); the per-slot figure is
+      null elsewhere because docs/08 states none, and the page-level ≤1.9MB/≤3.2MB ceiling is a property of
+      a rendered page. Deferred to W-SITE-10.'
+    - 'NOTE: SCOPED — the second half of the sixth criterion, "no placeholder is served on a published route
+      unless a provisional:true flag for it is returned by the Unconfirmed Assumptions query". Neither half
+      of that has anything to attach to yet. No indexable route renders an image: apps/web serves two
+      placeholder pages, /kitchen-sink (indexable:false) and the treatment handler, so a crawl today would
+      pass by having nothing to examine — the same reason W-SYS-05 scoped its route crawl. And the
+      Unconfirmed Assumptions query has exactly two sources, `app_setting` rows
+      (`unconfirmedAssumptions` in @berelax/db) and the settings registry (`provisionalSettings` in
+      @berelax/config); a placeholder is not a setting anybody sets, so registering five as app_setting rows
+      would put non-settings in the settings table. Delivered instead: `provisionalSlotPlaceholders()` in the
+      same three-field shape the panel already reads (key, openQuestionId, note), one entry per slot that
+      reserves a box, every one flagged against Y12-photos and asserted in registry.test.ts and in
+      packages/fixtures/src/media-slots.itest.ts. The FIRST half is satisfied in full and measured:
+      packages/ui/src/tokens/slot-placeholders.test.ts computes the OKLCH of all 21 palette tokens and
+      asserts every slot''s placeholder sits inside docs/08 §6''s band, with the 18 out-of-band tokens as the
+      control. Concatenating the third source into the panel belongs to whichever unit renders it; serving
+      the placeholder on a published route belongs to W-SITE-04/W-SITE-06.'
+    - 'NOTE: no migration, and no number taken. The reserved 0022_media.sql was never written and stays
+      unwritten; SCHEMA_VERSION stays at 29. The `media` table is Payload''s own, in the `payload` schema,
+      synced by `push` in development and by `payload migrate` on deploy — the arrangement migration 0023
+      exists for — so `pnpm db:drift` never sees it and there is nothing for a hand-written Drizzle mirror
+      to mirror. 0030, 0031 and 0032 are untouched.'
+    - 'NOTE: the row is metadata and `disableLocalStorage` is on. Payload''s default writes the file beside
+      the app and serves it from a public route, and an original must never be publicly readable — docs/08
+      §6 puts originals in berelax-private with no CDN and no public read, and nineteen of the twenty-five
+      real assets are photographs of employees whose photography consent is open (Y12-consent-photo). What
+      is therefore NOT wired: the put into the private bucket through @berelax/media''s storage port and the
+      `media.build-derivatives` enqueue. Both need a storage adapter and a pg-boss connection apps/web does
+      not have — the same gap W-SYS-05 named as `[no-real-media-storage-adapter]`, seen from the upload side
+      — and `derivative_manifest` is a read-only field that stays empty until something fills it, so a row
+      without derivatives is visibly incomplete rather than quietly broken. Deferred to whichever unit adds
+      the Spaces adapter.'
+    - 'NOTE: Payload now gets a `sharp` instance, because it measures an upload''s pixel dimensions and every
+      dimension constraint is a check on those numbers — without it `width` and `height` arrive null and
+      `assertMediaRowAcceptable` refuses every upload with `[unmeasured-original]`. It is imported through a
+      new `@berelax/media/sharp` subpath rather than declared as a dependency of apps/web, and the first
+      attempt (declaring it) failed a gate in a way worth recording: `pnpm gates:test` asserts that a licence
+      finding "names the package and the path it ships through", checking for `packages/media` in the
+      `[unaccepted-weak-copyleft]` message for `@img/sharp-libvips-*`. A direct dependency shortened the
+      shipped path to `apps/web > sharp`, and the assertion failed. Routing it through the media package is
+      the better answer anyway: two declared `sharp` ranges can resolve to two libvips builds, and then the
+      dimensions Payload measures come from one decoder and the crop `buildDerivatives` takes from another.
+      One range, one libvips, and the gate assertion is untouched.'
+    - 'NOTE: the `logo` slot does not accept an SVG, and docs/08 §9 says "Upload, SVG preferred". An SVG is
+      not an image, it is a document that can carry script and external references, and serving an uploaded
+      one same-origin is stored XSS; nothing in this repository sanitises one. Both committed wordmarks are
+      PNG, so nothing is blocked today. Deferred to whichever unit adds the logo setting, which needs the
+      sanitiser before it needs the mime type.'
+    - 'NOTE: added beyond the list — a new `pnpm media` rule,
+      `[aspect-ratio-must-come-from-the-slot-registry]`, which is how "grep asserts no component hard-codes
+      an aspect ratio" is satisfied. It refuses a literal `aspect-ratio:` declaration, an `aspectRatio` style
+      property and Tailwind''s `aspect-video` / `aspect-square` / `aspect-[4/5]` anywhere under apps/ or
+      packages/ except the registry itself, and allows a `var()` or a `${...}` hole. It found three real
+      violations on landing — packages/ui/src/patterns/therapist-card.tsx and two in
+      packages/harness/src/specimen.ts — all three now interpolating `slotAspectRatio(...)`, which is why
+      packages/ui and packages/harness gained @berelax/media as a dependency. `@berelax/media/slots` and
+      `@berelax/media/placeholder` are new sharp-free entry points so neither drags libvips into a browser
+      bundle.'
+    - 'NOTE: the junk-alt filter is eleven rules rather than docs/08 §6''s one regular expression, and the
+      reason is that the regular expression as written is wrong in both directions. Anchored at `^`,
+      `/^(image|photo|picture|img|hero|banner|untitled|dsc[_-]?\d+|img[_-]?\d+)/i` rejects "Photograph of a
+      massage bed made up with fresh white linen" and "Mirror image of the treatment room reflected in the
+      polished stone basin", which are good alt text — two of the twenty good strings are exactly those — and
+      it accepts "an image" and "the photo", which are not. It is also defeated by padding: `image image
+      image` is seventeen characters and clears every anchored rule. What replaces it is a residue test
+      (`alt-is-boilerplate`): strip the words for "a picture", the slot names, the file-naming habits and the
+      grammar, and refuse what is left if nothing describing anything remains. The other ten are
+      alt-missing, alt-whitespace-only (including zero-width and non-breaking, which look empty on screen),
+      alt-too-short (the 15 docs/08 asks for, in code points so Arabic counts), alt-has-too-few-letters,
+      alt-is-a-filename (extension, camera-roll pattern, or the uploaded file''s own stem),
+      alt-is-a-url, alt-repeats-the-context, alt-is-a-keyword-list, and the two decorative rules below.'
+    - 'NOTE: `altRequired: true` on all five slots is typed as the literal `true`, so a descriptor cannot opt
+      out — but empty alt is still sometimes correct, and the filter distinguishes empty-by-decision from
+      empty-by-omission rather than demanding text everywhere. WCAG 1.1.1 is explicit that a decorative
+      image takes alt="", and forcing somebody to describe the linen texture behind a pull-quote is worse
+      than silence because a screen reader then reads it out. So a media row may declare itself
+      `decorative`, and the registry says which slots may hold decoration: exactly one,
+      `testimonial-background`, the only slot whose content is the text in front of it.
+      `alt-decorative-not-permitted-in-slot` refuses it anywhere else — a photograph of a member of staff is
+      never decoration — and `alt-decorative-must-be-empty` refuses a decorative image that also carries
+      text.'
+    - 'NOTE: the gate block in scripts/test-gates.mjs proves the filter by MUTATION, in two directions,
+      because a junk-alt filter can fail by accepting junk or by rejecting good alt text and a corpus of
+      junk is blind to the second. Neutering `alt-is-boilerplate` must make the corpus fail (it does, naming
+      the rule), and raising ALT_MIN_LENGTH to 150 must make the twenty good strings fail (it does) — which
+      is what says those twenty are load-bearing rather than decorative. Nine more cases cover the media
+      gate''s new rules by name with their controls: the hard-coded ratio in three spellings, the legitimate
+      registry-read and `var()` forms, the hand-edited manifest slot block, the out-of-ratio asset with no
+      focal point, and the byte cap and minimum dimensions exercised by tightening the wordmark slot — the
+      only two numbers in the registry that appear once, so the mutation cannot hit a different slot.'
+    - 'NOTE: the fourth criterion is proved against real photography and real libvips in
+      packages/fixtures/src/media-slots.itest.ts, using photos/hero-team.jpg because its 16:9 window is
+      measurably the whole frame (1672/(16/9) rounds to its full 941 height), which is what "the subject
+      stays in frame" means for a specific file rather than in the abstract. Moving the focal point from
+      {50,45} to {15,45} changes the 4:5 derivative''s sha256 and leaves the 16:9 derivative''s identical,
+      with the two crops of the same frame as the control. Crop-before-resize is asserted structurally as
+      well: the 4:5 window is 753 source pixels wide while the rung being served is 414, which a pipeline
+      that resized first could not take.'
+    - 'NOTE: files — `tests/media/slots.spec.ts` was not created. This repository has no `tests/` directory;
+      unit tests sit beside the code as `*.test.ts` and integration tests as `*.itest.ts`, which is what
+      vitest.config.ts and vitest.integration.config.ts include. The equivalent files are
+      packages/media/src/slots/{registry,validate,alt-filter}.test.ts (112 unit tests),
+      packages/fixtures/src/media-slots.itest.ts (the real library and the focal point through libvips),
+      apps/web/src/media-slots.itest.ts (17 tests through Payload) and
+      packages/ui/src/tokens/slot-placeholders.test.ts (the placeholder band).'
     files:
     - packages/media/src/slots/registry.ts
     - packages/media/src/slots/validate.ts
     - packages/media/src/slots/alt-filter.ts
+    - packages/media/src/slots/index.ts
+    - packages/media/src/sharp.ts
+    - packages/media/src/slots/registry.test.ts
+    - packages/media/src/slots/validate.test.ts
+    - packages/media/src/slots/alt-filter.test.ts
+    - packages/media/src/url.ts
+    - packages/media/package.json
     - apps/web/src/collections/media.ts
-    - tests/media/slots.spec.ts
+    - apps/web/src/media-slots.itest.ts
+    - apps/web/payload.config.ts
+    - packages/fixtures/src/media-slots.itest.ts
+    - packages/ui/src/tokens/slot-placeholders.test.ts
+    - packages/ui/src/patterns/therapist-card.tsx
+    - packages/harness/src/specimen.ts
+    - scripts/check-media.mjs
+    - scripts/emit-media-manifest.mjs
+    - scripts/lib/media-slot-specs.mjs
+    - scripts/test-gates.mjs
+    - assets/media/manifest.json
   - id: W-SITE-06
     order: 145
     title: Therapist routes and the publishing guard

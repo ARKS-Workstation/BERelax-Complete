@@ -517,14 +517,38 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
 
 // 21. An uncovered file in packages/core must breach the coverage threshold.
 {
-  // packages/core carries a higher floor than the rest, because it is pure domain logic: money,
-  // time, business day, authorisation. Thirty uncovered statements there take it under 95%.
+  // packages/core carries a higher floor than the rest, because it is pure domain logic: money, time,
+  // business day, authorisation.
+  //
+  // ## Why the fixture is sized rather than counted
+  //
+  // This was a flat thirty uncovered statements, on the note that "thirty uncovered statements there take
+  // it under 95%". That was true when core was small and **stopped being true** as core grew: at 99.4%
+  // covered over ~1,400 statements, thirty uncovered ones land at 97% — still over the floor. So the gate
+  // reported PASS while proving nothing, and the only reason anybody noticed is that it eventually flipped
+  // to a FAIL of its own accord. It is the exact failure ADR 0003 exists for, in the gate written to
+  // enforce ADR 0003.
+  //
+  // The fixture is therefore sized against the package it is testing: one uncovered statement per ninety
+  // lines of core source, never fewer than 80. That is deliberately modest. Sized too generously it
+  // breaches the **global** 88% floor as well, and then the run fails naming the global threshold — which
+  // satisfies `failed` while proving nothing about the core floor this case exists for. The assertion
+  // below therefore requires the failure to name `packages/core/src/**` by its glob.
+  const coreLines = execFileSync(
+    'sh',
+    [
+      '-c',
+      "find packages/core/src -name '*.ts' ! -name '*.test.ts' ! -name '*.itest.ts' | xargs cat | wc -l",
+    ],
+    { encoding: 'utf8' },
+  )
+  const uncoveredNeeded = Math.max(80, Math.ceil(Number(coreLines.trim()) / 90))
   const f = 'packages/core/src/__gate_fixture__.ts'
   const lines = ['export function uncovered(n: number): number {', '  let total = 0']
-  for (let i = 0; i < 30; i += 1) lines.push(`  if (n > ${i}) total += ${i}`)
+  for (let i = 0; i < uncoveredNeeded; i += 1) lines.push(`  if (n > ${i}) total += ${i}`)
   lines.push('  return total', '}', '')
   writeFileSync(f, lines.join('\n'))
-  const { failed } = runExpectingFailure('pnpm', [
+  const { failed, output } = runExpectingFailure('pnpm', [
     'exec',
     'vitest',
     'run',
@@ -533,7 +557,19 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     '--coverage.enabled',
   ])
   rmSync(f, { force: true })
-  check('coverage thresholds reject an uncovered file in packages/core', failed)
+  check(
+    'coverage thresholds reject an uncovered file in packages/core',
+    failed && output.includes('packages/core/src/**'),
+    failed
+      ? `the run failed but not on the core floor — a fixture large enough to breach the GLOBAL floor ` +
+          `proves nothing about the higher one:\n${output
+            .split('\n')
+            .filter((l) => l.includes('ERROR: Coverage'))
+            .join('\n')}`
+      : `${uncoveredNeeded} uncovered statements in packages/core did not breach the 95% floor. The floor ` +
+          'is either gone from vitest.config.ts or its glob no longer matches — check that before enlarging ' +
+          'the fixture.',
+  )
 }
 
 // 22. A breached byte budget must fail.
@@ -875,9 +911,20 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
       // The controls, and the reason the seven above mean anything: the same tables accept a legitimate
       // row. Without these, a broken connection string or a renamed table would reject every probe and
       // this gate would report seven passes while examining nothing.
+      //
+      // The variant is priced against a service this probe creates, not against the seeded Asian Normal
+      // Massage. B-CAT-06 seeds all 32 of docs/13 §4's price points, so the 45-minute row now exists and
+      // this control started failing on `service_variant_service_duration_unique` — a control reporting a
+      // unique violation says nothing about whether a legitimate variant is accepted. A probe service of
+      // its own keeps the claim ("this table accepts a valid row") independent of what the catalogue is
+      // priced at, and the UNIQUE, the duration CHECK and the price CHECK all still apply to it.
       const legitimateVariant = psqlProbe(
-        'insert into service_variant (service_id, duration_minutes, gross_price_fils, ' +
-          `provisional_note) values (${ASIAN_NORMAL}, 45, 17000, '${MARKER}')`,
+        'insert into service (style, treatment_key, slug, internal_name, public_display_name, ' +
+          "turnaround_minutes) values ('asian', 'gate_fixture_priced', 'gate-fixture-priced', " +
+          "'Gate', 'Gate', 20); " +
+          'insert into service_variant (service_id, duration_minutes, gross_price_fils, ' +
+          'provisional_note) values ((select id from service where treatment_key = ' +
+          `'gate_fixture_priced'), 45, 17000, '${MARKER}')`,
       )
       check(
         'catalogue gate accepts a 45-minute variant at a positive price',
@@ -1551,8 +1598,13 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 // only a gate once something has been seen to bounce off it. Each probe states the rule that must reject
 // it, because a bare non-zero exit is also what a typo in a column name produces (ADR 0003).
 //
-// B-CAT-03 did not seed the 32 prices, so there is no service_variant row to hang a price list off:
-// every probe creates its own inside `begin; … ; rollback;` and leaves nothing behind.
+// Every probe creates its own service and its own two variants inside `begin; … ; rollback;` and leaves
+// nothing behind. It used to hang them off the seeded Asian Normal Massage, on the stated grounds that
+// "B-CAT-03 did not seed the 32 prices, so there is no service_variant row to hang a price list off".
+// B-CAT-06 seeds all 32, so that insert became a `service_variant_service_duration_unique` violation and
+// every probe in this block failed on the setup rather than on the rule it names — including the two
+// controls, which is the shape of failure that looks like a broken gate rather than a stale fixture. A
+// probe service of its own makes the block independent of what the real catalogue is priced at.
 {
   const PRICING_FIXTURE = 'packages/core/src/pricing/__gate_fixture__.ts'
 
@@ -1590,10 +1642,13 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // Two variants and one price list row, created inside the probe transaction. `provisional_note` is
   // the handle rather than a new column: it is unconstrained while `is_provisional` stays false.
   const PRICE_SETUP =
+    'insert into service (style, treatment_key, slug, internal_name, public_display_name, ' +
+    "turnaround_minutes) values ('asian', 'gate_fixture_price_list', 'gate-fixture-price-list', " +
+    "'Gate', 'Gate', 20); " +
     'insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note) ' +
-    "values ((select id from service where style = 'asian' and treatment_key = 'normal_massage'), " +
+    "values ((select id from service where treatment_key = 'gate_fixture_price_list'), " +
     "60, 20000, 'gate fixture 60'), " +
-    "((select id from service where style = 'asian' and treatment_key = 'normal_massage'), " +
+    "((select id from service where treatment_key = 'gate_fixture_price_list'), " +
     "90, 30000, 'gate fixture 90'); " +
     'insert into price_list (service_variant_id, gross_price_fils, label, valid_from, valid_to) ' +
     "values ((select id from service_variant where provisional_note = 'gate fixture 60'), 18000, " +
@@ -4987,6 +5042,983 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 26v-26x. (B-AVAIL-04) The therapist availability read model: the rules the schema refuses, and the
+//           type-level pin on the eligibility port.
+//
+// `0030_staff_availability.sql` is the therapist half of availability — employment, skills, roster,
+// leave and credentials — and every rule below is one whose absence is invisible from the outside. A
+// therapist stays bookable, the day still fills, and the defect is discovered by an inspector or by a
+// therapist asking why they have no bookings:
+//
+//   - an employment period that ends before it starts matches NO date, so the therapist is silently
+//     bookable on no day at all;
+//   - a placeholder `staff_reference` or licence number is indistinguishable from a configured one,
+//     which is brief rule 15 and what `is_placeholder_text` (0026) exists for;
+//   - a document expiring before it was issued makes "is this credential current" unanswerable;
+//   - an inclusive-upper `'[]'` shift covers the instant it ends, so a treatment STARTING at shift end
+//     is accepted — the therapist has gone home;
+//   - a shift on a date the premises does not trade puts somebody on duty on a closed day;
+//   - an approval with no `decided_at`, or a pending request with one, is a leave decision that cannot
+//     be reconciled against a balance;
+//   - two overlapping APPROVED leaves are double-counted leave, discovered a year later.
+//
+// Each probe names the rule that must reject it: a bare non-zero exit is also what a typo in a column
+// name produces, and the rule under test would then be dead while this file reported PASS for ever
+// (ADR 0003). The controls are not a formality — without them the placeholder probes are satisfied by a
+// database that refuses every reference, the `'[]'` probe by one that refuses every shift, and the
+// overlap probe by one that refuses a second leave row outright, which would make extending leave
+// impossible.
+//
+// Every probe runs inside `begin; … ; rollback;` and creates its own employee, so none of it depends on
+// rows another suite left behind.
+{
+  const staffDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const STAFF_MARKER = 'gate fixture staff'
+  const STAFF_DATE = "'2099-09-01'"
+  // A date with no `business_day` row, which is what the foreign key probe needs. Deliberately far from
+  // every date any suite or gate seeds; the control below inserts the identical shift on the traded
+  // date, so if this one ever became a trading date the probe would fail rather than quietly pass.
+  const UNTRADED_DATE = "'2091-03-17'"
+  const STAFF_REF = "'gate-fixture-staff'"
+  const EMPLOYEE = `(select id from employee where staff_reference = ${STAFF_REF})`
+  const staffSpan = (from, to) =>
+    `tstzrange('2099-09-01 ${from}:00:00+00','2099-09-01 ${to}:00:00+00','[)')`
+
+  const staffSetup = [
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${STAFF_DATE}, '2099-09-01 07:00:00+00', '2099-09-01 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    `insert into employee (staff_reference, gender, employed_from, notes)
+       values (${STAFF_REF}, 'female', '2099-01-01', '${STAFF_MARKER}')`,
+  ].join('; ')
+
+  const staffProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      staffDbUrl ?? '',
+      '-c',
+      `begin; ${staffSetup}; ${statement}; rollback;`,
+    ])
+
+  const approvedLeave = (from, to) =>
+    `insert into leave_request (employee_id, period, kind, status, decided_at) values ` +
+    `(${EMPLOYEE}, ${staffSpan(from, to)}, 'annual', 'approved', now())`
+
+  if (!staffDbUrl) {
+    check(
+      'the therapist availability schema refuses what it documents',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    checkRejectedBy(
+      'staff gate rejects an employment period that ends before it starts',
+      staffProbe(
+        `update employee set employed_until = '2098-12-31' where staff_reference = ${STAFF_REF}`,
+      ),
+      'employee_employment_period_ordered',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects a placeholder staff reference',
+      staffProbe(
+        'insert into employee (staff_reference, employed_from, notes) values ' +
+          `('TBC', '2099-01-01', '${STAFF_MARKER}')`,
+      ),
+      'employee_staff_reference_not_placeholder',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects a credential that expires before it was issued',
+      staffProbe(
+        'insert into employee_document (employee_id, document_type, issued_on, expires_on) values ' +
+          `(${EMPLOYEE}, 'professional_licence', '2099-06-01', '2099-05-31')`,
+      ),
+      'employee_document_expiry_after_issue',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects a placeholder licence number',
+      staffProbe(
+        'insert into employee_document (employee_id, document_type, reference, expires_on) values ' +
+          `(${EMPLOYEE}, 'professional_licence', 'TBD', '2099-12-31')`,
+      ),
+      'employee_document_reference_not_placeholder',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects an inclusive-upper shift, which would cover the instant it ends',
+      staffProbe(
+        `insert into shift (trading_date, period, label) values (${STAFF_DATE}, ` +
+          `tstzrange('2099-09-01 12:00:00+00','2099-09-01 18:00:00+00','[]'), '${STAFF_MARKER}')`,
+      ),
+      'shift_period_half_open',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects a shift on a date the premises does not trade',
+      staffProbe(
+        `insert into shift (trading_date, period, label) values (${UNTRADED_DATE}, ` +
+          `${staffSpan('12', '18')}, '${STAFF_MARKER}')`,
+      ),
+      'shift_trading_date_fkey',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects an approved leave request with no decision instant',
+      staffProbe(
+        'insert into leave_request (employee_id, period, kind, status) values ' +
+          `(${EMPLOYEE}, ${staffSpan('12', '18')}, 'annual', 'approved')`,
+      ),
+      'leave_request_decision_has_an_instant',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects a pending leave request that already carries a decision instant',
+      staffProbe(
+        'insert into leave_request (employee_id, period, kind, status, decided_at) values ' +
+          `(${EMPLOYEE}, ${staffSpan('12', '18')}, 'annual', 'pending', now())`,
+      ),
+      'leave_request_decision_has_an_instant',
+    )
+
+    checkRejectedBy(
+      'staff gate rejects two overlapping approved leaves for one employee',
+      staffProbe([approvedLeave('12', '18'), approvedLeave('15', '20')].join('; ')),
+      'leave_request_no_overlapping_approved',
+    )
+
+    // An employee is ENDED, never deleted: `employed_until` is the mechanism, and a DELETE erases the
+    // roster, the leave decisions and the subject of every audit row about them at once.
+    checkRejectedBy(
+      'staff gate rejects DELETE on employee from the application role',
+      staffProbe(
+        `set local role berelax_app; delete from employee where staff_reference = ${STAFF_REF}`,
+      ),
+      'permission denied for table employee',
+    )
+
+    // Control 1. The legitimate versions of every probe above, in one transaction: an employment period
+    // that ends after it starts, a real-looking reference, a document issued before it expires, a
+    // half-open shift on a trading date, an approved leave with its instant, and a PENDING request
+    // overlapping it — which is what asking to extend leave looks like and must stay legal.
+    const legitimate = staffProbe(
+      [
+        `update employee set employed_until = '2100-12-31' where staff_reference = ${STAFF_REF}`,
+        'insert into employee_skill (employee_id, skill) values ' +
+          `(${EMPLOYEE}, 'asian_style'), (${EMPLOYEE}, 'arabic_style')`,
+        'insert into employee_document (employee_id, document_type, reference, issued_on, expires_on)' +
+          ` values (${EMPLOYEE}, 'professional_licence', 'GATE-FIXTURE-REFERENCE', '2099-01-02',` +
+          " '2099-12-31')",
+        `insert into shift (trading_date, period, label) values (${STAFF_DATE}, ` +
+          `${staffSpan('12', '18')}, '${STAFF_MARKER}')`,
+        'insert into shift_assignment (shift_id, employee_id) select id, ' +
+          `${EMPLOYEE} from shift where label = '${STAFF_MARKER}'`,
+        approvedLeave('12', '13'),
+        'insert into leave_request (employee_id, period, kind, status) values ' +
+          `(${EMPLOYEE}, ${staffSpan('12', '18')}, 'annual', 'pending')`,
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'staff gate accepts a complete, legitimate employee file and roster',
+      !legitimate.failed,
+      `refused rows that break none of its rules:\n${legitimate.output}`,
+    )
+
+    // Control 2. The application role may still read and write these tables — the revoke is DELETE on
+    // `employee` and `leave_request` only. Without this, the probe above is satisfied by a role with no
+    // access at all, and without the shift delete the same revoke could be a blanket one that made an
+    // unpublished roster impossible to rewrite.
+    const appRoleWrites = staffProbe(
+      [
+        'set local role berelax_app',
+        `insert into employee_skill (employee_id, skill) values (${EMPLOYEE}, 'asian_style')`,
+        `update employee set gender = 'male' where staff_reference = ${STAFF_REF}`,
+        `insert into shift (trading_date, period, label) values (${STAFF_DATE}, ` +
+          `${staffSpan('14', '16')}, '${STAFF_MARKER}')`,
+        `delete from shift where label = '${STAFF_MARKER}'`,
+      ].join('; '),
+    )
+    check(
+      'staff gate lets the application role read, insert, update and rewrite a roster',
+      !appRoleWrites.failed,
+      `the revoke was wider than DELETE on employee and leave_request:\n${appRoleWrites.output}`,
+    )
+
+    // Control 3. The same shift row the foreign-key probe used, on a date that DOES trade, commits — so
+    // that probe is about the missing `business_day` row and not about the range, the label or the
+    // table.
+    const tradedDate = staffProbe(
+      `insert into shift (trading_date, period, label) values (${STAFF_DATE}, ` +
+        `${staffSpan('12', '18')}, '${STAFF_MARKER}')`,
+    )
+    check(
+      'staff gate accepts the identical shift on a date the premises does trade',
+      !tradedDate.failed,
+      `refused a shift on a trading date:\n${tradedDate.output}`,
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case
+    // a probe is wrongly accepted, and because an employee or a shift left behind fails a later gate
+    // with an error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      staffDbUrl,
+      '-c',
+      `delete from leave_request where employee_id in (select id from employee where notes = '${STAFF_MARKER}'); ` +
+        `delete from shift_assignment where employee_id in (select id from employee where notes = '${STAFF_MARKER}'); ` +
+        `delete from shift where label = '${STAFF_MARKER}'; ` +
+        `delete from employee_document where employee_id in (select id from employee where notes = '${STAFF_MARKER}'); ` +
+        `delete from employee_skill where employee_id in (select id from employee where notes = '${STAFF_MARKER}'); ` +
+        `delete from employee where notes = '${STAFF_MARKER}'; ` +
+        `delete from business_day where trading_date = ${STAFF_DATE};`,
+    ])
+  }
+
+  // 26t. The type-level half of the port, mutation-tested on the SHIPPED module rather than on a
+  // fixture file.
+  //
+  // `eligibility-port.test.ts` pins `TherapistEligibilityProvider` with three `@ts-expect-error`
+  // directives, and the first of them is over a provider that answers with bare therapist ids — which is
+  // exactly what P-HR has to hand. Widen `TherapistPool.therapists` and that directive becomes UNUSED —
+  // TS2578 — which is the only way to prove the assertion is still asserting something. A
+  // `@ts-expect-error` over an expression that has stopped being an error is indistinguishable from one
+  // over an expression that never was.
+  //
+  // The control is `pnpm typecheck`, which `pnpm verify` runs on the unmutated tree before this file:
+  // a port that rejected everything would fail there rather than here.
+  {
+    const port = 'packages/core/src/availability/eligibility-port.ts'
+    const anchor = '  readonly therapists: readonly EligibleTherapist[]'
+    const original = readFileSync(port, 'utf8')
+    let typecheck
+    try {
+      const mutated = original.replace(anchor, '  readonly therapists: readonly unknown[]')
+      if (mutated === original) throw new Error(`the anchor line is no longer in ${port}`)
+      writeFileSync(port, mutated)
+      typecheck = run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+    } finally {
+      writeFileSync(port, original)
+    }
+    check(
+      'widening the eligibility port leaves its @ts-expect-error unused (TS2578)',
+      typecheck.failed && typecheck.output.includes('TS2578'),
+      typecheck.output,
+    )
+  }
+
+  // 26u. The other half of the same seam: the db reader has to remain structurally the port.
+  //
+  // `packages/db` may not import `packages/core`, so the two shapes cannot be one type and the
+  // conformance is a `satisfies` in `packages/fixtures/src/therapist-eligibility.itest.ts` — the only
+  // package that may import both. Renaming the reader's `therapistId` to `employeeId` is the change P-HR
+  // is most likely to make, because that is what HR calls the column and this query's own input field is
+  // already `employeeIds`. The two names would then differ by one word across a boundary neither side
+  // can see over, and the failure would be an `undefined` therapist id at runtime rather than a compile
+  // error — which is why `asPool` copies the list WHOLE instead of mapping it field by field.
+  {
+    const reader = 'packages/db/src/repositories/eligibility.ts'
+    const anchor = 'export interface EligibleTherapistRow {\n  readonly therapistId: string'
+    const original = readFileSync(reader, 'utf8')
+    let typecheck
+    try {
+      const mutated = original.replace(
+        anchor,
+        'export interface EligibleTherapistRow {\n  readonly employeeId: string',
+      )
+      if (mutated === original) throw new Error(`the anchor lines are no longer in ${reader}`)
+      writeFileSync(reader, mutated)
+      typecheck = run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+    } finally {
+      writeFileSync(reader, original)
+    }
+    check(
+      'renaming a field of the db reader breaks the port conformance in packages/fixtures',
+      typecheck.failed && typecheck.output.includes('therapist-eligibility.itest.ts'),
+      typecheck.output,
+    )
+  }
+}
+
+// 33a-33r. (B-CAT-06) The real-business seed: the 0032 constraints against real PostgreSQL, the
+// totality of the docs/13 §4 price table, and the grep that keeps the address in one place.
+//
+// Three different kinds of guard, and each fails in a way the other two cannot see.
+//
+// The **database half** is `price_on_request` (0032), whose whole content is an absence: three offerings
+// docs/13 §4 lists with no figure. Every rule on it exists to stop that absence being quietly filled in —
+// a label that is itself a stand-in, an open question nobody can look up, a note that says nothing, and
+// above all a cleared `is_provisional`, which would take an unanswered price off the Unconfirmed
+// Assumptions panel while leaving it unanswered. Each probe names the constraint that must reject it,
+// because a bare non-zero exit is also what a typo in a column name produces (ADR 0003).
+//
+// The **type half** is the price table. `DOCS_13_PRICES_AED` is a `Record` over three enums, so 32 cells
+// is a property of the type rather than of a count somebody maintains: a missing cell and a spurious one
+// are both compile errors. That is worth a fixture precisely because it is invisible — nothing in the
+// test output says "the compiler is enforcing this", so if the Record were ever widened to an index
+// signature every test would still pass.
+//
+// The **repository half** is the grep. docs/09 §4 says the `premises` row is the single source of NAP,
+// which is a claim about the repository and not about the row: a footer with the street typed into it
+// renders the same whether or not anybody corrects the database. docs/13 §3 is a record of that failure
+// in the wild — two published WhatsApp numbers, and no way to tell which an assistant will repeat.
+//
+// Every psql probe runs inside `begin; … ; rollback;`, so a probe that is wrongly *accepted* leaves
+// nothing behind either.
+{
+  const poqUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const PROBE = 'BCAT06 Gate Probe'
+  const PROBE_TWO = 'BCAT06 Gate Probe Two'
+
+  /** A legitimate row: prose saying what it needs, no figure, and a question that resolves. */
+  const onRequest = (
+    label,
+    {
+      requirement = "'two therapists, one standard room'",
+      modelling = "'not_modelled'",
+      shape = 'null',
+      note = "'docs/13 section 4 prices this on request; no figure stated'",
+      question = "'Y9-poa-prices'",
+    } = {},
+  ) =>
+    'insert into price_on_request (menu_label, resource_requirement, modelled_as, shape, ' +
+    `provisional_note, open_question_id) values ('${label}', ${requirement}, ` +
+    `${modelling}::price_on_request_modelling, ${shape}, ${note}, ${question})`
+
+  const poqProbe = (statement, extraArgs = []) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      ...extraArgs,
+      poqUrl ?? '',
+      '-c',
+      `begin; ${statement}; rollback;`,
+    ])
+
+  const poqProbes = [
+    {
+      // The one that matters most. There is no price column, so "confirmed" could only ever mean
+      // "somebody cleared the flag and the price is still missing" — and the panel would stop showing
+      // it. Answering Y9-poa-prices deletes the row instead, which the control below proves it can.
+      name: 'price-on-request gate rejects clearing the provisional flag rather than answering',
+      rule: 'price_on_request_row_is_always_unanswered',
+      sql: `${onRequest(PROBE)}; update price_on_request set is_provisional = false where menu_label = '${PROBE}'`,
+    },
+    {
+      // The label is transcribed from docs/13. One that is itself a stand-in would put a placeholder on
+      // a menu, which is the one place it would be read as the name of a treatment.
+      name: 'price-on-request gate rejects a menu label that is itself a placeholder',
+      rule: 'price_on_request_menu_label_not_placeholder',
+      sql: onRequest('Gate Probe TBC'),
+    },
+    {
+      name: 'price-on-request gate rejects an open question nobody can look up',
+      rule: 'price_on_request_names_an_open_question',
+      sql: onRequest(PROBE, { question: "'ask the owner'" }),
+    },
+    {
+      // Four Hands and Couple Massage ARE shapes of treatments that exist; Full Body Shaving is neither
+      // one nor a shape of one. Conflating the cases is how "it is modelled" stops meaning anything.
+      name: 'price-on-request gate rejects an unmodelled offering that names a shape anyway',
+      rule: 'price_on_request_shape_matches_modelling',
+      sql: onRequest(PROBE, { modelling: "'not_modelled'", shape: "'couple'::service_shape" }),
+    },
+    {
+      name: 'price-on-request gate rejects a shape-modelled offering with no shape',
+      rule: 'price_on_request_shape_matches_modelling',
+      sql: onRequest(PROBE, { modelling: "'service_resource_shape'", shape: 'null' }),
+    },
+    {
+      // Every row here is an assumption. One with no stated reason is an assumption the panel can
+      // display and nobody can act on.
+      name: 'price-on-request gate rejects a row with no stated reason',
+      rule: 'price_on_request_note_nonempty',
+      sql: onRequest(PROBE, { note: "'   '" }),
+    },
+    {
+      name: 'price-on-request gate rejects a row that does not say what the offering needs',
+      rule: 'price_on_request_requirement_nonempty',
+      sql: onRequest(PROBE, { requirement: "'   '" }),
+    },
+    {
+      // Two rows for one offering is two answers to "does this have a price", settled by row order.
+      name: 'price-on-request gate rejects two rows for one menu label',
+      rule: 'price_on_request_menu_label_key',
+      sql: `${onRequest(PROBE)}; ${onRequest(PROBE)}`,
+    },
+  ]
+
+  const POQ_SWEEP =
+    "delete from price_on_request where menu_label like 'BCAT06 Gate Probe%' " +
+    "or menu_label = 'Gate Probe TBC';"
+
+  if (!poqUrl) {
+    check(
+      'price-on-request constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    try {
+      for (const { name, rule, sql: statement } of poqProbes) {
+        checkRejectedBy(name, poqProbe(statement), rule)
+      }
+
+      // 32i. The control for all eight. Without it every refusal above is satisfied by a table nothing
+      //      can be written to, which is a different bug wearing the same test output.
+      const accepted = poqProbe(
+        `${onRequest(PROBE)}; ` +
+          `${onRequest(PROBE_TWO, { modelling: "'service_resource_shape'", shape: "'four_hands'::service_shape" })}; ` +
+          "select 'probes=' || count(*) from price_on_request where menu_label like 'BCAT06 Gate Probe%'",
+        ['-At'],
+      )
+      check(
+        'price-on-request gate accepts an unpriced offering, modelled and unmodelled',
+        !accepted.failed && accepted.output.includes('probes=2'),
+        `refused the rows docs/13 section 4 actually describes:\n${accepted.output}`,
+      )
+
+      // 32j. And the row is deletable, which is the ONLY way Y9-poa-prices closes: the answer arrives as
+      //      ordinary catalogue data and this row goes. A table whose rows could not be removed would
+      //      make the refusal in 32a a trap rather than a guard rail.
+      const deleted = poqProbe(
+        `${onRequest(PROBE)}; delete from price_on_request where menu_label = '${PROBE}'; ` +
+          `select 'left=' || count(*) from price_on_request where menu_label = '${PROBE}'`,
+        ['-At'],
+      )
+      check(
+        'price-on-request gate accepts deleting a row whose price has been answered',
+        !deleted.failed && deleted.output.includes('left=0'),
+        `refused the delete that answering Y9-poa-prices performs:\n${deleted.output}`,
+      )
+
+      // 32k. The acceptance control for the whole block: the three rows are actually there and every one
+      //      of them is unanswered. The constraints above are worth nothing over an empty table.
+      const seeded = poqProbe(
+        "select 'seeded=' || count(*) from price_on_request where is_provisional " +
+          "and open_question_id = 'Y9-poa-prices'",
+        ['-At'],
+      )
+      check(
+        'the three docs/13 price-on-request offerings are seeded and flagged',
+        !seeded.failed && seeded.output.includes('seeded=3'),
+        `the seed did not leave three unanswered prices behind:\n${seeded.output}`,
+      )
+    } finally {
+      // Insurance, exactly as the B-CAT-05 block keeps: every probe rolls back, so in the ordinary case
+      // this deletes nothing. It is here for the probe that is wrongly ACCEPTED and committed, whose rows
+      // would otherwise fail a later gate with a unique violation about something else.
+      run('psql', ['--no-psqlrc', '-q', poqUrl, '-c', POQ_SWEEP])
+    }
+  }
+
+  // --- the price table's totality is a compile error, not a count ---------------------------------
+  //
+  // 32l. A fifth treatment key. `TREATMENT_KEYS` is the four keys 0017 seeded services for and 0012 keyed
+  //      its compatibility rows on, so a fifth is a new treatment, a migration and a compatibility row —
+  //      never a spelling added to a price table. Full Body Shaving is the one that would actually be
+  //      typed here, which is why the fixture uses it: docs/13 §4 lists it, and it belongs in
+  //      `price_on_request` because it has no style and no price.
+  {
+    const f = 'packages/db/src/seed/__gate_fixture__.ts'
+    const result = withFixture(
+      f,
+      [
+        "import type { ServiceDuration, TreatmentKey } from '@berelax/shared'",
+        'export const extra: Readonly<',
+        '  Record<TreatmentKey, Readonly<Record<ServiceDuration, number>>>',
+        '> = {',
+        '  normal_massage: { 45: 170, 60: 200, 90: 300, 120: 400 },',
+        '  hot_oil_balm_massage: { 45: 200, 60: 250, 90: 350, 120: 450 },',
+        '  morocco_bath_jacuzzi: { 45: 250, 60: 300, 90: 440, 120: 550 },',
+        '  massage_with_shaving: { 45: 200, 60: 250, 90: 350, 120: 450 },',
+        '  full_body_shaving: { 45: 360, 60: 450, 90: 630, 120: 810 },',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'tsc rejects a fifth treatment key in the docs/13 price table',
+      result,
+      "'full_body_shaving' does not exist in type",
+    )
+  }
+
+  // 32m. A missing duration column, which is the likelier mistake: a row pasted from a four-column table
+  //      into a three-column one. The Record is total over `ServiceDuration`, so the compiler says WHICH
+  //      duration is missing — where a list of 32 objects would simply be a list of 31.
+  {
+    const f = 'packages/db/src/seed/__gate_fixture__.ts'
+    const result = withFixture(
+      f,
+      [
+        "import type { ServiceDuration } from '@berelax/shared'",
+        'export const short: Readonly<Record<ServiceDuration, number>> =',
+        '  { 45: 170, 60: 200, 90: 300 }',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'tsc rejects a price row missing a duration',
+      result,
+      "Property '120' is missing",
+    )
+  }
+
+  // 32n. The control for both. The table as it is actually written must compile and be readable cell by
+  //      cell, or the two fixtures above are satisfied by a type nothing can satisfy.
+  {
+    const f = 'packages/db/src/seed/__gate_fixture__.ts'
+    const result = withFixture(
+      f,
+      [
+        "import { DOCS_13_PRICES_AED, docs13PriceCells } from './fixtures/prices-docs-13.ts'",
+        'export const arabicBath90 = DOCS_13_PRICES_AED.arabic.morocco_bath_jacuzzi[90]',
+        'export const cells = docs13PriceCells().length',
+      ].join('\n'),
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'tsc accepts the complete price table, read cell by cell',
+      !result.failed,
+      `rejected the transcription B-CAT-06 ships:\n${result.output}`,
+    )
+  }
+
+  // --- the address and the phone numbers live in one file ----------------------------------------
+  //
+  // The scan and its own controls are `packages/db/src/seed/premises.test.ts`, which is in the unit suite,
+  // so a hard-coded address fails `pnpm coverage` as well as this gate. What this gate adds is the
+  // fixture: a module that really does carry the street, written into a directory the scan covers and
+  // removed in a `finally`.
+  const NAP_TEST = 'packages/db/src/seed/premises.test.ts'
+  const NAP_FIXTURE = 'packages/db/src/__gate_fixture__.ts'
+  const napSuite = (contents) =>
+    withFixture(NAP_FIXTURE, contents, () =>
+      runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', NAP_TEST]),
+    )
+
+  // 32o. The street, in a module nobody exempted. The literal is assembled at runtime so that this gate
+  //      file does not itself become a second hard-coded address in the repository.
+  {
+    const result = napSuite(`export const footer = '250 ${'Al'} ${'Meena'} Street, Abu Dhabi'`)
+    checkRejectedBy(
+      'the NAP grep rejects a street address outside the seed',
+      result,
+      'nap-literal-outside-the-seed',
+    )
+  }
+
+  // 32p. And the WhatsApp number docs/13 §3 says may be the wrong one. This is the literal that matters
+  //      most: an assistant repeating a number that does not reach the business is the defect Y1-nap
+  //      exists to close, and a number typed into a template survives every correction to the database.
+  {
+    const result = napSuite(`export const whatsapp = '+9715${'2'}51${'0'}8633'`)
+    checkRejectedBy(
+      'the NAP grep rejects a hard-coded WhatsApp number',
+      result,
+      'nap-literal-outside-the-seed',
+    )
+  }
+
+  // 32q. The control: the tree as it stands passes, over a non-empty set of files. The second half is the
+  //      ADR 0002 failure — a layout change reduces the scan to zero files and the rule reports success
+  //      for ever — and the suite asserts a floor on the file count for exactly that.
+  {
+    const result = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', NAP_TEST])
+    check(
+      'the NAP grep passes on this tree, over a non-empty set of files',
+      !result.failed,
+      `the seed is not the only spelling of the address:\n${result.output}`,
+    )
+  }
+
+  // 32r. The transcription itself. A wrong cell must fail the unit suite **naming the cell**, because
+  //      "one of the 32 prices is wrong" is the failure nobody finds by reading a diff: every figure in
+  //      that table is exactly as plausible as every other.
+  {
+    const TABLE = 'packages/db/src/seed/fixtures/prices-docs-13.ts'
+    const original = readFileSync(TABLE, 'utf8')
+    let result
+    try {
+      // Arabic Morocco Bath at 90 minutes: 520 AED in docs/13 §4, and the cell this unit's acceptance
+      // criterion names. 525 is the shape a real transcription error takes — one digit, still plausible.
+      writeFileSync(TABLE, original.replace('90: 520', '90: 525'))
+      result = runExpectingFailure('pnpm', [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.config.ts',
+        'packages/db/src/seed/catalogue.test.ts',
+      ])
+    } finally {
+      // Restored whatever happened. A corrupted price table left behind fails every later gate with a
+      // figure that looks like a price rise nobody made.
+      writeFileSync(TABLE, original)
+    }
+    checkRejectedBy(
+      'the price transcription gate rejects a single wrong cell, by name',
+      result,
+      'arabic/morocco_bath_jacuzzi 90min',
+    )
+  }
+}
+
+// W-SYS-09 — the media slot registry, the declared constraints and the junk-alt filter.
+//
+//             The registry is the single source for a slot's ratio, minimum dimensions, byte cap, mime
+//             types and alt requirement, and three of those are enforced by a gate rather than a type:
+//             `pnpm media` measures the twenty-five committed assets against the registry, refuses a
+//             literal aspect ratio in any component, and refuses a manifest whose slot block has drifted
+//             from it. Each fixture below asserts the rule written for it.
+//
+//             The junk-alt filter is enforced by a test rather than a script, so it is proved the way
+//             W-SYS-08's compile-error boundary is: by mutating the shipped rule and requiring the suite
+//             to notice. Two mutations, in opposite directions — one that stops a junk rule matching and
+//             one that makes the filter too strict — because a filter can fail by accepting junk *or* by
+//             rejecting good alt text, and only the second of those is invisible to a corpus of junk.
+{
+  const MEDIA = ['scripts/check-media.mjs']
+  const MANIFEST = 'assets/media/manifest.json'
+  const REGISTRY = 'packages/media/src/slots/registry.ts'
+  const SLOTS_SUITE = [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    'packages/media/src/slots',
+  ]
+
+  {
+    // The clean tree. This is the control for every probe in the block — a gate that rejected everything
+    // would pass all of them — and it is also what says the registry, the manifest and the twenty-five
+    // real assets currently agree.
+    const result = run('node', MEDIA)
+    check(
+      'pnpm media passes on this tree, with the registry and the manifest in agreement',
+      !result.failed,
+      `the media gate failed on a clean tree:\n${result.output}`,
+    )
+  }
+
+  {
+    // A literal aspect ratio in a component. The number is already declared once, in the slot registry,
+    // and the second copy is not a wrong-looking diff — it is a card reserving a 4:5 box for a slot that
+    // has become some other shape, reflowing when the photograph lands.
+    const result = withFixture(
+      'packages/ui/src/patterns/__gate_fixture__.tsx',
+      [
+        "export const GATE_FIXTURE_CSS = '.gate-fixture { aspect-ratio: 4 / 5; object-fit: cover; }'",
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a hard-coded aspect ratio in a component',
+      result,
+      '[aspect-ratio-must-come-from-the-slot-registry]',
+    )
+  }
+
+  {
+    // The React and Tailwind spellings of the same mistake, which is how it would arrive in a `.tsx`.
+    const result = withFixture(
+      'packages/ui/src/patterns/__gate_fixture__.tsx',
+      [
+        "export const GATE_FIXTURE_STYLE = { aspectRatio: '16/9' }",
+        "export const GATE_FIXTURE_CLASS = 'aspect-[4/5] w-full'",
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects aspectRatio and an aspect-[] utility as well as the CSS property',
+      result,
+      '[aspect-ratio-must-come-from-the-slot-registry]',
+    )
+  }
+
+  {
+    // The control for the two above, and the one that matters: the rule must leave the legitimate path
+    // alone, or every component that reserves a box is unwritable and the rule gets deleted.
+    const result = withFixture(
+      'packages/ui/src/patterns/__gate_fixture__.tsx',
+      [
+        "import { slotAspectRatio } from '@berelax/media/slots'",
+        '',
+        // A template literal with an escaped placeholder: the fixture file has to contain a real `${…}`
+        // hole, which is the form the rule allows, and writing it as a plain string would leave a
+        // `noTemplateCurlyInString` warning in this file for ever.
+        `export const GATE_FIXTURE_CSS = \`.gate-fixture {`,
+        `  aspect-ratio: \${slotAspectRatio('therapist-portrait')};`,
+        '  object-fit: cover;',
+        '}`',
+        '',
+        'export const GATE_FIXTURE_VAR = `.gate-fixture-two { aspect-ratio: var(--slot-ratio); }`',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate allows a ratio read from the slot registry, and a custom property',
+      !result.failed,
+      `rejected the one legitimate way to reserve a box:\n${result.output}`,
+    )
+  }
+
+  {
+    // The manifest's slot block is a projection of the registry, committed so a change to a ratio or a
+    // cap is visible in a diff. A hand-edited one is a library measured against constraints nothing else
+    // enforces — the failure `tokens.css` and `palette.generated.ts` are gated against, one layer over.
+    const original = readFileSync(MANIFEST, 'utf8')
+    let result
+    try {
+      const manifest = JSON.parse(original)
+      manifest.slots.hero.minWidth = 999
+      writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`)
+      result = run('node', MEDIA)
+    } finally {
+      writeFileSync(MANIFEST, original)
+    }
+    checkRejectedBy(
+      'media gate rejects a manifest slot block hand-edited away from the registry',
+      result,
+      '[slot-spec-must-mirror-the-registry]',
+    )
+  }
+
+  {
+    // A cropped asset with no focal point, asserted by rule name rather than by exit code. Case 19 above
+    // makes the same change and asserts only that the build fails; that is also what a typo in a column
+    // name does, and the rule under test would then be dead while the gate reported PASS (ADR 0003). The
+    // portraits are full-length at native ratios from 0.461 to 0.799, so without a stated focal point a
+    // 4:5 crop takes the torso.
+    const original = readFileSync(MANIFEST, 'utf8')
+    let result
+    try {
+      const manifest = JSON.parse(original)
+      const portrait = manifest.assets.find((asset) => asset.slot === 'therapist-portrait')
+      delete portrait.focalX
+      delete portrait.focalY
+      writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`)
+      result = run('node', MEDIA)
+    } finally {
+      writeFileSync(MANIFEST, original)
+    }
+    checkRejectedBy(
+      'media gate rejects an out-of-ratio asset with no focal point, by rule name',
+      result,
+      '[slot-ratio-out-of-tolerance]',
+    )
+  }
+
+  {
+    // The byte cap and the minimum dimensions, exercised by tightening the registry rather than by
+    // shipping a bad asset: the twenty-five files are the real library and there is no spare one to
+    // break. Both are asserted on the wordmark slot, whose two numbers are the only ones in the file
+    // that appear once, so the mutation cannot silently hit a different slot.
+    const original = readFileSync(REGISTRY, 'utf8')
+    let result
+    try {
+      const mutated = original
+        .replace('  logo: 512 * KIB,', '  logo: 1 * KIB,')
+        .replace('    minWidth: 240,', '    minWidth: 4000,')
+      if (mutated === original) throw new Error(`the anchor lines are no longer in ${REGISTRY}`)
+      writeFileSync(REGISTRY, mutated)
+      result = run('node', MEDIA)
+    } finally {
+      writeFileSync(REGISTRY, original)
+    }
+    checkRejectedBy(
+      'media gate rejects a committed asset over its slot byte cap',
+      result,
+      '[slot-over-maximum-bytes]',
+    )
+    checkRejectedBy(
+      'media gate rejects a committed asset below its slot minimum dimensions',
+      result,
+      '[slot-below-minimum-dimensions]',
+    )
+  }
+
+  {
+    // The junk-alt filter, mutation-tested on the shipped rule.
+    //
+    // `alt-is-boilerplate` is the rule that does the work docs/08 §6's anchored regular expression cannot:
+    // it strips the words for "a picture", the slot names, the filing habits and the grammar, and refuses
+    // what is left if nothing describing anything remains. That is what catches `image image image`, which
+    // clears a fifteen-character floor and every prefix match. Neutering the residue test has to make the
+    // corpus fail, or the corpus is passing on the length floor alone.
+    const ALT_FILTER = 'packages/media/src/slots/alt-filter.ts'
+    const original = readFileSync(ALT_FILTER, 'utf8')
+    let neutered
+    let strict
+    try {
+      const anchor = '  if (describingWords(text).length === 0) {'
+      const mutated = original.replace(anchor, '  if (describingWords(text).length < 0) {')
+      if (mutated === original) throw new Error(`the anchor line is no longer in ${ALT_FILTER}`)
+      writeFileSync(ALT_FILTER, mutated)
+      neutered = run('pnpm', SLOTS_SUITE)
+
+      // And the other direction. A filter that rejected everything would satisfy every junk fixture ever
+      // written, which is why the corpus has twenty good strings — three of them containing "photograph",
+      // "banner" and "image" used properly. Raising the length floor to 150 characters rejects all twenty,
+      // so this is the probe that says those twenty are load-bearing rather than decorative.
+      const tightened = original.replace(
+        'export const ALT_MIN_LENGTH = 15',
+        'export const ALT_MIN_LENGTH = 150',
+      )
+      if (tightened === original)
+        throw new Error(`ALT_MIN_LENGTH is no longer declared in ${ALT_FILTER}`)
+      writeFileSync(ALT_FILTER, tightened)
+      strict = run('pnpm', SLOTS_SUITE)
+    } finally {
+      writeFileSync(ALT_FILTER, original)
+    }
+    check(
+      'neutering the junk-alt residue rule makes the corpus fail',
+      neutered.failed && neutered.output.includes('alt-is-boilerplate'),
+      neutered.failed
+        ? `the suite failed without naming alt-is-boilerplate:\n${neutered.output}`
+        : `the corpus passed with the rule disabled, so the length floor was doing the work:\n${neutered.output}`,
+    )
+    check(
+      'a junk-alt filter that rejected good alt text would fail the twenty-string control',
+      strict.failed,
+      `raising the length floor to 150 characters passed, so the good-alt corpus asserts nothing:\n${strict.output}`,
+    )
+  }
+
+  {
+    // The unmutated suite, which is the control for the two mutations above.
+    const result = run('pnpm', SLOTS_SUITE)
+    check(
+      'the slot registry, the upload validator and the junk-alt filter pass on this tree',
+      !result.failed,
+      `the slots suite failed on a clean tree:\n${result.output}`,
+    )
+  }
+}
+
+// 28ao-28av. (M-TILL-12) The three tax-document rules must fire, and the controls must pass.
+//
+//      Each one guards a defect that reaches a customer as a piece of paper rather than as a stack trace.
+//      A re-derived VAT figure prints 0.01 beside a stored 0.02 and the PDF is the copy the FTA is shown.
+//      An Arabic weight the PDF does not embed resolves to a neighbouring cut, so the stylesheet claims a
+//      face the document does not carry — which is the defect apps/web/app/_fonts/index.ts records on the
+//      web side, where a deliberate recalibration was dead for exactly this reason. And a direction mark
+//      written into a template is a second mechanism for right-to-left that survives into the extracted
+//      text and behaves differently from the same value after safeText has stripped it.
+//
+//      Asserted BY RULE NAME: a fixture rejected by some other rule would leave the one under test free
+//      to stop matching anything. The last two cases are the controls — the same template written
+//      correctly, and the tree as it stands — because six refusals are also what a gate that rejected
+//      every document template would produce.
+{
+  const f = 'packages/pdf/src/documents/__gate_fixture__.ts'
+  const DOCUMENTS = ['scripts/check-tax-documents.mjs']
+
+  const template = (body) =>
+    [
+      '// Known-bad fixture written by scripts/test-gates.mjs. Removed in a finally.',
+      "import { safeText } from '@berelax/core'",
+      '',
+      'export function renderGateFixture(name: string): string {',
+      ...body,
+      '}',
+    ].join('\n')
+
+  const cases = [
+    {
+      name: 'tax-document gate rejects VAT re-derived inside a document template',
+      source: template([
+        "  const totals = splitGross({ fils: 2200, currency: 'AED' })",
+        "  return '<p>' + safeText(name) + String(totals.vat.fils) + '</p>'",
+      ]),
+      rule: 'tax-document-must-not-derive-tax',
+    },
+    {
+      name: 'tax-document gate rejects a document that re-derives per line',
+      source: template([
+        "  const line = deriveTaxLine({ quantity: 1, unitGross: { fils: 11, currency: 'AED' }, rateBp: 500 })",
+        "  return '<p>' + safeText(name) + String(line.vat.fils) + '</p>'",
+      ]),
+      rule: 'tax-document-must-not-derive-tax',
+    },
+    {
+      // The recorded defect, in the shape it arrives: a weight chosen for how Arabic reads, from a cut
+      // nobody shipped.
+      name: 'tax-document gate rejects an Arabic weight the PDF does not embed',
+      source: template([
+        '  const css = "[lang=\'ar\'] { font-size: 1.06em; font-weight: 500; }"',
+        '  return "<style>" + css + "</style>" + safeText(name)',
+      ]),
+      rule: 'arabic-font-weight-must-be-a-shipped-cut',
+    },
+    {
+      name: 'tax-document gate rejects the same weight under a .ar selector',
+      source: template([
+        '  const css = ".ar { font-weight: 300; }"',
+        '  return "<style>" + css + "</style>" + safeText(name)',
+      ]),
+      rule: 'arabic-font-weight-must-be-a-shipped-cut',
+    },
+    {
+      name: 'tax-document gate rejects a right-to-left mark in a template',
+      source: template([
+        "  const rtl = '\\u200f'",
+        "  return '<p>' + rtl + safeText(name) + '</p>'",
+      ]),
+      rule: 'rtl-must-come-from-dir-not-a-direction-mark',
+    },
+    {
+      name: 'tax-document gate rejects an embedding control in a template',
+      source: template([
+        "  const wrap = (text: string) => '\\u202b' + text + '\\u202c'",
+        "  return '<p>' + wrap(safeText(name)) + '</p>'",
+      ]),
+      rule: 'rtl-must-come-from-dir-not-a-direction-mark',
+    },
+  ]
+
+  for (const { name, source, rule } of cases) {
+    const result = withFixture(f, source, () => run('node', DOCUMENTS))
+    checkRejectedBy(name, result, rule)
+  }
+
+  // The acceptance control, and it carries all three hazards in their legitimate form: the weights the
+  // Arabic face actually ships, right-to-left from `dir`, and an override handed to `safeText` to be
+  // stripped — which is what packages/pdf/src/documents/bidi-specimen.ts does to prove the stripping
+  // works. Without this case, the six refusals above would be satisfied by a gate that rejected every
+  // document template in the repository, including the three real ones.
+  const correct = withFixture(
+    f,
+    template([
+      "  const hostile = safeText('Ahmed Al Mansoori\\u202e')",
+      '  const css = "[lang=\'ar\'] { font-weight: 400; } .ar strong { font-weight: 600; }"',
+      '  const open = \'<p dir="rtl" lang="ar">\'',
+      '  return "<style>" + css + "</style>" + open + hostile + safeText(name) + "</p>"',
+    ]),
+    () => run('node', DOCUMENTS),
+  )
+  check(
+    'tax-document gate accepts a template with shipped weights, dir="rtl" and a stripped override',
+    !correct.failed,
+    correct.output,
+  )
+
+  // And the gate passes on the tree as it stands, which is the assertion that would have caught the
+  // `font-weight: 500` the F10 invoice template carried on its Arabic body copy for two units.
+  const clean = run('node', DOCUMENTS)
+  check('tax-document rules pass on this tree', !clean.failed, clean.output)
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -5005,6 +6037,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm deps',
     'pnpm licences',
     'pnpm container',
+    'pnpm documents',
     'pnpm audit:online',
     'pnpm palette',
     'pnpm tokens',
@@ -5023,6 +6056,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm touch-targets',
     'pnpm coverage',
     'pnpm --filter @berelax/web build',
+    'pnpm db:apply',
     'pnpm test:integration',
     'pnpm db:migrate:dry',
     'pnpm db:drift',

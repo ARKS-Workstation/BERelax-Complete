@@ -6,6 +6,7 @@ import {
   vatIfReDerivedFromTotal,
   vatRateBp,
 } from '@berelax/core'
+import { PREMISES_NAP } from '@berelax/db'
 import { describe, expect, it } from 'vitest'
 import {
   ELEVEN_FILS_EXPECTED,
@@ -87,7 +88,9 @@ describe('the mapping from core to db', () => {
     const { input } = fixture()
     expect(input.issuer.addressSnapshot.split('\n')).toEqual(FIXTURE_ISSUER.addressLines)
     expect(input.issuer.trn).toBe(FIXTURE_TRN)
-    expect(input.issuer.phone).toBe('+971525108633')
+    // Compared against the seed rather than a literal: the phone on a document is the premises
+    // row's, and a literal here would be a second spelling of it (B-CAT-06).
+    expect(input.issuer.phone).toBe(PREMISES_NAP.phoneLandline)
     // Absent, not empty: neither legal_entity nor premises carries an Arabic column to snapshot from.
     expect('legalNameAr' in input.issuer).toBe(false)
     expect('addressSnapshotAr' in input.issuer).toBe(false)

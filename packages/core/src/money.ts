@@ -193,6 +193,26 @@ export function formatMoney(amount: Money, locale: 'en' | 'ar' = 'en'): string {
   }).format(amount.fils / 100)
 }
 
+/**
+ * The figure without its currency, grouped, always two decimals.
+ *
+ * For a table column whose header states the currency once. A tax invoice carries six numeric columns
+ * across A4 — unit price, excluding VAT, rate, VAT, amount, quantity — and `AED` repeated in every cell
+ * of every one of them does not fit the width, which is why a printed invoice states the currency in
+ * the column head. {@link formatMoney} stays the only spelling used anywhere the currency is not
+ * already stated, so no amount is ever bare by accident.
+ *
+ * No locale argument, because there is nothing for it to change: `ar-AE-u-nu-latn` and `en-AE` produce
+ * the identical string for a plain number once Latin numerals are chosen (docs/08 §7) — measured, not
+ * assumed — and a parameter with one behaviour is a parameter somebody will later give a second one.
+ */
+export function formatAmount(amount: Money): string {
+  return new Intl.NumberFormat('en-AE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount.fils / 100)
+}
+
 /** Stable, locale-independent representation for logs, tests and ledger references. */
 export function toDecimalString(amount: Money): string {
   const negative = amount.fils < 0

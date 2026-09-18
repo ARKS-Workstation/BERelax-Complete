@@ -128,6 +128,12 @@ jobs:
       - name: Google token chokepoint
         run: pnpm chokepoint
 
+      # A tax document prints stored figures and derives none of them, declares only the Arabic weights
+      # the PDF actually embeds, and builds right-to-left from the dir attribute rather than from a
+      # direction mark. Three rules a review does not reliably catch on a template.
+      - name: Tax document rules
+        run: pnpm documents
+
       # The editorial grid, the direction multiplier and the one shadow. Static rules, so they run with
       # the other cheap scans rather than after the browser work.
       - name: Layout, motion and elevation discipline
@@ -171,6 +177,13 @@ jobs:
       # fail in CI on a missing `.next` while passing for anybody who had built locally.
       - name: Build the web application
         run: pnpm --filter @berelax/web build
+
+      # The integration suite needs a MIGRATED database, and nothing here was giving it one: the service
+      # container creates `berelax_test` empty, and `pnpm db:migrate:dry` below runs afterwards into a
+      # throwaway database it then drops. Every integration file would have failed on an empty schema.
+      # Nobody saw it because every local run applies the migrations by hand first, as the agent brief says.
+      - name: Apply migrations to the test database
+        run: pnpm db:apply
 
       - name: Integration tests (real PostgreSQL)
         run: pnpm test:integration

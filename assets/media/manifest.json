@@ -1,25 +1,85 @@
 {
   "source": "https://berelax.netlify.app/ — the business’s own prototype site",
   "slots": {
-    "therapist-portrait": {
-      "ratio": [
-        4,
-        5
-      ],
-      "minWidth": 600,
-      "focalRequired": true
-    },
     "hero": {
       "ratio": [
         16,
         9
       ],
       "minWidth": 1280,
+      "minHeight": 720,
+      "maxBytes": 8388608,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
+      "focalRequired": true
+    },
+    "therapist-portrait": {
+      "ratio": [
+        4,
+        5
+      ],
+      "minWidth": 600,
+      "minHeight": 750,
+      "maxBytes": 4194304,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
+      "focalRequired": true
+    },
+    "service-card": {
+      "ratio": [
+        4,
+        5
+      ],
+      "minWidth": 600,
+      "minHeight": 750,
+      "maxBytes": 4194304,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
+      "focalRequired": true
+    },
+    "gallery": {
+      "ratio": [
+        16,
+        9
+      ],
+      "minWidth": 1280,
+      "minHeight": 720,
+      "maxBytes": 6291456,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
+      "focalRequired": true
+    },
+    "testimonial-background": {
+      "ratio": [
+        16,
+        9
+      ],
+      "minWidth": 1280,
+      "minHeight": 720,
+      "maxBytes": 4194304,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
       "focalRequired": true
     },
     "logo": {
       "ratio": null,
       "minWidth": 240,
+      "minHeight": 60,
+      "maxBytes": 524288,
+      "mimeTypes": [
+        "image/jpeg",
+        "image/png"
+      ],
       "focalRequired": false
     }
   },

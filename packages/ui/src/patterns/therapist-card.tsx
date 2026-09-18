@@ -22,6 +22,7 @@
  *
  * The declared widths are docs/08 §4's: 260, 340 and 420px.
  */
+import { slotAspectRatio } from '@berelax/media/slots'
 import type { ReactNode } from 'react'
 
 /**
@@ -60,12 +61,17 @@ export const THERAPIST_CARD_CSS = `
 }
 
 /* The portrait is cropped around a declared focal point: the photographs are full-length at native
-   ratios from 0.461 to 0.799, and a centre crop to 4:5 takes the torso and leaves the face out of
-   frame. object-position comes from assets/media/manifest.json, per image. */
+   ratios from 0.461 to 0.799, and a centre crop takes the torso and leaves the face out of frame.
+   object-position comes from assets/media/manifest.json, per image.
+
+   The ratio is read from the therapist-portrait slot rather than written here. The media gate refuses a
+   literal one (aspect-ratio-must-come-from-the-slot-registry): the box this card reserves and the crop
+   the derivative job takes have to be the same number, and a card reserving the wrong box reflows when
+   the photograph lands. */
 .be-card__portrait {
   display: block;
   inline-size: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: ${slotAspectRatio('therapist-portrait')};
   object-fit: cover;
   background: var(--color-surface-clay);
   border-radius: var(--radius-1);

@@ -40,9 +40,12 @@ describe('derivativePath', () => {
         paths.add(path)
       }
     }
-    // 2 slots x 24 renditions, all distinct. The crop is in the name precisely so two crops cannot
-    // collide; without it this set would be smaller than 48 the moment the ladders shared a width.
-    expect(paths.size).toBe(48)
+    // One distinct path per (cropped slot, crop, width, format): five slots x 24 renditions. The crop is
+    // in the name precisely so two crops cannot collide; without it this set would be smaller the moment
+    // the ladders shared a width. Counted from the registry rather than written as 120, because the number
+    // moves when a slot is added and the property being asserted — all distinct — does not.
+    expect(paths.size).toBe(CROPPED_SLOTS.length * renditionSpecs().length)
+    expect(paths.size).toBe(120)
   })
 
   it('names the crop as well as the width', () => {
@@ -143,7 +146,12 @@ describe('slots', () => {
     // A wordmark has no declared ratio. Cropping it to 4:5 would cut the brand name in half, so it is a
     // programming error rather than twenty-four bad crops.
     expect(() => assertCroppedSlot('logo')).toThrow(/\[slot-is-never-cropped\]/)
-    expect(() => assertCroppedSlot('gallery')).toThrow(/\[unknown-slot\]/)
+    // A slot name nobody declared. `gallery` used to be the fixture here and is a real slot since
+    // W-SYS-09 added the other three docs/08 §6 names, so the fixture moved to a plausible name that is
+    // still not in the registry — the assertion is that an undeclared slot is refused, and it would go
+    // vacuous the moment its fixture became declared.
+    expect(assertCroppedSlot('gallery')).toBe('gallery')
+    expect(() => assertCroppedSlot('carousel')).toThrow(/\[unknown-slot\]/)
     expect(MEDIA_SLOTS).toContain('logo')
     expect(CROPPED_SLOTS).not.toContain('logo')
   })

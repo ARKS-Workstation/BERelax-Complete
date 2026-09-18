@@ -7,6 +7,9 @@
     ".": "./src/index.ts",
     "./ladders": "./src/ladders.ts",
     "./loader": "./src/loader.ts",
+    "./placeholder": "./src/placeholder.ts",
+    "./sharp": "./src/sharp.ts",
+    "./slots": "./src/slots/index.ts",
     "./url": "./src/url.ts"
   },
   "dependencies": {

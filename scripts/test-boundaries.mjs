@@ -140,6 +140,43 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // B-AVAIL-04 asks dependency-cruiser to prove that packages/core holds only the eligibility PORT and
+  // packages/db holds the implementation. Both directions are fixtures, and the scoped paths matter:
+  // the rules' `from.path` is a prefix and the generic fixtures above sit at the package root, so a
+  // rule that had stopped matching anything below `availability/` or `repositories/` would still be
+  // reported as firing. The pull is real in both directions — the port's natural implementation reads
+  // five tables, and the SQL implementation's natural home for the rules is the pure module that
+  // already states them — which is exactly why the seam is a type rather than an import.
+  {
+    rule: 'core-must-not-import-db',
+    file: 'packages/core/src/availability/__boundary_fixture__.ts',
+    source: [
+      "import { readEligibleTherapists } from '@berelax/db'",
+      'export const illegal = readEligibleTherapists',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/availability/__boundary_fixture__.ts',
+    // The installed driver, not a bare uninstalled name: resolving into node_modules is the branch the
+    // ledger fixture caught as dead. An availability solver that read its own shifts and leave would be
+    // a solver whose answer cannot be reproduced from its arguments, which is the whole reason the pool
+    // is injected.
+    source: ["import postgres from 'postgres'", 'export const illegal = postgres', ''].join('\n'),
+  },
+  {
+    rule: 'db-must-not-import-core',
+    file: 'packages/db/src/repositories/__boundary_fixture__.ts',
+    // `resolveTherapistPool` is the pure rule the SQL mirrors, so importing it here is the shortcut a
+    // reader reaches for the first time the two look like duplication. It would invert the dependency
+    // and make @berelax/db the thing that decides availability.
+    source: [
+      "import { resolveTherapistPool } from '@berelax/core'",
+      'export const illegal = resolveTherapistPool',
+      '',
+    ].join('\n'),
+  },
 ]
 
 let failures = 0
@@ -167,7 +204,9 @@ for (const { rule, file, source } of CASES) {
   const caught = exitCode !== 0 && output.includes(rule)
   // The directory is part of the case identity: four cases share `core-must-be-pure`, and without the
   // scope in the line the output cannot say which of them ran.
-  const scope = /packages\/core\/src\/(ledger|pricing)\//.exec(file)?.[1]
+  const scope =
+    /packages\/core\/src\/(ledger|pricing|availability)\//.exec(file)?.[1] ??
+    /packages\/db\/src\/(repositories)\//.exec(file)?.[1]
   console.log(
     `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${scope === undefined ? '' : `${scope}: `}` +
       `${what} ${caught ? 'rejected' : 'NOT rejected'}`,

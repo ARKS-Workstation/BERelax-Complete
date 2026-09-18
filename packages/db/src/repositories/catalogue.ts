@@ -383,7 +383,14 @@ export async function resolveServicePath(sql: Sql, path: string): Promise<PathRe
  */
 export type PublicDisplayNameLint = (name: string) => void
 
-const assertLinted = (name: string, lint: PublicDisplayNameLint): void => {
+/**
+ * Runs the lint, refusing outright when none was supplied.
+ *
+ * Exported because the B-CAT-06 seed publishes the eight names 0017 inserted as drafts, and that write
+ * is the moment they become public. A seed that skipped the lint would be the one write path on which a
+ * non-compliant public name could reach the site — and the seed is the path nobody reviews twice.
+ */
+export const assertPublicDisplayNameLinted = (name: string, lint: PublicDisplayNameLint): void => {
   if (typeof lint !== 'function') {
     throw refusal(
       'invariant_violated',
@@ -414,7 +421,7 @@ export async function setPublicDisplayName(
   uow: UnitOfWork,
   input: SetPublicDisplayNameInput,
 ): Promise<ServiceSnapshot> {
-  assertLinted(input.publicDisplayName, input.lint)
+  assertPublicDisplayNameLinted(input.publicDisplayName, input.lint)
   const before = await mustRead(uow.sql, input.serviceId)
   const [row] = await uow.sql<ServiceRow[]>`
     update service set public_display_name = ${input.publicDisplayName}

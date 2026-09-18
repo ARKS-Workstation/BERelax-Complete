@@ -68,16 +68,21 @@ beforeAll(async () => {
 
 describe('the media manifest and the pipeline agree', () => {
   it('declares the same slots in both places', () => {
-    // `packages/media` carries its own copy of the slot names because it may not import this package. This
-    // is the check that stops the copy drifting — without it, a slot renamed in the manifest would produce
-    // a `[unknown-slot]` failure at run time on a real upload and nowhere else.
+    // The manifest's slot block is written from `packages/media`'s registry by
+    // `scripts/emit-media-manifest.mjs`, and `pnpm media` fails when the committed file drifts from it.
+    // This is the other direction: the manifest's keys and the slot names the URL builder accepts must be
+    // the same set, because a slot renamed in one place would produce a `[unknown-slot]` failure at run
+    // time on a real upload and nowhere else.
     expect([...MEDIA_SLOTS].sort()).toEqual(Object.keys(loadMediaManifest().slots).sort())
   })
 
   it('declares the same aspect ratios as the slots the crops serve', () => {
     const slots = loadMediaManifest().slots
     expect(slots['therapist-portrait'].ratio).toEqual([...CROPS.mobile.ratio])
+    expect(slots['service-card'].ratio).toEqual([...CROPS.mobile.ratio])
     expect(slots.hero.ratio).toEqual([...CROPS.desktop.ratio])
+    expect(slots.gallery.ratio).toEqual([...CROPS.desktop.ratio])
+    expect(slots['testimonial-background'].ratio).toEqual([...CROPS.desktop.ratio])
     // The control: the slot that is never cropped declares no ratio, and the two crops are not the same.
     expect(slots.logo.ratio).toBeNull()
     expect(CROPS.mobile.ratio).not.toEqual([...CROPS.desktop.ratio])

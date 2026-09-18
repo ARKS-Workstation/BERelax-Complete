@@ -13,6 +13,11 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
+// The `employee_document_type` enum is declared with the tables it belongs to (0030) and imported
+// here, not redeclared: a second pgEnum of the same name would compile, read identically and be a
+// different Postgres type, so the mandatory list and the documents it is checked against would stop
+// being comparable.
+import { employeeDocumentType } from './staff.ts'
 
 /**
  * Drizzle mirrors of the SQL in packages/db/migrations.
@@ -110,6 +115,20 @@ export const regulatoryProfile = pgTable('regulatory_profile', {
   medicalClaimsPermitted: boolean('medical_claims_permitted').notNull(),
   permittedPublicTitles: text('permitted_public_titles').array().notNull(),
   bannedClaimTerms: text('banned_claim_terms').array().notNull(),
+  /**
+   * Document types a therapist must hold, unexpired, to be offered in availability (0030).
+   *
+   * Here rather than in `app_setting` because it is a consequence of the same unanswered question
+   * every other column in this table is a consequence of: whether the licence is a commercial
+   * wellness activity or a healthcare activity decides which credentials the person delivering a
+   * treatment must hold. An array of the `employee_document_type` enum rather than `text[]` — unlike
+   * `bannedClaimTerms`, which is free words a lint scans for, these have to match
+   * `employee_document.document_type` exactly, and a typo in a text[] is a mandatory type nothing
+   * matches, so every therapist passes the check that was meant to exclude them.
+   */
+  mandatoryTherapistDocumentTypes: employeeDocumentType('mandatory_therapist_document_types')
+    .array()
+    .notNull(),
   isProvisional: boolean('is_provisional').notNull(),
   sourceNote: text('source_note'),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),

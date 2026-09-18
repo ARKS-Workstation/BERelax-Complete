@@ -13,15 +13,19 @@
  */
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { manifestSlotSpecs } from './lib/media-slot-specs.mjs'
 
 const ROOT = join(import.meta.dirname, '..', 'assets', 'media')
 const MANIFEST = join(ROOT, 'manifest.json')
 
-const SLOTS = {
-  'therapist-portrait': { ratio: [4, 5], minWidth: 600, focalRequired: true },
-  hero: { ratio: [16, 9], minWidth: 1280, focalRequired: true },
-  logo: { ratio: null, minWidth: 240, focalRequired: false },
-}
+/**
+ * The slot block, projected from the one registry that declares a slot (W-SYS-09).
+ *
+ * It used to be a literal here, which made this file the second place a slot's ratio and minimum width
+ * lived. `check-media.mjs` now asserts the committed manifest still equals this projection, so the block
+ * is generated-and-committed like `tokens.css` rather than typed twice.
+ */
+const SLOTS = manifestSlotSpecs()
 
 /** Full-length portraits put the face in roughly the top fifth; heroes are close to centred. */
 const FOCAL_DEFAULTS = {

@@ -16,6 +16,22 @@
  * Dimensions are read from the file headers directly. A dependency for that would be a dependency for
  * nothing: a JPEG SOF marker and a PNG IHDR are both a fixed offset away.
  *
+ * **What the constraints are, and where they live.** W-SYS-09 moved them out of this file. Every asset is
+ * now measured by `validateUpload` against `packages/media/src/slots/registry.ts` — the one declaration of
+ * a slot's ratio, minimum dimensions, byte cap, mime types and alt requirement — so the library is held to
+ * exactly the constraints a real upload is. This file used to carry its own minimum width and its own
+ * ratio tolerance, and consequently never looked at the byte cap or the mime type at all. Each violation
+ * arrives with the rule name `validateUpload` gave it.
+ *
+ * `[slot-spec-must-mirror-the-registry]` is the other half: the manifest's `slots` block is a projection
+ * of the registry, committed so a change to a ratio or a cap is visible in a diff, and this fails when the
+ * committed file is not what `pnpm media:emit` would write. The same arrangement as `tokens.css`.
+ *
+ * `[aspect-ratio-must-come-from-the-slot-registry]` is the third source rule, and the reason the registry
+ * can be called single: a component that writes `aspect-ratio: 4 / 5` has made a second copy of a number
+ * the crop also depends on, and the symptom is a card reserving the wrong box and reflowing when the
+ * photograph lands. See the rule's own note below.
+ *
  * Two further rules, added by W-SYS-05, are about how the library is *referenced* rather than what is in
  * it. Both are reported with their rule name first, so `scripts/test-gates.mjs` can assert a known-bad
  * fixture was rejected by the rule written for it rather than by an unrelated one (ADR 0003).
@@ -39,14 +55,13 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { validateUpload } from '../packages/media/src/slots/validate.ts'
+import { manifestSlotSpecs } from './lib/media-slot-specs.mjs'
 import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const REPO = join(import.meta.dirname, '..')
 const ROOT = join(REPO, 'assets', 'media')
 const MANIFEST = join(ROOT, 'manifest.json')
-
-/** How far a native ratio may sit from its slot's target before the crop needs a stated focal point. */
-const RATIO_TOLERANCE = 0.08
 
 const SOF_MARKERS = new Set([
   0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
@@ -124,26 +139,48 @@ for (const asset of manifest.assets) {
     problems.push(`${asset.path} is in slot '${asset.slot}', which the manifest does not define`)
     continue
   }
-  if (size.width < spec.minWidth) {
-    problems.push(
-      `${asset.path} is ${size.width}px wide; slot '${asset.slot}' needs at least ${spec.minWidth}px`,
-    )
+
+  // Every committed asset is run through the same validator a real upload goes through (W-SYS-09), so
+  // the library is held to the constraints the slot registry declares rather than to a second, looser
+  // set written here. That is what caught the previous arrangement: this file checked minimum width and
+  // a ratio tolerance of its own and never looked at the byte cap or the mime type at all.
+  const focal =
+    asset.focalX === undefined || asset.focalY === undefined
+      ? undefined
+      : { x: asset.focalX, y: asset.focalY }
+  for (const violation of validateUpload({
+    slot: asset.slot,
+    mimeType: asset.path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+    byteLength: actualBytes,
+    width: size.width,
+    height: size.height,
+    filename: asset.path,
+    ...(focal === undefined ? {} : { focal }),
+  })) {
+    problems.push(`${asset.path}  ${violation.message}`)
   }
-  if (spec.ratio !== null) {
-    const target = spec.ratio[0] / spec.ratio[1]
-    const native = size.width / size.height
-    const deviation = Math.abs(native - target) / target
-    const hasFocal = asset.focalX !== undefined && asset.focalY !== undefined
-    if (deviation > RATIO_TOLERANCE && !hasFocal) {
-      problems.push(
-        `${asset.path} is ${native.toFixed(3)} against the slot's ${target.toFixed(3)} ` +
-          `(${Math.round(deviation * 100)}% off) and declares no focal point — a centre crop will ` +
-          'cut the subject out',
-      )
-    }
-  }
-  if (spec.focalRequired && (asset.focalX === undefined || asset.focalY === undefined)) {
+
+  if (spec.focalRequired && focal === undefined) {
+    // Stricter than the upload rule on purpose. The upload validator asks for a focal point only when
+    // the source is a different shape from the slot; a library asset in a cropped slot must declare one
+    // whatever its shape, because `assets/media/manifest.json` is what the renderer reads for
+    // `object-position` and a missing one there is a silent centre crop.
     problems.push(`${asset.path} is in a cropped slot and declares no focal point`)
+  }
+}
+
+// The manifest's slot block is a projection of the slot registry, committed so a change to a ratio or a
+// byte cap is visible in a diff. Regenerate with `pnpm media:emit`.
+{
+  const expected = JSON.stringify(manifestSlotSpecs(), null, 2)
+  const actual = JSON.stringify(manifest.slots, null, 2)
+  if (expected !== actual) {
+    problems.push(
+      "[slot-spec-must-mirror-the-registry] assets/media/manifest.json's `slots` block is not what " +
+        'packages/media/src/slots/registry.ts declares. A slot whose ratio, minimum dimensions, byte cap ' +
+        'or mime types differ here from the registry is a library measured against constraints nothing ' +
+        'else enforces. Run `pnpm media:emit`.',
+    )
   }
 }
 
@@ -177,6 +214,45 @@ const PRIVATE_ORIGIN = [
 ]
 
 const BLURHASH = /\bblurhash\b/i
+
+/**
+ * The one file that may state a ratio: the registry itself.
+ *
+ * A single path rather than a directory, so the exemption cannot quietly widen — the same shape
+ * `scripts/check-colour-tokens.mjs` uses for the token layer.
+ */
+const RATIO_SOURCE = new Set(['packages/media/src/slots/registry.ts'])
+
+/**
+ * `[aspect-ratio-must-come-from-the-slot-registry]`.
+ *
+ * Every slot's aspect ratio is declared once, in `packages/media/src/slots/registry.ts`, and a component
+ * that writes the number instead of reading it is the second copy. The failure is not an error and not a
+ * wrong-looking diff: it is a card that reserves a 4:5 box for a slot that has become 3:2, reflowing when
+ * the photograph lands — a CLS regression nobody attributes to two digits in a stylesheet.
+ *
+ * So a literal ratio is refused and `slotAspectRatio('hero')` is the way through. Three forms are matched,
+ * because all three are how it would actually be written:
+ *
+ *   - the CSS declaration, `aspect-ratio: 16 / 9`
+ *   - the React style property, `aspectRatio: '16/9'`
+ *   - Tailwind's utilities, `aspect-video`, `aspect-square`, `aspect-[4/5]`
+ *
+ * A value containing `var(` or a template hole is not a literal and is allowed: `var(--slot-ratio)` reads
+ * a custom property somebody set from the registry, and `${slotAspectRatio(...)}` is the registry itself.
+ */
+const ASPECT_RATIO_FORMS = [
+  /aspect-ratio\s*:\s*([^;}\n]+)/gi,
+  /aspectRatio\s*:\s*([^,;}\n]+)/g,
+  /\baspect-(square|video|\[[^\]]*\])/g,
+]
+
+/** A ratio nobody derived: digits, and no way for them to have come from the registry. */
+function isLiteralRatio(value) {
+  const text = value.trim()
+  if (text.includes('var(') || text.includes('${') || text.includes('slotAspectRatio')) return false
+  return /\d/.test(text) || /^(square|video)$/.test(text)
+}
 
 function* walkSource(dir, prefix) {
   let entries
@@ -235,6 +311,24 @@ for (const root of SOURCE_ROOTS) {
         const match = pattern.exec(line)
         if (match !== null) {
           referenceProblems.push(`${at}  [no-private-origin-url] '${match[0]}' — ${why}`)
+        }
+      }
+      if (!RATIO_SOURCE.has(relative)) {
+        for (const form of ASPECT_RATIO_FORMS) {
+          form.lastIndex = 0
+          let match = form.exec(line)
+          while (match !== null) {
+            if (isLiteralRatio(match[1] ?? '')) {
+              referenceProblems.push(
+                `${at}  [aspect-ratio-must-come-from-the-slot-registry] '${match[0].trim()}' — a slot's ` +
+                  'aspect ratio is declared once, in packages/media/src/slots/registry.ts. Interpolate ' +
+                  "slotAspectRatio('<slot>') instead: a second copy of the number reserves the wrong box " +
+                  'and reflows when the photograph lands, which is a CLS regression nobody traces back to ' +
+                  'a stylesheet',
+              )
+            }
+            match = form.exec(line)
+          }
         }
       }
     }

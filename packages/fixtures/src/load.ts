@@ -1,18 +1,39 @@
 /**
  * Writing the fixture salon into a database.
  *
- * Only the tables that exist today: `premises` and its trading hours, and the settings whose values
- * the fixture world depends on. Services, rooms, therapists, appointments and invoices are loaded by
- * `B-CAT`, `B-AVAIL`, `B-LIFE` and `M-VAT` once those tables exist — each registers a loader here
- * rather than writing its own seed script, so `pnpm seed` stays one command and the ordering between
- * loaders is explicit rather than implied by filenames.
+ * Two kinds of thing go through here, and the distinction matters more than the file name suggests.
+ *
+ * The **real business** — the premises and its 11:00–02:00 hours, the legal entity, the 32 prices of
+ * docs/13 §4, the publication of the eight services — is seeded from `packages/db/src/seed/`, which
+ * holds the transcriptions. The **fixture salon** — synthetic customers, an eight-therapist roster, the
+ * historical book — comes from `salon.ts`. Both run from one `pnpm seed` because the demo dataset is
+ * placed against the real trading window and the real menu; a loader that seeded its own hours would
+ * make the two disagree.
+ *
+ * Therapists, appointments and invoices are loaded by `B-AVAIL`, `B-LIFE` and `M-VAT` once those tables
+ * exist — each registers a loader here rather than writing its own seed script, so `pnpm seed` stays one
+ * command and the ordering between loaders is explicit rather than implied by filenames.
  *
  * **Every loader must be idempotent.** Seeding twice from clean has to produce the same rows, which
  * is the acceptance criterion and also what makes a developer's `pnpm seed` safe to run twice when
  * they are not sure whether it worked the first time.
  */
-import { horizonDates, horizonRows, hoursFromSchedule, localDate, localTime } from '@berelax/core'
-import { generateBusinessDays, type Sql } from '@berelax/db'
+import {
+  assertPublicDisplayNameCompliant,
+  horizonDates,
+  horizonRows,
+  hoursFromSchedule,
+  localDate,
+  localTime,
+} from '@berelax/core'
+import {
+  ensureLegalEntity,
+  generateBusinessDays,
+  readCompliancePolicy,
+  type Sql,
+  seedCatalogue,
+  seedPremises,
+} from '@berelax/db'
 import {
   FIXTURE_CLOSE,
   FIXTURE_FORWARD_DAYS,
@@ -30,40 +51,61 @@ export interface Loader {
 }
 
 /**
- * The premises, and its trading hours.
+ * The premises, its trading hours and the legal entity — the real ones, from docs/13.
  *
- * Hours are the fixture's most load-bearing row: 11:00 to 02:00 is what makes `crosses_midnight`
- * true and what makes every business-day calculation downstream mean something. Seeding 09:00 to
- * 17:00 here would leave the whole after-midnight path untested while every test still passed.
+ * The values used to be literals here, which made this file a second spelling of the address the
+ * `premises` row is supposed to be the only source of. They now live in
+ * `packages/db/src/seed/premises.ts`, which is a real seed rather than a fixture: this is the business's
+ * own address and its own hours, not synthetic data, and the fixture salon's appointments are placed
+ * against the same 11:00–02:00 window. B-CAT-06 moved them and left this loader as the ordering.
+ *
+ * Hours are the most load-bearing row in the database: 11:00 to 02:00 is what makes `crosses_midnight`
+ * true and what makes every business-day calculation downstream mean something. Seeding 09:00 to 17:00
+ * would leave the whole after-midnight path untested while every test still passed.
  */
 const premisesLoader: Loader = {
   name: 'premises',
   after: [],
   async load(sql, salon) {
     void salon
-    await sql`
-      insert into premises (id, display_name, address_line_1, address_line_2, area)
-      values (
-        1,
-        'BE RELAX Massage Center and Spa',
-        '250 Al Meena Street, Tower Block A/B, M-Floor',
-        'Al Zahiyah, E14',
-        'Al Zahiyah'
-      )
-      on conflict (id) do update set
-        display_name = excluded.display_name,
-        address_line_1 = excluded.address_line_1,
-        address_line_2 = excluded.address_line_2,
-        area = excluded.area
-    `
-    // Replace rather than upsert: the hours are a set, and a day removed from the fixture must be
-    // removed from the table too.
-    await sql`delete from premises_hours`
-    await sql`
-      insert into premises_hours (day_of_week, open_time, close_time)
-      select d, ${FIXTURE_OPEN}::time, ${FIXTURE_CLOSE}::time from generate_series(0, 6) as d
-    `
-    return 8
+    const rows = await seedPremises(sql)
+    // The legal entity is 0026's singleton, ensured with 0026's own values and `do nothing`. It is
+    // here so `pnpm seed` against a database that predates that migration still has an issuer, and it
+    // must never carry a second spelling of the registered name: that name is snapshotted onto every
+    // tax invoice, and a seed that "ensured" its own version once left the wrong one behind for every
+    // later suite.
+    return rows + (await ensureLegalEntity(sql))
+  },
+}
+
+/**
+ * The catalogue: the 32 prices of docs/13 §4, the publication of the 8 services, the price-on-request
+ * items.
+ *
+ * Runs after `premises` because the trading hours are what make a published menu bookable at all, and
+ * because `pnpm seed`'s output reads in that order.
+ *
+ * The compliance lint is assembled here rather than inside the seed, and this loader is the reason the
+ * seam exists: `packages/db` may not import `packages/core`, so the term list comes out of
+ * `regulatory_profile` through `readCompliancePolicy` and the lexicon comes from `@berelax/core`, and
+ * `packages/fixtures` is the only package allowed to hold both. `seedCatalogue` refuses to publish a
+ * name without a lint rather than defaulting to one that permits everything.
+ */
+const catalogueLoader: Loader = {
+  name: 'catalogue',
+  after: ['premises'],
+  async load(sql, salon) {
+    void salon
+    const policy = await readCompliancePolicy(sql)
+    const result = await seedCatalogue(sql, {
+      lint: (name) =>
+        assertPublicDisplayNameCompliant(name, {
+          bannedClaimTerms: policy.bannedClaimTerms,
+          permittedPublicTitles: policy.permittedPublicTitles,
+          medicalClaimsPermitted: policy.medicalClaimsPermitted,
+        }),
+    })
+    return result.variantsWritten + result.servicesPublished + result.priceOnRequestWritten
   },
 }
 
@@ -139,7 +181,7 @@ function shift(date: string, offsetDays: number) {
   return localDate(value.toISOString().slice(0, 10))
 }
 
-const LOADERS: Loader[] = [premisesLoader, settingsLoader, businessDayLoader]
+const LOADERS: Loader[] = [premisesLoader, catalogueLoader, settingsLoader, businessDayLoader]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */
 export function registerLoader(loader: Loader): void {

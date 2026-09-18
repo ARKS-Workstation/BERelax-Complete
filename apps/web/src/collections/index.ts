@@ -4,9 +4,11 @@ import { assertMayChangeStatus, collectionAccess } from '../payload/access.ts'
 import { auditCollectionChange, auditCollectionDelete } from '../payload/audit.ts'
 import { toPayloadField } from '../payload/fields.ts'
 import { CMS_USERS } from './cms-users.ts'
+import { MEDIA } from './media.ts'
 import { guardServiceNarrativeDelete, guardServiceNarrativeUnpublish } from './service-narrative.ts'
 
 export { CMS_USERS } from './cms-users.ts'
+export { MEDIA } from './media.ts'
 
 /**
  * Payload collections, built from the content model in `@berelax/cms`.
@@ -72,8 +74,17 @@ export function toPayloadCollection(collection: ContentCollection): CollectionCo
   }
 }
 
-/** The auth collection first, which is the order Payload's sidebar shows them in. */
+/**
+ * The auth collection first, which is the order Payload's sidebar shows them in, then the narrative
+ * collections, then media.
+ *
+ * `CMS_USERS` and `MEDIA` are hand-written rather than generated for the same kind of reason and for
+ * different specifics: an auth collection is Payload's own mechanism, and an upload collection's fields
+ * come from the file rather than from an editorial model. Both files say so at the top. Everything in
+ * between is generated from the one field list in `@berelax/cms`.
+ */
 export const PAYLOAD_COLLECTIONS: readonly CollectionConfig[] = [
   CMS_USERS,
   ...CONTENT_COLLECTIONS.map(toPayloadCollection),
+  MEDIA,
 ]

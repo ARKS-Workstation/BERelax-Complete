@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**49 / 207 units complete.**
+**53 / 207 units complete.**
 
 ## Next up
 
-1. **B-AVAIL-04 — Therapist availability read model and the eligibility port P-HR later fills**  — **needs owner input:** Y8-staff
-1. **B-CAT-06 — Catalogue, premises and room seed from the real business profile**  — **needs owner input:** Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn
+1. **B-AVAIL-05 — Gender matching as a hard constraint, default strict**  — **needs owner input:** Y9-gender
 1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
+1. **M-VAT-02 — Input VAT recoverability classification, including blocked categories**
 
 ## All units
 
@@ -37,12 +37,12 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |
 | [x] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
 | [x] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |
-| [ ] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
+| [x] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
 | [ ] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
 | [x] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |
 | [ ] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
 | [x] | 27 | `B-CAT-05` | Catalogue mutation guard rails and the public display-name compliance lint | `B-AVAIL-01`, `B-CAT-04` | — | — |
-| [ ] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
+| [x] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
 | [ ] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
 | [ ] | 30 | `B-LIFE-01` | Appointment lifecycle state machine with actor permissions and declared side effects | `B-AVAIL-06`, `F06`, `F07` | — | — |
 | [ ] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
@@ -68,7 +68,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 51 | `M-TILL-09` | Versioned package templates and package sale as deferred revenue | `F09`, `M-TILL-06` | — | Y9-package-policy, Y11-vat-package |
 | [ ] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
 | [ ] | 53 | `M-TILL-11` | Cash drawer reconciliation per shift, keyed on business_day | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `M-TILL-07` | — | — |
-| [ ] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
+| [x] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
 | [x] | 56 | `M-VAT-01` | Suppliers, supplier tax profile, bills and payables | `M-TILL-02`, `M-TILL-03` | — | — |
 | [ ] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
@@ -158,7 +158,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 141 | `W-SYS-08` | Payload CMS v3 embedded, content model and the catalogue boundary | `F07`, `F09`, `W-SYS-01` | — | — |
 | [ ] | 142 | `W-SITE-07` | CMS-driven routes, internal linking and breadcrumbs | `W-SITE-03`, `W-SITE-05`, `W-SYS-08` | — | Y1-licence |
 | [ ] | 143 | `W-SITE-10` | Publication control plane: banned-claims lint, named approval, immutable record | `F06`, `F09`, `W-SITE-07`, `W-SYS-08` | — | Y1-licence |
-| [ ] | 144 | `W-SYS-09` | Media slots: declared constraints, required alt and the junk-alt filter | `W-SYS-05`, `W-SYS-08` | — | Y12-photos |
+| [x] | 144 | `W-SYS-09` | Media slots: declared constraints, required alt and the junk-alt filter | `W-SYS-05`, `W-SYS-08` | — | Y12-photos |
 | [ ] | 145 | `W-SITE-06` | Therapist routes and the publishing guard | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `W-SITE-03`, `W-SYS-09` | — | Y12-consent-photo, Y8-staff |
 | [ ] | 146 | `W-SITE-08` | Sitemaps, hreflang, IndexNow and the publish propagation pipeline | `H02`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07` | M4 | — |
 | [ ] | 147 | `W-SITE-09` | Legacy WooCommerce URL migration and the 301 map | `W-SITE-08` | — | Y1-woo-baseline |

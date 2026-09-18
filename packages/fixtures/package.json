@@ -13,6 +13,7 @@
     "@berelax/shared": "workspace:*"
   },
   "devDependencies": {
-    "@berelax/media": "workspace:*"
+    "@berelax/media": "workspace:*",
+    "@berelax/pdf": "workspace:*"
   }
 }

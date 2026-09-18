@@ -22,6 +22,7 @@ import {
   generateSalon,
   isPublishable,
 } from '@berelax/fixtures'
+import { slotAspectRatio } from '@berelax/media/slots'
 import { tokensCss } from '@berelax/ui'
 
 const salon = generateSalon()
@@ -180,12 +181,15 @@ section { margin-block-end: var(--space-11); }
 @media (min-width: 768px) { .therapists { grid-template-columns: repeat(4, 1fr); } }
 .therapist { text-align: start; }
 /* Real photographs, cropped to the slot ratio around a declared focal point. The portraits are full
-   length at native ratios from 0.461 to 0.799, and a centre crop to 4:5 removes the face — which is
-   why object-position is set per image rather than left at its default. */
+   length at native ratios from 0.461 to 0.799, and a centre crop removes the face — which is why
+   object-position is set per image rather than left at its default.
+
+   Both ratios below are read from the slot registry, not written here: the specimen is the page a
+   designer looks at when something changes, so it has to reserve the same box the real card does. */
 .portrait {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: ${slotAspectRatio('therapist-portrait')};
   object-fit: cover;
   background: var(--color-surface-clay);
   border-radius: var(--radius-1);
@@ -195,7 +199,7 @@ section { margin-block-end: var(--space-11); }
 .hero {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: ${slotAspectRatio('hero')};
   object-fit: cover;
   border-radius: var(--radius-1);
   margin-block-end: var(--space-9);

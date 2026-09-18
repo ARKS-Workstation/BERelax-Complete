@@ -33,7 +33,7 @@ import {
   UAE_STANDARD_VAT_BP,
   type VatRateBp,
 } from '@berelax/core'
-import type { InvoiceLineInput, IssueInvoiceInput } from '@berelax/db'
+import { type InvoiceLineInput, type IssueInvoiceInput, PREMISES_NAP } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import { customerLabel } from './synthetic.ts'
 
@@ -55,18 +55,31 @@ export const FIXTURE_HOURS: HoursForDate = () => FIXTURE_TRADING_HOURS
  */
 export const FIXTURE_TRN = '100000000000003'
 
+/**
+ * The issuer as a document carries it, composed from the seeded `premises` values.
+ *
+ * The address and the phone used to be literals here, which made this file a second spelling of the one
+ * fact `premises` is supposed to be the only source of — and it was the *prototype's* WhatsApp number,
+ * which docs/13 §3 shows the live site contradicting. B-CAT-06 put the values in
+ * `packages/db/src/seed/premises.ts` and left this composition, so a corrected address reaches the
+ * document fixtures without anybody editing them.
+ *
+ * The TRN stays a fixture constant: `legal_entity.trn` holds a placeholder the schema refuses, and a
+ * document that proves issuance *works* needs fifteen digits. The phone is the **landline**, not the
+ * WhatsApp number: which WhatsApp number is canonical is Y1-nap, so the seeded value is a placeholder
+ * and cannot be printed on anything.
+ */
 export const FIXTURE_ISSUER: IssuerSnapshot = {
   legalName: 'BE RELAX SPA - L.L.C - O.P.C',
-  tradingName: 'BE RELAX - Massage Center and Spa',
+  tradingName: PREMISES_NAP.displayName,
   trn: FIXTURE_TRN,
   addressLines: [
-    '250 Al Meena Street',
-    'Tower Block A/B, M-Floor',
-    'Al Zahiyah (Al Mina), E14',
-    'Abu Dhabi',
+    PREMISES_NAP.addressLine1,
+    `${PREMISES_NAP.addressLine2}, ${PREMISES_NAP.floor}`,
+    `${PREMISES_NAP.area}, ${PREMISES_NAP.emirate}`,
   ],
-  emirate: 'Abu Dhabi',
-  phone: '+971525108633',
+  emirate: PREMISES_NAP.emirate,
+  phone: PREMISES_NAP.phoneLandline,
 }
 
 /** A line as a fixture states it: a description, a quantity and a VAT-inclusive unit price. */

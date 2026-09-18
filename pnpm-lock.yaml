@@ -263,6 +263,9 @@ importers:
       '@berelax/media':
         specifier: workspace:*
         version: link:../media
+      '@berelax/pdf':
+        specifier: workspace:*
+        version: link:../pdf
 
   packages/google:
     dependencies:
@@ -290,6 +293,9 @@ importers:
       '@berelax/fixtures':
         specifier: workspace:*
         version: link:../fixtures
+      '@berelax/media':
+        specifier: workspace:*
+        version: link:../media
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
@@ -372,6 +378,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@berelax/media':
+        specifier: workspace:*
+        version: link:../media
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared

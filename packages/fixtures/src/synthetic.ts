@@ -9,11 +9,12 @@
  * **Phone numbers use `+971 59`, which is not an allocated UAE mobile prefix.** Allocated mobile
  * prefixes are 050, 052, 054, 055, 056 and 058. A number on 059 cannot ring anybody today, which is
  * a stronger guarantee than a convention nobody remembers. `assertSynthetic` fails the build if a
- * generated number lands on a real prefix or matches either of the business's own numbers.
+ * generated number lands on a real prefix or matches any of the business's own numbers.
  *
  * **Names come from a fixed pool of plainly fictional names**, and every clinical note is prefixed
  * so that a screenshot of the clinical screen cannot be mistaken for a real record.
  */
+import { PREMISES_NAP, WHATSAPP_CANDIDATES } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 
 /** Mobile prefixes actually allocated in the UAE. A fixture number must avoid all of them. */
@@ -22,8 +23,20 @@ export const ALLOCATED_UAE_MOBILE_PREFIXES = ['50', '52', '54', '55', '56', '58'
 /** Unallocated, therefore undialable. Every fixture number starts here. */
 export const SYNTHETIC_MOBILE_PREFIX = '59'
 
-/** The business's real numbers, from docs/13. No fixture may collide with either. */
-export const REAL_BUSINESS_NUMBERS = ['+971528239069', '+971563429399', '+971525108633'] as const
+/**
+ * The business's real numbers. No fixture may collide with any of them.
+ *
+ * Composed from the seed rather than restated, so this list cannot fall behind the `premises` row.
+ * B-CAT-06 found it already had: the list held the mobile and both disputed WhatsApp numbers but not
+ * the **landline**, so a synthetic number could have collided with a number that rings the front desk.
+ * Both WhatsApp candidates are here because docs/13 §3 shows two published and Y1-nap has not said
+ * which is canonical — a fixture must avoid both, whichever turns out to be the business's.
+ */
+export const REAL_BUSINESS_NUMBERS: readonly string[] = Object.freeze([
+  PREMISES_NAP.phoneLandline,
+  PREMISES_NAP.phoneMobile,
+  ...WHATSAPP_CANDIDATES.map((candidate) => candidate.value),
+])
 
 /** Deliberately unroutable: RFC 2606 reserves `.invalid` so nothing can ever be delivered. */
 export const SYNTHETIC_EMAIL_DOMAIN = 'fixture.invalid'
@@ -99,7 +112,7 @@ export function assertSynthetic(person: SyntheticPerson): void {
       `${person.phone} is on allocated UAE mobile prefix 0${prefix} and could reach a real handset`,
     )
   }
-  if ((REAL_BUSINESS_NUMBERS as readonly string[]).includes(person.phone)) {
+  if (REAL_BUSINESS_NUMBERS.includes(person.phone)) {
     problems.push(`${person.phone} is one of the business's own numbers`)
   }
   if (!person.email.endsWith(`@${SYNTHETIC_EMAIL_DOMAIN}`)) {
