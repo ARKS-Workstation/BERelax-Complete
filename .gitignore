@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/out/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+artifacts/screens/
+playwright-report/
+test-results/
+.turbo/

@@ -17,7 +17,7 @@ units:
     order: 1
     title: Monorepo scaffold and toolchain
     owner: claude
-    status: in_progress
+    status: done
     depends_on: []
     steps: [14]
     acceptance:
