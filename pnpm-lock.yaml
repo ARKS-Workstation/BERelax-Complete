@@ -119,6 +119,21 @@ importers:
         specifier: 6.3.289
         version: 6.3.289
 
+  packages/providers:
+    dependencies:
+      '@berelax/config':
+        specifier: workspace:*
+        version: link:../config
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
+      '@berelax/messaging':
+        specifier: workspace:*
+        version: link:../messaging
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/shared: {}
 
   packages/ui:

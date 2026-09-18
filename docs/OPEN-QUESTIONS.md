@@ -71,6 +71,9 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 | Y6-sender-ids | Two SMSala sender IDs, transactional + `AD-` promotional | Fake SMSala with segment/cost calc, DLRs, suspension simulation | open | real campaigns |
 | Y7-mcc | Merchant category code confirmed in writing, two providers | Manual/cash adapter is real; fake card gateway with 3DS and chargebacks | open | `Y-PAY` going live |
 | Y13-pentest | Penetration test booked | — | open | go-live |
+| Y6-sms-rate | **What does SMSala actually charge per segment?** The campaign budget screen multiplies it by a segment count, and Arabic is 70 characters per segment against English's 160 — so the rate decides whether an Arabic campaign is affordable | 9 fils per segment, marked provisional in the fake | open | campaign cost estimates |
+| Y7-gateway | **Which card gateway, and is an MCC agreed in writing?** Some acquirers decline this merchant category | Fake gateway with 3DS, partial refund, webhook replay and disputes | open | `Y-PAY` |
+| Y8-llm-budget | **What monthly token budget does the owner agree to?** The setting exists and is bounded; the number is not the build's to choose | `agents.monthly_token_budget` provisional, and the fake accounts for tokens so the guard is testable | open | `G-SEO` live mode |
 
 ## D. Data and assets from the owner
 

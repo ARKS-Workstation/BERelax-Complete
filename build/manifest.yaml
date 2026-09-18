@@ -184,7 +184,7 @@ units:
     order: 13
     title: Fake provider layer
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F03
     - F06

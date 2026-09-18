@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**12 / 206 units complete.**
+**13 / 206 units complete.**
 
 ## Next up
 
-1. **H02 — Fake provider layer**
 1. **H03 — Deterministic seed and frozen clock**
 1. **B-MSG-01 — Channel-shaped template model, encoding, segment count and cost**
+1. **M-TILL-01 — Chart of accounts and the pure double-entry ledger kernel**  — **needs owner input:** Y8-coa
 
 ## All units
 
@@ -26,7 +26,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 10 | `F10` | Arabic RTL PDF proof | `F01` | — | — |
 | [x] | 11 | `F11` | Design tokens | `F01` | — | — |
 | [x] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
-| [ ] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
+| [x] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
 | [ ] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |
 | [ ] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |
 | [ ] | 16 | `H05` | Quality gates wired into CI | `F02`, `H04` | — | — |

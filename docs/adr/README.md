@@ -31,6 +31,7 @@ a decision the table does not list.
 | [0019](0019-cms-embedded-in-the-app.md) | Payload CMS inside the same app and database | 15 |
 | [0020](0020-regulatory-profile-drives-vocabulary-and-eligibility.md) | One regulatory profile, defaulting stricter | 19, 20, 23, 26 |
 | [0021](0021-catalogue-shape-and-packages-only.md) | A service is (style × treatment); packages only | 19b, 21 |
+| [0022](0022-provider-ports-and-fakes.md) | Every external service behind a port, with a fake that fails on demand | 32 |
 
 ## Writing one
 

@@ -39,7 +39,9 @@
       "@berelax/pdf": ["./packages/pdf/src/index.ts"],
       "@berelax/pdf/*": ["./packages/pdf/src/*"],
       "@berelax/ui": ["./packages/ui/src/index.ts"],
-      "@berelax/ui/*": ["./packages/ui/src/*"]
+      "@berelax/ui/*": ["./packages/ui/src/*"],
+      "@berelax/providers": ["./packages/providers/src/index.ts"],
+      "@berelax/providers/*": ["./packages/providers/src/*"]
     },
     "types": ["node"]
   }

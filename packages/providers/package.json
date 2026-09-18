@@ -1,0 +1,15 @@
+{
+  "name": "@berelax/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@berelax/config": "workspace:*",
+    "@berelax/core": "workspace:*",
+    "@berelax/messaging": "workspace:*",
+    "@berelax/shared": "workspace:*"
+  }
+}

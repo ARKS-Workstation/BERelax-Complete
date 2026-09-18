@@ -1,8 +1,9 @@
 /**
  * @berelax/messaging — the outbound port, the staging send guard and the local outbox.
  *
- * Provider adapters (SMSala, Resend, WhatsApp) are added in H02 against this port. Nothing in the
- * codebase may call a provider SDK directly.
+ * Provider adapters live in `@berelax/providers` (H02) behind their own ports; `B-MSG` bridges an
+ * OutboundMessage to a provider request, because the mapping needs a sender ID from settings and a
+ * template's message class. Nothing in the codebase may call a provider SDK directly.
  */
 
 export { createGuardedTransport, InMemoryOutbox, type OutboxEntry } from './outbox.ts'
