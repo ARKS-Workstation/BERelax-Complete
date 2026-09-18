@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**41 / 207 units complete.**
+**42 / 207 units complete.**
 
 ## Next up
 
-1. **B-AVAIL-03 — Resource-shape assignment for the three real shapes**
 1. **B-AVAIL-04 — Therapist availability read model and the eligibility port P-HR later fills**  — **needs owner input:** Y8-staff
 1. **B-CAT-05 — Catalogue mutation guard rails and the public display-name compliance lint**
+1. **B-MSG-04 — Delivery receipts, message lifecycle and the admin Messages inbox**
 
 ## All units
 
@@ -36,7 +36,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 19 | `B-CAT-03` | Service catalogue schema: style x treatment, variants, skills and resource shapes | `B-CAT-02` | — | Y9-turnaround |
 | [x] | 20 | `B-AVAIL-01` | Booking and appointment schema with the concurrency constraints | `B-CAT-03`, `F04`, `F06` | — | — |
 | [x] | 21 | `B-AVAIL-02` | The pure availability solver: trading window, duration, turnaround, buffers, lead and advance | `B-CAT-01`, `B-CAT-03`, `F05` | — | Y9-turnaround, Y9-buffer, Y9-lead |
-| [ ] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |
+| [x] | 22 | `B-AVAIL-03` | Resource-shape assignment for the three real shapes | `B-AVAIL-02`, `B-CAT-02` | — | — |
 | [ ] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
 | [ ] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
 | [x] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |

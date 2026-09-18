@@ -289,8 +289,15 @@ function slug(text: string): string {
  * Five rooms, and the two that are not ordinary.
  *
  * One couples room at capacity 2, which is the only reason the room-capacity trigger exists rather
- * than another exclusion constraint. Two wet rooms, because the Morocco Bath cannot be delivered in a
+ * than another exclusion constraint. **One** wet room, because the Morocco Bath cannot be delivered in a
  * dry room and a scheduler that ignores that produces a rota nobody can work.
+ *
+ * One, and the number is the point: it makes two Morocco Baths at the same hour genuinely impossible, so
+ * B-AVAIL-03's contention cases test contention rather than arithmetic. This comment said "two" while the
+ * array below held one, and `room-wet-1` reads as the first of a series — a prose/data disagreement in a
+ * fixture every scheduling unit asserts against. The real count is unanswered (OPEN-QUESTIONS Y8-rooms);
+ * the fixture is under the digest gate, so changing the data is a deliberate act with its own commit, not
+ * a tidy-up.
  */
 const ROOMS: readonly FixtureRoom[] = [
   { id: 'room-1', name: 'Room 1', capacity: 1, wet: false },

@@ -2648,6 +2648,187 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 26q. (B-AVAIL-03) The resource shapes the database will actually accept.
+//
+// `assign-shape.ts` chooses the `(therapists[], room)` tuple, and the only useful definition of a
+// correct choice is one the booking transaction can commit. Two rules of
+// `0024_appointment_constraints.sql` decide that, and both are counted in **appointment rows** because
+// that is what the table stores — one row per therapist:
+//
+//   - `appointment_room_capacity`, the deferred trigger, counts the rows holding a room at the busiest
+//     instant of the written row's own period and refuses a peak above `rooms.capacity`. A Four Hands
+//     is ONE client and TWO rows, so it needs TWO places in the room whatever `min_room_capacity` says.
+//     That is why `roomPlacesRequired` is `max(minRoomCapacity, therapistsRequired)` and not the client
+//     count, and the first probe below is the failure a client-count implementation ships:
+//     `room_over_capacity`, raised at COMMIT, after the customer has been told yes.
+//   - `appointment_therapist_no_overlap` refuses one therapist twice over one period, so the "pair" of
+//     a two-therapist shape has to be two different people. `assignShape` de-duplicates its pool for
+//     this reason, and the second probe is what happens when it does not.
+//
+// Each probe names the rule that must reject it: a bare non-zero exit is also what a typo in a column
+// name produces, and the rule under test would then be dead while this file reported PASS for ever
+// (ADR 0003). Both controls matter. Without the first, the capacity probe is satisfied by a database
+// that refuses two rows per booking outright — which would make Couple Massage unbookable too. Without
+// the second, it is satisfied by a database that refuses everything in a capacity-1 room, and Morocco
+// Bath lives in one.
+//
+// Every probe runs inside `begin; … ; rollback;` and creates its own rooms, so none of it depends on
+// the provisional inventory 0012 seeded and B-CAT-06 will replace.
+{
+  const shapeDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const SHAPE_MARKER = 'gate fixture shape'
+  const SINGLE = 'gate-fixture-shape-single'
+  const TWIN2 = 'gate-fixture-shape-twin'
+  const WET_ROOM = 'gate-fixture-shape-wet'
+  const SHAPE_DATE = "'2099-04-02'"
+  const SHAPE_BOOKING = "'40000000-0000-4000-8000-000000000005'"
+  const SHAPE_CUSTOMER = "(select id from customer where phone_e164 = '+971500000197')"
+  const SHAPE_VARIANT =
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1)"
+  const roomRef = (code) => `(select id from rooms where code = '${code}')`
+  const SHAPE_THERAPIST = (suffix) => `'40000000-0000-4000-8000-0000000000${suffix}'::uuid`
+  const shapeSlot = (from, to) =>
+    `tstzrange('2099-04-02 ${from}:00:00+00','2099-04-02 ${to}:00:00+00','[)')`
+
+  // Three rooms of this unit's own: the capacity-1 standard room the seeded inventory is made of, a
+  // capacity-2 standard room (capacity is data, so an owner can have one), and a capacity-1 wet room.
+  const shapeSetup = [
+    `insert into customer (phone_e164, created_via) values ('+971500000197', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${SHAPE_DATE}, '2099-04-02 07:00:00+00', '2099-04-02 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 60, 20000, '${SHAPE_MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes) values
+       ('${SINGLE}',   'Gate single', 'standard', 1, 92, '${SHAPE_MARKER}'),
+       ('${TWIN2}',    'Gate twin 2', 'standard', 2, 93, '${SHAPE_MARKER}'),
+       ('${WET_ROOM}', 'Gate wet',    'wet',      1, 94, '${SHAPE_MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${SHAPE_BOOKING}, ${SHAPE_CUSTOMER}, 'front_desk', '${SHAPE_MARKER}')`,
+  ].join('; ')
+
+  const shapeAppointment = ({ room, therapist, shape, period }) =>
+    'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+    `room_id, period, status, gross_price_fils) values (${SHAPE_BOOKING}, ${SHAPE_DATE}, ` +
+    `${SHAPE_VARIANT}, '${shape}', ${therapist}, ${room}, ${period}, 'confirmed', 20000)`
+
+  const shapeProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      shapeDbUrl ?? '',
+      '-c',
+      `begin; ${shapeSetup}; ${statement}; rollback;`,
+    ])
+
+  // The two therapists of one Four Hands, in one room, over one period — the tuple `assignShape`
+  // produces, written out as the two rows B-AVAIL-06 will insert.
+  const fourHandsRows = (room) => [
+    shapeAppointment({
+      room,
+      therapist: SHAPE_THERAPIST('b1'),
+      shape: 'four_hands',
+      period: shapeSlot('19', '20'),
+    }),
+    shapeAppointment({
+      room,
+      therapist: SHAPE_THERAPIST('b2'),
+      shape: 'four_hands',
+      period: shapeSlot('19', '20'),
+    }),
+  ]
+
+  if (!shapeDbUrl) {
+    check(
+      'resource-shape assignment is feasible against its constraints',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // Probe 1. The reason `roomPlacesRequired` counts rows rather than clients.
+    checkRejectedBy(
+      'shape gate rejects a Four Hands in a capacity-1 room, which its client count permits',
+      shapeProbe([...fourHandsRows(roomRef(SINGLE)), 'set constraints all immediate'].join('; ')),
+      'room_over_capacity',
+    )
+
+    // Probe 2. The reason `assignShape` de-duplicates the pool instead of trusting it.
+    checkRejectedBy(
+      'shape gate rejects a two-therapist shape that is one therapist listed twice',
+      shapeProbe(
+        [
+          shapeAppointment({
+            room: roomRef(TWIN2),
+            therapist: SHAPE_THERAPIST('b1'),
+            shape: 'four_hands',
+            period: shapeSlot('19', '20'),
+          }),
+          shapeAppointment({
+            room: roomRef(TWIN2),
+            therapist: SHAPE_THERAPIST('b1'),
+            shape: 'four_hands',
+            period: shapeSlot('19', '20'),
+          }),
+        ].join('; '),
+      ),
+      'appointment_therapist_no_overlap',
+    )
+
+    // Control 1. The same two rows in a capacity-2 room commit, so probe 1 is about the one missing
+    // place and not about two rows per booking, the `four_hands` value or the room's type.
+    const twoPlaces = shapeProbe(
+      [...fourHandsRows(roomRef(TWIN2)), 'set constraints all immediate'].join('; '),
+    )
+    check(
+      'shape gate accepts the same Four Hands in a room with two places',
+      !twoPlaces.failed,
+      `refused a Four Hands the room had room for:\n${twoPlaces.output}`,
+    )
+
+    // Control 2. Morocco Bath is one therapist in the single capacity-1 wet room, and it has to remain
+    // bookable — otherwise probe 1 is satisfied by a rule that refuses every capacity-1 room.
+    const moroccoBath = shapeProbe(
+      [
+        shapeAppointment({
+          room: roomRef(WET_ROOM),
+          therapist: SHAPE_THERAPIST('b1'),
+          shape: 'solo',
+          period: shapeSlot('19', '20'),
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'shape gate accepts a Morocco Bath alone in the capacity-1 wet room',
+      !moroccoBath.failed,
+      `refused the one shape a capacity-1 room exists for:\n${moroccoBath.output}`,
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the
+    // case a probe is wrongly accepted, and because a room or a booking left behind fails a later gate
+    // with an error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      shapeDbUrl,
+      '-c',
+      `delete from appointment where booking_id = ${SHAPE_BOOKING}; ` +
+        `delete from booking where notes = '${SHAPE_MARKER}'; ` +
+        `delete from rooms where notes = '${SHAPE_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${SHAPE_MARKER}'; ` +
+        `delete from business_day where trading_date = ${SHAPE_DATE}; ` +
+        "delete from customer where phone_e164 = '+971500000197';",
+    ])
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

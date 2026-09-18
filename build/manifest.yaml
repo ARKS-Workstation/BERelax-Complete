@@ -619,7 +619,7 @@ units:
       2 clients), Four Hands (2 therapists, 1 standard room, 1 client) and Morocco Bath (1 therapist, the
       single wet room). All-or-none, and deterministic so seeds and screenshots stay diffable.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-02
@@ -639,6 +639,52 @@ units:
       truncated or best-effort slot
     - 'Assignment is deterministic: 1000 repeat runs on identical input select the same therapist ids and
       room id in the same order'
+    - 'NOTE: scoped, and it is the one line here the shipped schema does not allow as written. Four Hands is
+      "2 therapists, 1 standard room, 1 client" (docs/13 section 4) and 0017 seeds min_room_capacity 1 for
+      it, correctly - there is one client. But 0024 stores one appointment ROW per therapist and its
+      deferred trigger counts ROWS against rooms.capacity, so two therapists in one room is a peak of 2 and
+      in any capacity-1 room the second row is refused at COMMIT with room_over_capacity. Verified against
+      real PostgreSQL and kept as the first known-bad fixture of gate 26q in scripts/test-gates.mjs. Every
+      standard room 0012 seeds is capacity 1, so against the seeded inventory Four Hands is assignable to no
+      room at all and this unit returns zero slots for it rather than a slot the booking transaction cannot
+      commit: a shape the database will refuse is not an assignment. The rule in core is roomPlacesRequired
+      = max(min_room_capacity, therapists_required), carried on every assignment as placesUsed, and the
+      client count stays a separate rule with its own name (the solver''s `clients`, which is what
+      bookableRoomsFor answers). The acceptance line is satisfied against a capacity-2 STANDARD room -
+      capacity is data, not a schema change, exactly as 0012 says a second couples room with three plinths
+      is - and the capacity-1 case is asserted as the refusal it is. Resolving it properly is not this
+      unit''s: either B-CAT-06''s measured inventory includes a two-place standard room, or the capacity
+      count moves off "appointment rows" onto a per-booking places figure, which is a migration and belongs
+      with the booking transaction of B-AVAIL-06. Tracked under Y8-rooms.'
+    - 'NOTE: the deterministic preference order is ROOM_TYPE_PREFERENCE - standard before couples before wet,
+      then the smallest room of that rank, then the id - held as a Record over the room_type union so a
+      fourth room type is a compile error rather than an unranked room. "When both a standard room and the
+      capacity-2 room are free it selects the standard room" is asserted twice, because under the seeded
+      required_room_type = standard the room TYPE filter alone satisfies it and the ranking could be
+      reversed, absent or dead while the test reported PASS. The second assertion clears required_room_type
+      - the column is nullable, so an admin can - leaving the ranking as the only thing choosing, and a
+      third control reverses the input room order and asserts the answer does not move, which is what
+      distinguishes a ranking from "whatever the repository returned first". bookableRoomsFor deliberately
+      does not sort and says so in its own comment; this is the module it defers that policy to.'
+    - 'NOTE: the 8 Morocco Bath cases are (2 styles x 4 durations), each asserting the positive and its
+      negation, and what differs per style is the eligible therapist pool rather than anything about the
+      room. Style is an attribute of the treatment that maps to a required SKILL and never to a room or a
+      price (ADR 0021), so it reaches this layer only through the pool B-AVAIL-04 hands over - that a style
+      cannot change the room assignment is the claim rather than an omission, because if it could then
+      reassigning a therapist would move the booking. The wet room is occupied by an appointment held by a
+      therapist outside every pool, so the room is taken without a therapist also being taken, and a ninth
+      case asserts that with every dry room free and the wet room absent the answer is zero slots rather
+      than a substitute.'
+    - 'NOTE: "remaining capacity >= 2" is a real rule here and is asserted directly on assignShape rather
+      than only end to end, because B-AVAIL-02''s roomsFreeFor is STRICTER than the database: it drops a
+      room with any overlapping room occupancy at all, so by the time a slot reaches this layer remaining
+      capacity is either 0 or the whole capacity and the half-occupied couples room would pass vacuously.
+      remainingRoomPlaces mirrors the SQL room_peak_concurrency of 0024 - a peak measured over the stored
+      treatment periods, never a total and never "how many overlap this one" - and a control asserts that
+      one free place of two is still enough for a one-place footprint, which is the assertion the stricter
+      solver rule cannot make. Whether the solver should offer a partially-occupied capacity-2 room at all
+      is B-AVAIL-02''s to change, and its property-test oracle currently requires the strict reading, so it
+      is left alone and recorded here instead.'
     files:
     - packages/core/src/availability/assign-shape.ts
     - packages/core/src/availability/assign-shape.test.ts
