@@ -90,7 +90,19 @@ caught a real defect in this repository.
       registered name in the row every later suite reads — and that column is snapshotted onto every tax
       invoice. If you ensure a singleton, ensure it with the values the migration seeds.
 
-13. **Do not invent a value that the real system will one day hold.** A plausible-looking TRN, licence
+13. **`pnpm gates:test` is not safe to interrupt.** One case mutates a shipped file in place and restores
+    it in a `finally`; others write `__gate_fixture__` files into real source directories. Kill the
+    wrapper and the `node scripts/test-gates.mjs` child is orphaned, not stopped — it goes on creating
+    and removing fixtures in your worktree while the next run's `tsc` and `depcruise` read them, which
+    surfaces as a failure in a package you never touched. If you must stop a run, find the orphan
+    (`pgrep -f test-gates` plus `/proc/<pid>/cwd`, because its argv carries no path) and kill that too,
+    then `git status` before believing anything.
+
+14. **The scratchpad directory is shared with every other agent.** A file called `verify.sh` or
+    `verify.log` there will be overwritten by somebody else's, and one agent has already relaunched
+    another's script against another's database. Prefix every scratchpad filename with your unit.
+
+15. **Do not invent a value that the real system will one day hold.** A plausible-looking TRN, licence
     number, legal name or address is worse than a blank one: blank is visibly unanswered, and plausible
     is indistinguishable from configured. Provisional values carry a marker the schema refuses
     (`is_placeholder_text`, migration 0026) and an `OPEN-QUESTIONS` id.
