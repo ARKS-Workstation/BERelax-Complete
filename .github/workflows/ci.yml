@@ -79,6 +79,28 @@ jobs:
       - name: No invisible or bidi-reordering characters in source
         run: pnpm invisibles
 
+      # Four supply-chain gates (H-HARD-02). All four are offline by construction, because `pnpm verify`
+      # runs on every unit by every agent and a gate that needs the network is a gate that gets skipped.
+      - name: No credentials in the repository
+        run: pnpm secrets
+
+      - name: Dependency advisories (offline snapshot)
+        run: pnpm deps
+
+      - name: Outbound licence policy
+        run: pnpm licences
+
+      - name: Container and image policy
+        run: pnpm container
+
+      # The online half of dependency scanning, and the only step in this workflow that reaches the
+      # network for a check. It stays out of `pnpm verify` deliberately: a developer offline, or an agent
+      # behind a proxy, must still be able to run the whole gate list. When this reports something the
+      # snapshot does not have, the finding is written into build/advisories.json and either fixed or
+      # accepted there with a dated expiry.
+      - name: Dependency advisories (live database)
+        run: pnpm audit:online
+
       - name: Palette contrast gate
         run: pnpm palette
 

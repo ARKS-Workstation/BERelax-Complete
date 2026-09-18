@@ -26,6 +26,20 @@ const CMS_ROBOTS_TAG = 'noindex, nofollow, noarchive'
 
 const config: NextConfig = {
   reactStrictMode: true,
+  /**
+   * Trailing slashes are `proxy.ts`'s, not Next's.
+   *
+   * Next's internal `/:path+/ → /:path+` redirect carries `priority: true`, so it runs *before* the proxy:
+   * `/Kitchen-Sink/` was a 308 to `/Kitchen-Sink` and then a 301 from the proxy to `/kitchen-sink`. Two
+   * permanent hops for the commonest mistyped-link shape there is, which is the chain W-SITE-01's
+   * acceptance criterion forbids — and each hop is a round trip on a phone. With the rule off, the proxy
+   * applies case, doubled-slash and trailing-slash normalisation in one 301.
+   *
+   * The paths the proxy deliberately does not canonicalise — `/admin`, `/cms-api`, `/api` — do not lose
+   * the behaviour: it trims their trailing slash with a 308, which is what Next was doing and what keeps
+   * `POST /api/v1/otp/` a POST. See `proxy.ts`.
+   */
+  skipTrailingSlashRedirect: true,
   // The monorepo's workspace packages ship TypeScript source rather than built output, so Next has to
   // compile them. Without this they arrive as untranspiled `.ts` and the build fails on the first
   // type annotation.

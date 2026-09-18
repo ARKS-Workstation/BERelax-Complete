@@ -45,8 +45,10 @@ export { type GalleryOptions, renderGalleryHtml } from './gallery.ts'
 export {
   type CaptureTarget,
   captureFilename,
+  capturePlan,
   DIRECTIONS,
   type Direction,
+  missingCaptures,
   parseCaptureFilename,
   THEMES,
   type Theme,

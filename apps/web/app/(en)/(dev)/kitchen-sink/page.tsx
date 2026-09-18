@@ -29,13 +29,17 @@ import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
 import { ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
+import { routeMetadata } from '../../../../src/routes/alternates.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
+import { RouteNav } from '../../../_routes/route-nav.tsx'
 import { portraits } from './portraits.ts'
 
 export const metadata: Metadata = {
   title: 'Kitchen sink — the BE RELAX design system',
   description: 'Every layout primitive and container-query component on one route.',
-  robots: { index: false, follow: false },
+  // `robots` and the alternate set both come from the registry entry: `indexable: false` is declared
+  // once, so a development surface cannot become indexable by a page forgetting to restate it.
+  ...routeMetadata('kitchen-sink', 'en'),
 }
 
 /** The Asian menu at 60 minutes, from docs/13 §4. Gross, VAT-inclusive. */
@@ -129,6 +133,7 @@ export default function KitchenSinkPage() {
   return (
     <main>
       <DesignSystemStyles />
+      <RouteNav id="kitchen-sink" locale="en" />
 
       <Section as="header">
         <Grid>

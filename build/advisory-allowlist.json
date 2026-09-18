@@ -1,0 +1,36 @@
+{
+  "about": "Advisories in build/advisories.json that this repository knowingly carries. Every entry must state a dated `expires`, because accepting a live vulnerability is a decision with a shelf life: the reason it is tolerable today (a fix is not available, the vulnerable path is unreachable) stops being true without anybody noticing. scripts/check-dependencies.mjs refuses an entry with no expiry, refuses an expired one, refuses an expiry more than `maxHorizonDays` out, deletes nothing quietly, and refuses a critical advisory outright — a critical finding is not something a date makes acceptable.",
+  "maxHorizonDays": 365,
+  "entries": [
+    {
+      "id": "GHSA-67mh-4wv8-2f99",
+      "package": "esbuild",
+      "expires": "2026-12-31",
+      "reason": "The advisory is in esbuild's `--serve` development server, which nothing in this system starts: esbuild is reached only as drizzle-kit's TypeScript loader, at apps/web > @payloadcms/db-postgres 3.89.0 > drizzle-kit 0.31.7 > @esbuild-kit/esm-loader > @esbuild-kit/core-utils > esbuild 0.18.20. It is fixed in esbuild >=0.25, but the version is pinned by Payload's own dependency on an archived @esbuild-kit shim, so it cannot be raised from this repository without unpinning @payloadcms/db-postgres. ADR 0002's rule applies: report the finding rather than upgrade the toolchain to satisfy a scanner. Revisit when Payload moves off @esbuild-kit (tsx absorbed it)."
+    },
+    {
+      "id": "GHSA-55q2-fjhq-7xh7",
+      "package": "dompurify",
+      "expires": "2026-12-31",
+      "reason": "dompurify 3.4.8 is reached only through the Payload admin editor: apps/web > @payloadcms/next > @payloadcms/ui > @monaco-editor/react > monaco-editor > dompurify. It sanitises Monaco's own hover markup for an authenticated admin, not customer input, and no public route loads it. The fix is >=3.4.13 and has to arrive through monaco-editor's pin. Revisit with the next Payload minor."
+    },
+    {
+      "id": "GHSA-cmwh-pvxp-8882",
+      "package": "dompurify",
+      "expires": "2026-12-31",
+      "reason": "Same dependency path and the same Monaco-only reachability as GHSA-55q2-fjhq-7xh7; this one needs setConfig() to be called across sanitises, which Monaco does not do. Fixed in >=3.4.11, still gated on monaco-editor's pin."
+    },
+    {
+      "id": "GHSA-c2j3-45gr-mqc4",
+      "package": "dompurify",
+      "expires": "2026-12-31",
+      "reason": "Same Monaco-only path. Requires CUSTOM_ELEMENT_HANDLING to be configured, which Monaco does not configure. Fixed in >=3.4.12."
+    },
+    {
+      "id": "GHSA-vxr8-fq34-vvx9",
+      "package": "dompurify",
+      "expires": "2026-12-31",
+      "reason": "Same Monaco-only path. Requires Trusted Types with RETURN_TRUSTED_TYPE, which Monaco does not enable. Fixed in >=3.4.9."
+    }
+  ]
+}

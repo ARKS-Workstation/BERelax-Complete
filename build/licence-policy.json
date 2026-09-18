@@ -1,0 +1,130 @@
+{
+  "about": "Outbound licence policy for scripts/check-licences.mjs. BE RELAX is a closed-source commercial product for a single business, so the question this policy answers is not 'is this open source' but 'what does distributing it oblige us to publish'. Strong copyleft in the shipped closure is refused outright and cannot be accepted; weak copyleft in the shipped closure needs an entry in `accepted` recording the obligation it carries; weak copyleft that only ever runs on a build machine is allowed without an entry, because MPL and LGPL obligations attach to conveying the work, not to compiling with it.",
+  "reviewedAt": "2026-09-18",
+  "minimumShippedPackages": 400,
+  "permissive": [
+    "0BSD",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CC-BY-3.0",
+    "CC-BY-4.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "OFL-1.1",
+    "Python-2.0",
+    "Unlicense",
+    "WTFPL",
+    "Zlib"
+  ],
+  "weakCopyleft": [
+    "CDDL-1.0",
+    "CDDL-1.1",
+    "EPL-1.0",
+    "EPL-2.0",
+    "LGPL-2.0-only",
+    "LGPL-2.0-or-later",
+    "LGPL-2.1",
+    "LGPL-2.1-only",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    "MPL-1.1",
+    "MPL-2.0"
+  ],
+  "strongCopyleft": [
+    "AGPL-1.0-only",
+    "AGPL-1.0-or-later",
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "CPAL-1.0",
+    "EUPL-1.1",
+    "EUPL-1.2",
+    "GPL-1.0-only",
+    "GPL-2.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "OSL-3.0",
+    "SSPL-1.0"
+  ],
+  "platformBinaries": [
+    {
+      "pattern": "@img/sharp-libvips-*",
+      "licence": "LGPL-3.0-or-later",
+      "reason": "Prebuilt libvips. Read from the installed linux-x64 build; the other platforms carry the same licence and are declared here so a macOS or musl target is classified on a Linux runner rather than skipped. Listed before @img/sharp-* because the first matching pattern wins."
+    },
+    {
+      "pattern": "@img/sharp-*",
+      "licence": "Apache-2.0",
+      "reason": "sharp's own native bindings, confirmed against the installed @img/sharp-linux-x64."
+    },
+    {
+      "pattern": "@biomejs/cli-*",
+      "licence": "MIT OR Apache-2.0",
+      "reason": "Confirmed against the installed @biomejs/cli-linux-x64."
+    },
+    {
+      "pattern": "@esbuild/*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @esbuild/linux-x64."
+    },
+    {
+      "pattern": "@napi-rs/canvas-*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @napi-rs/canvas-linux-x64-gnu."
+    },
+    {
+      "pattern": "@next/swc-*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @next/swc-linux-x64-gnu."
+    },
+    {
+      "pattern": "@parcel/watcher-*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @parcel/watcher-linux-x64-glibc."
+    },
+    {
+      "pattern": "@rolldown/binding-*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @rolldown/binding-linux-x64-gnu."
+    },
+    {
+      "pattern": "@tailwindcss/oxide-*",
+      "licence": "MIT",
+      "reason": "Confirmed against the installed @tailwindcss/oxide-linux-x64-gnu."
+    },
+    {
+      "pattern": "lightningcss-*",
+      "licence": "MPL-2.0",
+      "reason": "Confirmed against the installed lightningcss-linux-x64-gnu. Build tooling only — it arrives through tailwindcss, which is a devDependency of apps/web."
+    },
+    {
+      "pattern": "@emnapi/runtime",
+      "licence": "MIT",
+      "reason": "Declared upstream. Never installed on any platform here: it is an optional peer of sharp's WASM build, which this deployment does not use."
+    },
+    {
+      "pattern": "fsevents",
+      "licence": "MIT",
+      "reason": "Declared upstream. macOS-only, so never installed on a Linux runner."
+    }
+  ],
+  "accepted": [
+    {
+      "pattern": "@img/sharp-libvips-*",
+      "licence": "LGPL-3.0-or-later",
+      "reviewedAt": "2026-09-18",
+      "trail": "apps/web and apps/worker > packages/media > sharp > @img/sharp-libvips-<platform>",
+      "reason": "The only copyleft dependency this product distributes. sharp ships prebuilt libvips shared libraries; libvips is LGPL-3.0-or-later and nothing else in the image derives from it. Replacing sharp is not a serious option — it is the image pipeline W-SYS-05 is built on — and the LGPL does not ask us to open anything, so the finding is recorded rather than removed.",
+      "obligation": "The deployed image must carry libvips' LGPL text and notice, and the offer to supply or replace the library must be honoured. The library is linked unmodified and is not statically linked into our code; if that ever changes this entry stops being sufficient. The notice ships with the image, so the duty lands on the unit that writes apps/worker/Dockerfile (W-SYS-06)."
+    }
+  ]
+}

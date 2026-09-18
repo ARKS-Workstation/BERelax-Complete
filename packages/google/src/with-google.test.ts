@@ -29,6 +29,7 @@ import {
   upstreamFingerprint,
 } from './errors.ts'
 import { connectionRecord, createMemoryConnectionStore } from './memory-store.ts'
+import { createMemoryRefreshLock } from './token-refresh.ts'
 import { connectionBinding, sealToken } from './token-store.ts'
 import {
   type GoogleErrorSink,
@@ -182,6 +183,9 @@ function harness(
     }),
     deps: {
       store,
+      // Serialising, not a no-op. A lock that let two bodies run at once would make the double check in
+      // `accessTokenUnderLock` untested here and untestable anywhere cheap.
+      lock: createMemoryRefreshLock(store),
       oauth: createFakeGoogleOAuth({
         log: providerLog,
         failures: oauthFailures,

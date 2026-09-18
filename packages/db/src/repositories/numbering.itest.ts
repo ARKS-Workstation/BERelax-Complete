@@ -5,6 +5,7 @@ import { type UnitOfWork, withUnitOfWork } from '../tx.ts'
 import {
   type AllocatedDocumentNumber,
   allocateDocumentNumber,
+  DOCUMENT_SERIES_CODES,
   findNumberingGaps,
   listDocumentSeries,
   NUMBERING_LEDGER_COLUMNS,
@@ -148,12 +149,17 @@ async function issue(code: string, tradingDate = TRADING_DATE): Promise<Allocate
 }
 
 describe('the series', () => {
-  it('seeds three independent series, and a new counter starts at 1', async () => {
+  it('seeds the independent series, and a new counter starts at 1', async () => {
     const series = await listDocumentSeries(sql)
-    expect(series.map((s) => s.code)).toEqual(['CR-NOTE', 'SIMPL-INV', 'TAX-INV'])
+    // The exact set, not a subset: a series nobody expected is a range that will show up in the gap
+    // report. 'SUPP-BILL' joined in 0028 — a purchase bill is not a document we issue, but our own
+    // reference to one is gap-free for the same reason, and it shares this counter rather than
+    // getting a second implementation of it (ADR 0023).
+    expect(series.map((s) => s.code)).toEqual([...DOCUMENT_SERIES_CODES].sort())
     expect(series.map((s) => s.documentKind).sort()).toEqual([
       'credit_note',
       'simplified_invoice',
+      'supplier_bill',
       'tax_invoice',
     ])
 

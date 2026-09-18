@@ -20,7 +20,7 @@ import {
   type UpstreamFingerprint,
   upstreamFingerprint,
 } from './errors.ts'
-import { accessTokenFor } from './lifecycle.ts'
+import { accessTokenUnderLock, type RefreshLockRunner } from './token-refresh.ts'
 
 /**
  * `withGoogle` — the single chokepoint every consumer of Google goes through.
@@ -107,6 +107,16 @@ export interface WithGoogleDeps {
   readonly oauth: GoogleOAuthProvider
   readonly kek: Kek
   readonly clock: Clock
+  /**
+   * The advisory transaction lock a proactive refresh is serialised by (G-CONN-04).
+   *
+   * **Required, not optional**, and that is the substance of it. An optional lock is a lock every
+   * consumer may omit, and a refresh path that can be bypassed looks serialised without being it —
+   * exactly the failure `lifecycle.ts` refused to introduce by taking the lock one level too low.
+   * `createPostgresRefreshLock(sql)` in production; `createMemoryRefreshLock(store)` for a unit test,
+   * which serialises too rather than pretending to.
+   */
+  readonly lock: RefreshLockRunner
   readonly logger: GoogleLogger
   readonly errors?: GoogleErrorSink
   /** Injected so a test can assert on a known id. Defaults to a v4 UUID. */
@@ -322,8 +332,17 @@ export async function withGoogle<T>(
   }
 
   try {
-    const grant = await accessTokenFor(
-      { store: deps.store, oauth: deps.oauth, kek: deps.kek, clock: deps.clock },
+    // The proactive, serialised, double-checked path — never the lazy one. `accessTokenFor` would
+    // refresh without a lock, and ten jobs starting in the same second would then spend ten refresh
+    // requests on a token Google may rotate on any of them (docs/10 §4).
+    const grant = await accessTokenUnderLock(
+      {
+        store: deps.store,
+        oauth: deps.oauth,
+        kek: deps.kek,
+        clock: deps.clock,
+        lock: deps.lock,
+      },
       target.connectionId,
     )
     const value = await body({

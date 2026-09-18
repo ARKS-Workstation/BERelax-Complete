@@ -1,0 +1,39 @@
+{
+  "about": "Container policy for scripts/check-container.mjs. There is no Dockerfile in this repository yet — apps/worker/Dockerfile belongs to W-SYS-06, which needs ffmpeg in the image — so image *vulnerability* scanning is deferred (see imageVulnerabilityScanning below) rather than invented. What exists today is the container surface CI and local development already run on, and the Dockerfile rules are live so that the first Dockerfile is held to them on the commit that adds it.",
+  "reviewedAt": "2026-09-18",
+  "postgresMajor": "16",
+  "postgresMajorReason": "The deployment target is a DigitalOcean PostgreSQL Managed Database on major 16. The migration dry run, pnpm db:drift and the integration suite all validate against whatever major CI starts, so a divergence between that container and the managed database means the thing validated is not the thing deployed. btree_gist exclusion constraints and the deferred capacity trigger (ADR 0015, ADR 0024) are exactly the behaviour that would be validated on the wrong engine.",
+  "movingTags": [
+    "latest",
+    "stable",
+    "edge",
+    "main",
+    "master",
+    "dev",
+    "devel",
+    "nightly",
+    "rolling"
+  ],
+  "images": {
+    "postgres": {
+      "tag": "16-alpine",
+      "reason": "PostgreSQL 16 on Alpine, matching the managed database's major. Declared here so a bump in docker-compose.yml that is not also made in .github/workflows/ci.yml fails rather than producing two engines."
+    }
+  },
+  "requireBaseImageDigest": true,
+  "requireBaseImageDigestReason": "A tag is mutable: `node:22-bookworm-slim` is a different image every week, so the image CI builds and the image that was scanned are not the same bytes. A digest is the only pin that survives a re-push, and it is the difference between a container scan being evidence and being a snapshot of something else.",
+  "dockerfiles": [
+    {
+      "path": "apps/worker/Dockerfile",
+      "unit": "W-SYS-06",
+      "status": "not-yet-created",
+      "reason": "The worker image needs ffmpeg for the hero video renditions, which is why W-SYS-06 owns it. When that unit creates the file, this entry's status must change to `present` — and that is the commit that must also enable imageVulnerabilityScanning below."
+    }
+  ],
+  "imageVulnerabilityScanning": {
+    "status": "deferred",
+    "unit": "W-SYS-06",
+    "reason": "Scanning an image's OS packages for CVEs needs an image. There is no Dockerfile in this repository and no registry to pull a built image from, so a gate asserting either would be asserting against something invented. The rules that can be checked without an image — tag pinning, the PostgreSQL major agreeing with the managed database, base-image digests, a non-root final user, no .env copied in — are enforced now and are proven to fire by known-bad fixtures in scripts/test-gates.mjs.",
+    "whenEnabled": "A Trivy (or Grype) filesystem-and-OS scan of the built worker image, as a CI step rather than part of pnpm verify: it downloads a vulnerability database, so it must not make a developer's verify depend on the network."
+  }
+}

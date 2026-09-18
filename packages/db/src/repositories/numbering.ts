@@ -31,8 +31,17 @@ import type { UnitOfWork } from '../tx.ts'
  * a document has already been filed under one of them.
  */
 
-/** The three series the migration seeds. Adding one is a migration, not a settings change. */
-export const DOCUMENT_SERIES_CODES = ['TAX-INV', 'SIMPL-INV', 'CR-NOTE'] as const
+/**
+ * The series the migrations seed. Adding one is a migration, not a settings change.
+ *
+ * Three are statutory ranges (0013). 'SUPP-BILL' is ours: a purchase bill is not a document we issue —
+ * the statutory document is the supplier's own invoice — but our reference to it is gap-free for the
+ * same auditability reason, because a missing number in our own purchase range is a bill somebody
+ * removed, and "the bookkeeper deleted it" is not a record. It joins this counter rather than getting
+ * one of its own, because a second implementation of the row-locked counter is a second thing that can
+ * leak a number (ADR 0023).
+ */
+export const DOCUMENT_SERIES_CODES = ['TAX-INV', 'SIMPL-INV', 'CR-NOTE', 'SUPP-BILL'] as const
 export type DocumentSeriesCode = (typeof DOCUMENT_SERIES_CODES)[number]
 
 export interface AllocatedDocumentNumber {

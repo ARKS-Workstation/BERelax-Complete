@@ -84,6 +84,42 @@ export function parseCaptureFilename(
   return { page, viewport, theme, direction }
 }
 
+/**
+ * Every combination for a set of pages, in a stable order.
+ *
+ * This is what makes the matrix answer to the route registry rather than to a list inside the capture
+ * script. `apps/web/src/route-spine.itest.ts` passes the registry's document ids and asserts that every
+ * target in the returned plan was photographed — so adding a route adds twelve required captures, and a
+ * route added without one fails a test rather than quietly never being looked at.
+ *
+ * Duplicate names throw rather than being de-duplicated: two pages filed under one name produce one set
+ * of filenames, so the second would silently overwrite the first's images and the count would still add
+ * up.
+ */
+export function capturePlan(pages: readonly string[]): CaptureTarget[] {
+  const seen = new Set<string>()
+  for (const page of pages) {
+    if (seen.has(page)) throw new Error(`Duplicate page name in the capture plan: '${page}'`)
+    seen.add(page)
+  }
+  return pages.flatMap((page) => targetsFor(page))
+}
+
+/**
+ * The filenames a plan requires that are absent from a set of captures.
+ *
+ * Returned rather than thrown, and named rather than counted: "47 of 48" says a cell is missing, and
+ * `home__phone__dark__rtl.png` says which one — the difference between a failing test somebody can fix
+ * and a failing test somebody re-runs.
+ */
+export function missingCaptures(
+  plan: readonly CaptureTarget[],
+  filenames: Iterable<string>,
+): string[] {
+  const present = new Set(filenames)
+  return plan.map((target) => captureFilename(target)).filter((name) => !present.has(name))
+}
+
 /** Every combination for one page, in a stable order. */
 export function targetsFor(page: string): CaptureTarget[] {
   const targets: CaptureTarget[] = []

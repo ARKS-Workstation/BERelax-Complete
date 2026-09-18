@@ -7,6 +7,7 @@ import { createFakeBusinessProfile, createFakeGoogleOAuth } from '@berelax/provi
 import type { PgBoss } from 'pg-boss'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createPostgresConnectionStore } from './postgres-store.ts'
+import { createPostgresRefreshLock } from './token-refresh.ts'
 import { connectionBinding, sealToken } from './token-store.ts'
 import { type WithGoogleDeps, withGoogle } from './with-google.ts'
 
@@ -140,6 +141,9 @@ async function dashboardRows(connectionId: string): Promise<{ events: number; au
 function deps(failures: { oauth: FailureScript; api: FailureScript }): WithGoogleDeps {
   return {
     store,
+    // The real advisory-transaction lock (G-CONN-04). Every call below refreshes once, so this file also
+    // exercises the locked path; the concurrency claim itself is token-refresh.itest.ts's.
+    lock: createPostgresRefreshLock(sql),
     oauth: createFakeGoogleOAuth({
       log: createCallLog(() => NOW_ISO),
       failures: failures.oauth,

@@ -93,19 +93,17 @@ export function grantFailureFromError(error: unknown): GoogleGrantFailure {
 }
 
 /**
- * Obtains an access token for a connection, refreshing it when it is inside the margin.
+ * Loads a connection that is fit to serve a token, or says why it is not.
  *
- * Concurrency note: docs/10 §4 serialises competing refreshes with a Postgres advisory transaction
- * lock and a double-checked re-read, and that is G-CONN-04's unit of work. It belongs one level up,
- * around the whole read-refresh-write inside a transaction, rather than here: taking a lock on a path
- * a consumer can bypass is worse than not taking one, because it would look serialised and not be.
- * pg-boss can start the review poll, the SEO crawl and the health check in the same second.
+ * Split out because `token-refresh.ts` reads the same row twice — once to decide whether a refresh is
+ * due and once again inside the advisory lock — and a second copy of this guard is a second place for
+ * `disconnected` to be forgotten.
  */
-export async function accessTokenFor(
-  deps: TokenLifecycleDeps,
+export async function loadActiveConnection(
+  store: Pick<GoogleConnectionStore, 'load'>,
   connectionId: string,
-): Promise<AccessTokenGrant> {
-  const connection = await deps.store.load(connectionId)
+): Promise<GoogleConnectionRecord> {
+  const connection = await store.load(connectionId)
   if (connection === null) {
     throw new AppError('not_found', `No Google connection with id ${connectionId}`)
   }
@@ -113,26 +111,63 @@ export async function accessTokenFor(
     // Including `disconnected`: a disconnected connection's token was revoked at Google on purpose.
     throw googleReauthRequired(connection)
   }
+  return connection
+}
 
-  const binding = connectionBinding({
-    connectionId: connection.id,
-    googleSub: connection.googleSub,
-  })
-  const now = deps.clock.now()
-
+/**
+ * The cached grant on a connection, or null when there is none worth using.
+ *
+ * The ONLY place that decides whether a stored access token is still good. `token-refresh.ts` asks
+ * exactly this question twice — before taking the advisory lock and again inside it — and the second
+ * ask is the double check that stops the loser of a race spending a refresh token the winner has
+ * already replaced. Two copies of the margin arithmetic would eventually disagree, and the direction
+ * they disagree in is a token that expires mid-request.
+ */
+export function cachedAccessGrant(
+  deps: Pick<TokenLifecycleDeps, 'kek' | 'clock'>,
+  connection: GoogleConnectionRecord,
+): AccessTokenGrant | null {
+  if (connection.accessToken === null) return null
   if (
-    connection.accessToken !== null &&
-    !shouldRefreshAccessToken({ accessExpiresAt: connection.accessExpiresAt, now })
+    shouldRefreshAccessToken({
+      accessExpiresAt: connection.accessExpiresAt,
+      now: deps.clock.now(),
+    })
   ) {
-    return {
-      accessToken: openToken(deps.kek, binding, connection.accessToken),
-      // Non-null because the schema's CHECK makes the cached token and its expiry all-or-nothing.
-      expiresAt: connection.accessExpiresAt as Instant,
-      refreshed: false,
-    }
+    return null
   }
+  return {
+    accessToken: openToken(
+      deps.kek,
+      connectionBinding({ connectionId: connection.id, googleSub: connection.googleSub }),
+      connection.accessToken,
+    ),
+    // Non-null because the schema's CHECK makes the cached token and its expiry all-or-nothing.
+    expiresAt: connection.accessExpiresAt as Instant,
+    refreshed: false,
+  }
+}
 
-  return refreshAccessToken(deps, connection)
+/**
+ * Obtains an access token for a connection, refreshing it when it is inside the margin.
+ *
+ * **Unserialised, and that is why `withGoogle` does not call this.** docs/10 §4 serialises competing
+ * refreshes with a Postgres advisory transaction lock and a double-checked re-read, which is
+ * `accessTokenUnderLock` in `token-refresh.ts`: the lock belongs around the whole read-refresh-write
+ * in a transaction, one level up, and taking it here — on a path that has no transaction to scope it
+ * to — would look serialised without being it. pg-boss can start the review poll, the SEO crawl and
+ * the health check in the same second.
+ *
+ * What is left here is the unlocked primitive the locked path is built from, and the one place a
+ * caller holding a store with no transaction seam (the memory store, a unit test of the
+ * `invalid_grant` state machine) can still obtain a token.
+ */
+export async function accessTokenFor(
+  deps: TokenLifecycleDeps,
+  connectionId: string,
+): Promise<AccessTokenGrant> {
+  const connection = await loadActiveConnection(deps.store, connectionId)
+  return cachedAccessGrant(deps, connection) ?? refreshAccessToken(deps, connection)
 }
 
 /**

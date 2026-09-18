@@ -2829,6 +2829,1457 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 30a-30e. (W-SITE-01) The route registry is in exact bijection with the filesystem.
+//
+// The registry drives the sitemap, the hreflang set, the robots policy and the screenshot matrix, and
+// none of those notices a route that is missing from it: a page absent from the sitemap is not a build
+// error, a page with no hreflang is not a build error, and a page nobody screenshots is not a build
+// error. `apps/web/src/routes/registry.test.ts` is what turns all four into one, so it is the check that
+// has to have been seen to fail — in both directions and in both locales, because the Arabic tree is a
+// second root layout under a second route group and a scanner that quietly stopped at `(en)` would
+// report a clean bijection over half the site.
+//
+// Every fixture here is a file in the real `app/` directory, removed in a `finally`. The directories are
+// made and removed with the `run` helper rather than with `node:fs` imports, so the whole case is
+// contiguous and nothing above it changes.
+{
+  const registrySuite = [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    'apps/web/src/routes/registry.test.ts',
+  ]
+  const fixturePage = [
+    '/** A deliberately unregistered route. scripts/test-gates.mjs writes and removes this. */',
+    'export default function GateFixturePage() {',
+    '  return null',
+    '}',
+    '',
+  ].join('\n')
+
+  // 30a. An English page with no registry entry.
+  {
+    const dir = 'apps/web/app/(en)/(public)/gate-fixture-route'
+    run('mkdir', ['-p', dir])
+    try {
+      const result = withFixture(`${dir}/page.tsx`, fixturePage, () => run('pnpm', registrySuite))
+      checkRejectedBy(
+        'route registry gate rejects an English route with no registry entry',
+        result,
+        'route-without-registry-entry',
+      )
+    } finally {
+      run('rm', ['-rf', dir])
+    }
+  }
+
+  // 30b. The same in the Arabic tree, which is a different route group and a different root layout.
+  {
+    const dir = 'apps/web/app/(ar)/ar/gate-fixture-route'
+    run('mkdir', ['-p', dir])
+    try {
+      const result = withFixture(`${dir}/page.tsx`, fixturePage, () => run('pnpm', registrySuite))
+      checkRejectedBy(
+        'route registry gate rejects an Arabic route with no registry entry',
+        result,
+        'route-without-registry-entry',
+      )
+    } finally {
+      run('rm', ['-rf', dir])
+    }
+  }
+
+  // 30c. Two files resolving to one URL. A route group contributes nothing to the path, so
+  // `app/(ar)/page.tsx` and `app/(en)/(public)/page.tsx` are both `/` — which the bijection cannot see,
+  // because a set does not count duplicates, and which Next reports only after a minute of compiling.
+  {
+    const result = withFixture('apps/web/app/(ar)/page.tsx', fixturePage, () =>
+      run('pnpm', registrySuite),
+    )
+    checkRejectedBy(
+      'route registry gate rejects two files resolving to one URL',
+      result,
+      'route-declared-twice',
+    )
+  }
+
+  // 30d. The other direction: an entry in the registry whose route file is gone. The file is parked
+  // beside itself and moved back in the `finally` — a registry that claims a route the site does not
+  // serve puts a URL in the sitemap that answers 404, which is the failure nobody sees until Search
+  // Console reports it.
+  {
+    const route = 'apps/web/app/(ar)/ar/kitchen-sink/page.tsx'
+    const parked = `${route}.gate-fixture-parked`
+    run('mv', [route, parked])
+    let result
+    try {
+      result = run('pnpm', registrySuite)
+    } finally {
+      run('mv', [parked, route])
+    }
+    checkRejectedBy(
+      'route registry gate rejects a registry entry whose route file is gone',
+      result,
+      'registry-entry-without-route',
+    )
+  }
+
+  // 30e. The control for all four, and the proof that every fixture above was cleaned up: with the
+  // files back where they belong the suite passes. Without this, a fixture left behind would fail every
+  // later run with a bijection error about a route nobody added.
+  {
+    const result = run('pnpm', registrySuite)
+    check(
+      'the route registry suite passes once every fixture is removed',
+      !result.failed,
+      result.output,
+    )
+  }
+}
+
+// 26r. (M-VAT-01) The purchase constraints, as known-bad fixtures against real PostgreSQL.
+//
+// The rule this unit exists to enforce is that a supplier with no TRN cannot support a recoverable
+// input claim, while a bill from one stays postable. It is enforced three times over — a row-level
+// CHECK on `bill`, a trigger on `bill_line`, and the deferred totals trigger that makes the header
+// agree with its lines — and each layer is probed here separately, because each covers a hole the
+// others leave and a passing check that has never been seen to fail may not be a check at all.
+//
+// Every probe asserts the **name of the rule written for it**, a constraint name or one of the ZV
+// SQLSTATEs. A bare non-zero exit is also what a typo in a column name produces, and the rule under
+// test would then be dead while this file reported PASS for ever (ADR 0003).
+//
+// Every probe runs inside `begin; … ; rollback;`, so a probe that is wrongly *accepted* leaves nothing
+// behind — which matters more here than elsewhere: `bill` and `bill_line` refuse DELETE for every role
+// including the owner, so a committed fixture could not be swept up afterwards by anything.
+//
+// The deferred triggers need `set constraints all immediate` to fire without committing, which is also
+// a second proof that they really are deferred: an immediate trigger would have raised at the INSERT
+// before that statement was reached.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // After the provisional opening date (2026-09-01) and before any period this suite's siblings lock,
+  // so a refusal below is the rule under test rather than ZL002 or ZL004.
+  const DATE = "'2026-09-18'"
+  const TRN = "'000000000000003'"
+  const WITH_TRN = 'gate-fixture-registered'
+  const NO_TRN = 'gate-fixture-unregistered'
+
+  const supplier = (code, trn) =>
+    `insert into supplier (code, legal_name) values ('${code}', 'gate fixture supplier'); ` +
+    'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+    `select supplier_id, 'domestic', 'domestic_uae', ${trn} from supplier where code = '${code}'`
+
+  // Two suppliers, identical but for the TRN. That pair is the whole subject of the unit: the same bill
+  // is recoverable from one and cost from the other.
+  const setup = [supplier(WITH_TRN, TRN), supplier(NO_TRN, 'null')].join('; ')
+
+  /**
+   * A bill with its journal entry, and optionally one line.
+   *
+   * `number` is distinct per call and `display_number` derived from it, so a probe is refused by the
+   * rule it names rather than by `bill_internal_number_unique` — which is a real constraint and the
+   * wrong one to be testing by accident.
+   */
+  const bill = ({
+    n,
+    code = WITH_TRN,
+    reference = `GATE-${n}`,
+    net = 20000,
+    gross = 21000,
+    recoverable = 1000,
+    billDate = DATE,
+    dueDate = DATE,
+    line = null,
+  }) => {
+    const entryId = `JE-GATE-BILL-${n}`
+    const statements = [
+      'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('${entryId}', ${DATE}, 'gate fixture bill', 'supplier_bill')`,
+      'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+        `('${entryId}', 1, '6010', ${gross}, 0), ('${entryId}', 2, '2010', 0, ${gross})`,
+      'insert into bill (supplier_id, supplier_reference, series_code, period_key, number, ' +
+        'display_number, bill_date, due_date, entry_id, net_fils, gross_fils, ' +
+        'recoverable_input_vat_fils, received_by) select supplier_id, ' +
+        `'${reference}', 'SUPP-BILL', '', ${900000 + n}, 'BILL-GATE-${n}', ${billDate}, ${dueDate}, ` +
+        `'${entryId}', ${net}, ${gross}, ${recoverable}, 'gate' from supplier where code = '${code}'`,
+    ]
+    if (line !== null) {
+      const {
+        treatment = 'standard_recoverable',
+        rate = 500,
+        lineNet = net,
+        lineGross = gross,
+        lineRecoverable = recoverable,
+      } = line
+      statements.push(
+        'insert into bill_line (bill_id, line_no, description, expense_account_code, tax_treatment, ' +
+          'vat_rate_bp, net_fils, gross_fils, recoverable_input_vat_fils) select bill_id, 1, ' +
+          `'Gate fixture line', '6010', '${treatment}', ${rate}, ${lineNet}, ${lineGross}, ` +
+          `${lineRecoverable} from bill where supplier_reference = '${reference}'`,
+      )
+    }
+    return statements.join('; ')
+  }
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  // Written as data so the rule name sits next to the statement that must trip it.
+  const probes = [
+    {
+      name: 'purchases gate rejects the same supplier invoice entered twice',
+      rule: 'bill_supplier_reference_unique',
+      // The duplicate every accounts-payable process exists to catch: paid twice, VAT claimed twice.
+      sql: [bill({ n: 1, reference: 'GATE-DUP' }), bill({ n: 2, reference: 'GATE-DUP' })].join(
+        '; ',
+      ),
+    },
+    {
+      name: 'purchases gate rejects a recoverable claim on a bill whose supplier holds no TRN',
+      rule: 'bill_recoverable_needs_a_trn',
+      // The header claim, refused by the row-level CHECK. `supplier_trn` is set by the snapshot trigger
+      // from the profile, so the claim is refused however the caller filled the column in.
+      sql: bill({ n: 3, code: NO_TRN }),
+    },
+    {
+      name: 'purchases gate rejects a recoverable LINE under a bill with no supplier TRN',
+      rule: 'InputVatWithoutSupplierTrn',
+      // The line-level half, which the CHECK above cannot see: a header summary of zero with a
+      // recoverable line beneath it.
+      sql: bill({
+        n: 4,
+        code: NO_TRN,
+        net: 20000,
+        gross: 20000,
+        recoverable: 0,
+        line: {
+          treatment: 'standard_recoverable',
+          lineNet: 20000,
+          lineGross: 21000,
+          lineRecoverable: 1000,
+        },
+      }),
+    },
+    {
+      name: 'purchases gate rejects a claim on a line whose treatment cannot carry one',
+      rule: 'bill_line_recoverable_matches_treatment',
+      sql: bill({
+        n: 5,
+        net: 20000,
+        gross: 20000,
+        recoverable: 0,
+        line: {
+          treatment: 'no_trn_not_recoverable',
+          rate: 0,
+          lineNet: 20000,
+          lineGross: 20000,
+          lineRecoverable: 1000,
+        },
+      }),
+    },
+    {
+      name: 'purchases gate rejects VAT on a line that is not standard-rated',
+      rule: 'bill_line_only_a_standard_rated_line_carries_vat',
+      // An exempt supply has no VAT to carve out. A gross above net on one is an amount the preparer
+      // has mis-described, and it is the description that decides what is claimed.
+      sql: bill({
+        n: 6,
+        recoverable: 0,
+        line: {
+          treatment: 'exempt',
+          rate: 0,
+          lineNet: 20000,
+          lineGross: 21000,
+          lineRecoverable: 0,
+        },
+      }),
+    },
+    {
+      name: 'purchases gate rejects a VAT rate on a line that cannot carry VAT',
+      rule: 'bill_line_rate_matches_treatment',
+      sql: bill({
+        n: 7,
+        net: 20000,
+        gross: 20000,
+        recoverable: 0,
+        line: {
+          treatment: 'zero_rated',
+          rate: 500,
+          lineNet: 20000,
+          lineGross: 20000,
+          lineRecoverable: 0,
+        },
+      }),
+    },
+    {
+      name: 'purchases gate rejects a bill header that disagrees with its lines, at COMMIT',
+      rule: 'BillTotalsDoNotMatchLines',
+      sql: [
+        bill({
+          n: 8,
+          net: 20000,
+          gross: 20000,
+          recoverable: 0,
+          line: {
+            treatment: 'no_trn_not_recoverable',
+            rate: 0,
+            lineNet: 19000,
+            lineGross: 19000,
+            lineRecoverable: 0,
+          },
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    },
+    {
+      name: 'purchases gate rejects a bill with no lines at all',
+      rule: 'BillTotalsDoNotMatchLines',
+      // A different hole in the same rule: a bill with no lines fires no line trigger, so without the
+      // header's own constraint trigger it would commit as a demand for money with no stated reason.
+      sql: [bill({ n: 9 }), 'set constraints all immediate'].join('; '),
+    },
+    {
+      name: 'purchases gate rejects a supplier with no tax profile, at COMMIT',
+      rule: 'SupplierHasNoTaxProfile',
+      sql: [
+        "insert into supplier (code, legal_name) values ('gate-fixture-orphan', 'gate fixture')",
+        'set constraints all immediate',
+      ].join('; '),
+    },
+    {
+      name: 'purchases gate rejects an offshore supplier holding a UAE TRN',
+      rule: 'supplier_tax_profile_offshore_holds_no_uae_trn',
+      sql:
+        "insert into supplier (code, legal_name) values ('gate-fixture-offshore', 'gate fixture'); " +
+        'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+        `select supplier_id, 'offshore', 'imported_services_reverse_charge', ${TRN} ` +
+        "from supplier where code = 'gate-fixture-offshore'",
+    },
+    {
+      name: 'purchases gate rejects a domestic supplier marked for the reverse charge',
+      rule: 'supplier_tax_profile_rule_matches_residency',
+      // 'domestic' plus a reverse charge would self-account for VAT the supplier already charged and
+      // then claim it twice.
+      sql:
+        "insert into supplier (code, legal_name) values ('gate-fixture-rule', 'gate fixture'); " +
+        'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+        "select supplier_id, 'domestic', 'imported_services_reverse_charge', null " +
+        "from supplier where code = 'gate-fixture-rule'",
+    },
+    {
+      name: 'purchases gate rejects a due date behind the invoice date',
+      rule: 'bill_due_not_before_bill_date',
+      // A due date behind the invoice makes a brand-new bill overdue on arrival, and the aging report is
+      // read by whoever is about to pay somebody.
+      sql: bill({ n: 10, dueDate: "'2026-09-17'" }),
+    },
+    {
+      name: 'purchases gate rejects an UPDATE of a bill line, for the owner too',
+      rule: 'bill_line is append-only',
+      // The tax treatment of a filed line is not editable: reclassifying it after the return that
+      // included it would change a filed figure with no trace.
+      sql: [
+        bill({ n: 11, line: {} }),
+        "update bill_line set tax_treatment = 'exempt' where description = 'Gate fixture line'",
+      ].join('; '),
+    },
+    {
+      name: 'purchases gate rejects a DELETE of a bill, for the owner too',
+      rule: 'bill is append-only',
+      sql: [
+        bill({ n: 12, line: {} }),
+        "delete from bill where supplier_reference = 'GATE-12'",
+      ].join('; '),
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'purchase constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement } of probes) {
+      checkRejectedBy(name, psqlProbe(statement), rule)
+    }
+
+    // The controls, and the reason the fourteen above mean anything: the same tables accept the
+    // legitimate row. Without these, a broken connection string or a renamed table would reject every
+    // probe and this gate would report fourteen passes while examining nothing.
+    const recoverable = psqlProbe(
+      [bill({ n: 20, line: {} }), 'set constraints all immediate'].join('; '),
+    )
+    check(
+      'purchases gate accepts a recoverable bill from a supplier with a TRN',
+      !recoverable.failed,
+      `rejected a legitimate recoverable bill:\n${recoverable.output}`,
+    )
+
+    // The other half of the unit's point: a bill from an unregistered supplier is POSTABLE, and claims
+    // nothing. A guard that refused it would satisfy the probes above and leave the bookkeeper entering
+    // half the purchase ledger in a spreadsheet.
+    const noTrnPostable = psqlProbe(
+      [
+        bill({
+          n: 21,
+          code: NO_TRN,
+          net: 20000,
+          gross: 20000,
+          recoverable: 0,
+          line: {
+            treatment: 'no_trn_not_recoverable',
+            rate: 0,
+            lineNet: 20000,
+            lineGross: 20000,
+            lineRecoverable: 0,
+          },
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'purchases gate accepts a bill from a supplier with no TRN, claiming nothing',
+      !noTrnPostable.failed,
+      `refused a legitimate bill from an unregistered supplier:\n${noTrnPostable.output}`,
+    )
+
+    // The aging buckets, from the SQL function the report groups by. Read back rather than merely
+    // executed: a function that returned the same bucket for every date would satisfy "it ran".
+    const buckets = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(payables_aging_bucket(date '2026-06-01', date '2026-06-01' + n), ',') " +
+        'from generate_series(0, 91, 91) as days(n)',
+    ])
+    check(
+      'purchases gate reads the aging buckets from the database, and they differ across a boundary',
+      !buckets.failed &&
+        buckets.output.includes('current') &&
+        buckets.output.includes('days_over_90'),
+      `the aging bucket function did not answer both sides of a boundary:\n${buckets.output}`,
+    )
+
+    // Our own numbering series exists and is the never-resetting one, which is what makes a bill dated
+    // in a closed year postable after one dated in the next.
+    const series = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select prefix || ':' || reset_policy from document_series where code = 'SUPP-BILL'",
+    ])
+    check(
+      'purchases gate finds the supplier-bill numbering series, resetting never',
+      !series.failed && series.output.trim() === 'BILL-:never',
+      `the SUPP-BILL series is missing or resets: ${series.output}`,
+    )
+  }
+}
+
+// G-CONN-04 — the cached access token is six columns or none of them, and the set of modules that may
+//             hold a plaintext token did not grow to make the refresh lock possible.
+//
+// The CHECK is the backstop under the one write this unit adds. `recordRefresh` sets the five sealed
+// columns and `access_expires_at` in a single statement, so a partial write is impossible by
+// construction — but "impossible by construction" is a claim about today's SQL, and the next person to
+// add a column or a convenience update is who this constraint is for. A half-written cache does not fail
+// where it was written: it decrypts to a wrong-key error, hours later, on the cron job, and the five
+// sealed columns are exactly the kind of thing a hand-written UPDATE sets four of.
+//
+// Every probe runs inside `begin; … ; rollback;`, so a probe that is wrongly ACCEPTED leaves nothing
+// behind either — and each asserts the rule BY NAME, because a bare non-zero exit is also what a typo in
+// a column name produces, and the constraint under test would then be dead while this file reported PASS
+// for ever (ADR 0003).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const RULE = 'google_connections_access_token_complete'
+  const SUB = 'sub-gate-fixture-access-token-complete'
+  // Not a token and not pretending to be one: these rows never leave the rolled-back transaction, and
+  // what is under test is the CHECK's arity rather than anything cryptographic.
+  const BYTES = "'\\x00'::bytea"
+  const seed =
+    'insert into google_connections (google_sub, google_email, granted_scopes, refresh_token_ct, ' +
+    'refresh_token_nonce, refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp) values ' +
+    `('${SUB}', 'google-admin@berelax.ae', array['openid'], ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'fp')`
+  const update = (assignments) =>
+    `update google_connections set ${assignments} where google_sub = '${SUB}'`
+  // All six, together. The complete write, and the shape every legitimate caller uses.
+  const ALL_SIX =
+    `access_token_ct = ${BYTES}, access_token_nonce = ${BYTES}, ` +
+    `access_token_wrapped_key = ${BYTES}, access_token_kid = 'v1', ` +
+    "access_token_aad_fp = 'fp', access_expires_at = now() + interval '1 hour'"
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statement}; rollback;`,
+    ])
+
+  const probes = [
+    {
+      name: 'google gate rejects a cached access token written as one column',
+      // The mistake in its likeliest form: somebody caches the ciphertext and means to come back for
+      // the rest. The row is then undecryptable and says nothing about why.
+      sql: update(`access_token_ct = ${BYTES}`),
+    },
+    {
+      name: 'google gate rejects an access-token expiry with no token behind it',
+      // The sixth column is part of the same all-or-nothing, and this is the direction that would
+      // otherwise make a connection look freshly refreshed with nothing to present.
+      sql: update("access_expires_at = now() + interval '1 hour'"),
+    },
+    {
+      name: 'google gate rejects clearing four of the five sealed columns',
+      // What a re-consent looks like if it forgets one column. `recordConsent` nulls all six precisely
+      // because of this.
+      sql: [
+        update(ALL_SIX),
+        update(
+          'access_token_ct = null, access_token_nonce = null, access_token_wrapped_key = null, ' +
+            'access_token_kid = null',
+        ),
+      ].join('; '),
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'google connection constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, sql: statement } of probes) {
+      checkRejectedBy(name, psqlProbe(statement), RULE)
+    }
+
+    // The controls, and the reason the three above mean anything: the same column set accepts the
+    // legitimate write in BOTH of its legitimate shapes. Without these, a renamed table or a broken
+    // connection string would reject every probe and this gate would report three passes while
+    // examining nothing.
+    const complete = psqlProbe(update(ALL_SIX))
+    check(
+      'google gate accepts all six access-token columns written together',
+      !complete.failed,
+      `rejected the write recordRefresh makes:\n${complete.output}`,
+    )
+
+    const cleared = psqlProbe(
+      [
+        update(ALL_SIX),
+        update(
+          'access_token_ct = null, access_token_nonce = null, access_token_wrapped_key = null, ' +
+            'access_token_kid = null, access_token_aad_fp = null, access_expires_at = null',
+        ),
+      ].join('; '),
+    )
+    check(
+      'google gate accepts clearing all six together, which is what a re-consent does',
+      !cleared.failed,
+      `rejected the write recordConsent makes:\n${cleared.output}`,
+    )
+  }
+}
+
+{
+  // The other half of this unit, and it is a regression pin rather than a fixture: G-CONN-04 added a
+  // module that serialises the refresh, and it deliberately did NOT join the list of modules allowed to
+  // hold a plaintext Google token. It obtains an AccessTokenGrant from lifecycle.ts and hands it back to
+  // withGoogle, naming no accessor and importing token-store.ts not at all — so the allow-list stays at
+  // the five modules G-CONN-03 left it at.
+  //
+  // Widening an allow-list is the cheapest way to make a boundary rule stop meaning anything, and it
+  // happens one deliberate exception at a time. If a later change does need token-refresh.ts on either
+  // list, this case is what makes that an explicit decision instead of a diff nobody reads. The
+  // known-bad direction is already covered: cases (a) and (d) above write a sixth module that reaches
+  // the accessors and assert both gates reject it by name.
+  const scanner = readFileSync('scripts/check-google-token-chokepoint.mjs', 'utf8')
+  const cruiser = readFileSync('.dependency-cruiser.cjs', 'utf8')
+  const allowList = scanner.slice(
+    scanner.indexOf('const TOKEN_MODULES'),
+    scanner.indexOf('COLUMN_MODULES'),
+  )
+  const rule = cruiser.slice(
+    cruiser.indexOf('google-tokens-only-in-with-google'),
+    cruiser.indexOf('dependencyTypesNot', cruiser.indexOf('google-tokens-only-in-with-google')),
+  )
+  check(
+    'the Google token allow-list was not widened for the refresh lock',
+    allowList.length > 0 &&
+      rule.length > 0 &&
+      !allowList.includes('token-refresh') &&
+      !rule.includes('token-refresh'),
+    'packages/google/src/token-refresh.ts appears in a token allow-list. It holds the advisory lock, ' +
+      'not a key: it must not name openToken, sealToken, rewrapToken or connectionBinding, and must ' +
+      'not import token-store.ts. If the refresh itself has moved into it, say so and move the ' +
+      'allow-list deliberately.',
+  )
+}
+
+// 28m-28af. (B-CAT-05) The catalogue mutation guard rails, and the purity of the compliance lexicon.
+//
+// Two gates again, and for the same division as B-CAT-04's: one module in `packages/core` that must stay
+// pure, and a set of rules that only PostgreSQL can enforce.
+//
+// The lexicon is the pure half. It decides whether a public display name may be shown to a customer, and
+// the licence-dependent part of that decision — the banned claim terms, the permitted staff titles — is
+// read from `regulatory_profile` by the caller and passed in. A clock read there would be a lint whose
+// answer depended on when it ran; a `process.env` read would be a compliance rule configured by whoever
+// starts the process.
+//
+// The database half is the guard rails of 0029: three publish preconditions raising three distinct
+// codes, two deferred constraint triggers, one write-time trigger with three refusals of its own, a
+// CHECK and a foreign key two levels down. Each probe states the rule that must reject it, because a
+// bare non-zero exit is also what a typo in a column name produces (ADR 0003) — and because these
+// refusals are the difference between an admin screen that says which of three things to fix and one
+// that says "could not publish".
+//
+// The deferred probes run `set constraints all immediate` first, exactly as the booking gate does: it
+// makes the trigger fire without committing, and it is incidentally a second proof that the trigger
+// really is deferred, since an immediate one would have raised at the UPDATE before that line was
+// reached.
+//
+// Every probe runs inside `begin; … ; rollback;`, so a probe that is wrongly *accepted* leaves nothing
+// behind either.
+{
+  const COMPLIANCE_FIXTURE = 'packages/core/src/compliance/__gate_fixture__.ts'
+
+  // 28m. A clock read in the compliance lexicon must fail the purity gate, by the reason the rule
+  //      gives rather than by a bare non-zero exit.
+  {
+    const result = withFixture(
+      COMPLIANCE_FIXTURE,
+      'export const lintedAt = (): string => new Date().toISOString()',
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'purity gate rejects a clock read in packages/core/src/compliance',
+      result,
+      'inject a Clock and pass the instant in',
+    )
+  }
+
+  // 28n. And an environment read, which is the likelier mistake in this module: a banned-term list is
+  //      exactly the sort of thing somebody reaches for `process.env` to override.
+  {
+    const result = withFixture(
+      COMPLIANCE_FIXTURE,
+      "export const extraTerms = (): string => process.env['BANNED_TERMS'] ?? ''",
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'purity gate rejects an environment read in packages/core/src/compliance',
+      result,
+      'pass configuration in as an argument',
+    )
+  }
+
+  // 28o. The control for both. The profile arrives as an argument — that is the whole design, and a gate
+  //      that rejected it would make the module unwritable.
+  {
+    const result = withFixture(
+      COMPLIANCE_FIXTURE,
+      [
+        'export const refusesClaim = (name: string, banned: readonly string[]): boolean =>',
+        '  banned.some((term) => name.toLowerCase().includes(term))',
+      ].join('\n'),
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(
+      'purity gate allows a lexicon whose term list is an argument',
+      !result.failed,
+      `rejected the mechanism B-CAT-05 specifies:\n${result.output}`,
+    )
+  }
+
+  const catUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const CAT_MARKER = 'gate fixture bcat05'
+  const KEY = 'bcat05_gate'
+  const BARE = 'bcat05_gate_bare'
+  const PATH = "'/treatments/bcat05-gate'"
+  const BARE_PATH = "'/treatments/bcat05-gate-bare'"
+  const LEGACY = "'/treatments/bcat05-gate-legacy'"
+  const SECOND = "'/treatments/bcat05-gate-second'"
+
+  const service = (key, slug, order) =>
+    'insert into service (style, treatment_key, slug, internal_name, public_display_name, ' +
+    `turnaround_minutes, display_order) values ('asian', '${key}', '${slug}', 'Gate fixture', ` +
+    `'Normal Massage (Asian)', 20, ${order})`
+  const compat = (key) =>
+    'insert into service_room_type_compat (service_style, service_treatment_key, room_type) ' +
+    `values ('asian', '${key}', 'standard')`
+  const shape = (key) =>
+    'insert into service_resource_shape (service_style, service_treatment_key, shape, ' +
+    'therapists_required, rooms_required, min_room_capacity, required_room_type, ' +
+    `therapist_buffer_minutes) values ('asian', '${key}', 'solo', 1, 1, 1, 'standard', 10)`
+  const variant = (key) =>
+    'insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note) ' +
+    `select id, 60, 20000, '${CAT_MARKER}' from service where treatment_key = '${key}'`
+  const redirect = (source, target, reason = "'gate fixture'", status = 301) =>
+    'insert into redirect_map (source_path, target_path, status_code, reason) values ' +
+    `(${source}, ${target}, ${status}, ${reason})`
+  const publish = (key) => `update service set published_at = now() where treatment_key = '${key}'`
+
+  // One complete service, published, plus one with nothing attached so each publish precondition can
+  // be the only thing missing. Both inside the same rolled-back transaction as the probe.
+  const CAT_SETUP = [
+    service(KEY, 'bcat05-gate', 97),
+    compat(KEY),
+    shape(KEY),
+    variant(KEY),
+    publish(KEY),
+    service(BARE, 'bcat05-gate-bare', 96),
+  ].join('; ')
+
+  // `set constraints all immediate` is only issued by the probes that need it, because it also makes
+  // every other deferred constraint in the transaction fire at statement end.
+  const catProbe = (statement, extraArgs = []) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      ...extraArgs,
+      catUrl ?? '',
+      '-c',
+      `begin; ${CAT_SETUP}; ${statement}; rollback;`,
+    ])
+  const deferred = (statement) => `set constraints all immediate; ${statement}`
+
+  // What a committed probe leaves behind, in the guard rails' own order reversed: the redirect rows go
+  // first, because deleting a service something still points at is refused by ZC005 — the rule this
+  // block has just finished proving.
+  const CAT_SWEEP =
+    "delete from redirect_map where source_path like '/treatments/bcat05-gate%' " +
+    "or target_path like '/treatments/bcat05-gate%' " +
+    "or source_path = '/product-category/bcat05-gate'; " +
+    `delete from booking where notes = '${CAT_MARKER}'; ` +
+    `delete from service_variant where provisional_note = '${CAT_MARKER}'; ` +
+    "delete from service where treatment_key like 'bcat05_gate%'; " +
+    "delete from service_room_type_compat where service_treatment_key like 'bcat05_gate%'; " +
+    "delete from business_day where trading_date = '2099-07-01'; " +
+    "delete from customer where phone_e164 = '+971500000198';"
+
+  // The one probe that has to COMMIT. `set constraints all immediate` cannot serve here: it would fire
+  // the deferred trigger at the end of the UPDATE, which is precisely the state the trigger is deferred
+  // to tolerate. So the control commits for real — which is also the only way to see the deferred check
+  // ACCEPT a transaction — and the `finally` below sweeps what it left.
+  const catCommit = (statement, extraArgs = []) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      ...extraArgs,
+      catUrl ?? '',
+      '-c',
+      // The sweep runs in the same invocation, after the COMMIT. A fixture left committed would fail
+      // every later probe in this block with a unique violation about the wrong thing — which is
+      // exactly what it did the first time this control was written.
+      `begin; ${CAT_SETUP}; ${statement}; commit; ${CAT_SWEEP}`,
+    ])
+
+  const catProbes = [
+    // --- publishing: three preconditions, three names ------------------------------------------
+    {
+      name: 'catalogue gate rejects publishing a service no room type may deliver',
+      rule: 'service_publish_without_compat_row',
+      sql: publish(BARE),
+    },
+    {
+      name: 'catalogue gate rejects publishing a service with no resource shape',
+      rule: 'service_publish_without_resource_shape',
+      sql: `${compat(BARE)}; ${publish(BARE)}`,
+    },
+    {
+      name: 'catalogue gate rejects publishing a service with no priced variant',
+      rule: 'service_publish_without_priced_variant',
+      sql: `${compat(BARE)}; ${shape(BARE)}; ${publish(BARE)}`,
+    },
+    {
+      // Archiving withdraws publication in the same statement; the pair together is not a state the
+      // site could render sensibly.
+      name: 'catalogue gate rejects a service that is archived and published at once',
+      rule: 'service_archived_is_not_published',
+      sql: `update service set published_at = now(), archived_at = now() where treatment_key = '${KEY}'`,
+    },
+    // --- the slug change and its 301 -----------------------------------------------------------
+    {
+      name: 'catalogue gate rejects a slug change that leaves no redirect',
+      rule: 'slug_change_without_redirect',
+      sql: deferred(`update service set slug = 'bcat05-gate-moved' where treatment_key = '${KEY}'`),
+    },
+    {
+      // The 301 has to point at where the service ENDED the transaction. A row naming the intermediate
+      // slug of a double rename is a hop to a path that never existed publicly.
+      name: 'catalogue gate rejects a 301 left pointing at an intermediate slug',
+      rule: 'slug_change_without_redirect',
+      sql: deferred(
+        `update service set slug = 'bcat05-gate-mid' where treatment_key = '${KEY}'; ` +
+          `${redirect(PATH, "'/treatments/bcat05-gate-mid'")}; ` +
+          `update service set slug = 'bcat05-gate-final' where treatment_key = '${KEY}'`,
+      ),
+    },
+    {
+      name: 'catalogue gate rejects a redirect to a slug no live service answers on',
+      rule: 'redirect_target_unresolved',
+      sql: redirect(LEGACY, "'/treatments/bcat05-gate-no-such-thing'"),
+    },
+    {
+      name: 'catalogue gate rejects a redirect to an archived service',
+      rule: 'redirect_target_unresolved',
+      sql:
+        `update service set published_at = null, archived_at = now() where treatment_key = '${KEY}'; ` +
+        redirect(LEGACY, PATH),
+    },
+    {
+      name: 'catalogue gate rejects archiving a service a redirect still points at',
+      rule: 'redirect_target_unresolved',
+      sql: deferred(
+        `${redirect(LEGACY, PATH)}; ` +
+          `update service set published_at = null, archived_at = now() where treatment_key = '${KEY}'`,
+      ),
+    },
+    {
+      name: 'catalogue gate rejects deleting a service a redirect still points at',
+      rule: 'redirect_target_unresolved',
+      sql: deferred(
+        `${redirect(LEGACY, PATH)}; delete from service where treatment_key = '${KEY}'`,
+      ),
+    },
+    {
+      // A -> B -> C. One more rename and the oldest URL costs three hops, which is where crawlers stop.
+      name: 'catalogue gate rejects a redirect chain rather than collapsing it silently',
+      rule: 'redirect_chain_not_collapsed',
+      sql: `${redirect(LEGACY, PATH)}; ${redirect(SECOND, LEGACY)}`,
+    },
+    {
+      name: 'catalogue gate rejects a redirect from a page that still answers',
+      rule: 'redirect_source_still_live',
+      sql: redirect(PATH, "'/treatments'"),
+    },
+    {
+      name: 'catalogue gate rejects a redirect to itself',
+      rule: 'redirect_map_not_self',
+      sql: redirect("'/product-tag/bcat05-gate'", "'/product-tag/bcat05-gate'"),
+    },
+    {
+      name: 'catalogue gate rejects a relative source path',
+      rule: 'redirect_map_source_path_absolute',
+      sql: redirect("'treatments/bcat05-gate-legacy'", PATH),
+    },
+    {
+      // A 302 on a permanent rename asks every crawler to keep the old URL, which is the opposite of
+      // what the redirect is for.
+      name: 'catalogue gate rejects a temporary redirect status',
+      rule: 'redirect_map_status_permanent',
+      sql: redirect(LEGACY, PATH, "'gate fixture'", 302),
+    },
+    {
+      name: 'catalogue gate rejects a redirect with no stated reason',
+      rule: 'redirect_map_reason_nonempty',
+      sql: redirect(LEGACY, PATH, "'   '"),
+    },
+    {
+      name: 'catalogue gate rejects two redirects from one path',
+      rule: 'redirect_map_source_path_key',
+      sql: `${redirect(LEGACY, PATH)}; ${redirect(LEGACY, BARE_PATH)}`,
+    },
+  ]
+
+  if (!catUrl) {
+    check(
+      'catalogue guard rails reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    try {
+      for (const { name, rule, sql: statement } of catProbes) {
+        checkRejectedBy(name, catProbe(statement), rule)
+      }
+
+      // 28ab. The refusal an owner actually meets: a service with a booking cannot be deleted. Asserted
+      //       by the foreign key's own name, because the statement fails two levels down — the delete
+      //       cascades into service_variant and is refused by `appointment` (0024 ON DELETE RESTRICT).
+      const BOOKED = [
+        "insert into customer (phone_e164, created_via) values ('+971500000198', 'guest_booking')",
+        `insert into business_day (trading_date, opens_at, closes_at, source) values
+         ('2099-07-01', '2099-07-01 07:00:00+00', '2099-07-01 22:00:00+00', 'weekly')
+         on conflict (trading_date) do nothing`,
+        `insert into booking (id, customer_id, source, notes) values
+         ('50000000-0000-4000-8000-000000000005',
+          (select id from customer where phone_e164 = '+971500000198'), 'front_desk', '${CAT_MARKER}')`,
+        `insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id,
+          room_id, period, status, gross_price_fils) values
+         ('50000000-0000-4000-8000-000000000005', '2099-07-01',
+          (select id from service_variant where provisional_note = '${CAT_MARKER}'), 'solo',
+          '50000000-0000-4000-8000-0000000000a1'::uuid,
+          (select id from rooms where code = 'room-1'),
+          tstzrange('2099-07-01 19:00:00+00','2099-07-01 20:00:00+00','[)'), 'confirmed', 20000)`,
+      ].join('; ')
+      checkRejectedBy(
+        'catalogue gate rejects deleting a service that has an appointment',
+        catProbe(`${BOOKED}; delete from service where treatment_key = '${KEY}'`),
+        'appointment_service_variant_id_fkey',
+      )
+
+      // 28ac. The first control, and the one that matters most: the whole correct rename sequence must
+      //       commit. Without it every probe above is satisfied by a table nobody can rename anything in.
+      const renamed = catCommit(
+        `update service set slug = 'bcat05-gate-renamed' where treatment_key = '${KEY}'; ` +
+          `update redirect_map set target_path = '/treatments/bcat05-gate-renamed' ` +
+          `  where target_path = ${PATH}; ` +
+          `${redirect(PATH, "'/treatments/bcat05-gate-renamed'", "'slug change'")}; ` +
+          `select 'redirects=' || count(*) from redirect_map where source_path = ${PATH} ` +
+          `  and target_path = '/treatments/bcat05-gate-renamed'`,
+        ['-At'],
+      )
+      check(
+        'catalogue gate accepts a slug change that writes its 301 in the same transaction',
+        !renamed.failed && renamed.output.includes('redirects=1'),
+        `refused the sequence B-CAT-05 specifies:\n${renamed.output}`,
+      )
+
+      // 28ad. Publishing a service that has all three preconditions, and the bookable index agreeing.
+      const published = catProbe(
+        `${compat(BARE)}; ${shape(BARE)}; ${variant(BARE)}; ${publish(BARE)}; ` +
+          `select 'bookable=' || count(*) from service where published_at is not null ` +
+          `  and archived_at is null and treatment_key in ('${KEY}', '${BARE}')`,
+        ['-At'],
+      )
+      check(
+        'catalogue gate accepts publishing a service with a compat row, a shape and a price',
+        !published.failed && published.output.includes('bookable=2'),
+        `refused a service that meets every precondition:\n${published.output}`,
+      )
+
+      // 28ae. Archiving takes the service out of the bookable set and is accepted — the action the owner
+      //       actually wants when they reach for delete.
+      const archived = catProbe(
+        `update service set published_at = null, archived_at = now() where treatment_key = '${KEY}'; ` +
+          `select 'bookable=' || count(*) from service where published_at is not null ` +
+          `  and archived_at is null and treatment_key = '${KEY}'`,
+        ['-At'],
+      )
+      check(
+        'catalogue gate accepts archiving a published service, which leaves the bookable set',
+        !archived.failed && archived.output.includes('bookable=0'),
+        `refused an archive, or left the service bookable:\n${archived.output}`,
+      )
+
+      // 28af. The last two controls: a legitimate legacy redirect onto a live page, and deleting a
+      //       service nobody ever booked. Without the second, `service_has_appointments` is satisfied by
+      //       a table from which nothing can ever be deleted.
+      const legacy = catProbe(
+        redirect("'/product-category/bcat05-gate'", PATH, "'baseline import'"),
+      )
+      check(
+        'catalogue gate accepts a legacy redirect onto a live treatment page',
+        !legacy.failed,
+        `refused the row W-SITE-09's importer writes:\n${legacy.output}`,
+      )
+      const unbooked = catProbe(`delete from service where treatment_key = '${BARE}'`)
+      check(
+        'catalogue gate accepts deleting a service nobody ever booked',
+        !unbooked.failed,
+        `refused a delete that nothing depends on:\n${unbooked.output}`,
+      )
+    } finally {
+      // Insurance. Every probe rolls back and the committing control sweeps itself, so in the ordinary
+      // case this deletes nothing — it is here for the probe that is wrongly ACCEPTED, whose rows would
+      // otherwise fail every later gate with an error about something else entirely.
+      run('psql', ['--no-psqlrc', '-q', catUrl, '-c', CAT_SWEEP])
+    }
+  }
+}
+
+// 31a-31af. (H-HARD-02) The four supply-chain gates: credentials, dependency advisories, outbound
+// licences and container policy. Each rule is asserted **by name**, because a bare non-zero exit is
+// also what a typo in a path produces, and the four of them together are then run clean and timed
+// against a declared budget — `pnpm verify` is run on every unit by every agent, so a scan that costs
+// two minutes costs that on every future unit.
+{
+  // --- the credential scan ----------------------------------------------------------------------
+  //
+  // `AKIA` + `IOSFODNN7EXAMPLE` is AWS's own documentation example key. It has the exact shape the rule
+  // matches and cannot be mistaken for a real credential, which is the only kind of fixture a secret
+  // gate may carry: a plausible one would be a credential committed to this repository.
+  //
+  // It is assembled at runtime rather than written as one literal; so is the high-entropy fixture
+  // below, and the managed-database URL is split across two. Do not join any of them up: `pnpm secrets`
+  // scans every tracked file including this one, and a credential-shaped literal here would make the
+  // gate report itself. The alternative — an allowlist entry exempting this file — would leave a blind
+  // spot in the one file every agent edits.
+  const FAKE_AWS_KEY = `AKIA${'IOSFODNN7EXAMPLE'}`
+  const secretFixture = 'packages/core/src/__gate_fixture__.ts'
+  {
+    const result = withFixture(secretFixture, `export const key = '${FAKE_AWS_KEY}'`, () =>
+      run('node', ['scripts/check-secrets.mjs']),
+    )
+    checkRejectedBy('secret scan rejects an AWS access key id', result, '[aws-access-key-id]')
+    // The gate must report the path and the rule and nothing else. A scanner that echoes its finding
+    // has turned one file somebody can rotate into a CI log, an agent transcript and a scrollback.
+    check(
+      'secret scan never prints the value it matched',
+      !result.output.includes(FAKE_AWS_KEY),
+      `the matched credential appeared in the gate's own output:\n${result.output}`,
+    )
+    check(
+      'secret scan reports the path it found it in',
+      result.output.includes(secretFixture),
+      `a finding with no path is not actionable:\n${result.output}`,
+    )
+  }
+
+  // A DigitalOcean managed-database URL: public host, and the password is the whole database.
+  {
+    const result = withFixture(
+      secretFixture,
+      "export const url = 'postgres://doadmin:EXAMPLE-NOT-A-REAL-PASSWORD@" +
+        "db-postgresql-fra1-00000-do-user-0-0.b.db.ondigitalocean.com:25060/defaultdb'",
+      () => run('node', ['scripts/check-secrets.mjs']),
+    )
+    checkRejectedBy(
+      'secret scan rejects a reachable database URL carrying a password',
+      result,
+      '[database-url-with-password]',
+    )
+  }
+
+  // The control for it, and the reason the rule is worth having: the same shape on loopback is the
+  // documented local development credential, which appears in .env.example, in the CI workflow and in
+  // the agent brief. Exempting those three paths would have exempted whatever lands in them next.
+  {
+    const result = withFixture(
+      secretFixture,
+      "export const url = 'postgres://berelax:berelax@127.0.0.1:5432/berelax_dev'",
+      () => run('node', ['scripts/check-secrets.mjs']),
+    )
+    check(
+      'secret scan accepts the loopback development credential',
+      !result.failed,
+      `a database nobody outside the machine can reach is not a secret:\n${result.output}`,
+    )
+  }
+
+  // The general rule, for the credential no provider pattern anticipated. The value says what it is
+  // and is still a single base64url encoding of 40-odd high-entropy characters, which is what the rule
+  // actually tests — it must not fire on `password: 'a-long-enough-test-password'`.
+  {
+    const result = withFixture(
+      secretFixture,
+      `export const apiKey = 'NOT_A_SECRET_${'Zq7Z4pKfW2mNvB8xTr5LsJd1HgYc'}'`,
+      () => run('node', ['scripts/check-secrets.mjs']),
+    )
+    checkRejectedBy(
+      'secret scan rejects a high-entropy value assigned to a credential name',
+      result,
+      '[high-entropy-assigned-secret]',
+    )
+  }
+
+  // An exemption nobody can review, and an exemption that no longer covers anything. The second is the
+  // dangerous one: it silently covers whatever arrives at that path next.
+  {
+    const allowlist = 'build/__gate_fixture_secret_allowlist__.json'
+    const result = withFixture(
+      allowlist,
+      JSON.stringify({
+        entries: [{ rule: 'aws-access-key-id', path: 'packages/core/src/nothing-here.ts' }],
+      }),
+      () => run('node', ['scripts/check-secrets.mjs', '--allowlist', allowlist]),
+    )
+    checkRejectedBy(
+      'secret scan rejects an allowlist entry with no reason',
+      result,
+      '[allowlist-entry-without-reason]',
+    )
+    checkRejectedBy(
+      'secret scan rejects an allowlist entry that no longer matches anything',
+      result,
+      '[stale-allowlist-entry]',
+    )
+  }
+
+  // --- dependency advisories --------------------------------------------------------------------
+  //
+  // With nothing accepted, the five advisories this repository really carries must be reported. This is
+  // the probe that proves the walk reaches transitive reality: dompurify is six edges from anything
+  // anybody declared, inside Payload's admin editor.
+  {
+    const allowlist = 'build/__gate_fixture_advisory_allowlist__.json'
+    const result = withFixture(
+      allowlist,
+      JSON.stringify({ maxHorizonDays: 365, entries: [] }),
+      () => run('node', ['scripts/check-dependencies.mjs', '--allowlist', allowlist]),
+    )
+    checkRejectedBy(
+      'advisory gate reports an unaccepted advisory in the resolved graph',
+      result,
+      '[unaccepted-advisory]',
+    )
+    check(
+      'advisory gate names the transitive package and its path, not just a count',
+      result.output.includes('dompurify@3.4.8') && result.output.includes('monaco-editor'),
+      `the finding has to be traceable to a dependency edge:\n${result.output}`,
+    )
+  }
+
+  // A fixture workspace package declaring a version with a known critical advisory. `mkdir` through the
+  // `run` helper rather than a new import, and `rm -rf` in the `finally`: a workspace directory left
+  // behind would fail later gates with an error about the wrong thing.
+  {
+    const directory = 'packages/__gate_fixture_pkg__'
+    run('mkdir', ['-p', directory])
+    try {
+      const manifest = `${directory}/package.json`
+      const critical = withFixture(
+        manifest,
+        JSON.stringify({
+          name: '@berelax/gate-fixture',
+          private: true,
+          dependencies: { minimist: '0.0.8' },
+        }),
+        () => run('node', ['scripts/check-dependencies.mjs']),
+      )
+      checkRejectedBy(
+        'advisory gate rejects a declared dependency with a critical advisory',
+        critical,
+        '[critical-advisory]',
+      )
+      check(
+        'advisory gate names the advisory it matched',
+        critical.output.includes('GHSA-xvch-5gv4-984h'),
+        `a finding with no advisory id cannot be looked up:\n${critical.output}`,
+      )
+
+      // The same directory, for the two workspace-manifest rules the licence policy owns. A workspace
+      // package of a closed-source product grants nobody an outbound licence, and `private: true` is
+      // what stops one being published by accident.
+      const granted = withFixture(
+        manifest,
+        JSON.stringify({ name: '@berelax/gate-fixture', private: true, license: 'AGPL-3.0-only' }),
+        () => run('node', ['scripts/check-licences.mjs']),
+      )
+      checkRejectedBy(
+        'licence gate rejects a workspace package that grants an outbound licence',
+        granted,
+        '[workspace-licence-grant]',
+      )
+      const publishable = withFixture(
+        manifest,
+        JSON.stringify({ name: '@berelax/gate-fixture' }),
+        () => run('node', ['scripts/check-licences.mjs']),
+      )
+      checkRejectedBy(
+        'licence gate rejects a workspace package that is not private',
+        publishable,
+        '[private-workspace-package]',
+      )
+    } finally {
+      run('rm', ['-rf', directory])
+    }
+  }
+
+  // The allowlist's own rules. Accepting a live vulnerability is a decision with a shelf life, so an
+  // entry with no expiry, an expired one, and one dated past the policy horizon are all refused — and a
+  // critical advisory cannot be accepted at all, because no date makes it acceptable.
+  {
+    const reason =
+      'a deliberately long reason string, because the gate refuses an entry whose reason is too ' +
+      'short to disagree with'
+    const cases = [
+      {
+        name: 'an allowlist entry with no expiry',
+        rule: '[allowlist-entry-without-expiry]',
+        entry: { id: 'GHSA-67mh-4wv8-2f99', package: 'esbuild', reason },
+      },
+      {
+        name: 'an expired allowlist entry',
+        rule: '[allowlist-entry-expired]',
+        entry: { id: 'GHSA-67mh-4wv8-2f99', package: 'esbuild', expires: '2024-01-01', reason },
+      },
+      {
+        name: 'an allowlist entry dated past the policy horizon',
+        rule: '[allowlist-expiry-too-far]',
+        entry: { id: 'GHSA-67mh-4wv8-2f99', package: 'esbuild', expires: '2099-01-01', reason },
+      },
+      {
+        name: 'an allowlist entry for a critical advisory',
+        rule: '[critical-advisory-cannot-be-accepted]',
+        entry: { id: 'GHSA-xvch-5gv4-984h', package: 'minimist', expires: '2026-12-01', reason },
+      },
+    ]
+    const allowlist = 'build/__gate_fixture_advisory_allowlist__.json'
+    for (const probe of cases) {
+      const result = withFixture(
+        allowlist,
+        JSON.stringify({ maxHorizonDays: 365, entries: [probe.entry] }),
+        () => run('node', ['scripts/check-dependencies.mjs', '--allowlist', allowlist]),
+      )
+      checkRejectedBy(`advisory gate rejects ${probe.name}`, result, probe.rule)
+    }
+  }
+
+  // --- outbound licences ------------------------------------------------------------------------
+  //
+  // Both probes run the **real** graph against a modified policy, which is what makes them mean
+  // something: `@img/sharp-libvips-<platform>` is LGPL-3.0-or-later and is genuinely shipped, four
+  // edges below packages/media's `sharp`. With its acceptance removed the gate must find it; with the
+  // LGPL family reclassified as strong copyleft it must refuse it outright.
+  {
+    const policy = JSON.parse(readFileSync('build/licence-policy.json', 'utf8'))
+    const fixture = 'build/__gate_fixture_licence_policy__.json'
+    const unaccepted = withFixture(fixture, JSON.stringify({ ...policy, accepted: [] }), () =>
+      run('node', ['scripts/check-licences.mjs', '--policy', fixture]),
+    )
+    checkRejectedBy(
+      'licence gate finds the unaccepted copyleft dependency this product really ships',
+      unaccepted,
+      '[unaccepted-weak-copyleft]',
+    )
+    check(
+      'licence gate names the package and the path it ships through',
+      unaccepted.output.includes('@img/sharp-libvips') &&
+        unaccepted.output.includes('packages/media'),
+      `a licence finding with no dependency path cannot be acted on:\n${unaccepted.output}`,
+    )
+
+    const asStrong = withFixture(
+      fixture,
+      JSON.stringify({
+        ...policy,
+        weakCopyleft: policy.weakCopyleft.filter((id) => id !== 'LGPL-3.0-or-later'),
+        strongCopyleft: [...policy.strongCopyleft, 'LGPL-3.0-or-later'],
+      }),
+      () => run('node', ['scripts/check-licences.mjs', '--policy', fixture]),
+    )
+    checkRejectedBy(
+      'licence gate refuses strong copyleft in the shipped closure',
+      asStrong,
+      '[strong-copyleft-in-shipped-closure]',
+    )
+  }
+
+  // A copyleft fixture *dependency*, injected into the pnpm store: an AGPL-3.0-only package unpacked
+  // into node_modules that the lockfile does not explain. It has to be refused twice — once for being on
+  // disk with nothing in the lockfile accounting for it, and once for the licence, because code on disk
+  // is what gets copied into an image whether or not a lockfile mentions it.
+  {
+    const store = 'node_modules/.pnpm/gate-fixture-copyleft@1.0.0'
+    const directory = `${store}/node_modules/gate-fixture-copyleft`
+    run('mkdir', ['-p', directory])
+    try {
+      const injected = withFixture(
+        `${directory}/package.json`,
+        JSON.stringify({
+          name: 'gate-fixture-copyleft',
+          version: '1.0.0',
+          license: 'AGPL-3.0-only',
+        }),
+        () => run('node', ['scripts/check-licences.mjs']),
+      )
+      checkRejectedBy(
+        'licence gate refuses a copyleft fixture dependency unpacked into the store',
+        injected,
+        '[strong-copyleft-in-shipped-closure]',
+      )
+      checkRejectedBy(
+        'licence gate refuses a package the lockfile does not account for',
+        injected,
+        '[package-outside-the-lockfile-graph]',
+      )
+    } finally {
+      run('rm', ['-rf', store])
+    }
+  }
+
+  // --- container policy -------------------------------------------------------------------------
+  //
+  // There is no Dockerfile in this repository yet — apps/worker/Dockerfile belongs to W-SYS-06 — so the
+  // image vulnerability scan is deferred. These fixtures prove the rules that do not need an image are
+  // live, including the Dockerfile rules, so the first Dockerfile is held to them on the commit that
+  // adds it rather than six months later.
+  {
+    const compose = 'docker-compose.gate-fixture.yml'
+    const service = (image) => `services:\n  probe:\n    image: ${image}\n`
+    const cases = [
+      { name: 'an image on a moving tag', image: 'postgres:latest', rule: '[unpinned-image-tag]' },
+      {
+        name: 'a PostgreSQL major the managed database does not run',
+        image: 'postgres:15-alpine',
+        rule: '[postgres-major-mismatch]',
+      },
+      { name: 'an undeclared base image', image: 'redis:7-alpine', rule: '[undeclared-image]' },
+    ]
+    for (const probe of cases) {
+      const result = withFixture(compose, service(probe.image), () =>
+        run('node', ['scripts/check-container.mjs']),
+      )
+      checkRejectedBy(`container gate rejects ${probe.name}`, result, probe.rule)
+    }
+
+    const dockerfile = 'apps/worker/Dockerfile.gate-fixture'
+    const result = withFixture(dockerfile, 'FROM node:22\nCOPY .env ./\nRUN echo build\n', () =>
+      run('node', ['scripts/check-container.mjs']),
+    )
+    checkRejectedBy(
+      'container gate rejects a base image with no digest',
+      result,
+      '[unpinned-base-image]',
+    )
+    checkRejectedBy(
+      'container gate rejects an image whose final stage is root',
+      result,
+      '[container-runs-as-root]',
+    )
+    checkRejectedBy(
+      'container gate rejects a .env copied into a layer',
+      result,
+      '[env-file-copied-into-image]',
+    )
+    checkRejectedBy(
+      'container gate rejects an undeclared Dockerfile',
+      result,
+      '[dockerfile-not-declared]',
+    )
+
+    // And the deferral cannot be quietly forgotten: the moment a Dockerfile the policy records as
+    // `not-yet-created` exists, the gate demands the policy — and with it the image vulnerability scan —
+    // be revisited. Asserted against a fixture policy pointing at the fixture path, deliberately not by
+    // writing apps/worker/Dockerfile: that is a real file W-SYS-06 will author, and a harness that
+    // created and then deleted it could destroy work in progress.
+    const containerPolicy = JSON.parse(readFileSync('build/container-policy.json', 'utf8'))
+    const policyFixture = 'build/__gate_fixture_container_policy__.json'
+    const appeared = withFixture(
+      policyFixture,
+      JSON.stringify({
+        ...containerPolicy,
+        dockerfiles: [{ path: dockerfile, unit: 'W-SYS-06', status: 'not-yet-created' }],
+      }),
+      () =>
+        withFixture(
+          dockerfile,
+          'FROM node:22-slim@sha256:' +
+            '0000000000000000000000000000000000000000000000000000000000000000\nUSER node\n',
+          () => run('node', ['scripts/check-container.mjs', '--policy', policyFixture]),
+        ),
+    )
+    checkRejectedBy(
+      'container gate demands the policy be updated when the deferred Dockerfile appears',
+      appeared,
+      '[dockerfile-appeared]',
+    )
+  }
+
+  // --- the completeness property, and the cost ---------------------------------------------------
+  //
+  // Case 29 below is what makes deleting a gate a build failure. These read its list out of this file
+  // rather than restating it, so they cannot pass against a list that has stopped containing these
+  // four. `'postgres:16'` is that list's last entry and appears nowhere else after it.
+  {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
+    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'))
+    const source = readFileSync('scripts/test-gates.mjs', 'utf8')
+    const marker = source.lastIndexOf("'postgres:16'")
+    const listing = source.slice(source.lastIndexOf('[', marker), source.indexOf(']', marker))
+    const required = [...listing.matchAll(/'([^']+)'/g)].map((match) => match[1])
+    check(
+      "the completeness check's own list is readable from source",
+      required.length > 20 && required.includes('pnpm gates:test'),
+      `read ${required.length} entries: ${required.join(', ')}`,
+    )
+
+    // Everything `pnpm verify` runs must have a CI step. Derived from package.json, so unlike a
+    // hand-maintained list it cannot drift: adding a gate to `verify` and forgetting CI fails here.
+    const missingFromCI = scripts.verify
+      .split('&&')
+      .map((part) => part.trim())
+      .filter((command) => !workflow.includes(`run: ${command}\n`))
+    check(
+      'every gate in pnpm verify has a step in the CI workflow',
+      missingFromCI.length === 0,
+      `not run by CI: ${missingFromCI.join(', ')}`,
+    )
+
+    // And the converse, which keeps case 29 honest: every package.json script the workflow runs must be
+    // registered there, or deleting its step would be a silent loss of coverage.
+    const unregistered = [...workflow.matchAll(/^\s+run: pnpm ([\w:-]+)$/gm)]
+      .map((match) => match[1])
+      .filter((name) => Object.hasOwn(scripts, name))
+      .filter((name) => !required.includes(`pnpm ${name}`))
+    check(
+      'every gate the workflow runs is registered with the completeness check',
+      unregistered.length === 0,
+      `run by CI but not asserted by case 29: ${unregistered.join(', ')}`,
+    )
+
+    for (const gate of ['pnpm secrets', 'pnpm deps', 'pnpm licences', 'pnpm container']) {
+      const without = workflow.replace(`run: ${gate}\n`, 'run: true\n')
+      const missing = required.filter((entry) => !without.includes(entry))
+      check(
+        `removing \`${gate}\` from the workflow fails the completeness check`,
+        missing.includes(gate),
+        missing.length === 0
+          ? `case 29's list did not notice ${gate} was gone`
+          : `it reported ${missing.join(', ')} instead`,
+      )
+    }
+  }
+
+  // The declared time budget. Each gate is run clean — which is also the control for every probe above,
+  // since a gate that rejected everything would fail here — and timed. The budgets are several times the
+  // measured cost so a slow CI filesystem does not fail the build, and low enough that a scanner which
+  // grew a network call or a full-tree parse would.
+  {
+    const budgets = [
+      ['secrets', 'scripts/check-secrets.mjs', 8],
+      ['deps', 'scripts/check-dependencies.mjs', 8],
+      ['licences', 'scripts/check-licences.mjs', 8],
+      ['container', 'scripts/check-container.mjs', 5],
+    ]
+    let total = 0
+    for (const [name, script, budget] of budgets) {
+      const started = Date.now()
+      const result = run('node', [script])
+      const seconds = (Date.now() - started) / 1000
+      total += seconds
+      check(
+        `pnpm ${name} passes on this tree in ${seconds.toFixed(2)}s, within its ${budget}s budget`,
+        !result.failed && seconds <= budget,
+        result.failed
+          ? `the gate failed on a clean tree:\n${result.output}`
+          : `took ${seconds.toFixed(2)}s, over the ${budget}s budget`,
+      )
+    }
+    check(
+      `the four supply-chain gates add ${total.toFixed(2)}s to pnpm verify, within the 25s budget`,
+      total <= 25,
+      `${total.toFixed(2)}s is more than pnpm verify should spend on supply-chain scanning`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -2839,6 +4290,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm boundaries:test',
     'pnpm purity',
     'pnpm invisibles',
+    // H-HARD-02's four offline supply-chain gates, plus the online audit that runs in CI only. They are
+    // registered here because the properties in that unit's block read THIS array: one of them asserts
+    // that every `run:` step in the workflow is named here, so a CI step nobody registered fails the
+    // build rather than passing unnoticed.
+    'pnpm secrets',
+    'pnpm deps',
+    'pnpm licences',
+    'pnpm container',
+    'pnpm audit:online',
     'pnpm palette',
     'pnpm tokens',
     'pnpm colours',

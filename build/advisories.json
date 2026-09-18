@@ -1,0 +1,109 @@
+{
+  "about": "The offline advisory set scripts/check-dependencies.mjs matches the resolved graph against. It exists so `pnpm verify` needs no network: a gate that reaches an advisory database would make every developer's and every agent's verify run fail behind a proxy or offline, and a gate that is routinely skipped is not a gate. The always-current half is the separate `pnpm audit:online` step in CI, which runs `pnpm audit` against registry.npmjs.org; this file is what that step's findings get written into. Two groups, both captured with `pnpm audit --json` and cross-checked against the registry's advisory endpoint.",
+  "capturedAt": "2026-09-18",
+  "source": "pnpm audit --json (registry.npmjs.org) against this lockfile, plus registry advisory lookups for the never-again group",
+  "observed": [
+    {
+      "id": "GHSA-67mh-4wv8-2f99",
+      "package": "esbuild",
+      "vulnerable": "<=0.24.2",
+      "patched": ">=0.25.0",
+      "severity": "moderate",
+      "title": "esbuild enables any website to send any requests to the development server and read the response"
+    },
+    {
+      "id": "GHSA-55q2-fjhq-7xh7",
+      "package": "dompurify",
+      "vulnerable": "<=3.4.12",
+      "patched": ">=3.4.13",
+      "severity": "moderate",
+      "title": "IN_PLACE hook removal leaves a detached subtree executable, causing XSS"
+    },
+    {
+      "id": "GHSA-cmwh-pvxp-8882",
+      "package": "dompurify",
+      "vulnerable": "<=3.4.10",
+      "patched": ">=3.4.11",
+      "severity": "moderate",
+      "title": "Permanent ALLOWED_ATTR pollution via setConfig() bypassing the hook clone-guard"
+    },
+    {
+      "id": "GHSA-c2j3-45gr-mqc4",
+      "package": "dompurify",
+      "vulnerable": "<=3.4.11",
+      "patched": ">=3.4.12",
+      "severity": "low",
+      "title": "CUSTOM_ELEMENT_HANDLING bypasses afterSanitizeElements for allowed custom elements"
+    },
+    {
+      "id": "GHSA-vxr8-fq34-vvx9",
+      "package": "dompurify",
+      "vulnerable": "<3.4.9",
+      "patched": ">=3.4.9",
+      "severity": "low",
+      "title": "Trusted Types policy survives clearConfig() and can poison later RETURN_TRUSTED_TYPE output"
+    }
+  ],
+  "neverAgain": [
+    {
+      "id": "GHSA-xvch-5gv4-984h",
+      "package": "minimist",
+      "vulnerable": "<0.2.4 || >=1.0.0 <1.2.6",
+      "patched": ">=1.2.6",
+      "severity": "critical",
+      "title": "Prototype pollution in minimist",
+      "note": "The graph resolves minimist 1.2.8, outside both ranges. Kept because minimist arrives transitively through a dozen build tools and a resolution that slipped back under 1.2.6 would be invisible."
+    },
+    {
+      "id": "GHSA-mh6f-8j2x-4483",
+      "package": "event-stream",
+      "vulnerable": "=3.3.6",
+      "patched": ">=4.0.0",
+      "severity": "critical",
+      "title": "Malicious code in event-stream via flatmap-stream",
+      "note": "Absent from the graph. A published package that stole wallets; the point of listing an absent package is that it stays absent."
+    },
+    {
+      "id": "GHSA-g4rg-993r-mgx7",
+      "package": "shell-quote",
+      "vulnerable": ">=1.6.3 <=1.7.2",
+      "patched": ">=1.7.3",
+      "severity": "critical",
+      "title": "Command injection through improper neutralisation in shell-quote"
+    },
+    {
+      "id": "GHSA-w7jw-789q-3m8p",
+      "package": "shell-quote",
+      "vulnerable": ">=1.1.0 <=1.8.3",
+      "patched": ">=1.8.4",
+      "severity": "critical",
+      "title": "shell-quote quote() does not escape newlines in object .op values",
+      "note": "Absent from the graph, and the range is wide enough that any arrival would fail this gate — which is the intent, because this repository shells out from scripts."
+    },
+    {
+      "id": "GHSA-pjwm-rvh2-c87w",
+      "package": "ua-parser-js",
+      "vulnerable": "=0.7.29",
+      "patched": ">=0.7.30",
+      "severity": "high",
+      "title": "Embedded malware in ua-parser-js"
+    },
+    {
+      "id": "GHSA-35jh-r3h4-6jhm",
+      "package": "lodash",
+      "vulnerable": "<4.17.21",
+      "patched": ">=4.17.21",
+      "severity": "high",
+      "title": "Command injection in lodash"
+    },
+    {
+      "id": "GHSA-r5fr-rjxr-66jc",
+      "package": "lodash",
+      "vulnerable": ">=4.0.0 <=4.17.23",
+      "patched": ">=4.18.0",
+      "severity": "high",
+      "title": "Code injection via _.template imports key names",
+      "note": "The graph resolves lodash 4.18.1, one patch above the whole range. Kept because a downgrade by any transitive dependency lands back inside it."
+    }
+  ]
+}

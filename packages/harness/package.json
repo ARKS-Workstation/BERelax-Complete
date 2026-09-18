@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./accessibility": "./src/accessibility.ts",
+    "./matrix": "./src/matrix.ts",
     "./touch-targets": "./src/touch-targets.ts"
   },
   "dependencies": {

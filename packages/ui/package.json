@@ -8,6 +8,7 @@
     "./arabic.css": "./src/theme/arabic.css",
     "./direction": "./src/primitives/direction.tsx",
     "./font-fallbacks.css": "./src/theme/font-fallbacks.generated.css",
+    "./icon": "./src/icon.tsx",
     "./layout": "./src/layout/index.tsx",
     "./patterns": "./src/patterns/index.tsx",
     "./primitives": "./src/primitives/index.tsx",

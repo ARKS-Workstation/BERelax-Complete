@@ -870,7 +870,7 @@ units:
       lexicon lint applied to the public display name while the internal name stays unconstrained. Owns
       the redirect table and the compliance-lexicon module that W-SITE later reuses.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-01
@@ -890,12 +890,63 @@ units:
       public display name, slug and archive, four cases
     - A price_list change leaves every existing appointment's snapshotted gross_price_fils, net and vat
       untouched, asserted over a seeded appointment before and after
+    - 'NOTE: the migration is packages/db/migrations/0029_redirect.sql and SCHEMA_VERSION is 29.
+      0026 (M-TILL-04) and 0028 (M-VAT-01) were merging in parallel, so this unit took 0029 rather
+      than the next free number in its own worktree. The suite named catalogue.test.ts in the file
+      list is two files: catalogue.test.ts for the halves that need no database (the SQLSTATE and
+      constraint-name translation, and the fail-closed lint check) and catalogue.itest.ts for the
+      guard rails themselves - packages/db has no database in the unit runner, so a database-backed
+      suite there must be an .itest.ts or it never connects. Same correction as otp.itest.ts
+      (B-LIFE-02) and booking-constraints.itest.ts (B-AVAIL-01).'
+    - 'NOTE: the redirect table is `redirect_map (source_path, target_path, status_code, reason,
+      created_by, ...)`, not a table named `redirect` with columns old_path/new_path. The acceptance
+      triple (old_path, new_path, 301) is satisfied as (source_path, target_path, status_code = 301);
+      the names are W-SITE-09''s, whose acceptance imports the legacy WooCommerce URLs into "the same
+      table" and shares the one-hop invariant. Two redirect tables would be two answers to "where does
+      this path go", settled by whichever middleware ran first.'
+    - 'NOTE: the route half is apps/web/app/(en)/(public)/treatments/[slug]/route.ts plus its
+      handler.ts, and it is a placeholder W-SITE-05 supersedes - a rendered page.tsx cannot coexist
+      with a route.ts in one segment, so that unit deletes the route and moves the resolution into the
+      page. It returns text/plain for a live service, deliberately not markup, so it cannot be mistaken
+      for the treatment page. An archived service''s own path 404s today rather than 301-ing to
+      /treatments, because that index page does not exist yet (W-SITE-05): a 301 to a page that is not
+      there is the 404-with-extra-steps this unit exists to prevent. The one target this schema cannot
+      check is the same /treatments index that archiving retargets redirects onto - it resolves when
+      W-SITE-05 ships it, and the trigger deliberately checks only /treatments/<slug> targets, since
+      nothing in this schema knows what resolves outside the catalogue.'
+    - 'NOTE: the lint is applied at the db chokepoint through an INJECTED function, because packages/db
+      must never import packages/core. setPublicDisplayName refuses to write a public name when no lint
+      was supplied (public_display_name_unlinted) rather than defaulting to permitting it, and
+      readCompliancePolicy reads regulatory_profile_current for the caller to feed to core. The pair is
+      exercised in packages/fixtures/src/catalogue-compliance.itest.ts, the only package allowed to
+      depend on both. The profile-driven half of the lexicon is the claim terms and the permitted staff
+      titles; the solicitation and outside-the-licence terms are code and are NOT relaxed by
+      medical_claims_permitted, because no licence class makes them lawful - a facility that genuinely
+      performed one of them would be a code change with a human reviewing it.'
+    - 'NOTE: the lint is Latin-script. A public display name written only in Arabic yields no findings,
+      asserted as a test rather than left implicit: the Arabic public copy is CMS content
+      (service-narrative) and is linted where it is rendered, by W-SITE-05 and W-SITE-10.'
+    - 'NOTE: two rules beyond this list were added because a test found them. ZC007
+      redirect_source_still_live refuses a redirect FROM a page that still answers - renaming a slug
+      back to one it used to have produced exactly that row, and it can never fire because the live
+      page wins; renameServiceSlug now releases such a row. And the deferred dead-target check on a
+      RENAME is a backstop rather than the first refusal: the write-time chain check (ZC006) reaches
+      the same transaction first in every ordinary case, so the backstop is proven by disabling that
+      trigger for one transaction - the technique B-AVAIL-01 used to prove the argument for its
+      DEFERRED trigger.'
     files:
     - packages/core/src/compliance/lexicon.ts
     - packages/core/src/compliance/lexicon.test.ts
+    - packages/core/src/compliance/index.ts
+    - packages/db/migrations/0029_redirect.sql
     - packages/db/src/schema/redirect.ts
     - packages/db/src/repositories/catalogue.ts
     - packages/db/src/repositories/catalogue.test.ts
+    - packages/db/src/repositories/catalogue.itest.ts
+    - packages/fixtures/src/catalogue-compliance.itest.ts
+    - apps/web/app/(en)/(public)/treatments/[slug]/handler.ts
+    - apps/web/app/(en)/(public)/treatments/[slug]/route.ts
+    - apps/web/src/treatment-path.itest.ts
   - id: B-CAT-06
     order: 28
     title: Catalogue, premises and room seed from the real business profile
@@ -2079,7 +2130,7 @@ units:
       and bill_line with immutable per-line tax treatment, our own gapless internal reference alongside
       the supplier's, and payables aging.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-02
@@ -2096,12 +2147,61 @@ units:
     - a bill dated inside a locked period is refused with PeriodLocked and writes nothing
     - each bill_line's tax treatment is stored on the line and the application role holds no UPDATE grant
       on bill_line, asserted from information_schema
+    - 'NOTE: the aging has FIVE buckets where this list names four. current, 1-30, 31-60 and 90+ are all
+      present and each means literally what it says; 61-90 was added because a bucket labelled "90+" that
+      actually holds a 75-day payable misstates the oldest debt in the business, which is the one figure
+      an aging report is opened for. Collapsing 61-90 into 90+ stays available to a report; a bucket that
+      lies does not.'
+    - 'NOTE: "outstanding" is the full gross of every posted bill, because nothing can be paid yet — no
+      unit before this one builds a supplier payment or settlement table. When one lands it is an
+      allocation row pointing at the bill (never an UPDATE, which the append-only triggers refuse) and the
+      aging query becomes gross_fils - coalesce(allocated, 0): a join, not a redesign. Deferred to
+      whichever unit adds supplier payments.'
+    - 'NOTE: two tax treatments are deliberately ABSENT from bill_line.tax_treatment rather than declared
+      and unimplemented — blocked input VAT (M-VAT-02) and the imported-services reverse charge
+      (M-VAT-03). Each needs posting behaviour this unit does not have, and a value the schema accepts but
+      no code path posts correctly would record a bill that looks complete and understates the return. So
+      postBill refuses a bill from an offshore supplier whose place-of-supply rule is
+      imported_services_reverse_charge, naming M-VAT-03, and adding the treatment is a migration there.'
+    - 'NOTE: our own bill series resets NEVER, unlike the three statutory ranges in 0013. document_series
+      holds one counter and one period_key per series, so under the annual policy a document dated in the
+      earlier period that arrives AFTER one dated in the later period restarts the earlier range and
+      re-issues a number already used. For an invoice that is hypothetical — we issue them in date order.
+      For a purchase bill it is the normal case: last December''s invoice arrives in January. Found by
+      bill_internal_number_unique refusing the second BILL-2026-00001 in the integration suite. An
+      unbroken range costs nothing for an internal reference, so BILL-00001 it is.'
+    - 'NOTE: no DOMESTIC supplier is seeded. The real list — landlord, utilities, laundry, consumables —
+      is an H-MIG import (no Y8 question covers it), and a seeded placeholder would put a company that
+      does not exist into the books, where it gets exported and eventually paid. The five offshore vendors
+      docs/04 section 4 names (DigitalOcean, Resend, Google, Meta, Anthropic) ARE seeded, because their
+      residency is the fact the system must not be able to get wrong. SMSala is omitted: docs/04 says "if
+      billed offshore", so its residency is unknown and guessing it is how a supplier ends up domestic by
+      default. The domestic paths are exercised by suppliers the tests create.'
+    - 'NOTE: two files outside this unit changed, both because the bill joins the existing numbering
+      counter rather than getting a second one (ADR 0023): DOCUMENT_SERIES_CODES in
+      packages/db/src/repositories/numbering.ts gains SUPP-BILL, and numbering.itest.ts asserted the exact
+      set of three series. 0013''s anonymous document_kind CHECK is dropped and re-added by name
+      (document_series_document_kind_allowed) so the next unit adding a kind extends it by name.'
+    - 'NOTE: bill carries no entry_date. The business day lives on journal_entry.entry_date, resolved by
+      the caller with resolveTradingDate, and two copies of the date that decides which VAT period a
+      figure lands in is one copy plus a future disagreement. A bill dated in a closed month is posted on
+      the business day it was entered, which is what a bookkeeper does; the aging reads the supplier''s due
+      date and is unaffected.'
     files:
     - packages/db/src/schema/supplier.ts
     - packages/db/src/schema/bill.ts
-    - packages/db/migrations/00xx_purchases.sql
+    - packages/db/migrations/0028_purchases.sql
     - packages/db/src/services/post-bill.ts
     - packages/db/src/services/post-bill.itest.ts
+    - packages/db/src/queries/payables-aging.ts
+    - packages/core/src/purchases/bill.ts
+    - packages/core/src/purchases/payables-aging.ts
+    - packages/core/src/purchases/bill.test.ts
+    - packages/core/src/purchases/payables-aging.test.ts
+    - packages/fixtures/src/purchases.ts
+    - packages/fixtures/src/purchases.test.ts
+    - packages/fixtures/src/purchases.itest.ts
+    - scripts/test-gates.mjs
   - id: M-VAT-02
     order: 57
     title: Input VAT recoverability classification, including blocked categories
@@ -5249,7 +5349,7 @@ units:
       trailing-slash and case normalisation; the /ar subpath locale with real RTL; noindex and sitemap exclusion
       for the admin group.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - W-SYS-01
@@ -5270,12 +5370,82 @@ units:
     - 'On /ar the layout is genuinely mirrored: a computed-style assertion confirms the editorial grid''s
       inline-start gutter is on the right and that at least one directional icon is transformed, not merely
       translated'
+    - 'NOTE: apps/web/app/(public)/layout.tsx is stale and was NOT created. W-SYS-01 shipped two root layouts
+      — app/(en)/layout.tsx and app/(ar)/layout.tsx, both rendering app/_document/shell.tsx, which owns
+      <html lang dir>, the font variables and the theme bootstrap — plus app/(admin)/layout.tsx over the same
+      shell, and W-SYS-08 added app/(payload)/layout.tsx over Payload''s. Four root layouts already. A
+      (public) group would have been a fifth <html> element, and a duplicate of what (en) is: invalid HTML
+      that React hydrates wrongly, with two ThemeProviders fighting over one data-theme attribute. The spine
+      is built on the groups that exist. Delivered: apps/web/src/routes/registry.ts (the typed registry),
+      apps/web/src/i18n/locales.ts (the locale seam), apps/web/src/routes/canonical.ts (normalisation),
+      apps/web/src/routes/alternates.ts (canonical URL and hreflang), apps/web/src/routes/discover.ts (the
+      filesystem side of the bijection) and app/_routes/route-nav.tsx — an underscore folder, so Next
+      excludes it from routing.'
+    - 'NOTE: the middleware is apps/web/proxy.ts, not apps/web/middleware.ts. Next 16.3.5 renamed the
+      convention: middleware.ts still runs and warns "The middleware file convention is deprecated. Please
+      use proxy instead." on every build, and having both is a hard error (E900). Identical semantics and
+      identical config.matcher; the exported function must be named proxy, which Next''s entry template
+      selects by filename.'
+    - 'NOTE: the tests are apps/web/src/routes/registry.test.ts (unit: the bijection, the normalisation
+      table, hreflang completeness, the capture plan, the noindex coverage) and
+      apps/web/src/route-spine.itest.ts (integration: redirect hops, live headers, rendered hreflang, RTL
+      geometry, the captures, and the build manifests) — not tests/routes/registry.spec.ts. This repository
+      has no tests/ directory: tests sit beside their source as *.test.ts and *.itest.ts.'
+    - 'NOTE: SCOPED — "exactly one 301 hop" for a path with a DOUBLED SLASH. Next collapses repeated slashes
+      itself, with an unconditional 308, in resolve-routes.js before any application code runs, and 16.3.5
+      has no configuration for it. So /treatments//x reaches its canonical path in exactly one PERMANENT hop
+      whose status is 308 rather than 301, and a spelling that also has the wrong case or a trailing slash
+      takes Next''s 308 and then the proxy''s 301 — two permanent hops, zero loops, ending at the canonical
+      URL. The integration test asserts that shape exactly rather than claiming one hop. Case and
+      trailing-slash variants ARE one 301 hop each for every registry document in both locales, which
+      required skipTrailingSlashRedirect: true in next.config.ts — Next''s own trailing-slash redirect has
+      priority: true and would otherwise chain 308 then 301. The exempt prefixes keep that behaviour: the
+      proxy trims their trailing slash with a 308, so POST /api/v1/otp/ is still a POST.'
+    - 'NOTE: SCOPED — the acceptance criterion''s literal /treatments paths. The route is W-SITE-04''s and
+      does not exist, so the destination of its normalisation is a 404. The hop count, the status and the
+      destination are asserted; the 200 at the end is asserted for every route that does exist, in both
+      locales, from variants generated out of the registry — so W-SITE-04''s route is covered the day it
+      lands with no change to the test.'
+    - 'NOTE: SCOPED — "absent from every sitemap". There is no sitemap: W-SITE-08 owns sitemap.xml and the
+      per-type sitemaps. Delivered instead: sitemapEntries() in the registry as the only source a sitemap
+      may read, with tests asserting it holds exactly / and /ar, that every non-indexable route and every
+      handler is absent from it by construction, and that cmsRoutesIn over the registry''s paths is empty.'
+    - 'NOTE: SCOPED — /analytics. The route is A-FIRST-10''s and does not exist yet, so it cannot be a
+      registry entry: the bijection refuses an entry with no file. It is declared as a noindex PREFIX
+      instead, beside /settings, because the (admin) route group contributes nothing to the URL and its
+      routes share no prefix. The header is therefore on the live response today, where /analytics is a 404,
+      and on the dashboard the day it lands — asserted against the running app.'
+    - 'NOTE: the screenshot harness reads the registry through capturePlan() and missingCaptures(), added to
+      @berelax/harness/matrix, and the captures are taken in apps/web/src/route-spine.itest.ts: every
+      registry document at 3 viewports x 2 themes x 2 directions, 24 PNGs into artifacts/screens/routes,
+      each render asserted to be the cell it claims (theme, dir, viewport width) before the shutter, and
+      missingCaptures naming any cell that was not taken. Not in scripts/screenshots.mjs, which has no
+      server: pnpm critique is one of the cheap gates and must not start depending on a next build — the
+      same reasoning scripts/accessibility.mjs records for live routes.'
+    - 'NOTE: the RTL acceptance is asserted at /ar for the grid and at /ar/kitchen-sink for the icon. The
+      grid assertion places probe elements on the editorial grid''s named lines — the computed
+      grid-template-columns lists tracks in logical order and says nothing about mirroring — and shows the
+      12rem inline-start column physically to the right of the 20rem one and against the right-hand gutter,
+      with the English document as the control. The icon is at /ar/kitchen-sink because that is where the
+      spine renders a directional glyph (the locale root has no back link); its computed transform is
+      matrix(-1, 0, 0, 1, 0, 0), asserted as a negated horizontal scale with both translation components
+      zero, and "none" on the English route.'
+    - 'NOTE: canonical and hreflang URLs are absolute and built from SITE_ORIGIN, documented in .env.example
+      and falling back to the live domain berelaxmassage.com (docs/13 §5), which the relaunch takes over. It
+      is read at render time, so it is fixed at build time for the statically rendered routes: a preview
+      deployment must set it before next build or it will announce production URLs as canonical.'
     files:
     - apps/web/src/routes/registry.ts
-    - apps/web/middleware.ts
+    - apps/web/src/routes/canonical.ts
+    - apps/web/src/routes/alternates.ts
+    - apps/web/src/routes/discover.ts
     - apps/web/src/i18n/locales.ts
-    - apps/web/app/(public)/layout.tsx
-    - tests/routes/registry.spec.ts
+    - apps/web/proxy.ts
+    - apps/web/app/_routes/route-nav.tsx
+    - apps/web/src/routes/registry.test.ts
+    - apps/web/src/route-spine.itest.ts
+    - packages/harness/src/matrix.ts
+    - scripts/test-gates.mjs
   - id: W-SITE-02
     order: 133
     title: 'The premises row as the only NAP source: /api/facts, /llms.txt, robots policy'
@@ -6475,7 +6645,7 @@ units:
       0)) and re-read the row inside the lock so the loser of the race uses the winner's token. Persist
       a rotated refresh token if Google ever returns one.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-03
@@ -6493,9 +6663,97 @@ units:
       changes, the new value round-trips, and the old plaintext no longer matches any stored row'
     - 'Token never reaches a job payload: after a full refresh cycle driven by a pg-boss job, a scan of
       pgboss.job.data across all rows finds zero occurrences of the fixture refresh token in any encoding'
+    - 'NOTE: the integration test is token-refresh.itest.ts, not token-refresh.integration.test.ts. The
+      suite''s convention is *.itest.ts for integration and *.test.ts for unit, and
+      vitest.integration.config.ts includes packages/**/*.itest.ts — a file named
+      .integration.test.ts would have been collected by the UNIT runner, which has no database, and
+      would have failed on the first line rather than running'
+    - 'NOTE: the token allow-list was NOT widened, and that shaped the module boundary. token-refresh.ts
+      holds the lock and the double check only; the plaintext token stays in lifecycle.ts, which is
+      already one of the five modules permitted to hold one. accessTokenUnderLock calls
+      loadActiveConnection, cachedAccessGrant and refreshAccessToken and never names openToken,
+      sealToken, rewrapToken or connectionBinding, and never imports token-store.ts — so
+      google-tokens-only-in-with-google and scripts/check-google-token-chokepoint.mjs are both unchanged
+      and still report five modules. Moving the refresh into this file, as G-CONN-03''s NOTE anticipated,
+      would have meant a SIXTH entry on both allow-lists in exchange for a file move; a new case in
+      scripts/test-gates.mjs pins the list so a later widening has to be a decision rather than a diff.
+      cachedAccessGrant was extracted from accessTokenFor rather than copied, because the margin
+      arithmetic is asked twice — once before the lock and once inside it — and two copies of it would
+      eventually disagree in the direction of a token that expires mid-request'
+    - 'NOTE: WithGoogleDeps.lock is REQUIRED, not optional. An optional lock is one every consumer may
+      omit, which is the failure lifecycle.ts refused to introduce by taking the lock one level too low:
+      a refresh path that can be bypassed looks serialised without being it. withGoogle now calls
+      accessTokenUnderLock; accessTokenFor remains as the unlocked primitive the locked path is built
+      from and the only path available to a store with no transaction seam. createMemoryRefreshLock
+      serialises per connection id for the unit tests rather than passing bodies straight through — a
+      permissive fake here would make every double-check assertion above it pass for the wrong reason'
+    - 'NOTE: the double check is only correct under READ COMMITTED, so it is asserted rather than
+      assumed. Under REPEATABLE READ the snapshot is taken at the first statement — the lock
+      acquisition itself — so the re-read returns the row as it was BEFORE the winner committed and the
+      loser refreshes anyway, silently and while looking correct. assertReadCommitted runs inside the
+      transaction on current_setting(''transaction_isolation''); its rejecting branch is unit-tested for
+      all three other levels, because the failure branch of a guard nothing has watched fail is not a
+      guard'
+    - 'NOTE: a lock_timeout was added and is not decoration. pg_advisory_xact_lock waits for ever by
+      default, so a hung HTTPS call to Google would leave every waiter holding an open transaction and
+      therefore a pooled connection — one slow refresh becoming 53300 too_many_connections for the
+      booking flow. SET LOCAL via set_config(…, true) so it cannot leak onto the next user of a pooled
+      connection; 55P03 is translated into an AppError whose details.reason is
+      google_refresh_lock_timeout, which classifies TransientUpstream and therefore throws for pg-boss
+      to retry with backoff rather than degrading the consumer. Proven against a lock held on a reserved
+      connection, with the contention itself asserted from a third session first'
+    - 'NOTE: FakeGoogleOptions gained rotatesRefreshToken (default false, Google''s ordinary behaviour).
+      Until it existed the rotation branch in refreshAccessToken was unreachable from any test, and the
+      acceptance line about a rotated token could only have been satisfied by a hand-built response. Its
+      control is the default: with rotation off the stored ciphertext must be byte-identical afterwards,
+      which is what stops "the ciphertext changed" from being a statement about recordRefresh rewriting
+      the column unconditionally. The change is additive and every existing caller still compiles'
+    - 'NOTE: the ten-way race is made deterministic by a barrier, and that was a real flake rather than a
+      precaution. accessTokenUnderLock reads the row once before it takes the lock, so whether a caller
+      reaches the lock at all depends on whether its read landed before the winner''s COMMIT — scheduling,
+      not behaviour. Asserting that all ten reached it passed when the file ran alone and FAILED inside the
+      full sequential suite, where the extra load let later reads see the committed row and take the fast
+      path. storeHoldingEveryReader wraps the outer store''s load so every caller holds the stale row
+      before any of them locks, which is both deterministic and the exact scenario docs/10 §4 describes:
+      three jobs starting in the same second on different workers, all seeing a stale token. The barrier
+      releases in JS after each query returned, so no connection is held while waiting, and the store
+      inside the lock is a different object so the double check is never held. The test also now asserts,
+      from withGoogle''s own log lines, that exactly one of the ten reported refreshed=true and the other
+      nine reported false — one did the work and nine used its token, which is the sentence the unit
+      exists to make true'
+    - 'NOTE: the concurrency control asserts MORE than one refresh rather than exactly ten. Re-run with
+      a pass-through lock the count lands between six and ten depending on which read happens after
+      which commit — the non-determinism IS the complaint, and pinning it would make the control flaky
+      while proving nothing beyond "not one". The acceptance line''s own assertion is exact: one refresh
+      request against the fake, ten ok outcomes, and one refreshed row in the append-only log'
+    - 'NOTE: "the old plaintext no longer matches any stored row" is asserted on the BYTES of every row,
+      not by decrypting each one, and the first version of it was a false failure of exactly the kind
+      the brief warns about. Every integration file makes its own KEK with generateKek(''v1''), which is
+      randomBytes, so a loop that opened every row raised an authentication failure the moment another
+      suite had left one behind — it passed alone and failed in the full sequential suite. A byte scan
+      needs no key, so it covers their rows too, and it is the stronger claim: it would also catch a
+      token written to the column by something that never encrypted it. Its own control writes the
+      plaintext into refresh_token_ct, asserts the scan finds it, and deletes the row immediately, because
+      zero hits is also what a query against the wrong column reports. This file isolates itself the way
+      with-google.itest.ts does — status = ''disconnected'' for every other google_sub rather than a
+      DELETE, because google_reviews.connection_id is ON DELETE RESTRICT'
+    - 'NOTE: no migration and no SCHEMA_VERSION change, and no new cron. The pg-boss job in the payload
+      test is a queue owned by the test file, because the scheduled refresh is G-CONN-06''s daily health
+      check at 03:00 Asia/Dubai — declaring a cron here would need an agent_definition row for a job
+      that unit owns. The google_connections_access_token_complete CHECK from 0016 is what the new write
+      is proven against: three known-bad partial writes in scripts/test-gates.mjs are rejected by the
+      constraint name, with both legitimate shapes (all six written, all six cleared) as controls'
     files:
     - packages/google/src/token-refresh.ts
-    - packages/google/src/token-refresh.integration.test.ts
+    - packages/google/src/token-refresh.test.ts
+    - packages/google/src/token-refresh.itest.ts
+    - packages/google/src/lifecycle.ts
+    - packages/google/src/with-google.ts
+    - packages/google/src/index.ts
+    - packages/google/src/with-google.test.ts
+    - packages/google/src/with-google.itest.ts
+    - packages/providers/src/google/fake-google.ts
+    - scripts/test-gates.mjs
   - id: G-CONN-05
     order: 155
     title: Account and location picker, LOCATION_GROUP enumeration, GSC selected independently
@@ -7422,7 +7680,7 @@ units:
       run and removed in a finally block, and each asserted by name by the CI-completeness check so deleting
       one fails the build.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F02
@@ -7437,11 +7695,52 @@ units:
       from the workflow fails the check
     - pnpm verify runs all four scans locally and completes within the declared time budget, asserted by
       the gate harness
+    - 'NOTE: container scanning is scoped, because there is no container. Image vulnerability scanning
+      — a Trivy or Grype pass over a built image — needs an image, and no Dockerfile exists in this
+      repository: apps/worker/Dockerfile belongs to W-SYS-06, which needs ffmpeg in it. Rather than
+      invent one, `pnpm container` enforces the half that needs no image, each rule proven to fire by a
+      known-bad fixture: every image reference pinned to a non-moving tag, the PostgreSQL major in
+      docker-compose.yml and .github/workflows/ci.yml equal to the DigitalOcean Managed Database major
+      (16), no undeclared base image, and the Dockerfile rules themselves — base image pinned by
+      @sha256 digest, a non-root final USER, no .env copied into a layer, every Dockerfile declared with
+      an owner. The deferral cannot be forgotten: the moment apps/worker/Dockerfile exists the gate
+      fails with [dockerfile-appeared] until build/container-policy.json is updated, which is the commit
+      that must also add the image scan. Deferred to W-SYS-06.'
+    - 'NOTE: the dependency audit is split, because `pnpm verify` must not depend on the network. The
+      offline half, `pnpm deps`, is in `verify` and in CI: it matches the resolved lockfile graph and
+      every workspace manifest against build/advisories.json — a dated, committed snapshot — and
+      enforces the allowlist''s own hygiene. The online half, `pnpm audit:online`, is a separate CI step
+      running `pnpm audit --audit-level high` against registry.npmjs.org, and is deliberately absent
+      from `verify`: a gate that fails offline or behind an agent proxy is a gate that gets commented
+      out, and a check nobody runs is indistinguishable from one that does not exist. That makes five
+      gates wired into CI rather than four; all five are asserted by name by case 29 of
+      scripts/test-gates.mjs.'
+    - 'NOTE: the findings against the repository as it stands are recorded, not fixed, per ADR 0002''s
+      rule that a deliberately pinned toolchain is not loosened to satisfy a scanner. Licences: one
+      copyleft dependency is distributed — @img/sharp-libvips-<platform>, LGPL-3.0-or-later, reached at
+      apps/web and apps/worker > packages/media > sharp — accepted in build/licence-policy.json with the
+      notice-and-replacement obligation stated, which lands on W-SYS-06''s image. axe-core and
+      lightningcss (both MPL-2.0) are build tooling only and are not distributed. Advisories: five, none
+      critical or high — GHSA-67mh-4wv8-2f99 (esbuild 0.18.20, pinned beneath @payloadcms/db-postgres >
+      drizzle-kit, and the advisory is in a development server this system never starts) and four
+      dompurify 3.4.8 advisories reachable only through Payload''s Monaco admin editor. Each carries a
+      dated expiry in build/advisory-allowlist.json; a critical advisory cannot be allowlisted at all.
+      Credentials: none.'
+    - 'NOTE: no migration and no schema change — every gate reads files, pnpm-lock.yaml and the pnpm
+      store. SCHEMA_VERSION is untouched.'
     files:
     - scripts/test-gates.mjs
     - .github/workflows/ci.yml
     - scripts/check-licences.mjs
     - scripts/check-secrets.mjs
+    - scripts/check-dependencies.mjs
+    - scripts/check-container.mjs
+    - scripts/lib/dependency-graph.mjs
+    - build/advisories.json
+    - build/advisory-allowlist.json
+    - build/licence-policy.json
+    - build/secret-allowlist.json
+    - build/container-policy.json
     - package.json
   - id: H-HARD-03
     order: 177

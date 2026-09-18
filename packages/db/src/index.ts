@@ -45,6 +45,17 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  bucketTotalFils,
+  type OutstandingPayable,
+  outstandingPayables,
+  overdueTotalFils,
+  PAYABLES_AGING_BUCKETS,
+  type PayablesAgingBucket,
+  type PayablesAgingReport,
+  type PayablesAgingRow,
+  payablesAging,
+} from './queries/payables-aging.ts'
+export {
   isBalanced,
   type TrialBalance,
   type TrialBalanceRow,
@@ -68,6 +79,35 @@ export {
   setKillSwitch,
   withAgentRun,
 } from './repositories/agents.ts'
+export {
+  archiveService,
+  CATALOGUE_REFUSALS,
+  CATALOGUE_SQLSTATE,
+  type CatalogueRefusal,
+  type CompliancePolicyRow,
+  catalogueError,
+  changeVariantPrice,
+  deleteService,
+  listBookableServices,
+  type PathResolution,
+  type PriceChange,
+  type PriceChangeInput,
+  type PublicDisplayNameLint,
+  publishService,
+  type RenameSlugResult,
+  readCompliancePolicy,
+  readService,
+  refusalOf,
+  renameServiceSlug,
+  resolveServicePath,
+  SERVICE_PATH_PREFIX,
+  type ServiceSnapshot,
+  type SetPublicDisplayNameInput,
+  servicePath,
+  setInternalName,
+  setPublicDisplayName,
+  TREATMENTS_INDEX_PATH,
+} from './repositories/catalogue.ts'
 export {
   CUSTOMER_ORIGINS,
   type CustomerIdentityInput,
@@ -190,6 +230,31 @@ export {
   openingImbalanceFils,
   provisionalOpeningBalances,
 } from './services/opening-balances.ts'
+export {
+  BILL_SERIES_CODE,
+  BILL_TAX_TREATMENTS,
+  type BillLineToPost,
+  type BillTaxTreatment,
+  type BillToPost,
+  findSupplierByCode,
+  isDuplicateSupplierReference,
+  isInputVatWithoutTrn,
+  PLACE_OF_SUPPLY_RULES,
+  type PlaceOfSupplyRule,
+  type PostedBill,
+  type PostedBillLine,
+  PURCHASES_SQLSTATE,
+  postBill,
+  purchaseError,
+  RECOVERABLE_INPUT_VAT_ACCOUNT_CODE,
+  readBill,
+  recordSupplier,
+  SUPPLIER_RESIDENCIES,
+  type SupplierInput,
+  type SupplierRecord,
+  type SupplierResidency,
+  TRADE_PAYABLES_ACCOUNT_CODE,
+} from './services/post-bill.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-export const SCHEMA_VERSION = 27 as const
+export const SCHEMA_VERSION = 29 as const

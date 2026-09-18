@@ -70,6 +70,10 @@ export const ACTION_CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* An action may carry a glyph beside its label — the spine's back link does. Without a gap the two
+     touch, and the value is the same one \`.be-btn\` uses, so an action and a button space a glyph
+     identically rather than by eye. */
+  gap: var(--space-4);
   min-block-size: 48px;
   min-inline-size: 48px;
   padding-inline: var(--space-8);

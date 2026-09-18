@@ -89,6 +89,20 @@ export const service = pgTable(
      */
     turnaroundMinutes: smallint('turnaround_minutes').notNull(),
     displayOrder: smallint('display_order').notNull(),
+    /**
+     * When the service became publicly bookable; `null` is a draft (B-CAT-05, migration 0029).
+     *
+     * Setting it is guarded in the database by three separate named refusals — no room-type
+     * compatibility row (ZC001), no resource shape (ZC002), no priced variant (ZC003) — because all
+     * three present to the owner as the same symptom: the treatment is on the site and nobody can
+     * book it.
+     */
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    /**
+     * When the service left the menu. Archive, never delete: a future appointment holds the variant it
+     * was quoted from, and `appointment.service_variant_id` is ON DELETE RESTRICT (0024).
+     */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     /** The same provenance trio as `app_setting`, read by the Unconfirmed Assumptions panel. */
     isProvisional: boolean('is_provisional').notNull(),
     provisionalNote: text('provisional_note'),
@@ -98,6 +112,17 @@ export const service = pgTable(
   },
   (t) => [
     unique('service_style_treatment_key_unique').on(t.style, t.treatmentKey),
+    // The public menu's read and the one definition of bookable (0029). Partial, so a draft or an
+    // archived service is absent from the index rather than filtered out of it.
+    index('service_bookable_idx')
+      .on(t.displayOrder, t.id)
+      .where(sql`${t.publishedAt} is not null and ${t.archivedAt} is null`),
+    // An archived service that is still published is a menu item the site renders and the solver
+    // refuses, which reads as a broken booking system rather than a withdrawn treatment.
+    check(
+      'service_archived_is_not_published',
+      sql`${t.archivedAt} is null or ${t.publishedAt} is null`,
+    ),
     check('service_treatment_key_snake_case', sql`${t.treatmentKey} ~ '^[a-z][a-z0-9_]*$'`),
     check('service_slug_kebab_case', sql`${t.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
     check(

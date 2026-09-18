@@ -76,6 +76,17 @@ export interface FakeGoogleOptions {
    * everything requested would leave that path unbuilt until launch day.
    */
   readonly grantedScopes?: readonly string[]
+  /**
+   * Whether `refresh` returns a **new** refresh token alongside the access token.
+   *
+   * Default false, because that is Google's ordinary behaviour: a refresh returns the same refresh
+   * token and the response omits the field. But it is not a guarantee, and docs/10 §4 is explicit that
+   * a rotated token must be persisted — *"silently discarding a rotated token is a time bomb"*: the old
+   * one stops working at a moment nothing in the deploy log explains. Until this option existed the
+   * rotation branch in `refreshAccessToken` was unreachable from any test, and an unreachable branch is
+   * one nobody has seen work.
+   */
+  readonly rotatesRefreshToken?: boolean
 }
 
 function addSeconds(iso: string, seconds: number): string {
@@ -113,6 +124,7 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
     sub = '104729518362094771533',
     email = DEFAULT_FAKE_EMAIL,
     grantedScopes = FAKE_GRANTED_SCOPES,
+    rotatesRefreshToken = false,
   } = options
   let issuedRefreshTokens = 0
   let issuedCodes = 0
@@ -267,7 +279,10 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         })
         throw failureError(GOOGLE_OAUTH, armed)
       }
-      const tokens = issue(grantedScopes, false)
+      // Rotation off by default: Google normally returns the same refresh token and omits the field,
+      // and a fake that rotated on every call would make "the stored ciphertext changed" true whatever
+      // the code did with the response.
+      const tokens = issue(grantedScopes, rotatesRefreshToken)
       log.record({
         provider: GOOGLE_OAUTH,
         operation: 'refresh',

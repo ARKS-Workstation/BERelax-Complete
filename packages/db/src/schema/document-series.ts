@@ -45,9 +45,12 @@ export const documentSeries = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
   (t) => [
+    // Named `..._allowed` rather than the anonymous name PostgreSQL gave the original, because 0028
+    // dropped and re-added it to admit a fourth kind: the next unit that adds one extends it by name
+    // instead of guessing what the constraint was called.
     check(
-      'document_series_document_kind_check',
-      sql`${t.documentKind} in ('tax_invoice', 'simplified_invoice', 'credit_note')`,
+      'document_series_document_kind_allowed',
+      sql`${t.documentKind} in ('tax_invoice', 'simplified_invoice', 'credit_note', 'supplier_bill')`,
     ),
     check('document_series_prefix_check', sql`${t.prefix} <> ''`),
     check('document_series_padding_check', sql`${t.padding} between 1 and 18`),

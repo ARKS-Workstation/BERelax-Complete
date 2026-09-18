@@ -50,8 +50,10 @@ export {
 export {
   type AccessTokenGrant,
   accessTokenFor,
+  cachedAccessGrant,
   googleReauthRequired,
   grantFailureFromError,
+  loadActiveConnection,
   refreshAccessToken,
   type TokenLifecycleDeps,
 } from './lifecycle.ts'
@@ -112,6 +114,20 @@ export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
  *
  * `SealedToken` stays: it is the five sealed columns as a type, and a type decrypts nothing.
  */
+export {
+  accessTokenUnderLock,
+  assertReadCommitted,
+  createMemoryRefreshLock,
+  createPostgresRefreshLock,
+  DEFAULT_REFRESH_LOCK_TIMEOUT_MS,
+  type LockedRefreshScope,
+  type ProactiveRefreshDeps,
+  REFRESH_LOCK_NAMESPACE,
+  REFRESH_LOCK_TIMEOUT,
+  REFRESH_LOCK_WRONG_ISOLATION,
+  type RefreshLockOptions,
+  type RefreshLockRunner,
+} from './token-refresh.ts'
 export type { SealedToken } from './token-store.ts'
 export {
   type DegradationCause,
