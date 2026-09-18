@@ -15,7 +15,6 @@
  * so that a screenshot of the clinical screen cannot be mistaken for a real record.
  */
 import { AppError } from '@berelax/shared'
-import type { Rng } from './rng.ts'
 
 /** Mobile prefixes actually allocated in the UAE. A fixture number must avoid all of them. */
 export const ALLOCATED_UAE_MOBILE_PREFIXES = ['50', '52', '54', '55', '56', '58'] as const
@@ -33,84 +32,54 @@ export const SYNTHETIC_EMAIL_DOMAIN = 'fixture.invalid'
 export const CLINICAL_FIXTURE_PREFIX = 'FIXTURE (not a real record) —'
 
 /**
- * Given names, plainly fictional, spanning the scripts the salon actually serves.
+ * There are no invented names in this fixture, and that is deliberate.
  *
- * Arabic and Latin both appear because a customer list that is entirely Latin never exercises the
- * bidirectional layout, and a therapist roster that is entirely one script never exercises the
- * name-rendering rules. The list is fixed rather than generated, so the fixture is reviewable.
+ * An earlier version generated plausible-looking names from a pool. Two things are wrong with that.
+ *
+ * **The therapists have no names to invent.** Nineteen photographs and zero names is the real state
+ * of the business's site, and ADR 0020 turns it into a rule: a therapist page publishes only with a
+ * display name and a recorded photography consent, both entered by the admin. A fixture that supplies
+ * names shows a system in a state it has never been in, and quietly hides the guard that matters.
+ *
+ * **A plausible name is a liability even when it is fake.** It gets exported, demoed, pasted into a
+ * ticket, and at some point somebody treats it as a person. A label that could not be a name cannot.
+ *
+ * So customers are labelled by their record number, which is what they are in a fixture, and
+ * therapists carry no name at all until one is set.
  */
-export const SYNTHETIC_GIVEN_NAMES = [
-  'Amal',
-  'Bilal',
-  'Dana',
-  'Faris',
-  'Hana',
-  'Idris',
-  'Jamila',
-  'Karim',
-  'Layla',
-  'Marwan',
-  'Nadia',
-  'Omar',
-  'Rania',
-  'Samir',
-  'Tala',
-  'Yusuf',
-  'Zara',
-  'Elena',
-  'Grace',
-  'Mei',
-  'Nina',
-  'Priya',
-  'Sofia',
-  'Thandi',
-] as const
 
-export const SYNTHETIC_FAMILY_NAMES = [
-  'Al Fulani',
-  'Testovic',
-  'Sampleton',
-  'Fixture',
-  'Placeholder',
-  'Demoson',
-  'Mockridge',
-  'Stubbs',
-] as const
+/** `Customer 0042` / `عميل 0042`. Not a name, and not mistakable for one. */
+export function customerLabel(index: number, locale: 'en' | 'ar' = 'en'): string {
+  const serial = String(index).padStart(4, '0')
+  return locale === 'ar' ? `عميل ${serial}` : `Customer ${serial}`
+}
 
-/** Arabic display names for the therapists whose profile is Arabic-first. */
-export const SYNTHETIC_GIVEN_NAMES_AR = [
-  'أمل',
-  'بلال',
-  'دانة',
-  'فارس',
-  'هناء',
-  'ليلى',
-  'كريم',
-  'نادية',
-] as const
+/** `Therapist 07`. An internal reference for the rota and the scheduler, never a display name. */
+export function therapistReference(index: number): string {
+  return `Therapist ${String(index).padStart(2, '0')}`
+}
 
 export interface SyntheticPerson {
-  readonly displayName: string
+  /** A record label, not a name. See the note above. */
+  readonly label: string
   readonly phone: string
   readonly email: string
 }
 
 /**
- * A person, whose phone number is derived from an index rather than drawn at random.
+ * A customer record, whose phone number is derived from its index rather than drawn at random.
  *
- * Derivation guarantees uniqueness without a retry loop, and it makes the fixture's numbers legible:
- * customer 42 is `+971 59 000 0042`. A collision in a fixture is not a cosmetic problem — two
- * customers sharing a number would merge under the phone-first identity rule (ADR 0014) and the
- * fixture would silently have one fewer customer than it claims.
+ * Derivation guarantees uniqueness without a retry loop, and it makes the numbers legible: customer
+ * 42 is `+971 59 000 0042`. A collision in a fixture is not cosmetic — two customers sharing a number
+ * would merge under the phone-first identity rule (ADR 0014), and the fixture would silently have one
+ * fewer customer than it claims.
  */
-export function syntheticPerson(rng: Rng, index: number): SyntheticPerson {
-  const given = rng.pick(SYNTHETIC_GIVEN_NAMES)
-  const family = rng.pick(SYNTHETIC_FAMILY_NAMES)
+export function syntheticPerson(index: number): SyntheticPerson {
   const serial = String(index).padStart(7, '0')
   return {
-    displayName: `${given} ${family}`,
+    label: customerLabel(index),
     phone: `+971${SYNTHETIC_MOBILE_PREFIX}${serial}`,
-    email: `${given.toLowerCase()}.${index}@${SYNTHETIC_EMAIL_DOMAIN}`,
+    email: `customer.${index}@${SYNTHETIC_EMAIL_DOMAIN}`,
   }
 }
 
@@ -135,6 +104,10 @@ export function assertSynthetic(person: SyntheticPerson): void {
   }
   if (!person.email.endsWith(`@${SYNTHETIC_EMAIL_DOMAIN}`)) {
     problems.push(`${person.email} is not on the unroutable fixture domain`)
+  }
+  // A label that looks like a name is the failure this whole module exists to prevent.
+  if (!/^(Customer|Therapist) \d+$/.test(person.label)) {
+    problems.push(`${person.label} looks like a name rather than a record label`)
   }
 
   if (problems.length > 0) {

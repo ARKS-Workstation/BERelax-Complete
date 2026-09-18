@@ -52,12 +52,14 @@ import {
   FIXTURE_TIMEZONE,
   FIXTURE_TODAY,
 } from './clock.ts'
+import { assetsForSlot, type MediaAsset } from './media.ts'
 import { createRng, type Rng } from './rng.ts'
 import {
   assertSynthetic,
-  SYNTHETIC_GIVEN_NAMES_AR,
+  customerLabel,
   syntheticClinicalNote,
   syntheticPerson,
+  therapistReference,
 } from './synthetic.ts'
 
 export const DEFAULT_SEED = 20260918
@@ -86,14 +88,26 @@ export interface FixtureRoom {
 
 export interface FixtureTherapist {
   readonly id: string
-  readonly displayName: string
+  /**
+   * An internal reference for the rota and the scheduler. Never shown to a customer.
+   *
+   * A therapist is identified in the back office long before anybody decides what name goes on the
+   * website, and conflating the two is how an internal label ends up published.
+   */
+  readonly reference: string
+  /**
+   * The public name, set by the admin. **Absent for every therapist in this fixture**, because the
+   * business's site has nineteen photographs and no names, and the build does not invent them.
+   */
+  readonly displayName?: string
   readonly displayNameAr?: string
   readonly gender: Gender
   readonly skills: readonly TreatmentStyle[]
   readonly languages: readonly ('en' | 'ar' | 'tl' | 'th')[]
-  /** Nobody is published without a name and a recorded consent — ADR 0020. */
+  /** ADR 0020: publishing needs a name AND a recorded consent. Neither is assumed. */
   readonly photographyConsent: boolean
-  readonly published: boolean
+  /** The real photograph from the business's own site. Never a placeholder, never stock. */
+  readonly portrait: MediaAsset
 }
 
 export interface FixtureShift {
@@ -123,7 +137,9 @@ export interface FixtureAppointment {
 
 export interface FixtureCustomer {
   readonly id: string
-  readonly displayName: string
+  /** A record label such as `Customer 0042`. Not a name; see `synthetic.ts`. */
+  readonly label: string
+  readonly labelAr: string
   readonly phone: string
   readonly email: string
   readonly gender: Gender
@@ -284,31 +300,48 @@ const ROOMS: readonly FixtureRoom[] = [
   { id: 'room-wet-1', name: 'Wet Room 1', capacity: 1, wet: true },
 ]
 
+/**
+ * Whether a therapist page may be published.
+ *
+ * Derived, never stored as a flag. ADR 0020 requires a display name and a recorded photography
+ * consent; a boolean somebody sets is a boolean somebody sets wrongly, and the guard then exists in
+ * the data model and nowhere on screen.
+ */
+export function isPublishable(therapist: FixtureTherapist): boolean {
+  return therapist.displayName !== undefined && therapist.photographyConsent
+}
+
+/**
+ * Eight therapists, each carrying a real portrait from the business's own site and no name.
+ *
+ * No name is the point. Nineteen photographs and zero names is the actual launch state, so every
+ * therapist here is unpublishable until an admin supplies one — which means every screen that lists
+ * therapists has to handle that case, rather than handling it in theory.
+ */
 function buildTherapists(rng: Rng): FixtureTherapist[] {
-  const people = rng.fork('therapists')
+  const roster = rng.fork('therapists')
+  const portraits = assetsForSlot('therapist-portrait')
   const therapists: FixtureTherapist[] = []
   for (let index = 0; index < 8; index += 1) {
-    const person = syntheticPerson(people, 900 + index)
-    assertSynthetic(person)
+    const portrait = portraits[index % portraits.length]
+    if (portrait === undefined) throw new Error('the media library has no therapist portraits')
     // Style is a treatment attribute, not a therapist one (ADR 0021) — but it maps to a required
     // skill, so the roster must cover both or half the catalogue is unbookable.
     const skills: TreatmentStyle[] =
       index % 3 === 0 ? ['asian', 'arabic'] : index % 2 === 0 ? ['asian'] : ['arabic']
-    const arabicFirst = skills.includes('arabic') && index % 2 === 1
-    // Two therapists are deliberately unpublished: one with no consent on record, one with consent
-    // but no display name. ADR 0020 says both must render as unlinked photo cards.
-    const photographyConsent = index !== 6
-    const published = photographyConsent && index !== 7
     therapists.push({
       id: `thr-${index + 1}`,
-      displayName: person.displayName,
-      ...(arabicFirst ? { displayNameAr: people.pick(SYNTHETIC_GIVEN_NAMES_AR) } : {}),
+      reference: therapistReference(index + 1),
       gender: index % 4 === 3 ? 'male' : 'female',
       skills,
-      languages: arabicFirst ? ['ar', 'en'] : index % 3 === 2 ? ['en', 'tl'] : ['en', 'th'],
-      photographyConsent,
-      published,
+      languages: index % 3 === 1 ? ['ar', 'en'] : index % 3 === 2 ? ['en', 'tl'] : ['en', 'th'],
+      // Consent is recorded for some and not others, because that is the state a real consent
+      // register is in partway through collecting it. It is the second half of the publish guard,
+      // and without the variation the guard is never exercised in both directions.
+      photographyConsent: index % 3 !== 2,
+      portrait,
     })
+    void roster
   }
   return therapists
 }
@@ -317,7 +350,7 @@ function buildCustomers(rng: Rng, count: number): FixtureCustomer[] {
   const people = rng.fork('customers')
   const customers: FixtureCustomer[] = []
   for (let index = 0; index < count; index += 1) {
-    const person = syntheticPerson(people, index + 1)
+    const person = syntheticPerson(index + 1)
     assertSynthetic(person)
     // Marketing consent defaults false and is the minority, because that is what a consent record
     // built honestly looks like. A fixture where everyone consented makes the frequency cap and the
@@ -326,7 +359,8 @@ function buildCustomers(rng: Rng, count: number): FixtureCustomer[] {
     const hasNote = people.chance(0.18)
     customers.push({
       id: `cus-${String(index + 1).padStart(4, '0')}`,
-      displayName: person.displayName,
+      label: person.label,
+      labelAr: customerLabel(index + 1, 'ar'),
       phone: person.phone,
       email: person.email,
       gender: people.chance(0.72) ? 'female' : 'male',

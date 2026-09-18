@@ -9,7 +9,7 @@ import {
   FIXTURE_TODAY,
 } from './clock.ts'
 import { salonReport } from './reports.ts'
-import { DEFAULT_SEED, type FixtureAppointment, generateSalon } from './salon.ts'
+import { DEFAULT_SEED, type FixtureAppointment, generateSalon, isPublishable } from './salon.ts'
 import { digest } from './serialise.ts'
 import {
   ALLOCATED_UAE_MOBILE_PREFIXES,
@@ -81,12 +81,34 @@ describe('acceptance — the shape docs/12 section 5 describes', () => {
     expect(skills).toEqual(new Set(['asian', 'arabic']))
   })
 
-  it('leaves two therapists unpublished, which is the guard ADR 0020 describes', () => {
-    const unpublished = salon.therapists.filter((therapist) => !therapist.published)
-    expect(unpublished).toHaveLength(2)
-    // One has no photography consent at all; publishing that page would publish someone's face
-    // without a record that they agreed.
-    expect(unpublished.some((therapist) => !therapist.photographyConsent)).toBe(true)
+  it('gives every therapist a real portrait from the business\u2019s own site', () => {
+    for (const therapist of salon.therapists) {
+      expect(therapist.portrait.slot).toBe('therapist-portrait')
+      expect(therapist.portrait.width).toBeGreaterThan(600)
+      // Full-length shots with the face near the top: a centre crop would remove it.
+      expect(therapist.portrait.focalY ?? 50).toBeLessThan(30)
+    }
+  })
+
+  it('invents no names, so every therapist is unpublishable until an admin sets one', () => {
+    // Nineteen photographs and zero names is the real launch state. ADR 0020's guard is only
+    // exercised if the fixture is actually in it.
+    for (const therapist of salon.therapists) {
+      expect(therapist.displayName).toBeUndefined()
+      expect(isPublishable(therapist)).toBe(false)
+    }
+  })
+
+  it('records consent for some and not others, so the second half of the guard is exercised', () => {
+    const consented = salon.therapists.filter((therapist) => therapist.photographyConsent)
+    expect(consented.length).toBeGreaterThan(0)
+    expect(consented.length).toBeLessThan(salon.therapists.length)
+  })
+
+  it('labels customers by record number rather than by an invented name', () => {
+    for (const customer of salon.customers) {
+      expect(customer.label).toMatch(/^Customer \d{4}$/)
+    }
   })
 
   it('has a published rota covering every therapist', () => {

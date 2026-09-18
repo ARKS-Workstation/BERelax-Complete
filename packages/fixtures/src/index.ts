@@ -7,6 +7,7 @@
  */
 export * from './clock.ts'
 export * from './load.ts'
+export * from './media.ts'
 export * from './reports.ts'
 export * from './rng.ts'
 export * from './salon.ts'

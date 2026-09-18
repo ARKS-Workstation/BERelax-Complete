@@ -15,7 +15,13 @@
  * that fails its own rules teaches the wrong thing.
  */
 import { formatMoney, safeText } from '@berelax/core'
-import { generateSalon } from '@berelax/fixtures'
+import {
+  assetByPath,
+  assetDataUrl,
+  focalPosition,
+  generateSalon,
+  isPublishable,
+} from '@berelax/fixtures'
 import { tokensCss } from '@berelax/ui'
 
 const salon = generateSalon()
@@ -43,7 +49,11 @@ const COPY = {
     en: 'All prices include VAT. Same-gender therapist matching is on by default and can be changed at the desk.',
     ar: 'جميع الأسعار تشمل الضريبة. مطابقة الجنس مفعّلة افتراضياً ويمكن تغييرها عند الاستقبال.',
   },
+  unnamed: { en: 'Name not yet published', ar: 'الاسم غير منشور بعد' },
 } satisfies Record<string, Copy>
+
+/** The hero, from the business's own photography. */
+const HERO = assetByPath('photos/hero-team.jpg')
 
 const SLOT_TIMES = ['11:00', '12:30', '14:00', '15:30', '17:00', '18:30', '20:00', '21:30'] as const
 
@@ -169,13 +179,27 @@ section { margin-block-end: var(--space-11); }
 .therapists { display: grid; gap: var(--space-6); grid-template-columns: repeat(2, 1fr); list-style: none; padding: 0; margin: 0; }
 @media (min-width: 768px) { .therapists { grid-template-columns: repeat(4, 1fr); } }
 .therapist { text-align: start; }
-/* Placeholder at the correct ratio, on purpose: layout truth should not wait on photography, and a
-   placeholder at the right aspect exposes crop problems a real image would disguise. */
+/* Real photographs, cropped to the slot ratio around a declared focal point. The portraits are full
+   length at native ratios from 0.461 to 0.799, and a centre crop to 4:5 removes the face — which is
+   why object-position is set per image rather than left at its default. */
 .portrait {
+  display: block;
+  width: 100%;
   aspect-ratio: 4 / 5;
+  object-fit: cover;
   background: var(--color-surface-clay);
   border-radius: var(--radius-1);
   margin-block-end: var(--space-5);
+}
+
+.hero {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-1);
+  margin-block-end: var(--space-9);
+  background: var(--color-surface-clay);
 }
 .therapist .name { font-weight: 600; }
 /* ink-2, not ink-3. ink-3 is 3.40:1 and docs/08 marks it "large text and meta only"; this label is
@@ -215,17 +239,20 @@ export function renderSpecimenHtml(options: SpecimenOptions): string {
       `<li><button class="slot" type="button" aria-pressed="${index === 2 ? 'true' : 'false'}">${time}</button></li>`,
   )
 
-  // Three published and one not, deliberately. The unpublished state is a rule (ADR 0020: no page
-  // without a display name and a recorded photography consent) and a specimen that only shows the
-  // happy path is how a rule ends up implemented in the data model and nowhere on screen.
-  const published = salon.therapists.filter((therapist) => therapist.published).slice(0, 3)
-  const withheld = salon.therapists.filter((therapist) => !therapist.published).slice(0, 1)
-  const therapists = [...published, ...withheld].map((therapist) => {
-    // ADR 0020: a therapist without a recorded consent renders as an unlinked photo card.
-    const name = therapist.published
-      ? `<span class="name">${safeText(rtl ? (therapist.displayNameAr ?? therapist.displayName) : therapist.displayName)}</span>`
-      : `<span class="unnamed">${t({ en: 'Name not yet published', ar: 'الاسم غير منشور بعد' })}</span>`
-    return ['<li class="therapist">', '<div class="portrait"></div>', name, '</li>'].join('')
+  // Every therapist, unnamed, because that is the launch state: nineteen photographs and no names.
+  // A specimen that shows the happy path is how ADR 0020's guard ends up implemented in the data
+  // model and nowhere on screen — so this page shows what the site looks like on day one.
+  const therapists = salon.therapists.slice(0, 4).map((therapist) => {
+    const publishable = isPublishable(therapist)
+    const label = publishable
+      ? `<span class="name">${safeText(rtl ? (therapist.displayNameAr ?? therapist.displayName ?? '') : (therapist.displayName ?? ''))}</span>`
+      : `<span class="unnamed">${t(COPY.unnamed)}</span>`
+    // A real photograph, cropped to the slot's ratio around its focal point. Centre-cropping a
+    // full-length portrait to 4:5 removes the face, which is the defect a flat placeholder hides.
+    const image =
+      `<img class="portrait" src="${assetDataUrl(therapist.portrait.path)}" alt="" ` +
+      `style="object-position: ${focalPosition(therapist.portrait)}" loading="lazy">`
+    return ['<li class="therapist">', image, label, '</li>'].join('')
   })
 
   return `<!doctype html>
@@ -239,6 +266,7 @@ export function renderSpecimenHtml(options: SpecimenOptions): string {
 <body>
 <div class="page">
   <header>
+    <img class="hero" src="${assetDataUrl(HERO.path)}" alt="" style="object-position: ${focalPosition(HERO)}">
     <p class="eyebrow">${t(COPY.title)}</p>
     <h1>${t(COPY.tagline)}</h1>
     <p class="lede">${t(COPY.lede)}</p>

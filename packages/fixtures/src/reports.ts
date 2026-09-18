@@ -28,7 +28,8 @@ export interface DailyTakings {
 
 export interface TherapistUtilisation {
   readonly therapistId: string
-  readonly displayName: string
+  /** The internal reference, not a public name — a back-office report is back office. */
+  readonly reference: string
   readonly completedAppointments: number
   readonly bookedMinutes: number
   readonly gross: Money
@@ -99,7 +100,7 @@ export function therapistUtilisation(salon: FixtureSalon): TherapistUtilisation[
     )
     return {
       therapistId: therapist.id,
-      displayName: therapist.displayName,
+      reference: therapist.reference,
       completedAppointments: completed.length,
       bookedMinutes: completed.reduce(
         (total, appointment) => total + (appointment.endsAt - appointment.startsAt) / 60_000,

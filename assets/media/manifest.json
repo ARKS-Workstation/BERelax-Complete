@@ -1,0 +1,249 @@
+{
+  "source": "https://berelax.netlify.app/ — the business’s own prototype site",
+  "slots": {
+    "therapist-portrait": {
+      "ratio": [
+        4,
+        5
+      ],
+      "minWidth": 600,
+      "focalRequired": true
+    },
+    "hero": {
+      "ratio": [
+        16,
+        9
+      ],
+      "minWidth": 1280,
+      "focalRequired": true
+    },
+    "logo": {
+      "ratio": null,
+      "minWidth": 240,
+      "focalRequired": false
+    }
+  },
+  "assets": [
+    {
+      "path": "logo/be-relax-logo-dark.png",
+      "slot": "logo",
+      "width": 950,
+      "height": 467,
+      "bytes": 105384
+    },
+    {
+      "path": "logo/be-relax-logo-white.png",
+      "slot": "logo",
+      "width": 719,
+      "height": 354,
+      "bytes": 74874
+    },
+    {
+      "path": "photos/hero-team.jpg",
+      "slot": "hero",
+      "width": 1672,
+      "height": 941,
+      "bytes": 231994,
+      "focalX": 50,
+      "focalY": 45
+    },
+    {
+      "path": "photos/spa-01.jpg",
+      "slot": "hero",
+      "width": 1983,
+      "height": 793,
+      "bytes": 232939,
+      "focalX": 50,
+      "focalY": 45
+    },
+    {
+      "path": "photos/spa-02.jpg",
+      "slot": "hero",
+      "width": 1672,
+      "height": 941,
+      "bytes": 170558,
+      "focalX": 50,
+      "focalY": 45
+    },
+    {
+      "path": "photos/spa-03.jpg",
+      "slot": "hero",
+      "width": 1376,
+      "height": 768,
+      "bytes": 204775,
+      "focalX": 50,
+      "focalY": 45
+    },
+    {
+      "path": "team/team-01.jpg",
+      "slot": "therapist-portrait",
+      "width": 882,
+      "height": 1600,
+      "bytes": 70957,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-02.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 122658,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-03.jpg",
+      "slot": "therapist-portrait",
+      "width": 737,
+      "height": 1600,
+      "bytes": 111331,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-04.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 81802,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-05.jpg",
+      "slot": "therapist-portrait",
+      "width": 900,
+      "height": 1599,
+      "bytes": 99032,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-06.jpg",
+      "slot": "therapist-portrait",
+      "width": 894,
+      "height": 1600,
+      "bytes": 101539,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-07.jpg",
+      "slot": "therapist-portrait",
+      "width": 894,
+      "height": 1600,
+      "bytes": 110787,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-08.jpg",
+      "slot": "therapist-portrait",
+      "width": 1072,
+      "height": 1467,
+      "bytes": 124236,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-09.jpg",
+      "slot": "therapist-portrait",
+      "width": 1083,
+      "height": 1453,
+      "bytes": 95683,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-10.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 120687,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-11.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 112661,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-12.jpg",
+      "slot": "therapist-portrait",
+      "width": 1023,
+      "height": 1537,
+      "bytes": 104056,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-13.jpg",
+      "slot": "therapist-portrait",
+      "width": 900,
+      "height": 1599,
+      "bytes": 144949,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-14.jpg",
+      "slot": "therapist-portrait",
+      "width": 1066,
+      "height": 1476,
+      "bytes": 58465,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-15.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 121350,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-16.jpg",
+      "slot": "therapist-portrait",
+      "width": 1121,
+      "height": 1403,
+      "bytes": 102958,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-17.jpg",
+      "slot": "therapist-portrait",
+      "width": 900,
+      "height": 1599,
+      "bytes": 88238,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-18.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 125921,
+      "focalX": 50,
+      "focalY": 16
+    },
+    {
+      "path": "team/team-19.jpg",
+      "slot": "therapist-portrait",
+      "width": 1086,
+      "height": 1448,
+      "bytes": 88759,
+      "focalX": 50,
+      "focalY": 16
+    }
+  ]
+}

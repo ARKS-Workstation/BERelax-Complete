@@ -94,6 +94,9 @@ jobs:
       - name: Progress ledger matches the manifest
         run: pnpm progress:check
 
+      - name: Media library matches its manifest
+        run: pnpm media
+
       - name: Fixture salon unchanged
         run: pnpm fixtures
 

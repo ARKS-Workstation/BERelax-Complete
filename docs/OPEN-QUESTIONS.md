@@ -88,8 +88,8 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 | Y8-opening-balances | Accounting opening balances at a clean period boundary | Zero | open | `M-VAT` |
 | Y8-coa | Existing chart of accounts and what the accountant expects monthly | Standard spa CoA | open | `M-VAT` |
 | Y8-customers | Customer list. **Imports with `marketing_consent = false` without exception** — see [11](11-execution-plan.md) §7 | Synthetic customers | open | `H-MIG` |
-| Y12-photos | **Photo library audit** — 15–20 representative images against each media slot's constraints | Palette-matched placeholders at correct aspect ratios | open | `W-SITE` final imagery |
-| Y12-consent-photo | Staff photography consent on record for anyone identifiable | Therapist pages use initials until consent recorded | open | `W-SITE` therapist pages |
+| Y12-photos | **Photo library audit and per-face focal points.** The 19 portraits from the prototype are now in `assets/media/`, and their native ratios span **0.461 to 0.799** — nearly two to one. They are full-length shots with the face in roughly the top fifth, so a 4:5 centre crop produces a row of torsos | Every portrait carries a focal point of 50%/16%, a defensible default from the framing rather than a per-face measurement. `pnpm media` fails if one is missing | open | `W-SITE` therapist grid |
+| Y12-consent-photo | Staff photography consent on record for anyone identifiable. **19 identifiable photographs are now in the repository**, taken from the business's own public site | Therapist cards render the photograph with no name and no link, which is also the launch state: the prototype has 19 photographs and 0 names | open | `W-SITE` therapist pages |
 
 ## D2. Newly opened by the prototype and live-site review
 
@@ -101,6 +101,7 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 | Y8-rooms | Room count, types, which is the wet room, which are capacity-2 | 5 rooms: 1 wet, 1 capacity-2, 3 standard | open | `B-CAT`, availability |
 | Y9-poa-prices | Prices for Four Hands, Couple Massage, Full Body Shaving | Derived as 1.8× the single-therapist equivalent | open | `B-CAT` seed |
 | Y9-shaving-room | Does Full Body Shaving need a specific room or equipment? | Any standard room | open | `service_room_type_compat` |
+| Y12-names | **The 19 therapist display names.** The prototype publishes none, and the build does not invent them — a therapist page is unpublishable without one (ADR 0020), so every therapist in the fixture is currently unpublished | Cards read "Name not yet published"; the photograph shows, the page does not link | open | `W-SITE` therapist pages, therapist SEO |
 | Y12-body-face | **Keep Jost for body text, or adopt a higher-x-height workhorse sans?** Jost is a legibility risk at 17px and worse in dense admin tables | Workhorse sans for body and admin; Jost retained for marketing display | open | `F11`, `W-SYS` |
 | Y5-analytics-basis | Lawful basis for the **internal** first-party analytics store, which shares nothing with third parties — a different question from the consent-gated GA4/Meta push | Internal store treated as consent-gated too, i.e. the stricter position | open | `A-FIRST` go-live |
 | Y12-ref-loop | **Will the front desk paste the WhatsApp ref code at booking?** If not, attribution honestly stops at the click | Ref field present; capture rate reported rather than assumed | open | funnel completeness |

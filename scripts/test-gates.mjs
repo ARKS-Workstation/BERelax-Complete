@@ -267,7 +267,23 @@ const runExpectingFailure = (cmd, args) => {
   check('critique pass reports a deliberately non-compliant page as a defect', failed)
 }
 
-// 19. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 19. A media asset without a focal point must fail the media gate.
+{
+  const f = 'assets/media/manifest.json'
+  const original = readFileSync(f, 'utf8')
+  const manifest = JSON.parse(original)
+  // The portraits are full-length at ratios from 0.461 to 0.799. Without a focal point a 4:5 crop
+  // takes the torso and leaves the face out of frame — a defect that is invisible in code.
+  const portrait = manifest.assets.find((asset) => asset.slot === 'therapist-portrait')
+  delete portrait.focalX
+  delete portrait.focalY
+  writeFileSync(f, `${JSON.stringify(manifest, null, 2)}\n`)
+  const { failed } = runExpectingFailure('node', ['scripts/check-media.mjs'])
+  writeFileSync(f, original)
+  check('media gate rejects a cropped asset with no focal point', failed)
+}
+
+// 20. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -282,6 +298,7 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm colours',
     'pnpm adr',
     'pnpm progress:check',
+    'pnpm media',
     'pnpm fixtures',
     'pnpm critique',
     'pnpm test',

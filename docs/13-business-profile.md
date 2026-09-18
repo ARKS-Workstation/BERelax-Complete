@@ -181,3 +181,24 @@ Body Shaving.
 
 All are tracked in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) with a provisional value, and none blocks the
 build.
+
+---
+
+## 8. The media library, extracted
+
+Every image from the prototype is now in `assets/media/`: **19 staff portraits, 4 interiors, 2 logo
+files**. Nothing is stock and nothing is generated. `assets/media/manifest.json` measures each one and
+`pnpm media` checks it on every build.
+
+Two measured facts came out of the extraction, and both are work rather than trivia.
+
+**The portraits span aspect ratios from 0.461 to 0.799** — nearly two to one. They are full-length
+shots and the face sits in roughly the top fifth of the frame, so a therapist grid at a fixed 4:5 with
+a centre crop returns a row of torsos. Every portrait therefore carries a focal point, defaulted to
+50%/16% from the framing. Setting them per face is `Y12-photos`.
+
+**There are 19 photographs and 0 names**, which is what the prototype publishes. The build does not
+invent them: a therapist page is unpublishable without a display name and a recorded photography
+consent ([ADR 0020](adr/0020-regulatory-profile-drives-vocabulary-and-eligibility.md)), so every
+therapist renders as an unlinked photo card reading *Name not yet published*. The names are
+`Y12-names`, and the consent register is `Y12-consent-photo`.
