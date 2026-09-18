@@ -184,7 +184,43 @@ const runExpectingFailure = (cmd, args) => {
   check('colour gate rejects a Tailwind default palette utility', failed)
 }
 
-// 14. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 14. A locked decision with no ADR must fail the coverage gate.
+{
+  const f = 'docs/01-scope-and-decisions.md'
+  const original = readFileSync(f, 'utf8')
+  // Inserted into the decisions table itself, not appended to the file: a row after the table is a
+  // row the parser correctly ignores, and a fixture that tests the parser's blind spot tests nothing.
+  const anchor = '| 1 | Repo shape'
+  writeFileSync(
+    f,
+    original.replace(anchor, `| 99 | Gate fixture | A decision nobody recorded | — |\n${anchor}`),
+  )
+  const { failed } = runExpectingFailure('node', ['scripts/check-adr-coverage.mjs'])
+  writeFileSync(f, original)
+  check('ADR gate rejects a locked decision with no record', failed)
+}
+
+// 15. An ADR the index does not link must fail the same gate.
+{
+  const f = 'docs/adr/README.md'
+  const original = readFileSync(f, 'utf8')
+  writeFileSync(f, original.replace('(0021-catalogue-shape-and-packages-only.md)', '(missing.md)'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-adr-coverage.mjs'])
+  writeFileSync(f, original)
+  check('ADR gate rejects a record the index does not link', failed)
+}
+
+// 16. A stale progress ledger must fail.
+{
+  const f = 'docs/PROGRESS.md'
+  const original = readFileSync(f, 'utf8')
+  writeFileSync(f, original.replace('units complete', 'units complete (edited by hand)'))
+  const { failed } = runExpectingFailure('python3', ['scripts/progress.py', '--check'])
+  writeFileSync(f, original)
+  check('progress gate rejects a hand-edited ledger', failed)
+}
+
+// 17. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -197,6 +233,8 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm palette',
     'pnpm tokens',
     'pnpm colours',
+    'pnpm adr',
+    'pnpm progress:check',
     'pnpm test',
     'pnpm test:integration',
     'pnpm db:migrate:dry',

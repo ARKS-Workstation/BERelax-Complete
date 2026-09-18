@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**11 / 206 units complete.**
+**12 / 206 units complete.**
 
 ## Next up
 
-1. **H01 — Progress ledger, ADRs for locked decisions, open questions**
 1. **H02 — Fake provider layer**
 1. **H03 — Deterministic seed and frozen clock**
+1. **B-MSG-01 — Channel-shaped template model, encoding, segment count and cost**
 
 ## All units
 
@@ -25,7 +25,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 9 | `F09` | Settings registry | `F04`, `F07` | — | — |
 | [x] | 10 | `F10` | Arabic RTL PDF proof | `F01` | — | — |
 | [x] | 11 | `F11` | Design tokens | `F01` | — | — |
-| [ ] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
+| [x] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
 | [ ] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
 | [ ] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |
 | [ ] | 15 | `H04` | Screenshot harness and gallery | `H03`, `F11` | — | — |

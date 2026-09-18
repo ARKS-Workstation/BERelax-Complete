@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F06
+- **Covers:** docs/01 decision 4
 
 ## The unit of work
 

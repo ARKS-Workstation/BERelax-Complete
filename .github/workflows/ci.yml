@@ -88,6 +88,12 @@ jobs:
       - name: Colour token discipline
         run: pnpm colours
 
+      - name: Every locked decision has an ADR
+        run: pnpm adr
+
+      - name: Progress ledger matches the manifest
+        run: pnpm progress:check
+
       - name: Unit tests
         run: pnpm test
 

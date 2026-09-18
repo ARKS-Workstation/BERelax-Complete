@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F02
+- **Covers:** docs/01 decision 16
 
 ## Decision
 

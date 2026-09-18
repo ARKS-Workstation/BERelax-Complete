@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F11
+- **Covers:** docs/01 decisions 30, 31
 
 ## The failure this prevents
 

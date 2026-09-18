@@ -173,12 +173,13 @@ units:
     order: 12
     title: Progress ledger, ADRs for locked decisions, open questions
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F01
     acceptance:
-    - an ADR exists for each of the 20 locked decisions in docs/01
-    - PROGRESS.md regenerated from this manifest by a script
+    - every locked decision in docs/01 is covered by an ADR, asserted by scripts/check-adr-coverage.mjs
+    - the ADR index links every record, and an uncovered decision fails the build
+    - PROGRESS.md regenerated from this manifest by a script, and a stale ledger fails the build
   - id: H02
     order: 13
     title: Fake provider layer

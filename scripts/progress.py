@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate docs/PROGRESS.md from build/manifest.yaml. The manifest is the source of truth."""
+"""Regenerate docs/PROGRESS.md from build/manifest.yaml. The manifest is the source of truth.
+
+Run with no arguments to rewrite the ledger; run with --check to assert the committed ledger is what
+this script would write today. The check is in `pnpm verify`, because a progress document that
+disagrees with the manifest is worse than no progress document: it is the one artifact a reader
+trusts to tell them where the build actually is.
+"""
 import yaml, pathlib, sys
 
 m = yaml.safe_load(open("build/manifest.yaml"))
@@ -41,5 +47,17 @@ L += ["", "## Legend", "",
       "A unit is `done` only when every acceptance check in the manifest passes in CI —",
       "never on assertion. See [12-autonomous-delivery.md](12-autonomous-delivery.md) §6.", ""]
 
-pathlib.Path("docs/PROGRESS.md").write_text("\n".join(L))
+content = "\n".join(L)
+target = pathlib.Path("docs/PROGRESS.md")
+
+if "--check" in sys.argv:
+    current = target.read_text() if target.exists() else None
+    if current == content:
+        print(f"PASS  docs/PROGRESS.md matches the manifest — {len(done)}/{len(units)} done")
+        raise SystemExit(0)
+    reason = "does not exist" if current is None else "is stale or hand-edited"
+    print(f"FAIL  docs/PROGRESS.md {reason} — run `pnpm progress`")
+    raise SystemExit(1)
+
+target.write_text(content)
 print(f"wrote docs/PROGRESS.md — {len(done)}/{len(units)} done, {len(nxt)} ready")

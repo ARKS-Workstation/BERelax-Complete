@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F10
+- **Covers:** docs/01 decisions 27, 28, 29
 
 ## The problem
 

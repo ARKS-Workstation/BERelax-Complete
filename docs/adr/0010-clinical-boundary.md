@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F08
+- **Covers:** docs/01 decisions 10, 17
 
 ## Why this exists at all
 

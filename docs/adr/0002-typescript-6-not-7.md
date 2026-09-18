@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F01
+- **Covers:** docs/01 decisions — none; this is a build-process decision
 - **Revisit when:** dependency-cruiser declares TypeScript 7 support, and the Next.js / Drizzle /
   Payload stack is known-good on it.
 

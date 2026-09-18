@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F05
+- **Covers:** docs/01 decisions 7, 8, 22
 
 ## Money
 

@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F03
+- **Covers:** docs/01 decisions — none; this is a build-process decision
 
 ## Context
 

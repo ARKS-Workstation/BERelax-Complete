@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F07
+- **Covers:** docs/01 decision 5
 
 ## The matrix is pure, and lives in `packages/core`
 

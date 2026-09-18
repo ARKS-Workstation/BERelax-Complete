@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-09-18
 - **Unit:** F02
+- **Covers:** docs/01 decisions — none; this is a build-process decision
 - **Supersedes nothing. Generalises:** [ADR 0002](0002-typescript-6-not-7.md)
 
 ## Context
