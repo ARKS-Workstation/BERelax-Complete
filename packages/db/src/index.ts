@@ -79,6 +79,25 @@ export {
   markPhoneVerified,
 } from './repositories/customer.ts'
 export {
+  type CustomerSnapshotInput,
+  INVOICE_DOCUMENT_KINDS,
+  INVOICE_SQLSTATE,
+  type InvoiceDocumentKind,
+  type InvoiceLineInput,
+  type IssuedInvoice,
+  type IssuedInvoiceLine,
+  type IssueInvoiceInput,
+  type IssuerSnapshotInput,
+  invoiceError,
+  isInvoiceAppendOnly,
+  isInvoiceTotalsDisagreement,
+  issueInvoice,
+  type MandatoryInvoiceField,
+  readInvoice,
+  readInvoiceByDisplayNumber,
+  Y11_VAT_INVOICE_FIELDS,
+} from './repositories/invoice.ts'
+export {
   type AccountBalanceRow,
   accountTotals,
   isAppendOnlyViolation,

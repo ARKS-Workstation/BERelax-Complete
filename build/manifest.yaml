@@ -1627,7 +1627,7 @@ units:
       address from premises, the full Y11-vat-invoice field superset, a separate tax_point_date, and no
       update path anywhere.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F05
@@ -1653,12 +1653,57 @@ units:
       the application role holds no UPDATE grant on invoice or invoice_line
     - 'tax_point_date is stored separately from issue date: a test asserts a supply on business_day D invoiced
       on D+1 keeps tax_point_date = D'
+    - 'NOTE: deferred to M-TILL-12 and B-CAT-06 — the Arabic-language requirement is carried but cannot be NOT
+      NULL. issuer_legal_name_ar, issuer_address_snapshot_ar and invoice_line.description_ar are nullable
+      because there is nothing to snapshot FROM: legal_entity has no Arabic legal name, premises no Arabic
+      address, and service no Arabic public display name. NOT NULL would make every invoice unissuable.
+      B-CAT-06 is the unit that seeds those tables from the real business profile and is therefore where the
+      source columns belong; M-TILL-12 is the unit that renders them. Every other field in the Y11-vat-invoice
+      superset IS a NOT NULL column, enumerated as data in Y11_VAT_INVOICE_FIELDS and checked against
+      information_schema by invoice.itest.ts.'
+    - 'NOTE: where this schema and the F10 PDF disagree, and it matters. packages/pdf/src/documents/invoice.ts
+      takes `totals: VatBreakdown` — the return type of splitGross() — for the whole document. Building that
+      value the obvious way, splitGross(documentGross), is EXACTLY the re-derivation this unit forbids: for
+      the committed two-lines-at-11-fils fixture it renders VAT of 1 beside a stored vat_total of 2, and the
+      PDF is the copy the customer keeps. M-TILL-12 must build the totals block from the stored
+      net_total/vat_total/gross_total columns (or from core''s deriveDocumentTax), never from the document
+      gross. Two smaller disagreements: InvoiceParty.nameAr and addressLinesAr are REQUIRED in the PDF''s type
+      while this schema''s Arabic columns are nullable, so M-TILL-12 needs a fallback rather than a non-null
+      assertion; and VatBreakdown carries one rateBp, which cannot express the mixed-rate document
+      invoice_line.vat_rate_bp allows — the PDF already drops the rate from its footnote when the lines
+      disagree, so the totals block is the part that needs the per-rate subtotals core returns as
+      DocumentTax.byRate.'
+    - 'NOTE: the statutory number is allocated against the ISSUE trading date, not the tax point, and the
+      tempting choice is destructive. allocate_document_number() (0013) restarts the counter at 1 whenever the
+      period key it computes differs from the stored one, so allocation dates must move forward: a January
+      invoice raised for a December supply would compute period key ''2026'' against a counter already on
+      ''2027'', reset it, and re-issue numbers December had already used. issueTradingDate falls back to
+      issueDate because a document raised while the premises is shut (the accountant at 10:00) belongs to no
+      trading date at all, which is why invoice.issue_trading_date is the one nullable date column.'
+    - 'NOTE: what else was scoped out, and to which unit. There is no link from invoice_line to a sale, an
+      appointment or a service_variant: none of those tables exists yet and a foreign key written now would be
+      a guess at a column somebody else will name — M-TILL-06 owns that wiring. There is no credit_note table:
+      a correction is a separate document with its own series, and this unit''s contribution to it is the
+      refusal (ZI003) that makes one necessary. 0026 also seeds legal_entity, which had no row at all, with
+      the real legal and trading names from docs/13 §1 and the Y1-trn placeholder ''TRN-PENDING-Y1-TRN'';
+      B-CAT-06 owns the full premises and catalogue seed, so the insert is `on conflict do nothing` and
+      touches nothing else.'
     files:
     - packages/core/src/money/vat.ts
     - packages/core/src/money/vat.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0026_invoice.sql
     - packages/db/src/schema/invoice.ts
-    - packages/db/migrations/00xx_invoice.sql
+    - packages/db/src/schema/index.ts
     - packages/db/src/repositories/invoice.ts
+    - packages/db/src/repositories/invoice.test.ts
+    - packages/db/src/repositories/invoice.itest.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/invoice.ts
+    - packages/fixtures/src/invoice.test.ts
+    - packages/fixtures/src/invoice-document.itest.ts
+    - packages/fixtures/src/index.ts
+    - scripts/test-gates.mjs
   - id: M-TILL-05
     order: 47
     title: 'Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines'

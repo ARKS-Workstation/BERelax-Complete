@@ -2426,6 +2426,228 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 26n. (M-TILL-04) The invoice document's constraints, as known-bad fixtures against real PostgreSQL.
+//
+// Every rule this unit adds is a database rule: four CHECKs on the issuer snapshot, two that reconcile
+// amounts, a composite foreign key, two UNIQUEs, a pair of refusal triggers and a DEFERRED constraint
+// trigger. A constraint is only a gate once something has been seen to bounce off it, so each probe
+// below states the rule it must trip and `checkRejectedBy` fails if the rejection came from anything
+// else — a bare non-zero exit is also what a typo in a column name produces (ADR 0003).
+//
+// `VERBOSITY=verbose` so the SQLSTATE and the constraint name are both in psql's output: the CHECKs are
+// asserted by constraint name, and the two trigger rules by their own codes, ZI001 and ZI003.
+//
+// Every probe runs inside `begin; … ; rollback;`, which is also the only way the append-only cases can
+// be written at all: `invoice` refuses DELETE for every role including the owner, so a fixture row that
+// committed could not be swept afterwards. The `finally` sweeps by marker anyway, with the two DELETE
+// triggers disabled inside its own transaction and re-enabled before it commits — because "it rolled
+// back" and "we checked" are different facts.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'GATE-INVOICE'
+  // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is the
+  // subject of the first probe below.
+  const GATE_TRN = '100123456700003'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  /** The header insert, with any field overridden. The defaults are a document that is accepted. */
+  const header = (overrides = {}) => {
+    const v = {
+      kind: "'tax_invoice'",
+      series: "'TAX-INV'",
+      period: "'GATE'",
+      number: '900001',
+      display: `'${MARKER}-0001'`,
+      legalName: "'BE RELAX SPA - L.L.C - O.P.C'",
+      tradingName: "'BE RELAX - Massage Center and Spa'",
+      trn: `'${GATE_TRN}'`,
+      address: "'250 Al Meena Street'",
+      emirate: "'Abu Dhabi'",
+      customer: "'Customer 0042'",
+      issue: "'2026-09-19'",
+      taxPoint: "'2026-09-18'",
+      net: '20',
+      vat: '2',
+      gross: '22',
+      ...overrides,
+    }
+    return (
+      'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+      'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+      'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total) values (' +
+      `${v.kind}, ${v.series}, ${v.period}, ${v.number}, ${v.display}, ${v.legalName}, ` +
+      `${v.tradingName}, ${v.trn}, ${v.address}, ${v.emirate}, ${v.customer}, ${v.issue}::date, ` +
+      `${v.taxPoint}::date, ${v.net}, ${v.vat}, ${v.gross})`
+    )
+  }
+
+  /** Two lines at 11 fils gross: net 10 and VAT 1 each, so the document's VAT is 2. */
+  const twoLines = (lineVat = '1', lineNet = '10') =>
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    `vat_rate_bp, line_net_fils, line_vat_fils) select id, n, 'Rounding probe', 1, 11, 500, ` +
+    `${lineNet}, ${lineVat} from invoice, generate_series(1, 2) as n ` +
+    `where display_number = '${MARKER}-0001'`
+
+  const probes = [
+    {
+      name: 'invoice gate rejects the seeded Y1-trn placeholder as the issuer TRN',
+      rule: 'invoice_issuer_trn_is_fifteen_digits',
+      sql: header({ trn: "'TRN-PENDING-Y1-TRN'" }),
+    },
+    {
+      name: 'invoice gate rejects a placeholder issuer legal name',
+      rule: 'invoice_issuer_name_not_placeholder',
+      sql: header({ legalName: "'[CONFIRM]'" }),
+    },
+    {
+      name: 'invoice gate rejects a placeholder issuer address',
+      rule: 'invoice_issuer_address_not_placeholder',
+      sql: header({ address: "'Address TBC'" }),
+    },
+    {
+      // NOT NULL rather than the CHECK, asserted by the column the message names. The CHECK refuses a
+      // NULL too, and only because is_placeholder_text() is deliberately not STRICT: a strict function
+      // returns NULL for NULL, and a CHECK whose expression is NULL passes.
+      name: 'invoice gate rejects a NULL issuer TRN, naming the column',
+      rule: 'null value in column "issuer_trn"',
+      sql: header({ trn: 'null' }),
+    },
+    {
+      name: 'invoice gate rejects a header whose net and VAT do not add up to its gross',
+      rule: 'invoice_totals_reconcile',
+      sql: header({ net: '21' }),
+    },
+    {
+      name: 'invoice gate rejects a line whose net and VAT do not add up to its gross',
+      rule: 'invoice_line_totals_reconcile',
+      sql: `${header()}; ${twoLines('2')}`,
+    },
+    {
+      name: 'invoice gate rejects a tax point after the date of issue',
+      rule: 'invoice_tax_point_not_after_issue',
+      sql: header({ issue: "'2026-09-18'", taxPoint: "'2026-09-19'" }),
+    },
+    {
+      // The composite foreign key to document_series (code, document_kind). Without it a tax invoice
+      // could be numbered out of the credit-note range, and the range a VAT return reads would hold
+      // two kinds of document.
+      name: 'invoice gate rejects a tax invoice numbered out of the credit-note series',
+      rule: 'invoice_series_kind_fk',
+      sql: header({ series: "'CR-NOTE'" }),
+    },
+    {
+      name: 'invoice gate rejects a duplicate display number',
+      rule: 'invoice_display_number_unique',
+      sql: `${header()}; ${header({ number: '900002' })}`,
+    },
+    {
+      name: 'invoice gate rejects the same number twice in one series period',
+      rule: 'invoice_series_period_number_unique',
+      sql: `${header()}; ${header({ display: `'${MARKER}-0002'` })}`,
+    },
+    {
+      // THE central rule. The header states 1 — what splitting the 22-fils document total gives — while
+      // its two lines sum to 2. Both inserts succeed; `set constraints all immediate` forces the
+      // deferred trigger to run without committing, which is also what leaves nothing behind.
+      name: 'invoice gate rejects VAT re-derived from the document total, at COMMIT',
+      rule: 'ZI001',
+      sql: `${header({ net: '21', vat: '1' })}; ${twoLines()}; set constraints all immediate`,
+    },
+    {
+      name: 'invoice gate rejects a document committed with no lines',
+      rule: 'ZI002',
+      sql: `${header({ net: '0', vat: '0', gross: '0' })}; set constraints all immediate`,
+    },
+    {
+      name: 'invoice gate rejects an UPDATE of an issued invoice',
+      rule: 'ZI003',
+      sql:
+        `${header()}; ${twoLines()}; ` +
+        `update invoice set notes = 'corrected' where display_number = '${MARKER}-0001'`,
+    },
+    {
+      name: 'invoice gate rejects a DELETE of an issued invoice',
+      rule: 'ZI003',
+      sql: `${header()}; ${twoLines()}; delete from invoice where display_number = '${MARKER}-0001'`,
+    },
+    {
+      name: 'invoice gate rejects an UPDATE of an issued invoice line',
+      rule: 'ZI003',
+      sql: `${header()}; ${twoLines()}; update invoice_line set line_vat_fils = 0 where line_no = 1`,
+    },
+  ]
+
+  try {
+    if (!dbUrl) {
+      check(
+        'invoice constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      for (const { name, rule, sql: statements } of probes) {
+        checkRejectedBy(name, psqlProbe(statements), rule)
+      }
+
+      // The control, and the reason the fifteen probes above mean anything: the correct document is
+      // ACCEPTED, including by the deferred trigger. Without it, a broken connection string or a
+      // renamed column would reject every probe and this gate would report fifteen passes while
+      // examining nothing.
+      const accepted = psqlProbe(`${header()}; ${twoLines()}; set constraints all immediate`)
+      check(
+        'invoice gate accepts two lines at 11 fils with a document VAT of 2',
+        !accepted.failed,
+        `rejected the document this unit exists to store:\n${accepted.output}`,
+      )
+
+      // The second control: the accepted document and the ZI001 one differ in the document VAT and in
+      // nothing else, so that probe is about the re-derivation rather than about anything else in the
+      // statement.
+      const reDerived = psqlProbe(
+        `${header({ net: '21', vat: '1' })}; ${twoLines()}; set constraints all immediate`,
+      )
+      check(
+        'the accepted and rejected documents differ only in the document VAT',
+        reDerived.failed && !accepted.failed,
+        'both probes must not have the same outcome, or the rule under test is not what is tripping',
+      )
+    }
+  } finally {
+    if (dbUrl) {
+      // `invoice` refuses DELETE for every role, so the sweep disables the two DELETE triggers and
+      // re-enables them before committing. Scoped to the marker, and a no-op when every probe rolled
+      // back as intended — which is the point of running it.
+      run('psql', [
+        '--no-psqlrc',
+        '-q',
+        dbUrl,
+        '-c',
+        'begin; ' +
+          'alter table invoice disable trigger invoice_no_delete; ' +
+          'alter table invoice_line disable trigger invoice_line_no_delete; ' +
+          'delete from invoice_line where invoice_id in ' +
+          `(select id from invoice where display_number like '${MARKER}-%'); ` +
+          `delete from invoice where display_number like '${MARKER}-%'; ` +
+          'alter table invoice enable trigger invoice_no_delete; ' +
+          'alter table invoice_line enable trigger invoice_line_no_delete; ' +
+          'commit;',
+      ])
+    }
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

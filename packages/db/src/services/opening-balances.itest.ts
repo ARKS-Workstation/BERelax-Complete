@@ -34,13 +34,20 @@ let openingEntryId = ''
 
 beforeAll(async () => {
   sql = createConnection({ url: DATABASE_URL, max: 4 })
-  // `legal_entity` is a single-row table (0003) whose row the seed writes. This suite's own database may
-  // never have been seeded, and the foreign key from `opening_balance_import` is not optional — so the
-  // row is ensured rather than assumed. `on conflict do nothing` keeps it idempotent against a seeded
-  // database, where the real values must not be overwritten by these placeholders.
+  // `legal_entity` is a single-row table (0003) and migration 0026 seeds its row; the foreign key from
+  // `opening_balance_import` is not optional, so the row is ensured rather than assumed and
+  // `on conflict do nothing` keeps that idempotent.
+  //
+  // The values are the ones 0026 seeds and docs/13 §1 states, deliberately and not as decoration. This
+  // insert used to carry an invented spelling of the legal name on the reasoning that a conflict would
+  // discard it — and then it ran against a database that predated 0026, won the race, and left the wrong
+  // legal name in the singleton every later suite reads. `legal_entity.legal_name` is snapshotted onto
+  // every tax invoice, so a fallback that can disagree with the seed is a fallback that can put the wrong
+  // registered name on a document filed with the FTA. There is one spelling, and this is it.
   await sql`
-    insert into legal_entity (id, legal_name, trading_name)
-    values (1, 'BE RELAX Massage Center and Spa LLC', 'BE RELAX')
+    insert into legal_entity (id, legal_name, trading_name, trn, licensing_authority, emirate)
+    values (1, 'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa',
+            'TRN-PENDING-Y1-TRN', 'ADDED', 'Abu Dhabi')
     on conflict (id) do nothing
   `
   // Every import row, cleared. `opening_balance_import` carries no refusal trigger — it is evidence, not

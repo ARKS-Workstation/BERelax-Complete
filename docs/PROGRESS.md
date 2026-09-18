@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**40 / 207 units complete.**
+**41 / 207 units complete.**
 
 ## Next up
 
@@ -60,7 +60,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
 | [x] | 45 | `M-TILL-03` | Gap-free sequential document numbering allocated inside the insert transaction | `F04` | — | — |
-| [ ] | 46 | `M-TILL-04` | Invoice document model: immutable per-line tax derivation and issuer snapshot | `F05`, `M-TILL-02`, `M-TILL-03` | — | Y11-vat-invoice, Y1-trn |
+| [x] | 46 | `M-TILL-04` | Invoice document model: immutable per-line tax derivation and issuer snapshot | `F05`, `M-TILL-02`, `M-TILL-03` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 47 | `M-TILL-05` | Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01` | — | — |
 | [ ] | 48 | `M-TILL-06` | Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F06`, `M-TILL-04`, `M-TILL-05` | — | — |
 | [ ] | 49 | `M-TILL-07` | Payments and refunds through the manual tender adapter | `M-TILL-06` | — | — |
