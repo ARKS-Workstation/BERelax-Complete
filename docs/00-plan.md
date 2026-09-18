@@ -1,380 +1,428 @@
-# BeRelax Platform — Master Plan & Phased Roadmap
+# BeRelax Platform — Single-Release Build Plan
 
-## 1. What we are building
+**Execution model: build the complete system, then launch once.** No incremental go-lives, no
+interim releases. This document is the work breakdown for that.
 
-A single, self-hosted platform covering the full operating surface of a one-location UAE
-massage and spa business: taking bookings, running the front desk, managing client
-relationships, paying and scheduling staff, keeping the books to FTA standard, reporting on
-the money, and acquiring customers through organic search.
+---
 
-## 2. Confirmed constraints
+## 1. What "in one go" changes, and what it does not
 
-| Decision | Value |
+**The business is already operating.** That is the important context for this whole plan. There is an
+existing trade licence, an existing service menu, existing staff on existing visas, an existing
+accountant, existing customers and an existing booking process — almost certainly a mix of phone,
+WhatsApp and a diary or an incumbent app. Two consequences follow:
+
+1. **The build is under no revenue pressure.** The business keeps trading on its current process
+   throughout. Nothing is lost by finishing the system before switching to it.
+2. **The end of the build is a migration, not a launch.** The hard part is not "going live" — it is
+   moving a live, operating business onto the system without losing a booking, a voucher liability or
+   a leave balance. §7 is therefore a work breakdown, not a risk-mitigation plea.
+
+**Changes.** No phased staff onboarding, one UAT, one training event, one cutover.
+Business-outcome-per-phase sequencing is gone, so the organising structure becomes **parallel
+workstreams against a dependency graph**, with **internal integration milestones** that prove the
+system end to end rather than ship to customers.
+
+**Does not change.** Dependencies are physics, not policy. Checkout cannot be written before the
+catalogue exists; reminders cannot be written before the appointment lifecycle exists; reporting
+cannot be written before there are facts to report on. A single release does not flatten the graph —
+it only removes the release points from it.
+
+**Also does not change: a handful of external items.** Most are answered by reading documents the
+business already holds — the trade licence states the activity, the accountant knows the VAT position,
+the insurer knows the cover. Only three genuinely sit in an external queue: **SMS sender-ID
+registration**, **platform verifications** (Google Business Profile, Search Console, Meta, Resend
+domain) and, if cards are wanted, **merchant-account onboarding**. Those three should start now
+because they are measured in weeks. See §8 and
+[05-external-dependencies.md](05-external-dependencies.md).
+
+---
+
+## 2. Serial prefix: the Foundation (~3 weeks, blocks everything)
+
+Nothing else starts until this is merged. Attempting workstreams in parallel with a moving schema
+spine produces rework that costs more than the three weeks saved.
+
+- Monorepo, TypeScript strict, lint/format, module import-boundary rule.
+- CI on GitHub Actions: typecheck, unit, integration against real Postgres, migration dry-run.
+- Four environments: local (compose), PR preview, staging, production. **Staging send guard** — a
+  hard block preventing any non-production environment from messaging a real customer.
+- DigitalOcean provisioning: App Platform (web + worker), Managed Postgres 2 vCPU / 4 GB with
+  standby, Spaces, Cloudflare, secrets, TLS `verify-full` to the database.
+- Schema spine and migration pipeline: `legal_entity`, `premises`, `regulatory_profile`,
+  `audit_event`, `outbox_event`, pg-boss tables, the role/permission model.
+- Cross-cutting services: config validation at boot, structured logging with correlation IDs,
+  Sentry, audit service, outbox publisher, job queue, notification service, money and date
+  utilities, feature flags, export service.
+- Staff auth with mandatory TOTP 2FA; the RBAC policy layer.
+- **The `clinical` schema boundary**: separate role, envelope encryption, UUID-only references, no
+  cross-boundary foreign keys.
+- **Prove Arabic RTL PDF rendering now**, not in month six. It is the classic late surprise.
+- Confirm `btree_gist` is available on DO Managed Postgres. The concurrency design depends on it.
+
+**Exit criteria:** a deployable skeleton where a migration ships through CI to production, an
+audited mutation appears in the audit log, an outbox event reaches a worker, and a 2FA login works.
+
+---
+
+## 3. Dependency graph
+
+```
+                              ┌─────────────────┐
+                              │  F  Foundation  │  serial, blocks all
+                              └────────┬────────┘
+                                       │
+        ┌──────────────┬───────────────┼───────────────┬──────────────┐
+        ▼              ▼               ▼               ▼              ▼
+   ┌─────────┐   ┌──────────┐    ┌──────────┐    ┌──────────┐   ┌──────────┐
+   │ B       │   │ C        │    │ P        │    │ A        │   │ W        │
+   │ Booking │   │ CRM +    │    │ People   │    │Analytics │   │ Web/CMS  │
+   │ + desk  │   │messaging │    │ HR+leave │    │          │   │ + SEO    │
+   └────┬────┘   └────┬─────┘    └────┬─────┘    └────┬─────┘   └────┬─────┘
+        │             │               │               │              │
+        │  catalogue  │ events        │ availability  │ outbox       │ catalogue
+        │  + lifecycle│ + consent     │ blocking      │ events       │ + facts
+        ├─────────────┴───────────────┴───────────────┘              │
+        ▼                                                            │
+   ┌──────────┐                                                      │
+   │ M  Money │  checkout, invoicing, ledger, VAT, recurring costs    │
+   └────┬─────┘                                                      │
+        │                                                            │
+        ├──────────────┬─────────────────────────────────────────────┘
+        ▼              ▼                              ▼
+   ┌──────────┐   ┌──────────┐                  ┌──────────┐
+   │ R        │   │ Y        │                  │ S        │
+   │Reporting │   │ Payments │                  │SEO agent │
+   └────┬─────┘   └────┬─────┘                  └────┬─────┘
+        └──────────────┴─────────────┬───────────────┘
+                                     ▼
+                          ┌────────────────────┐
+                          │ H  Hardening, UAT, │
+                          │    cutover         │
+                          └────────────────────┘
+```
+
+**Hard edges** (cannot be parallelised away):
+
+| Edge | Why |
 |---|---|
-| Jurisdiction | **United Arab Emirates** (Dubai / Sharjah / Abu Dhabi) |
-| Locations | **One, permanently.** No branches, no franchise, no multi-tenancy |
-| Service model | **In-parlour only.** Treatments happen in rooms at the premises |
-| Hosting | DigitalOcean |
-| Database | DigitalOcean **Managed PostgreSQL** |
-| Email | **Resend** |
-| SMS | **SMSala** |
-| Card payments | Required **later**, not at launch |
-| Languages | English primary, Arabic (RTL) planned |
-| Staff scale | ~5–25 therapists |
+| F → everything | Schema spine, auth, audit, outbox, queue |
+| B → M | Checkout needs the appointment lifecycle and snapshotted prices |
+| B → C | Automation triggers on booking events; reminders need the lifecycle |
+| B → A | Conversion events originate from booking and completion |
+| B, C, M → R | Reporting needs facts from all three |
+| P → B | Approved leave and expired credentials must block availability |
+| M → Y | Payments plug into the ledger and invoice model built in M |
+| W → S | The SEO agent needs pages and GSC history to work on |
+| all → H | Hardening, UAT and cutover are terminal |
 
-Explicitly out of scope: home/hotel outcall, mobile therapists, travel-time scheduling,
-multi-branch, franchise reporting.
-
-## 3. Honest framing before the phases
-
-Three things need saying before a roadmap is credible.
-
-**This is several products, not one.** A booking engine, a marketing automation platform, an
-accounting system, an HR system and an SEO agent are each a company in their own right. The
-full requested scope is roughly **40–50 engineer-weeks**: about 10–12 months for one capable
-full-stack engineer, or 6–7 months for two working in parallel after the foundations land.
-Anyone promising materially less is either cutting a module or cutting the parts that make it
-trustworthy with money and law.
-
-**Two of the nine modules should be integrated rather than built.** Statutory VAT filing and
-payroll mechanics are commodity, heavily regulated, and change under you. The plan builds an
-internal double-entry journal — because operational truth must live in your own database and
-retrofitting one is brutal — but hands statutory filing to an FTA-ready package (Zoho Books
-is the pragmatic UAE choice) and hands payroll mechanics to a reviewed export. You get the
-management reporting you want without becoming responsible for tracking every FTA rule change
-in code. Building the booking engine and CRM *is* justified: they are where your operational
-difference lives, and no off-the-shelf product will model your rooms, your gender-matching
-constraint and your intake flow the way you need.
-
-**The sequencing in the original brief has one error.** "Design the frontend and CMS last" is
-right for the *marketing site* and wrong for the *booking interface*. A booking engine with no
-UI cannot be validated, cannot be used by the front desk, and cannot take a single dirham. The
-plan therefore splits the frontend in two: a deliberately plain but real booking UI and admin
-calendar in Phase 1, and the designed marketing site plus CMS in Phase 8. It also flags a
-consequence of deferring content: organic search compounds slowly, so pushing all content to
-month seven delays organic revenue by roughly that much. Phase 1 includes a minimal static
-marketing shell with correct structured data for that reason — it is cheap, and it starts the
-clock.
-
-## 4. The phases
-
-Each phase states the business outcome it produces. A phase that does not move a business
-number should be challenged.
+**Soft edges** (ordering preference, not a blocker): W benefits from a stable catalogue; A benefits
+from a settled event taxonomy; R benefits from a closed month of real test data.
 
 ---
 
-### Phase 0 — Foundations (2–3 weeks)
+## 4. Workstreams
 
-Repo, monorepo layout, TypeScript strict, lint/format, CI on GitHub Actions, four
-environments, DigitalOcean provisioning (App Platform, Managed Postgres with standby, Spaces,
-Cloudflare), secret management, structured logging, error tracking, the migration pipeline,
-the audit-log service, the transactional outbox, the durable job queue, staff auth with TOTP
-2FA, the RBAC model, and the two singleton tables (`legal_entity`, `premises`).
+Effort is engineer-weeks for a competent full-stack engineer. "Entry" is what must be merged before
+the track can start meaningfully.
 
-Also in Phase 0, and just as important: the **`regulatory_profile`** row — a single versioned
-config record carrying licence class, emirate, legal form, VAT status, retention years,
-permitted public vocabulary and required credential types. Every module reads policy from it.
-It defaults to the *stricter* of the wellness and healthcare profiles so a late answer from
-the lawyer cannot produce a non-compliant system.
+### F — Foundation · 2–3 weeks · serial
+See §2. Owner: the most senior engineer. Do not delegate the schema spine.
 
-**Outcome:** a deployable skeleton with auth, audit, jobs and compliance policy in place.
-Nothing customer-facing. This phase exists so that the following ten do not each reinvent it.
+### B — Booking engine and front desk · 5–7 weeks · entry: F
+The hardest engineering in the project. Detail in [03-modules.md](03-modules.md) §1–3.
 
-**Start in parallel:** every external lead-time item in [docs/05-external-dependencies.md](05-external-dependencies.md).
+Service catalogue (categories, services, variants, add-ons, skill mapping, room-type compatibility,
+turnaround, gross-fils pricing, effective-dated price lists, linted public display names). Rooms as
+schedulable resources including capacity-2 couples rooms. The availability engine with all five
+simultaneous constraints including **same-gender matching, default strict**. Concurrency correctness:
+`btree_gist` exclusion constraint on therapist ranges, deferred constraint trigger for room capacity,
+`FOR UPDATE` on the room row, idempotency keys on the public endpoint. Appointment lifecycle state
+machine with every transition, actor and side effect. Phone-first identity with SMS OTP, rate
+limiting and enumeration resistance. Public booking flow (mobile-first, accessible). Admin calendar:
+room × time primary, therapist × time secondary, drag to reschedule, quick-book, walk-in entry.
+Transactional messaging with **reminder invalidation on reschedule and cancellation**. Magic-link
+self-service manage-booking page.
 
----
+**Exit:** property-based tests prove no double-booking, no room over capacity, no closure crossing,
+turnaround always respected, gender constraint never violated. A walk-in is bookable in under 10
+seconds, measured.
 
-### Phase 1 — Booking engine and the front desk (5–7 weeks) ← *the revenue phase*
+### M — Money: checkout, invoicing, ledger, VAT, costs · 7–9 weeks · entry: B (catalogue + lifecycle)
+Till/checkout with cash, in-salon card machine and bank transfer via a manual payments adapter, so
+the ledger is correct before any gateway exists. FTA-compliant bilingual tax invoices and simplified
+invoices with snapshotted issuer identity and **gapless sequential numbering allocated inside the
+insert transaction**. Credit notes as the only correction mechanism. Vouchers, packages and
+memberships as **deferred revenue liabilities** with redemption, balance, expiry and breakage. Cash
+drawer reconciliation per shift. Rebooking prompt at checkout. Chart of accounts, **append-only
+double-entry journal**, period locking, corrections by dated reversal. Suppliers, bills, expense
+capture, payables. **Recurring-cost register** with fixed/variable split and variance alerting.
+**Reverse-charge VAT** on offshore suppliers with a nightly exception report. Blocked input VAT
+classification. VAT201 working papers with drill-down and preparer/reviewer sign-off — **no auto-file
+capability in the codebase**. Inventory and COGS. The **compliance calendar** with blocking
+obligations. Zoho Books export.
 
-The core of the system and the hardest engineering in the project.
+**Exit:** a closed test month reconciles — bookings to invoices to payments to journal to VAT boxes —
+and an FTA-registered tax agent signs off the working papers.
 
-- Service catalogue configurable in admin: categories, services, duration/price variants,
-  add-ons, therapist skill mapping, room-type compatibility, per-service turnaround.
-- Rooms as first-class schedulable resources, including capacity-2 couples rooms, room types
-  and housekeeping turnaround as scheduled non-bookable time.
-- The availability engine: opening hours, closures, lunar public holidays, therapist shifts,
-  skills, **same-gender matching as a hard constraint (default strict)**, credential validity,
-  buffers, lead time, booking window.
-- Concurrency correctness: `btree_gist` exclusion constraint on therapist time ranges, a
-  deferred constraint trigger for room capacity, idempotency keys on the public endpoint.
-- Appointment lifecycle state machine with every transition, actor and side effect defined.
-- Phone-first identity: E.164 normalisation, SMS OTP with rate limiting and enumeration
-  resistance, guest booking with no account, a stable `customer_id` regardless.
-- Public booking flow (plain, mobile-first, accessible, real) and a minimal marketing shell
-  with correct `DaySpa`/`LocalBusiness` structured data.
-- Admin day/week calendar: room × time as the primary grid, therapist × time secondary,
-  drag to reschedule, quick-book, walk-in and phone-booking entry.
-- Transactional messaging: confirmation, reminder at 24h and 2h, reschedule, cancellation —
-  via SMSala and Resend, on the durable queue, with invalidation on reschedule or cancel.
-- Self-service manage-booking page via a magic link, so customers reschedule without calling.
+### C — CRM, consent and automation · 5–6 weeks · entry: F, B (events)
+Client record with preferences, tags, lifecycle, source, VIP and blocklist. **Intake and consent
+forms behind the clinical boundary**, exposing boolean contraindication flags only. Duplicate
+detection and **merge as a first-class operation** re-pointing consents, suppressions, enrolments and
+ledgers. Consent per channel × purpose × timestamp × wording version; preference centre reachable
+without login. Automation engine on the outbox and queue: versioned flow DSL, enrolment pinning to a
+definition version, idempotency on `(flow_run, node, channel, contact)`, frequency caps, loop
+detection, kill switch, dry-run. **Messaging compliance gate** with two sender IDs, immutable
+template `message_class`, consent/window/suppression enforced in the send path, fail-closed. Kanban
+pipeline, then the React Flow node-graph builder. Campaigns with spend caps. Review solicitation,
+win-back, birthday triggers.
 
-**Outcome:** the business takes online bookings and the front desk runs the day off the
-system. This is the first phase that earns money.
+**Exit:** consent gating is tested as an invariant — a send is *impossible* without valid consent,
+inside quiet hours, or to a suppressed contact. A flow edit does not disturb in-flight enrolments.
 
----
+### P — People: HR and leave · 3–4 weeks · entry: F, B (availability interface)
+Employee records with field-level encryption on bank and identity fields. **Credential registry
+gating bookable availability** — an expired labour card removes the therapist automatically and flags
+their future appointments for reassignment. Rota publishing, swaps, open shifts, labour-cost
+forecast. Attendance and timesheets. **Leave management**: accrual, carry-over, UAE 30-day
+entitlement, sick-leave tiers, approval with delegation, minimum-coverage rules, team calendar, and
+the hard link that **approving leave blocks availability and surfaces booking conflicts**. Commission
+(versioned, reproducible, therapist-visible), tips, deductions, payslips, **monthly gratuity
+accrual** posting to the ledger, WPS export. Ramadan reduced hours; provisional-vs-confirmed lunar
+holidays with an impact report.
 
-### Phase 2 — Checkout, invoicing and money-in (3–4 weeks)
+**Exit:** approving leave over an existing booking produces a conflict and a reassignment path, never
+a silent cancellation. Leave accrual matches worked examples reviewed against the labour law.
 
-- Till/checkout screen: complete a visit, add retail, apply a discount, record payment by
-  cash, in-salon card machine or bank transfer. No gateway yet — a manual payments adapter so
-  the ledger is correct before any card integration exists.
-- **FTA-compliant tax invoices** and simplified tax invoices: bilingual, with TRN and issuing
-  address snapshotted, gap-free sequential numbering allocated inside the insert transaction,
-  per-line VAT at 5%, gross-first integer-fils money.
-- Credit notes as the only correction mechanism. No invoice is ever edited or deleted.
-- Gift vouchers, prepaid packages and memberships as **deferred revenue liabilities**, with
-  redemption, balance tracking, expiry and breakage.
-- Cash drawer reconciliation per shift.
-- Rebooking prompt at checkout — the single biggest revenue lever in the industry.
+### A — Analytics and measurement · 2–3 weeks · entry: F, B (events), M (till events)
+Measurement plan and event taxonomy first; one typed tracking SDK. GA4 and Meta Pixel client-side.
+**Server-side push from the transactional outbox** to GA4 Measurement Protocol and Meta CAPI with
+shared `event_id`, hashed user data, `fbp`/`fbc` forwarding. **Consent Mode v2** and a CMP gating
+both client tags and server pushes. **Offline conversion loop**: the till emits corrected values;
+no-shows are voided. **Egress guard** mapping services to opaque category codes with a test
+enumerating every service. First-party `/api/collect` route instead of a server-side GTM container.
 
-**Outcome:** every dirham is recorded, and the documents you hand an auditor exist and are
-correct. Deferred revenue stops being invisible.
+**Exit:** the enumerating egress test passes; a booking-then-no-show produces a net-zero conversion;
+no tag fires before recorded consent.
 
----
+### R — Reporting and financial analysis · 2–3 weeks · entry: M, B, C, P
+Reporting schema in the same Postgres, refreshed by materialised views. P&L, balance sheet,
+cash-flow statement. The spa KPI set with explicit formulas: therapist and room utilisation, revenue
+per available room-hour, average ticket, retail attachment, rebooking rate, retention cohorts, LTV,
+no-show cost, discount leakage, labour cost %, **contribution margin per service**, break-even,
+voucher liability, CAC and payback. Seasonality including Ramadan and the summer exodus. Cash-flow
+forecast from recurring costs plus forward bookings and payroll. Pushed alerts. Role-scoped
+dashboards with drill-down and a data-quality view that refuses to show an unreconciled number.
 
-### Phase 3 — CRM, consent and automation (4–5 weeks)
+**Exit:** every headline number drills to source rows and ties to the ledger.
 
-- Client record: preferences (pressure, oils, therapist, room temperature), tags, lifecycle
-  stage, source, visit and spend history, VIP and blocklist flags.
-- **Intake and consent forms behind the clinical data boundary**: own Postgres schema, own DB
-  role, envelope encryption, UUID-only references, no cross-boundary foreign keys, separate
-  RBAC and separate audit log. The booking layer sees boolean contraindication flags only —
-  never free-text health notes.
-- Duplicate detection and merge, including re-pointing consents, suppressions, enrolments and
-  ledgers to the surviving record.
-- Consent as a first-class object: per channel, per purpose, timestamped, with the exact
-  wording version shown. A preference centre reachable without login.
-- Automation engine: event-driven, on the outbox and job queue, with a flow definition DSL,
-  enrolment state, versioning, and hard rails — global per-contact frequency cap, quiet hours,
-  suppression and consent evaluated at **send** time, loop detection, kill switch, dry-run.
-- Drag-and-drop: the Kanban lead/client pipeline first (cheap, immediately useful), the
-  node-graph journey builder second (React Flow) once the engine is proven.
-- SMS campaigns behind the **TDRA compliance gate** (see Phase gating below).
-- Review solicitation, win-back, birthday and lapsed-client triggers.
+### W — Web: CMS, public site and SEO · 5–7 weeks · entry: F, B (catalogue); can start early on design
+Payload CMS v3 in the same app on the same Postgres. Content model with the catalogue/CMS boundary
+explicit. Design system, EN/AR with real RTL, WCAG 2.2 AA, performance budget with a CWV gate in CI.
+JSON-LD generated from the database. Sitemaps with CMS-driven `lastmod`, hreflang, redirect-on-slug-
+change, IndexNow. **LLM-SEO**: server-rendered HTML, question-shaped headings with stable anchors, a
+machine-readable facts endpoint, a considered AI-crawler `robots.txt` policy, citation monitoring.
+**Publication control plane**: draft → banned-claims lint → named human approval → immutable
+publication record. Publish pipeline: ISR revalidation, sitemap, IndexNow, CDN purge.
 
-**Outcome:** retention levers are live and rebooking rate, churn and segment performance
-become measurable.
+**Exit:** nothing publishable breaches licence conditions; a catalogue change propagates to page,
+structured data and sitemap without manual intervention.
 
----
+### S — SEO agent · 2–3 weeks · entry: W
+GSC API with nightly snapshots into Postgres. Deterministic analysis first, LLM for judgement and
+drafting only. CTR outliers, content gaps, cannibalisation, coverage regressions, internal-link
+audit, structured-data validation, on-site-vs-GBP consistency. **Propose-only by construction** —
+publish denied at the permission layer, never `robots.txt`/canonical/redirect/`noindex`, keyword
+expansion filtered against the blocking lexicon, fetched web content treated as untrusted data.
+Weekly plain-English report by Resend.
 
-### Phase 4 — Accounting and recurring costs (4–5 weeks)
+**Exit:** the agent cannot publish even if instructed to; a red-team prompt-injection test fails to
+escalate it.
 
-- Chart of accounts for a spa; append-only double-entry journal; period locking; corrections
-  by dated reversal only.
-- Purchases, suppliers, expense capture with receipt images, approval limits, payables ageing.
-- **Recurring-cost register** — rent, DEWA, salaries, licences, insurance, SaaS, DigitalOcean,
-  Resend, SMSala — with frequency, next-due, vendor, category, contract end, renewal reminder,
-  fixed-vs-variable split, and budget-versus-actual variance alerting.
-- **Reverse-charge VAT on imported services** (DigitalOcean, Resend, Google, Meta, Anthropic),
-  incurred from day one and the single most commonly missed UAE obligation at this size. A
-  nightly job flags any offshore bill lacking reverse-charge entries.
-- VAT201 working papers: GL accounts tagged with return-box codes, drill-down to source
-  documents, preparer/reviewer sign-off. **The system never files anything** — that capability
-  is absent from the codebase, not merely disabled.
-- Blocked input VAT classification. Inventory and COGS for retail and professional-use stock.
-- The **compliance calendar**: VAT returns, trade licence, municipality permit, insurance,
-  per-employee visa and labour card, therapist certifications, corporate tax, WPS runs — each
-  with configurable lead time, owner and escalation. Blocking obligations change system
-  behaviour when overdue.
-- Export/integration to Zoho Books for statutory filing.
+### Y — Payments · 3–4 weeks · entry: M · **external gate: merchant account**
+Gateway behind the payments abstraction built in M. Deposits, first-time prepayment, saved cards,
+no-show and late-cancellation fees with disclosed consent. PCI SAQ-A only — hosted fields, never
+touching PAN. Webhooks with signature verification, idempotent handlers, replay protection and a
+reconciliation job for missed events; client callbacks are never the source of truth. Settlement
+reconciliation: gross vs net, timing, refunds, chargebacks. Discreet configurable statement
+descriptor.
 
-**Outcome:** the VAT return is prepared from the system rather than from a spreadsheet, and
-the true cost base — including the subscriptions nobody remembers — becomes visible.
+**Exit:** a settlement file reconciles to the ledger to the fils, including fees and a refund.
 
----
-
-### Phase 5 — HR and leave (3–4 weeks)
-
-- Employee records with field-level encryption on bank details and identity document numbers.
-- **Credential registry driving availability**: visa, labour card, Emirates ID, occupational
-  health card, qualifications. An expired mandatory document automatically removes the
-  therapist from bookable availability and flags their future appointments for reassignment.
-  This automation is the module's main value.
-- Rota and shift publishing, swaps, open shifts, labour-cost forecast against booked revenue.
-- Attendance and timesheets; scheduled vs actual vs billed hours.
-- **Leave management**: leave types with distinct accrual, carry-over and expiry; UAE 30-day
-  annual entitlement and sick-leave tiers; approval workflow with delegation; minimum-coverage
-  rules; a team calendar; and the critical link that approving leave blocks therapist
-  availability and surfaces conflicts with existing bookings.
-- Commission (transparent, versioned, auditable — this is where staff disputes happen), tips,
-  deductions, payslips, **end-of-service gratuity accrued monthly as a balance-sheet
-  liability**, and a WPS salary-file export reviewed by a human.
-- Ramadan reduced hours as a dated override; provisional-versus-confirmed lunar holidays.
-
-**Outcome:** leave and labour cost are controlled, and the expired-visa risk — an existential
-compliance problem for a UAE small business — is automated away.
+### H — Hardening, UAT and cutover · 4–5 weeks · entry: all
+See §6 and §7. Penetration test, restore drill, DR runbooks, key rotation, incident-response plan
+with PDPL notification timelines, dependency and secret scanning, the documentation set, then UAT
+and the cutover itself.
 
 ---
 
-### Phase 6 — Analytics and measurement (2–3 weeks)
+## 5. Integration milestones
 
-- Measurement plan and event taxonomy first, then a single typed tracking SDK so events are
-  not sprinkled ad hoc.
-- GA4 and Meta Pixel client-side; **server-side push driven from the transactional outbox** to
-  the GA4 Measurement Protocol and Meta Conversions API, with a shared `event_id` for dedup and
-  properly hashed user data.
-- Google **Consent Mode v2** and a CMP, gating client tags *and* server pushes. A server-side
-  push that ignores consent is the classic compliance hole.
-- **Offline conversion loop**: most revenue is confirmed at the till, so completed and paid
-  bookings and no-shows are pushed back with corrected values. Booking value at booking time
-  is a guess; the till knows the truth.
-- **Analytics egress guard**: services map to opaque allowlisted category codes and any
-  health-adjacent parameter is stripped, with a test enumerating every service. Health data
-  must never reach Google or Meta.
-- Recommendation: skip a server-side GTM container. A first-party `/api/collect` route inside
-  the app gives first-party cookies and ad-blocker resilience at a fraction of the cost and
-  maintenance. Revisit only if tag complexity genuinely demands a container.
+Internal, not releases. Each is a **vertical slice demonstrated on real data**, and each is the
+earliest honest evidence that a set of workstreams actually composes. In a single-release build these
+replace release points as the schedule's truth-telling mechanism — if a milestone slips, the launch
+date slips, and you find out months earlier than you otherwise would.
 
-**Outcome:** marketing spend becomes attributable to completed, paid bookings rather than to
-form submissions.
+| # | Milestone | Proves | Needs |
+|---|---|---|---|
+| **M1 Bookable** | Catalogue → availability → book online → confirmation SMS → appears on admin calendar → reschedule invalidates the old reminder | The core engine composes, and messaging works | F, B |
+| **M2 Bankable** | Visit completed → invoice issued with correct VAT → payment recorded → journal balanced → lands in the right VAT201 box | Money is correct end to end | B, M |
+| **M3 Reachable** | Booking event → automation enrolment → consented SMS sent → opt-out honoured → suppression blocks the next send | Consent and automation are enforced, not decorative | B, C |
+| **M4 Findable** | Publish a service in admin → page live with JSON-LD → sitemap updated → indexed in GSC | The catalogue-to-frontend loop works | B, W |
+| **M5 Accountable** | Close a test month → VAT201 working papers → P&L and cash flow → owner dashboard, every number drilling to source | Reporting ties to the ledger | M, R |
+| **M6 Staffed** | Publish rota → approve leave over a booking → conflict surfaced → availability blocked → payroll and gratuity posted | HR and booking share one source of truth | B, P |
+| **M7 Attributable** | Booking → no-show → GA4 and Meta receive the corrected net-zero value; egress test passes | Measurement reflects reality | B, M, A |
+
+Demo each to the owner. M1, M2 and M6 are the three where a surprise is most likely and most
+expensive.
 
 ---
 
-### Phase 7 — Financial analysis (2–3 weeks)
+## 6. Global definition of done
 
-- A small star-shaped reporting schema inside the same Postgres, refreshed by materialised
-  views. No warehouse, no read replica, no BigQuery — the data volume does not justify them.
-- Statutory-shaped reports: P&L, balance sheet, cash-flow statement (profit and cash are not
-  the same number, and the owner will not otherwise see it).
-- The KPIs that actually run a spa, each with an explicit formula: therapist utilisation, room
-  utilisation, **revenue per available room-hour**, average ticket, retail attachment,
-  **rebooking rate at checkout**, new-versus-returning mix, retention by cohort, LTV,
-  no-show cost, discount leakage, labour cost %, **contribution margin per service** (which
-  services are actually profitable once commission and room time are costed — this usually
-  surprises owners), break-even per day, outstanding voucher liability, CAC and payback.
-- Forecasting: seasonality including Ramadan and the summer exodus, cash-flow forecast from
-  the recurring-cost register plus forward bookings and payroll.
-- Pushed alerts: revenue below forecast, no-show spike, utilisation collapse, cost drift,
-  unexpected VAT liability build-up.
-- Role-scoped dashboards — owner (five numbers on a phone), manager, accountant, therapist —
-  with drill-down to source rows, and a data-quality view that refuses to show a number the
-  system cannot reconcile.
+Applies to every item in every workstream. A module is not done until all of it holds.
 
-**Outcome:** the owner sees the state of the business daily without asking anyone.
+- Unit tests on the domain logic in `core`; integration tests against real Postgres; Playwright
+  coverage for anything a customer or receptionist touches.
+- Migration reviewed, forward-only, expand-contract if destructive.
+- Permissions applied at field level where sensitive; deny-by-default verified.
+- Audit logging on every mutation, on reads of clinical and salary data, and on every export.
+- i18n keys extracted; Arabic present; RTL verified visually, including PDFs.
+- Analytics events emitted per the taxonomy; egress guard respected.
+- Compliance lint applied to anything publishable.
+- Accessibility: keyboard operable, screen-reader semantics, contrast checked.
+- ADR written for any decision that a future maintainer would otherwise have to guess at.
+- Runbook entry if it can fail at 8pm on a Friday.
 
 ---
 
-### Phase 8 — CMS and the designed public site (5–7 weeks)
+## 7. Cutover: moving an operating business onto the system
 
-- Payload CMS v3 embedded in the same Next.js app on the same Postgres — one deployment, one
-  database, no second source of truth.
-- Content model with a clear boundary: the **catalogue** owns price, duration and bookability;
-  the **CMS** owns narrative, media and SEO copy. Service pages join the two.
-- Design system (Tailwind + shadcn/ui), EN/AR with real RTL, WCAG 2.2 AA, explicit performance
-  budget and a Core Web Vitals regression gate in CI.
-- SEO: JSON-LD generated from the database so it cannot drift from reality, title/meta patterns
-  from the catalogue, hub-and-spoke topic clusters, sitemaps with CMS-driven `lastmod`,
-  hreflang, redirect-on-slug-change, IndexNow.
-- **LLM/AI-answer-engine optimisation**: clean server-rendered HTML (not a client-rendered
-  SPA — see the note in [docs/02-architecture.md](02-architecture.md)), question-shaped headings
-  with stable anchors, high factual density, a machine-readable facts endpoint so price, hours
-  and location are consistent everywhere, a considered `robots.txt` policy for AI crawlers, and
-  brand-citation monitoring in AI answers as a tracked KPI.
-- **Publication control plane**: draft → automated compliance lint (banned medical claims,
-  forbidden staff titles, controlled vocabulary from the regulatory profile) → named human
-  approval → publish, with an immutable publication record carrying the content hash. Runs
-  over service names and descriptions too: a service called "Therapeutic Deep Tissue Treatment"
-  is a regulatory claim, so public display names are linted separately from internal names.
-- Publish pipeline: on-demand ISR revalidation, sitemap update, IndexNow ping, CDN purge.
+The business is trading throughout the build, so this section is the work of switching it over. It is
+scoped work, not contingency.
 
-**Outcome:** an organic acquisition channel exists, and nothing publishable can breach the
-licence conditions.
+**Data migration.** Everything below already exists somewhere — a spreadsheet, an incumbent app, a
+diary, the accountant's ledger. Extracting it is the job.
 
----
+| Data | Notes |
+|---|---|
+| Customers | Phone normalisation to E.164 and duplicate merge. Expect 5–15% duplicates from a phone-and-WhatsApp process |
+| Historic bookings | Enough history for the reporting cohorts and each client's visit record |
+| **Unredeemed gift vouchers** | Real, enforceable liabilities held by real customers. Missing one produces an angry client at the desk and a wrong opening balance sheet |
+| **Outstanding packages and memberships** | Remaining session balances and expiry dates |
+| Staff records | Contracts, skills, and **current visa / labour-card / certification expiry dates** |
+| **Leave balances as they stand today** | The accrual engine needs an opening balance per employee, not a zero |
+| Accounting opening balances | From the accountant, at a clean period boundary |
+| Existing site URLs | Into a 301 redirect map, if the site is being replaced |
 
-### Phase 9 — The agentic SEO system (2–3 weeks)
+Run the migration three times against staging. Each run produces a reconciliation report — counts,
+totals, voucher liability, leave liability — compared against the source. The third run should have no
+unexplained variance. Then run it once for real during the freeze window.
 
-- Google Search Console API integration with nightly snapshots into Postgres, building the
-  16-month-plus history GSC itself discards.
-- Deterministic analysis first, LLM only for judgement and drafting: CTR outliers at positions
-  5–20, content gaps, cannibalisation, coverage regressions, internal-link audit, structured-data
-  validation, and a check that on-site price and hours match Google Business Profile.
-- **Propose-only by construction.** The agent writes to a suggestions table or opens a pull
-  request. It has no publish capability *at the permission layer* — not a prompt instruction, an
-  API permission. It may never touch `robots.txt`, canonicals, redirects or `noindex`. Keyword
-  expansion is filtered against the blocking lexicon so non-compliant terms never surface as
-  tempting opportunities. Fetched competitor pages and SERP content are treated as untrusted
-  data, never as instructions.
-- Deliverable the owner actually wants: a weekly plain-English report with five prioritised
-  actions, what changed, and what it earned — emailed via Resend.
+**Parallel run, two weeks.** Both the existing process and the new system record every booking, with
+daily reconciliation. For an operating business this is cheap: nobody is waiting on it, and it is the
+only way to find out that the availability engine disagrees with how the salon actually works while
+the old process is still there.
 
-**Outcome:** a prioritised SEO worklist every week, with a human deciding what ships.
+**Staff pilot.** Real bookings on a quiet weekday, front desk on the new till, one super-user per
+shift. Staff on an operating floor will not tolerate a system slower than what they have, so fix what
+they complain about before cutover — the post-cutover version of that complaint is silent
+abandonment and rotten data.
 
----
+**Paper fallback, first fortnight.** A printed day sheet each morning and a documented manual process.
 
-### Phase 10 — Card payments (3–4 weeks)
+**SEO migration.** If the current site is being replaced: full crawl and rank baseline before
+anything changes, a 301 for every retired URL, preserve structure where it ranks, monitor for four
+weeks. A relaunch without this routinely costs 30–50% of organic traffic, and an operating business
+has traffic to lose.
 
-Deliberately late in the build, but the **merchant-account conversation starts in Phase 0**
-because onboarding for this merchant category takes weeks and can stall.
+**Freeze window.** Code freeze one week before cutover; launch-blocking fixes only.
 
-- Gateway integration behind the payments abstraction built in Phase 2 (Stripe, Telr,
-  N-Genius, Checkout.com, PayTabs — chosen on AED settlement, local acquiring and the MCC the
-  acquirer will actually grant). Tabby/Tamara for packages.
-- Deposits, prepayment for first-time clients, saved cards, and no-show/late-cancellation fees
-  with the explicit disclosed consent that makes them defensible.
-- PCI SAQ-A scope only: hosted fields, never touching card data.
-- Webhooks with signature verification, idempotent handlers, replay protection and a
-  reconciliation job for missed events. Client-side success callbacks are never the source of
-  truth.
-- Settlement reconciliation: gross vs net of fees, timing differences, refunds, chargebacks.
-- A discreet, configurable statement descriptor — a genuine product requirement for this
-  business, not a joke.
+**Go / no-go checklist.** External items in §8 cleared. M1–M7 demonstrated. Restore drill passed.
+Penetration-test findings triaged. Rollback plan rehearsed. Support rota agreed for the first
+fortnight, including who answers at 8pm on a Friday.
 
-**Outcome:** revenue protection against no-shows, and online prepayment.
+**Rollback.** Per subsystem, and honest about what cannot be reversed: issued tax invoices and sent
+messages are permanent. So the rollback story is "bookings revert to the old process, the ledger
+stays", not "switch the system off".
 
 ---
 
-### Phase 11 — Hardening and the things that keep it alive (ongoing, ~3 weeks concentrated)
+## 8. External items
 
-Penetration test, restore drill from backup (an untested backup is not a backup), DR runbooks,
-key rotation procedure, incident-response plan with PDPL notification timelines, WhatsApp
-Business API as the channel this market actually reads, dependency and secret scanning, and the
-documentation set: admin guide, therapist quick guide, accountant guide, the data-processing
-register and the ADR log.
+The business is established, so most of this is retrieval rather than discovery. Detail and the exact
+questions in [05-external-dependencies.md](05-external-dependencies.md).
 
----
+**In an external queue — start now, measured in weeks:**
 
-## 5. Gates
-
-Some phases must not ship without an external answer. These are hard gates, not warnings.
-
-| Gate | Blocks | Needed from |
+| Item | Blocks | From |
 |---|---|---|
-| Health-data residency answer | Go-live with real intake data (Phase 3) | UAE lawyer |
-| Licence classification | Any public copy going live (Phase 1 shell, Phase 8) | Economic dept + health authority |
-| Same-gender matching requirement | Availability engine sign-off (Phase 1) | Licensing authority, in writing |
-| Two registered sender IDs | First marketing campaign (Phase 3) | SMSala + e& + du |
-| Tax-invoice field list confirmed | First invoice issued (Phase 2) | FTA-registered tax agent |
-| Merchant category code in writing | Payments build (Phase 10) | Acquirer |
+| Two SMS sender IDs (transactional + `AD-` promotional) | Any marketing send | SMSala + e& + du |
+| Platform verifications: GBP, Search Console, Meta Business, Resend domain + SPF/DKIM/DMARC and warm-up | Workstreams A, W, S | The platforms |
+| Merchant category code confirmed in writing | Workstream Y | Acquirer — ask two |
 
-## 6. Effort and team
+**Answered from what the business already holds — a morning's work:**
 
-| Phase | Weeks | Cumulative |
+| Question | Source |
+|---|---|
+| Licence classification, and therefore permitted public vocabulary and staff titles | The trade licence itself, plus municipality/health approvals already on file |
+| Permitted room types and treatment-room count | The licence and municipality approval |
+| VAT registration status, TRN, tax period, invoice format currently issued | The accountant, and existing invoices |
+| Whether the entity is mainland, DIFC, ADGM or free zone | Incorporation documents — determines which privacy law applies |
+| Insurance cover in force, and what the insurer requires to accept a claim | The existing policy and broker |
+| Current staff visa, labour-card and certification expiry dates | HR file |
+| Existing leave practice and contract terms | Existing contracts |
+
+**Still worth one professional conversation:** whether the intake notes count as health data subject
+to UAE localisation rules, which decides the hosting region. It is the one item where reading the
+licence is not enough, and it gates loading real intake data. Ask the accountant's or the company's
+existing lawyer — it is a single question, not an engagement.
+
+---
+
+## 9. Calendar and team
+
+Total scope is **40–52 engineer-weeks**. The critical path is **F → B → M → H**, roughly 18–24 weeks
+of serial work that cannot be compressed by adding people.
+
+| Team | Elapsed to launch | Assessment |
 |---|---|---|
-| 0 Foundations | 2–3 | 3 |
-| 1 Booking + front desk | 5–7 | 10 |
-| 2 Checkout + invoicing | 3–4 | 14 |
-| 3 CRM + automation | 4–5 | 19 |
-| 4 Accounting | 4–5 | 24 |
-| 5 HR + leave | 3–4 | 28 |
-| 6 Analytics | 2–3 | 31 |
-| 7 Financial analysis | 2–3 | 34 |
-| 8 CMS + public site | 5–7 | 41 |
-| 9 SEO agent | 2–3 | 44 |
-| 10 Payments | 3–4 | 48 |
-| 11 Hardening | ~3 | 51 |
+| 1 full-stack engineer | 11–13 months | Works, but the highest-risk shape in this plan. Bus factor of one over a year, and no second opinion on the money paths |
+| **2 engineers + designer (~4 wks) + tax agent review** | **7–8 months** | **Recommended.** One owns F/B/M (the critical path), the other owns C/P/A/R/W. H is shared |
+| 3 engineers | 5–6 months | Diminishing returns — F is serial, and M depends on B. The third engineer is best spent on W, S and test coverage |
 
-Roughly **40–51 engineer-weeks**. One engineer: 10–12 months. Two: 6–7 months, with Phases 4–7
-parallelising well once Phase 2 lands. A designer is needed for ~3 weeks before Phase 8, and an
-FTA-registered tax agent should review Phase 4's output before the first return is filed.
+Allocation that works for two engineers:
 
-Bus factor of one is the largest programme risk. ADRs, tests on the money paths and a written
-runbook set are the mitigation, and they are in the plan for that reason.
+- **Engineer 1 (critical path):** F → B → M → Y, then shares H.
+- **Engineer 2:** starts on W design system and CMS scaffolding during F, then C → P → A → R.
+- **Designer:** ~4 weeks, front-loaded, so W is not blocked later.
+- **FTA-registered tax agent:** reviews M's working papers before launch. Non-negotiable.
+- **Penetration test:** booked for the start of H, not the end.
 
-## 7. Run cost
+---
 
-At launch, roughly **USD 120–190/month**: App Platform web (2 instances) and one worker,
-Managed Postgres 2 vCPU / 4 GB with standby, Spaces + CDN, Cloudflare, Sentry, plus per-message
-SMS and email. Note that Arabic SMS is UCS-2 — 70 characters per segment instead of 160 — so an
-Arabic campaign costs roughly double per message. LLM spend for the SEO agent is small at
-weekly cadence. Budget separately for the annual penetration test and the Zoho Books licence.
+## 10. If the date compresses
+
+Building in one go removes the natural pressure valve of shipping a smaller first release, so decide
+the flex list **now**, before the pressure arrives.
+
+**Frozen — never cut, because the cost of retrofitting is worse than the delay:**
+money correctness (integer fils, gross-first, snapshotting), the append-only journal and gapless
+numbering, the availability engine's correctness constraints, consent gating and the audit log, the
+clinical boundary, the compliance lints, and the migration reconciliation of voucher liabilities.
+
+**Flexible — ship a thinner version and extend after launch:**
+
+| Can be thinned | To |
+|---|---|
+| Node-graph flow builder | Kanban pipeline plus hard-coded reminder and win-back flows |
+| SEO agent (S) | The GSC data warehouse and weekly emailed report; no suggestion engine |
+| Payments (Y) | Cash, card machine and bank transfer only — already the plan for launch |
+| Arabic / RTL | English at launch, Arabic as the first post-launch release — but keep i18n plumbing and the RTL PDF proof from F |
+| Memberships | Vouchers and packages only |
+| Retail inventory | Sell retail as a simple line item; no stock or COGS |
+| Financial analysis (R) | P&L, cash flow and the five owner KPIs; defer cohorts and forecasting |
+| CMS editorial depth | A fixed set of page templates; defer the composable block library |
+
+**Never the answer:** cutting tests on the money paths, shipping without the parallel run, or
+launching before the external gates in §8 clear.

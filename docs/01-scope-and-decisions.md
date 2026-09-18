@@ -63,7 +63,7 @@ project; that price is recorded here rather than paid for in advance.
 
 ## 4. Locked technical decisions
 
-Each of these should become an ADR in `docs/adr/` when Phase 0 starts.
+Each of these should become an ADR in `docs/adr/` when workstream F starts.
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|

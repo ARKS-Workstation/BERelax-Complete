@@ -7,7 +7,10 @@ consequences* are designed in, not so it substitutes for professional advice.
 
 ## 1. The licence classification question
 
-This is the most consequential unresolved fact in the project.
+This is the most consequential single fact in the project — and because the business is already
+operating, **the answer is already on file.** Read the trade licence and any municipality health or
+DHA/DoH/MOHAP approval. The table below is what changes depending on which side of the line the
+licence sits, so that the software can be configured from the document rather than from guesswork.
 
 | | Commercial wellness | Healthcare activity |
 |---|---|---|
@@ -227,7 +230,7 @@ like this one.
 Price display obligations and honouring advertised prices; cancellation and refund rules;
 gift-voucher expiry rules.
 
-For Phase 10: the **merchant category code** matters. Massage and wellness sit in a category several
+For workstream Y (Payments): the **merchant category code** matters. Massage and wellness sit in a category several
 acquirers treat as heightened risk, and the classification applied during onboarding — by people
 reading your website — can decide whether an account is available at all. Get it confirmed in
 writing, ask at least two providers, and note the acquirer will require a physical address, AED

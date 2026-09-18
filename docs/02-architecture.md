@@ -47,7 +47,7 @@ HTML to every crawler. This is not a compromise; it is strictly better on both a
 
 External: Resend (email), SMSala (SMS), GA4 Measurement Protocol, Meta Conversions API,
 Google Search Console API, Zoho Books (statutory filing), Sentry, a payment gateway from
-Phase 10.
+workstream Y (Payments).
 
 **Why App Platform and not Droplets or DOKS.** App Platform gives managed TLS, zero-downtime
 rolling deploys, log aggregation and a separate worker component without writing any
@@ -86,7 +86,7 @@ docs/
 
 Module boundaries are enforced with an ESLint import-boundary rule. `core` may not import from
 `db`; `db` may not import from `apps`. This is what stops a nine-module system rotting into a
-ball of mud, and it is nearly free to set up in Phase 0.
+ball of mud, and it is nearly free to set up in workstream F (Foundation).
 
 ## 4. Data model spine
 
@@ -144,7 +144,7 @@ status lifecycle, segments, cost), `campaign`, `flow_definition` (versioned JSON
 `dim_date`, `dim_service`, `dim_staff`, `dim_customer`, `fact_appointment`, `fact_sale`,
 `fact_shift`, refreshed nightly and on demand.
 
-## 5. Cross-cutting services built once in Phase 0
+## 5. Cross-cutting services built once in workstream F (Foundation)
 
 - **Config and env validation at boot** — fail fast on a missing secret, never at 2am on a Friday.
 - **Structured JSON logging** with correlation IDs; Sentry for errors.
@@ -156,8 +156,8 @@ status lifecycle, segments, cost), `campaign`, `flow_definition` (versioned JSON
   calling a provider SDK directly.
 - **Money and date utilities.** Integer fils, one date library, business timezone explicit.
 - **PDF service** for invoices, payslips and reports — with early attention to Arabic/RTL
-  rendering, which is genuinely painful and worth proving in Phase 0 rather than discovering in
-  Phase 2.
+  rendering, which is genuinely painful and worth proving in workstream F (Foundation) rather than discovering in
+  workstream M (Money).
 - **Export service** (CSV/Excel), gated by permission and always audited.
 - **Feature flags**, so a half-built module can ship dark.
 - **Staging send guard** — a hard block preventing any non-production environment from ever

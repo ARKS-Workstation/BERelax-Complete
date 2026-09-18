@@ -11,7 +11,7 @@ grouped by theme, and each says what to do rather than only what to worry about.
 roughly in this order: walk-ins, phone calls, WhatsApp, Instagram DMs, Google Maps, then the
 website. The brief specifies a web booking engine and says nothing about the first four. A plan that
 perfects the web form and ignores the phone has optimised the smallest channel.
-**Do:** make staff-side quick-book as fast as the web flow (Phase 1), treat Google Business Profile
+**Do:** make staff-side quick-book as fast as the web flow (workstream B (Booking)), treat Google Business Profile
 as a first-class booking surface with the booking link installed and UTM-tagged, and put WhatsApp on
 the roadmap rather than treating it as an extra.
 
@@ -26,7 +26,7 @@ under 10 seconds" as a hard performance requirement with a stopwatch acceptance 
 nice-to-have.
 
 **A4. Rebooking at checkout is the single biggest revenue lever in the industry** and it is not in
-the brief. **Do:** a rebooking prompt is part of the Phase 2 checkout flow, and rebooking rate is a
+the brief. **Do:** a rebooking prompt is part of the workstream M (Money) checkout flow, and rebooking rate is a
 headline KPI.
 
 ---
@@ -35,7 +35,7 @@ headline KPI.
 
 **B1. Room turnaround is not a therapist buffer.** Linen change, cleaning and airing occupy the
 *room* after the client leaves. Conflating the two either over-books rooms or silently wastes ~15
-minutes of capacity per treatment. Modelled separately in Phase 1.
+minutes of capacity per treatment. Modelled separately in workstream B (Booking).
 
 **B2. Therapist fatigue is a real capacity limit.** A therapist cannot deliver eight hours of deep
 tissue. **Do:** per-service physical-load weighting and a daily cap in the rota validator, otherwise
@@ -46,7 +46,7 @@ laundry cycle, that is a hard ceiling regardless of what the calendar says. **Do
 model, and visibility of consumption per job so loss is detectable.
 
 **B4. Professional-use consumption is a cost, not a sale.** Oils, creams and linens used on clients
-must be expensed, not treated as retail stock movements. Separate stock categories from Phase 4.
+must be expensed, not treated as retail stock movements. Separate stock categories from workstream M (Money).
 
 **B5. Lunar public holidays are announced at short notice.** **Do:** provisional-versus-confirmed
 holiday states, plus an impact report showing which already-booked appointments a newly confirmed
@@ -54,7 +54,7 @@ holiday affects.
 
 **B6. Ramadan and the summer exodus change demand materially** — reduced hours, shifted evening
 demand, and a genuinely quiet July/August. Any forecast that assumes a flat year will be wrong
-twice annually. Built into the Phase 7 seasonality model.
+twice annually. Built into the workstream R (Reporting) seasonality model.
 
 ---
 
@@ -66,22 +66,22 @@ discovered during a VAT reconciliation when it is already historical.
 
 **C2. Unredeemed vouchers already sold are a migration problem.** They are real, enforceable
 liabilities held by real customers. Miss them at cutover and you get angry clients and a wrong
-opening balance sheet. On the Phase 0 data-collection list.
+opening balance sheet. On the workstream F (Foundation) data-collection list.
 
 **C3. Reverse-charge VAT on imported services** — DigitalOcean, Resend, Google, Meta, Anthropic —
 incurred from day one and the most commonly missed UAE obligation at this size. Automated as a
-nightly exception report in Phase 4.
+nightly exception report in workstream M (Money).
 
 **C4. End-of-service gratuity is an accruing balance-sheet liability**, not a surprise payment when
-someone leaves. Accrued monthly in Phase 5.
+someone leaves. Accrued monthly in workstream P (People).
 
 **C5. Contribution margin per service will surprise you.** Once therapist commission and room-hour
 cost are loaded, some services on most spa menus are barely profitable and a few lose money.
-Discount culture makes it worse. Phase 7 produces this; it usually changes the menu.
+Discount culture makes it worse. workstream R (Reporting) produces this; it usually changes the menu.
 
 **C6. No-show and late-cancellation cost is invisible until measured.** A 10% no-show rate on a
-full book is a double-digit percentage of revenue. Measured from Phase 2; addressable with deposits
-in Phase 10.
+full book is a double-digit percentage of revenue. Measured from workstream M (Money); addressable with deposits
+in workstream Y (Payments).
 
 **C7. Tips are politically and fiscally awkward** — cash versus card, pooled versus individual,
 pass-through rather than revenue. Decide the model *before* card payments are designed, because
@@ -93,7 +93,7 @@ not trust.
 
 **C9. Price-change audit trail.** "You charged me AED 400, the website said 350." You need to know
 what the price was on that date and who changed it. Effective-dated prices plus an audit log, from
-Phase 1.
+workstream B (Booking).
 
 ---
 
@@ -109,7 +109,7 @@ message templates by default, with the detail behind a link. Same logic for cale
 and, later, the card statement descriptor.
 
 **D3. A receptionist should not be able to read clinical notes.** Field-level authorisation, not
-route-level. Built into the Phase 3 clinical boundary.
+route-level. Built into the workstream C (CRM) clinical boundary.
 
 **D4. The insider threat is the realistic breach.** A therapist leaving with the client list is more
 likely than an external attacker. **Do:** every client-list export is logged *and alerted*, export
@@ -123,10 +123,10 @@ flow — so a departure is survivable.
 its enumerating test exist for exactly this.
 
 **D7. A server-side conversion push that ignores consent is a compliance hole** that client-side
-consent banners hide. Consent gates both paths in Phase 6.
+consent banners hide. Consent gates both paths in workstream A (Analytics).
 
 **D8. Staging emailing real customers** is the classic disaster. A hard environment guard is in
-Phase 0, not later.
+workstream F (Foundation), not later.
 
 **D9. Backups cannot have individual rows deleted.** Erasure requests need a stated, documented
 position on backup retention rather than an implied promise the system cannot keep.
@@ -160,7 +160,7 @@ inspection or an insurer will ask.
 ## F. Things absent from the brief entirely
 
 **F1. Retail product inventory and supplier ordering.** Retail attachment is a standard spa revenue
-line and needs stock, COGS, reorder points and stock takes (Phase 4).
+line and needs stock, COGS, reorder points and stock takes (workstream M (Money)).
 
 **F2. Corporate and hotel wellness contracts.** A recurring B2B revenue line most owners discover in
 year one — needs contract rates, consolidated monthly invoicing and a referral code. Not built, but
@@ -183,7 +183,7 @@ overdue obligation, revenue below forecast, a VIP booking arriving.
 everything, undo, bulk edit, saved views, keyboard shortcuts, an activity feed.
 
 **F8. Hardware.** Receipt printer, cash drawer, tablet at reception, barcode scanner for retail.
-Decide before Phase 2 whether the checkout targets a tablet or a desktop; it changes the UI.
+Decide before workstream M (Money) whether the checkout targets a tablet or a desktop; it changes the UI.
 
 **F9. Offline tolerance.** The salon's wifi will drop mid-checkout. What happens? At minimum, an
 honest error state and a paper fallback for the first fortnight after go-live.
@@ -208,7 +208,7 @@ framework-free `core` package, which the architecture already does.
 
 **G1. SEO migration, if a website already exists.** A redesign launched without a full pre-launch
 crawl, a 301 redirect map and a monitoring window routinely loses **30–50% of organic traffic**, and
-it takes months to recover. **Do:** baseline crawl before Phase 8 touches anything; preserve URL
+it takes months to recover. **Do:** baseline crawl before workstream W (Web) touches anything; preserve URL
 structure where it ranks; map every retired URL.
 
 **G2. Migrating off an incumbent platform.** If bookings currently run through Fresha, Booksy or
@@ -217,7 +217,7 @@ Google Business Profile booking integration may be tied to it. Audit what actual
 committing to a cutover date.
 
 **G3. The honest buy-versus-build question.** Fresha, Zenoti, Booksy, Phorest and Mindbody already do
-perhaps 80% of Phases 1–3 for a monthly fee. The defensible argument for building is that you need the
+perhaps 80% of workstreams B, M and C for a monthly fee. The defensible argument for building is that you need the
 gender-matching constraint, your specific room model, your intake flow, UAE-shaped accounting and one
 owned dataset joining bookings to money to marketing — none of which you can get from a closed
 platform, and all of which are what the last six phases depend on. That argument is real. It is worth
@@ -244,20 +244,20 @@ order is chosen so that the earliest phases reduce the owner's daily workload ra
 | # | Risk | Impact | Mitigation |
 |---|---|---|---|
 | 1 | Health-data residency answer requires UAE hosting after launch | Critical | Clinical boundary from day one; relocation is ~1 week, not a rewrite. Do not load real intake data before the answer |
-| 2 | Licence classification turns out to be healthcare | High | Regulatory profile defaults to the stricter combination; vocabulary and retention are data, not code |
-| 3 | Gender-matching requirement discovered after launch | High | Hard constraint, default strict, from Phase 1 |
+| 2 | Licence classification mis-read from the existing licence | Medium | Regulatory profile makes vocabulary and retention data, not code, so a correction is a config change |
+| 3 | Gender-matching rule not reflected in the engine | High | Hard constraint, default strict, in workstream B. The business already knows how it operates — capture current practice, then confirm in writing |
 | 4 | Promotional sender ID suspended, stopping booking confirmations | High | Two separately registered sender IDs; class-locked templates; marketing kill switch cannot affect transactional |
 | 5 | Double-booking under concurrency | High | `btree_gist` exclusion constraint + deferred room-capacity trigger + row lock + property-based tests |
 | 6 | Stale reminders after reschedule or cancellation | High | Invalidation keys on every scheduled step; tested as an invariant |
-| 7 | Revenue/VAT misstated by voucher and package treatment | High | Deferred revenue model with the VAT event separated from recognition, from Phase 2 |
+| 7 | Revenue/VAT misstated by voucher and package treatment | High | Deferred revenue model with the VAT event separated from recognition, from workstream M (Money) |
 | 8 | Staff reject the system as slower than paper | High | Front-desk speed as a measured acceptance criterion; super-user per shift; parallel run |
 | 9 | Client list exfiltrated by an insider | High | Export logging and alerting; narrow permissions; separate tamper-evident audit log |
 | 10 | Health data leaks to Google/Meta | High | Egress guard with an enumerating test; consent gating on both client and server paths |
 | 11 | Organic traffic lost at site relaunch | High | Pre-launch crawl, 301 map, post-launch monitoring window |
-| 12 | Merchant account declined for the MCC | Medium | Start acquirer conversations in Phase 0; ask two providers; site copy lint live from the first page |
-| 13 | `btree_gist` unavailable on DO Managed Postgres | Medium | Confirm in Phase 0; fallback is advisory locks plus serialisable transactions |
+| 12 | Merchant account declined for the MCC | Medium | Start acquirer conversations in workstream F (Foundation); ask two providers; site copy lint live from the first page |
+| 13 | `btree_gist` unavailable on DO Managed Postgres | Medium | Confirm in workstream F (Foundation); fallback is advisory locks plus serialisable transactions |
 | 14 | SEO agent publishes something non-compliant | Medium | Publish denied at the permission layer; keyword filtering; fetched content treated as untrusted data |
 | 15 | Accounting module drifts from FTA rules over time | Medium | Statutory filing integrated to an accredited package; no auto-file in the codebase |
 | 16 | Duplicate customer records corrupt journeys and balances | Medium | Merge as a first-class operation re-pointing consents, suppressions, enrolments and ledgers |
-| 17 | Scope overruns the calendar | Medium | Phase gates with business outcomes; Phases 4–7 parallelise; fallback in G3 |
-| 18 | Arabic RTL invoices and PDFs prove painful late | Low–Medium | Prove RTL PDF rendering in Phase 0, not Phase 2 |
+| 17 | Scope overruns the calendar | Medium | Integration milestones M1–M7 surface slippage early; workstreams M, P, A and R parallelise; flex list in 00-plan.md §10 |
+| 18 | Arabic RTL invoices and PDFs prove painful late | Low–Medium | Prove RTL PDF rendering in workstream F (Foundation), not workstream M (Money) |
