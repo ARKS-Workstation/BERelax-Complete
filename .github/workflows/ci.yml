@@ -82,6 +82,12 @@ jobs:
       - name: Palette contrast gate
         run: pnpm palette
 
+      - name: Generated token stylesheets are current
+        run: pnpm tokens
+
+      - name: Colour token discipline
+        run: pnpm colours
+
       - name: Unit tests
         run: pnpm test
 

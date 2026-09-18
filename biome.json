@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.next"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.next",
+      "!packages/ui/src/tokens/palette.generated.ts",
+      "!packages/ui/src/tokens/tokens.css",
+      "!packages/ui/src/tokens/tailwind.css"
+    ]
   },
   "formatter": {
     "enabled": true,

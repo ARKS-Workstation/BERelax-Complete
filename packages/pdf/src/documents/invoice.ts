@@ -25,6 +25,7 @@ import {
   type VatBreakdown,
   type VatRateBp,
 } from '@berelax/core'
+import { tokensCss } from '@berelax/ui'
 import { FONT_STACK, fontFaceCss } from '../fonts.ts'
 
 export interface InvoiceParty {
@@ -215,15 +216,16 @@ function settlementSentenceAr(invoice: TaxInvoice): string {
 function styles(): string {
   return `
 ${fontFaceCss()}
+${tokensCss()}
 
 @page { size: A4; }
 
-:root {
-  --ink: #1b1a18;
-  --ink-muted: #5f5b55;
-  --rule: #d8d3cb;
-  --surface-sunken: #f6f3ee;
-}
+/*
+ * A printed invoice is always light: paper has no dark mode, and neither does a PDF a customer
+ * downloads. The light tokens are therefore pinned here rather than left to prefers-color-scheme,
+ * which in a headless renderer would follow whatever the container happens to report.
+ */
+:root { color-scheme: light; }
 
 * { box-sizing: border-box; }
 
@@ -234,7 +236,7 @@ body {
   font-family: ${FONT_STACK};
   font-size: 10pt;
   line-height: 1.5;
-  color: var(--ink);
+  color: var(--color-ink);
 }
 
 /* Arabic is optically smaller at the same point size and never tracked or uppercased.
@@ -251,7 +253,7 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  border-bottom: 1.5pt solid var(--ink);
+  border-bottom: 1.5pt solid var(--color-ink);
   padding-bottom: 6pt;
   margin-bottom: 12pt;
 }
@@ -261,33 +263,33 @@ header .title-ar { font-size: 17pt; font-weight: 600; }
 
 .meta { display: flex; gap: 18pt; margin-bottom: 14pt; }
 .meta > div { flex: 1; }
-.meta .label { color: var(--ink-muted); font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; }
-.meta .label-ar { color: var(--ink-muted); font-size: 8.5pt; }
+.meta .label { color: var(--color-ink-2); font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; }
+.meta .label-ar { color: var(--color-ink-2); font-size: 8.5pt; }
 
 .parties { display: flex; gap: 18pt; margin-bottom: 16pt; }
 .party { flex: 1; }
-.party h2 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin: 0 0 4pt; display: flex; justify-content: space-between; }
+.party h2 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-ink-2); margin: 0 0 4pt; display: flex; justify-content: space-between; }
 .party h2 .ar { text-transform: none; font-size: 8.5pt; }
 .party-body { display: flex; justify-content: space-between; gap: 10pt; }
 .party-body > div { flex: 1; }
-.party .labelled { display: flex; align-items: baseline; gap: 8pt; margin-top: 3pt; color: var(--ink-muted); }
+.party .labelled { display: flex; align-items: baseline; gap: 8pt; margin-top: 3pt; color: var(--color-ink-2); }
 .party .labelled .en { text-transform: uppercase; letter-spacing: 0.06em; font-size: 8pt; }
 .party .labelled .ar { font-size: 8.5pt; }
-.party .labelled .figure { color: var(--ink); }
+.party .labelled .figure { color: var(--color-ink); }
 
 table { width: 100%; border-collapse: collapse; }
-.lines thead th { border-bottom: 1pt solid var(--ink); padding: 4pt 5pt; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); vertical-align: bottom; }
+.lines thead th { border-bottom: 1pt solid var(--color-ink); padding: 4pt 5pt; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-ink-2); vertical-align: bottom; }
 .lines thead th span { display: block; }
 .lines thead th .ar { text-transform: none; letter-spacing: 0; font-size: 8.5pt; }
 /* Scoped to .lines deliberately. An unscoped tbody-td rule also matched the totals table, where the
    label is a th — so each totals row grew a rule under the amount only, and the block looked like a
    table with half its lines missing. */
-.lines tbody td { border-bottom: 0.5pt solid var(--rule); padding: 6pt 5pt; vertical-align: top; }
+.lines tbody td { border-bottom: 0.5pt solid var(--color-hairline); padding: 6pt 5pt; vertical-align: top; }
 .align-start { text-align: start; }
 .align-end { text-align: end; }
 /* Tabular figures keep the amount column aligned on the decimal point. */
 .figure { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.description .ar { color: var(--ink-muted); }
+.description .ar { color: var(--color-ink-2); }
 
 .totals { margin-top: 10pt; margin-inline-start: auto; width: 62%; }
 .totals th { font-weight: 400; padding: 3pt 5pt; }
@@ -295,14 +297,14 @@ table { width: 100%; border-collapse: collapse; }
 /* English label, Arabic label, then the figure — one row, three columns, so the eye can run down
    either language without the labels stacking away from their amount. */
 .totals .label-pair { display: flex; justify-content: space-between; gap: 12pt; }
-.totals .label-pair .ar { color: var(--ink-muted); font-size: 9pt; }
-.totals .emphasis th, .totals .emphasis td { border-top: 1pt solid var(--ink); font-weight: 600; font-size: 11.5pt; padding-top: 5pt; }
-.totals .emphasis .label-pair .ar { font-size: 10pt; font-weight: 500; color: var(--ink); }
+.totals .label-pair .ar { color: var(--color-ink-2); font-size: 9pt; }
+.totals .emphasis th, .totals .emphasis td { border-top: 1pt solid var(--color-ink); font-weight: 600; font-size: 11.5pt; padding-top: 5pt; }
+.totals .emphasis .label-pair .ar { font-size: 10pt; font-weight: 500; color: var(--color-ink); }
 
-.inclusive { display: flex; justify-content: space-between; gap: 14pt; margin-top: 8pt; color: var(--ink-muted); font-size: 9pt; }
+.inclusive { display: flex; justify-content: space-between; gap: 14pt; margin-top: 8pt; color: var(--color-ink-2); font-size: 9pt; }
 
-.settlement { background: var(--surface-sunken); padding: 8pt 10pt; margin-top: 16pt; }
-footer { margin-top: 14pt; display: flex; justify-content: space-between; color: var(--ink-muted); font-size: 8.5pt; border-top: 0.5pt solid var(--rule); padding-top: 6pt; }
+.settlement { background: var(--color-ground-sunk); padding: 8pt 10pt; margin-top: 16pt; }
+footer { margin-top: 14pt; display: flex; justify-content: space-between; color: var(--color-ink-2); font-size: 8.5pt; border-top: 0.5pt solid var(--color-hairline); padding-top: 6pt; }
 `
 }
 

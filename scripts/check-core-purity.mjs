@@ -11,6 +11,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const ROOT = 'packages/core/src'
 
@@ -33,51 +34,9 @@ const walk = (dir) =>
     return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : []
   })
 
-/**
- * Blanks out comments and string literals while preserving line numbers and length, so a rule
- * explained in a doc comment is not reported as a violation of itself. Newlines are kept so the
- * reported line number still matches the file.
- */
-function stripNonCode(src) {
-  const out = src.split('')
-  let i = 0
-  // Comments become whitespace; string CONTENTS become a placeholder character. Blanking a string
-  // to whitespace would make `new Date(`${d}T00:00:00Z`)` look like an argument-less `new Date()`.
-  const blank = (from, to, fill = ' ') => {
-    for (let k = from; k < to && k < out.length; k += 1) {
-      if (out[k] !== '\n') out[k] = fill
-    }
-  }
-  while (i < src.length) {
-    const two = src.slice(i, i + 2)
-    if (two === '//') {
-      const end = src.indexOf('\n', i)
-      blank(i, end === -1 ? src.length : end)
-      i = end === -1 ? src.length : end
-    } else if (two === '/*') {
-      const end = src.indexOf('*/', i + 2)
-      const stop = end === -1 ? src.length : end + 2
-      blank(i, stop)
-      i = stop
-    } else if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
-      const quote = src[i]
-      let k = i + 1
-      while (k < src.length && src[k] !== quote) {
-        if (src[k] === '\\') k += 1
-        k += 1
-      }
-      blank(i + 1, Math.min(k, src.length), 'x')
-      i = Math.min(k + 1, src.length)
-    } else {
-      i += 1
-    }
-  }
-  return out.join('')
-}
-
 let violations = 0
 for (const file of walk(ROOT)) {
-  const code = stripNonCode(readFileSync(file, 'utf8'))
+  const code = stripNonCode(readFileSync(file, 'utf8'), { blankStrings: true })
   code.split('\n').forEach((line, i) => {
     for (const { re, why } of FORBIDDEN) {
       re.lastIndex = 0

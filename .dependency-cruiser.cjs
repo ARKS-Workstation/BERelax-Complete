@@ -38,7 +38,7 @@ module.exports = {
         'and receives what it needs as arguments.',
       severity: 'error',
       from: { path: '^packages/core/' },
-      to: { path: '^packages/(config|messaging|auth|db|clinical|pdf)/' },
+      to: { path: '^packages/(config|messaging|auth|db|clinical|pdf|ui)/' },
     },
     {
       name: 'db-must-not-import-core',

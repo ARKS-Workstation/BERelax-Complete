@@ -1,0 +1,143 @@
+/*
+ * GENERATED from packages/ui/src/tokens. Do not edit.
+ *
+ * Colours come from scripts/palette.py, which re-derives and re-measures them on every CI run.
+ * Scales come from tokens/scale.ts. Regenerate with `pnpm tokens:emit`.
+ */
+
+:root {
+  --color-ground: #FDFAF5;
+  --color-surface: #FFFFFF;
+  --color-ground-sunk: #F7F0E5;
+  --color-surface-sand: #F2E9DC;
+  --color-surface-clay: #E6D8C4;
+  --color-ink: #26241F;
+  --color-ink-2: #6E675D;
+  --color-ink-3: #90877B;
+  --color-accent-gold: #946A32;
+  --color-accent-gold-strong: #6E4E25;
+  --color-accent-green: #4E7048;
+  --color-accent-teal: #2A6E66;
+  --color-decor-gold: #C08A43;
+  --color-decor-tan: #C9AE8B;
+  --color-hairline: #E6D8C4;
+  --color-border: #C9AE8B;
+  --color-border-strong: #B18A57;
+  --color-focus: #2A6E66;
+  --color-danger: #C0392B;
+  --color-success: #4E7048;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-ground: #141210;
+    --color-ground-sunk: #0F0D0B;
+    --color-surface: #1F1C18;
+    --color-surface-raised: #292520;
+    --color-ink: #F0EBE3;
+    --color-ink-2: #B5AEA4;
+    --color-ink-3: #746F66;
+    --color-accent-gold: #C08A43;
+    --color-accent-green: #5F8958;
+    --color-accent-teal: #358C81;
+    --color-hairline: #2A2621;
+    --color-border: #3A352E;
+    --color-border-strong: #8B857B;
+    --color-focus: #5FB8AC;
+    --color-danger: #D55144;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-ground: #141210;
+  --color-ground-sunk: #0F0D0B;
+  --color-surface: #1F1C18;
+  --color-surface-raised: #292520;
+  --color-ink: #F0EBE3;
+  --color-ink-2: #B5AEA4;
+  --color-ink-3: #746F66;
+  --color-accent-gold: #C08A43;
+  --color-accent-green: #5F8958;
+  --color-accent-teal: #358C81;
+  --color-hairline: #2A2621;
+  --color-border: #3A352E;
+  --color-border-strong: #8B857B;
+  --color-focus: #5FB8AC;
+  --color-danger: #D55144;
+}
+
+:root {
+  --space-0: 1px;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 40px;
+  --space-10: 48px;
+  --space-11: 64px;
+  --space-12: 80px;
+  --space-13: 96px;
+  --space-14: 128px;
+  --space-15: 160px;
+  --space-16: 192px;
+  --radius-1: 2px;
+  --radius-2: 8px;
+  --radius-3: 16px;
+  --radius-handle: 999px;
+  --dur-instant: 90ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --dur-reveal: 500ms;
+  --ease-out-quiet: cubic-bezier(.22,1,.36,1);
+  --ease-out-soft: cubic-bezier(.16,1,.30,1);
+  --ease-in-quick: cubic-bezier(.40,0,1,1);
+  --ease-calm: cubic-bezier(.45,0,.55,1);
+  --move-sm: 8px;
+  --move-md: 16px;
+  --move-lg: 32px;
+  --stagger: 40ms;
+  --dur-ambient: 12s;
+  --container-max: 1360px;
+  --gutter: 20px;
+  /* Direction multiplier, so no animation is authored twice for RTL. */
+  --dir: 1;
+}
+
+[dir="rtl"] {
+  --dir: -1;
+}
+
+/* Reduced motion as a token override. One change, whole system compliant. */
+@media (prefers-reduced-motion: reduce) {
+:root:not([data-motion="full"]) {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 120ms;
+    --dur-slow: 120ms;
+    --dur-reveal: 120ms;
+    --dur-ambient: 0s;
+    --move-sm: 0px;
+    --move-md: 0px;
+    --move-lg: 0px;
+    --stagger: 0ms;
+  }
+}
+
+@media (min-width: 480px) {
+  :root { --gutter: 24px; }
+}
+@media (min-width: 768px) {
+  :root { --gutter: 40px; }
+}
+@media (min-width: 1024px) {
+  :root { --gutter: 64px; }
+}
+@media (min-width: 1280px) {
+  :root { --gutter: 80px; }
+}

@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**10 / 206 units complete.**
+**11 / 206 units complete.**
 
 ## Next up
 
-1. **F11 — Design tokens**
 1. **H01 — Progress ledger, ADRs for locked decisions, open questions**
 1. **H02 — Fake provider layer**
+1. **H03 — Deterministic seed and frozen clock**
 
 ## All units
 
@@ -24,7 +24,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 8 | `F08` | Clinical schema boundary | `F04`, `F07` | — | — |
 | [x] | 9 | `F09` | Settings registry | `F04`, `F07` | — | — |
 | [x] | 10 | `F10` | Arabic RTL PDF proof | `F01` | — | — |
-| [ ] | 11 | `F11` | Design tokens | `F01` | — | — |
+| [x] | 11 | `F11` | Design tokens | `F01` | — | — |
 | [ ] | 12 | `H01` | Progress ledger, ADRs for locked decisions, open questions | `F01` | — | — |
 | [ ] | 13 | `H02` | Fake provider layer | `F03`, `F06` | — | — |
 | [ ] | 14 | `H03` | Deterministic seed and frozen clock | `F04`, `F05` | — | — |

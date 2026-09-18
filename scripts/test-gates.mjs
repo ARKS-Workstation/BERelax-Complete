@@ -134,7 +134,57 @@ const runExpectingFailure = (cmd, args) => {
   check('invisible-character gate rejects a zero-width space in source', failed)
 }
 
-// 9. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
+// 9. A hand-edited palette token must fail the palette gate.
+{
+  const f = 'packages/ui/src/tokens/palette.generated.ts'
+  const original = readFileSync(f, 'utf8')
+  // The failure this guards is a designer nudging a hex by eye. The value still looks like gold; it
+  // no longer meets 4.62:1, and nothing else in the system would notice.
+  writeFileSync(f, original.replace("'accent-gold': '#946A32'", "'accent-gold': '#C08A43'"))
+  const { failed } = runExpectingFailure('python3', ['scripts/palette.py'])
+  writeFileSync(f, original)
+  check('palette gate rejects a hand-edited token', failed)
+}
+
+// 10. A stale generated stylesheet must fail the tokens gate.
+{
+  const f = 'packages/ui/src/tokens/tokens.css'
+  const original = readFileSync(f, 'utf8')
+  writeFileSync(f, `${original}\n:root { --color-ink: #000000; }\n`)
+  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/emit-tokens.mjs'])
+  writeFileSync(f, original)
+  check('tokens gate rejects a hand-edited generated stylesheet', failed)
+}
+
+// 11. An un-tokened colour must fail the colour gate.
+{
+  const f = 'packages/ui/src/__gate_fixture__.ts'
+  writeFileSync(f, ['export const css = `.x { color: #123456; }`', ''].join('\n'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
+  rmSync(f, { force: true })
+  check('colour gate rejects an un-tokened colour', failed)
+}
+
+// 12. The decorative brand gold on a text-bearing property must fail the colour gate.
+{
+  const f = 'packages/ui/src/__gate_fixture__.ts'
+  // 2.90:1. This is the specific mistake the whole classification exists to prevent.
+  writeFileSync(f, ['export const css = `.x { color: var(--color-decor-gold); }`', ''].join('\n'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
+  rmSync(f, { force: true })
+  check('colour gate rejects the decorative gold on a text-bearing property', failed)
+}
+
+// 13. A Tailwind default palette utility must fail the colour gate.
+{
+  const f = 'packages/ui/src/__gate_fixture__.tsx'
+  writeFileSync(f, ['export const cls = ', '  "rounded p-2 " + "text-slate-700"', ''].join('\n'))
+  const { failed } = runExpectingFailure('node', ['scripts/check-colour-tokens.mjs'])
+  rmSync(f, { force: true })
+  check('colour gate rejects a Tailwind default palette utility', failed)
+}
+
+// 14. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
   const required = [
@@ -145,6 +195,8 @@ const runExpectingFailure = (cmd, args) => {
     'pnpm purity',
     'pnpm invisibles',
     'pnpm palette',
+    'pnpm tokens',
+    'pnpm colours',
     'pnpm test',
     'pnpm test:integration',
     'pnpm db:migrate:dry',

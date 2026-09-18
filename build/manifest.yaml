@@ -158,7 +158,7 @@ units:
     order: 11
     title: Design tokens
     owner: claude
-    status: todo
+    status: done
     depends_on:
     - F01
     steps:

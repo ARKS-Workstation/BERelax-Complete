@@ -19,6 +19,7 @@
  * both ways states its VAT rate two different ways on one page.
  */
 import { bdi, safeText } from '@berelax/core'
+import { tokensCss } from '@berelax/ui'
 import { FONT_STACK, fontFaceCss } from '../fonts.ts'
 
 /** A dialling code is the classic case: the `+` is a neutral and it moves. */
@@ -197,16 +198,18 @@ export function renderBidiSpecimenHtml(): string {
 <title>Bidi specimen</title>
 <style>
 ${fontFaceCss()}
+${tokensCss()}
 @page { size: A4; }
+:root { color-scheme: light; }
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { margin: 0; font-family: ${FONT_STACK}; font-size: 11pt; color: #1b1a18; }
+body { margin: 0; font-family: ${FONT_STACK}; font-size: 11pt; color: var(--color-ink); }
 h1 { font-size: 15pt; font-weight: 600; margin: 0 0 2pt; }
-.intro { color: #5f5b55; font-size: 9.5pt; margin: 0 0 14pt; max-width: 62ch; }
-section { border-top: 0.5pt solid #d8d3cb; padding: 7pt 0; }
-.caption { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: #5f5b55; margin-bottom: 3pt; }
-.good { color: #2f6b4f; }
-.bad { color: #9b3226; }
+.intro { color: var(--color-ink-2); font-size: 9.5pt; margin: 0 0 14pt; max-width: 62ch; }
+section { border-top: 0.5pt solid var(--color-hairline); padding: 7pt 0; }
+.caption { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-ink-2); margin-bottom: 3pt; }
+.good { color: var(--color-accent-green); }
+.bad { color: var(--color-danger); }
 .specimen { margin: 0; font-size: 13pt; line-height: 1.9; }
 </style>
 </head>
