@@ -27,6 +27,22 @@ suspends the identity and every booking confirmation stops.
 
 *If delayed:* ship transactional-only messaging; hold the campaign sender behind a feature flag.
 
+### 1b. Google Business Profile API access — the application Google reviews
+**Blocks:** programmatic review replies. Does **not** block the SEO agent.
+
+Submit the *Application for Basic API Access* (`support.google.com/business/contact/api_default`) with
+the Cloud project number, from an account that is an owner or manager of the listing. Prerequisites:
+the profile **verified and active 60+ days**, with a **website representing the business** on it.
+Approval is visible as project quota moving **0 → 300 QPM**. **[UNVERIFIED]** timeline — reports range
+from days to ~6 weeks.
+
+Two things to do in the same week, because both have their own waiting periods: **establish which Google
+account currently owns the listing** (for an operating business, possibly a former agency), and start the
+**nine-day refresh-token expiry experiment** in §8 of [10-google-connection.md](10-google-connection.md).
+
+*If not granted by launch:* the autoresponder runs in draft-and-notify mode, which is ~70–80% of the
+value and is the designed launch mode rather than a degraded one.
+
 ### 2. Platform verifications — Google, Meta, Resend
 **Blocks:** workstreams A (analytics), W (web/SEO), S (SEO agent).
 

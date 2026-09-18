@@ -131,22 +131,29 @@ GBP-versus-website consistency checker — off a shared, encrypted token store.
 
 Two things this does **not** solve, and which the plan must handle:
 
-- **OAuth grants authorisation, not API access.** The Google Business Profile APIs are gated
-  separately at the Google Cloud project level by an access request that Google reviews. Until
-  granted, calls fail regardless of token validity. **[UNVERIFIED — confirm current process.]** The
-  draft-and-notify fallback is therefore the launch path for the autoresponder, not a contingency.
-  Search Console is **not** gated this way, so the SEO agent can be fully working while GBP access is
-  pending.
+- **OAuth grants authorisation, not API access.** The Business Profile APIs are gated at the Google
+  Cloud **project** level by the *Application for Basic API Access* form; until approved, project
+  quota is **0 QPM** and every call fails regardless of token validity. Prerequisites include the
+  profile being verified and active **60+ days** with a website on it. The draft-and-notify fallback
+  is therefore the **launch mode** for the autoresponder, not a contingency. Search Console is **not**
+  gated this way, so the SEO agent is fully functional on launch day. Full detail in
+  [10-google-connection.md](10-google-connection.md).
 - **OAuth app publishing status has an operational consequence.** An app left in *Testing* issues
-  short-lived refresh tokens, which would stop both agents on a recurring cadence with no obvious
-  cause. Moving to *Production* avoids this but may trigger app verification for sensitive scopes.
-  A launch-blocking decision, to be resolved during the build rather than after.
+  refresh tokens that expire in **7 days**, which would stop both agents weekly with no correlated
+  deploy. `business.manage` is a Sensitive scope, so Production may trigger app verification.
+  **Recommended resolution: one Google Workspace seat on the business domain**, putting the Cloud
+  project in a Workspace organisation so the OAuth audience can be *Internal* — which also fixes the
+  account-identity problem. A launch-blocking decision; see
+  [10-google-connection.md](10-google-connection.md) §3.
 
-**Recommendation to put to the owner:** connect a **dedicated business Google account that owns the
-GBP listing**, with the proprietor as a manager — not a personal Gmail. A personal account is a single
-point of failure: a password change, a lost 2FA device, or the proprietor leaving breaks both agents.
-If they prefer their own account anyway, that is their call; the minimum safeguards are documented
-with the design.
+**Recommendation to put to the owner:** connect a **dedicated business Google account that is an Owner
+of the GBP listing**, with the proprietor as a **Manager** — not a personal Gmail. The real risk is not
+a password change (Google ties that revocation to Gmail scopes, which we do not request) but
+**offboarding**: for an operating business the listing may already be held by a former agency or a
+departed staff member. **Establishing who owns it today is the first task in the build.** If the owner
+prefers their own account, that is their call; §5 of
+[10-google-connection.md](10-google-connection.md) documents the minimum safeguards and the migration
+path.
 
 ---
 
