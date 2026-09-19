@@ -11604,6 +11604,243 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 48a-48j. (W-SYS-10) The breakpoint preview. Every case below breaks a shipped file and requires the test
+//       that claims to cover it to fail **by name**, because the whole unit is one claim — that the preview
+//       shows an editor what the site actually serves — and a preview that agreed with nothing would look
+//       exactly the same.
+{
+  const SRCSET = 'packages/media/src/srcset.ts'
+  const CROP_PREVIEW = 'packages/media/src/crop-preview.ts'
+  const DERIVATIVE_SET = 'packages/media/src/derivative-set.ts'
+  const SRCSET_TEST = 'packages/media/src/srcset.test.ts'
+  const CROP_TEST = 'packages/media/src/crop-preview.test.ts'
+  const SET_TEST = 'packages/media/src/derivative-set.test.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // 48a. The two art-directed ladders must not collide in one `srcset`. A single set containing both crops
+  //      lets a browser pick a 16:9 rung on a phone, which is art direction switched off — and the image
+  //      still renders, so nothing anywhere looks wrong.
+  const mixed = withEditedFile(
+    SRCSET,
+    (text) =>
+      text.replace(
+        'return CROPS[crop].widths\n',
+        "return CROPS[crop === 'mobile' ? 'desktop' : crop].widths\n",
+      ),
+    () => runExpectingFailure('pnpm', unit(SRCSET_TEST)),
+  )
+  checkRejectedBy(
+    'the srcset suite fails when one crop serves another crops rungs',
+    mixed,
+    'offers every rung of the crop, ascending, with w descriptors',
+  )
+
+  // 48b. The rung a browser selects is the narrowest candidate at least as wide as it needs. An off-by-one
+  //      here serves the next rung up at every exact boundary, which is a weight report that is wrong on the
+  //      widths a laptop actually reports.
+  const offByOne = withEditedFile(
+    SRCSET,
+    (text) => text.replace('candidate >= needed', 'candidate > needed'),
+    () => runExpectingFailure('pnpm', unit(SRCSET_TEST)),
+  )
+  checkRejectedBy(
+    'the srcset suite fails when the selection rule is off by one',
+    offByOne,
+    'reports the table the acceptance criterion asks for',
+  )
+
+  // 48c. The crop sweep the browser indexes must be `cropRectFor` — the function the derivative job extracts
+  //      with. A centre crop is the specific wrong answer: it is what a preview that ignored the focal point
+  //      would show, and a centre crop of a full-length portrait is a torso.
+  const centred = withEditedFile(
+    CROP_PREVIEW,
+    (text) =>
+      text.replace(
+        'boxes[crop] = cropRectFor(source, crop, focal)',
+        'boxes[crop] = cropRectFor(source, crop, { x: 50, y: 50 })',
+      ),
+    () => runExpectingFailure('pnpm', unit(CROP_TEST)),
+  )
+  checkRejectedBy(
+    'the crop-preview suite fails when the sweep ignores the focal point',
+    centred,
+    'is cropRectFor, for every crop',
+  )
+
+  // 48d. A slider that looks live and moves nothing. The sweep is 101 entries by construction, so one that
+  //      returned the same rectangle 101 times would still be the right length.
+  const frozen = withEditedFile(
+    CROP_PREVIEW,
+    (text) => text.replace('{ x: focalX, y: focalY }', '{ x: 50, y: focalY }'),
+    () => runExpectingFailure('pnpm', unit(CROP_TEST)),
+  )
+  checkRejectedBy(
+    'the crop-preview suite fails when focalX moves no window',
+    frozen,
+    'actually moves the window, and only where there is room to move',
+  )
+
+  // 48e. The per-rung weight must be the bytes of the object in the bucket. An estimate from the rung's
+  //      pixel count is the exact failure the acceptance criterion names — "not a computed estimate" — and it
+  //      is plausible enough that a badge showing one looks right.
+  const estimated = withEditedFile(
+    DERIVATIVE_SET,
+    (text) => text.replace('bytes: head.bytes,', 'bytes: Math.round((width * width) / 40),'),
+    () => runExpectingFailure('pnpm', unit(SET_TEST)),
+  )
+  checkRejectedBy(
+    'the derivative-set suite fails when a rung weight becomes an estimate',
+    estimated,
+    'addresses the ladder by the CURRENT original and reports every rung',
+  )
+
+  // 48f. The over-budget comparison itself. Neutered, every rung reads as within budget and the preview's
+  //      whole point — the over-budget state — becomes decoration.
+  const neutered = withEditedFile(
+    DERIVATIVE_SET,
+    (text) =>
+      text.replace(
+        'overBudget: budgetBytes !== null && rendition.bytes > budgetBytes,',
+        'overBudget: false,',
+      ),
+    () => runExpectingFailure('pnpm', unit(SET_TEST)),
+  )
+  checkRejectedBy(
+    'the derivative-set suite fails when nothing can be over budget',
+    neutered,
+    'marks a rung over its crop budget, and leaves the rest within',
+  )
+
+  // 48g. `null` budget means "docs/08 §8 states none for this slot", not "unlimited" and not "zero". Read as
+  //      zero, every gallery tile is flagged — noise an editor learns to ignore, which is how a real breach
+  //      goes unread.
+  const nullAsZero = withEditedFile(
+    DERIVATIVE_SET,
+    (text) =>
+      text.replace(
+        'const budgetBytes = budget === null ? null : budget[rendition.crop]',
+        'const budgetBytes = budget === null ? 0 : budget[rendition.crop]',
+      ),
+    () => runExpectingFailure('pnpm', unit(SET_TEST)),
+  )
+  checkRejectedBy(
+    'the derivative-set suite fails when a null budget is read as zero',
+    nullAsZero,
+    'never reports over budget for a slot docs/08 states no budget for',
+  )
+
+  // 48h. The weight fed to the publication refusal is the MAXIMUM rung, not the widest. They are the same
+  //      object for a source whose bytes rise with pixels and not for one whose do not, and the difference is
+  //      a refusal the preview showed and the API did not.
+  const widestOnly = withEditedFile(
+    DERIVATIVE_SET,
+    (text) =>
+      text.replace(
+        'return bytes.length === 0 ? undefined : Math.max(...bytes)',
+        'return bytes.at(-1)',
+      ),
+    () => runExpectingFailure('pnpm', unit(SET_TEST)),
+  )
+  checkRejectedBy(
+    'the derivative-set suite fails when the served weight is the widest rung rather than the heaviest',
+    widestOnly,
+    'is the MAXIMUM, not the widest, so a non-monotonic source cannot slip past a budget',
+  )
+
+  // 48i. The new admin route had to be declared in the registry, and that is a build error rather than an
+  //      omission somebody notices in Search Console six weeks later. A route file with no entry must fail
+  //      the bijection by the name W-SITE-01 gave it.
+  const unregistered = withFixture(
+    'apps/web/app/(admin)/settings/media/route.ts',
+    'export function GET(): Response {\n  return new Response("gate fixture")\n}',
+    () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
+  )
+  checkRejectedBy(
+    'the route registry rejects an admin route with no entry',
+    unregistered,
+    'route-without-registry-entry',
+  )
+
+  // 48j. The control for all nine. A suite broken for any other reason satisfies every probe above, which is
+  //      precisely how a gate comes to report a pass for a rule it has stopped testing.
+  for (const [name, file] of [
+    ['srcset', SRCSET_TEST],
+    ['crop-preview', CROP_TEST],
+    ['derivative-set', SET_TEST],
+    ['route registry', REGISTRY_TEST],
+  ]) {
+    const clean = run('pnpm', unit(file))
+    check(
+      `the committed ${name} suite passes`,
+      !clean.failed,
+      `${file} failed on the committed files:\n${clean.output}`,
+    )
+  }
+}
+
+// 54a-54c. `pnpm typecheck` must actually typecheck the web application.
+//
+// For a long time it did not, and nothing said so. The root `tsconfig.json` includes
+// `packages/**/*.ts`, `apps/worker/**/*.ts`, one loader file and `vitest.config.ts` — no
+// `apps/web/app/**`, no `apps/web/src/**`, and no `.tsx` anywhere in the repository. So every gate that
+// reported a clean typecheck was reporting it over a subset of the tree, and the only thing standing
+// between a type error in the application and a deploy was `next build`, which `pnpm verify` does not
+// run. W-SYS-10 found it the way it had to be found: two wrong relative import depths passed
+// `pnpm typecheck` and failed in the build.
+//
+// `pnpm typecheck` now runs both projects. These three cases are what stop that from silently becoming
+// one project again — a `&&` deleted, or the web project's `include` narrowed — and they deliberately
+// break a `.tsx` as well as a `.ts`, because `.tsx` is the extension the old configuration could not see
+// at all.
+{
+  const webFixtureTs = 'apps/web/src/__gate_fixture__.ts'
+  const webFixtureTsx = 'apps/web/src/__gate_fixture__.tsx'
+
+  // 54a. A type error in an ordinary module under apps/web/src.
+  withFixture(webFixtureTs, 'export const widths: number[] = ["not a number"]\n', () => {
+    const { failed, output } = runExpectingFailure('pnpm', ['typecheck'])
+    check(
+      'typecheck rejects a type error under apps/web/src',
+      failed && output.includes('__gate_fixture__.ts'),
+      failed
+        ? `it failed without naming the fixture:\n${output.split('\n').slice(-12).join('\n')}`
+        : 'a string assigned to number[] under apps/web/src typechecked clean — the web project is ' +
+            'out of `pnpm typecheck` again, or its `include` no longer reaches src/',
+    )
+  })
+
+  // 54b. The same in a .tsx, which is the extension the root project could not see at all. A component,
+  //      so the failure is in JSX rather than in a bare assignment: `jsx: "preserve"` is part of what
+  //      makes this a separate project, and a misconfigured one reports "cannot use JSX" instead.
+  withFixture(
+    webFixtureTsx,
+    'export function Fixture(): JSX.Element {\n' +
+      '  const n: number = "not a number"\n' +
+      '  return <span>{n}</span>\n' +
+      '}\n',
+    () => {
+      const { failed, output } = runExpectingFailure('pnpm', ['typecheck'])
+      check(
+        'typecheck rejects a type error in a .tsx under apps/web/src',
+        failed && output.includes('__gate_fixture__.tsx'),
+        failed
+          ? `it failed without naming the fixture:\n${output.split('\n').slice(-12).join('\n')}`
+          : 'a string assigned to number inside a component typechecked clean — no .tsx in this ' +
+              'repository is being typechecked',
+      )
+    },
+  )
+
+  // 54c. The control. Without it the two above would also pass on a tree that cannot typecheck at all.
+  const clean = run('pnpm', ['typecheck'])
+  check(
+    'pnpm typecheck passes on this tree, over both projects',
+    !clean.failed,
+    `the committed tree does not typecheck:\n${clean.output.split('\n').slice(-20).join('\n')}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

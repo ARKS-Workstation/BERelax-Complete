@@ -19,6 +19,17 @@ import { defineConfig } from 'vitest/config'
  * mock works — which is how a coverage number becomes a number rather than evidence.
  */
 export default defineConfig({
+  /**
+   * JSX, for the same reason `vitest.integration.config.ts` states it.
+   *
+   * `apps/web/tsconfig.json` sets `jsx: "preserve"` because Next compiles JSX itself, Vite reads that for any
+   * file under `apps/web`, and the transform then emits JSX into a `.js` module — which fails in the
+   * IMPORTER with "the content contains invalid JS syntax", several frames from the cause. Declared in both
+   * configs rather than only in the one that needs it today: two runners that disagree about JSX is a test
+   * that passes in one suite and cannot be written in the other. It is `oxc` and not `esbuild` because Vite 8
+   * transforms with oxc.
+   */
+  oxc: { jsx: { runtime: 'automatic', importSource: 'react' } },
   test: {
     name: 'unit',
     include: ['packages/**/*.test.ts', 'apps/**/*.test.ts'],

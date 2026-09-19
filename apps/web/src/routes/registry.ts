@@ -130,6 +130,24 @@ export const ROUTES = [
       'locks the room rows and writes, on every request.',
   },
   {
+    id: 'media-publish',
+    path: '/api/v1/media/publish',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-10s publish gate: the API half of "blocked in the UI AND at the API endpoint". Under /api ' +
+      'and not beside the preview for three reasons — /api is exempt from the proxy, so a trailing ' +
+      'slash is trimmed with a 308 rather than a 301, and a 301 on a POST is downgraded to a GET with ' +
+      'the body dropped; a publish is not a document, so a locale would give one endpoint two URLs; and ' +
+      'an endpoint under /api is somewhere a curl naturally goes, which is what the acceptance ' +
+      'criterion means by an assertion independent of the UI. Not indexable, and covered by the proxy ' +
+      'exemption rather than by a header, exactly like the OTP endpoint beside it.',
+  },
+  {
     id: 'otp',
     path: '/api/v1/otp',
     kind: 'handler',
@@ -188,6 +206,25 @@ export const ROUTES = [
       'sitemap: it says what the business IS and which pages are worth reading, in prose, for a reader ' +
       'that will not run JavaScript. Indexable for the same reason as /api/facts, and its page list is ' +
       'derived from this registry, so docs/09 §1s eleven planned routes appear in it the day they land.',
+  },
+  {
+    id: 'derivative',
+    path: '/m/[mediaId]/[contentHash]/[filename]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: true,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'The derivative origin (W-SYS-10). packages/media/src/storage/port.ts states the rule this route ' +
+      'exists to satisfy — derivatives are served SAME-ORIGIN, because a Spaces hostname costs DNS, TCP ' +
+      'and TLS before the first byte of the LCP image — and until now nothing answered the URLs the ' +
+      'pipeline produced. Locale-neutral because a photograph has no language, and dynamic because the ' +
+      'bytes are read from the bucket per request. Indexable on purpose, and it is the one route here ' +
+      'where that reads oddly: a noindex on an image is a page removed from Google Images, which is ' +
+      'traffic this business wants, and the URL carries no unpublished state — it is content-addressed, ' +
+      'immutable and already public. Absent from the sitemap because a sitemap lists documents.',
   },
   {
     id: 'robots-txt',
@@ -250,6 +287,25 @@ export const ROUTES = [
       'than a document because a document has to be served in both locales and needs the admin shell ' +
       'W-SYS-01 builds; the settings card that will call this is G-CONN-07. Covered by the /settings ' +
       'noindex prefix, like the consent route beside it.',
+  },
+  {
+    id: 'media-breakpoint-preview',
+    path: '/settings/media/preview/[mediaId]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-10s breakpoint preview: the real crop at real widths from the real derivative URLs, with ' +
+      'per-rung transferred bytes against the slot budget. A handler rather than a document for the two ' +
+      'reasons the Messages inbox gives one directory along — a document must be served in both locales, ' +
+      'which would need an Arabic admin document and would join a twelve-cell screenshot matrix, and ' +
+      'this surfaces acceptance asks for three viewports times two themes — plus a third that is this ' +
+      'routes own: a handler returns a STATUS CODE, and "403 for the receptionist, 200 for editor and ' +
+      'above" is a status code. Covered by the /settings noindex prefix; dynamic because it measures the ' +
+      'objects in the bucket on every request.',
   },
   {
     id: 'messages-inbox',

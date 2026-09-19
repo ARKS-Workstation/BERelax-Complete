@@ -7777,7 +7777,7 @@ units:
       URLs, reports per-rung weight against the slot budget, and blocks a bad publish in the UI and at the
       API.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-09
@@ -7797,11 +7797,163 @@ units:
     - The preview route is noindex, returns 403 for the receptionist role and 200 for editor and above,
       and is captured by the screenshot harness at 3 viewports x 2 themes
     - The preview makes zero network requests to third-party origins (network assertion)
+    - 'NOTE: files — none of the four paths in the list below could be written as named, and each reason is
+      worth keeping. (1) apps/web/app/(payload)/admin/preview/[mediaId]/page.tsx: `(payload)` is Payload''s
+      own root layout, which renders its own <html> and its own stylesheet, and `/admin` is @berelax/cms''s
+      prefix, which W-SITE-01''s bijection skips on BOTH sides — so a route there would be outside the
+      registry, and the registry is where a new admin route belongs. (2) A `page.tsx` cannot answer 403 at all
+      without Next''s experimental `authInterrupts`, and "403 for the receptionist, 200 for editor and above"
+      is a status code; a route handler returns one. (3) Having settled on a handler, Next 16.3.5 then refuses
+      `react-dom/server` anywhere in the app graph ("You''re importing a component that imports
+      react-dom/server"), so the document is assembled as a string — `render.ts` beside the Messages inbox is
+      the same decision. Delivered: apps/web/app/(admin)/settings/media/preview/[mediaId]/route.ts,
+      apps/web/src/components/admin/breakpoint-preview.ts, apps/web/src/components/admin/weight-badge.ts and
+      the one component that is genuinely production React, apps/web/src/components/media/slot-picture.tsx.
+      (4) tests/admin/breakpoint-preview.spec.ts: this repository has no tests/ directory (W-SYS-09 recorded
+      the same thing); the file is apps/web/src/breakpoint-preview.itest.ts.'
+    - 'NOTE: the srcset builder the first acceptance criterion calls "the ONE source of truth" did not exist.
+      W-SYS-05 built the ladders, the content-addressed URL builder and the next/image loader; W-SYS-09 built
+      the slot registry. Nothing built a `srcset`, and nothing rendered a `<picture>`: the only srcset in the
+      repository was four hand-written entries inside packages/media/src/served.itest.ts. So this unit created
+      it — packages/media/src/srcset.ts (`srcsetFor`, `pictureSourcesFor`, `selectedRungFor`,
+      `DEFAULT_SIZES`, `PREVIEW_CSS_WIDTHS`, `fallbackSrcFor`) — together with the first production
+      component that renders one, apps/web/src/components/media/slot-picture.tsx. The equality the
+      criterion asks for is
+      asserted between two INDEPENDENT renderers that share only that builder: React renders the component in
+      the test, the route handler''s string builder renders the preview, and the six srcset strings are
+      compared byte for byte with a lookalike (the docs/08 `{slot}-{width}` spelling, which drops the crop) as
+      the control.'
+    - 'NOTE: `selectedRungFor` is deliberately NOT the loader''s `nearestRung`, and the two disagree on a width
+      the acceptance criterion names. HTML''s srcset selection takes the narrowest candidate at least as wide
+      as needed; `nearestRung` takes the closest, because it exists to map an ARBITRARY requested width onto
+      an object that happens to exist. At 1600 CSS px the browser is served the 1920 rung and `nearestRung`
+      answers 1440 — so a preview built on the loader''s rule would print 1440 and report its byte count while
+      the browser downloaded 1920, a weight report wrong on exactly the widest and heaviest screens. The rule
+      is asserted against `HTMLImageElement.currentSrc` in a real Chromium at all seven widths, which is the
+      only way to know it is the browser''s rule and not this module''s opinion of it.'
+    - 'NOTE: a `<source media>` query is evaluated against the VIEWPORT, not against the element, and that
+      broke the first working version of this preview — found by a failing assertion rather than reasoned out
+      in advance. Seven frames in one 1440px admin window all matched `(min-width: 768px)`, so every row
+      showed the 16:9 crop including the three labelled 360, 390 and 414: a preview of the phone that never
+      showed the phone''s photograph, and entirely plausible to look at. The per-row markup therefore drops
+      `media` and resolves the crop with `cropForViewportWidth` (which reads the ladder''s own query), leaving
+      the browser to negotiate the format and pick the rung — everything it can still decide correctly at this
+      width.'
+    - 'NOTE: added beyond the list, and the preview could not have existed without it —
+      apps/web/app/m/[mediaId]/[contentHash]/[filename]/route.ts, the derivative origin. Until now every URL
+      the pipeline produced was a path nothing served, so the preview would have rendered seven broken images
+      and called itself a preview. It is not an invention either: packages/media/src/storage/port.ts states
+      the rule ("derivatives are served same-origin ... a Spaces host costs DNS, TCP and TLS before the hero")
+      and scripts/check-media.mjs already fails the build on a `digitaloceanspaces.com` hostname in source, so
+      a same-origin path has to answer. It serves from the storage port with the production
+      `derivativeHeaders`, it never reads the private bucket, it 404s a rung nobody built rather than
+      inventing a rendition, and with MEDIA_STORAGE=real it answers 503 `[no-real-media-storage-adapter]`
+      rather than 404ing every image on the site. Registry entry `derivative`, and it is the one entry here
+      that is `indexable: true` — a noindex on an image is a page removed from Google Images, and a
+      content-addressed immutable derivative carries no unpublished state.'
+    - 'NOTE: the oversized fixture is synthetic, because NO ASSET IN THIS REPOSITORY breaches the hero budget.
+      Measured: the four heroes encode to 40,487–62,819 bytes on the widest mobile rung against 97,280, and
+      89,015–113,916 on the widest desktop rung against 174,080 — which is why
+      packages/fixtures/src/media-derivatives.itest.ts passes. Putting a therapist portrait in the hero slot
+      does not help (team-13 measures 62,819 and 89,015). So the over-budget fixture is high-entropy
+      `feTurbulence` noise rendered to a JPEG, which is exactly the technique gate 28b in
+      scripts/test-gates.mjs already uses to make this same budget fail. `baseFrequency` is 0.9 rather than
+      gate 28b''s 0.2, and that too is measured: at 0.2 this fixture''s mobile 1080 rung is 88,246 bytes —
+      UNDER the budget — because it passes through a JPEG before AVIF sees it and the first pass smooths the
+      detail the budget is spent on; at 0.9 the same round-trip is 234,554 and 443,874, which is 2.4x and
+      2.5x. The in-budget fixture and the replacement that clears the state are the real asset,
+      assets/media/photos/hero-team.jpg.'
+    - 'NOTE: the alt-failure fixture is written with SQL, and that is the case the check exists for rather than
+      a way round it. W-SYS-09''s `assertMediaRowAcceptable` runs in `beforeChange` on create AND on update,
+      so `image image image image` cannot be stored through Payload at all — there is no upload path that
+      produces a row `publicationRefusals` would refuse on alt. W-SYS-09''s own note says why the publication
+      check exists anyway: "the column is a Payload `select` and a database edited by hand, or a migration
+      from an earlier role list, can put anything in it". The test writes exactly that row, asserts both
+      guards refuse it, and restores the original bytes in a `finally`.'
+    - 'NOTE: SCOPED — what `POST /api/v1/media/publish` does on success. There is no draft -> lint_passed ->
+      approved -> published state machine: W-SITE-10 owns it and is `todo`, which is the same gap W-SYS-09
+      scoped its fifth criterion against. So this endpoint is the media GATE of a publish — it reads the row
+      through Payload''s access layer, measures the objects in the bucket, runs `publicationRefusals`, and
+      answers 422 with the rule names and the measured weights when the image may not reach the public. On a
+      pass it answers `allowed: true, published: false` and says in the body that nothing was published,
+      because docs/12 §1 prohibits a stub that looks like it worked and "publish succeeded" while nothing was
+      published is the purest form of it. Flipping a page live belongs to W-SITE-10 and will call the same
+      function.'
+    - 'NOTE: "editor and above" is not a role in this system, and the route does not invent one. The preview is
+      gated by `mayOperateOnCollection(role, ''update'')`, which is `can(role, ''content:write'')` from the
+      F07 matrix; publishing is gated by `content:publish`, which in that matrix is the owner''s alone. So
+      owner, manager, marketer and system open the preview, receptionist gets 403 naming the permission, and a
+      manager who may open it may not publish from it — which the UI states rather than offering a button that
+      would 403. Nothing in either route names a role. The session is Payload''s own (`payload.auth({ headers
+      })` through apps/web/src/payload/request-principal.ts): there is still no `staff_user` table (W-SYS-08
+      recorded that), and when one arrives that one function changes and no authorisation in this unit does.'
+    - 'NOTE: no migration, and no number taken. SCHEMA_VERSION stays at 39 and 0040-0043 are units in flight
+      alongside this one. Nothing here is a row: the per-rung weights are objects in a bucket read through the
+      storage port, the crop windows are geometry over the measured original, the budgets are in the slot
+      registry and the refusals are computed. The media row itself is Payload''s own, in the `payload` schema,
+      which `pnpm db:drift` never sees.'
+    - 'NOTE: the captures are 3 viewports x 2 themes in apps/web/src/breakpoint-preview.itest.ts, written to
+      artifacts/screens/breakpoint-preview__{theme}-{width}__ltr.png, and not in scripts/screenshots.mjs —
+      which has no server, and `pnpm critique` must not start depending on a next build. That is the
+      arrangement messages-inbox.itest.ts already uses. There is no direction axis and that is a decision
+      rather than an omission: the route is a locale-neutral handler serving one English document, the
+      acceptance criterion asks for three viewports times two themes, and the twelve-cell matrix with its RTL
+      half belongs to the public routes. Each cell is asserted to be the cell it claims (innerWidth, and a
+      darker resolved ground in dark mode) before the shutter, photographed twice, and the two passes are
+      byte-identical.'
+    - 'NOTE: vitest.integration.config.ts gained `oxc: { jsx: { runtime: ''automatic'', importSource: ''react''
+      } }`. This unit is the first test in the repository to import a `.tsx` module, and
+      apps/web/tsconfig.json sets `jsx: "preserve"` because Next compiles JSX itself — Vite reads that for any
+      file under apps/web, hands the transform `preserve`, and the import then fails with "the content
+      contains invalid JS syntax" in the IMPORTER, several frames from the cause. It is `oxc` and not
+      `esbuild` because Vite 8 transforms with oxc and setting both prints "esbuild options will be ignored"
+      and carries on failing. Next''s own build is untouched.'
+    - 'NOTE: a finding in existing configuration, reported and not changed. The root tsconfig.json `include` is
+      `packages/**/*.ts`, `apps/worker/**/*.ts`, `apps/web/src/image-loader.ts` and `vitest.config.ts` — so
+      `pnpm typecheck` never typechecks the web application at all, neither app/ nor src/, and neither does it
+      see any `.tsx` in packages/. Two wrong relative import depths in this unit (`../../../../src` where five
+      and six levels were needed) passed `pnpm typecheck` cleanly and failed only in `next build`, which is
+      NOT in `pnpm verify` — it is a separate CI step. Widening the include pulls JSX settings and two hundred
+      files into the root project and is a toolchain decision bigger than this unit, so it is recorded here
+      rather than attempted: whoever owns the toolchain should either add apps/web to the root project or add
+      `pnpm --filter @berelax/web build` to `pnpm verify`.'
+    - 'NOTE: a finding in another unit''s test, reported and not touched, because it failed this unit''s `pnpm
+      verify` and the next agent will meet it too. `packages/fixtures/src/message-lifecycle.itest.ts` is flaky
+      one run in ten, per recipient. Its seeder addresses every seeded SMS to `+9715${run.slice(0, 8)}`
+      (`message-lifecycle.ts`), and the file''s own six test recipients are `+9715${RUN.slice(0, 7)}` followed
+      by a literal digit 0-5. Those two strings are the same string exactly when the eighth character of RUN
+      is that digit — and RUN is a process id followed by six random digits, so each of the six has about a
+      one-in-ten chance on every run. This run drew a 5, so "counts a promotional message from the moment it
+      was sent" read six messages where it asserts two: its own delivered and failed, plus the four seeded
+      ones, all `sent`. `listMessageInbox` filters `m.recipient = $1` exactly, so nothing in the query is at
+      fault — the two fixtures simply do not partition the number space. The fix is one line in whichever unit
+      owns the file (derive both from `slice(0, 8)`, or give the test''s recipients a separator the seeder
+      cannot emit); changing another unit''s test from here is what CONTRIBUTING-AGENT-BRIEF §1 says not to
+      do. It is unrelated to W-SYS-10: this unit writes no message row.'
     files:
-    - apps/web/src/components/admin/breakpoint-preview.tsx
-    - apps/web/src/components/admin/weight-badge.tsx
-    - apps/web/app/(payload)/admin/preview/[mediaId]/page.tsx
-    - tests/admin/breakpoint-preview.spec.ts
+    - packages/media/src/srcset.ts
+    - packages/media/src/srcset.test.ts
+    - packages/media/src/crop-preview.ts
+    - packages/media/src/crop-preview.test.ts
+    - packages/media/src/derivative-set.ts
+    - packages/media/src/derivative-set.test.ts
+    - packages/media/src/storage/index.ts
+    - packages/media/package.json
+    - apps/web/src/components/media/slot-picture.tsx
+    - apps/web/src/components/admin/breakpoint-preview.ts
+    - apps/web/src/components/admin/weight-badge.ts
+    - apps/web/src/media/storage.ts
+    - apps/web/src/media/publish-gate.ts
+    - apps/web/src/payload/request-principal.ts
+    - apps/web/app/(admin)/settings/media/preview/[mediaId]/route.ts
+    - apps/web/app/api/v1/media/publish/route.ts
+    - apps/web/app/api/v1/media/publish/handler.ts
+    - apps/web/app/m/[mediaId]/[contentHash]/[filename]/route.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/breakpoint-preview.itest.ts
+    - scripts/test-gates.mjs
+    - vitest.config.ts
+    - vitest.integration.config.ts
   - id: G-AGT-01
     order: 150
     title: Agent registry, heartbeat contract and 2x-interval watchdog

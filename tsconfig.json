@@ -1,3 +1,13 @@
+// The packages and the worker. `apps/web` is NOT here and cannot be: it needs `jsx: "preserve"`, the
+// Next language-service plugin, DOM libs and its own path map, none of which this project wants applied
+// to `packages/core`. So it is a second project, and `pnpm typecheck` runs both — because for a long
+// time it ran only this one, and nothing typechecked `apps/web/app/**`, `apps/web/src/**` or any `.tsx`
+// at all. W-SYS-10 found it the only way it could be found: two wrong relative import depths passed
+// `pnpm typecheck` clean and failed in `next build`, which `pnpm verify` does not run.
+//
+// One gap remains, stated rather than papered over: `.next/types/**` exists only after a build, so the
+// generated route types are checked only when one has happened. The app's own source is checked either
+// way, which is the part a reviewer was relying on.
 {
   "extends": "./tsconfig.base.json",
   "include": [

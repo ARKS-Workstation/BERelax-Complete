@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**67 / 207 units complete.**
+**68 / 207 units complete.**
 
 ## Next up
 
@@ -163,7 +163,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 146 | `W-SITE-08` | Sitemaps, hreflang, IndexNow and the publish propagation pipeline | `H02`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07` | M4 | — |
 | [ ] | 147 | `W-SITE-09` | Legacy WooCommerce URL migration and the 301 map | `W-SITE-08` | — | Y1-woo-baseline |
 | [ ] | 148 | `W-SITE-11` | Performance enforcement: Lighthouse CI budgets and field RUM | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04`, `A-FIRST-05`, `A-FIRST-06`, `A-FIRST-07`, `A-FIRST-08`, `A-FIRST-09`, `A-FIRST-10`, `H05`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06` | — | Y5-analytics-basis |
-| [ ] | 149 | `W-SYS-10` | Breakpoint preview in the CMS admin | `W-SYS-09` | — | — |
+| [x] | 149 | `W-SYS-10` | Breakpoint preview in the CMS admin | `W-SYS-09` | — | — |
 | [x] | 150 | `G-AGT-01` | Agent registry, heartbeat contract and 2x-interval watchdog | `F09`, `H02` | — | — |
 | [x] | 151 | `G-CONN-01` | google_connections schema: one-to-many, sub-keyed, envelope-encrypted | `F04`, `F08`, `F09` | — | Y2-listing-owner, Y2-gbp-status |
 | [x] | 152 | `G-CONN-02` | OAuth consent against the fake, granted-scope truth, sub-match reconnect semantics | `G-CONN-01`, `H02` | — | Y10-consent |

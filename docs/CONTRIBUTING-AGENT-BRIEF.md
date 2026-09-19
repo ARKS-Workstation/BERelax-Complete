@@ -107,6 +107,25 @@ caught a real defect in this repository.
     is indistinguishable from configured. Provisional values carry a marker the schema refuses
     (`is_placeholder_text`, migration 0026) and an `OPEN-QUESTIONS` id.
 
+16. **Never wait on a `pgrep -f` pattern that appears in the waiting command itself.** `until ! pgrep -f
+    "pnpm verify"; do sleep 10; done` never exits: the shell evaluating it has `pnpm verify` in its own
+    argv, so `pgrep` matches that shell and the condition can never become true. `PID=$(pgrep -f "pnpm
+    test:integration && …")` has the same defect and is worse, because the pid it captures is the
+    waiting shell, so `tail --pid=$PID` waits on itself. Three of these have had to be killed by hand in
+    this build, two of them still spinning in worktrees that had already been deleted. Redirect the run
+    to a log with a sentinel (`sh -c 'pnpm verify > mine.log 2>&1; echo "VERIFY_EXIT=$?" >> mine.log'`)
+    and wait on the sentinel's presence in the file, or identify the process by
+    `readlink /proc/<pid>/cwd`, which cannot match your own shell by accident.
+
+17. **`pnpm typecheck` runs two projects, and `pnpm verify` does not build the web application.** The
+    root `tsconfig.json` cannot include `apps/web` — it needs `jsx: "preserve"`, DOM libs, the Next
+    plugin and its own path map — so the web app is a second `tsc` invocation chained into the same
+    script. That chaining is recent: before it, nothing typechecked `apps/web/app/**`,
+    `apps/web/src/**` or any `.tsx`, and two wrong import depths passed `pnpm typecheck` and failed only
+    in `next build`. One gap is still open and is stated in `tsconfig.json` rather than hidden:
+    `.next/types/**` exists only after a build, so the generated route types are checked only when one
+    has happened. If your unit adds a route, build the app once before believing a clean typecheck.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy
