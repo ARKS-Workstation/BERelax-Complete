@@ -92,6 +92,21 @@ export const treatmentNote = clinicalSchema.table(
   ],
 )
 
+/**
+ * The KEK version registry (migration 0043).
+ *
+ * Key MATERIAL is never here — only the label that says which externally-held key opens a row. It
+ * lives in the `clinical` schema rather than `public` so that it is dumped, moved and restored with
+ * the store it describes: a registry left behind in `public` would make the relocated store
+ * unreadable. `status` is `active` or `retired`, one active row at most, and retirement is one-way.
+ */
+export const kekVersion = clinicalSchema.table('kek_version', {
+  version: text('version').primaryKey(),
+  status: text('status').notNull(),
+  activatedAt: timestamp('activated_at', { withTimezone: true }).notNull(),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
+})
+
 /** The only shape permitted to cross the boundary. Booleans, no detail, no diagnosis. */
 export const contraindicationFlag = clinicalSchema.table('contraindication_flag', {
   customerId: uuid('customer_id').primaryKey(),

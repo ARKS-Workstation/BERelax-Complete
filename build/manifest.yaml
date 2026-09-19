@@ -9140,7 +9140,7 @@ units:
       Nightly snapshots into seo_gsc_daily build the history GSC discards, paging 25,000 rows at a time,
       respecting the 2-3 day lag, and rotating a priority subset through the 2,000/day URL Inspection cap.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-AGT-01
@@ -9164,11 +9164,107 @@ units:
       test)'
     - The job writes a heartbeat through G-AGT-01 on both success and failure, so a broken cron registration
       surfaces in the console and the watchdog
+    - 'NOTE: the migration is 0042_seo_gsc_daily.sql, not the 0045 this entry''s files list guessed at, and
+      SCHEMA_VERSION moves to 42. 40 (G-CONN-09) and 41 (W-SYS-06) are units in flight alongside this one,
+      so their numbers are taken and their SQL is not in this checkout; the gap is left rather than closed,
+      because renumbering would apply one number to two different migrations on two branches.'
+    - 'NOTE: four tables, not the one the title names. seo_gsc_daily is the warehouse; seo_gsc_snapshot is
+      one row per (property, window) carrying the paging evidence and the two totals whose difference is the
+      withheld figure — without it, "the pass ran and found nothing" and "the pass has not run since
+      Tuesday" are the same row count; seo_url_inspection is the rotation cursor; and
+      seo_url_inspection_run is the quota ledger, keyed on Google''s calendar day so a RETRY takes the
+      remainder of the 2,000 rather than a second full cap. The last one is the difference between a cap
+      that is per day (Google''s) and per run (ours), which is a day of quota spent on work already done.'
+    - 'NOTE: the unique index is (site_url, date, page, query, device, country) — the five dimensions the
+      criterion names, plus the property. A domain property and a URL-prefix property for one website are
+      two SEPARATE datasets with separate data (docs/10 §2), so without site_url in the key one would
+      overwrite the other row by row and leave a single dataset that is half of each. The criterion is
+      satisfied by the five it names; the sixth is the one that makes them mean anything.'
+    - 'NOTE: these dates are calendar UTC days, NOT business_day trading dates, and that is the one
+      deliberate exception in the system. A Search Console date is Google''s: it is the value the API
+      accepts and returns, and the join key between our warehouse and the Search Console UI the owner will
+      compare it against. Resolving it on business_day (trading 11:00–02:00, so 01:30 belongs to the
+      previous trading date) would move up to three hours of clicks into the previous day, and the two
+      systems would then disagree by an amount nobody could reconcile. gsc-window.test.ts pins an instant
+      where the two answers differ — 23:30 UTC, which is 03:30 in Abu Dhabi and therefore trading date the
+      19th while Google''s date is the 18th — and asserts the UTC answer is the one used. The argument is in
+      the 0042 header, in gsc-window.ts and in both column comments.'
+    - 'NOTE: two new agent_definition rows, seo_gsc_snapshot and seo_url_inspection, and deliberately NOT
+      seo_agent. That row declares a SEVEN-DAY interval because it is the weekly review (G-SEO-05), so a
+      nightly pass writing its heartbeat would keep it hours old for ever and a weekly report that had
+      stopped being produced would be invisible — the watchdog measures the absence of a success per agent.
+      Two rather than one for the same reason a level down: the rotation can be refused all night by an
+      exhausted quota while the snapshot is perfectly healthy, and a shared heartbeat would report the pair
+      as fine because one of them ran. This is 0033''s argument for google_liveness, applied unchanged.'
+    - 'NOTE: the two passes live in packages/google/src/seo/ (nightly-pass.ts, rotation-pass.ts) and the
+      files this entry names in apps/worker keep the wiring, the handler and the log line. The reason is
+      the chokepoint, not taste: every end-to-end criterion here needs a Google token that OPENS, sealToken
+      is behind G-CONN-03''s allow-list, and only a test inside packages/google may seal one — so a pass
+      living in apps/worker could only ever be integration-tested over ZERO connections, which is what
+      G-CONN-06''s own itest had to settle for. The pass is also the pairing of withAgentRun (@berelax/db)
+      with createRunBudget (@berelax/core), and db may not import core, so it needs a home that may import
+      both. The allow-list was NOT widened: pnpm chokepoint still reports five modules, and a gate pins
+      that the eight new modules exist and that none of them names an accessor.'
+    - 'NOTE: the rare-query gap is a GENERATED column (page_clicks - query_clicks), not a stored figure.
+      "Do not invent a number: derive it" is therefore enforced by PostgreSQL — an INSERT that supplies one
+      is refused with SQLSTATE 428C9 — and a gate probes exactly that. The direction of the inequality is a
+      CHECK as well: query-level clicks above page-level cannot come from Google (it withholds rows, it
+      does not invent them), so it means this system summed the same rows twice, and the generated column
+      would then hold a negative withheld figure the owner-facing sentence would render as "-20 clicks are
+      withheld".'
+    - 'NOTE: the fake was extended rather than mocked, and the rare-query gap is modelled as DATA. The
+      Search Console port gained startRow, dimensions and inspectUrl; the fake gained a list of rows it
+      WITHHOLDS — returned when the query dimension is not requested and omitted when it is, which is
+      exactly what Google does. The gap therefore comes out of the fixture instead of being subtracted from
+      it, and no test or production path holds a literal the other has to be kept in step with. The fake
+      also ENFORCES the 2,000-a-day inspection cap, so the rotation''s accounting is tested against a cap
+      that bites rather than against its own arithmetic. Its withheld rows carry a visible marker rather
+      than a plausible query, so a leak would read as a defect rather than as data (the brief''s rule 15).'
+    - 'NOTE: "exactly 2,000 inspected per run" and "no URL inspected twice before full coverage" are both
+      true at once, and the reading matters. With 5,000 candidates runs one and two cover 4,000; run three
+      takes the remaining 1,000 FIRST (the claim orders last_inspected_at NULLS FIRST) and then spends the
+      rest of its 2,000 beginning the next cycle, because the cap does not carry over and an unspent
+      remainder is a day of quota lost for ever. Coverage completes inside run three, and every URL
+      inspected before that moment is distinct — asserted by set comparison over the three runs.'
+    - 'NOTE deferred, and to which unit. (1) Nothing renders the rare-query sentence on a screen yet: the
+      SEO console is G-SEO-05 and the admin shell is W-SYS-01, so the string is a pure function in
+      packages/core fed from the STORED row, and the itest asserts the pass returns exactly what the stored
+      figures produce. (2) No 16-month backfill: the nightly window is seven days ending at today-3, which
+      makes the pass self-healing over a missed night but builds history only forwards. A one-off backfill
+      is a call with a longer window and belongs with whoever runs the relaunch (docs/09 §4 names the
+      pre-relaunch baseline). (3) The inspection candidate set is the pages Search Console has impressions
+      for, registered by the snapshot; the sitemap-driven set that would include a page with no impressions
+      yet needs the live sitemap and is G-SEO-04''s. (4) Nothing consumes the warehouse yet — the three
+      query-side analyses are G-SEO-03.'
+    - 'NOTE: a gap in EXISTING code, found by this unit and not fixed here because it is G-CONN-06''s to
+      fix. Three files (apps/worker/src/jobs/google-connection-health.itest.ts twice,
+      packages/google/src/health/deep-check.test.ts and packages/google/src/health/testing-expiry.ts) point
+      at packages/google/src/google-health.itest.ts as the home of "every claim needing a token that DOES
+      open". That file does not exist. The consequence is narrow but real: runDeepCheck has no integration
+      test anywhere — grep for it across *.itest.ts returns nothing — so the per-capability health rows it
+      writes are proved only against a memory store, while the worker''s own itest deliberately runs the
+      pass over zero connections. The Testing-expiry DOM half DID land, as
+      apps/web/src/google-health-fragment.itest.ts, so that reference is merely a stale filename.'
     files:
-    - packages/db/migrations/0045_seo_gsc_daily.sql
+    - packages/db/migrations/0042_seo_gsc_daily.sql
+    - packages/db/src/schema/seo.ts
+    - packages/db/src/repositories/seo-warehouse.ts
+    - packages/core/src/seo/gsc-window.ts
+    - packages/core/src/seo/rare-query-gap.ts
+    - packages/core/src/seo/url-inspection-cap.ts
     - packages/google/src/adapters/search-analytics.ts
+    - packages/google/src/seo/gsc-snapshot.ts
+    - packages/google/src/seo/nightly-pass.ts
+    - packages/google/src/seo/rotation-pass.ts
+    - packages/google/src/seo/url-inspection.ts
+    - packages/google/src/seo/nightly-pass.itest.ts
+    - packages/google/src/seo/rotation-pass.itest.ts
     - apps/worker/src/jobs/gsc-nightly-snapshot.ts
     - apps/worker/src/jobs/gsc-url-inspection-rotation.ts
+    - apps/worker/src/jobs/gsc-jobs.test.ts
+    - packages/providers/src/google/port.ts
+    - packages/providers/src/google/fake-google.ts
+    - scripts/test-gates.mjs
   - id: G-SEO-02
     order: 169
     title: 'The seo_agent principal: publish denied at the permission layer, target allowlist'
@@ -9532,7 +9628,7 @@ units:
       resumably and idempotently, with the AAD row binding still enforced. Plus the operational secret-rotation
       inventory this depends on.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F08
@@ -9550,11 +9646,129 @@ units:
     - 'a retired KEK version can decrypt but cannot encrypt a new record: the write is refused with a named
       error'
     - each rotation writes an audit_event naming the old and new key versions and the record count
+    - 'NOTE: migration 0043_kek_rotation.sql, SCHEMA_VERSION 43. 40 (G-CONN-09), 41 (W-SYS-06) and 42
+      (G-SEO-01) were in flight alongside this unit, which the comment in packages/db/src/index.ts
+      records. The migration adds clinical.kek_version — the registry of which KEK versions exist and
+      which one may encrypt, in the clinical schema so it is dumped and moved with the store it
+      describes (ADR 0010). Key MATERIAL is never in the database; only version labels are.'
+    - 'NOTE: three of this unit''s rules are enforced by the DATABASE and not only by the code that
+      drives a rotation, because a rotation is a mass UPDATE over the most sensitive table in the
+      system and ADR 0010''s thesis is that the boundary survives a mistake in the application. ZK001
+      KekRetiredCannotEncrypt — a version that is not the active one cannot encrypt, on INSERT or on a
+      re-wrap. ZK002 SealedRowImmutable — an UPDATE may change only wrapped_data_key, kek_version and
+      superseded_at, so a re-wrap cannot touch the ciphertext, the nonce, the AAD fingerprint or the
+      row identity the AAD binds it to. ZK003 RewrapDidNotRewrap — a version change with an unchanged
+      wrapped key is refused, which is the bug that would otherwise label a row with a key that cannot
+      open it. ZK005 KekReactivationRefused — retirement is one-way. Each has a known-bad fixture in
+      the 47a-47w block of scripts/test-gates.mjs, asserted by name, with controls for the accepted
+      cases including superseding a submission on a retired version.'
+    - 'NOTE: the G-CONN-04 deferral is answered — TWO key-encrypting keys, not one. CLINICAL_KEK and
+      GOOGLE_TOKEN_KEK, each with a _VERSION label and a _PREVIOUS retired slot, declared in
+      packages/config/src/env.ts, .env.example and build/secret-inventory.json. Two rather than one
+      because the clinical store is designed to relocate to a UAE-hosted database and takes its key
+      with it (ADR 0010), and because a Google client-secret incident must not force a re-wrap of every
+      clinical record. Two halves remain deferred and are recorded in the runbook: the Google consent
+      route still reads process.env[''GOOGLE_TOKEN_KEK''] directly rather than through @berelax/config,
+      because whether production may REFUSE TO BOOT without a KEK is a deployment decision (W-SYS-01)
+      and the route''s loud refusal is the behaviour that matters and is already tested; and
+      packages/google/src/rewrap.ts still has no caller, so the Google KEK rotation is a runbook
+      procedure rather than a command — the clinical equivalent, scripts/rotate-kek.mjs, is the shape
+      it should take. Deferred to G-CONN-04/G-CONN-09.'
+    - 'NOTE: what rotation does NOT cover, written into docs/runbooks/key-rotation.md#what-rotation-does-not-cover
+      rather than left implied. Re-wrapping changes which key is used from now on and reaches nothing
+      already written: every BACKUP and snapshot taken before the rotation still holds data keys wrapped
+      with the old KEK, so the old key must be retained to restore one and a rotation performed because
+      a key was exposed does not close the exposure until those backups age out; WAL segments and any
+      standby hold the pre-rotation wrapped keys until recycled, and a point-in-time recovery to before
+      the rotation lands on the old key; and an UPDATE in PostgreSQL leaves the old row version in the
+      heap page until vacuum reclaims the space for REUSE rather than overwriting it, so the old wrapped
+      key is recoverable from the raw device for an unbounded period. What rotation does give is that a
+      FUTURE dump of the live database is useless to a holder of only the old key.'
+    - 'NOTE: three findings in existing code, all fixed or recorded rather than worked around. (1)
+      Migration 0009 grants berelax_clinical SELECT on public and nothing else, so the audited read that
+      ADR 0010 requires for every access to health data — and that ClinicalStore.readIntake is
+      documented to write — could not insert its audit row, and neither could a rotation running as that
+      role. 0043 adds `grant insert on audit_event to berelax_clinical`; audit_event stays append-only
+      for every role by 0005''s rules, and a gate control asserts the clinical role can INSERT and still
+      cannot UPDATE. (2) packages/clinical/src/** was absent from the coverage `include` in
+      vitest.config.ts, so the most sensitive package in the repository was counted by neither the
+      global floor nor the core floor; it is now included, with the SQL-only Postgres store and the
+      Drizzle mirrors excluded for the reasons the google and db equivalents are. (3) F08 shipped the
+      ClinicalStore INTERFACE and the schema and no implementation, so nothing in this system has ever
+      written a clinical record: the fixtures in rotation.itest.ts are the first rows clinical.intake_submission
+      and clinical.treatment_note have ever held. That is correct for Y5-residency, and it means the
+      envelope''s AAD binding had never been exercised against a real row until this unit.'
+    - 'NOTE: the resumability criterion is proved twice, and the reason for both is that neither covers
+      the other. The unit suite interrupts a rotation over an in-memory store, which isolates the
+      algorithm. The integration suite runs the real CLI as a child process and SIGKILLs its process
+      group after a progress line it has actually SEEN — no unwind, no finally, no chance to write a
+      checkpoint — then restarts it and compares checksums. One rotation gives both halves of the
+      comparison: the store walks intake_submission before treatment_note, so the intake estate is
+      straddled by the kill while the note estate is not reached until the restarted run, which rotates
+      it in a single uninterrupted pass. Both end on the same version with the same content per ordinal,
+      so rotationChecksum — label, final key version, plaintext digest — must be equal across the two. A
+      second database is not needed and would not help: two rotations cannot both target one version
+      label, because retirement is one-way. The control that keeps it from going vacuous asserts the
+      kill landed strictly inside the straddled estate, and a gate in test-gates.mjs blinds the CLI''s
+      progress output and requires the itest to FAIL, because a kill that never fires would compare a
+      completed rotation with itself. Observed kill points across runs: 10, 26, 28 and 30 of 120.'
+    - 'NOTE: the checksum is two functions, not one. rotationChecksum covers label, final KEK version
+      and a digest of the decrypted payload — the criterion''s form. contentChecksum leaves the version
+      out, so it is INVARIANT across a rotation and is the one the runbook takes before and compares
+      after. Neither alone would catch a rotation that lost a record, and the pair is asserted both ways
+      in rotate.test.ts. The ciphertext digest is deliberately in neither: two estates seeded with the
+      same content hold different ciphertext because seal() draws a fresh nonce and data key, so a
+      checksum including it could only compare an estate with itself. Ciphertext immutability is asserted
+      per row instead, read back as md5() in SQL from the heap, and enforced by ZK002.'
+    - 'NOTE: the secret-rotation half is build/secret-inventory.json plus `pnpm rotation`
+      (scripts/check-secret-rotation.mjs), wired into verify, into CI and into case 29''s required list.
+      It extends H-HARD-02''s inventory rather than duplicating it: `pnpm secrets` answers "is a
+      credential committed", this one answers "when one leaks, what does somebody do at 02:00". The
+      checkable rule is that every secret-SHAPED environment name the code reads — from process.env, from
+      .env.example and from the config schema — must be classified exactly once: as key material, as a
+      retired slot, as a version label, or as explicitly not a secret with a reason. So a new credential
+      fails the build until its rotation is written, which is the only moment the person who knows how it
+      works is still looking at it. It reads no value from any environment, ever. It deliberately does
+      NOT check that a rotation HAPPENED: rotatePeriodDays is a declared policy, and a last-rotated date
+      committed to the repository would be stale the first time somebody rotated without editing a JSON
+      file. H-HARD-04''s drill report is the shape a measured staleness check would need.'
+    - 'NOTE: rotation.itest.ts sweeps its own rows by the id prefix 0dec0de0 in both beforeAll and
+      afterAll — by prefix rather than by truncating the table, because a later unit''s clinical rows
+      must survive and contraindication_flag.source_submission_id is ON DELETE RESTRICT against them.
+      The beforeAll sweep is the load-bearing one: a row left behind on a retired version by a killed
+      run would stop the NEXT rotation with KekVersionNotRetained. The two clinical.kek_version rows each
+      run creates are left behind on purpose — retirement is one-way, so deleting the active row would
+      leave a database nothing may seal into. One row per run, each naming the run that made it. The
+      consequence to know: after this file runs, the active clinical KEK version in that test database
+      refers to key material that existed only inside the test process. Nothing else in the system seals
+      a clinical record today, and the next run reads whatever is active and generates its own.'
+    - 'NOTE: provisional as declared — every assertion is against synthetic fixtures whose payloads
+      carry packages/fixtures''s CLINICAL_FIXTURE_PREFIX, and no real intake data is loaded until
+      Y5-residency is answered. No fixture anywhere in this unit contains anything that could be
+      mistaken for key material: the unit and integration suites generate 32 random bytes at runtime and
+      never write them to a file, and the SQL gate fixtures use a single zero byte in every sealed
+      column, which could not be a ciphertext or a wrapped key.'
     files:
+    - packages/db/migrations/0043_kek_rotation.sql
     - packages/clinical/src/crypto/rotate.ts
-    - scripts/rotate-kek.mjs
     - packages/clinical/src/crypto/rotate.test.ts
+    - packages/clinical/src/crypto/memory-key-store.ts
+    - packages/clinical/src/crypto/postgres-key-store.ts
+    - packages/clinical/src/crypto/rotation.itest.ts
+    - packages/clinical/src/schema/clinical.ts
+    - packages/clinical/src/index.ts
+    - packages/clinical/package.json
+    - scripts/rotate-kek.mjs
+    - scripts/check-secret-rotation.mjs
+    - build/secret-inventory.json
     - docs/runbooks/key-rotation.md
+    - packages/config/src/env.ts
+    - packages/db/src/index.ts
+    - scripts/test-gates.mjs
+    - .github/workflows/ci.yml
+    - .env.example
+    - vitest.config.ts
+    - package.json
   - id: H-HARD-04
     order: 178
     title: Backup, PITR and the automated restore drill

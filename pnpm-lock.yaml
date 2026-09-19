@@ -223,6 +223,9 @@ importers:
       '@berelax/config':
         specifier: workspace:*
         version: link:../config
+      '@berelax/db':
+        specifier: workspace:*
+        version: link:../db
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared

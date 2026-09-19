@@ -10703,6 +10703,907 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 49a-49t. (G-SEO-01) The Search Console warehouse: the rules the database refuses, and the behaviours
+//           whose tests must be able to fail.
+//
+// The defect this unit's acceptance criteria are built around is a silent one, and it is worth naming
+// before the probes: **an `on conflict do nothing` that hid 20,000 lost rows.** A night's fetch of 60,000
+// rows writes 40,000, reports success, and the warehouse is a third short with nothing anywhere saying so.
+// Every other failure in this unit has the same shape — a cursor that falls behind, a window that reaches
+// into the 2–3 day lag, a rotation that re-inspects the same 2,000 URLs for a week — and none of them
+// produces an error. They produce numbers that are smaller, or older, or repeated.
+//
+// So there are two kinds of probe here:
+//
+//   49a-49i   the rules the SCHEMA refuses, as known-bad rows against real PostgreSQL, each asserted by
+//             its own constraint name (`VERBOSITY=verbose` is what makes the name visible), plus the
+//             acceptance controls that prove the rows are otherwise valid — without those, a probe
+//             rejected for a typo in a column name would report a rule that has stopped matching anything.
+//   49j-49t   the behaviours no constraint can express — the paging cursor, the lag, the swallowed row, the
+//             rotation order and the cron/agent pairing — probed the way `36j` and `42x` probe theirs:
+//             by breaking the shipped code and requiring the test that claims to cover it to fail BY NAME,
+//             with a control that the committed code passes. Each mutation is checked for being a no-op
+//             first, because a mutation that changed nothing would make this gate report a pass for a
+//             defect it never introduced.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // A property no suite writes, so a probe cannot collide with a row an integration test left behind — and
+  // visibly a fixture rather than plausible (the brief's rule 15).
+  const SITE = "'sc-domain:gseo01-gate.invalid'"
+  const DATE = "'2026-09-15'"
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      // So the SQLSTATE and the constraint name are printed, and a probe can assert `seo_gsc_daily_…`
+      // rather than a sentence a future PostgreSQL release is free to reword.
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statement}; rollback;`,
+    ])
+
+  /** One warehouse row, with every dimension and count named so a probe can break exactly one of them. */
+  const dailyRow = ({
+    query = "'gseo01 gate query'",
+    page = "'/'",
+    device = "'MOBILE'",
+    country = "'are'",
+    clicks = 3,
+    impressions = 40,
+    position = 650,
+    date = DATE,
+  } = {}) =>
+    'insert into seo_gsc_daily (site_url, date, page, query, device, country, clicks, impressions, ' +
+    `avg_position_centi) values (${SITE}, ${date}::date, ${page}, ${query}, ${device}, ${country}, ` +
+    `${clicks}, ${impressions}, ${position})`
+
+  /** One snapshot row. `generated` supplies the withheld column, which PostgreSQL must refuse. */
+  const snapshotRow = ({
+    queryClicks = 258,
+    queryImpressions = 5448,
+    pageClicks = 329,
+    pageImpressions = 7588,
+    pages = 1,
+    generated = false,
+  } = {}) =>
+    'insert into seo_gsc_snapshot (site_url, window_start, window_end, requested_at, pages_fetched, ' +
+    'row_limit, last_start_row, rows_persisted, query_clicks, query_impressions, page_clicks, ' +
+    `page_impressions${generated ? ', rare_query_clicks' : ''}) values (${SITE}, '2026-09-09'::date, ` +
+    `${DATE}::date, '2026-09-18T23:00:00Z'::timestamptz, ${pages}, 25000, 0, 7, ${queryClicks}, ` +
+    `${queryImpressions}, ${pageClicks}, ${pageImpressions}${generated ? ', 999' : ''})`
+
+  const inspectionRow = ({
+    url = "'https://gseo01-gate.invalid/page'",
+    priority = 10,
+    inspections = 0,
+    lastInspected = 'null',
+    verdict = 'null',
+  } = {}) =>
+    'insert into seo_url_inspection (site_url, url, priority, inspections, last_inspected_at, verdict) ' +
+    `values (${SITE}, ${url}, ${priority}, ${inspections}, ${lastInspected}, ${verdict})`
+
+  const runLedger = ({ cap = 2000, inspected = 0 } = {}) =>
+    'insert into seo_url_inspection_run (site_url, run_date, daily_cap, inspected) values ' +
+    `(${SITE}, ${DATE}::date, ${cap}, ${inspected})`
+
+  const probes = [
+    {
+      name: 'the warehouse refuses the same dimension tuple twice, so a re-read page cannot double a day',
+      rule: 'seo_gsc_daily_dimensions_unique',
+      // THE index the paging criterion turns on. Two identical tuples in one night means the cursor read
+      // the same rows twice, and a warehouse that accepted both would report a day at double its clicks.
+      sql: `${dailyRow()}; ${dailyRow({ clicks: 4 })}`,
+    },
+    {
+      name: 'the warehouse refuses more clicks than impressions, which Google never reports',
+      rule: 'seo_gsc_daily_clicks_cannot_exceed_impressions',
+      // Google reports clicks as a subset of impressions. A row that breaks it was mis-parsed on our side,
+      // and storing it would corrupt every CTR the G-SEO-03 analyses compute from these two columns.
+      sql: dailyRow({ clicks: 50, impressions: 40 }),
+    },
+    {
+      name: 'the warehouse refuses position zero, which is what a coerced missing value looks like',
+      rule: 'seo_gsc_daily_position_is_at_least_one',
+      // Position is 1-based and there is no position zero: it would read as ranking ABOVE the first result,
+      // which is the same mistake docs/10 §7 names for CrUX — handle the empty case, never render a zero.
+      sql: dailyRow({ position: 0 }),
+    },
+    {
+      name: 'the snapshot refuses a query total above its page total, which cannot come from Google',
+      rule: 'seo_gsc_snapshot_query_clicks_do_not_exceed_page_clicks',
+      // Google WITHHOLDS rare queries; it does not invent them. The inverted direction means this system
+      // summed the same rows twice, and the generated column would then hold a negative withheld figure the
+      // owner-facing sentence would render as "-20 clicks are withheld".
+      sql: snapshotRow({ queryClicks: 400, pageClicks: 329 }),
+    },
+    {
+      name: 'the withheld figure cannot be supplied, only derived — the column is GENERATED',
+      // Not a constraint name: PostgreSQL's own refusal, by SQLSTATE and column. This is what makes "do not
+      // invent a number, derive it" a guarantee rather than a convention — no code path can write a
+      // withheld figure that disagrees with the two totals stored beside it.
+      rule: 'cannot insert a non-DEFAULT value into column "rare_query_clicks"',
+      sql: snapshotRow({ generated: true }),
+    },
+    {
+      name: 'the snapshot refuses a window whose end precedes its start',
+      rule: 'seo_gsc_snapshot_window_is_ordered',
+      sql:
+        'insert into seo_gsc_snapshot (site_url, window_start, window_end, requested_at, pages_fetched, ' +
+        'row_limit, last_start_row, rows_persisted, query_clicks, query_impressions, page_clicks, ' +
+        `page_impressions) values (${SITE}, ${DATE}::date, '2026-09-09'::date, ` +
+        "'2026-09-18T23:00:00Z'::timestamptz, 1, 25000, 0, 7, 258, 5448, 329, 7588)",
+    },
+    {
+      name: 'the rotation refuses a row counted as inspected with no timestamp to sort it by',
+      rule: 'seo_url_inspection_inspected_rows_carry_a_timestamp',
+      // The coverage guarantee, as a constraint. A row like this sorts as never-inspected under NULLS FIRST,
+      // so the very next run would inspect it again — twice, while another URL had not been inspected at
+      // all, which is exactly what a 2,000-a-day cap makes expensive.
+      sql: inspectionRow({ inspections: 1 }),
+    },
+    {
+      name: 'the rotation refuses a verdict for an inspection that never happened',
+      rule: 'seo_url_inspection_verdict_needs_an_inspection',
+      sql: inspectionRow({ verdict: "'PASS'" }),
+    },
+    {
+      name: 'the day ledger refuses a spend beyond the 2,000-a-day cap',
+      rule: 'seo_url_inspection_run_stays_within_the_daily_cap',
+      // The cap arithmetic lives in `@berelax/core` because `packages/db` may not import it, so the cap is
+      // ALSO a CHECK — which is what makes the pairing checkable rather than trusted. Going over does not
+      // fail gracefully at Google's end: every further call that day is refused, including a manual one.
+      sql: runLedger({ cap: 2000, inspected: 2001 }),
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(`G-SEO-01 gate: ${probe.name}`, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The acceptance controls. Without them a probe rejected by an unrelated rule — a renamed column, a
+  // missing table — would report a rule that has quietly stopped matching anything (ADR 0003).
+  const accepted = [
+    ['a warehouse row in its correct shape is accepted', dailyRow()],
+    [
+      'two rows differing only in device are two rows, not a conflict',
+      `${dailyRow()}; ${dailyRow({ device: "'DESKTOP'" })}`,
+    ],
+    [
+      'two rows differing only in country are two rows',
+      `${dailyRow()}; ${dailyRow({ country: "'ind'" })}`,
+    ],
+    ['a snapshot row with a withheld gap is accepted, and the gap is derived', snapshotRow()],
+    [
+      'a snapshot whose totals are equal is accepted: nothing withheld is a real state',
+      snapshotRow({ queryClicks: 329, queryImpressions: 7588 }),
+    ],
+    [
+      'an inspected rotation row carrying its timestamp and verdict is accepted',
+      inspectionRow({
+        inspections: 1,
+        lastInspected: "'2026-09-18T23:00:00Z'::timestamptz",
+        verdict: "'NEUTRAL'",
+      }),
+    ],
+    ['a day ledger exactly at the cap is accepted', runLedger({ cap: 2000, inspected: 2000 })],
+  ]
+  for (const [name, statement] of accepted) {
+    const result = psqlProbe(statement)
+    check(
+      `G-SEO-01 control: ${name}`,
+      !result.failed,
+      `the row the probes above are built from was itself rejected:\n${result.output}`,
+    )
+  }
+
+  // 49j. The paging cursor advances by the PAGE SIZE, never by what the last page returned.
+  //
+  // The two implementations are indistinguishable from their output for as long as every page is full, and
+  // the page that is not full is the last one — so the difference never appears in the rows. It appears in
+  // the cursor, which is why the test reads the call log, and this is the mutation that proves it does.
+  {
+    const ADAPTER = 'packages/google/src/adapters/search-analytics.ts'
+    const TEST = 'packages/google/src/adapters/search-analytics.test.ts'
+    const ADVANCE = 'const startRow = page * pageSize'
+    const source = readFileSync(ADAPTER, 'utf8')
+    check(
+      'the paging adapter still advances by the page size, which this gate replaces',
+      source.includes(ADVANCE),
+      `${ADAPTER} no longer contains the cursor advance — the mutation below would be a no-op, and a ` +
+        'no-op mutation makes this gate report a pass for a defect it is not testing',
+    )
+    // The off-by-one page, which is the paging bug that actually happens: `startRow` reads like a page
+    // number and several Google APIs are 1-based, so starting at `pageSize` is one keystroke away. It
+    // discards the first 25,000 rows of every window — the busiest queries on the site — and nothing
+    // errors: the row count is merely smaller, which reads as a quiet month.
+    const mutated = withEditedFile(
+      ADAPTER,
+      (text) => text.replace(ADVANCE, 'const startRow = (page + 1) * pageSize'),
+      () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+    )
+    checkRejectedBy(
+      'the paging suite fails when the cursor starts one page in',
+      mutated,
+      'advances startRow by exactly the page size and persists every row once',
+    )
+  }
+
+  // 49k. The 2–3 day lag. A window that reaches one day nearer stores figures Google is still revising.
+  {
+    const WINDOW = 'packages/core/src/seo/gsc-window.ts'
+    const TEST = 'packages/core/src/seo/gsc-window.test.ts'
+    const LAG = 'export const GSC_DATA_LAG_DAYS = 3'
+    check(
+      'the window module still declares a three-day lag, which this gate shortens',
+      readFileSync(WINDOW, 'utf8').includes(LAG),
+      `${WINDOW} no longer declares GSC_DATA_LAG_DAYS = 3 — the mutation below would be a no-op`,
+    )
+    const mutated = withEditedFile(
+      WINDOW,
+      (text) => text.replace(LAG, 'export const GSC_DATA_LAG_DAYS = 1'),
+      () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+    )
+    checkRejectedBy(
+      'the window suite fails when the lag is shortened to one day',
+      mutated,
+      'ends three days back and never includes today or yesterday',
+    )
+  }
+
+  // 49l-49m. THE defect: `on conflict do nothing`, which loses rows and reports success.
+  //
+  // The mutation is the exact code somebody would write. It is invisible on a first run — every row is an
+  // insert, so every row is affected — and it appears on the re-run, which is the normal case here because
+  // the last two to three days keep changing and each day is fetched on seven consecutive nights.
+  {
+    const WRITER = 'packages/db/src/repositories/seo-warehouse.ts'
+    const ITEST = 'packages/google/src/seo/nightly-pass.itest.ts'
+    const integration = (file) => [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      file,
+    ]
+    const UPSERT = 'on conflict (site_url, date, page, query, device, country) do update'
+    check(
+      'the warehouse writer still upserts with do update, which this gate replaces',
+      readFileSync(WRITER, 'utf8').includes(UPSERT),
+      `${WRITER} no longer upserts on the dimension key — the mutation below would be a no-op`,
+    )
+    const swallowed = withEditedFile(
+      WRITER,
+      (text) =>
+        text.replace(
+          UPSERT,
+          'on conflict (site_url, date, page, query, device, country) do nothing --',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    )
+    checkRejectedBy(
+      'the nightly-pass suite fails when a conflicting row is silently discarded',
+      swallowed,
+      'leaves the row count unchanged, updating every row instead of inserting a second copy',
+    )
+
+    // And the case that would survive the probe above: a writer that swallows the conflict AND stops
+    // counting. On a first run the two are indistinguishable from correct — every row is an insert, so
+    // every row is affected — so the guard alone cannot be what catches this. What catches it is the
+    // SUITE's own assertion that the second run updated all 2,500 rows rather than merely throwing
+    // nothing, and this probe is what proves that assertion is live rather than decorative. It is exactly
+    // the 20,000-lost-rows defect: success reported, rows gone.
+    const COUNT_CHECK = 'if (affected.length !== chunk.length) {'
+    check(
+      'the warehouse writer still compares the affected count with the batch size',
+      readFileSync(WRITER, 'utf8').includes(COUNT_CHECK),
+      `${WRITER} no longer counts what it wrote — the mutation below would be a no-op`,
+    )
+    const silentlyLossy = withEditedFile(
+      WRITER,
+      (text) =>
+        text
+          .replace(
+            UPSERT,
+            'on conflict (site_url, date, page, query, device, country) do nothing --',
+          )
+          .replace(COUNT_CHECK, 'if (false) {'),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          ITEST,
+        ]),
+    )
+    checkRejectedBy(
+      'the nightly-pass suite fails when a lost row is swallowed AND uncounted',
+      silentlyLossy,
+      'leaves the row count unchanged, updating every row instead of inserting a second copy',
+    )
+  }
+
+  // 49n. The rotation covers everything before it repeats anything, and NULLS FIRST is why.
+  //
+  // `nulls last` is the whole defect in two words: the never-inspected URLs sort to the back, the rotation
+  // re-inspects what it has already seen, and the tail of the site is never looked at. Nothing errors.
+  {
+    const WRITER = 'packages/db/src/repositories/seo-warehouse.ts'
+    const ITEST = 'packages/google/src/seo/rotation-pass.itest.ts'
+    const ORDER = 'order by last_inspected_at asc nulls first, priority asc, url asc'
+    check(
+      'the rotation claim still orders never-inspected first, which this gate reverses',
+      readFileSync(WRITER, 'utf8').includes(ORDER),
+      `${WRITER} no longer orders the claim NULLS FIRST — the mutation below would be a no-op`,
+    )
+    const reversed = withEditedFile(
+      WRITER,
+      (text) =>
+        text.replace(ORDER, 'order by last_inspected_at asc nulls last, priority asc, url asc'),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.integration.config.ts',
+          ITEST,
+        ]),
+    )
+    checkRejectedBy(
+      'the rotation suite fails when never-inspected URLs sort behind inspected ones',
+      reversed,
+      'inspects exactly 2,000 per run, covers every URL by the third, and repeats none before it',
+    )
+  }
+
+  // 49o. The two SEO crons must not share one agent, and that must be watchable.
+  //
+  // Nothing in the database prevents it: `seo_gsc_snapshot` is a perfectly valid agent for any cron to
+  // name. The consequence is the one the agent registry exists to remove — the watchdog measures the
+  // absence of a success per agent, so two crons sharing a heartbeat report as healthy whenever either of
+  // them runs, and a pass that stopped entirely is invisible for ever.
+  {
+    const REGISTRY = 'apps/worker/src/registry.ts'
+    const TEST = 'apps/worker/src/jobs/gsc-jobs.test.ts'
+    const mutated = withEditedFile(
+      REGISTRY,
+      (text) => text.replace('agent: SEO_URL_INSPECTION_AGENT,', 'agent: SEO_GSC_SNAPSHOT_AGENT,'),
+      () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+    )
+    checkRejectedBy(
+      'the SEO schedule test fails when the rotation reports to the snapshot agent',
+      mutated,
+      'declares both crons, each naming its own agent',
+    )
+  }
+
+  // 49p. The token allow-list did not grow for this unit, and the pin is not vacuous.
+  //
+  // This unit added four modules that reach Google and one that writes the warehouse, and none of them may
+  // hold a plaintext token: every one of them obtains its token from `withGoogle`, names no accessor and
+  // never imports `token-store.ts`. So `pnpm chokepoint` must still report FIVE modules — and the four
+  // files must be asserted to EXIST, because an absence check passes trivially the moment a file is
+  // renamed (G-CONN-05's own pin makes the same argument).
+  {
+    const NEW_MODULES = [
+      'packages/google/src/adapters/search-analytics.ts',
+      'packages/google/src/seo/gsc-snapshot.ts',
+      'packages/google/src/seo/nightly-pass.ts',
+      'packages/google/src/seo/rotation-pass.ts',
+      'packages/google/src/seo/url-inspection.ts',
+      'packages/db/src/repositories/seo-warehouse.ts',
+      'apps/worker/src/jobs/gsc-nightly-snapshot.ts',
+      'apps/worker/src/jobs/gsc-url-inspection-rotation.ts',
+    ]
+    const missing = NEW_MODULES.filter((file) => !existsSync(file))
+    check(
+      "G-SEO-01's modules exist, so the chokepoint pin below is about something",
+      missing.length === 0,
+      `missing: ${missing.join(', ')}`,
+    )
+    // Comments stripped first, for the reason the chokepoint scanner strips them: prose that NAMES an
+    // accessor is not a call to one, and several of these modules explain in a comment why the token they
+    // never touch stays behind the chokepoint. A scan that read the prose would condemn the explanation.
+    const withoutComments = (text) =>
+      text
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .split('\n')
+        .map((line) => line.replace(/(?<!:)\/\/.*$/, ''))
+        .join('\n')
+    const accessors = NEW_MODULES.filter((file) =>
+      /\b(openToken|sealToken|rewrapToken|connectionBinding)\b/.test(
+        withoutComments(readFileSync(file, 'utf8')),
+      ),
+    )
+    check(
+      'no G-SEO-01 module names a token accessor: every one of them goes through withGoogle',
+      accessors.length === 0,
+      `these name an accessor: ${accessors.join(', ')}`,
+    )
+    const chokepoint = run('pnpm', ['chokepoint'])
+    check(
+      'the token allow-list still holds five modules after G-SEO-01',
+      !chokepoint.failed && chokepoint.output.includes('5 module(s) may hold a plaintext token'),
+      chokepoint.output,
+    )
+  }
+
+  // 49q-49t. The controls. Every mutation above needs the committed code to pass the same suite, or a
+  // suite broken for an unrelated reason satisfies all four probes at once — which is exactly how a gate
+  // comes to report a pass for a rule it has stopped testing.
+  const clean = [
+    [
+      'the paging suite passes on the committed adapter',
+      [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.config.ts',
+        'packages/google/src/adapters/search-analytics.test.ts',
+      ],
+    ],
+    [
+      'the window suite passes on the committed lag',
+      [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.config.ts',
+        'packages/core/src/seo/gsc-window.test.ts',
+      ],
+    ],
+    [
+      'the SEO schedule test passes on the committed registry',
+      ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', 'apps/worker/src/jobs/gsc-jobs.test.ts'],
+    ],
+    [
+      'the nightly-pass suite passes on the committed writer',
+      [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.integration.config.ts',
+        'packages/google/src/seo/nightly-pass.itest.ts',
+      ],
+    ],
+    [
+      'the rotation suite passes on the committed claim order',
+      [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.integration.config.ts',
+        'packages/google/src/seo/rotation-pass.itest.ts',
+      ],
+    ],
+  ]
+  for (const [name, args] of clean) {
+    const result = run('pnpm', args)
+    check(name, !result.failed, `the committed code failed its own suite:\n${result.output}`)
+  }
+}
+
+// 47a-47w. (H-HARD-03) KEK rotation for clinical DEKs, and the secret-rotation inventory.
+//
+// Three groups. The first is migration 0043's rules against real PostgreSQL, because the whole point
+// of putting them in the database is that they survive a mistake in the code that drives a rotation —
+// and a rule nothing has bounced off is not a rule (ADR 0003). Each probe names the error it must
+// trip, so a fixture rejected by an unrelated constraint fails rather than passing.
+//
+// The second breaks the shipped rotation code and requires the test that claims to cover it to fail,
+// by name. That includes the interruption test itself: blind the CLI's progress output and the kill
+// never fires, which would leave the resumability test comparing a completed rotation with itself.
+//
+// The third is `pnpm rotation`'s own known-bad fixtures. No fixture here contains anything that could
+// be mistaken for key material — the bytes are single repeated zeros and the inventory fixtures hold
+// names, never values.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  // One zero byte in every sealed column. A ciphertext that could not be a ciphertext and a wrapped
+  // key that could not be a wrapped key: nothing in these probes is ever decrypted, and a fixture that
+  // looked like key material would be key material as far as a leak scanner is concerned.
+  const BYTES = "'\\x00'::bytea"
+  const GATE_ID = "'0dec0de9-0000-7000-8000-000000000001'::uuid"
+  const CUSTOMER = "'0dec0de9-0000-7000-8000-000000000002'::uuid"
+  const ACTIVE = '(select clinical.active_kek_version())'
+
+  /** A retired version this transaction invents, so the probe does not depend on rotation history. */
+  const retiredVersion =
+    'insert into clinical.kek_version (version, status, retired_at) ' +
+    "values ('gate-retired', 'retired', now())"
+
+  const note = (kekVersion) =>
+    'insert into clinical.treatment_note (id, customer_id, appointment_id, author_employee_id, ' +
+    'body_ciphertext, body_nonce, wrapped_data_key, kek_version, aad_fingerprint) values (' +
+    `${GATE_ID}, ${CUSTOMER}, ${CUSTOMER}, ${CUSTOMER}, ${BYTES}, ${BYTES}, ${BYTES}, ` +
+    `${kekVersion}, 'gate-fingerprint')`
+
+  const probes = [
+    {
+      name: 'a retired KEK version cannot encrypt a new clinical record',
+      rule: 'KekRetiredCannotEncrypt',
+      sql: `${retiredVersion}; ${note("'gate-retired'")}`,
+    },
+    {
+      name: 'an UPDATE cannot rewrite a clinical ciphertext',
+      rule: 'SealedRowImmutable',
+      sql:
+        `${note(ACTIVE)}; update clinical.treatment_note set body_ciphertext = '\\x01'::bytea ` +
+        `where id = ${GATE_ID}`,
+    },
+    {
+      name: 'an UPDATE cannot move a payload to another customer, which would break the AAD',
+      rule: 'SealedRowImmutable',
+      sql:
+        `${note(ACTIVE)}; update clinical.treatment_note set customer_id = ` +
+        `'0dec0de9-0000-7000-8000-000000000003'::uuid where id = ${GATE_ID}`,
+    },
+    {
+      name: 'an UPDATE cannot rewrite the AAD fingerprint',
+      rule: 'SealedRowImmutable',
+      sql:
+        `${note(ACTIVE)}; update clinical.treatment_note set aad_fingerprint = 'forged' ` +
+        `where id = ${GATE_ID}`,
+    },
+    {
+      name: 'a re-wrap onto a retired version is refused',
+      rule: 'KekRetiredCannotEncrypt',
+      sql:
+        `${retiredVersion}; ${note(ACTIVE)}; update clinical.treatment_note set ` +
+        `wrapped_data_key = '\\x01'::bytea, kek_version = 'gate-retired' where id = ${GATE_ID}`,
+    },
+    {
+      name: 'a version bump that did not actually re-wrap the key is refused',
+      rule: 'RewrapDidNotRewrap',
+      sql:
+        `${note(ACTIVE)}; update clinical.kek_version set status = 'retired', retired_at = now() ` +
+        "where status = 'active'; " +
+        "insert into clinical.kek_version (version, status) values ('gate-next', 'active'); " +
+        `update clinical.treatment_note set kek_version = 'gate-next' where id = ${GATE_ID}`,
+    },
+    {
+      name: 'a retired KEK version cannot be brought back',
+      rule: 'KekReactivationRefused',
+      sql:
+        `${retiredVersion}; update clinical.kek_version set status = 'active', ` +
+        "retired_at = null where version = 'gate-retired'",
+    },
+    {
+      name: 'two KEK versions cannot be active at once',
+      rule: 'kek_version_one_active',
+      sql: "insert into clinical.kek_version (version, status) values ('gate-second', 'active')",
+    },
+    {
+      name: 'a KEK version label with an illegal shape is refused',
+      rule: 'kek_version_version_check',
+      sql:
+        'insert into clinical.kek_version (version, status, retired_at) values ' +
+        "('Gate Version!', 'retired', now())",
+    },
+    {
+      name: 'a retired KEK version with no retirement time is refused',
+      rule: 'kek_version_retired_at_matches_status',
+      sql: "insert into clinical.kek_version (version, status) values ('gate-undated', 'retired')",
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(`0043 gate: ${probe.name}`, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The controls. Without them every probe above is satisfied by a typo in a column name, and the
+  // third one is the interesting one: `superseded_at` is in the mutable allow-list on purpose,
+  // because an intake submission is superseded rather than edited.
+  const accepted = [
+    {
+      name: 'a clinical record sealed with the ACTIVE version is accepted',
+      sql: note(ACTIVE),
+    },
+    {
+      name: 'a re-wrap that changes only the wrapped key and the version is accepted',
+      sql:
+        `${note(ACTIVE)}; update clinical.kek_version set status = 'retired', ` +
+        "retired_at = now() where status = 'active'; " +
+        "insert into clinical.kek_version (version, status) values ('gate-next', 'active'); " +
+        "update clinical.treatment_note set wrapped_data_key = '\\x01'::bytea, " +
+        `kek_version = 'gate-next' where id = ${GATE_ID}`,
+    },
+    {
+      name: 'superseding an intake submission is accepted, even on a retired version',
+      sql:
+        'insert into clinical.intake_form_template (id, version, locale, title, definition, ' +
+        'consent_text, consent_hash, is_current) values ' +
+        `(${GATE_ID}, 20043, 'en', 'gate', '{}'::jsonb, 'gate', 'gate', false); ` +
+        'insert into clinical.intake_submission (id, customer_id, template_id, payload_ciphertext, ' +
+        'payload_nonce, wrapped_data_key, kek_version, aad_fingerprint, submitted_via) values (' +
+        `${GATE_ID}, ${CUSTOMER}, ${GATE_ID}, ${BYTES}, ${BYTES}, ${BYTES}, ${ACTIVE}, ` +
+        "'gate-fingerprint', 'online'); " +
+        "update clinical.kek_version set status = 'retired', retired_at = now() " +
+        "where status = 'active'; " +
+        "insert into clinical.kek_version (version, status) values ('gate-next', 'active'); " +
+        `update clinical.intake_submission set superseded_at = now() where id = ${GATE_ID}`,
+    },
+    {
+      // 0043 grants berelax_clinical INSERT on audit_event, because 0009 gave it SELECT on public and
+      // nothing else — so the audited read ADR 0010 requires for every access to health data could not
+      // record itself. Both halves are asserted here: it can write one, and it still cannot rewrite
+      // one. The second half is checked by READING the row back rather than by expecting an error,
+      // because `audit_event` is append-only via `do instead nothing` RULES (0005), and a rule reports
+      // SUCCESS to the caller. Expecting a refusal here fails today for no reason, and would pass for
+      // the wrong reason the day those rules become triggers.
+      name: 'the clinical role can write an audit row and still cannot rewrite one',
+      sql:
+        'set local role berelax_clinical; ' +
+        'insert into audit_event (actor_kind, action, entity_type, operation) values ' +
+        "('system', 'clinical.gate.probe', 'clinical.treatment_note', 'read'); " +
+        "update audit_event set action = 'clinical.gate.tampered' " +
+        "where action = 'clinical.gate.probe'; " +
+        'do $$ begin ' +
+        "if not exists (select 1 from audit_event where action = 'clinical.gate.probe') then " +
+        "raise exception 'AuditInsertRefused: the clinical role could not write an audit row'; " +
+        'end if; ' +
+        "if exists (select 1 from audit_event where action = 'clinical.gate.tampered') then " +
+        "raise exception 'AppendOnlyRuleFailed: an UPDATE from berelax_clinical changed an audit row'; " +
+        'end if; end $$',
+    },
+  ]
+  for (const control of accepted) {
+    const result = psqlProbe(control.sql)
+    check(`0043 control: ${control.name}`, !result.failed, result.output)
+  }
+
+  // --- the suites must be able to fail ------------------------------------------------------------
+  const ROTATE = 'packages/clinical/src/crypto/rotate.ts'
+  const CLI = 'scripts/rotate-kek.mjs'
+  const UNIT = 'packages/clinical/src/crypto/rotate.test.ts'
+  const ITEST = 'packages/clinical/src/crypto/rotation.itest.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The key version is what makes `rotationChecksum` answer "the same final key version". Drop it and
+  // the checksum still compares content, which is why the control exists at all.
+  checkRejectedBy(
+    'the rotation suite fails when the checksum stops covering the key version',
+    withEditedFile(
+      ROTATE,
+      // `${` assembled from two pieces: these strings are source text to be MATCHED, not templates to
+      // be evaluated, and a placeholder inside a plain string is a warning biome is right to raise
+      // everywhere else. Removing the version term leaves the checksum comparing content only.
+      (src) => src.replace(`${'$'}{r.kekVersion}|`, ''),
+      () => runExpectingFailure('pnpm', unit(UNIT)),
+    ),
+    'a checksum over the wrong final version does NOT match',
+  )
+
+  // The guard that turns a store whose write matched nothing into a message instead of an infinite
+  // loop, proved by INVERTING it rather than by deleting it.
+  //
+  // Deleting it was tried and is not a usable fixture: without the guard the run does not fail, it
+  // loops for ever — and because every await inside that loop resolves on the microtask queue, no
+  // timer ever runs, so vitest's own test timeout never fires either and the whole harness hangs.
+  // That is precisely why the guard exists rather than being left to a timeout. Inverting it makes the
+  // guard fire on the FIRST sighting of every record, which fails fast and proves the stronger thing:
+  // that it is consulted for every record on the hot path, not just for a repeat.
+  checkRejectedBy(
+    'the rotation suite fails when the progress guard stops being consulted for every record',
+    withEditedFile(
+      ROTATE,
+      (src) => src.replace('if (seen.has(key)) {', 'if (!seen.has(key)) {'),
+      () => runExpectingFailure('pnpm', unit(UNIT)),
+    ),
+    're-wraps every DEK, rewrites no ciphertext, and everything still decrypts',
+  )
+
+  // The interruption test kills the CLI after a progress line it has SEEN. Blind that output and the
+  // kill never fires, the rotation finishes, and the test would be comparing a completed rotation with
+  // itself. It must fail instead — this is the control that keeps the resumability proof honest.
+  checkRejectedBy(
+    'the resumability test fails when the rotation cannot be interrupted',
+    withEditedFile(
+      CLI,
+      // Renaming the progress prefix is the smallest possible blinding: the CLI still writes a line
+      // per record, and the test's counter — which matches `^rewrapped ` — never fires.
+      (src) => src.replace('rewrapped ', 'progress '),
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'instead of being killed',
+  )
+
+  // The control for all three: the committed files pass their own suites. Without it a suite broken
+  // for any other reason satisfies every probe above, which is how a gate comes to report a pass for
+  // a rule it has stopped testing.
+  {
+    const cleanUnit = run('pnpm', unit(UNIT))
+    check(
+      'the rotation unit suite passes on the committed code',
+      !cleanUnit.failed,
+      cleanUnit.output,
+    )
+    const cleanItest = run('pnpm', integration(ITEST))
+    check(
+      'the rotation integration suite passes on the committed code',
+      !cleanItest.failed,
+      cleanItest.output,
+    )
+  }
+
+  // --- the secret-rotation inventory --------------------------------------------------------------
+  const INVENTORY = 'build/secret-inventory.json'
+  const fixtureInventory = 'build/__gate_fixture_secret_inventory__.json'
+  const rotationGate = (inventory) =>
+    run('node', ['scripts/check-secret-rotation.mjs', '--inventory', inventory])
+
+  const committedInventory = JSON.parse(readFileSync(INVENTORY, 'utf8'))
+  /** The committed inventory with one entry replaced, so every fixture differs in exactly one way. */
+  const inventoryWith = (mutate) => {
+    const copy = JSON.parse(JSON.stringify(committedInventory))
+    mutate(copy)
+    return JSON.stringify(copy, null, 2)
+  }
+  const clinicalKek = (inventory) => inventory.entries.find((entry) => entry.id === 'clinical-kek')
+
+  // A new credential in the code with no rotation procedure. This is the rule the whole gate exists
+  // for: the moment to write down how a secret is rotated is the moment somebody adds it.
+  //
+  // The name is assembled from three pieces and the read is interpolated, so neither the name nor the
+  // `process.env['NAME']` shape appears as a literal in THIS file. `pnpm rotation` scans every source
+  // file including this one, and a fixture written as one literal made the gate report itself — the
+  // control below caught it. Joining them up puts that blind spot back.
+  const fixtureEnvName = `GATE_FIXTURE_${'API'}_KEY`
+  checkRejectedBy(
+    'rotation gate rejects a secret-shaped environment variable nothing declares',
+    withFixture(
+      'packages/core/src/__gate_fixture__.ts',
+      `export const key = process.env[${JSON.stringify(fixtureEnvName)}]`,
+      () => run('node', ['scripts/check-secret-rotation.mjs']),
+    ),
+    '[undeclared-secret]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a KEK with nowhere to keep the retired version',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        delete clinicalKek(inv).retiredEnv
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[kek-must-retain-retired-versions]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a rotation procedure that is not in the runbook',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        clinicalKek(inv).rotation = 'docs/runbooks/key-rotation.md#no-such-heading'
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[rotation-procedure-missing]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a secret with no declared rotation period',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        clinicalKek(inv).rotatePeriodDays = 2000
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[rotation-period-missing]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a rotation that breaks something and does not say what',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        clinicalKek(inv).zeroDowntime = false
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[outage-not-described]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a name dismissed as not-a-secret with no reason',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        inv.notSecrets.push({ name: 'SOME_OTHER_URL', reason: 'no' })
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[not-a-secret-without-reason]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a name classified twice',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        inv.notSecrets.push({
+          name: 'CLINICAL_KEK',
+          reason: 'a contradiction: it is also declared as key material above',
+        })
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[secret-classified-twice]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a declared secret nothing reads',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        clinicalKek(inv).env = 'CLINICAL_KEK_NOBODY_READS_THIS'
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[declared-secret-unused]',
+  )
+
+  checkRejectedBy(
+    'rotation gate rejects a secret whose kind it does not know',
+    withFixture(
+      fixtureInventory,
+      inventoryWith((inv) => {
+        clinicalKek(inv).kind = 'something-new'
+      }),
+      () => rotationGate(fixtureInventory),
+    ),
+    '[unknown-secret-kind]',
+  )
+
+  // The control. A gate that rejects everything is not a gate, and the committed inventory is the one
+  // thing that has to pass.
+  {
+    const clean = run('node', ['scripts/check-secret-rotation.mjs'])
+    check(
+      'rotation gate accepts the committed secret inventory',
+      !clean.failed,
+      `the committed inventory failed its own gate:\n${clean.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -10718,6 +11619,9 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // that every `run:` step in the workflow is named here, so a CI step nobody registered fails the
     // build rather than passing unnoticed.
     'pnpm secrets',
+    // H-HARD-03's secret-rotation inventory. Registered here for the same reason as the four above:
+    // the completeness property in that unit's block reads THIS array.
+    'pnpm rotation',
     'pnpm deps',
     'pnpm licences',
     'pnpm container',

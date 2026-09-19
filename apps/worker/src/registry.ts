@@ -31,6 +31,11 @@ import {
   googleLivenessHandler,
 } from './jobs/google-connection-health.ts'
 import { GOOGLE_REVOKE_RETRY_JOB } from './jobs/google-revoke-retry.ts'
+import { gscNightlySnapshotHandler, SEO_GSC_SNAPSHOT_AGENT } from './jobs/gsc-nightly-snapshot.ts'
+import {
+  gscUrlInspectionHandler,
+  SEO_URL_INSPECTION_AGENT,
+} from './jobs/gsc-url-inspection-rotation.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
@@ -254,6 +259,49 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 120,
     handler: googleLivenessHandler_,
   },
+  {
+    name: 'seo.gsc-snapshot',
+    purpose:
+      'Mirrors the Search Console query report into seo_gsc_daily: a seven-day window ending at today ' +
+      'minus 3, paged 25,000 rows at a time, with the rare-query gap stored as the difference between ' +
+      'the query-level and page-level totals. The API keeps 16 months and discards the seventeenth, so ' +
+      'this pass IS the history (G-SEO-01, docs/10 §7).',
+    // 04:45 Asia/Dubai. After trading closes at 02:00, and after the Google health check at 03:00 —
+    // deliberately, because that pass forces a token refresh and records a dead grant: a snapshot that
+    // ran first would be the thing that discovered it, an hour before the job whose purpose is to. It is
+    // also after 03:45 and 04:15, so the four nightly passes do not contend for the same connections.
+    // Asia/Dubai is UTC+4 with no DST; `registerJobs` passes the zone to pg-boss rather than this file
+    // pre-computing an offset.
+    cron: '45 4 * * *',
+    agent: SEO_GSC_SNAPSHOT_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 300,
+    retryBackoff: true,
+    // Two paged fetches plus up to sixty upsert statements. Twenty minutes is generous for a property this
+    // size; a pass still running past it is blocked rather than slow, and reclaiming it is right — the
+    // window overlaps the next six nights, so a lost pass repairs itself.
+    expireInSeconds: 1200,
+    handler: gscSnapshotHandler_,
+  },
+  {
+    name: 'seo.url-inspection',
+    purpose:
+      'Inspects a rotating priority subset of URLs inside the 2,000-a-day per-site cap, ordered by the ' +
+      'persisted cursor so every candidate is covered before any is re-inspected. The cap belongs to Google ' +
+      'and cannot be raised, so the rotation is the feature (G-SEO-01, docs/10 §7).',
+    // 05:30 Asia/Dubai, after the snapshot at 04:45 that registers its candidates. Running first would
+    // rotate over yesterday's candidate list — which is only wrong on the first night after a new page
+    // starts earning impressions, and that is exactly the page worth inspecting soonest.
+    cron: '30 5 * * *',
+    agent: SEO_URL_INSPECTION_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 300,
+    retryBackoff: true,
+    // Up to 2,000 sequential inspections. Thirty minutes at a modest rate; a retry after that reads the
+    // day ledger and takes only the remainder of the cap, so a reclaimed pass cannot double-spend.
+    expireInSeconds: 1800,
+    handler: gscUrlInspectionHandler_,
+  },
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
@@ -312,6 +360,22 @@ async function googleHealthHandler_(_data: never, context: JobContext): Promise<
 
 async function googleLivenessHandler_(_data: never, context: JobContext): Promise<void> {
   await googleLivenessHandler(googleConfig(), context.now(), context.jobId)
+}
+
+/**
+ * The two SEO passes' handlers.
+ *
+ * Each opens its own connection for the same reason the Google health passes do: a token refresh holds an
+ * advisory transaction lock for the length of an HTTPS call, and a 60,000-row upsert holds a connection for
+ * sixty statements. Sharing the four-connection maintenance pool is how one slow pass becomes
+ * `53300 too_many_connections` for the audit partition job.
+ */
+async function gscSnapshotHandler_(_data: never, context: JobContext): Promise<void> {
+  await gscNightlySnapshotHandler(googleConfig(), context.now(), context.jobId)
+}
+
+async function gscUrlInspectionHandler_(_data: never, context: JobContext): Promise<void> {
+  await gscUrlInspectionHandler(googleConfig(), context.now(), context.jobId)
 }
 
 /**

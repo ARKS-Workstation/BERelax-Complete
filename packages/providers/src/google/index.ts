@@ -14,6 +14,7 @@ export {
   createFakeSearchConsole,
   FAKE_GRANTED_SCOPES,
   type FakeGoogleOptions,
+  FIXTURE_ANALYTICS_DATE,
   GBP_ACCOUNT_FIXTURES,
   GBP_LOCATION_FIXTURES,
   GBP_LOCATION_GROUP_ACCOUNT,
@@ -21,9 +22,13 @@ export {
   GOOGLE_BUSINESS_PROFILE,
   GOOGLE_OAUTH,
   GOOGLE_SEARCH_CONSOLE,
+  RARE_QUERY_CLICKS,
+  RARE_QUERY_IMPRESSIONS,
   REVIEW_FIXTURES,
+  SEARCH_ANALYTICS_MAX_ROWS,
   SEARCH_CONSOLE_SITE_FIXTURES,
   TESTING_REFRESH_TOKEN_DAYS,
+  URL_INSPECTION_CAP_PER_DAY,
 } from './fake-google.ts'
 export type {
   AuthorizationUrlArgs,
@@ -40,10 +45,13 @@ export type {
   LocationsGetRequest,
   LocationsListRequest,
   Review,
+  SearchAnalyticsDevice,
+  SearchAnalyticsDimension,
   SearchAnalyticsRow,
   SearchConsoleProvider,
   SearchConsoleSite,
   SitePermissionLevel,
+  UrlInspectionResult,
   VoiceOfMerchantState,
 } from './port.ts'
 export { GOOGLE_REVOKE_ENDPOINT } from './port.ts'

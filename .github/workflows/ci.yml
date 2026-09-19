@@ -84,6 +84,12 @@ jobs:
       - name: No credentials in the repository
         run: pnpm secrets
 
+      # H-HARD-03's half: every secret the system holds is declared with a rotation procedure, and a
+      # new one added to the code without one fails here rather than being discovered during an
+      # incident, when nobody knows how to rotate it.
+      - name: Secret rotation inventory
+        run: pnpm rotation
+
       - name: Dependency advisories (offline snapshot)
         run: pnpm deps
 

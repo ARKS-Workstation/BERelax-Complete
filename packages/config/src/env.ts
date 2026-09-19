@@ -59,6 +59,36 @@ const schema = z
     GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
     GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
 
+    /**
+     * The two key-encrypting keys, and the retired slot each rotation needs.
+     *
+     * G-CONN-04 deferred the naming to H-HARD-03's secret inventory, and the answer is **two keys,
+     * not one**: the clinical store is designed to relocate to a UAE-hosted database
+     * (OPEN-QUESTIONS `Y5-residency`, ADR 0010) and would take its key with it, while the Google
+     * refresh-token key belongs to a boundary the chokepoint gate polices separately. One shared key
+     * would also tie the two rotation schedules together — a Google client-secret incident would
+     * force a rotation of every clinical record's data key, for no security gain.
+     *
+     * Every one is `optional()` here on purpose. Declaring the names is what this schema is for
+     * ("every key is declared here"); deciding whether production may boot without them is a
+     * deployment question, and the two runtime readers — the Google consent callback and
+     * `scripts/rotate-kek.mjs` — each refuse loudly and by name when their key is absent, which is
+     * the behaviour that matters and is already tested.
+     *
+     * `…_PREVIOUS` is the retired key, RETAINED so rows that have not been re-wrapped yet can still
+     * be decrypted. Discarding it before a rotation finishes is what makes records unreadable, so it
+     * is a named slot rather than an ad-hoc export during the rotation.
+     * `build/secret-inventory.json` and `docs/runbooks/key-rotation.md` hold the procedure.
+     */
+    CLINICAL_KEK: z.string().optional(),
+    CLINICAL_KEK_VERSION: z.string().optional(),
+    CLINICAL_KEK_PREVIOUS: z.string().optional(),
+    CLINICAL_KEK_PREVIOUS_VERSION: z.string().optional(),
+    GOOGLE_TOKEN_KEK: z.string().optional(),
+    GOOGLE_TOKEN_KEK_VERSION: z.string().optional(),
+    GOOGLE_TOKEN_KEK_PREVIOUS: z.string().optional(),
+    GOOGLE_TOKEN_KEK_PREVIOUS_VERSION: z.string().optional(),
+
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   })

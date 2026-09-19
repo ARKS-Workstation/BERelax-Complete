@@ -31,6 +31,25 @@ export {
   readLocationSnapshot,
 } from './adapters/business-information.ts'
 export {
+  assertRowCarriesDimensions,
+  assertRowCountsArePlausible,
+  fetchSearchAnalyticsRows,
+  GSC_MAX_PAGES,
+  GSC_PAGE_OVERSIZED,
+  GSC_PAGE_SIZE,
+  GSC_PAGING_DID_NOT_TERMINATE,
+  GSC_ROW_COUNTS_IMPLAUSIBLE,
+  GSC_ROW_DIMENSION_MISSING,
+  type GscFetchResult,
+  type GscPageRecord,
+  type GscTotals,
+  type GscWindowArgs,
+  KNOWN_DEVICES,
+  PAGE_DIMENSIONS,
+  QUERY_DIMENSIONS,
+  totalsOf,
+} from './adapters/search-analytics.ts'
+export {
   assertSiteSelectable,
   isDomainProperty,
   listSearchConsoleSites,
@@ -227,6 +246,37 @@ export {
 } from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
+export {
+  assertWindowRespectsLag,
+  type CollectOptions,
+  collectGscSnapshot,
+  GSC_WINDOW_BREACHES_LAG,
+  type GscCollected,
+  type GscCollection,
+  type GscDegraded,
+  type GscSnapshotDeps,
+  positionCenti,
+  toWarehouseRow,
+} from './seo/gsc-snapshot.ts'
+export {
+  runGscNightlySnapshot,
+  SEO_GSC_SNAPSHOT_AGENT,
+  type SnapshotPassOptions,
+  type SnapshotPassResult,
+} from './seo/nightly-pass.ts'
+export {
+  type RotationPassOptions,
+  type RotationPassResult,
+  runUrlInspectionRotation,
+  SEO_URL_INSPECTION_AGENT,
+} from './seo/rotation-pass.ts'
+export {
+  type InspectionCollection,
+  type InspectionDegraded,
+  type InspectionRunOutcome,
+  inspectClaimedUrls,
+  type UrlInspectionDeps,
+} from './seo/url-inspection.ts'
 /**
  * The token *shape*, and deliberately not the token *accessors*.
  *

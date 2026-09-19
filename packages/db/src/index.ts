@@ -316,6 +316,28 @@ export {
   recordReplySubmittedToApi,
   recordRoutingVerdict,
 } from './repositories/reviews.ts'
+export {
+  type ClaimedInspection,
+  claimUrlInspectionBatch,
+  countGscDailyRows,
+  GSC_BATCH_HAS_DUPLICATE_DIMENSIONS,
+  GSC_UPSERT_LOST_ROWS,
+  type GscDailyRow,
+  type GscSnapshotInput,
+  type GscSnapshotRow,
+  type GscUpsertResult,
+  type InspectionCandidate,
+  type InspectionCoverage,
+  type InspectionOutcome,
+  type InspectionRunLedger,
+  inspectionCoverage,
+  openInspectionRun,
+  readGscSnapshot,
+  recordGscSnapshot,
+  recordInspectionOutcomes,
+  registerInspectionCandidates,
+  upsertGscDailyRows,
+} from './repositories/seo-warehouse.ts'
 export * as schema from './schema/index.ts'
 export {
   type CatalogueSeedResult,
@@ -451,10 +473,12 @@ export {
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-// 41 is reserved for a unit in flight that turned out not to need it. 36 is
-// 0036_setting_justification.sql, 37 is 0037_review_routing_verdict.sql, 38 is
+// 41 is unused and will stay unused. W-SYS-06 reserved it, found it needed no schema change, and the
+// number was not reclaimed: renumbering to close a gap is how two branches come to apply the same number
+// to different SQL. 36 is 0036_setting_justification.sql, 37 is 0037_review_routing_verdict.sql, 38 is
 // 0038_booking_transaction.sql — which corrects the unit `rooms.capacity` is counted in and adds the four
-// figures an appointment snapshots — 39 is 0039_reverse_charge.sql, and 40 is 0040_google_disconnect.sql,
+// figures an appointment snapshots — 39 is 0039_reverse_charge.sql, 40 is 0040_google_disconnect.sql,
 // which makes the five refresh-token columns nullable so a disconnect can zeroise them and fences that
-// nullability with three named CHECK constraints.
-export const SCHEMA_VERSION = 40 as const
+// nullability with three named CHECK constraints, 42 is 0042_seo_gsc_daily.sql and 43 is
+// 0043_kek_rotation.sql.
+export const SCHEMA_VERSION = 43 as const

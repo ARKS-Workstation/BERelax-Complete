@@ -29,9 +29,11 @@ import type {
   GoogleRevocation,
   GoogleTokens,
   Review,
+  SearchAnalyticsDimension,
   SearchAnalyticsRow,
   SearchConsoleProvider,
   SearchConsoleSite,
+  UrlInspectionResult,
   VoiceOfMerchantState,
 } from './port.ts'
 
@@ -146,6 +148,40 @@ export interface FakeGoogleOptions {
   readonly locationsByAccount?: Readonly<Record<string, readonly GbpLocation[]>>
   /** What `sites.list` returns. Default: the three fixtures below. */
   readonly sites?: readonly SearchConsoleSite[]
+  /**
+   * The query-level Search Analytics rows, replacing the fixtures.
+   *
+   * Exists for one case the fixtures cannot express: **paging**. The real API returns at most 25,000 rows
+   * per request and is paged with `startRow`, so the failure worth testing needs more rows than any
+   * hand-written fixture set — G-SEO-01's criterion is 60,000. A generator in the test supplies them,
+   * this fake slices them exactly as Google does, and the call log records the cursor each call used so
+   * the advance can be asserted rather than assumed.
+   *
+   * Caller order is preserved. The real API orders by clicks descending, and a fake that re-sorted would
+   * make a test's own ordering claim untestable.
+   */
+  readonly analyticsRows?: readonly SearchAnalyticsRow[]
+  /**
+   * The rows Google WITHHOLDS from the query breakdown — the rare-query gap, as data rather than as a
+   * subtracted constant.
+   *
+   * This is the fake's most load-bearing detail after the paging cursor. Search Console removes queries
+   * too rare to be anonymous from the query report **entirely**, while still counting their clicks in any
+   * report that does not group by query (docs/10 §7). So these rows are returned when the `query`
+   * dimension is NOT requested and omitted when it is, which reproduces the behaviour exactly: the sums
+   * differ by these rows and by nothing else, and a consumer that derives the gap from the two totals
+   * gets the right number without anybody hardcoding one.
+   */
+  readonly withheldQueryRows?: readonly SearchAnalyticsRow[]
+  /**
+   * The URL Inspection daily cap this fake enforces. Default 2,000 — Google's own, per site, per day.
+   *
+   * Enforced rather than documented: the 2,001st call in one of Google's days fails with
+   * `quota_exhausted`, the way the real API does. A fake that let a caller inspect 5,000 URLs in a day
+   * would let the rotation's accounting be wrong in exactly the direction that costs a day of quota, and
+   * the test would pass. Lowerable so a test can reach the cap without 2,000 calls.
+   */
+  readonly urlInspectionCap?: number
 }
 
 function addSeconds(iso: string, seconds: number): string {
@@ -790,6 +826,15 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
 }
 
 /**
+ * The date every fixture row is attributed to.
+ *
+ * Google's calendar date in UTC, not a trading date (migration 0042's header says why that distinction
+ * matters here and nowhere else). Fixed rather than derived from `now()`, because a fixture whose date
+ * moved with the clock would make every stored warehouse row a different row tomorrow.
+ */
+export const FIXTURE_ANALYTICS_DATE = '2026-09-15'
+
+/**
  * Search Analytics fixtures.
  *
  * Shaped like a real local-services profile: a handful of brand queries with high CTR and good
@@ -804,8 +849,21 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 310,
     ctr: 0.458,
     position: 1.2,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    country: 'are',
   },
-  { query: 'be relax massage', page: '/', clicks: 97, impressions: 248, ctr: 0.391, position: 1.4 },
+  {
+    query: 'be relax massage',
+    page: '/',
+    clicks: 97,
+    impressions: 248,
+    ctr: 0.391,
+    position: 1.4,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    country: 'are',
+  },
   {
     query: 'massage al zahiyah',
     page: '/',
@@ -813,6 +871,9 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 890,
     ctr: 0.061,
     position: 6.8,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    country: 'are',
   },
   {
     query: 'arabic massage abu dhabi',
@@ -821,6 +882,9 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 1240,
     ctr: 0.025,
     position: 9.4,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'DESKTOP',
+    country: 'are',
   },
   {
     query: 'moroccan bath abu dhabi',
@@ -829,6 +893,9 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 1580,
     ctr: 0.011,
     position: 12.7,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    country: 'are',
   },
   {
     query: 'massage tourist club area',
@@ -837,6 +904,11 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 460,
     ctr: 0.026,
     position: 8.1,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    // A visitor searching from outside the country, which is ordinary for a city with this much
+    // tourism and the reason `country` is a warehouse dimension rather than an assumption.
+    country: 'ind',
   },
   {
     query: 'spa near corniche abu dhabi',
@@ -845,17 +917,169 @@ const ANALYTICS_FIXTURES: readonly SearchAnalyticsRow[] = [
     impressions: 720,
     ctr: 0.006,
     position: 18.3,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'TABLET',
+    country: 'are',
   },
 ]
 
 /**
- * Clicks and impressions the row breakdown does not show.
+ * The rows Search Console WITHHOLDS from the query breakdown.
  *
- * Search Console withholds queries too rare to be anonymous, so the rows never sum to the site
- * total. Roughly a fifth of clicks live here for a profile this size.
+ * Not a subtracted constant, and that is the point. Google removes a query too rare to be anonymous from
+ * the query report entirely while still counting its clicks in every report that does not group by query
+ * — so modelling the gap as data reproduces the behaviour instead of asserting it: these rows are
+ * returned when `query` is not among the requested dimensions and omitted when it is. Any consumer that
+ * derives the gap from the two totals therefore gets the true difference, and nobody has to hardcode a
+ * number the fake would then have to be kept in step with.
+ *
+ * Two rows rather than one, because "rare queries" is plural: the tail of a local business is dozens of
+ * one-click searches, and a single withheld row would let a consumer treat the gap as one missing query.
+ *
+ * The `query` text is a visible marker rather than a plausible search. It exists only because the row
+ * type requires the field, these rows are never returned when the query dimension is requested, and if a
+ * future bug ever did return one, `(withheld by Search Console)` in a warehouse row is instantly a
+ * defect — where a plausible query would look like data (the brief's rule 15, one layer down).
  */
-const RARE_QUERY_CLICKS = 71
-const RARE_QUERY_IMPRESSIONS = 2140
+const WITHHELD_QUERY_ROWS: readonly SearchAnalyticsRow[] = [
+  {
+    query: '(withheld by Search Console)',
+    page: '/',
+    clicks: 52,
+    impressions: 1610,
+    ctr: 0.032,
+    position: 14.2,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'MOBILE',
+    country: 'are',
+  },
+  {
+    query: '(withheld by Search Console)',
+    page: '/treatments/morocco-bath',
+    clicks: 19,
+    impressions: 530,
+    ctr: 0.036,
+    position: 16.8,
+    date: FIXTURE_ANALYTICS_DATE,
+    device: 'DESKTOP',
+    country: 'are',
+  },
+]
+
+const sumClicks = (rows: readonly SearchAnalyticsRow[]): number =>
+  rows.reduce((total, row) => total + row.clicks, 0)
+const sumImpressions = (rows: readonly SearchAnalyticsRow[]): number =>
+  rows.reduce((total, row) => total + row.impressions, 0)
+
+/**
+ * The gap, derived from the withheld rows rather than declared beside them.
+ *
+ * Exported so a test can assert the number a consumer stored is the one the fake withheld — without
+ * either side holding a literal. A constant here and rows above would be two statements of one fact, and
+ * the day they disagreed the consumer's arithmetic would be blamed.
+ */
+export const RARE_QUERY_CLICKS = sumClicks(WITHHELD_QUERY_ROWS)
+export const RARE_QUERY_IMPRESSIONS = sumImpressions(WITHHELD_QUERY_ROWS)
+
+/** The API's maximum rows per Search Analytics request, and therefore its page size (docs/10 §7). */
+export const SEARCH_ANALYTICS_MAX_ROWS = 25_000
+
+/** Google's URL Inspection cap: 2,000 a day per site, and docs/10 §7 records that it cannot be raised. */
+export const URL_INSPECTION_CAP_PER_DAY = 2000
+
+/** The dimensions the API groups by when a request names none. */
+const DEFAULT_DIMENSIONS: readonly SearchAnalyticsDimension[] = ['query', 'page']
+
+function dimensionValue(row: SearchAnalyticsRow, dimension: SearchAnalyticsDimension): string {
+  if (dimension === 'date') return row.date ?? ''
+  if (dimension === 'query') return row.query
+  if (dimension === 'page') return row.page
+  if (dimension === 'device') return row.device ?? ''
+  return row.country ?? ''
+}
+
+/**
+ * Regroups rows onto a dimension set, the way the API does when fewer dimensions are requested.
+ *
+ * Every field that was not requested is dropped rather than carried through, which is what makes the
+ * adapter's dimension check meaningful: a consumer cannot read a dimension it did not ask for, because
+ * the response does not contain one. Position is averaged **weighted by impressions**, which is how
+ * Search Console computes an average position; an unweighted mean would put a one-impression query at
+ * position 80 on equal footing with a thousand impressions at position 3.
+ */
+function regroup(
+  rows: readonly SearchAnalyticsRow[],
+  dimensions: readonly SearchAnalyticsDimension[],
+): readonly SearchAnalyticsRow[] {
+  const groups = new Map<
+    string,
+    { row: SearchAnalyticsRow; clicks: number; impressions: number; positionWeighted: number }
+  >()
+  for (const row of rows) {
+    const key = dimensions.map((dimension) => dimensionValue(row, dimension)).join('\u0000')
+    const existing = groups.get(key)
+    const clicks = (existing?.clicks ?? 0) + row.clicks
+    const impressions = (existing?.impressions ?? 0) + row.impressions
+    const positionWeighted = (existing?.positionWeighted ?? 0) + row.position * row.impressions
+    groups.set(key, { row: existing?.row ?? row, clicks, impressions, positionWeighted })
+  }
+  const has = (dimension: SearchAnalyticsDimension): boolean => dimensions.includes(dimension)
+  const grouped = [...groups.values()].map(
+    ({ row, clicks, impressions, positionWeighted }): SearchAnalyticsRow => ({
+      // Required by the row type and empty when not requested: the empty string is the honest value for
+      // "these rows were not grouped by query", and an invented one would be indistinguishable from data.
+      query: has('query') ? row.query : '',
+      page: has('page') ? row.page : '',
+      clicks,
+      impressions,
+      ctr: impressions === 0 ? 0 : clicks / impressions,
+      position: impressions === 0 ? row.position : positionWeighted / impressions,
+      ...(has('date') && row.date !== undefined ? { date: row.date } : {}),
+      ...(has('device') && row.device !== undefined ? { device: row.device } : {}),
+      ...(has('country') && row.country !== undefined ? { country: row.country } : {}),
+    }),
+  )
+  // Clicks descending, as the API returns them, with the key as a stable tie-break so two runs of one
+  // report produce the same order.
+  return grouped.sort(
+    (a, b) => b.clicks - a.clicks || (a.query + a.page).localeCompare(b.query + b.page),
+  )
+}
+
+/**
+ * A URL's inspection verdict, derived from the URL itself.
+ *
+ * Deterministic, so a rotation test gets the same answer for the same URL on every run, and **not
+ * uniformly PASS**: the two states worth acting on are *crawled and not indexed* (a quality or
+ * duplication problem) and *discovered and not crawled* (a crawl-budget or sitemap problem), and a fake
+ * that always passed would leave both unreachable from any test. `lastCrawledAtIso` is deliberately
+ * ABSENT for the second, because Google has never crawled it — the empty case docs/10 §7 says to handle
+ * rather than render as a zero.
+ */
+function inspectionVerdictFor(url: string, nowIso: string): UrlInspectionResult {
+  const bucket = Number.parseInt(fingerprint(url).slice(0, 2), 16)
+  if (bucket < 16) {
+    return {
+      inspectionUrl: url,
+      verdict: 'NEUTRAL',
+      coverageState: 'Discovered - currently not indexed',
+    }
+  }
+  if (bucket < 48) {
+    return {
+      inspectionUrl: url,
+      verdict: 'NEUTRAL',
+      coverageState: 'Crawled - currently not indexed',
+      lastCrawledAtIso: nowIso,
+    }
+  }
+  return {
+    inspectionUrl: url,
+    verdict: 'PASS',
+    coverageState: 'Submitted and indexed',
+    lastCrawledAtIso: nowIso,
+  }
+}
 
 /**
  * The properties the consenting account can see, and the trap in the middle of the list.
@@ -877,8 +1101,18 @@ export const SEARCH_CONSOLE_SITE_FIXTURES: readonly SearchConsoleSite[] = [
 ]
 
 export function createFakeSearchConsole(options: FakeGoogleOptions): SearchConsoleProvider {
-  const { log, failures } = options
+  const { log, failures, now } = options
   const sites = options.sites ?? SEARCH_CONSOLE_SITE_FIXTURES
+  const visibleRows = options.analyticsRows ?? ANALYTICS_FIXTURES
+  const withheldRows = options.withheldQueryRows ?? WITHHELD_QUERY_ROWS
+  const inspectionCap = options.urlInspectionCap ?? URL_INSPECTION_CAP_PER_DAY
+  /**
+   * URL Inspection calls per Google day, which is what the quota is counted in.
+   *
+   * Per day and not per fake instance: a job that retried and spent a second full cap is the mistake the
+   * rotation's day ledger exists to prevent, and a fake that counted per instance would let it pass.
+   */
+  const inspectionsByDay = new Map<string, number>()
 
   const guard = (operation: string, summary: string): void => {
     const armed = failures.take()
@@ -908,19 +1142,60 @@ export function createFakeSearchConsole(options: FakeGoogleOptions): SearchConso
       return sites
     },
 
-    async queryAnalytics({ siteUrl, startDate, endDate, rowLimit }) {
+    /**
+     * `searchanalytics.query`, with the two behaviours that decide how a client must be written.
+     *
+     * **Paging.** `rowLimit` caps the page at 25,000 and `startRow` is the cursor. There is no page token
+     * and no total count, so the only signal that the last page arrived is a page that came back short —
+     * which is why both are recorded in the call log: a test asserts the cursor advanced by exactly the
+     * page size, which is the one thing a paging loop gets wrong silently.
+     *
+     * **The rare-query gap.** A request that groups by `query` gets the visible rows only; a request that
+     * does not also gets the withheld ones, regrouped. The difference between the two totals is therefore
+     * real data rather than a constant, and a consumer that derives the gap gets the right answer.
+     *
+     * The requested date range is recorded but does not filter the rows, as before this unit: the fixture
+     * rows carry one date and a test that needs particular dates supplies its own rows. The range is what
+     * the 2–3 day lag is asserted on, and it is asserted from the log.
+     */
+    async queryAnalytics({ siteUrl, startDate, endDate, rowLimit, startRow, dimensions }) {
       guard('queryAnalytics', `Search analytics for ${siteUrl} failed`)
-      const rows = ANALYTICS_FIXTURES.slice(0, rowLimit ?? ANALYTICS_FIXTURES.length)
+      const grouping = dimensions ?? DEFAULT_DIMENSIONS
+      if (rowLimit !== undefined && rowLimit > SEARCH_ANALYTICS_MAX_ROWS) {
+        // The real API refuses this rather than returning more, and a fake that quietly returned more
+        // would hide a client that had stopped paging altogether.
+        log.record({
+          provider: GOOGLE_SEARCH_CONSOLE,
+          operation: 'queryAnalytics',
+          outcome: 'failure',
+          summary: `rowLimit ${rowLimit} exceeds the API maximum of ${SEARCH_ANALYTICS_MAX_ROWS}`,
+          detail: { siteUrl, rowLimit },
+        })
+        throw failureError(GOOGLE_SEARCH_CONSOLE, 'rejected')
+      }
+      const source = grouping.includes('query')
+        ? regroup(visibleRows, grouping)
+        : regroup([...visibleRows, ...withheldRows], grouping)
+      const from = startRow ?? 0
+      const limit = rowLimit ?? source.length
+      const rows = source.slice(from, from + limit)
       log.record({
         provider: GOOGLE_SEARCH_CONSOLE,
         operation: 'queryAnalytics',
         outcome: 'success',
-        summary: `${rows.length} row(s) for ${siteUrl}, ${startDate} to ${endDate}`,
+        summary:
+          `${rows.length} row(s) for ${siteUrl}, ${startDate} to ${endDate}, ` +
+          `from row ${from} grouped by ${grouping.join('+')}`,
         detail: {
           siteUrl,
           startDate,
           endDate,
-          clicksInRows: rows.reduce((total, row) => total + row.clicks, 0),
+          startRow: from,
+          rowLimit: limit,
+          dimensions: [...grouping],
+          returned: rows.length,
+          withheldIncluded: !grouping.includes('query'),
+          clicksInRows: sumClicks(rows),
         },
       })
       return rows
@@ -928,21 +1203,61 @@ export function createFakeSearchConsole(options: FakeGoogleOptions): SearchConso
 
     async totalsFor({ siteUrl, startDate, endDate }) {
       guard('totalsFor', `Totals for ${siteUrl} failed`)
+      // Visible plus withheld: the site total counts every click, including the ones whose query the
+      // breakdown refuses to name. That is the whole reason this method exists beside `queryAnalytics`.
       const totals = {
-        clicks:
-          ANALYTICS_FIXTURES.reduce((total, row) => total + row.clicks, 0) + RARE_QUERY_CLICKS,
-        impressions:
-          ANALYTICS_FIXTURES.reduce((total, row) => total + row.impressions, 0) +
-          RARE_QUERY_IMPRESSIONS,
+        clicks: sumClicks(visibleRows) + sumClicks(withheldRows),
+        impressions: sumImpressions(visibleRows) + sumImpressions(withheldRows),
       }
       log.record({
         provider: GOOGLE_SEARCH_CONSOLE,
         operation: 'totalsFor',
         outcome: 'success',
         summary: `${totals.clicks} clicks, ${totals.impressions} impressions for ${siteUrl}`,
-        detail: { siteUrl, startDate, endDate, rareQueryClicks: RARE_QUERY_CLICKS },
+        detail: { siteUrl, startDate, endDate, rareQueryClicks: sumClicks(withheldRows) },
       })
       return totals
+    },
+
+    /**
+     * `urlInspection.index.inspect`, with the cap enforced.
+     *
+     * The 2,001st call in one of Google's days fails with `quota_exhausted` — the same error the real API
+     * returns, from the same cause. It is the reason this method is worth faking at all: a rotation tested
+     * against a fake with no cap proves only that its own arithmetic agrees with itself.
+     */
+    async inspectUrl({ siteUrl, inspectionUrl }) {
+      guard('inspectUrl', `URL inspection of ${inspectionUrl} failed`)
+      const nowIso = now()
+      const day = nowIso.slice(0, 10)
+      const spent = inspectionsByDay.get(day) ?? 0
+      if (spent >= inspectionCap) {
+        log.record({
+          provider: GOOGLE_SEARCH_CONSOLE,
+          operation: 'inspectUrl',
+          outcome: 'failure',
+          summary: `URL inspection quota exhausted for ${siteUrl}: ${spent} calls on ${day}`,
+          detail: { siteUrl, inspectionUrl, spent, cap: inspectionCap, day },
+        })
+        throw failureError(GOOGLE_SEARCH_CONSOLE, 'quota_exhausted')
+      }
+      inspectionsByDay.set(day, spent + 1)
+      const result = inspectionVerdictFor(inspectionUrl, nowIso)
+      log.record({
+        provider: GOOGLE_SEARCH_CONSOLE,
+        operation: 'inspectUrl',
+        outcome: 'success',
+        summary: `${inspectionUrl}: ${result.verdict} — ${result.coverageState}`,
+        detail: {
+          siteUrl,
+          inspectionUrl,
+          verdict: result.verdict,
+          coverageState: result.coverageState,
+          spentToday: spent + 1,
+          cap: inspectionCap,
+        },
+      })
+      return result
     },
   }
 }

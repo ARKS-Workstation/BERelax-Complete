@@ -231,6 +231,18 @@ export interface BusinessProfileProvider {
   deleteReply(args: { locationId: string; reviewId: string }): Promise<void>
 }
 
+/**
+ * A Search Analytics dimension, as the API names them.
+ *
+ * `searchAppearance` is deliberately absent: the API refuses it in combination with any other dimension,
+ * so a client that offered it would offer a request Google rejects. It arrives with its own report or not
+ * at all.
+ */
+export type SearchAnalyticsDimension = 'date' | 'query' | 'page' | 'device' | 'country'
+
+/** DESKTOP | MOBILE | TABLET, spelled as the API spells them. */
+export type SearchAnalyticsDevice = 'DESKTOP' | 'MOBILE' | 'TABLET'
+
 export interface SearchAnalyticsRow {
   readonly query: string
   readonly page: string
@@ -240,6 +252,37 @@ export interface SearchAnalyticsRow {
   readonly ctr: number
   /** Average position, 1-based. */
   readonly position: number
+  /**
+   * The dimension values, present only when the dimension was requested.
+   *
+   * Optional on the port and **required by the adapter for every dimension it asked for**: a row missing
+   * a dimension it requested is a shape change in the API, and storing a blank for it would collapse
+   * several dimension rows onto one warehouse key and silently keep whichever arrived last. The adapter
+   * refuses instead (`assertRowCarriesDimensions` in packages/google/src/adapters/search-analytics.ts).
+   *
+   * `date` is Google's calendar day **in UTC** and not a trading date; see migration 0042's header for
+   * why this is the one date in the system that is not resolved on `business_day`.
+   */
+  readonly date?: string
+  readonly device?: SearchAnalyticsDevice
+  /** ISO 3166-1 alpha-3, lower case. `zzz` is Google's own value for a country it could not determine. */
+  readonly country?: string
+}
+
+/**
+ * One URL Inspection result, as the API's index status result reports it.
+ *
+ * Modelled as three separate fields because they answer three different questions and collapsing them
+ * loses the useful one: `verdict` is Google's own summary, `coverageState` is the prose a human acts on
+ * ("Crawled - currently not indexed" is a completely different problem from "Submitted and indexed"),
+ * and `lastCrawledAtIso` is how stale the answer is. A boolean "indexed" would answer none of them.
+ */
+export interface UrlInspectionResult {
+  readonly inspectionUrl: string
+  readonly verdict: 'PASS' | 'PARTIAL' | 'FAIL' | 'NEUTRAL' | 'VERDICT_UNSPECIFIED'
+  readonly coverageState: string
+  /** Absent for a URL Google has never crawled, which is the interesting case rather than an error. */
+  readonly lastCrawledAtIso?: string
 }
 
 /**
@@ -288,7 +331,32 @@ export interface SearchConsoleProvider {
     siteUrl: string
     startDate: string
     endDate: string
+    /**
+     * At most 25,000, which is the API's maximum and its page size (docs/10 §7).
+     *
+     * Unset means the API's own default of 1,000 rows — which is the trap this parameter exists to make
+     * visible: a client that omitted it would silently report the thousand best queries as though they
+     * were all of them.
+     */
     rowLimit?: number
+    /**
+     * The paging cursor: the zero-based index of the first row to return.
+     *
+     * This is how the 25,000-row page size is escaped, and it is the whole of the paging contract. The
+     * caller advances it by exactly `rowLimit` per call and stops when a page comes back short. There is
+     * no page token and no total count, so a short page is the only signal that the last page arrived.
+     */
+    startRow?: number
+    /**
+     * The dimensions to group by. Unset means the default `['query', 'page']`.
+     *
+     * The dimension SET decides what the numbers mean, which is why it is on the port rather than fixed
+     * in the adapter: a request that includes `query` gets the query breakdown, from which Google has
+     * removed every query too rare to be anonymous, and a request that omits it gets totals those clicks
+     * are still counted in. The difference between the two is the rare-query gap, and it can only be
+     * measured by making both calls.
+     */
+    dimensions?: readonly SearchAnalyticsDimension[]
   }): Promise<readonly SearchAnalyticsRow[]>
   /** Site-level totals, which include the rare queries the row breakdown omits. */
   totalsFor(args: {
@@ -296,4 +364,14 @@ export interface SearchConsoleProvider {
     startDate: string
     endDate: string
   }): Promise<{ clicks: number; impressions: number }>
+  /**
+   * URL Inspection for one URL.
+   *
+   * One URL per call, because that is what the API offers — there is no batch form, which is what makes
+   * the **2,000 a day per site** cap the shape of the whole feature rather than a limit to watch
+   * (docs/10 §7). A real quota refusal arrives as `quota_exhausted`, and the fake produces one at
+   * exactly 2,000 calls within one of Google's days, so the rotation's accounting is tested against a cap
+   * that actually bites rather than against its own arithmetic.
+   */
+  inspectUrl(args: { siteUrl: string; inspectionUrl: string }): Promise<UrlInspectionResult>
 }

@@ -44,6 +44,8 @@
     "progress": "python3 scripts/progress.py",
     "progress:check": "python3 scripts/progress.py --check",
     "purity": "node scripts/check-core-purity.mjs",
+    "rotate:kek": "tsx scripts/rotate-kek.mjs",
+    "rotation": "node scripts/check-secret-rotation.mjs",
     "screens": "tsx scripts/screenshots.mjs",
     "secrets": "node scripts/check-secrets.mjs",
     "structured-data": "tsx scripts/validate-structured-data.mjs",
@@ -54,7 +56,7 @@
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm structured-data && pnpm chokepoint && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm structured-data && pnpm chokepoint && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

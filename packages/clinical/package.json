@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@berelax/shared": "workspace:*",
-    "@berelax/config": "workspace:*"
+    "@berelax/config": "workspace:*",
+    "@berelax/db": "workspace:*"
   }
 }

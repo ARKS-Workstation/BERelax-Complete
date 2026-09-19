@@ -7,6 +7,28 @@
  * package talks to the clinical schema, and no foreign key crosses the boundary.
  */
 export {
+  createMemoryClinicalKeyStore,
+  type MemoryClinicalKeyStore,
+} from './crypto/memory-key-store.ts'
+export { createPostgresClinicalKeyStore } from './crypto/postgres-key-store.ts'
+export {
+  bindingFor,
+  CLINICAL_KEK_ERRORS,
+  CLINICAL_SEALED_TABLES,
+  type ClinicalKeyStore,
+  type ClinicalSealedTable,
+  contentChecksum,
+  type KekRotationReport,
+  type KekVersionRow,
+  type RewrapWrite,
+  rotateClinicalKek,
+  rotationChecksum,
+  type SealedRecord,
+  sealUnderActiveKek,
+  type VerifiedRecord,
+  verifyRecord,
+} from './crypto/rotate.ts'
+export {
   fingerprint,
   generateKek,
   type Kek,

@@ -40,6 +40,10 @@ export default defineConfig({
         'packages/messaging/src/**/*.ts',
         'packages/providers/src/**/*.ts',
         'packages/google/src/**/*.ts',
+        // The clinical boundary was counted by NEITHER floor: the package holding the envelope, the AAD
+        // binding and the KEK rotation was absent from this list, so the most sensitive code in the
+        // repository had no coverage requirement at all. Found while adding H-HARD-03.
+        'packages/clinical/src/**/*.ts',
         'packages/media/src/**/*.ts',
         'packages/fixtures/src/**/*.ts',
         'packages/ui/src/**/*.ts',
@@ -57,6 +61,13 @@ export default defineConfig({
         // SQL only. Its behaviour — including that a re-wrap touches five columns and nothing else — is
         // proved against a real PostgreSQL by packages/google/src/google-connection.itest.ts.
         'packages/google/src/postgres-store.ts',
+        // The same two exclusions for the clinical boundary, for the same two reasons. The key store is
+        // SQL only and is driven against a real PostgreSQL by
+        // packages/clinical/src/crypto/rotation.itest.ts; the Drizzle mirrors are declarations whose
+        // agreement with the database is `pnpm db:drift`'s to prove, not a test's — the equivalents in
+        // packages/db are excluded by that package's absence from the list above.
+        'packages/clinical/src/crypto/postgres-key-store.ts',
+        'packages/clinical/src/schema/**',
         // The sharp pipeline. Twenty-four encodes is half a minute of libvips, which is the integration
         // suite's job — packages/media/src/derivatives.itest.ts drives it, and packages/fixtures's does it
         // again against the real photography. The pure halves it sits on, the ladders and the URL builder,
