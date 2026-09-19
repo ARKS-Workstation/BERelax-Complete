@@ -115,6 +115,21 @@ export const ROUTES = [
       'URL, and the payload carries both locales worth of nothing, because a fact has no language.',
   },
   {
+    id: 'bookings',
+    path: '/api/v1/bookings',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-AVAIL-06s booking transaction. Locale-neutral for the reason the OTP route below gives — one ' +
+      'endpoint, one URL — and noindex because a POST that takes a row lock and writes five records is ' +
+      'nothing a crawler should be encouraged to find. Dynamic by necessity: it reads the catalogue, ' +
+      'locks the room rows and writes, on every request.',
+  },
+  {
     id: 'otp',
     path: '/api/v1/otp',
     kind: 'handler',

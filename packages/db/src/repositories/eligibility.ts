@@ -66,9 +66,8 @@ import type { Sql } from '../connection.ts'
  * exclusion constraint `appointment_therapist_no_overlap` (0024) refuses a second overlapping
  * appointment for one therapist with SQLSTATE 23P01, so a pool handed to the solver without the
  * appointments those therapists already hold produces a slot the booking transaction cannot commit —
- * after the customer has been told yes. It returns **one record per appointment row**, which is the
- * unit 0024 counts room capacity in; see that function for why merging a two-therapist delivery into
- * one record over-reports the room's free places.
+ * after the customer has been told yes. It returns **one record per appointment row**, each carrying the
+ * delivery it belongs to: rows are what block therapists, deliveries are what fill a room (0038).
  */
 
 /**
@@ -183,6 +182,14 @@ export interface ScheduledAppointmentRow {
   readonly id: string
   readonly roomId: string
   readonly therapistIds: readonly string[]
+  /**
+   * `appointment.delivery_id` and `appointment.room_places` (0038).
+   *
+   * Always present from this reader, because the columns are NOT NULL: the rows of one delivery share
+   * the id, so two therapists over one client count as **one** place in the room. Optional on the core
+   * side, where absence means one delivery per record — the stricter reading.
+   */
+  readonly delivery: { readonly id: string; readonly places: number }
   readonly treatment: { readonly startsAt: number; readonly endsAt: number }
   readonly turnaroundMinutes: number
   readonly therapistBufferMinutes: number
@@ -422,14 +429,20 @@ export async function readEligibleTherapists(
 /**
  * The appointments on a trading date that still hold a therapist and a room.
  *
- * **One record per appointment ROW, not per delivery.** 0024 stores one row per therapist and its
- * capacity trigger counts ROWS (`room_peak_concurrency`), so the two rows of a Four Hands are two
- * places in the room. `roomPlacesTaken` in `assign-shape.ts` counts `ScheduledAppointment` records,
- * which means the record has to be the row for the two to agree: merging a Four Hands into one record
- * with two `therapistIds` — the reading its doc comment suggests — under-counts that room's committed
- * places by one, and a capacity-2 room already holding a Four Hands is then offered a third place that
- * the trigger refuses at COMMIT. Per-row is also exactly right for the therapist side: each row blocks
- * its own therapist over the same period, which is what `therapistsFreeFor` asks.
+ * **One record per appointment ROW, with the delivery carried on each.** 0024 stores one row per
+ * therapist, so per-row is what the therapist side needs: each row blocks its own therapist over the
+ * same period, which is what `therapistsFreeFor` asks. The ROOM side is counted per delivery — 0038
+ * gave the appointment a `delivery_id` and a `room_places` figure and re-issued `room_peak_concurrency`
+ * to sum places over distinct deliveries — so the two rows of a Four Hands are two therapists and
+ * **one** place in the room.
+ *
+ * That pairing is what settled a disagreement this function used to work around. The trigger counted
+ * appointment ROWS against `rooms.capacity`, a column 0012 documents as CLIENTS, while
+ * `roomPlacesTaken` in `assign-shape.ts` counted `ScheduledAppointment` records — so whether a room had
+ * a free place depended on which unit you asked, and Four Hands (one client, two rows) was unbookable
+ * in every capacity-1 standard room the salon owns. Carrying the delivery makes both readings agree:
+ * merging the rows of a delivery into one record and returning them separately now give the same
+ * number of places.
  *
  * Selected on `holds_resources` (0024), the generated column the exclusion constraint and the capacity
  * trigger both read, so "still holds" has one definition and a cancelled appointment releases its
@@ -441,12 +454,13 @@ export async function readEligibleTherapists(
  * filtering these rows by candidate id would hide room occupancy and offer a room that is taken. The
  * trading date is the axis that narrows this safely.
  *
- * Turnaround and buffer are the figures in force, read from the catalogue, and that is a limitation
- * rather than a choice: `appointment` snapshots neither column, so a Morocco Bath booked before the
- * owner shortened the standard turnaround is re-derived at today's figure. `solve.ts` says these
- * should be the appointment's own ("both figures are snapshotted onto the appointment when it is
- * booked"), and they are not there to read — fixing it means adding both columns, which belongs with
- * the booking transaction that would write them (B-AVAIL-06).
+ * Turnaround and buffer are **the appointment's own**, read from the columns 0038 added, which is what
+ * `solve.ts` always said they were ("both figures are snapshotted onto the appointment when it is
+ * booked"). They used to be re-derived from `service` and `service_resource_shape` at today's figures
+ * because the columns did not exist, and that is the retroactive occupancy change `solve.ts` warns
+ * about: shortening the configured turnaround moved the busy interval of every appointment already
+ * taken, and the first sign of it would have been a double booking. The catalogue is no longer joined
+ * here at all.
  */
 export async function readCommittedAppointments(
   sql: Sql,
@@ -457,6 +471,8 @@ export async function readCommittedAppointments(
       id: string
       room_id: string
       therapist_id: string
+      delivery_id: string
+      room_places: number
       starts_at: Date
       ends_at: Date
       turnaround_minutes: number
@@ -466,17 +482,13 @@ export async function readCommittedAppointments(
     select a.id::text as id,
            a.room_id,
            a.therapist_id::text as therapist_id,
+           a.delivery_id::text as delivery_id,
+           a.room_places,
            lower(a.period) as starts_at,
            upper(a.period) as ends_at,
-           s.turnaround_minutes,
-           coalesce(srs.therapist_buffer_minutes, 0) as therapist_buffer_minutes
+           a.turnaround_minutes,
+           a.therapist_buffer_minutes
       from appointment a
-      join service_variant v on v.id = a.service_variant_id
-      join service s on s.id = v.service_id
-      left join service_resource_shape srs
-        on srs.service_style = s.style
-       and srs.service_treatment_key = s.treatment_key
-       and srs.shape = a.shape
      where a.trading_date = ${args.tradingDate}::date
        and a.holds_resources
      order by lower(a.period), a.room_id, a.therapist_id
@@ -485,6 +497,7 @@ export async function readCommittedAppointments(
     id: row.id,
     roomId: row.room_id,
     therapistIds: [row.therapist_id],
+    delivery: { id: row.delivery_id, places: Number(row.room_places) },
     treatment: { startsAt: row.starts_at.getTime(), endsAt: row.ends_at.getTime() },
     turnaroundMinutes: Number(row.turnaround_minutes),
     therapistBufferMinutes: Number(row.therapist_buffer_minutes),

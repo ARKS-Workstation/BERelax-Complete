@@ -56,6 +56,16 @@ const THERAPIST = 'aaaaaaaa-0000-4000-8000-0000000c0502'
 const ACTOR = { kind: 'system', label: 'B-CAT-05 pair itest' } as const
 /** The gross the appointment is quoted at: 200.00 AED as integer fils, VAT-inclusive (ADR 0007). */
 const QUOTED_FILS = 20000
+/**
+ * The exact net/VAT split of that gross, which 0038 made NOT NULL on `appointment`.
+ *
+ * `net = roundHalfUp(gross x 10000 / 10500)` and `vat = gross - net`, so `net + vat = gross` exactly
+ * (ADR 0007) and `appointment_price_split_exact` accepts it. Written out rather than computed here,
+ * because a fixture that derived the figure with the same formula the constraint checks would assert
+ * that the formula equals itself.
+ */
+const QUOTED_NET_FILS = 19048
+const QUOTED_VAT_FILS = 952
 /** What the price rises to. Different from the quote, or the snapshot assertion proves nothing. */
 const RAISED_FILS = 24000
 
@@ -181,10 +191,11 @@ beforeAll(async () => {
   const [appointment] = await sql<{ id: string }[]>`
     insert into appointment
       (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period, status,
-       gross_price_fils)
+       turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils)
     values (
       ${booking?.id as string}, ${TRADING_DATE}, ${variantId}, 'solo', ${THERAPIST},
-      ${room?.id as string}, ${`[${at('20')},${at('21')})`}::tstzrange, 'confirmed', ${QUOTED_FILS}
+      ${room?.id as string}, ${`[${at('20')},${at('21')})`}::tstzrange, 'confirmed', 20, 10,
+      ${QUOTED_FILS}, ${QUOTED_NET_FILS}, ${QUOTED_VAT_FILS}
     )
     returning id
   `

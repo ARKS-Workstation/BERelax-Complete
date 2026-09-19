@@ -78,13 +78,15 @@ const STANDARD_B: Room = {
   isBookable: true,
 }
 /**
- * A capacity-2 standard room.
+ * A capacity-2 standard room. An owner can have one — `rooms.capacity` is data (0012) — and the seeded
+ * inventory has none.
  *
- * Needed because a Four Hands writes two appointment rows, and 0024's deferred trigger counts rows
- * against `rooms.capacity`: in a capacity-1 room the second row is refused at COMMIT with
- * `room_over_capacity`, proved against real PostgreSQL by the fixture in scripts/test-gates.mjs. The
- * seeded inventory of 0012 has no such room, which is the NOTE on this unit in build/manifest.yaml —
- * `rooms.capacity` is data, so this is a room an owner can have, not a room this test invented.
+ * It exists here to keep the **room preference** assertions honest, and it is deliberately no longer
+ * what makes Four Hands assignable: since 0038 counts client places over distinct deliveries rather
+ * than appointment rows, two therapists over one client take one place and fit in the capacity-1 rooms
+ * the salon actually owns. What this room still proves is that the ranking prefers a *standard* room
+ * and, among standard rooms, the smallest that fits — so a solo client does not take the two-plinth
+ * room while a one-plinth room stands empty.
  */
 const STANDARD_TWIN: Room = {
   id: 'room-standard-twin',
@@ -117,6 +119,8 @@ const appointment = (args: {
   readonly from: string
   readonly until: string
   readonly turnaroundMinutes?: number
+  /** Omitted means "its own delivery of one client", which is what `appointment.delivery_id` defaults to. */
+  readonly delivery?: { readonly id: string; readonly places: number }
 }): ScheduledAppointment => ({
   id: args.id,
   roomId: args.roomId,
@@ -124,6 +128,7 @@ const appointment = (args: {
   treatment: period(args.from, args.until),
   turnaroundMinutes: args.turnaroundMinutes ?? 20,
   therapistBufferMinutes: 10,
+  ...(args.delivery === undefined ? {} : { delivery: args.delivery }),
 })
 
 const BASE: ShapeSlotRequest = {
@@ -167,7 +172,9 @@ describe('acceptance — Couple Massage needs two therapists and both places of 
         shape: 'couple',
         therapistIds: [THERAPIST_1, THERAPIST_2],
         roomId: COUPLES.id,
-        // Two appointment rows, which is what the deferred trigger counts against rooms.capacity.
+        // TWO clients, which is what the deferred trigger counts against rooms.capacity. It is also
+        // two appointment rows, and for this one shape the two figures coincide — which is why the
+        // Four Hands case below is the one that tells them apart.
         placesUsed: 2,
       })
     }
@@ -266,10 +273,14 @@ describe('acceptance — Four Hands puts two therapists in one room, standard fo
       expect(slot.assignment).toEqual({
         shape: 'four_hands',
         therapistIds: [THERAPIST_1, THERAPIST_2],
-        roomId: STANDARD_TWIN.id,
-        // One client, two therapists, TWO appointment rows — the figure the database counts.
-        placesUsed: 2,
+        // The smallest standard room, which since 0038 is a capacity-1 one: one client is one place
+        // however many therapists work it, so the two-plinth room is left for a booking that needs it.
+        roomId: STANDARD_A.id,
+        // One client, one place. TWO appointment rows will be written, and that is a different number
+        // — `therapistIds.length` — which is the conflation 0038 corrected.
+        placesUsed: 1,
       })
+      expect(slot.assignment.therapistIds).toHaveLength(2)
     }
   })
 
@@ -305,30 +316,64 @@ describe('acceptance — Four Hands puts two therapists in one room, standard fo
     )
   })
 
-  it('refuses the capacity-1 standard rooms the database would refuse the second row in', () => {
+  it('takes a capacity-1 standard room, which is the whole seeded standard inventory', () => {
+    // The regression this case exists for. Until 0038 the deferred trigger counted appointment ROWS
+    // against `rooms.capacity`, so a Four Hands was two places, and every standard room 0012 seeds is
+    // capacity 1 — the shape was assignable to no room the salon owns and this layer returned zero
+    // slots for it. docs/13 §4 states the footprint as 2 therapists, 1 standard room, 1 CLIENT, and
+    // 0012 documents `capacity` as clients, so the rows were the wrong unit.
     const solution = solve({ ...FOUR_HANDS_BASE, rooms: [STANDARD_A, STANDARD_B] })
-    expect(solution.slots).toEqual([])
-    expect(rejectionAt(solution, '19:00')).toBe('no_room_with_free_places')
+    expect(solution.slots.length).toBeGreaterThan(0)
+    for (const slot of solution.slots) {
+      expect(slot.assignment.roomId).toBe(STANDARD_A.id)
+      expect(slot.assignment.therapistIds).toEqual([THERAPIST_1, THERAPIST_2])
+      expect(slot.assignment.placesUsed).toBe(1)
+    }
 
-    // The control, and the whole point of `roomPlacesRequired`: the identical request needing ONE
-    // therapist is assigned to the very same room. So the refusal above is about the second
-    // appointment row, not about the room being unavailable.
-    const solo = solve({
-      ...FOUR_HANDS_BASE,
-      shape: withShape(FOUR_HANDS_SHAPE, { shape: 'solo', therapistsRequired: 1 }),
-      rooms: [STANDARD_A, STANDARD_B],
+    // Control 1: a capacity-1 room already holding somebody else's delivery has no free place, so the
+    // assignment is refused by name. Without this the acceptance above is satisfied by a places check
+    // that has stopped counting anything at all.
+    const treatment = period('2026-10-02T19:00:00+04:00', '2026-10-02T20:00:00+04:00')
+    const occupied = appointment({
+      id: 'held',
+      roomId: STANDARD_A.id,
+      therapistIds: [OUTSIDE_POOL],
+      from: '2026-10-02T19:00:00+04:00',
+      until: '2026-10-02T20:00:00+04:00',
     })
-    expect(solo.slots.length).toBeGreaterThan(0)
-    expect(new Set(solo.slots.map((slot) => slot.assignment.roomId))).toEqual(
-      new Set([STANDARD_A.id]),
-    )
+    expect(
+      assignShape({
+        shape: FOUR_HANDS_SHAPE,
+        rooms: [STANDARD_A],
+        therapistIds: [THERAPIST_1, THERAPIST_2],
+        treatment,
+        appointments: [occupied],
+      }),
+    ).toEqual({ kind: 'refused', reason: 'no_room_with_free_places' })
+
+    // Control 2: a COUPLE footprint — the same two therapists, two clients — is still refused by a
+    // capacity-1 room. So the acceptance above is about the client count rather than about a rule that
+    // stopped comparing places to capacity.
+    expect(
+      assignShape({
+        shape: withShape(COUPLE_MASSAGE_SHAPE, { requiredRoomType: 'standard' }),
+        rooms: [STANDARD_A],
+        therapistIds: [THERAPIST_1, THERAPIST_2],
+        treatment,
+        appointments: [],
+      }),
+    ).toEqual({ kind: 'refused', reason: 'no_room_with_free_places' })
   })
 
-  it('counts room places as appointment rows, which is not the client count', () => {
-    expect(roomPlacesRequired(FOUR_HANDS_SHAPE)).toBe(2)
-    // The mistake this function exists to prevent, stated: `min_room_capacity` is 1 for Four Hands,
-    // and a layer that used it would offer a capacity-1 room that cannot take the second row.
+  it('counts room places as clients, which is not the number of appointment rows', () => {
+    // The corrected rule, and the two figures it is easy to conflate. Four Hands needs TWO therapists
+    // — two appointment rows — and ONE place, because there is one client; the rule was
+    // max(minRoomCapacity, therapistsRequired) until 0038 and that made the shape unbookable.
+    expect(roomPlacesRequired(FOUR_HANDS_SHAPE)).toBe(1)
     expect(FOUR_HANDS_SHAPE.minRoomCapacity).toBe(1)
+    expect(FOUR_HANDS_SHAPE.therapistsRequired).toBe(2)
+    // Non-vacuity: a shape with two clients really does need two places, so the function is reading
+    // `minRoomCapacity` rather than answering 1 for everything.
     expect(roomPlacesRequired(COUPLE_MASSAGE_SHAPE)).toBe(2)
     expect(roomPlacesRequired(MOROCCO_BATH_SHAPE)).toBe(1)
   })
@@ -624,6 +669,48 @@ describe('room places are a peak, exactly as the SQL counts them', () => {
     // that began before the candidate and has not finished.
     const later = period('2026-10-02T23:00:00+04:00', '2026-10-02T23:30:00+04:00')
     expect(roomPlacesTaken({ roomId: ROOM_ID, period: later, appointments: EVENING })).toBe(1)
+  })
+
+  it('counts the two rows of one delivery as one place, and two deliveries as two', () => {
+    const treatment = period('2026-10-02T19:00:00+04:00', '2026-10-02T20:00:00+04:00')
+    const seat = (seatIndex: number, deliveryId: string): ScheduledAppointment =>
+      appointment({
+        id: `four-hands-row-${deliveryId}-${seatIndex}`,
+        roomId: ROOM_ID,
+        therapistIds: [`${OUTSIDE_POOL}-${deliveryId}-${seatIndex}`],
+        from: '2026-10-02T19:00:00+04:00',
+        until: '2026-10-02T20:00:00+04:00',
+        delivery: { id: deliveryId, places: 1 },
+      })
+
+    // A committed Four Hands: two appointment rows, one delivery, ONE client in the room. This is the
+    // case that under-counted before 0038 — it was two records and therefore two places — and the
+    // consequence was a capacity-2 room reporting no free place for a solo client who fitted.
+    const oneFourHands = [seat(0, 'delivery-a'), seat(1, 'delivery-a')]
+    expect(
+      roomPlacesTaken({ roomId: ROOM_ID, period: treatment, appointments: oneFourHands }),
+    ).toBe(1)
+    expect(
+      remainingRoomPlaces({ room: COUPLES, period: treatment, appointments: oneFourHands }),
+    ).toBe(1)
+
+    // The control: two SEPARATE deliveries of one client each fill the same capacity-2 room, so the 1
+    // above is the grouping and not a function that has stopped counting past one.
+    const twoDeliveries = [seat(0, 'delivery-a'), seat(1, 'delivery-a'), seat(0, 'delivery-b')]
+    expect(
+      roomPlacesTaken({ roomId: ROOM_ID, period: treatment, appointments: twoDeliveries }),
+    ).toBe(2)
+    expect(
+      remainingRoomPlaces({ room: COUPLES, period: treatment, appointments: twoDeliveries }),
+    ).toBe(0)
+
+    // And a delivery that says it holds two clients — a committed Couple Massage — fills the room on
+    // its own, so `places` is read rather than assumed to be 1.
+    const couple = [
+      { ...seat(0, 'delivery-c'), delivery: { id: 'delivery-c', places: 2 } },
+      { ...seat(1, 'delivery-c'), delivery: { id: 'delivery-c', places: 2 } },
+    ]
+    expect(roomPlacesTaken({ roomId: ROOM_ID, period: treatment, appointments: couple })).toBe(2)
   })
 })
 

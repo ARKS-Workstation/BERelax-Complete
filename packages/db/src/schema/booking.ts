@@ -8,12 +8,14 @@ import {
   index,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core'
 import { serviceShape, serviceVariant } from './catalogue.ts'
 import { customer } from './customer.ts'
+import { priceList } from './price-list.ts'
 import { rooms } from './rooms.ts'
 import { businessDay } from './trading.ts'
 
@@ -156,6 +158,20 @@ export const appointment = pgTable(
      * a second time the first bug.
      */
     period: tstzrange('period').notNull(),
+    /**
+     * The rows of **one delivery** share this (0038).
+     *
+     * Two therapists over one client — Four Hands — is one delivery, two rows and **one** place in the
+     * room. `room_peak_concurrency` sums `roomPlaces` over distinct delivery ids, so this column is
+     * what stopped `rooms.capacity` (clients) being compared against appointment rows (therapists),
+     * which made Four Hands unbookable in every standard room the salon owns.
+     *
+     * Defaulted per row in the database, and the default is the strict reading: a writer that knows
+     * nothing about deliveries produces one delivery per row, which is the old count.
+     */
+    deliveryId: uuid('delivery_id').notNull(),
+    /** Clients this delivery puts in the room — `service_resource_shape.min_room_capacity`. */
+    roomPlaces: smallint('room_places').notNull(),
     status: appointmentStatus('status').notNull(),
     /**
      * Generated in the database: true while the appointment still holds its therapist and its room.
@@ -164,14 +180,39 @@ export const appointment = pgTable(
      * all read, so the status list is not written out three times and cannot drift between them.
      */
     holdsResources: boolean('holds_resources').notNull(),
+    /**
+     * Minutes the **room** stays held after the treatment, snapshotted at the moment it was sold
+     * (0038).
+     *
+     * Not re-read from `service.turnaround_minutes` later, and that is the whole point: shortening the
+     * configured turnaround would otherwise move the occupancy of every appointment already taken, and
+     * the first sign of it would be a double booking.
+     */
+    turnaroundMinutes: smallint('turnaround_minutes').notNull(),
+    /** Minutes the **therapist** is held either side. A different resource, a different duration. */
+    therapistBufferMinutes: smallint('therapist_buffer_minutes').notNull(),
     /** VAT-inclusive gross in integer fils, snapshotted so a later price change cannot retro-price. */
     grossPriceFils: fils('gross_price_fils').notNull(),
+    /** The net of that gross. VAT is the remainder, so `net + vat = gross` exactly (ADR 0007). */
+    netFils: fils('net_fils').notNull(),
+    vatFils: fils('vat_fils').notNull(),
+    /** Basis points the split was taken at. 500 is the UAE standard rate. */
+    vatRateBp: smallint('vat_rate_bp').notNull(),
+    /**
+     * The effective-dated override that produced the gross, or `null` meaning *considered and did not
+     * apply* — the distinction `ResolvedPrice` makes. With `promotionId`, this is how a disputed
+     * figure is settled a year later.
+     */
+    priceListId: uuid('price_list_id').references(() => priceList.id, { onDelete: 'restrict' }),
+    /** No `promotion` table exists yet (B-CAT-04), so this references nothing. */
+    promotionId: text('promotion_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     index('appointment_booking_idx').on(t.bookingId),
     index('appointment_trading_date_idx').on(t.tradingDate),
+    index('appointment_delivery_idx').on(t.deliveryId),
     // Partial, matching the migration. A mirror that dropped the `where` would read as an index over
     // every appointment, which is a different plan and a different claim.
     index('appointment_room_period_idx')
@@ -187,6 +228,20 @@ export const appointment = pgTable(
       sql`lower_inc(${t.period}) and not upper_inc(${t.period})`,
     ),
     check('appointment_price_positive', sql`${t.grossPriceFils} > 0`),
+    check('appointment_room_places_bounded', sql`${t.roomPlaces} between 1 and 4`),
+    check('appointment_turnaround_bounded', sql`${t.turnaroundMinutes} between 0 and 240`),
+    check(
+      'appointment_therapist_buffer_bounded',
+      sql`${t.therapistBufferMinutes} between 0 and 60`,
+    ),
+    check('appointment_vat_rate_bounded', sql`${t.vatRateBp} between 0 and 10000`),
+    // VAT is derived as the remainder precisely so this is exact for every input rather than for
+    // almost every input. A stored pair that fails it is a one-fils discrepancy on an invoice.
+    check('appointment_price_split_exact', sql`${t.netFils} + ${t.vatFils} = ${t.grossPriceFils}`),
+    check(
+      'appointment_promotion_id_nonempty',
+      sql`${t.promotionId} is null or btrim(${t.promotionId}) <> ''`,
+    ),
     // `appointment_therapist_no_overlap` — EXCLUDE USING gist (therapist_id WITH =, period WITH &&)
     // WHERE (holds_resources) — is not expressible in Drizzle. It lives in
     // 0024_appointment_constraints.sql, and booking-constraints.itest.ts asserts both that

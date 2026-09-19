@@ -2304,10 +2304,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
        values (${BOOKING}, ${CUSTOMER}, 'front_desk', '${MARKER}')`,
   ].join('; ')
 
+  // `turnaround_minutes`, `therapist_buffer_minutes`, `net_fils` and `vat_fils` are NOT NULL with no
+  // default since 0038 — there is no honest default for a turnaround — so every writer states them. The
+  // split is `greatest(price, 0)` and 0 so the zero-price probe below still trips
+  // `appointment_price_positive` rather than the new `appointment_price_split_exact`.
   const appointment = ({ room, therapist, period, status = 'confirmed', price = 20000 }) =>
     'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
-    `room_id, period, status, gross_price_fils) values (${BOOKING}, ${DATE}, ${VARIANT}, 'solo', ` +
-    `${therapist}, ${room}, ${period}, '${status}', ${price})`
+    'room_id, period, status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, ' +
+    `net_fils, vat_fils) values (${BOOKING}, ${DATE}, ${VARIANT}, 'solo', ` +
+    `${therapist}, ${room}, ${period}, '${status}', 20, 10, ${price}, greatest(${price}, 0), 0)`
 
   const psqlProbe = (statement) =>
     run('psql', [
@@ -2738,12 +2743,13 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 // `0024_appointment_constraints.sql` decide that, and both are counted in **appointment rows** because
 // that is what the table stores — one row per therapist:
 //
-//   - `appointment_room_capacity`, the deferred trigger, counts the rows holding a room at the busiest
-//     instant of the written row's own period and refuses a peak above `rooms.capacity`. A Four Hands
-//     is ONE client and TWO rows, so it needs TWO places in the room whatever `min_room_capacity` says.
-//     That is why `roomPlacesRequired` is `max(minRoomCapacity, therapistsRequired)` and not the client
-//     count, and the first probe below is the failure a client-count implementation ships:
-//     `room_over_capacity`, raised at COMMIT, after the customer has been told yes.
+//   - `appointment_room_capacity`, the deferred trigger, counts the CLIENT PLACES held in a room at the
+//     busiest instant of the written row's own period and refuses a peak above `rooms.capacity`. Places
+//     are summed over distinct DELIVERIES since 0038, so a Four Hands — 2 therapists, 1 client — is one
+//     place however many rows it is, and `roomPlacesRequired` is the client count. Until 0038 the trigger
+//     counted ROWS against a column 0012 documents as CLIENTS, which made that shape assignable to no
+//     room the salon owns; B-AVAIL-06 corrected it and gate 41k is the acceptance half. The first probe
+//     below is what still has to be refused: two SEPARATE deliveries in a one-client room.
 //   - `appointment_therapist_no_overlap` refuses one therapist twice over one period, so the "pair" of
 //     a two-therapist shape has to be two different people. `assignShape` de-duplicates its pool for
 //     this reason, and the second probe is what happens when it does not.
@@ -2795,10 +2801,14 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
        values (${SHAPE_BOOKING}, ${SHAPE_CUSTOMER}, 'front_desk', '${SHAPE_MARKER}')`,
   ].join('; ')
 
+  // Every row carries its own `delivery_id` by default (0038), so the two rows of `fourHandsRows` below
+  // are two deliveries of one client each — which is what probe 1 is about.
   const shapeAppointment = ({ room, therapist, shape, period }) =>
     'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
-    `room_id, period, status, gross_price_fils) values (${SHAPE_BOOKING}, ${SHAPE_DATE}, ` +
-    `${SHAPE_VARIANT}, '${shape}', ${therapist}, ${room}, ${period}, 'confirmed', 20000)`
+    'room_id, period, status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, ' +
+    `net_fils, vat_fils) values (${SHAPE_BOOKING}, ${SHAPE_DATE}, ` +
+    `${SHAPE_VARIANT}, '${shape}', ${therapist}, ${room}, ${period}, 'confirmed', 20, 10, 20000, ` +
+    '19048, 952)'
 
   const shapeProbe = (statement) =>
     run('psql', [
@@ -2835,9 +2845,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
     )
   } else {
-    // Probe 1. The reason `roomPlacesRequired` counts rows rather than clients.
+    // Probe 1. Two rows with no shared delivery id are two deliveries of one client each — which is what
+    // `appointment.delivery_id`'s per-row default means (0038) — and a one-client room holds one. The
+    // same two rows as ONE delivery commit, which is gate 41k in B-AVAIL-06's block.
     checkRejectedBy(
-      'shape gate rejects a Four Hands in a capacity-1 room, which its client count permits',
+      'shape gate rejects two separate one-client deliveries in a capacity-1 room',
       shapeProbe([...fourHandsRows(roomRef(SINGLE)), 'set constraints all immediate'].join('; ')),
       'room_over_capacity',
     )
@@ -2865,7 +2877,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
 
     // Control 1. The same two rows in a capacity-2 room commit, so probe 1 is about the one missing
-    // place and not about two rows per booking, the `four_hands` value or the room's type.
+    // place and not about two rows per booking, the `four_hands` value or the room's type. Both rows
+    // still carry the per-row delivery default here, so this is two deliveries in a two-place room.
     const twoPlaces = shapeProbe(
       [...fourHandsRows(roomRef(TWIN2)), 'set constraints all immediate'].join('; '),
     )
@@ -3816,12 +3829,14 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
          ('50000000-0000-4000-8000-000000000005',
           (select id from customer where phone_e164 = '+971500000198'), 'front_desk', '${CAT_MARKER}')`,
         `insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id,
-          room_id, period, status, gross_price_fils) values
+          room_id, period, status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils,
+          net_fils, vat_fils) values
          ('50000000-0000-4000-8000-000000000005', '2099-07-01',
           (select id from service_variant where provisional_note = '${CAT_MARKER}'), 'solo',
           '50000000-0000-4000-8000-0000000000a1'::uuid,
           (select id from rooms where code = 'room-1'),
-          tstzrange('2099-07-01 19:00:00+00','2099-07-01 20:00:00+00','[)'), 'confirmed', 20000)`,
+          tstzrange('2099-07-01 19:00:00+00','2099-07-01 20:00:00+00','[)'), 'confirmed', 20, 10,
+          20000, 19048, 952)`,
       ].join('; ')
       checkRejectedBy(
         'catalogue gate rejects deleting a service that has an appointment',
@@ -4289,7 +4304,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     const source = readFileSync('scripts/test-gates.mjs', 'utf8')
     const marker = source.lastIndexOf("'postgres:16'")
     const listing = source.slice(source.lastIndexOf('[', marker), source.indexOf(']', marker))
-    const required = [...listing.matchAll(/'([^']+)'/g)].map((match) => match[1])
+    // Entries only: one quoted string per line, ending in a comma. A bare /'([^']+)'/ also matched the
+    // prose BETWEEN two apostrophes in the comment inside that array ("H-HARD-02's … that unit's"), which
+    // put a phantom entry in `required` that no workflow could ever contain — so the `missing.length === 0`
+    // branch below, the one that says the list stopped noticing a gate, was unreachable.
+    const required = [...listing.matchAll(/^\s*'([^']+)',$/gm)].map((match) => match[1])
     check(
       "the completeness check's own list is readable from source",
       required.length > 20 && required.includes('pnpm gates:test'),
@@ -8550,6 +8569,847 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 41a-41r. (B-AVAIL-06) The booking transaction: the constraints 0038 added, and the four properties of
+//          the write path that stop being true if a line is removed.
+//
+// Two kinds of fixture, because this unit has two kinds of claim.
+//
+// **The schema half** is a set of psql probes, each a statement the database must refuse by the NAME of
+// the rule written for it. A bare non-zero exit is also what a typo in a column name produces, and the
+// rule under test would then be dead while this file reported PASS for ever (ADR 0003). Every probe runs
+// inside `begin; … ; rollback;` and creates its own rooms, so none of it depends on the provisional
+// inventory and a probe that is wrongly accepted leaves nothing behind. The room-capacity probes need
+// `set constraints all immediate` to make the deferred triggers fire without committing — which is also a
+// second proof that they really are deferred.
+//
+// The centre of it is the one 0038 changed the meaning of. `rooms.capacity` counts CLIENTS (0012) and the
+// trigger counted appointment ROWS, so a Four Hands — 2 therapists, 1 standard room, 1 client (docs/13
+// §4) — was two places and unbookable in every standard room B-CAT-06 measured and seeded. 41i and 41j
+// are that pair: the same two rows COMMIT as one delivery and are REFUSED as two.
+//
+// **The code half** is four mutants of `create-booking.ts`, each run against the pair suite in
+// packages/fixtures. A row lock, a lock ORDER and a re-applied eligibility check are not expressible as
+// constraints, so the only way to know the tests are testing them is to remove each one and watch the
+// suite fail. Every anchor is asserted to exist first: `String.replace` with a missing needle returns the
+// text unchanged, and the mutant would then be the shipped code passing its own tests.
+{
+  const bookDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const BOOK_MARKER = 'gate fixture booking'
+  const BOOK_SINGLE = 'gate-fixture-book-single'
+  const BOOK_TWIN = 'gate-fixture-book-twin'
+  const BOOK_DATE = "'2099-04-03'"
+  const BOOK_BOOKING = "'40000000-0000-4000-8000-000000000006'"
+  const BOOK_CUSTOMER = "(select id from customer where phone_e164 = '+971500000196')"
+  const BOOK_VARIANT =
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1)"
+  const bookRoom = (code) => `(select id from rooms where code = '${code}')`
+  const bookTherapist = (suffix) => `'40000000-0000-4000-8000-0000000000${suffix}'::uuid`
+  const bookDelivery = (suffix) => `'40000000-0000-4000-8000-0000000000${suffix}'::uuid`
+  const bookSlotRange = (from, to) =>
+    `tstzrange('2099-04-03 ${from}:00:00+00','2099-04-03 ${to}:00:00+00','[)')`
+
+  // A capacity-1 standard room — every standard room the seed holds is one — and a capacity-2 one, so a
+  // refusal can be shown to be about the missing place rather than about the room type or the shape.
+  const bookSetup = [
+    `insert into customer (phone_e164, created_via) values ('+971500000196', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${BOOK_DATE}, '2099-04-03 07:00:00+00', '2099-04-03 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 60, 20000, '${BOOK_MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes) values
+       ('${BOOK_SINGLE}', 'Gate book single', 'standard', 1, 88, '${BOOK_MARKER}'),
+       ('${BOOK_TWIN}',   'Gate book twin',   'standard', 2, 89, '${BOOK_MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${BOOK_BOOKING}, ${BOOK_CUSTOMER}, 'front_desk', '${BOOK_MARKER}')`,
+  ].join('; ')
+
+  /** One appointment row, with every column 0038 made NOT NULL stated. */
+  const bookAppointment = ({
+    room,
+    therapist,
+    delivery,
+    shape = 'solo',
+    period,
+    places = 1,
+    turnaround = 20,
+    buffer = 10,
+    gross = 20000,
+    net = 19048,
+    vat = 952,
+    priceList = 'null',
+    promotion = 'null',
+  }) =>
+    'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+    'room_id, period, status, delivery_id, room_places, turnaround_minutes, ' +
+    'therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils, price_list_id, promotion_id' +
+    `) values (${BOOK_BOOKING}, ${BOOK_DATE}, ${BOOK_VARIANT}, '${shape}', ${therapist}, ${room}, ` +
+    `${period}, 'confirmed', ${delivery}, ${places}, ${turnaround}, ${buffer}, ${gross}, ${net}, ` +
+    `${vat}, ${priceList}, ${promotion})`
+
+  const bookProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      bookDbUrl ?? '',
+      '-c',
+      `begin; ${bookSetup}; ${statement}; rollback;`,
+    ])
+
+  /** The two rows of one Four Hands, sharing a delivery id and one client place. */
+  const fourHandsAsOneDelivery = (room) =>
+    ['b1', 'b2'].map((suffix) =>
+      bookAppointment({
+        room,
+        therapist: bookTherapist(suffix),
+        delivery: bookDelivery('d1'),
+        shape: 'four_hands',
+        period: bookSlotRange('19', '20'),
+        places: 1,
+      }),
+    )
+
+  if (!bookDbUrl) {
+    check(
+      'the booking transaction constraints hold',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 41a. A delivery whose rows disagree about the period is not one delivery. Without this,
+    //      `max(room_places)` per delivery is a guess about which row to believe.
+    checkRejectedBy(
+      'booking gate rejects a delivery whose two rows are in different periods',
+      bookProbe(
+        [
+          bookAppointment({
+            room: bookRoom(BOOK_TWIN),
+            therapist: bookTherapist('b1'),
+            delivery: bookDelivery('d1'),
+            shape: 'four_hands',
+            period: bookSlotRange('19', '20'),
+          }),
+          bookAppointment({
+            room: bookRoom(BOOK_TWIN),
+            therapist: bookTherapist('b2'),
+            delivery: bookDelivery('d1'),
+            shape: 'four_hands',
+            period: bookSlotRange('20', '21'),
+          }),
+          'set constraints all immediate',
+        ].join('; '),
+      ),
+      'delivery_incoherent',
+    )
+
+    // 41b. The same, from the other side: two rooms. A Four Hands with a therapist in each of two rooms
+    //      is two deliveries wearing one id, and its places figure would be counted once.
+    checkRejectedBy(
+      'booking gate rejects a delivery whose two rows are in different rooms',
+      bookProbe(
+        [
+          bookAppointment({
+            room: bookRoom(BOOK_TWIN),
+            therapist: bookTherapist('b1'),
+            delivery: bookDelivery('d1'),
+            shape: 'four_hands',
+            period: bookSlotRange('19', '20'),
+          }),
+          bookAppointment({
+            room: bookRoom(BOOK_SINGLE),
+            therapist: bookTherapist('b2'),
+            delivery: bookDelivery('d1'),
+            shape: 'four_hands',
+            period: bookSlotRange('19', '20'),
+          }),
+          'set constraints all immediate',
+        ].join('; '),
+      ),
+      'delivery_incoherent',
+    )
+
+    // 41c. Zero client places is not a delivery, it is a row that occupies nothing and would let a room
+    //      hold any number of them.
+    checkRejectedBy(
+      'booking gate rejects a delivery occupying zero client places',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          places: 0,
+        }),
+      ),
+      'appointment_room_places_bounded',
+    )
+
+    // 41d. The price identity. VAT is derived as the remainder so `net + vat = gross` is exact for every
+    //      input; a stored pair that fails it is a one-fils discrepancy on a tax invoice.
+    checkRejectedBy(
+      'booking gate rejects a price whose net and VAT do not sum to the gross',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          net: 19047,
+        }),
+      ),
+      'appointment_price_split_exact',
+    )
+
+    // 41e. The two snapshot figures are bounded exactly as 0017 bounds their sources, so a snapshot
+    //      cannot hold a figure the catalogue itself would refuse.
+    checkRejectedBy(
+      'booking gate rejects a snapshotted turnaround the catalogue would refuse',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          turnaround: 300,
+        }),
+      ),
+      'appointment_turnaround_bounded',
+    )
+    checkRejectedBy(
+      'booking gate rejects a snapshotted therapist buffer the catalogue would refuse',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          buffer: 90,
+        }),
+      ),
+      'appointment_therapist_buffer_bounded',
+    )
+
+    // 41f. The snapshot is unskippable. There is no honest default for a turnaround — zero claims the
+    //      room is free the instant the treatment ends — so a writer that omits it is refused rather than
+    //      quietly given one.
+    checkRejectedBy(
+      'booking gate rejects an appointment with no snapshotted turnaround at all',
+      bookProbe(
+        'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+          'room_id, period, status, gross_price_fils, net_fils, vat_fils) values (' +
+          `${BOOK_BOOKING}, ${BOOK_DATE}, ${BOOK_VARIANT}, 'solo', ${bookTherapist('b1')}, ` +
+          `${bookRoom(BOOK_TWIN)}, ${bookSlotRange('19', '20')}, 'confirmed', 20000, 19048, 952)`,
+      ),
+      'turnaround_minutes',
+    )
+
+    // 41g. The price_list_id is the explanation of a figure already taken, so it cannot point at nothing.
+    checkRejectedBy(
+      'booking gate rejects a price_list_id that references no price list',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          priceList: "'40000000-0000-4000-8000-0000000000ff'::uuid",
+        }),
+      ),
+      'appointment_price_list_id_fkey',
+    )
+
+    // 41h. An empty string is not a promotion id; it is a caller that meant null and said something else.
+    checkRejectedBy(
+      'booking gate rejects an empty promotion id',
+      bookProbe(
+        bookAppointment({
+          room: bookRoom(BOOK_TWIN),
+          therapist: bookTherapist('b1'),
+          delivery: bookDelivery('d1'),
+          period: bookSlotRange('19', '20'),
+          promotion: "'   '",
+        }),
+      ),
+      'appointment_promotion_id_nonempty',
+    )
+
+    // 41i. The idempotency key. A UNIQUE constraint and not a set in memory: the second request blocks on
+    //      this index until the first commits or rolls back, which is what makes a double tap one booking.
+    checkRejectedBy(
+      'booking gate rejects a replayed idempotency key at the database',
+      bookProbe(
+        [
+          `insert into booking_idempotency (idempotency_key, request_fingerprint, booking_id)
+             values ('${BOOK_MARKER}-key', 'fingerprint-a', ${BOOK_BOOKING})`,
+          `insert into booking_idempotency (idempotency_key, request_fingerprint, booking_id)
+             values ('${BOOK_MARKER}-key', 'fingerprint-b', ${BOOK_BOOKING})`,
+        ].join('; '),
+      ),
+      'booking_idempotency_pkey',
+    )
+
+    // 41j. THE ONE THIS UNIT EXISTS FOR, as a refusal: two SEPARATE deliveries of one client each do not
+    //      fit in a one-client room. This is the rule that must still hold after 0038 changed the unit.
+    checkRejectedBy(
+      'booking gate rejects two separate deliveries in a capacity-1 room',
+      bookProbe(
+        [
+          bookAppointment({
+            room: bookRoom(BOOK_SINGLE),
+            therapist: bookTherapist('b1'),
+            delivery: bookDelivery('d1'),
+            period: bookSlotRange('19', '20'),
+          }),
+          bookAppointment({
+            room: bookRoom(BOOK_SINGLE),
+            therapist: bookTherapist('b2'),
+            delivery: bookDelivery('d2'),
+            period: bookSlotRange('19', '20'),
+          }),
+          'set constraints all immediate',
+        ].join('; '),
+      ),
+      'room_over_capacity',
+    )
+
+    // 41k. And the acceptance control it is paired with: the same two ROWS as ONE delivery commit in that
+    //      same capacity-1 room. Before 0038 this was refused, and Four Hands — which docs/13 §4 states as
+    //      2 therapists, 1 standard room, 1 CLIENT — was bookable in no room the salon owns.
+    const fourHandsCommits = bookProbe(
+      [...fourHandsAsOneDelivery(bookRoom(BOOK_SINGLE)), 'set constraints all immediate'].join(
+        '; ',
+      ),
+    )
+    check(
+      'booking gate accepts a Four Hands as ONE delivery in a capacity-1 standard room',
+      !fourHandsCommits.failed,
+      `refused the shape docs/13 §4 sells as 2 therapists, 1 standard room, 1 client:\n${fourHandsCommits.output}`,
+    )
+
+    // 41l. The second control, from the other direction: a delivery that really does hold two clients is
+    //      still refused by a one-client room. Without it, 41k is satisfied by a capacity check that has
+    //      stopped comparing anything.
+    checkRejectedBy(
+      'booking gate rejects a two-client delivery in a capacity-1 room',
+      bookProbe(
+        [
+          bookAppointment({
+            room: bookRoom(BOOK_SINGLE),
+            therapist: bookTherapist('b1'),
+            delivery: bookDelivery('d1'),
+            shape: 'couple',
+            period: bookSlotRange('19', '20'),
+            places: 2,
+          }),
+          'set constraints all immediate',
+        ].join('; '),
+      ),
+      'room_over_capacity',
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case
+    // a probe is wrongly accepted, and because a room or a booking left behind fails a later gate with an
+    // error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      bookDbUrl,
+      '-c',
+      `delete from appointment where booking_id = ${BOOK_BOOKING}; ` +
+        `delete from booking where notes = '${BOOK_MARKER}'; ` +
+        `delete from rooms where notes = '${BOOK_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${BOOK_MARKER}'; ` +
+        `delete from business_day where trading_date = ${BOOK_DATE}; ` +
+        "delete from customer where phone_e164 = '+971500000196';",
+    ])
+  }
+
+  // 41m-41r. The code half. Each mutant removes one line the write path depends on and the pair suite
+  //          must fail; the committed file must then pass. Without the controls, a suite broken for any
+  //          other reason satisfies every probe.
+  const BOOK_REPO = 'packages/db/src/repositories/create-booking.ts'
+  const BOOK_PAIR = 'packages/fixtures/src/booking-transaction.itest.ts'
+  const BOOK_UNIT = 'packages/db/src/repositories/create-booking.test.ts'
+
+  const bookMutant = (anchor, replacement, body) =>
+    withEditedFile(
+      BOOK_REPO,
+      (text) => {
+        // An anchor that has moved makes the assertion below vacuous, so it is an error rather than a
+        // no-op replace: `String.replace` with a missing needle returns the text unchanged, and the
+        // mutant would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the B-AVAIL-06 gate's anchor is no longer in ${BOOK_REPO}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const bookPairSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', BOOK_PAIR])
+  const bookUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', BOOK_UNIT])
+
+  // 41m. The row lock. Without `for update` the count can be taken twice, and the whole unit is that it
+  //      cannot: docs/01 decision 9 pairs the deferred capacity trigger with this lock, and ADR 0024
+  //      records that the trigger is necessary and not sufficient. Each probe names a TEST TITLE rather
+  //      than the file path — a path appears in the output whichever case failed.
+  checkRejectedBy(
+    'booking gate: dropping SELECT ... FOR UPDATE on the room row is caught',
+    bookMutant('\n         for update\n', '\n', bookPairSuite),
+    'which a competing FOR SHARE cannot take',
+  )
+
+  // 41n. The lock ORDER. Two bookings over overlapping room sets deadlock unless every writer takes the
+  //      rows in one order, and ascending id is an order every writer can compute without coordinating.
+  //      The mutant is the seven characters that produce request order instead.
+  checkRejectedBy(
+    'booking gate: locking the rooms in request order instead of id order is caught',
+    bookMutant(
+      'input.deliveries.map((delivery) => delivery.roomId))].sort()',
+      'input.deliveries.map((delivery) => delivery.roomId))]',
+      bookPairSuite,
+    ),
+    'locks in room-id order',
+  )
+
+  // 41o. The eligibility re-check. `appointment.therapist_id` has no foreign key precisely because
+  //      `references employee (id)` would accept a receptionist as the therapist of a massage; this call
+  //      is the claim that constraint could not make (B-AVAIL-04's NOTE).
+  checkRejectedBy(
+    'booking gate: dropping the eligibility re-check lets an ineligible therapist be booked',
+    bookMutant(
+      '  await assertTherapistsAreEligible(uow, { input, delivery, footprint })',
+      '',
+      bookPairSuite,
+    ),
+    'refuses a therapist without the skill',
+  )
+
+  // 41p. Fail closed. A booking written with no injected re-check is a booking nobody checked, and the
+  //      permissive default is the one failure the whole transaction exists to prevent.
+  checkRejectedBy(
+    'booking gate: defaulting the missing slot re-check to "assume it is fine" is caught',
+    bookMutant(
+      "  if (typeof deps?.recheck !== 'function') {",
+      '  if ((false as boolean)) {',
+      bookUnitSuite,
+    ),
+    'refuses when no slot re-check was injected',
+  )
+
+  // 41q-41r. The controls. The committed file passes both suites, so the four probes above are the lines
+  //          they remove and not a suite that fails for its own reasons.
+  const bookPairClean = bookPairSuite()
+  check(
+    'booking gate: the committed transaction passes its pair suite',
+    !bookPairClean.failed,
+    `the committed booking transaction failed its own pair suite:\n${bookPairClean.output}`,
+  )
+  const bookUnitClean = bookUnitSuite()
+  check(
+    'booking gate: the committed transaction passes its unit suite',
+    !bookUnitClean.failed,
+    `the committed booking transaction failed its own unit suite:\n${bookUnitClean.output}`,
+  )
+}
+
+// 43a-43t. (W-SITE-03) The JSON-LD gates: the structured-data validator, the licence-class vocabulary, the
+// midnight-crossing hours, the money door and the two greps.
+//
+// Five different gates, and each one fails in a way the other four cannot see.
+//
+// The **validator** (`pnpm structured-data`). The acceptance criterion names two known-bad fixtures — "a
+// Service with no offers, and a DaySpa with no address" — and asks that they fail the build rather than
+// warning. They are fed to the script as files, which is the mode the script has for exactly this reason: a
+// gate that can only be handed a graph it built itself can only ever pass. The other rules a review does not
+// catch are fixtured beside them: an `aggregateRating` nothing stands behind (a manual action, not a lost
+// rich result), a `null` where a property should be absent, a placeholder the schema's own predicate refuses,
+// a price as a JSON number, and an `OpeningHoursSpecification` that crosses midnight in one entry.
+//
+// The **midnight crossing**, which is the thing implementations get wrong and the reason the hours are
+// emitted as two specifications. `OpeningHoursSpecification` has no next-day flag, so one entry reading
+// `opens: 11:00, closes: 02:00` makes a consumer evaluating `opens <= t <= closes` conclude the premises is
+// open for no minute of any day. The mutation deletes the split and asserts the suite fails; the fixture
+// asserts the validator names the rule.
+//
+// The **licence class**. docs/09 §"Schema types" refuses `MedicalBusiness` and `MedicalClinic` unless the
+// classification supports it, and `regulatory_profile.licence_class` is `unconfirmed` (Y1-licence). Two
+// mutations: one deletes the graph's final `assertVocabularyPermitted` call, one makes the wellness branch
+// emit a medical type. Both have to fail, because the first is the guard and the second is the mapping.
+//
+// The **money door**. "Constructing a price from a float is a compile error" is a claim about the type system,
+// and the only way to prove it is to widen the type and watch `tsc` stop complaining: the `@ts-expect-error`
+// directives in `offerings.test.ts` become unused and TS2578 fails the build.
+//
+// The **two greps**. `handwritten-jsonld-block` keeps one block builder; `bare-brand-without-massage-center`
+// keeps the full trading name in every title and schema name, because `berelax.com` is an international
+// airport-spa chain with an outlet in the same city.
+{
+  const CORE = 'packages/core/src/seo/jsonld'
+  const BUSINESS = `${CORE}/business.ts`
+  const GRAPH = `${CORE}/graph.ts`
+  const CONTENT = `${CORE}/content.ts`
+  const OFFERINGS = `${CORE}/offerings.ts`
+  const VOCABULARY = `${CORE}/vocabulary.ts`
+  const suite = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const validator = (...files) => ['exec', 'tsx', 'scripts/validate-structured-data.mjs', ...files]
+
+  /** A minimal graph, so each fixture below differs from a passing one in exactly one way. */
+  const address = {
+    '@type': 'PostalAddress',
+    streetAddress: '1 Specimen Road',
+    addressLocality: 'Specimen District',
+    addressRegion: 'Specimen Emirate',
+    addressCountry: 'AE',
+  }
+  const hours = [
+    {
+      '@type': 'OpeningHoursSpecification',
+      dayOfWeek: ['Monday'],
+      opens: '12:00',
+      closes: '23:59',
+    },
+    {
+      '@type': 'OpeningHoursSpecification',
+      dayOfWeek: ['Tuesday'],
+      opens: '00:00',
+      closes: '03:00',
+    },
+  ]
+  const business = (extra = {}) => ({
+    '@type': ['DaySpa'],
+    '@id': 'https://example.test/#business',
+    name: 'Specimen Wellness Rooms and Spa',
+    url: 'https://example.test/',
+    telephone: '+97120000000',
+    address,
+    openingHoursSpecification: hours,
+    ...extra,
+  })
+  const service = (offers) => ({
+    '@type': ['Service'],
+    '@id': 'https://example.test/#service-x',
+    name: 'Normal Massage (Asian)',
+    provider: { '@id': 'https://example.test/#business' },
+    offers,
+  })
+  const graphOf = (...nodes) =>
+    `${JSON.stringify({ '@context': 'https://schema.org', '@graph': nodes }, null, 2)}\n`
+
+  /** Feeds one graph to the validator as a file and asserts the rule it must name. */
+  const expectValidatorRejects = (label, name, nodes, rule) => {
+    const path = `scripts/__gate_fixture__-${name}.json`
+    const result = withFixture(path, graphOf(...nodes), () =>
+      runExpectingFailure('pnpm', validator(path)),
+    )
+    checkRejectedBy(label, result, rule)
+  }
+
+  // 43a. A Service with no offers — the acceptance criterion's own fixture. A treatment with no price and no
+  //      availability is the one thing a customer came for.
+  expectValidatorRejects(
+    'the structured-data validator rejects a Service with no offers',
+    'service-no-offers',
+    [business(), service([])],
+    'service_without_offers',
+  )
+
+  // 43b. A DaySpa with no address — the criterion's other fixture, and the one property Google requires.
+  {
+    const node = business()
+    delete node.address
+    expectValidatorRejects(
+      'the structured-data validator rejects a DaySpa with no address',
+      'dayspa-no-address',
+      [node],
+      'business_missing_required_property',
+    )
+  }
+
+  // 43c. An aggregateRating with nothing behind it. docs/09 §"Schema types" refuses self-serving review
+  //      markup and Google answers it with a manual action rather than a dropped rich result, which is why
+  //      this is checked on the emitted bytes and not merely left to the absence of a builder.
+  expectValidatorRejects(
+    'the structured-data validator rejects an aggregateRating with no reviews',
+    'rating-no-reviews',
+    [business({ aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.9' } })],
+    'aggregate_rating_without_reviews',
+  )
+
+  // 43d. An OpeningHoursSpecification that crosses midnight in one entry. Not ambiguous — false: a consumer
+  //      evaluating `opens <= t <= closes` concludes the premises is open for no minute of any day.
+  expectValidatorRejects(
+    'the structured-data validator rejects hours that cross midnight in one specification',
+    'hours-crossing',
+    [
+      business({
+        openingHoursSpecification: [
+          {
+            '@type': 'OpeningHoursSpecification',
+            dayOfWeek: ['Monday'],
+            opens: '11:00',
+            closes: '02:00',
+          },
+        ],
+      }),
+    ],
+    'opening_hours_crosses_midnight_in_one_spec',
+  )
+
+  // 43e. A price as a JSON number. `200` is a double to most consumers and money is integer fils (ADR 0007);
+  //      the whole point of publishing the figure is that a third party quotes it correctly.
+  expectValidatorRejects(
+    'the structured-data validator rejects a price that is not a two-decimal string',
+    'price-number',
+    [business(), service([{ '@type': 'Offer', price: 200, priceCurrency: 'AED' }])],
+    'offer_price_not_two_decimals',
+  )
+
+  // 43f. A `null` where a property should be absent. `"geo": null` is a published claim about the business,
+  //      and `"latitude": null` is worse — a consumer checking for the key finds it.
+  expectValidatorRejects(
+    'the structured-data validator rejects a null property',
+    'null-geo',
+    [business({ geo: null })],
+    'null_property',
+  )
+
+  // 43g. A placeholder reaching a published document. `is_placeholder_text()` (0026) refuses these in the
+  //      database and this is the last place they could surface instead.
+  expectValidatorRejects(
+    'the structured-data validator rejects a provisional placeholder',
+    'placeholder-name',
+    [business({ name: 'BE RELAX — Massage Center (TRN-PENDING-Y1-TRN)' })],
+    'placeholder_property',
+  )
+
+  // 43h. A medical type while the licence class is unconfirmed. A bare graph carries no licence class, so the
+  //      validator judges it against the seeded one — the strict answer, and the right default for a fixture.
+  expectValidatorRejects(
+    'the structured-data validator rejects a medical type under the seeded licence class',
+    'medical-type',
+    [business({ '@type': ['DaySpa', 'MedicalClinic'] })],
+    'medical_vocabulary_outside_healthcare',
+  )
+
+  // 43i. An invented coordinate, half-supplied. A GeoCoordinates with one of the pair is not half a location
+  //      — it is a node no consumer can use, and the half that is present is the half somebody typed.
+  expectValidatorRejects(
+    'the structured-data validator rejects half a coordinate',
+    'geo-half',
+    [business({ geo: { '@type': 'GeoCoordinates', latitude: '24.490000' } })],
+    'geo_incomplete',
+  )
+
+  // 43j. The control for 43a-43i, and the proof that every fixture above was cleaned up: with no arguments
+  //      the script builds the specimen graphs through the real builders and every one of them must pass.
+  {
+    const result = run('pnpm', ['structured-data'])
+    check(
+      'the structured-data gate passes on this tree, over the real builders',
+      !result.failed,
+      result.output,
+    )
+  }
+
+  // 43k. The midnight split, neutered. Emitting one specification per session is the naive implementation and
+  //      the one the whole design exists to avoid; the suite has to notice.
+  {
+    const result = withEditedFile(
+      BUSINESS,
+      (original) => {
+        const anchor = '    if (day.closesNextDay) {'
+        if (!original.includes(anchor))
+          throw new Error(`the midnight split is no longer in ${BUSINESS}`)
+        return original.replace(anchor, '    if (false) {')
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/business.test.ts`)),
+    )
+    checkRejectedBy(
+      'emitting one specification for a midnight-crossing session fails the hours suite',
+      result,
+      '01:30',
+    )
+  }
+
+  // 43l. The coordinate, invented. `premises.latitude` is NULL because docs/13 states none, and a plausible
+  //      pair would put a map pin on the wrong building with nothing on the page saying it was a guess.
+  {
+    const result = withEditedFile(
+      BUSINESS,
+      (original) => {
+        const anchor = '  if (latitude === null || longitude === null) return undefined'
+        if (!original.includes(anchor)) throw new Error(`the geo guard is no longer in ${BUSINESS}`)
+        return original.replace(
+          anchor,
+          "  if (latitude === null || longitude === null)\n    return { '@type': 'GeoCoordinates', latitude: '24.490000', longitude: '54.370000' }",
+        )
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/business.test.ts`)),
+    )
+    checkRejectedBy('inventing a coordinate for a null row fails the geo suite', result, 'geo')
+  }
+
+  // 43m. The final vocabulary guard, removed. `businessTypesFor` makes the medical types unreachable through
+  //      the type functions; this is what makes them unreachable through a service name or a CMS description,
+  //      which is the same claim to a regulator and the only one nobody looks for.
+  {
+    const result = withEditedFile(
+      GRAPH,
+      (original) => {
+        const anchor = '  assertVocabularyPermitted(graph, input.licence)'
+        if (!original.includes(anchor))
+          throw new Error(`the vocabulary guard is no longer in ${GRAPH}`)
+        return original.replace(anchor, '  void assertVocabularyPermitted')
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/graph.test.ts`)),
+    )
+    checkRejectedBy(
+      'removing the graph vocabulary guard fails the medical-claim control',
+      result,
+      'medical_vocabulary_outside_healthcare',
+    )
+  }
+
+  // 43n. The mapping itself, loosened: the wellness branch emits a medical type. The guard above would catch
+  //      it in a finished graph, and this proves the mapping is asserted in its own right — the acceptance
+  //      criterion asks that flipping the profile to healthcare be the ONLY path.
+  {
+    const result = withEditedFile(
+      VOCABULARY,
+      (original) => {
+        const anchor = "    case 'wellness':\n      return [PRIMARY_BUSINESS_TYPE]"
+        if (!original.includes(anchor))
+          throw new Error(`the wellness branch is no longer in ${VOCABULARY}`)
+        return original.replace(
+          anchor,
+          "    case 'wellness':\n      return [PRIMARY_BUSINESS_TYPE, 'MedicalBusiness']",
+        )
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/vocabulary.test.ts`)),
+    )
+    checkRejectedBy(
+      'a medical type on a non-healthcare branch fails the vocabulary suite',
+      result,
+      'MedicalBusiness',
+    )
+  }
+
+  // 43o. The therapist publishing guard, neutered. ADR 0020 needs a display name AND a recorded photography
+  //      consent; docs/13 §5 states what the alternative produces — "19 indexed, empty, near-duplicate pages
+  //      — worse for SEO than having none", with the added property that a machine would repeat it.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (original) => {
+        const anchor = '  if (candidate.photographyConsentRecordedAt === null) refusals.push('
+        if (!original.includes(anchor))
+          throw new Error(`the consent guard is no longer in ${CONTENT}`)
+        return original.replace(anchor, '  if (false) refusals.push(')
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/content.test.ts`)),
+    )
+    checkRejectedBy(
+      'publishing a therapist with no recorded photography consent fails the guard suite',
+      result,
+      'no_photography_consent',
+    )
+  }
+
+  // 43p. The price-on-request branch, given a figure. Three offerings in docs/13 §4 have no price column at
+  //      all (0032, Y9-poa-prices), and a derived figure would be quoted, taken at the till and printed on a
+  //      tax invoice with nothing marking it as a guess.
+  {
+    const result = withEditedFile(
+      OFFERINGS,
+      (original) => {
+        const anchor = "    '@id': priceOnRequestOfferId(input),"
+        if (!original.includes(anchor))
+          throw new Error(`the on-request branch is no longer in ${OFFERINGS}`)
+        return original.replace(anchor, `${anchor}\n    price: '0.00',\n    priceCurrency: 'AED',`)
+      },
+      () => runExpectingFailure('pnpm', suite(`${CORE}/offerings.test.ts`)),
+    )
+    checkRejectedBy(
+      'giving a price-on-request offering a figure fails the catalogue suite',
+      result,
+      'price',
+    )
+  }
+
+  // 43q. The control for 43k-43p: with every mutation restored, the whole JSON-LD suite passes. Without this,
+  //      a file left edited would fail a later gate with a defect nobody introduced.
+  {
+    const result = run('pnpm', suite(CORE))
+    check('the JSON-LD suite passes once every mutation is restored', !result.failed, result.output)
+  }
+
+  // 43r. A hand-written block in a page. The acceptance criterion asks for zero of them, and a convention
+  //      cannot be checked — so the media type is spelled in one component and anything else is a finding.
+  {
+    const result = withFixture(
+      'apps/web/src/__gate_fixture__.ts',
+      [
+        'export function handwrittenBlock(): string {',
+        '  return `<script type="application/ld+json">{"@type":"DaySpa"}</script>`',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', suite('apps/web/src/seo/structured-data.test.ts')),
+    )
+    checkRejectedBy(
+      'a hand-written application/ld+json block fails the one-builder grep',
+      result,
+      'handwritten-jsonld-block',
+    )
+  }
+
+  // 43s. A bare-brand title. `berelax.com` is an international airport-spa chain with an outlet in the same
+  //      city, so a title carrying the brand alone is a citation that reinforces the wrong entity.
+  {
+    const result = withFixture(
+      'apps/web/src/__gate_fixture__.ts',
+      "export const metadata = { title: 'BE RELAX — Spa in Abu Dhabi' }\n",
+      () => runExpectingFailure('pnpm', suite('apps/web/src/seo/brand.test.ts')),
+    )
+    checkRejectedBy(
+      'a bare-brand title fails the brand-collision grep',
+      result,
+      'bare-brand-without-massage-center',
+    )
+  }
+
+  // 43t. "Constructing a price from a float is a compile error", proved the only way a claim about the type
+  //      system can be: widen `price` to `number` and the `@ts-expect-error` directives in
+  //      `offerings.test.ts` become unused, which is TS2578 and a failed build. If they had never been
+  //      erroring, this mutation would change nothing and the gate would report PASS for ever.
+  {
+    const result = withEditedFile(
+      OFFERINGS,
+      (original) => {
+        const anchor = '  readonly price: Money\n}'
+        if (!original.includes(anchor))
+          throw new Error(`PricedOfferInput.price is no longer in ${OFFERINGS}`)
+        return original.replace(anchor, '  readonly price: Money | number\n}')
+      },
+      () => runExpectingFailure('pnpm', ['typecheck']),
+    )
+    checkRejectedBy(
+      'widening an Offer price to accept a float fails the typechecker',
+      result,
+      'TS2578',
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -8569,6 +9429,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm licences',
     'pnpm container',
     'pnpm documents',
+    'pnpm structured-data',
     'pnpm audit:online',
     'pnpm palette',
     'pnpm tokens',

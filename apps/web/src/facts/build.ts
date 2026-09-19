@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { type Fils, filsFrom, money, toDecimalString } from '@berelax/core'
+import { grossMoneyFromFils, toDecimalString } from '@berelax/core'
 import type { PremisesFacts } from '@berelax/db'
 import {
   AppError,
@@ -37,6 +37,12 @@ import {
  *   - the display spelling of each phone number, from its E.164 form. One number, two renderings, no
  *     second stored value.
  *
+ * The AED figure goes through `grossMoneyFromFils` from `@berelax/core`, which is `filsFromStoredDigits`
+ * plus `money`: a `bigint` column reaches the driver as a **string** precisely so nothing rounds a money
+ * figure, and `Number(...)` here would put the rounding back. This file used to carry its own copy of that
+ * round-trip check; W-SITE-03 needed the identical door for the `Offer` nodes, and two implementations of
+ * "is this a safe integer" is one that will be relaxed.
+ *
  * ## And the one thing it refuses to publish
  *
  * A WhatsApp number. docs/13 §3 records two of them — one on the prototype, a different one on the live
@@ -62,26 +68,6 @@ export interface BuildFactsOptions {
 
 /** The path the fact sheet is served from. One spelling, shared with the registry and `/llms.txt`. */
 export const FACTS_PATH = '/api/facts'
-
-/**
- * Integer fils from the `bigint` string the driver hands back, with the round trip checked.
- *
- * `connection.ts` returns bigint as a **string** precisely so nothing rounds a money figure, and
- * `Number(...)` here would put the rounding back. The comparison is what makes that impossible rather
- * than unlikely: a value that does not survive `String(Number(v))` is refused instead of published, and
- * `filsFrom` refuses anything beyond the safe integer range on the way through.
- */
-function filsFromDatabase(value: string): Fils {
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isSafeInteger(parsed) || String(parsed) !== value) {
-    throw new AppError(
-      'invariant_violated',
-      `gross_price_fils '${value}' does not survive a round trip through a JavaScript number, so it ` +
-        'cannot be published as a price. Money is integer fils (ADR 0007).',
-    )
-  }
-  return filsFrom(parsed)
-}
 
 /** A stored E.164 number in both the form that is dialled and the form that is read out. */
 function phoneOf(e164: string | null): FactsPhone | null {
@@ -143,7 +129,7 @@ export function buildFacts(read: PremisesFacts, options: BuildFactsOptions): Fac
     const variant = {
       durationMinutes: price.durationMinutes,
       grossFils: price.grossPriceFils,
-      grossAed: toDecimalString(money(filsFromDatabase(price.grossPriceFils))),
+      grossAed: toDecimalString(grossMoneyFromFils(price.grossPriceFils)),
     }
     const last = services[services.length - 1]
     if (last !== undefined && last.slug === price.slug) {

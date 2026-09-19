@@ -29,8 +29,10 @@ import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
 import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
-import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
+import { readPageFacts } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import { pageGraph } from '../../../../src/seo/graph-input.ts'
+import { StructuredData } from '../../../../src/seo/structured-data.tsx'
 import {
   MotionGallery,
   type MotionGalleryCopy,
@@ -189,10 +191,38 @@ const MOTION_COPY: MotionGalleryCopy = {
 }
 
 export default async function KitchenSinkPage() {
-  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
-  const facts = await readFactsForPage()
+  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readPageFacts`.
+  const source = await readPageFacts()
+  const facts = source?.facts ?? null
+  /*
+    The structured data, from the same read as the NAP block below.
+
+    This route is where W-SITE-03's graph is *rendered*, and the reason is the one its registry entry already
+    gives for the NAP block: a JSON-LD block built from the premises row can only be right on a route that
+    reads the row **per request**, and this is the one document in the registry that is `force-dynamic`. `/`
+    is statically prerendered, so its metadata and its markup are evaluated during `next build`, where there
+    is no database by design — CI runs the build before `pnpm db:apply`. A build-time read would bake a graph
+    that nothing could then correct, which is a hand-written schema block with extra steps. W-SITE-04 renders
+    the public home page under ISR and puts the block there, where a revalidation propagates a correction.
+
+    `includeCatalogue` is true because this page renders the menu, and because it is the surface the 32 price
+    points are proved against: `apps/web/src/seo/structured-data.itest.ts` fetches this route, parses the
+    block out of the served HTML and matches every Offer against the catalogue rows.
+  */
+  const graph =
+    source === null
+      ? null
+      : pageGraph({
+          id: 'kitchen-sink',
+          locale: 'en',
+          facts: source.facts,
+          licenceClass: source.licenceClass,
+          breadcrumb: { home: 'Home', page: 'Kitchen sink' },
+          includeCatalogue: true,
+        })
   return (
     <main>
+      {graph === null ? null : <StructuredData graph={graph} />}
       <DesignSystemStyles />
       <MotionHeader copy={MOTION_COPY} />
       <RouteNav id="kitchen-sink" locale="en" />

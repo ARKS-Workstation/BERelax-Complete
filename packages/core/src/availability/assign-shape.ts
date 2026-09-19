@@ -47,10 +47,12 @@
  *     The two therapists of a shape must therefore be *distinct*; the same id twice is refused with
  *     SQLSTATE 23P01, so this module de-duplicates rather than trusting its input.
  *   - `appointment_room_capacity` — the deferred trigger counts, at the busiest instant of the written
- *     row's own period, the appointment **rows** holding the room, and refuses a peak above
- *     `rooms.capacity`. Two therapists in one room is two rows, so a two-therapist shape needs **two
- *     places** in that room whatever its client count is. `roomPlacesRequired` is that figure and
- *     `roomPlacesTaken` mirrors the SQL `room_peak_concurrency` so the two cannot drift.
+ *     row's own period, the **client places** held in the room, and refuses a peak above
+ *     `rooms.capacity`. Places are summed over distinct *deliveries* (0038), so two therapists over one
+ *     client is one place however many rows it is. `roomPlacesRequired` is that figure and
+ *     `roomPlacesTaken` mirrors the SQL `room_peak_concurrency` so the two cannot drift. Until 0038 the
+ *     trigger counted rows, which made Four Hands unbookable in every capacity-1 standard room the
+ *     salon owns; see `roomPlacesRequired` for what was wrong and why the inventory was not.
  *
  * Pure: rooms, therapist ids, periods and appointments in, a tuple out. No clock, no database.
  */
@@ -99,9 +101,9 @@ export const COUPLE_MASSAGE_SHAPE: ResourceShape = Object.freeze({
 /**
  * Four Hands: two therapists over **one** client, in a standard room.
  *
- * `minRoomCapacity` is 1 and that is correct — there is one client — which is exactly why
- * `roomPlacesRequired` exists: the database counts appointment rows, and two therapists write two of
- * them, so the room this shape needs still has to hold two.
+ * `minRoomCapacity` is 1 and that is correct — there is one client, docs/13 §4 says so, and 0017 seeds
+ * it. The two rows the database stores are two *therapists*, which is not a second place in the room;
+ * that is what 0038 settled, and it is why a capacity-1 standard room takes this shape.
  */
 export const FOUR_HANDS_SHAPE: ResourceShape = Object.freeze({
   shape: 'four_hands',
@@ -159,29 +161,46 @@ export const ROOM_TYPE_PREFERENCE: Readonly<Record<RoomType, number>> = Object.f
 })
 
 /**
- * Places in one room that one delivery of the shape consumes — that is, appointment **rows**.
+ * Places in one room that one delivery of the shape consumes — that is, **clients**.
  *
- * `max(minRoomCapacity, therapistsRequired)`, and the second term is the one that is easy to miss.
- * `rooms.capacity` is documented as clients, and the deferred trigger of `0024` counts *rows*: a Four
- * Hands is one client and two rows, so it needs two places. A capacity-1 standard room takes the first
- * row and the second is refused at COMMIT with `room_over_capacity` — proved against real PostgreSQL
- * by the known-bad fixture in `scripts/test-gates.mjs`. Offering that slot means the booking
- * transaction fails after the customer has been told yes.
+ * It was `max(minRoomCapacity, therapistsRequired)` until migration 0038, because the deferred trigger
+ * of `0024` counted appointment **rows** against `rooms.capacity` and `0024` writes one row per
+ * therapist. That made a Four Hands two places, and since every standard room the salon owns is
+ * capacity 1 (B-CAT-06 measured the inventory and seeded them so), a shape this business sells was
+ * assignable to no room at all.
+ *
+ * The rows were the wrong unit, not the inventory. `rooms.capacity` is documented in `0012_rooms.sql`
+ * as the clients a room holds at once and docs/13 §4 states Four Hands as *2 therapists, 1 standard
+ * room, 1 client* — so a row is a therapist, a place is a client, and the two columns were never
+ * comparable. 0038 gives the appointment a `delivery_id` and a `room_places` figure and re-issues
+ * `room_peak_concurrency` to sum places over distinct deliveries; this function is the other side of
+ * that arithmetic and is now simply the client count.
+ *
+ * It stays a named function rather than becoming `shape.minRoomCapacity` at each call site, because
+ * "places of a room a delivery occupies" and "clients a room must hold" are two questions that happen
+ * to share an answer: `bookableRoomsFor`'s `clients` asks whether the room is big enough at all, and
+ * this asks how much of it this delivery takes. They are asserted separately for that reason.
  */
 export function roomPlacesRequired(shape: ResourceShape): number {
-  return Math.max(shape.minRoomCapacity, shape.therapistsRequired)
+  return shape.minRoomCapacity
 }
 
 /**
- * The peak number of appointment rows holding `roomId` at any single instant of `period`.
+ * The peak number of **client places** held in `roomId` at any single instant of `period`.
  *
- * A mirror of the SQL `room_peak_concurrency(room_id, window)` in `0024_appointment_constraints.sql`,
- * measured the same way and for the same reason: a **total** is wrong, and so is "how many
- * appointments overlap this one". In a capacity-2 room holding 10:00–12:00 and 18:00–20:00, a new
- * 09:00–21:00 booking overlaps both, so the naive count is 3 — but at no instant are three people in
- * the room, and refusing that booking is the guard becoming the problem. For half-open intervals the
+ * A mirror of the SQL `room_peak_concurrency(room_id, window)` — re-issued by 0038 to sum places over
+ * distinct deliveries — measured the same way and for the same reason: a **total** is wrong, and so is
+ * "how many appointments overlap this one". In a capacity-2 room holding 10:00–12:00 and 18:00–20:00, a
+ * new 09:00–21:00 booking overlaps both, so the naive count is 3 — but at no instant are three people
+ * in the room, and refusing that booking is the guard becoming the problem. For half-open intervals the
  * maximum number of simultaneously open intervals is always attained at one of their lower bounds, so
  * measuring at `period`'s own start and at every appointment start inside it is exhaustive.
+ *
+ * Grouped by {@link ScheduledAppointment.delivery}, because the SQL groups by `delivery_id`: two
+ * therapists over one client are two records and **one** place. A record with no delivery is its own
+ * delivery of one place, which is what every record was before 0038 and is the stricter reading of a
+ * room. The places of a delivery are taken at `max`, matching `max(room_places)` in the SQL, so two
+ * records that disagreed about one delivery's footprint are counted at the larger of the two.
  *
  * The periods compared are the **treatments**, not the room occupancy: `appointment.period` stores the
  * treatment and the trigger reads that column, so counting turnaround here would make this module
@@ -205,9 +224,16 @@ export function roomPlacesTaken(args: {
       .filter((at) => at >= period.startsAt && at < period.endsAt),
   ]
   return instants.reduce((peak, at) => {
-    const concurrent = inRoom.filter(
-      (appointment) => appointment.treatment.startsAt <= at && at < appointment.treatment.endsAt,
-    ).length
+    // Keyed by delivery id, and by the record's own id when it has no delivery — which is exactly
+    // "one delivery per row", the default `appointment.delivery_id` carries.
+    const places = new Map<string, number>()
+    for (const appointment of inRoom) {
+      if (appointment.treatment.startsAt > at || at >= appointment.treatment.endsAt) continue
+      const key = appointment.delivery?.id ?? appointment.id
+      const claimed = appointment.delivery?.places ?? 1
+      places.set(key, Math.max(places.get(key) ?? 0, claimed))
+    }
+    const concurrent = [...places.values()].reduce((total, claimed) => total + claimed, 0)
     return concurrent > peak ? concurrent : peak
   }, 0)
 }
@@ -272,9 +298,13 @@ export interface ShapeAssignment {
   readonly therapistIds: readonly string[]
   readonly roomId: string
   /**
-   * Places of the room consumed — the number of appointment rows B-AVAIL-06 will write. Carried on the
-   * assignment rather than recomputed by the caller, so the figure the availability layer reasoned
-   * about is the figure the booking transaction checks against `rooms.capacity`.
+   * Places of the room consumed — the clients this delivery puts in it, which is the figure
+   * `appointment.room_places` stores and the capacity trigger sums. Carried on the assignment rather
+   * than recomputed by the caller, so the figure the availability layer reasoned about is the figure
+   * the booking transaction writes and the database checks against `rooms.capacity`.
+   *
+   * Not the number of appointment rows: that is `therapistIds.length`, and conflating the two is the
+   * defect 0038 corrected.
    */
   readonly placesUsed: number
 }
@@ -460,4 +490,97 @@ export function assignShapeSlots(request: ShapeSlotRequest): ShapeSlotSolution {
     rejected: [...rejected].sort((a, b) => a.startsAt - b.startsAt),
     windows: solution.windows,
   }
+}
+
+// ------------------------------------------------------------------------------------------------
+// The seam the booking transaction re-checks through
+// ------------------------------------------------------------------------------------------------
+//
+// `packages/db` may never import `packages/core`, so B-AVAIL-06's booking transaction takes the rule
+// that decides whether a tuple is still deliverable as an injected function. This is that function, and
+// it lives here rather than at the call site so there is exactly one of it: an adapter written twice —
+// once in the route and once in the pair test — is two rules, and the second one drifts.
+//
+// Its argument types are spelled in **plain epoch milliseconds** and plain string unions, which is what
+// a caller on the other side of the boundary has: `Instant` is a branded number and `packages/db`
+// cannot name the brand. The branding happens here, on the one side that owns it. The shapes are
+// otherwise field for field those of `SlotRecheckInput` / `SlotRecheckResult` in
+// `packages/db/src/repositories/create-booking.ts`, and `packages/fixtures` asserts the assignability
+// with `satisfies` rather than a comment — the same arrangement `CompliancePolicyRow` has with
+// `CompliancePolicy` (B-CAT-05) and `TherapistPoolRead` with `TherapistPool` (B-AVAIL-04).
+
+/** A committed appointment as a caller outside this package spells it: epoch milliseconds, no brands. */
+export interface CommittedAppointment {
+  readonly id: string
+  readonly roomId: string
+  readonly therapistIds: readonly string[]
+  /** `appointment.delivery_id` and `appointment.room_places` (0038). Required from a repository. */
+  readonly delivery: { readonly id: string; readonly places: number }
+  readonly treatment: { readonly startsAt: number; readonly endsAt: number }
+  readonly turnaroundMinutes: number
+  readonly therapistBufferMinutes: number
+}
+
+/** Everything `assignShape` needs, as rows read inside the booking transaction. */
+export interface ShapeRecheckInput {
+  readonly shape: ResourceShape
+  /**
+   * The candidate rooms. In the booking transaction this is the ONE room that was offered, so the
+   * answer is "still this room, or none" — silently moving a booking to another room would change what
+   * the customer was shown after the confirmation had been rendered.
+   */
+  readonly rooms: readonly Room[]
+  readonly therapistIds: readonly string[]
+  readonly treatment: { readonly startsAt: number; readonly endsAt: number }
+  readonly appointments: readonly CommittedAppointment[]
+}
+
+export type ShapeRecheckResult =
+  | {
+      readonly kind: 'assigned'
+      readonly roomId: string
+      readonly therapistIds: readonly string[]
+      readonly placesUsed: number
+    }
+  | { readonly kind: 'refused'; readonly reason: ShapeRefusal }
+
+/**
+ * Re-applies the assignment rule to a tuple that was offered earlier.
+ *
+ * A thin adapter over {@link assignShape} and deliberately not a second implementation of it: the rule
+ * that decided the slot was offerable is the rule that has to decide it still is, or the booking
+ * transaction would be checking something the availability query never claimed.
+ */
+export function recheckShapeAssignment(input: ShapeRecheckInput): ShapeRecheckResult {
+  const result = assignShape({
+    shape: input.shape,
+    rooms: input.rooms,
+    therapistIds: input.therapistIds,
+    treatment: {
+      startsAt: input.treatment.startsAt as Instant,
+      endsAt: input.treatment.endsAt as Instant,
+    },
+    appointments: input.appointments.map(
+      (appointment): ScheduledAppointment => ({
+        id: appointment.id,
+        roomId: appointment.roomId,
+        therapistIds: appointment.therapistIds,
+        delivery: appointment.delivery,
+        treatment: {
+          startsAt: appointment.treatment.startsAt as Instant,
+          endsAt: appointment.treatment.endsAt as Instant,
+        },
+        turnaroundMinutes: appointment.turnaroundMinutes,
+        therapistBufferMinutes: appointment.therapistBufferMinutes,
+      }),
+    ),
+  })
+  return result.kind === 'assigned'
+    ? {
+        kind: 'assigned',
+        roomId: result.assignment.roomId,
+        therapistIds: result.assignment.therapistIds,
+        placesUsed: result.assignment.placesUsed,
+      }
+    : { kind: 'refused', reason: result.reason }
 }

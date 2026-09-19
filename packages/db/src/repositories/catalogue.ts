@@ -225,6 +225,17 @@ export interface CompliancePolicyRow {
   readonly medicalClaimsPermitted: boolean
   /** The profile version this came from, so an audit row can say which rules were applied. */
   readonly profileVersion: number
+  /**
+   * `regulatory_profile_current.licence_class` — `unconfirmed`, `wellness` or `healthcare`.
+   *
+   * Not part of the lint's own policy, which is why it is not on `CompliancePolicy` in `@berelax/core`.
+   * It is here because a second consumer reads the same row for a different decision: W-SITE-03's JSON-LD
+   * asks which schema.org types the licence permits (docs/09 §"Schema types" — `MedicalBusiness` and
+   * `MedicalClinic` are refused unless the classification supports them), and that is the same question
+   * `medical_claims_permitted` answers for a public *name*. Read from this function rather than through a
+   * query of its own so the two decisions cannot be taken against two different profile versions.
+   */
+  readonly licenceClass: string
 }
 
 /**
@@ -242,9 +253,11 @@ export async function readCompliancePolicy(sql: Sql): Promise<CompliancePolicyRo
       banned_claim_terms: string[]
       permitted_public_titles: string[]
       medical_claims_permitted: boolean
+      licence_class: string
     }[]
   >`
-    select version, banned_claim_terms, permitted_public_titles, medical_claims_permitted
+    select version, banned_claim_terms, permitted_public_titles, medical_claims_permitted,
+           licence_class::text as licence_class
       from regulatory_profile_current
   `
   if (row === undefined) {
@@ -259,6 +272,7 @@ export async function readCompliancePolicy(sql: Sql): Promise<CompliancePolicyRo
     permittedPublicTitles: row.permitted_public_titles,
     medicalClaimsPermitted: row.medical_claims_permitted,
     profileVersion: Number(row.version),
+    licenceClass: row.licence_class,
   }
 }
 

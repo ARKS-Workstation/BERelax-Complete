@@ -49,6 +49,13 @@ const CHECK_VIOLATION = '23514'
  * in the past would make that guard pass for the wrong reason.
  */
 const TRADING_DATE = '2099-03-01'
+/**
+ * The two figures 0038 made NOT NULL on `appointment`, at the values 0017 seeds for a standard dry
+ * massage. There is no honest default for either — a zero turnaround claims the room is free the instant
+ * the treatment ends — so every writer states them and a missing snapshot is a not-null violation.
+ */
+const TURNAROUND_MINUTES = 20
+const BUFFER_MINUTES = 10
 const at = (hhmm: string) => `2099-03-01 ${hhmm}:00+00`
 const period = (from: string, to: string) => `[${at(from)},${at(to)})`
 
@@ -171,18 +178,28 @@ interface AppointmentInput {
   shape?: 'solo' | 'four_hands' | 'couple'
   status?: string
   id?: string
+  /**
+   * Omitted means a fresh delivery per row, which is what `appointment.delivery_id` defaults to and the
+   * count this file was written against: one row, one delivery, one client place (0038). A shape whose
+   * two rows are ONE delivery is B-AVAIL-06's own suites' to write.
+   */
+  deliveryId?: string
+  roomPlaces?: number
 }
 
 async function insertAppointment(tx: Sql, input: AppointmentInput): Promise<string> {
   const [row] = await tx<{ id: string }[]>`
     insert into appointment
       (id, booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-       status, gross_price_fils)
+       status, delivery_id, room_places, turnaround_minutes, therapist_buffer_minutes,
+       gross_price_fils, net_fils, vat_fils)
     values (
       coalesce(${input.id ?? null}::uuid, uuid_generate_v7()),
       ${input.bookingId}, ${TRADING_DATE}, ${variantId}, ${input.shape ?? 'solo'},
       ${input.therapistId}, ${input.roomId}, ${input.period}::tstzrange,
-      ${input.status ?? 'confirmed'}::appointment_status, 20000
+      ${input.status ?? 'confirmed'}::appointment_status,
+      coalesce(${input.deliveryId ?? null}::uuid, uuid_generate_v7()),
+      ${input.roomPlaces ?? 1}, ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES}, 20000, 19048, 952
     )
     returning id
   `
@@ -615,7 +632,9 @@ describe('acceptance — the IMMEDIATE variant is the regression that justifies 
       }),
     )
     expect(outcome.code).toBe(ROOM_OVER_CAPACITY)
-    expect(outcome.message).toContain('would hold 3 overlapping appointments')
+    // "client places", not "appointments": 0038 corrected the unit rooms.capacity is counted in, and
+    // these three rows are three separate deliveries of one client each.
+    expect(outcome.message).toContain('would hold 3 client places')
   })
 })
 
@@ -718,7 +737,9 @@ describe('acceptance — rooms.capacity cannot be reduced below what the room al
     expect(refused.code).toBe(CAPACITY_BELOW_COMMITTED)
     expect(refused.message).toContain('capacity_below_committed')
     expect(refused.message).toContain(TWIN_ROOM_CODE)
-    expect(refused.message).toContain('already holds 2 overlapping appointments')
+    // Two rows, two deliveries, two client places (0038). The figure is the same as the row count here
+    // because each row is its own delivery, which is what `delivery_id`'s default means.
+    expect(refused.message).toContain('already holds 2 client places')
 
     // Control 1: raising the capacity is never refused, so the guard is the reduction and not a
     // table that has stopped accepting updates.
@@ -767,9 +788,10 @@ describe('acceptance — rooms.capacity cannot be reduced below what the room al
       await sql`
         insert into appointment
           (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-           status, gross_price_fils)
+           status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils)
         values (${bookingId}, '2020-03-01', ${variantId}, 'couple', ${therapistId},
-                ${twinRoomId}, ${past}::tstzrange, 'completed', 20000)
+                ${twinRoomId}, ${past}::tstzrange, 'completed', ${TURNAROUND_MINUTES},
+                ${BUFFER_MINUTES}, 20000, 19048, 952)
       `
     }
     await expect(sql`update rooms set capacity = 1 where id = ${twinRoomId}`).resolves.toBeDefined()
@@ -1022,9 +1044,10 @@ describe('booking — the commercial container', () => {
     const refused = await stateOf(sql`
       insert into appointment
         (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-         status, gross_price_fils)
+         status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils)
       values (${bookingId}, '2099-12-25', ${variantId}, 'solo', ${THERAPIST_A}, ${standardRoomId},
-              ${period('19', '20')}::tstzrange, 'confirmed', 20000)
+              ${period('19', '20')}::tstzrange, 'confirmed', ${TURNAROUND_MINUTES},
+              ${BUFFER_MINUTES}, 20000, 19048, 952)
     `)
     expect(refused.code).toBe('23503')
     expect(refused.message).toContain('appointment_trading_date_fkey')
@@ -1046,9 +1069,11 @@ describe('booking — the commercial container', () => {
       const refused = await stateOf(sql`
         insert into appointment
           (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-           status, gross_price_fils)
+           status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils,
+           vat_fils)
         values (${bookingId}, ${TRADING_DATE}, ${variantId}, 'solo', ${THERAPIST_A},
-                ${standardRoomId}, ${period('19', '20')}::tstzrange, 'confirmed', ${price})
+                ${standardRoomId}, ${period('19', '20')}::tstzrange, 'confirmed',
+                ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES}, ${price}, greatest(${price}, 0), 0)
       `)
       expect(refused.code).toBe(CHECK_VIOLATION)
       expect(refused.message).toContain('appointment_price_positive')
@@ -1058,9 +1083,10 @@ describe('booking — the commercial container', () => {
     await expect(sql`
       insert into appointment
         (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-         status, gross_price_fils)
+         status, turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils)
       values (${bookingId}, ${TRADING_DATE}, ${variantId}, 'solo', ${THERAPIST_A},
-              ${standardRoomId}, ${period('19', '20')}::tstzrange, 'confirmed', 1)
+              ${standardRoomId}, ${period('19', '20')}::tstzrange, 'confirmed',
+              ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES}, 1, 1, 0)
     `).resolves.toBeDefined()
   })
 })

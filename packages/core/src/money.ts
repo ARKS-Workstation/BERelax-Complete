@@ -78,6 +78,33 @@ export function aedFrom(value: number): Money {
   return { fils: filsFrom(value * 100), currency: 'AED' }
 }
 
+/**
+ * Integer fils from the digits a `bigint` column was read as, with the round trip checked.
+ *
+ * The third way a price arrives, after a literal (`aed`) and a computed figure (`aedFrom`): as a **string
+ * of digits**. `packages/db`'s connection returns `bigint` as a string precisely so nothing rounds a money
+ * figure, and `Number(value)` at the consumer would put the rounding straight back.
+ *
+ * The comparison is what makes that impossible rather than unlikely. A value that does not survive
+ * `String(Number(v))` is refused instead of published — and `String` rather than a magnitude test because
+ * the failures are not all large: `'0200'` and `'2e3'` both parse to a number that stringifies differently,
+ * and both mean somebody has reformatted a column on the way here.
+ *
+ * `label` names the column in the message, because the caller is usually two boundaries away from the
+ * query and "a price" is not enough to find it.
+ */
+export function filsFromStoredDigits(value: string, label: string): Fils {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isSafeInteger(parsed) || String(parsed) !== value) {
+    throw new AppError(
+      'invariant_violated',
+      `${label} '${value}' does not survive a round trip through a JavaScript number, so it cannot be ` +
+        'published as a price. Money is integer fils (ADR 0007).',
+    )
+  }
+  return filsFrom(parsed)
+}
+
 export function money(amount: Fils, currency: Currency = 'AED'): Money {
   return { fils: amount, currency }
 }

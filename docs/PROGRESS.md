@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**60 / 207 units complete.**
+**62 / 207 units complete.**
 
 ## Next up
 
-1. **B-AVAIL-06 — The booking transaction: room row lock, idempotency, all-or-none, price snapshot**
-1. **W-SITE-03 — JSON-LD generated from the database**  — **needs owner input:** Y1-licence, Y2-gbp-status
-1. **W-SYS-06 — Hero video rendition job**  — **needs owner input:** Y12-photos
+1. **B-AVAIL-07 — Availability query service, brief cache with write invalidation, alternatives and waitlist**
+1. **B-LIFE-01 — Appointment lifecycle state machine with actor permissions and declared side effects**
+1. **W-SITE-05 — Catalogue-derived routes: /treatments, /treatments/[slug], /pricing**  — **needs owner input:** Y9-poa-prices
 
 ## All units
 
@@ -40,7 +40,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 23 | `B-AVAIL-04` | Therapist availability read model and the eligibility port P-HR later fills | `B-AVAIL-01`, `B-CAT-02` | — | Y8-staff |
 | [x] | 24 | `B-AVAIL-05` | Gender matching as a hard constraint, default strict | `B-AVAIL-04`, `F09` | — | Y9-gender |
 | [x] | 25 | `B-CAT-04` | Price resolution chain and effective-dated price lists | `B-CAT-03`, `F05` | — | — |
-| [ ] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
+| [x] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
 | [x] | 27 | `B-CAT-05` | Catalogue mutation guard rails and the public display-name compliance lint | `B-AVAIL-01`, `B-CAT-04` | — | — |
 | [x] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
 | [ ] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
@@ -148,7 +148,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 131 | `W-SYS-03` | Radix/shadcn primitive set and an axe gate that provably fires | `H05`, `W-SYS-01`, `W-SYS-02` | — | — |
 | [x] | 132 | `W-SITE-01` | Route spine, EN/AR locales, canonicalisation and the route registry | `W-SYS-01`, `W-SYS-03` | — | — |
 | [x] | 133 | `W-SITE-02` | The premises row as the only NAP source: /api/facts, /llms.txt, robots policy | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `F09`, `W-SITE-01` | — | Y1-nap |
-| [ ] | 134 | `W-SITE-03` | JSON-LD generated from the database | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-02` | — | Y1-licence, Y2-gbp-status |
+| [x] | 134 | `W-SITE-03` | JSON-LD generated from the database | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-02` | — | Y1-licence, Y2-gbp-status |
 | [ ] | 135 | `W-SITE-05` | Catalogue-derived routes: /treatments, /treatments/[slug], /pricing | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-03`, `W-SYS-02` | — | Y9-poa-prices |
 | [x] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
 | [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |

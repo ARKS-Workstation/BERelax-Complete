@@ -25,8 +25,10 @@ import { aed, formatMoney } from '@berelax/core'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
 import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patterns'
 import type { Metadata } from 'next'
-import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
+import { readPageFacts } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import { pageGraph } from '../../../../src/seo/graph-input.ts'
+import { StructuredData } from '../../../../src/seo/structured-data.tsx'
 import {
   MotionGallery,
   type MotionGalleryCopy,
@@ -164,10 +166,33 @@ const MOTION_COPY: MotionGalleryCopy = {
 }
 
 export default async function ArabicKitchenSinkPage() {
-  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
-  const facts = await readFactsForPage()
+  // Fail-soft: `null` when the singleton has not been seeded in this database. See `readPageFacts`.
+  const source = await readPageFacts()
+  const facts = source?.facts ?? null
+  /*
+    The same graph as the English sink, on the Arabic document. See that route for why this pair is where
+    W-SITE-03's block is rendered.
+
+    The graph itself is identical in both locales and that is correct rather than an omission: every value in
+    it is a database row — the address, the hours, the numbers, the 32 prices — and none of those is
+    translated. The Arabic *copy* on this page is the route's; a fact has no language, which is the same
+    argument `/api/facts` makes for being locale-neutral. What differs is `pageUrl` and the breadcrumb, both
+    of which are derived from the registry for this locale.
+  */
+  const graph =
+    source === null
+      ? null
+      : pageGraph({
+          id: 'kitchen-sink',
+          locale: 'ar',
+          facts: source.facts,
+          licenceClass: source.licenceClass,
+          breadcrumb: { home: 'الصفحة الرئيسية', page: 'معرض المكونات' },
+          includeCatalogue: true,
+        })
   return (
     <main>
+      {graph === null ? null : <StructuredData graph={graph} />}
       <DesignSystemStyles />
       <MotionHeader copy={MOTION_COPY} />
       <RouteNav id="kitchen-sink" locale="ar" />

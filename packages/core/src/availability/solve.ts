@@ -101,8 +101,30 @@ export interface TherapistShift {
 export interface ScheduledAppointment {
   readonly id: string
   readonly roomId: string
-  /** One id for a solo delivery, two for Four Hands and Couple Massage. */
+  /**
+   * The therapists this record holds. **One id per `appointment` row** as the repository reads them.
+   *
+   * It used to say "two for Four Hands and Couple Massage", and that invitation to merge the rows of
+   * one delivery into a single record was half of a real defect: room places were counted in records,
+   * so a merged two-therapist delivery reported one place where the database counted two. Merging is
+   * now harmless — {@link delivery} is what the place count groups by — but a record is still a row,
+   * because each row blocks its own therapist over the same period and that is what
+   * `therapistsFreeFor` asks.
+   */
   readonly therapistIds: readonly string[]
+  /**
+   * The delivery this record belongs to, and the client places it occupies in the room.
+   *
+   * Absent means *this record is its own delivery of one client*, which is the reading every caller
+   * had before deliveries existed and the **stricter** one: it can only ever over-count a room's
+   * committed places, and over-counting refuses a booking the database would have taken, where
+   * under-counting offers one it refuses at COMMIT. Present, it mirrors `appointment.delivery_id` and
+   * `appointment.room_places` (0038): two therapists over one client is one delivery of one place.
+   *
+   * One optional object rather than two optional fields, so a caller cannot supply a grouping without
+   * the footprint that grouping is counted at.
+   */
+  readonly delivery?: { readonly id: string; readonly places: number }
   /** The treatment itself. Occupancy is derived from it, never stored alongside it. */
   readonly treatment: Period
   readonly turnaroundMinutes: number

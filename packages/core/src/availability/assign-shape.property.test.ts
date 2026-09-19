@@ -11,13 +11,14 @@
  *   - the two therapists are **distinct** (`appointment_therapist_no_overlap`, SQLSTATE 23P01);
  *   - both therapists and the room were reported free by the solver — assignment narrows, never widens;
  *   - the room is bookable and of a type the shape and the service's compatibility rows both allow;
- *   - `placesUsed` is the number of appointment **rows**, and the room's peak occupancy plus those rows
- *     does not exceed `rooms.capacity` (`appointment_room_capacity`, the deferred trigger of 0024).
+ *   - `placesUsed` is the number of **client places** — `min_room_capacity`, not the therapist count —
+ *     and the room's peak places plus those places does not exceed `rooms.capacity`
+ *     (`appointment_room_capacity`, the deferred trigger of 0024 as 0038 re-issued it).
  *
  * ## The oracle is written independently
  *
  * Every check below re-derives its figure with plain arithmetic over the generated sample — the room's
- * peak occupancy is counted out here rather than through `roomPlacesTaken`, and the allowed room types
+ * peak places are counted out here rather than through `roomPlacesTaken`, and the allowed room types
  * are intersected here rather than through `shapeRoomTypes`. An oracle expressed in terms of the
  * functions it is checking proves the module is self-consistent, which is not the question.
  *
@@ -201,20 +202,32 @@ function shiftsFrom(sample: Generated, opensAt: Instant): TherapistShift[] {
 function requestFrom(sample: Generated): ShapeSlotRequest {
   const session = SESSIONS[sample.dateIndex] as (typeof SESSIONS)[number]
   const rooms = roomsFrom(sample)
-  const appointments: ScheduledAppointment[] = sample.appointments.map((spec, index) => ({
-    id: `appointment-${index}`,
-    roomId: (rooms[spec.roomIndex] as Room).id,
-    therapistIds:
-      spec.pairIndex === undefined
-        ? [THERAPIST_IDS[spec.therapistIndex] as string]
-        : [THERAPIST_IDS[spec.therapistIndex] as string, THERAPIST_IDS[spec.pairIndex] as string],
-    treatment: {
+  // ONE RECORD PER APPOINTMENT ROW, with the rows of a two-therapist delivery sharing one delivery id
+  // and one places figure. That is the shape `readCommittedAppointments` returns and the unit 0038's
+  // trigger counts: a pair is two rows blocking two therapists and ONE place in the room. Merging the
+  // pair into a single record with two ids — the reading this generator used before — hid the grouping
+  // from the property entirely, because one record is one place whether it is grouped or not.
+  const appointments: ScheduledAppointment[] = sample.appointments.flatMap((spec, index) => {
+    const seated = [
+      THERAPIST_IDS[spec.therapistIndex] as string,
+      ...(spec.pairIndex === undefined ? [] : [THERAPIST_IDS[spec.pairIndex] as string]),
+    ]
+    const treatment = {
       startsAt: addMinutes(session.opensAt, spec.startOffset),
       endsAt: addMinutes(session.opensAt, spec.startOffset + spec.durationMinutes),
-    },
-    turnaroundMinutes: spec.turnaroundMinutes,
-    therapistBufferMinutes: spec.therapistBufferMinutes,
-  }))
+    }
+    // De-duplicated: the generator can draw the same index twice, and one person in two seats is a row
+    // `appointment_therapist_no_overlap` refuses rather than a pair.
+    return [...new Set(seated)].map((therapistId, seat) => ({
+      id: `appointment-${index}-${seat}`,
+      roomId: (rooms[spec.roomIndex] as Room).id,
+      therapistIds: [therapistId],
+      delivery: { id: `delivery-${index}`, places: 1 },
+      treatment,
+      turnaroundMinutes: spec.turnaroundMinutes,
+      therapistBufferMinutes: spec.therapistBufferMinutes,
+    }))
+  })
   const blocks: ResourceBlock[] = sample.blocks.map((spec) => ({
     roomId: (rooms[spec.roomIndex] as Room).id,
     period: {
@@ -253,23 +266,31 @@ interface Span {
 }
 
 /**
- * The peak number of appointment rows in one room over `period`, counted out here.
+ * The peak number of **client places** in one room over `period`, counted out here.
  *
  * Deliberately not `roomPlacesTaken`: this is the figure the deferred trigger of 0024 computes at
- * COMMIT, and checking the module against itself would pass for any consistent wrong answer. Measured
- * at the period's own start and at every row start inside it, which for half-open intervals is where a
- * maximum is always attained.
+ * COMMIT (as 0038 re-issued it), and checking the module against itself would pass for any consistent
+ * wrong answer. Measured at the period's own start and at every row start inside it, which for
+ * half-open intervals is where a maximum is always attained.
+ *
+ * Grouped by delivery, because the SQL groups by `delivery_id`: the two rows of a Four Hands are one
+ * place. A record with no delivery is its own delivery of one place.
  */
-function peakRowsIn(roomId: string, period: Span, appointments: readonly ScheduledAppointment[]) {
-  const rows: Span[] = appointments
-    .filter((appointment) => appointment.roomId === roomId)
-    .map((appointment) => appointment.treatment)
+function peakPlacesIn(roomId: string, period: Span, appointments: readonly ScheduledAppointment[]) {
+  const rows = appointments.filter((appointment) => appointment.roomId === roomId)
   const instants = [
     period.startsAt,
-    ...rows.map((row) => row.startsAt).filter((at) => at >= period.startsAt && at < period.endsAt),
+    ...rows
+      .map((row) => row.treatment.startsAt)
+      .filter((at) => at >= period.startsAt && at < period.endsAt),
   ]
   return instants.reduce((peak, at) => {
-    const concurrent = rows.filter((row) => row.startsAt <= at && at < row.endsAt).length
+    const perDelivery: Record<string, number> = {}
+    for (const row of rows) {
+      if (row.treatment.startsAt > at || at >= row.treatment.endsAt) continue
+      perDelivery[row.delivery?.id ?? row.id] = row.delivery?.places ?? 1
+    }
+    const concurrent = Object.values(perDelivery).reduce((total, places) => total + places, 0)
     return concurrent > peak ? concurrent : peak
   }, 0)
 }
@@ -321,16 +342,18 @@ function assignmentFaults(args: {
     faults.push(`${room.id} is a ${room.roomType} room, which this shape may not use`)
   }
 
-  // One appointment row per therapist, so the places a delivery consumes is the therapist count when
-  // that is the larger figure — Four Hands is one client and two rows.
-  const rows = Math.max(shape.minRoomCapacity, shape.therapistsRequired)
-  if (assignment.placesUsed !== rows) {
-    faults.push(`placesUsed is ${assignment.placesUsed} where the shape writes ${rows} rows`)
-  }
-  const peak = peakRowsIn(room.id, slot.treatment, request.appointments)
-  if (peak + rows > room.capacity) {
+  // `rooms.capacity` counts CLIENTS (0012), so the places a delivery consumes is its client count and
+  // never its therapist count: Four Hands is two therapists over one client and takes one place (0038).
+  const places = shape.minRoomCapacity
+  if (assignment.placesUsed !== places) {
     faults.push(
-      `${room.id} would hold ${peak + rows} rows at once against a capacity of ${room.capacity}`,
+      `placesUsed is ${assignment.placesUsed} where the shape occupies ${places} client place(s)`,
+    )
+  }
+  const peak = peakPlacesIn(room.id, slot.treatment, request.appointments)
+  if (peak + places > room.capacity) {
+    faults.push(
+      `${room.id} would hold ${peak + places} places at once against a capacity of ${room.capacity}`,
     )
   }
   return faults
@@ -458,23 +481,25 @@ describe('the oracle can fail', () => {
     expect(faults).toContain('the same therapist assigned twice')
   })
 
-  it('reports a Four Hands put in a room with one place too few', () => {
-    // The capacity-1 standard room the solver legitimately offers a Four Hands — its `clients` figure
-    // is 1 — and which the database refuses the second appointment row in with `room_over_capacity`.
-    const fourHands = requestFrom({ ...sample, shapeIndex: 1 })
-    expect(fourHands.shape).toEqual(FOUR_HANDS_SHAPE)
-    const single = fourHands.rooms.find(
+  it('reports a Couple Massage put in a room with one place too few', () => {
+    // Two clients into a one-client room. This is the fault a Four Hands used to be reported for while
+    // the places figure was the therapist count, and the reason the mutant had to be rewritten: a Four
+    // Hands in a capacity-1 room is now correct, and a checker still reporting it would refuse the
+    // shape this unit exists to make bookable.
+    const single = honest.rooms.find(
       (room) => room.roomType === 'standard' && room.capacity === 1,
     ) as Room
-    const faults = faultsOfMutant(
-      // The honest module assigns nothing here, so the mutant is measured on a request whose inventory
-      // does hold a large enough room — and then moved into the small one.
-      {
-        ...fourHands,
-        rooms: [...fourHands.rooms, { ...single, id: 'room-standard-twin', capacity: 2 }],
-      },
-      (assignment) => ({ ...assignment, roomId: single.id }),
-    )
+    const faults = faultsOfMutant(honest, (assignment) => ({ ...assignment, roomId: single.id }))
     expect(faults.some((fault) => fault.includes('against a capacity of 1'))).toBe(true)
+  })
+
+  it('reports a Four Hands claiming a place per therapist', () => {
+    // The regression 0038 corrected, as a mutant: `placesUsed` set to the therapist count. A room with
+    // one place would then look too small for the shape it fits, and Four Hands would be unbookable
+    // against the whole seeded standard inventory.
+    const fourHands = requestFrom({ ...sample, shapeIndex: 1, keepRequiredRoomType: false })
+    expect(fourHands.shape).toEqual({ ...FOUR_HANDS_SHAPE, requiredRoomType: undefined })
+    const faults = faultsOfMutant(fourHands, (assignment) => ({ ...assignment, placesUsed: 2 }))
+    expect(faults).toContain('placesUsed is 2 where the shape occupies 1 client place(s)')
   })
 })

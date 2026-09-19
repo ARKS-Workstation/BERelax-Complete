@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-18
-- **Unit:** B-AVAIL-01
+- **Unit:** B-AVAIL-01, amended by B-AVAIL-06 (see "Amendment: what a place is")
 - **Covers:** docs/01 decisions — none; this is the mechanism behind the one ADR 0015 chose for decision 9
 
 ## Decision
@@ -16,8 +16,9 @@ create constraint trigger appointment_room_capacity
   for each row execute function assert_room_capacity();
 ```
 
-The trigger counts the **peak number of overlapping resource-holding appointments** in the room and
-compares it to `rooms.capacity`. The therapist half of the same requirement is a plain, immediate
+The trigger counts the **peak number of overlapping client places** held in the room and compares it
+to `rooms.capacity`. It counted appointment *rows* until migration 0038; see the amendment at the end
+of this record for why that was wrong and what changed. The therapist half of the same requirement is a plain, immediate
 exclusion constraint:
 
 ```sql
@@ -192,6 +193,62 @@ guarantee. It would push retry handling into every write path in the application
 against concurrent transactions — a single transaction that over-books a room on its own would still
 commit.
 
+## Amendment: what a place is (B-AVAIL-06, migration 0038)
+
+`assert_room_capacity` counted **appointment rows**. `0024` writes one row per therapist, and
+`rooms.capacity` is documented in `0012_rooms.sql` as *the clients a room holds at once*. The two were
+never comparable, and the consequence was measurable rather than theoretical:
+
+- docs/13 §4 states Four Hands as **2 therapists, 1 standard room, 1 client**, and `0017` seeds
+  `min_room_capacity = 1` for it, correctly.
+- B-CAT-06 measured the inventory against that document and seeded three standard rooms at capacity 1.
+- So a Four Hands was a peak of 2 against a capacity of 1, and the second row was refused at COMMIT with
+  `room_over_capacity`. A shape the business sells was assignable to no room the salon owns. B-AVAIL-03
+  returned zero slots for it rather than offering one the booking transaction could not commit, and
+  B-AVAIL-04 found the mirror image in `packages/core` — `roomPlacesTaken` counting records where the SQL
+  counted rows — and left the resolution to the transaction that would have to write the columns.
+
+**The counting rule was the defect, not the inventory.** Inventing a two-place standard room would have
+invented a premises fact to make a test pass, and would also have let the scheduler put two unrelated
+clients in one room (B-CAT-06 decided Y8-rooms on exactly that ground). So `appointment` gained two
+columns:
+
+- `delivery_id` — the rows of one delivery share it. Two therapists over one client is one delivery, two
+  rows, one place.
+- `room_places` — the clients that delivery puts in the room, from
+  `service_resource_shape.min_room_capacity`.
+
+and `room_peak_concurrency` now sums `max(room_places)` over **distinct deliveries** at each instant
+instead of counting rows. The function keeps its name and its output columns: the measurement is
+unchanged — a true peak at an instant, never a daily total, and every argument above about *which
+instants* to measure still holds — and only the unit is corrected, from rows to clients, which is what
+"concurrency" meant. Two functions answering one question during the change is how the two units came to
+disagree in the first place.
+
+Three consequences worth stating:
+
+- **Both columns carry a DEFAULT, and the defaults are the stricter reading.**
+  `delivery_id default uuid_generate_v7()` means "this row is its own delivery" and `room_places` is 1,
+  so a writer that has never heard of a delivery reproduces the old row count exactly. Over-counting
+  refuses a booking the database would have taken; under-counting offers one it refuses at COMMIT. No
+  default can reach the second.
+- **A delivery is one room over one period**, enforced by `appointment_delivery_is_coherent`
+  (SQLSTATE `ZB004`), and deferred for the same reason the capacity trigger is: a legitimate
+  rearrangement passes through a state it would refuse. Without it `max(room_places)` per delivery is a
+  guess about which row to believe, and a reschedule that moved one row of a Four Hands would silently
+  split it into two deliveries — two places, refused at the *next* booking rather than at the move.
+- **The error messages changed.** They said "overlapping appointments"; they now say "client places". A
+  trigger whose message names the wrong unit is how the next reader concludes the inventory is too small
+  and invents a room to fix it.
+
+The room lock this record called B-AVAIL-06's is now taken, in `createBooking`
+(`packages/db/src/repositories/create-booking.ts`): one `SELECT … FOR UPDATE` per room, in ascending
+room-id order, before anything is counted. The order is computed at the call site rather than left to
+`ORDER BY`, because `ORDER BY` is applied after the rows are locked and the acquisition order would
+otherwise be a property of the plan. `packages/fixtures/src/booking-concurrency.itest.ts` runs the
+hundred-race and the two-hundred-iteration interleaved stress; gates 41m and 41n remove the lock and the
+order and watch the pair suite fail.
+
 ## See also
 
 - [ADR 0015](0015-double-booking-prevented-in-the-database.md) — double-booking is prevented in the
@@ -202,3 +259,5 @@ commit.
   neither the exclusion constraint nor the trigger is expressible in the mirror.
 - `packages/db/migrations/0024_appointment_constraints.sql` and
   `packages/db/src/schema/booking-constraints.itest.ts`.
+- `packages/db/migrations/0038_booking_transaction.sql` and
+  `packages/fixtures/src/booking-transaction.itest.ts` — the amendment above.

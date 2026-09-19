@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { GenderMatchingMode, TherapistSkill } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from '../connection.ts'
@@ -653,6 +654,8 @@ describe('readCommittedAppointments', () => {
     readonly to: string
     readonly roomCode: string
     readonly shape: string
+    /** Shared by every row this call writes, so a two-therapist shape is ONE delivery (0038). */
+    readonly deliveryId?: string
   }): Promise<string> => {
     const [customer] = await sql<{ id: string }[]>`
       insert into customer (phone_e164, created_via) values ('+971590000411', 'guest_booking')
@@ -665,6 +668,10 @@ describe('readCommittedAppointments', () => {
       returning id
     `
     const bookingId = (booking as { id: string }).id
+    // One delivery id shared by every row of this call: two therapists over one client is ONE delivery
+    // and ONE client place in the room (0038). Passed in rather than defaulted, because the default is a
+    // fresh id per row, which counts the pair as two places.
+    const deliveryId = args.deliveryId ?? randomUUID()
     const [room] = await sql<{ id: string }[]>`select id from rooms where code = ${args.roomCode}`
     // This file's own variant. 0017 seeds the eight services and no variants — B-CAT-06's seed owns
     // the 32 price points — so a suite that needed one has to create it, exactly as
@@ -685,29 +692,33 @@ describe('readCommittedAppointments', () => {
       await sql`
         insert into appointment
           (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period,
-           status, gross_price_fils)
+           status, delivery_id, room_places, turnaround_minutes, therapist_buffer_minutes,
+           gross_price_fils, net_fils, vat_fils)
         values (
           ${bookingId}, ${TRADING_DATE}, ${(variant as { id: string }).id}, ${args.shape}::service_shape,
           ${idOf(reference)}, ${(room as { id: string }).id},
           ${`[${dubai(TRADING_DATE, args.from)},${dubai(TRADING_DATE, args.to)})`}::tstzrange,
-          'confirmed', 20000
+          'confirmed', ${deliveryId}, 1, 20, 10, 20000, 19048, 952
         )
       `
     }
     return bookingId
   }
 
-  it('returns one record per appointment ROW, which is the unit 0024 counts capacity in', async () => {
-    // Two therapists in one room over one period is TWO rows, and the deferred capacity trigger counts
-    // rows. Merging them into one record with two therapistIds — the reading `ScheduledAppointment`'s
-    // doc comment suggests — under-counts that room's committed places by one, and `roomPlacesTaken`
-    // in assign-shape.ts would then report a free place the trigger refuses at COMMIT.
+  it('returns one record per appointment ROW, each carrying the delivery it belongs to', async () => {
+    // Rows are what block THERAPISTS: each of the two rows of a Four Hands holds its own person over the
+    // same period, which is what `therapistsFreeFor` asks. Deliveries are what fill a ROOM: 0038 counts
+    // client places per `delivery_id`, so these two rows are ONE place. Before 0038 the trigger counted
+    // rows against `rooms.capacity` — a column 0012 documents as CLIENTS — and the two readings
+    // disagreed, which is what made Four Hands unbookable in every capacity-1 standard room.
+    const deliveryId = randomUUID()
     const bookingId = await bookAppointment({
       references: ['bavail04-a', 'bavail04-b'],
       from: '19',
       to: '20',
       roomCode: 'room-couples',
       shape: 'four_hands',
+      deliveryId,
     })
     const rows = await readCommittedAppointments(sql, { tradingDate: TRADING_DATE })
     const mine = rows.filter((row) =>
@@ -716,7 +727,31 @@ describe('readCommittedAppointments', () => {
     expect(mine).toHaveLength(2)
     expect(mine.every((row) => row.therapistIds.length === 1)).toBe(true)
     expect(mine.map((row) => row.roomId)).toEqual([mine[0]?.roomId, mine[0]?.roomId])
-    expect(mine[0]?.turnaroundMinutes).toBeGreaterThan(0)
+    // Both rows, one delivery, one client place — the pair core groups by.
+    expect(mine.map((row) => row.delivery)).toEqual([
+      { id: deliveryId, places: 1 },
+      { id: deliveryId, places: 1 },
+    ])
+    // The two snapshot columns 0038 added, read from the appointment and no longer re-derived from the
+    // catalogue: the fixture wrote 20 and 10, and those are the figures that come back.
+    expect(mine[0]?.turnaroundMinutes).toBe(20)
+    expect(mine[0]?.therapistBufferMinutes).toBe(10)
+
+    // The control for the delivery grouping: a SEPARATE row with its own delivery id is its own place,
+    // so the assertion above is the grouping rather than a reader that answers one id for everything.
+    const soloBooking = await bookAppointment({
+      references: ['bavail04-a'],
+      from: '21',
+      to: '22',
+      roomCode: 'room-couples',
+      shape: 'solo',
+    })
+    const withSolo = await readCommittedAppointments(sql, { tradingDate: TRADING_DATE })
+    const solo = withSolo.filter((row) => row.id !== mine[0]?.id && row.id !== mine[1]?.id)
+    expect(solo).toHaveLength(1)
+    expect(solo[0]?.delivery.id).not.toBe(deliveryId)
+    await sql`delete from appointment where booking_id = ${soloBooking}`
+    await sql`delete from booking where id = ${soloBooking}`
 
     // Cancelling releases both, because the select is on `holds_resources` — the generated column the
     // exclusion constraint and the capacity trigger read, so "still holds" has one definition.

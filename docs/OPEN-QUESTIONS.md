@@ -107,6 +107,7 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 | Y5-analytics-basis | Lawful basis for the **internal** first-party analytics store, which shares nothing with third parties — a different question from the consent-gated GA4/Meta push | Internal store treated as consent-gated too, i.e. the stricter position | open | `A-FIRST` go-live |
 | Y12-ref-loop | **Will the front desk paste the WhatsApp ref code at booking?** If not, attribution honestly stops at the click | Ref field present; capture rate reported rather than assumed | open | funnel completeness |
 | Y1-woo-baseline | Crawl and rank baseline of `berelaxmassage.com` before anything changes, for the 301 map | Not yet captured | open | `W-SITE` 301 map, relaunch safety |
+| Y1-profiles | **The URLs of the business's own profiles elsewhere: TripAdvisor, Instagram, Facebook.** docs/13 §6 records that a TripAdvisor listing exists and gives no URL, and neither web property publishes a social link | **None published.** `Organization.sameAs` in the JSON-LD carries the site origin alone (W-SITE-03). A plausible URL would bind this entity to somebody else's listing, which is precisely the collision with the airport-spa chain that `sameAs` exists to prevent; `SAME_AS_UNANSWERED` in `@berelax/core` names each absent profile with this id. The GBP URL is `Y2-gbp-status`'s | open | `Organization.sameAs`, entity disambiguation, citation consistency |
 
 ---
 

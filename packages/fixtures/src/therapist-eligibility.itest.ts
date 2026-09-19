@@ -731,11 +731,11 @@ describe('acceptance — it does not offer a slot the database would then refuse
     await sql`
       insert into appointment
         (booking_id, trading_date, service_variant_id, shape, therapist_id, room_id, period, status,
-         gross_price_fils)
+         turnaround_minutes, therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils)
       values (
         ${bookingId}, ${TRADING_DATE}, ${variantId}, 'solo', ${idOf('bavail04p-short')}, ${roomId},
         ${`[${new Date(treatment.treatment.startsAt).toISOString()},${new Date(treatment.treatment.endsAt).toISOString()})`}::tstzrange,
-        'confirmed', 30000
+        'confirmed', ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES}, 30000, 28571, 1429
       )
     `
     // It committed, which is the first half of the claim: `appointment_therapist_no_overlap` and the

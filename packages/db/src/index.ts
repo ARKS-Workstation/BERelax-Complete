@@ -148,6 +148,32 @@ export {
   TREATMENTS_INDEX_PATH,
 } from './repositories/catalogue.ts'
 export {
+  BOOKABLE_STATUSES,
+  BOOKING_REFUSALS,
+  BOOKING_SQLSTATE,
+  type BookableStatus,
+  type BookingDeliveryInput,
+  type BookingPriceSnapshot,
+  type BookingRefusal,
+  bookingError,
+  bookingRefusalOf,
+  bookSlot,
+  type CreateBookingDeps,
+  type CreateBookingInput,
+  type CreatedBooking,
+  type CreatedBookingDelivery,
+  createBooking,
+  isIdempotencyRace,
+  readBookingByIdempotencyKey,
+  readBookingDeliveries,
+  requestFingerprint,
+  type SlotRecheck,
+  type SlotRecheckInput,
+  type SlotRecheckResult,
+  type SlotRecheckRoom,
+  type SlotRecheckShape,
+} from './repositories/create-booking.ts'
+export {
   CUSTOMER_ORIGINS,
   type CustomerIdentityInput,
   type CustomerOrigin,
@@ -422,6 +448,7 @@ export {
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-// 37 and 38 are units in flight alongside this one; 36 is 0036_setting_justification.sql and 39 is
-// 0039_reverse_charge.sql.
+// 37 is a unit in flight alongside this one. 36 is 0036_setting_justification.sql, 38 is
+// 0038_booking_transaction.sql — which corrects the unit `rooms.capacity` is counted in and adds the four
+// figures an appointment snapshots — and 39 is 0039_reverse_charge.sql.
 export const SCHEMA_VERSION = 39 as const

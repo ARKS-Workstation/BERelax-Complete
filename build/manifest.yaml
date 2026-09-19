@@ -1025,7 +1025,7 @@ units:
       snapshots the resolved price and tax onto each appointment, and writes the outbox event and audit
       event in the same transaction. The public endpoint requires an idempotency key.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-AVAIL-01
@@ -1052,6 +1052,123 @@ units:
     - 'The appointment insert, the outbox booking.created event and the audit_event commit together: killing
       the worker before it drains leaves the event in pending state and zero messages sent, and draining
       later delivers it exactly once'
+    - 'NOTE: the room-places disagreement two units left here is RESOLVED, and the counting rule was the
+      defect rather than the inventory. rooms.capacity is documented in 0012 as the CLIENTS a room holds
+      at once; 0024 stored one appointment ROW per therapist and counted rows against that column. docs/13
+      section 4 states Four Hands as "2 therapists, 1 standard room, 1 CLIENT", 0017 seeds
+      min_room_capacity 1 for it correctly, and B-CAT-06 measured the inventory against that document and
+      seeded three standard rooms at capacity 1. So a Four Hands was a peak of 2 against a capacity of 1
+      and its second row was refused at COMMIT: a shape the business sells was assignable to no room the
+      salon owns. packages/db/migrations/0038_booking_transaction.sql adds appointment.delivery_id (the
+      rows of one delivery share it) and appointment.room_places (the clients that delivery puts in the
+      room), and re-issues room_peak_concurrency to sum max(room_places) over DISTINCT deliveries instead
+      of counting rows. Four Hands IS now bookable in a capacity-1 standard room - gate 41k commits the
+      two rows as one delivery against real PostgreSQL, and
+      packages/fixtures/src/booking-transaction.itest.ts books it end to end through createBooking. The
+      function keeps its name and its output columns because the MEASUREMENT is unchanged (a true peak at
+      an instant, never a daily total - every argument in ADR 0024 about which instants to measure still
+      holds); only the unit is corrected, and two functions answering one question during the change is
+      how the two units came to disagree in the first place. Both new columns carry a DEFAULT and the
+      defaults are the stricter reading: delivery_id defaults to a fresh id per row and room_places to 1,
+      so every pre-existing writer reproduces the old row count exactly - over-counting refuses a booking
+      the database would have taken, under-counting offers one it refuses at COMMIT, and no default can
+      reach the second. In core, roomPlacesRequired is now shape.minRoomCapacity and roomPlacesTaken
+      groups by ScheduledAppointment.delivery; the ScheduledAppointment.therapistIds comment that invited
+      one record per DELIVERY is corrected to say one record per ROW, because rows are what block
+      therapists and deliveries are what fill a room. B-AVAIL-03''s assign-shape.test.ts and
+      assign-shape.property.test.ts were updated with it: the property oracle now counts client places per
+      delivery, its generator emits one record per row sharing a delivery id, and its "Four Hands in a
+      room with one place too few" mutant became "a Couple Massage in a room with one place too few" plus
+      a new mutant that sets placesUsed to the therapist count - the regression 0038 corrected. Gate 26q''s
+      first probe keeps its SQL and is relabelled: two rows with no shared delivery id are two deliveries,
+      and a one-client room still refuses them. ADR 0024 carries the amendment.'
+    - 'NOTE: appointment now snapshots turnaround_minutes and therapist_buffer_minutes, which solve.ts
+      always said it did and B-AVAIL-04 deferred here. Both are NOT NULL with NO default, because there is
+      no honest default for either - a zero turnaround claims the room is free the instant the treatment
+      ends - so every writer states them and a missing snapshot is a not_null_violation (gate 41f).
+      createBooking reads both from the catalogue INSIDE the transaction rather than taking them from the
+      caller, which is what makes them the figures in force at the moment the booking was taken;
+      readCommittedAppointments now reads the columns and no longer joins service or
+      service_resource_shape at all. The eleven existing appointment inserts across seven files gained the
+      two figures, and the migration backfills them for any database that already held rows. The price
+      snapshot gained net_fils, vat_fils, vat_rate_bp, price_list_id and promotion_id beside the
+      gross_price_fils 0024 already had, with appointment_price_split_exact enforcing net + vat = gross
+      exactly (ADR 0007); promotion_id references nothing because no promotion table exists and no unit
+      owns one (B-CAT-04''s NOTE).'
+    - 'NOTE: appointment.therapist_id still has NO foreign key, and that is B-AVAIL-04''s reasoning
+      carried out rather than deferred again. `references employee (id)` would accept a receptionist as
+      the therapist of a massage while reading as though it had proved otherwise; the claim worth
+      enforcing is the eligibility read model - employed, holding the skill this style requires, rostered,
+      not on approved leave, credentialled - and createBooking re-applies it with readEligibleTherapists
+      inside the transaction, narrowed to the therapists the request named, refusing with
+      therapist_not_eligible and the reason the model gave. Gate 41o removes that call and watches the
+      pair suite fail. B-AVAIL-05''s gender rule is honoured and not re-opened: the mode is passed through
+      to the same reader and normalised by the same genderMatchingMode, so absent is strict here as it is
+      in the solver, and a request whose client gender was never collected is refused with
+      requires_client_gender - which the eligibility reader CANNOT catch, because an absent client gender
+      means "this query is not about a client" there (the admin calendar asks who is working on Thursday).
+      That refusal is the one rule this unit added beyond its acceptance list, and without it the booking
+      path would book through a refusal the availability query had already made.'
+    - 'NOTE: roomsFreeFor is left STRICTER than the database, deliberately, and the deferral is renewed
+      rather than closed. It drops a room with any overlapping occupancy even where capacity allows a
+      second place, so the salon under-offers shared-room slots. Relaxing it would make the scheduler
+      offer the second place of the capacity-2 couples room to an unrelated walk-in, and B-CAT-06 decided
+      Y8-rooms against exactly that ("would let the scheduler put two unrelated clients in one room") -
+      whether a room may be shared between two parties is a premises and privacy decision nobody has
+      taken, and the strict reading under-offers rather than over-books, which is the direction 0004 says
+      an unconfirmed question resolves in. Four Hands did not need it: its two therapists are ONE delivery
+      of one client, so the room is empty when the slot is offered. What the relaxation would unlock is
+      only the half-occupied shared room, and B-AVAIL-02''s property oracle still encodes the strict
+      reading. Still tracked under Y8-rooms, now with the room-places half resolved.'
+    - 'NOTE: the concrete files this list left as placeholders, and one correction.
+      create-booking.concurrency.test.ts is not in packages/db: the races need real transactions AND
+      core''s own assignShape as the injected re-check, and packages/db may never import packages/core -
+      so they are packages/fixtures/src/booking-concurrency.itest.ts (the 100-race and the 200-iteration
+      interleaved stress) and packages/fixtures/src/booking-transaction.itest.ts (the lock, the
+      idempotency replay including the deliberately delayed first transaction, all-or-none, the price
+      snapshot, the outbox and the audit row). packages/db/src/repositories/create-booking.test.ts is the
+      half that needs no database - the request fingerprint, every refusal raised before a statement is
+      issued, and the SQLSTATE translation - asserted with a unit of work whose every statement throws, so
+      "refused before anything was written" is a property of the test. The endpoint''s 400 is
+      apps/web/app/api/v1/bookings/handler.test.ts, driven with a connection and a clock that throw on
+      use. The re-check adapter is recheckShapeAssignment in
+      packages/core/src/availability/assign-shape.ts rather than in the route, so the route and the pair
+      test pass one function: an adapter written twice is two rules, and the second drifts. SCHEMA_VERSION
+      is 38 and the migration is 0038_booking_transaction.sql; 0037 was a unit in flight alongside this
+      one.'
+    - 'NOTE: two acceptance lines are satisfied differently from the way they are worded, and neither is a
+      narrowing. (1) "booking_idempotency has a UNIQUE constraint on the client-supplied key" is satisfied
+      by the PRIMARY KEY 0024 already declared on that column - a primary key IS a unique constraint in
+      PostgreSQL, backed by a unique index, and a second UNIQUE on the same column would be a duplicate
+      index and a second answer to one question. The itest asserts it from pg_constraint by contype and
+      column, and gate 41i asserts the refusal by the constraint name booking_idempotency_pkey. (2) "a
+      test inspects pg_locks to confirm the lock is held" is satisfied, and the pg_locks row alone is NOT
+      the assertion that proves it: inserting an appointment makes PostgreSQL check
+      appointment_room_id_fkey, which takes FOR KEY SHARE on the parent rooms row, and FOR KEY SHARE is
+      also a RowShareLock at table level - so the pg_locks row appears whether the transaction took the
+      lock deliberately or not. That was measured, not assumed: with `for update` removed the pg_locks
+      assertion still passed. The decisive assertion is a competing `select ... for share nowait`, which is
+      compatible with FOR KEY SHARE and conflicts with FOR UPDATE, so 55P03 is the proof; both are in the
+      same test and gate 41m removes the lock and watches it fail.'
+    - 'NOTE: the lock is ONE statement per room in ascending room-id order, not a single
+      `where id = any(...) order by id for update`. The single statement takes the same locks in one round
+      trip and was the first version; it is wrong for the claim, because ORDER BY is applied AFTER the rows
+      are locked and the acquisition order is then a property of the plan - a sequential scan returns
+      physical order, an index scan returns index order, and neither is a promise. The order is computed at
+      the call site (`.sort()` over the de-duplicated room ids) so it is a property of this code, gate 41n
+      removes those seven characters and watches the ordering assertion fail, and the 200-iteration
+      interleaved stress runs A-then-B against B-then-A with zero deadlocks.'
+    - 'NOTE: the transaction runs `set constraints all immediate` after its last insert, so the two
+      DEFERRED triggers - appointment_room_capacity and appointment_delivery_is_coherent - fire inside the
+      transaction rather than at COMMIT. They are deferred because a legitimate rearrangement passes
+      through a state they would refuse (ADR 0024), and this transaction has finished rearranging:
+      checking there means a capacity refusal arrives as a named slot_taken where the context is, instead
+      of from a COMMIT createBooking does not execute. bookingError is exported anyway, as the backstop for
+      a caller that composes another statement into the same unit of work - the same reason journalError
+      and catalogueError are exported. The one recovery that cannot happen inside the transaction is the
+      second request of a double tap finding its key taken: a unique violation has already aborted the
+      transaction it arrived in, so bookSlot owns it and answers the loser from the winner''s committed
+      claim.'
     files:
     - packages/db/src/repositories/create-booking.ts
     - apps/web/app/api/v1/bookings/route.ts
@@ -6450,7 +6567,7 @@ units:
       FAQPage, BreadcrumbList, ImageObject and VideoObject — validated in CI, with the medical-type claim
       impossible while the licence class is unconfirmed.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-01
@@ -6486,12 +6603,65 @@ units:
       hero — each asserted route by route
     - The CI structured-data validator exits non-zero on a known-bad fixture (a Service with no offers,
       and a DaySpa with no address), proving invalid JSON-LD fails the build rather than warning
+    - 'NOTE: the block is RENDERED on the two /kitchen-sink documents and nowhere else yet, and the reason
+      is the registry, not an omission. `/` and `/ar` are `rendering: static`, so their markup is evaluated
+      during `next build` — where there is no database by design, and CI applies the migrations AFTER the
+      build step. A build-time read would bake a graph nothing could then correct, which is a hand-written
+      schema block with extra steps; the kitchen sink is the one `force-dynamic` document in the registry,
+      which is why W-SITE-02 put the NAP block there for the same reason. The builders, the validator, the
+      greps and the route-crawling match test are all complete and route-agnostic. Deferred to W-SITE-04
+      (home page under ISR) and W-SITE-05 (treatment pages): both render the block by calling
+      `readGraphForPage` with their route id.'
+    - 'NOTE: `Organization.sameAs` publishes the site origin ONLY. No TripAdvisor, Instagram or Facebook URL
+      exists anywhere in the system — docs/13 §6 records that a TripAdvisor listing exists and gives no URL —
+      and the GBP URL is blocked on Y2-gbp-status. A plausible URL would bind this entity to somebody else''s
+      listing, which is exactly the collision with the airport-spa chain that `sameAs` exists to prevent.
+      `SAME_AS_UNANSWERED` in `@berelax/core` names every absent profile with its open question, and
+      `Y1-profiles` was opened for the three that had none. The builder takes the recorded profiles as an
+      argument, so the day a URL is confirmed it is one call site.'
+    - 'NOTE: `ImageObject` and `VideoObject` are built and unit-tested but EMIT NOTHING today. No hero
+      derivative is committed or served — `build/budgets.json` builds the derivative budgets from the
+      originals at check time, and no route serves a `/m/...` URL — so an `ImageObject.contentUrl` would
+      404, which is a claim about the page a crawler checks and fails. And there is no video at all: all 25
+      assets in `assets/media/manifest.json` are stills, and the prototype''s `#video` anchor pointed at an
+      embed on somebody else''s platform. Deferred to the unit that serves derivatives and to W-SITE-04''s
+      hero.'
+    - 'NOTE: `Person` blocks emit NOTHING, and that is the guard working rather than a gap. `employee` has no
+      `display_name` column at all (0030 states why: a nullable one is what an admin fills in without a
+      consent row, leaving the guard invisible) and there is no photography-consent register, so no candidate
+      can pass ADR 0020. `mayPublishTherapist` requires both, and
+      `apps/web/src/seo/structured-data.itest.ts` asserts the column really is absent — so the empty list
+      cannot quietly stay empty after somebody adds one. Y12-names and Y12-consent-photo.'
+    - 'NOTE: `FAQPage` derives from the `faq_entries` collection and is wired but unfed: `/faq` is not in the
+      route registry (docs/09 §1 lists it as a later route), so there is no page for the node to live on and
+      no Payload read path on a rendered route. `apps/web/src/seo/structured-data.test.ts` asserts the
+      builder''s field names against `FAQ_ENTRIES`''s own field list, so a renamed CMS field fails a test
+      rather than producing empty answers. Deferred to the unit that adds /faq.'
+    - 'NOTE: `geo`/`GeoCoordinates` is DELIBERATELY ABSENT. `premises.latitude` and `longitude` are NULL
+      because docs/13 states no coordinate; a plausible pair would put a map pin on the wrong building with
+      nothing on the page saying it was a guess. `aggregateRating` and `review` have no builder at all: there
+      are no reviews, and docs/09 §"Schema types" refuses self-serving review markup, which Google answers
+      with a manual action rather than a dropped rich result. Both absences are asserted on the served bytes,
+      and the validator reports `geo_incomplete` and `aggregate_rating_without_reviews` on a fixture.'
+    - 'NOTE: the bare-brand rule is scoped to `name`/`alternateName` and EXEMPTS `legalName`, which the first
+      run of the assertion found. `legal_entity.legal_name` is the registered entity — the name on the trade
+      licence and on every tax invoice — and rewriting it to contain "Massage Center" would put a name on a
+      tax document that no registry holds. The same run found `<title>BE RELAX admin</title>` in B-MSG-04''s
+      Messages inbox; it is exempt because its registry entry is `indexable: false`, and every exemption is
+      checked against the registry so one cannot be granted to an indexable page.'
+    - 'NOTE: the tests are `packages/core/src/seo/jsonld/*.test.ts`, `apps/web/src/seo/*.test.ts` and
+      `apps/web/src/seo/structured-data.itest.ts`, not `tests/seo/jsonld.spec.ts`: `vitest.config.ts` includes
+      `packages/**/*.test.ts` and `apps/**/*.test.ts` only, and there is no top-level `tests/` directory in
+      this repository.'
     files:
     - packages/core/src/seo/jsonld/*.ts
+    - apps/web/src/seo/graph-input.ts
     - apps/web/src/seo/structured-data.tsx
+    - apps/web/src/seo/page-graph.ts
+    - apps/web/src/seo/brand.ts
     - scripts/validate-structured-data.mjs
     - scripts/test-gates.mjs
-    - tests/seo/jsonld.spec.ts
+    - apps/web/src/seo/structured-data.itest.ts
   - id: W-SITE-05
     order: 135
     title: 'Catalogue-derived routes: /treatments, /treatments/[slug], /pricing'

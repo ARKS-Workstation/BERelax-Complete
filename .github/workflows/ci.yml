@@ -134,6 +134,13 @@ jobs:
       - name: Tax document rules
         run: pnpm documents
 
+      # Every JSON-LD block this site serves is built by one function, and an invalid graph fails the build
+      # rather than warning. The rules a review does not catch: a plausible coordinate nothing stands behind,
+      # an aggregateRating with no reviews, a Service with no price, and an OpeningHoursSpecification that
+      # crosses midnight in one entry — which makes every consumer conclude the premises is never open.
+      - name: Structured data (JSON-LD) validity
+        run: pnpm structured-data
+
       # The editorial grid, the direction multiplier and the one shadow. Static rules, so they run with
       # the other cheap scans rather than after the browser work.
       - name: Layout, motion and elevation discipline
