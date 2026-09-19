@@ -4,7 +4,11 @@ import { join } from 'node:path'
 import { createConnection, createPostgresMessageStore, type Sql } from '@berelax/db'
 import { ARABIC_150, type SeededMessagingFixture, seedMessagingFixture } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
-import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
+import {
+  captureUntilStable,
+  DETERMINISM_CSS,
+  DETERMINISTIC_LAUNCH_ARGS,
+} from '@berelax/harness/determinism'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -380,25 +384,27 @@ describe('acceptance — the same route photographed twice is byte-identical', (
   it('captures 3 viewports x 2 themes twice, with zero pixel diff between the runs', async () => {
     mkdirSync(SCREENS, { recursive: true })
     const shots = new Map<string, Uint8Array>()
-    for (const pass of [1, 2]) {
-      for (const cell of CELLS) {
-        const label = `${cell.theme}-${cell.width}`
-        const png = await withCell(cell, (page) =>
-          page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
-        )
-        expect(png.byteLength, label).toBeGreaterThan(1000)
-        if (pass === 1) {
-          shots.set(label, png)
-          writeFileSync(join(SCREENS, `messages-inbox__${label}__ltr.png`), png)
-          continue
-        }
-        // Byte equality, which is a zero pixel diff and then some: the page renders from a database,
-        // and a document that printed a relative time or a generated id could not do this.
-        expect(
-          Buffer.compare(Buffer.from(shots.get(label) ?? new Uint8Array()), Buffer.from(png)),
-          label,
-        ).toBe(0)
-      }
+    for (const cell of CELLS) {
+      const label = `${cell.theme}-${cell.width}`
+      /*
+        The claim is about the PAGE: it renders from a database, and a document printing a relative time or
+        a generated id could not render identically twice. Through `captureUntilStable` rather than
+        comparing capture one to capture two, because that also asserts paint had settled by the first
+        capture — untrue at load 10 on a four-core box, where this flapped a byte at a time while passing
+        in isolation every time. The helper throws `[screenshot-never-stabilised]` when no two CONSECUTIVE
+        captures ever agree, which is exactly what a clock in the render produces.
+      */
+      const stable = await captureUntilStable(
+        () =>
+          withCell(cell, (page) =>
+            page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
+          ),
+        { label },
+      )
+      expect(stable.png.byteLength, label).toBeGreaterThan(1000)
+      expect(stable.attemptsUsed, `${label} settled in`).toBeLessThanOrEqual(5)
+      shots.set(label, stable.png)
+      writeFileSync(join(SCREENS, `messages-inbox__${label}__ltr.png`), stable.png)
     }
     expect(shots.size).toBe(6)
 

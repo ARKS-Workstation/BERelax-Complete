@@ -2,7 +2,11 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
-import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
+import {
+  captureUntilStable,
+  DETERMINISM_CSS,
+  DETERMINISTIC_LAUNCH_ARGS,
+} from '@berelax/harness/determinism'
 import { captureFilename, THEMES, VIEWPORTS } from '@berelax/harness/matrix'
 import { buildDerivatives, storeOriginal } from '@berelax/media'
 import { CROPS, cropRectFor } from '@berelax/media/ladders'
@@ -1013,7 +1017,6 @@ describe('acceptance — the screenshot harness captures 3 viewports x 2 themes'
       expect(first.innerWidth, label).toBe(cell.viewport.width)
       expect(first.png.byteLength, label).toBeGreaterThan(1000)
       luminance[label] = first.backgroundLuminance
-      shots.set(label, first.png)
       // The harness's own filename, so the gallery can parse it back: page__viewport__theme__direction.
       writeFileSync(
         join(
@@ -1028,11 +1031,21 @@ describe('acceptance — the screenshot harness captures 3 viewports x 2 themes'
         first.png,
       )
 
-      // The repeat run, immediately: byte equality is a zero pixel diff and then some, and a page rendering
-      // a database row, a byte count and seven scaled frames could not do it if anything on it were derived
-      // from a clock or a fresh identifier.
-      const second = await shoot(previewPath(heroFixture), cell)
-      expect(Buffer.compare(Buffer.from(first.png), Buffer.from(second.png)), label).toBe(0)
+      // The claim: a page rendering a database row, a byte count and seven scaled frames renders the same
+      // twice, which it could not do if anything on it came from a clock or a fresh identifier. Through
+      // `captureUntilStable`, because "capture one equals capture two" also asserts that paint had settled
+      // by the first capture, and that part is not true at load 10 on a four-core box — it flapped for
+      // days, a byte at a time, passing in isolation every time. The helper throws
+      // `[screenshot-never-stabilised]` if no two CONSECUTIVE captures ever agree, which is what a clock
+      // in the render actually produces, so the determinism claim is intact and the timing one is gone.
+      const stable = await captureUntilStable(
+        () => shoot(previewPath(heroFixture), cell).then((s) => s.png),
+        {
+          label,
+        },
+      )
+      expect(stable.attemptsUsed, `${label} settled in`).toBeLessThanOrEqual(5)
+      shots.set(label, stable.png)
     }
     expect(shots.size).toBe(6)
 

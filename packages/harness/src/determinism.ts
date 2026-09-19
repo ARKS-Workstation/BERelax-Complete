@@ -75,6 +75,57 @@ video { visibility: hidden !important; }
  * a testimonial list produces a different image every day. The frozen instant is the fixture salon's,
  * so a screenshot and a seeded database agree about what day it is.
  */
+/**
+ * A capture the page agrees with twice running.
+ *
+ * ## Why this is not "screenshot twice and compare"
+ *
+ * Two tests assert that a page renders identically on a repeat capture, and the claim they are making is
+ * about the PAGE: a document printing a relative time or a freshly generated id could not do it. Both
+ * expressed that as "capture one must equal capture two", which asserts something else as well — that
+ * paint had settled by the first capture. Those are different claims, and the second one is not true
+ * under load. Both tests flapped for days on this 4-core box whenever several worktrees ran their suites
+ * at once: a one-byte difference, moving between cells, changing sign, passing in isolation every time.
+ *
+ * Fixing the launch flags removed most of it (see `DETERMINISTIC_LAUNCH_ARGS`, and
+ * `--disable-skia-runtime-opts` above all) and was worth doing on its own. It did not remove all of it:
+ * at load 10 the failures came back, and two units lost verify cycles to them after the flags landed.
+ *
+ * So this takes captures until two CONSECUTIVE ones agree. That preserves the claim exactly and drops the
+ * part that was never true: if anything time-derived or randomly generated reached the render, no two
+ * consecutive captures would ever agree, the attempts would run out, and this throws. A page that is
+ * genuinely deterministic settles on the second or third.
+ *
+ * It cannot hide a real defect, and that is asserted rather than argued: the gate for this helper renders
+ * a clock into the page and requires it to exhaust and throw.
+ */
+export async function captureUntilStable(
+  take: () => Promise<Uint8Array>,
+  options: { readonly label: string; readonly attempts?: number },
+): Promise<{ readonly png: Uint8Array; readonly attemptsUsed: number }> {
+  const attempts = options.attempts ?? 5
+  if (attempts < 2) {
+    throw new Error(
+      `captureUntilStable needs at least 2 attempts to compare anything, got ${attempts}`,
+    )
+  }
+  const sizes: number[] = []
+  let previous: Uint8Array | null = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const png = await take()
+    sizes.push(png.byteLength)
+    if (previous !== null && Buffer.compare(Buffer.from(previous), Buffer.from(png)) === 0) {
+      return { png, attemptsUsed: attempt }
+    }
+    previous = png
+  }
+  throw new Error(
+    `[screenshot-never-stabilised] ${options.label}: ${attempts} captures and no two consecutive ones ` +
+      `matched, so this page does not render deterministically. Byte lengths: ${sizes.join(', ')}. ` +
+      'A clock, a random id or an unsettled animation is reaching the render — this is not load.',
+  )
+}
+
 export function freezePageEnvironment(nowMs: number): void {
   const globals = globalThis as unknown as PageGlobalsForHarness
 

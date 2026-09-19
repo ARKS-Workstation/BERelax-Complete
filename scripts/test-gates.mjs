@@ -13525,6 +13525,59 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 55d-55f. `captureUntilStable` must refuse a page that is genuinely nondeterministic.
+//
+// The helper takes captures until two CONSECUTIVE ones agree, which is what makes the repeat-capture
+// assertions survive a loaded machine. That same tolerance is how it could become a way to pass a page
+// with a clock in it, so this is the case that says it cannot: a `Date.now()` rendered into the preview
+// means no two consecutive captures ever agree, and the helper must exhaust and throw
+// `[screenshot-never-stabilised]` rather than return the last one.
+//
+// Tested as a unit against a fake `take` rather than through a browser, because the property is the loop's
+// and a real capture would put the box's load back into a case about load.
+{
+  const fixture = 'packages/harness/src/__gate_fixture__.mjs'
+  const probe =
+    "import { captureUntilStable } from './determinism.ts'\n" +
+    'const bytes = (n) => new Uint8Array([n])\n' +
+    '// A page with a clock: every capture differs from the one before it.\n' +
+    'let tick = 0\n' +
+    'try {\n' +
+    '  await captureUntilStable(() => Promise.resolve(bytes((tick += 1) % 251)), {\n' +
+    "    label: 'clock-in-the-render',\n" +
+    '    attempts: 5,\n' +
+    '  })\n' +
+    "  console.log('NO_THROW')\n" +
+    '} catch (err) {\n' +
+    '  console.log(err.message)\n' +
+    '}\n' +
+    '// And a deterministic page settles on the second capture.\n' +
+    'const stable = await captureUntilStable(() => Promise.resolve(bytes(7)), {\n' +
+    "  label: 'deterministic',\n" +
+    '  attempts: 5,\n' +
+    '})\n' +
+    "console.log('SETTLED_IN', stable.attemptsUsed)\n"
+
+  withFixture(fixture, probe, () => {
+    const { output } = run('pnpm', ['exec', 'tsx', fixture])
+    check(
+      'captureUntilStable refuses a render that never settles',
+      output.includes('[screenshot-never-stabilised]') && output.includes('clock-in-the-render'),
+      `a changing capture did not exhaust the attempts:\n${output.split('\n').slice(0, 6).join('\n')}`,
+    )
+    check(
+      'captureUntilStable reports the failure as nondeterminism rather than load',
+      output.includes('this is not load'),
+      'the message would send the next reader to look at the machine instead of at the page',
+    )
+    check(
+      'captureUntilStable settles a deterministic render on the second capture',
+      output.includes('SETTLED_IN 2'),
+      `an identical capture should agree immediately:\n${output.split('\n').slice(0, 6).join('\n')}`,
+    )
+  })
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
