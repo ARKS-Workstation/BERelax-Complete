@@ -260,9 +260,12 @@ export const appointment = pgTable(
  * `google_connection_events` (0016) make: an append-only log holding a reference to a mutable parent
  * is a contradiction, because the parent's delete either fails or rewrites history.
  *
- * It carries no actor and no reason — attribution belongs to `audit_event`, written in the same
- * transaction by the repository layer (F06). B-LIFE-01 adds the actor, role and reason its
- * transition API knows.
+ * It carries the actor, their F07 role and the reason as of **0046** (B-LIFE-01), and every one of those
+ * arrives through a transaction-local `berelax.transition_*` setting because a trigger cannot see a value
+ * that is not a column on `appointment` — the mechanism 0036 uses for the settings justification. The
+ * duplication with `audit_event` is deliberate and narrow: the grain differs (one audit row per ACTION
+ * versus one history row per APPOINTMENT, which a couples booking cancelled in one call makes visible),
+ * and `audit_event` records the KIND of actor and has never held the ROLE the permission check consulted.
  */
 export const appointmentStatusHistory = pgTable(
   'appointment_status_history',
@@ -273,12 +276,56 @@ export const appointmentStatusHistory = pgTable(
     fromStatus: appointmentStatus('from_status'),
     toStatus: appointmentStatus('to_status').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /** `staff | customer | system | agent`, the same vocabulary as `audit_event.actor_kind`. */
+    actorKind: text('actor_kind'),
+    actorId: uuid('actor_id'),
+    /** For an actor with no id — a worker, an agent. Never `''`. */
+    actorLabel: text('actor_label'),
+    /**
+     * The F07 role the permission check consulted, which `audit_event` never held.
+     *
+     * Nullable, and that is a decision rather than laxity: `set_config` is transaction-local, so a NOT
+     * NULL here would make a correcting `update appointment set status = …` from a psql session
+     * impossible rather than merely unattributed — and push the correction outside the chain. What
+     * enforces attribution for the application is `transitionAppointment`, which reads the appended row
+     * back in the same transaction and refuses unless it carries exactly this actor.
+     */
+    actorRole: text('actor_role'),
+    /** Why, as the actor stated it. Mandatory for the transitions the table declares; never `''`. */
+    reason: text('reason'),
   },
   (t) => [
     index('appointment_status_history_appointment_idx').on(t.appointmentId, t.occurredAt, t.id),
+    index('appointment_status_history_actor_idx').on(t.actorId, t.occurredAt),
     check(
       'appointment_status_history_is_a_change',
       sql`${t.fromStatus} is null or ${t.fromStatus} <> ${t.toStatus}`,
+    ),
+    check(
+      'appointment_status_history_actor_kind_known',
+      sql`${t.actorKind} is null or ${t.actorKind} in ('staff', 'customer', 'system', 'agent')`,
+    ),
+    check(
+      'appointment_status_history_actor_role_known',
+      sql`${t.actorRole} is null or ${t.actorRole} in ('owner', 'manager', 'accountant', 'receptionist', 'therapist', 'marketer', 'auditor', 'system')`,
+    ),
+    // Half an attribution is always a defect, whoever wrote it: a row naming a role and no kind of
+    // actor is a row written from two places.
+    check(
+      'appointment_status_history_attribution_is_whole',
+      sql`(${t.actorKind} is null) = (${t.actorRole} is null)`,
+    ),
+    check(
+      'appointment_status_history_reason_needs_an_actor',
+      sql`${t.reason} is null or ${t.actorRole} is not null`,
+    ),
+    check(
+      'appointment_status_history_reason_nonempty',
+      sql`${t.reason} is null or btrim(${t.reason}) <> ''`,
+    ),
+    check(
+      'appointment_status_history_actor_label_nonempty',
+      sql`${t.actorLabel} is null or btrim(${t.actorLabel}) <> ''`,
     ),
   ],
 )

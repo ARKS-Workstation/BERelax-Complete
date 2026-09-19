@@ -118,6 +118,21 @@ export {
   withAgentRun,
 } from './repositories/agents.ts'
 export {
+  type DecidedTransition,
+  TRANSITION_REFUSALS,
+  type TransitionActor,
+  type TransitionDecider,
+  type TransitionDecision,
+  type TransitionDeps,
+  type TransitionHistoryRow,
+  type TransitionInput,
+  type TransitionRefusal,
+  type TransitionResult,
+  transitionAppointment,
+  transitionAppointmentTx,
+  transitionRefusalOf,
+} from './repositories/appointment-transition.ts'
+export {
   archiveService,
   assertPublicDisplayNameLinted,
   CATALOGUE_REFUSALS,
@@ -479,6 +494,9 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 0038_booking_transaction.sql — which corrects the unit `rooms.capacity` is counted in and adds the four
 // figures an appointment snapshots — 39 is 0039_reverse_charge.sql, 40 is 0040_google_disconnect.sql,
 // which makes the five refresh-token columns nullable so a disconnect can zeroise them and fences that
-// nullability with three named CHECK constraints, 42 is 0042_seo_gsc_daily.sql and 43 is
-// 0043_kek_rotation.sql.
-export const SCHEMA_VERSION = 43 as const
+// nullability with three named CHECK constraints, 42 is 0042_seo_gsc_daily.sql, 43 is
+// 0043_kek_rotation.sql, 44 and 45 are allocated to units in flight, and 46 is
+// 0046_appointment_lifecycle.sql — which gives the transition chain its actor, F07 role and reason
+// through the transaction-local settings 0036 introduced, because the trigger that writes the row cannot
+// see a value that is not a column on `appointment`.
+export const SCHEMA_VERSION = 46 as const

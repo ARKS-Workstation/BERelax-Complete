@@ -307,7 +307,9 @@ const PREVIEW_SCRIPT = `
     root.setAttribute('data-focal-repaints', String(repaints));
   }
 
+  // Returns whether it wrote a height, so \`settle\` can run it until it stops writing one.
   function fit() {
+    var changed = false;
     var boxes = document.querySelectorAll('.viewportbox');
     for (var i = 0; i < boxes.length; i += 1) {
       var box = boxes[i];
@@ -316,15 +318,45 @@ const PREVIEW_SCRIPT = `
       var declared = Number(frame.getAttribute('data-css-width'));
       var height = Number(frame.getAttribute('data-css-height'));
       var scale = Math.min(1, box.clientWidth / declared);
+      var next = Math.round(height * scale) + 'px';
       frame.style.setProperty('--fit', String(scale));
-      box.style.height = Math.round(height * scale) + 'px';
+      if (box.style.height !== next) {
+        box.style.height = next;
+        changed = true;
+      }
     }
+    return changed;
+  }
+
+  /*
+    Fit until nothing moves, then say so on the root element.
+
+    Two reasons, and the first is about the page rather than the test. Writing a height can add or remove
+    the page's scrollbar, which changes every box's \`clientWidth\`, which changes the scale that was just
+    written — a feedback loop whose visible symptom is a frame scaled to the wrong width. The
+    \`scrollbar-gutter: stable\` above removes the loop in a browser that honours it; this makes the page
+    correct in one that does not, and it is bounded because each pass either writes nothing or converges.
+
+    The second is that \`data-preview-settled\` gives a caller an OBSERVABLE FACT to wait for. The
+    integration test's byte-identical assertion previously waited two animation frames, which is a guess
+    about how long layout takes: it held when the file ran alone and failed under the load of a full
+    \`pnpm verify\`, photographing a layout mid-settle on one pass and settled on the next. A flag that is
+    absent until no layout write is pending cannot be raced.
+  */
+  function settle() {
+    root.removeAttribute('data-preview-settled');
+    var passes = 0;
+    while (fit() && passes < 4) passes += 1;
+    root.setAttribute('data-preview-settled', '1');
   }
 
   slider.addEventListener('input', paint);
   paint();
-  fit();
-  window.addEventListener('resize', fit);
+  settle();
+  // Again once the images have decoded: \`fit\` reads \`clientWidth\`, and an image that arrives after the
+  // script ran changes the layout it measured. This is the event the late arrival lands before.
+  window.addEventListener('load', settle);
+  window.addEventListener('resize', settle);
 })();
 `
 

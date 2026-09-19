@@ -11841,6 +11841,470 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 51a-51t. (B-LIFE-01) The appointment lifecycle: the attribution 0046 added, and the properties of the
+//          transition table and its write path that stop being true if one line is removed.
+//
+// Two kinds of fixture, because this unit has two kinds of claim.
+//
+// **The schema half** is a set of psql probes, each a statement the database must refuse by the NAME of
+// the rule written for it. A bare non-zero exit is also what a typo in a column name produces, and the
+// rule under test would then be dead while this file reported PASS for ever (ADR 0003). Every probe runs
+// inside `begin; … ; rollback;`. `appointment_status_history.appointment_id` is a plain uuid with no
+// foreign key (0024, deliberately: an append-only log cannot hold a reference to a mutable parent), so
+// the six constraint probes need no fixture rows at all — which is also why each one violates exactly
+// ONE constraint, and the name in the output is therefore the rule and not whichever check ran first.
+//
+// The pair 51h/51i is the one that needs a real appointment, because what it proves is that the 0046
+// trigger reads the transaction-local settings: the probe raises a NAMED exception unless the appended
+// row carries the actor, and its twin runs the same probe with no `set_config` and must see that
+// exception. A positive control that cannot fail is the failure mode ADR 0002 is about.
+//
+// **The code half** is mutants, each removing one line the unit depends on, run against the suite that
+// is supposed to notice. A row lock, a `set_config` that a trigger reads and a table typed over a union
+// are not expressible as constraints, so the only way to know the tests are testing them is to remove
+// each one and watch the right suite fail. Every anchor is asserted to exist first: `String.replace`
+// with a missing needle returns the text unchanged, and the mutant would then be the shipped code
+// passing its own tests.
+{
+  const lifeDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const LIFE_MARKER = 'gate fixture lifecycle'
+  const LIFE_DATE = "'2099-11-06'"
+  const LIFE_ROOM = 'gate-fixture-life-room'
+  const LIFE_PHONE = '+971500000197'
+  const LIFE_BOOKING = "'40000000-0000-4000-8000-00000000b201'"
+  const LIFE_APPOINTMENT = "'40000000-0000-4000-8000-00000000b202'"
+  const LIFE_THERAPIST = "'40000000-0000-4000-8000-00000000b203'::uuid"
+  const LIFE_DELIVERY = "'40000000-0000-4000-8000-00000000b204'::uuid"
+  const LIFE_REASON = 'the gate stated a reason'
+
+  /** One history row, every column spelled so each probe below differs by exactly one value. */
+  const lifeHistoryRow = ({
+    kind = "'staff'",
+    id = 'null',
+    label = 'null',
+    role = "'manager'",
+    reason = 'null',
+    from = "'confirmed'",
+    to = "'checked_in'",
+  } = {}) =>
+    'insert into appointment_status_history (appointment_id, from_status, to_status, actor_kind, ' +
+    'actor_id, actor_label, actor_role, reason) values (' +
+    `${LIFE_APPOINTMENT}, ${from}::appointment_status, ${to}::appointment_status, ${kind}, ${id}, ` +
+    `${label}, ${role}, ${reason})`
+
+  const lifeSetup = [
+    `insert into customer (phone_e164, created_via) values ('${LIFE_PHONE}', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${LIFE_DATE}, '2099-11-06 07:00:00+00', '2099-11-06 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 90, 30000, '${LIFE_MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes)
+       values ('${LIFE_ROOM}', 'Gate lifecycle room', 'standard', 1, 90, '${LIFE_MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${LIFE_BOOKING},
+               (select id from customer where phone_e164 = '${LIFE_PHONE}'),
+               'front_desk', '${LIFE_MARKER}')`,
+    'insert into appointment (id, booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+      'room_id, period, status, delivery_id, room_places, turnaround_minutes, ' +
+      'therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils) values (' +
+      `${LIFE_APPOINTMENT}, ${LIFE_BOOKING}, ${LIFE_DATE}, ` +
+      '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+      "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1), 'solo', " +
+      `${LIFE_THERAPIST}, (select id from rooms where code = '${LIFE_ROOM}'), ` +
+      "tstzrange('2099-11-06 19:00:00+00','2099-11-06 20:30:00+00','[)'), 'requested', " +
+      `${LIFE_DELIVERY}, 1, 20, 10, 30000, 28572, 1428)`,
+  ].join('; ')
+
+  const lifeProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      lifeDbUrl ?? '',
+      '-c',
+      `begin; ${statement}; rollback;`,
+    ])
+
+  /**
+   * Moves the appointment and RAISES unless the appended row carries the actor, role and reason.
+   *
+   * `setActor` is either the three `set_config` calls the repository makes or nothing at all, which is
+   * the only difference between 51h and 51i.
+   */
+  const lifeTriggerProbe = (setActor) =>
+    lifeProbe(
+      [
+        lifeSetup,
+        `do $$
+           declare v_kind text; v_role text; v_reason text;
+           begin
+             ${setActor}
+             update appointment set status = 'confirmed' where id = ${LIFE_APPOINTMENT};
+             select actor_kind, actor_role, reason into v_kind, v_role, v_reason
+               from appointment_status_history
+              where appointment_id = ${LIFE_APPOINTMENT} and from_status is not null
+              order by appointment_status_history.id desc limit 1;
+             if v_kind is distinct from 'staff' or v_role is distinct from 'manager'
+                or v_reason is distinct from '${LIFE_REASON}' then
+               raise exception
+                 'gate51_transition_not_attributed: kind=% role=% reason=%', v_kind, v_role, v_reason;
+             end if;
+           end $$`,
+      ].join('; '),
+    )
+
+  const LIFE_SET_ACTOR = [
+    "perform set_config('berelax.transition_actor_kind', 'staff', true);",
+    "perform set_config('berelax.transition_actor_role', 'manager', true);",
+    `perform set_config('berelax.transition_reason', '${LIFE_REASON}', true);`,
+  ].join('\n             ')
+
+  if (!lifeDbUrl) {
+    check(
+      'the appointment lifecycle attribution rules hold',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 51a. The actor vocabulary is audit_event's (0005) and nothing else. A spelling the reader cannot
+    //      map is a row that answers "who" with a word nobody else in the schema uses.
+    checkRejectedBy(
+      'lifecycle gate rejects an actor kind outside the audit vocabulary',
+      lifeProbe(lifeHistoryRow({ kind: "'janitor'" })),
+      'appointment_status_history_actor_kind_known',
+    )
+
+    // 51b. The role list is the F07 one, restated in SQL because the database cannot import the policy
+    //      layer. The duplication is made safe by the pair itest, which compares the constraint's own
+    //      accepted set with `ROLES`; this probe is the other half — the list must actually refuse.
+    checkRejectedBy(
+      'lifecycle gate rejects a role the policy layer does not declare',
+      lifeProbe(lifeHistoryRow({ role: "'janitor'" })),
+      'appointment_status_history_actor_role_known',
+    )
+
+    // 51c. Half an attribution is always a defect: a role with no kind of actor, or the reverse, is a
+    //      row written from two places and cannot answer the question the columns exist for.
+    checkRejectedBy(
+      'lifecycle gate rejects a role with no kind of actor beside it',
+      lifeProbe(lifeHistoryRow({ kind: 'null', role: "'manager'" })),
+      'appointment_status_history_attribution_is_whole',
+    )
+    checkRejectedBy(
+      'lifecycle gate rejects a kind of actor with no role beside it',
+      lifeProbe(lifeHistoryRow({ kind: "'staff'", role: 'null' })),
+      'appointment_status_history_attribution_is_whole',
+    )
+
+    // 51d. A reason with nobody attached to it is the 0036 shape exactly: a value demanded of the
+    //      operator, validated, and then stored with the actor lost.
+    checkRejectedBy(
+      'lifecycle gate rejects a reason with no actor to attribute it to',
+      lifeProbe(lifeHistoryRow({ kind: 'null', role: 'null', reason: "'because'" })),
+      'appointment_status_history_reason_needs_an_actor',
+    )
+
+    // 51e-51f. One fact, one representation: `''` is not "no reason", NULL is.
+    checkRejectedBy(
+      'lifecycle gate rejects an empty reason rather than storing it as one somebody gave',
+      lifeProbe(lifeHistoryRow({ reason: "''" })),
+      'appointment_status_history_reason_nonempty',
+    )
+    checkRejectedBy(
+      'lifecycle gate rejects a blank actor label',
+      lifeProbe(lifeHistoryRow({ label: "'   '" })),
+      'appointment_status_history_actor_label_nonempty',
+    )
+
+    // 51g. The control for all six. A fully attributed row inserts, so each refusal above is about the
+    //      value it changed and not about a column list that stopped matching the table.
+    const lifeAttributed = lifeProbe(
+      lifeHistoryRow({
+        kind: "'staff'",
+        id: "'40000000-0000-4000-8000-00000000b205'",
+        label: "'Gate probe'",
+        role: "'owner'",
+        reason: "'stated by the actor'",
+      }),
+    )
+    check(
+      'lifecycle gate accepts a fully attributed transition row',
+      !lifeAttributed.failed,
+      `the six refusals above are not about the values they changed:\n${lifeAttributed.output}`,
+    )
+
+    // 51h. The 0046 trigger really does read the transaction-local settings. This is the one claim no
+    //      unit test can make: the actor reaches the row through PostgreSQL or it does not reach it.
+    const lifeAttributedByTrigger = lifeTriggerProbe(LIFE_SET_ACTOR)
+    check(
+      'lifecycle gate: the trigger records the actor, role and reason from the settings',
+      !lifeAttributedByTrigger.failed,
+      `a transition made with the berelax.transition_* settings set was not attributed:\n${lifeAttributedByTrigger.output}`,
+    )
+
+    // 51i. And the probe above can fail. Without it, 51h is satisfied by a probe that checks nothing —
+    //      which is how an unattributed chain would read as attributed for ever.
+    checkRejectedBy(
+      'lifecycle gate: the same probe with no set_config sees an unattributed row',
+      lifeTriggerProbe(''),
+      'gate51_transition_not_attributed',
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case
+    // a probe is wrongly accepted, and because a room or a booking left behind fails a later gate with
+    // an error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      lifeDbUrl,
+      '-c',
+      `delete from appointment where booking_id = ${LIFE_BOOKING}; ` +
+        `delete from booking where notes = '${LIFE_MARKER}'; ` +
+        `delete from rooms where notes = '${LIFE_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${LIFE_MARKER}'; ` +
+        `delete from business_day where trading_date = ${LIFE_DATE}; ` +
+        `delete from customer where phone_e164 = '${LIFE_PHONE}';`,
+    ])
+  }
+
+  // 51j-51t. The code half.
+  const LIFE_TABLE = 'packages/core/src/lifecycle/transitions.ts'
+  const LIFE_REPO = 'packages/db/src/repositories/appointment-transition.ts'
+  const LIFE_PAIR = 'packages/fixtures/src/appointment-lifecycle.itest.ts'
+  const LIFE_UNIT = 'packages/db/src/repositories/appointment-transition.test.ts'
+  const LIFE_CORE_SUITE = 'packages/core/src/lifecycle'
+
+  /** Applies one or more anchored edits to a shipped file, asserting every anchor is still there. */
+  const lifeMutant = (path, edits, body) =>
+    withEditedFile(
+      path,
+      (text) =>
+        edits.reduce((carried, [anchor, replacement]) => {
+          if (!carried.includes(anchor)) {
+            throw new Error(`the B-LIFE-01 gate's anchor is no longer in ${path}: ${anchor}`)
+          }
+          return carried.replace(anchor, replacement)
+        }, text),
+      body,
+    )
+
+  const lifePairSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', LIFE_PAIR])
+  const lifeUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', LIFE_UNIT])
+  const lifeCoreSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', LIFE_CORE_SUITE])
+
+  // 51j. The row lock. Without `for update` the status is read, judged and written across three
+  //      statements, so two actors completing the same appointment both read `in_progress` and both
+  //      decide the move is legal — and the second one's UPDATE changes nothing, appends no history row
+  //      and is reported as a transition that happened.
+  checkRejectedBy(
+    'lifecycle gate: dropping SELECT ... FOR UPDATE on the appointment row is caught',
+    lifeMutant(LIFE_REPO, [['\n       for update\n', '\n']], lifePairSuite),
+    'the second reads the state it now holds',
+  )
+
+  // 51k. The actor. Removing the `set_config` call leaves the trigger writing a row with three NULLs in
+  //      it, which is precisely 0036's recorded failure — and the repository's own read-back is what
+  //      refuses it, before anything commits.
+  checkRejectedBy(
+    'lifecycle gate: dropping the set_config that carries the actor is caught',
+    lifeMutant(LIFE_REPO, [['  await announceActor(uow, input.actor, reason)', '']], lifePairSuite),
+    'transition_not_recorded',
+  )
+
+  // 51l. And the layer under it: with the read-back's comparison disabled TOO, the unattributed row
+  //      commits — and the pair suite, which reads the row the trigger wrote rather than the object the
+  //      caller passed, is what notices. Two mutants because there are two guards, and a test that only
+  //      caught one of them would leave the other free to rot.
+  checkRejectedBy(
+    'lifecycle gate: an unattributed chain is caught even with the read-back comparison disabled',
+    lifeMutant(
+      LIFE_REPO,
+      [
+        ['  await announceActor(uow, input.actor, reason)', ''],
+        ['  if (mismatch) {', '  if ((false as boolean)) {'],
+      ],
+      lifePairSuite,
+    ),
+    'writes exactly one history row',
+  )
+
+  // 51m. Fail closed. A transition written with no decider injected is a transition nobody judged, and
+  //      the permissive default is the one failure this module exists to prevent.
+  checkRejectedBy(
+    'lifecycle gate: defaulting the missing transition decider to "assume it is fine" is caught',
+    lifeMutant(
+      LIFE_REPO,
+      [["  if (typeof deps?.decide !== 'function') {", '  if ((false as boolean)) {']],
+      lifeUnitSuite,
+    ),
+    'refuses a call with no decider',
+  )
+
+  // 51n. The distinction the two cancellations exist for. A display helper that answers 'CANCELLED' for
+  //      both is how the cancellation policy, the no-show fee and the refund lose which one happened —
+  //      and the sweep over this module's exports is what catches it.
+  checkRejectedBy(
+    'lifecycle gate: a helper collapsing both cancellations into CANCELLED is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [
+        [
+          'export function legalTransitionPairs()',
+          'export const cancellationLabel = (status: AppointmentStatus): string =>\n' +
+            "  status.startsWith('cancelled') ? 'CANCELLED' : status\n\n" +
+            'export function legalTransitionPairs()',
+        ],
+      ],
+      lifeCoreSuite,
+    ),
+    'answers one cancellation-shaped value for both',
+  )
+
+  // 51o. The coverage assertion, and the acceptance criterion literally: the table is typed over the
+  //      status union, so a tenth status makes both `Record`s incomplete and the TYPECHECKER refuses the
+  //      build naming this module. A state machine that compiles with a state unhandled has a
+  //      default-allow branch whether or not anybody wrote one.
+  const lifeTenthStatus = lifeMutant(
+    LIFE_TABLE,
+    [["  'rescheduled',\n] as const", "  'rescheduled',\n  'paused',\n] as const"]],
+    () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+  )
+  checkRejectedBy(
+    'lifecycle gate: a tenth status with no row in the table fails the typecheck',
+    lifeTenthStatus,
+    `${LIFE_TABLE}(`,
+  )
+  // And it must fail because the ROWS are missing, in BOTH tables — the status actions and the legal
+  // transitions — rather than for some other reason that happens to mention the file. Two errors in the
+  // module itself is what "the table is typed over the union" means: one Record would leave the other
+  // free to be keyed on `string`.
+  check(
+    'lifecycle gate: the typecheck names both tables as missing the tenth status',
+    lifeTenthStatus.output.includes("Property 'paused' is missing") &&
+      lifeTenthStatus.output.split(`${LIFE_TABLE}(`).length - 1 >= 2,
+    `the tenth status failed the typecheck for some other reason:\n${lifeTenthStatus.output}`,
+  )
+
+  // 51p. The allowlist: "the till knows the truth". A confirmation may not emit an event whose NAME
+  //      reads as money, because a handler subscribing by name would treat it as some.
+  checkRejectedBy(
+    'lifecycle gate: naming the confirmation event as an invoice is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [
+        [
+          "      eventType: 'appointment.confirmed',",
+          "      eventType: 'appointment.invoice_raised',",
+        ],
+      ],
+      lifeCoreSuite,
+    ),
+    'non_revenue_event_named_as_money',
+  )
+
+  // 51q. Two statuses sharing one event type: the two cancellations again, from the other side. A
+  //      handler could not tell them apart, and the outbox key would collide.
+  checkRejectedBy(
+    'lifecycle gate: giving both cancellations one event type is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [
+        [
+          "      eventType: 'appointment.cancelled_by_salon',",
+          "      eventType: 'appointment.cancelled_by_customer',",
+        ],
+      ],
+      lifeCoreSuite,
+    ),
+    'event_type_shared_by_two_statuses',
+  )
+
+  // 51r. COMPLETED emits revenue. Clearing the flag leaves a lifecycle in which no transition is money,
+  //      which is the state of the system before docs/03 §2 was written down.
+  checkRejectedBy(
+    'lifecycle gate: a table where no transition emits revenue is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [['      emitsRevenue: true,', '      emitsRevenue: false,']],
+      lifeCoreSuite,
+    ),
+    'revenue_declared_by_a_status_that_is_not_completed',
+  )
+
+  // 51s. The repeat declarations are asserted against a literal list, so flipping one is caught rather
+  //      than absorbed. A completion that is idempotent on repeat is the double-invoice case.
+  checkRejectedBy(
+    'lifecycle gate: changing a terminal state s declared repeat behaviour is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [
+        [
+          "      emitsRevenue: true,\n      reasonRequired: false,\n      repeat: 'refused',",
+          "      emitsRevenue: true,\n      reasonRequired: false,\n      repeat: 'idempotent',",
+        ],
+      ],
+      lifeCoreSuite,
+    ),
+    'declares idempotent or refused for every state a transition reaches',
+  )
+
+  // 51t. The grid itself, both ways: a declared pair removed and an undeclared pair added. The expected
+  //      set is written out by hand in the test, which is what makes both directions fail.
+  checkRejectedBy(
+    'lifecycle gate: removing a declared legal transition is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [["    { to: 'in_progress', why: 'The therapist starts the treatment.' },", '']],
+      lifeCoreSuite,
+    ),
+    'declares exactly the fifteen pairs written out here',
+  )
+  checkRejectedBy(
+    'lifecycle gate: widening the machine with an undeclared transition is caught',
+    lifeMutant(
+      LIFE_TABLE,
+      [
+        [
+          '  in_progress: [',
+          "  in_progress: [\n    { to: 'rescheduled', why: 'a pair nobody declared, added by the gate' },",
+        ],
+      ],
+      lifeCoreSuite,
+    ),
+    'declares exactly the fifteen pairs written out here',
+  )
+
+  // The controls. The committed files pass all three suites, so every probe above is the line it removed
+  // and not a suite that fails for its own reasons.
+  const lifeCoreClean = lifeCoreSuite()
+  check(
+    'lifecycle gate: the committed transition table passes its own suite',
+    !lifeCoreClean.failed,
+    `the committed lifecycle table failed its own suite:\n${lifeCoreClean.output}`,
+  )
+  const lifeUnitClean = lifeUnitSuite()
+  check(
+    'lifecycle gate: the committed write path passes its unit suite',
+    !lifeUnitClean.failed,
+    `the committed transition repository failed its own unit suite:\n${lifeUnitClean.output}`,
+  )
+  const lifePairClean = lifePairSuite()
+  check(
+    'lifecycle gate: the committed write path passes its pair suite',
+    !lifePairClean.failed,
+    `the committed transition repository failed its own pair suite:\n${lifePairClean.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

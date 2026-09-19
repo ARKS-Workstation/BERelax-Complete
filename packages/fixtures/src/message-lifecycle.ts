@@ -52,6 +52,59 @@ export const FIXTURE_COST_WINDOW = {
  */
 export const ARABIC_150 = 'ت'.repeat(150)
 
+/*
+  Every SMS recipient this fixture and its suite write, from ONE builder, because two builders over one
+  run id is a defect that hides for weeks and then fails about three runs in five.
+
+  It was two: this module addressed its seeded messages to `+9715${run.slice(0, 8)}` while
+  `message-lifecycle.itest.ts` addressed its live sends to `+9715${RUN.slice(0, 7)}` plus a
+  distinguishing digit — and those are the SAME NUMBER whenever the eighth character of the run id
+  happens to equal that digit. The digits in use were 0 to 5, so six runs in ten collided on one slot,
+  and the symptom was a test reading the fixture's rows as well as its own: five or six statuses where it
+  asserts two. Four separate units hit it. The first two fixes narrowed the odds — eight characters to
+  seven, then one shared helper inside the itest — without removing the cause, because the cause is the
+  OTHER builder, in this file.
+
+  So: one function, a fixed-width run component, and a declared slot per writer. A collision is now
+  impossible rather than unlikely, and `slotsAreDistinct` is asserted by the suite so a writer that helps
+  itself to an existing slot fails a test rather than a Tuesday.
+*/
+export const SMS_RECIPIENT_SLOTS = {
+  /** The messages `seedMessagingFixture` writes. */
+  seededFixture: '9',
+  /**
+   * `message-lifecycle.itest.ts`'s live sends, one slot each, named for the test that writes it. The
+   * names matter as much as the digits: a slot whose name does not say who owns it is one the next
+   * writer reuses.
+   */
+  seededShape: '0',
+  inboxRead: '1',
+  rejected: '2',
+  rateLimited: '3',
+  retryable: '4',
+  promotional: '5',
+} as const
+
+/** Every slot is one digit and no two writers share one. Asserted, not assumed. */
+export function slotsAreDistinct(): boolean {
+  const slots = Object.values(SMS_RECIPIENT_SLOTS)
+  return slots.every((slot) => /^[0-9]$/.test(slot)) && new Set(slots).size === slots.length
+}
+
+/**
+ * A UAE mobile in E.164 for one writer in one run: `+9715`, seven digits of the run id, and the slot.
+ *
+ * The run component is padded rather than sliced alone, because a run id is `${process.pid}` plus an
+ * unpadded `Math.floor(Math.random() * 1e6)` and can therefore be shorter than seven characters — which
+ * would produce a number too short to be a UAE mobile, a second flake waiting behind the first.
+ */
+export function smsRecipientFor(run: string, slot: string): string {
+  if (!/^[0-9]$/.test(slot)) {
+    throw new Error(`a recipient slot must be a single digit, not ${JSON.stringify(slot)}`)
+  }
+  return `+9715${run.slice(0, 7).padStart(7, '0')}${slot}`
+}
+
 export interface SeededMessage {
   readonly id: string
   readonly templateKey: string
@@ -221,7 +274,9 @@ export async function seedMessagingFixture(
       messageClass: 'transactional',
       locale: plan.locale,
       vendor: isEmail ? 'resend' : 'smsala',
-      recipient: isEmail ? `guest-${run}@example.com` : `+9715${run.slice(0, 8)}`,
+      recipient: isEmail
+        ? `guest-${run}@example.com`
+        : smsRecipientFor(run, SMS_RECIPIENT_SLOTS.seededFixture),
       senderId: isEmail ? null : 'BERELAX',
       subject: isEmail ? 'Your tax invoice' : null,
       body: plan.body,

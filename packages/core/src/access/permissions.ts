@@ -38,6 +38,24 @@ export const PERMISSIONS = [
   'calendar:read',
   'walkin:create',
 
+  // The appointment lifecycle (B-LIFE-01). One permission per state a transition can reach, which is
+  // what lets `packages/core/src/lifecycle/transitions.ts` declare who may perform each move ONCE, in
+  // data, and check it through `can()` — instead of a hand-rolled role comparison at each call site,
+  // which is how two call sites come to disagree about who may cancel.
+  //
+  // `booking:cancel` above is the customer-requested cancellation, which the front desk records.
+  // Cancelling on the SALON's behalf and marking a no-show are separate permissions because they are
+  // the two moves the front desk may not make alone: one breaks the salon's own commitment and carries
+  // a refund, the other writes a judgement against the customer that a fee policy will later attach
+  // money to (B-LIFE-03). Neither is granted to `system`: marking a no-show is a judgement, not a
+  // sweep, and a background worker that could take it would take it at 03:00 with nobody to ask.
+  'booking:confirm',
+  'booking:check_in',
+  'booking:start',
+  'booking:complete',
+  'booking:mark_no_show',
+  'booking:cancel_as_salon',
+
   // Catalogue
   'catalogue:read',
   'catalogue:write',
@@ -133,6 +151,13 @@ const RECEPTIONIST_PERMISSIONS = [
   'booking:create',
   'booking:reschedule',
   'booking:cancel',
+  // The lifecycle moves the front desk makes all evening: accept a request, record an arrival, start
+  // the treatment, close it at the till. Deliberately NOT `booking:mark_no_show` or
+  // `booking:cancel_as_salon` — see the catalogue above.
+  'booking:confirm',
+  'booking:check_in',
+  'booking:start',
+  'booking:complete',
   'calendar:read',
   'walkin:create',
   'catalogue:read',
@@ -158,6 +183,9 @@ export const ROLE_DEFINITIONS: Readonly<Record<Role, RoleDefinition>> = Object.f
     permissions: [
       ...RECEPTIONIST_PERMISSIONS,
       'booking:override_constraints',
+      // The two lifecycle moves the front desk may not make alone (B-LIFE-01).
+      'booking:mark_no_show',
+      'booking:cancel_as_salon',
       'catalogue:write',
       'customer:merge',
       'customer:blocklist',
@@ -214,6 +242,9 @@ export const ROLE_DEFINITIONS: Readonly<Record<Role, RoleDefinition>> = Object.f
     permissions: [
       'calendar:read',
       'booking:read',
+      // The therapist starts the treatment they are about to give, from the room. The front desk
+      // records the arrival and closes the till; neither of those is theirs.
+      'booking:start',
       'customer:read',
       'catalogue:read',
       'clinical_flags:read',

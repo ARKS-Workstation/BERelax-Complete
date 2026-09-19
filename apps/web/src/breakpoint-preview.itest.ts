@@ -375,11 +375,8 @@ async function open(
     /*
      * Two frames, so the paint the screenshot captures is a committed one.
      *
-     * `img.complete` says the bytes arrived, not that they were decoded and painted, and the inline script
-     * sets each frame's scale and height after that. One rAF schedules the work; the second runs after the
-     * frame carrying it has been committed. Without this the first pass of the byte-identical assertion can
-     * photograph a layout the second pass photographs settled — which failed once under the load of a
-     * full `pnpm verify` and passed every time the file was run on its own.
+     * `img.complete` says the bytes arrived, not that they were decoded and painted. One rAF schedules the
+     * work; the second runs after the frame carrying it has been committed.
      */
     await new Promise((resolve) => {
       requestAnimationFrame(() => {
@@ -387,6 +384,24 @@ async function open(
       })
     })
   })
+  /*
+   * And then the page's own signal that no layout write is pending.
+   *
+   * The two frames above are necessary and were not sufficient: they are a guess about how long the
+   * inline script's `fit` takes, and the guess held when this file ran alone and failed under the load of
+   * a full `pnpm verify` — the first pass of the byte-identical assertion photographed a layout mid-fit
+   * that the second photographed settled, reported as `light-390: expected -1 to be +0`. `fit` now runs
+   * until it stops writing heights and only then sets `data-preview-settled`, so this waits for a fact
+   * the page states rather than for a duration. `readyState` is part of it because `settle` runs again on
+   * `load`: without it this could observe the flag from the pass before the images decoded.
+   */
+  await page.waitForFunction(
+    () =>
+      document.readyState === 'complete' &&
+      document.documentElement.dataset['previewSettled'] === '1',
+    undefined,
+    { timeout: 30_000 },
+  )
   return { page, context, requested, foreign }
 }
 

@@ -1433,7 +1433,7 @@ units:
       roles, its history row and exactly which outbox event it emits. COMPLETED emits revenue; CONFIRMED
       does not.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-AVAIL-06
@@ -1455,11 +1455,119 @@ units:
     - Each terminal state declares explicitly whether a repeat of the transition that produced it is an
       idempotent no-op or an error, and a test asserts the declared behaviour per state with no undeclared
       cases
+    - 'NOTE: the table is packages/core/src/lifecycle/transitions.ts and it is DATA in two objects, both
+      `Record`s over the status union: APPOINTMENT_STATUS_ACTIONS (what entering a status costs - its F07
+      permission, its one event type, whether it emits revenue, whether a reason is mandatory, and what a
+      repeat does) and LEGAL_APPOINTMENT_TRANSITIONS (which pairs move, each carrying the argument for why
+      it is legal). Fifteen legal pairs out of the eighty-one cells; the other sixty-six are refused, and
+      the test enumerates all eighty-one and pins the four counts (15 allowed, 6 idempotent no-ops, 2
+      already_in_status, 58 illegal_transition). The coverage assertion is the typing itself: gate 51o adds
+      a tenth status, runs pnpm typecheck, and asserts it fails naming transitions.ts TWICE - once per
+      Record - with "Property ''paused'' is missing". decideAppointmentTransition takes STRINGS and denies
+      by default, because the from-status arrives from a database column and the role from a session: a
+      label this build does not declare is illegal_transition and an unknown role is transition_forbidden,
+      the shape can() takes for an unknown permission.'
+    - 'NOTE: two files beyond the four this list names, for the reason B-AVAIL-06''s NOTE gives.
+      packages/db may never import packages/core, so the write path takes the decision as an injected
+      function (TransitionDecider) exactly as createBooking takes its slot re-check, and the pair can only
+      be exercised where both may be imported: packages/fixtures/src/appointment-lifecycle.itest.ts is the
+      34-case pair suite (the enum/role vocabularies compared against the catalogue, all fifteen
+      transitions driven against real PostgreSQL asserting exactly one history row, one audit row and one
+      outbox event each, the refusals writing nothing, every terminal state''s declared repeat, and the row
+      lock under a deliberately held transaction). `decideAppointmentTransition satisfies
+      TransitionDecider` there is what proves the two declarations of that seam agree - a refusal name
+      added to one and not the other is a typecheck failure. appointment-transition.test.ts is the half
+      that needs no database, asserted with a unit of work whose every statement throws so "refused before
+      anything was written" is a property of the test.'
+    - 'NOTE: six permissions were added to the F07 catalogue rather than the roles being listed here -
+      booking:confirm, booking:check_in, booking:start, booking:complete, booking:mark_no_show and
+      booking:cancel_as_salon - and permittedRolesFor DERIVES the role list from ROLE_DEFINITIONS through
+      can(). That is what "enforced by the F07 policy layer" was asked for: the grant is declared once, in
+      data, and a change to ROLE_DEFINITIONS changes this table''s answer in the same commit. The
+      receptionist holds confirm, check_in, start and complete plus the booking:cancel and
+      booking:reschedule they already had; mark_no_show and cancel_as_salon are owner-or-manager only,
+      because one breaks the salon''s own commitment and carries a refund and the other writes a judgement
+      against the customer that B-LIFE-03''s fee policy will attach money to. The therapist gained
+      booking:start only - they start the treatment they are about to give. `system` holds none: marking a
+      no-show is a judgement, not a sweep, so a future overnight job cannot take it without a grant
+      somebody writes down.'
+    - 'NOTE: the repeat decisions, with the rule that produced them. A repeat is an ERROR where answering
+      "done" would conceal an actor acting on the wrong appointment - completed (money is already taken and
+      the invoice issued; the likeliest cause of a second completion is the other row of a couples booking
+      being in front of the actor) and rescheduled (the appointment that still exists is the SUCCESSOR, so
+      a second reschedule of a superseded row would move a period it no longer holds and leave the live row
+      untouched). It is an IDEMPOTENT no-op everywhere else, because the state asked for is already true
+      and nothing downstream counts the asking: cancelled_by_customer (a portal double-tap, a retried
+      webhook), cancelled_by_salon (when a therapist calls in sick two managers cancel the same list),
+      no_show (a sweep of the past day may run twice), confirmed, checked_in and in_progress. requested is
+      the ninth case and it is neither: nothing transitions INTO it, so there is nothing to repeat and
+      requested -> requested is illegal_transition. A no-op writes NOTHING - no history row, no audit row,
+      no event - which is why it is a separate verdict kind from allowed rather than a flag on it.'
+    - 'NOTE: satisfied differently from the wording in one place. "every other pair is refused with a named
+      illegal_transition error" holds for all fifty-seven undeclared off-diagonal pairs and for requested
+      -> requested; the eight other diagonal cells are the REPEATS the last acceptance line asks to be
+      declared, and a repeat declared an error is refused as `already_in_status` rather than
+      `illegal_transition`. Two names because they are two facts and the front desk needs to be told them
+      differently: "this appointment is already completed" sends the actor to read the appointment,
+      "completed -> in_progress is not a transition" sends them to read the machine. Both are in
+      APPOINTMENT_TRANSITION_REFUSALS, both are asserted per cell, and a repeat is still refused before the
+      table is consulted for anything else.'
+    - 'NOTE: migration 0046_appointment_lifecycle.sql, and SCHEMA_VERSION is 46 (41 unused, 42-45 taken by
+      units in flight). appointment_status_history gained actor_kind, actor_id, actor_label, actor_role and
+      reason, and the six CHECK constraints that make a HALF-written attribution impossible. 0024 writes
+      the chain from a trigger so that "a transition without a history row is not reachable", and a trigger
+      cannot see a value that is not a column on `appointment` - so the actor arrives the way 0036 solved
+      exactly this for app_setting_history.justification: set_config(''berelax.transition_*'', $1, true) in
+      the same transaction, read back with current_setting(..., true). The columns are NULLABLE and that is
+      a decision with a cost attached: set_config is transaction-local, so a NOT NULL would make every
+      correcting `update appointment set status` from a psql session IMPOSSIBLE rather than merely
+      unattributed, and would push the correction outside the chain - and it would require the seven
+      existing direct status updates across the schema, eligibility and booking suites to be wrapped in
+      explicit transactions. What enforces it for the application instead is transitionAppointment, which
+      READS THE APPENDED ROW BACK in the same transaction and refuses with transition_not_recorded unless
+      exactly one row was written carrying exactly this actor, role and reason. Gates 51k and 51l remove the
+      set_config and then the comparison too, and watch the pair suite fail; gates 51h/51i prove the trigger
+      reads the settings, with the same probe run without them to show it can fail.'
+    - 'NOTE: the actor_role CHECK restates the eight F07 roles in SQL, because the database cannot import
+      the policy layer. The duplication is made safe rather than tolerated: the pair suite reads the
+      accepted set out of pg_get_constraintdef and asserts it equals ROLES, and gate 51b inserts a role
+      the policy layer does not declare and watches the constraint refuse it by name. actor_kind is
+      compared CONSTRAINT TO CONSTRAINT against audit_event''s own check, so the two tables agree with each
+      other rather than with a literal in a test file.'
+    - 'NOTE: three deferrals, each with the reason it cannot be closed here. (1) The CREATION history row
+      is unattributed - from_status null, no actor - because B-AVAIL-06''s Actor carries kind, id and label
+      and no F07 ROLE, and attributing half of it is what 0046''s attribution_is_whole constraint refuses.
+      Closing it means a role on the booking request, which is the endpoint''s API and W-BOOK''s to change;
+      the pair suite asserts the creation row''s shape so the state of it is recorded rather than assumed.
+      (2) A CUSTOMER cancelling through a portal has no role in F07''s ROLES, which is staff auth: the
+      state cancelled_by_customer names who REQUESTED the cancellation and the actor columns name who
+      RECORDED it, so a receptionist taking the phone call is already expressible, but a self-service
+      cancellation needs either a `customer` role in the policy layer or a portal actor mapping, and
+      neither is this unit''s to invent. (3) NO_SHOW is declared reachable from CONFIRMED and CHECKED_IN
+      (B-LIFE-03''s wording) and the CLOCK GUARD - only once the start is past - is B-LIFE-03''s, as is the
+      cancellation window. They narrow what a caller may ask for; adding them here would put a clock in
+      packages/core, which may not read one.'
+    - 'NOTE: two things found wrong in existing code. (1) packages/fixtures/src/salon.ts declares
+      `AppointmentState = ''completed'' | ''no_show'' | ''cancelled'' | ''booked''` and
+      packages/fixtures/src/reports.ts counts against it - a SECOND appointment-state vocabulary with the
+      two cancellations collapsed into one `cancelled`. It is synthetic demo data and never reads the
+      appointment_status enum, so nothing drifts today, but any report built on it cannot answer "who
+      cancelled" and that is the distinction this unit exists to keep. Not changed here: the fixture digest
+      (pnpm fixtures) pins those values and re-emitting it is a change to another unit''s evidence. (2)
+      `select id::text as id … order by id` sorts the ids as TEXT, because ORDER BY resolves an output
+      column name before a table column - so ''10'' sorts before ''9''. It cost a run in this unit''s own
+      pair suite and both sites here now name the column qualified. The same shape is live in
+      packages/google/src/google-disconnect.itest.ts (three places: `select id::text … order by id` over
+      google_connection_events, a bigint identity), where the order is not load-bearing today - the cases
+      assert a count and then loop - so it is a hazard rather than a defect, and worth fixing when that file
+      is next touched.'
     files:
     - packages/core/src/lifecycle/transitions.ts
     - packages/core/src/lifecycle/transitions.test.ts
     - packages/db/src/repositories/appointment-transition.ts
     - packages/db/src/repositories/appointment-transition.test.ts
+    - packages/fixtures/src/appointment-lifecycle.itest.ts
+    - packages/db/migrations/0046_appointment_lifecycle.sql
   - id: B-LIFE-03
     order: 31
     title: Reschedule, cancellation, no-show and the cancellation policy

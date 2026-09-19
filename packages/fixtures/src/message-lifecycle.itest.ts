@@ -55,7 +55,10 @@ import {
   FIXTURE_TRADING_DATE_ONE,
   FIXTURE_TRADING_DATE_TWO,
   type SeededMessagingFixture,
+  SMS_RECIPIENT_SLOTS,
   seedMessagingFixture,
+  slotsAreDistinct,
+  smsRecipientFor,
 } from './message-lifecycle.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
@@ -67,23 +70,29 @@ if (!url) {
 const RUN = `${process.pid}${Math.floor(Math.random() * 1e6)}`
 
 /**
- * A recipient for this run, distinguished from every other by `slot` alone.
+ * A recipient for this run, from the ONE builder that every writer of these rows shares.
  *
- * Every recipient in this file MUST share one prefix and differ only in the last character, and that is a
- * correctness requirement rather than a tidiness one. They were built inline, as two different
- * truncations of the same string: eight characters of RUN for the seeded fixtures, seven plus a digit for
- * the live sends. Those are the SAME number whenever the eighth character of RUN happens to equal that
- * digit — and RUN ends in `Math.random()`, so it is roughly a one-in-ten run. What it produces is
- * `listMessageInbox` returning the fixtures' rows as well as the live one, against a file whose own
- * header promises that "every read here is narrowed to this run's own template keys, recipients and
- * provider ids". G-CONN-09's verify caught it with eleven rows where one was expected, and M-VAT-03's
- * caught the same thing independently on the run where that character was a 5 — which is the real rate:
- * the five live recipients take the distinct digits 1 to 5, so exactly one of them collides whenever the
- * eighth character of RUN is in that range, and that is one run in two, not one in ten.
- *
- * Slots are single characters and all distinct. `+9715` plus eight digits is a UAE mobile in E.164.
+ * The slot is what separates this file's live sends from each other AND from the rows
+ * `seedMessagingFixture` writes, and the builder lives beside that seeder rather than here for exactly
+ * that reason. Two builders over one run id is what went wrong: this file took seven characters of RUN
+ * plus a digit while the seeder took eight, and those are the SAME NUMBER whenever the eighth character
+ * of RUN equals that digit. The digits in use were 0 to 5, so about three runs in five collided on one
+ * slot, and the symptom was a read returning the seeder's rows as well as its own — against a file whose
+ * own header promises that "every read here is narrowed to this run's own template keys, recipients and
+ * provider ids". Four units hit it: M-VAT-03, G-CONN-09, W-SYS-10 and H-HARD-03, and the first two fixes
+ * narrowed the odds without removing the cause, because the cause was the other builder.
  */
-const recipientFor = (slot: string): string => `+9715${RUN.slice(0, 7)}${slot}`
+const recipientFor = (slot: string): string => smsRecipientFor(RUN, slot)
+
+it("every writer of these rows has its own recipient slot, so none can read another's", () => {
+  // The assertion the two previous fixes lacked. Without it the next writer to want a number here takes
+  // a digit that is already spoken for, and the failure surfaces three runs in five, somewhere else.
+  expect(slotsAreDistinct()).toBe(true)
+  expect(new Set(Object.values(SMS_RECIPIENT_SLOTS)).size).toBe(7)
+  expect(recipientFor(SMS_RECIPIENT_SLOTS.promotional)).not.toBe(
+    recipientFor(SMS_RECIPIENT_SLOTS.seededFixture),
+  )
+})
 
 const SENT_AT = '2026-09-18T10:00:00.000Z'
 const DELIVERED_AT = '2026-09-18T10:00:12.000Z'
@@ -121,7 +130,7 @@ async function sentMessage(suffix: string, costFils = 9, segments = 1) {
       messageClass: 'transactional',
       locale: 'en',
       vendor: 'smsala',
-      recipient: recipientFor('0'),
+      recipient: recipientFor(SMS_RECIPIENT_SLOTS.seededShape),
       senderId: 'BERELAX',
       subject: null,
       body: 'Your appointment is confirmed.',
@@ -278,7 +287,7 @@ describe('acceptance — the row carries the lifecycle, and a DLR cannot move it
     // the receipt; the row says which KIND of failure this was.
     expect(stored?.lastFailureReason).toBe('delivery_reported_failed')
     const [entry] = await listMessageInbox(sql, {
-      recipient: recipientFor('0'),
+      recipient: recipientFor(SMS_RECIPIENT_SLOTS.seededShape),
       limit: 200,
     })
     expect(entry).toBeDefined()
@@ -358,7 +367,7 @@ function liveRequest(recipient: string): RecordedSendRequest {
 
 describe('acceptance — every fake send is in the inbox, and a failure retries to a declared cap', () => {
   it('finds the inbox row a send just produced, with body, encoding, segments, cost and status', async () => {
-    const recipient = recipientFor('1')
+    const recipient = recipientFor(SMS_RECIPIENT_SLOTS.inboxRead)
     const harness = liveHarness()
     const outcome = await deliverMessage(harness.deps, liveRequest(recipient))
     expect(outcome.kind).toBe('sent')
@@ -391,7 +400,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
   })
 
   it('attempts a rejection once and a rate limit three times, both ending failed', async () => {
-    const rejectedRecipient = recipientFor('2')
+    const rejectedRecipient = recipientFor(SMS_RECIPIENT_SLOTS.rejected)
     const rejected = liveHarness()
     rejected.sms.failures.transactional.failAlways('rejected')
     const first = await deliverMessage(rejected.deps, liveRequest(rejectedRecipient))
@@ -408,7 +417,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
     })
     expect(rejected.waits).toEqual([])
 
-    const limitedRecipient = recipientFor('3')
+    const limitedRecipient = recipientFor(SMS_RECIPIENT_SLOTS.rateLimited)
     const limited = liveHarness()
     limited.sms.failures.transactional.failAlways('rate_limited')
     const second = await deliverMessage(limited.deps, liveRequest(limitedRecipient))
@@ -428,7 +437,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
   })
 
   it('leaves a retryable failure queued with its next attempt, which the schema only allows there', async () => {
-    const recipient = recipientFor('4')
+    const recipient = recipientFor(SMS_RECIPIENT_SLOTS.retryable)
     const harness = liveHarness()
     harness.sms.failures.transactional.failNext('rate_limited', 1)
     // One wait, then the provider recovers: the row passes through queued with a next_attempt_at, and
@@ -450,7 +459,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
 
 describe('acceptance — a delivery receipt cannot un-count a message against the frequency cap', () => {
   it('counts a promotional message from the moment it was sent, whatever happens to it after', async () => {
-    const recipient = recipientFor('5')
+    const recipient = recipientFor(SMS_RECIPIENT_SLOTS.promotional)
     const promotionalTemplateId = await ensureMessageTemplate(sql, {
       key: `bmsg04.${RUN}.promo`,
       channel: 'sms',
