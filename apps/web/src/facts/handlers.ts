@@ -2,7 +2,7 @@ import type { CompliancePolicy } from '@berelax/core'
 import { readCompliancePolicy, readPremisesFacts, type Sql } from '@berelax/db'
 import { DEFAULT_LOCALE, LOCALES, localisedPath } from '../i18n/locales.ts'
 import { absoluteUrl, siteOrigin } from '../routes/alternates.ts'
-import { ROUTES, routeByPath } from '../routes/registry.ts'
+import { fillParams, isParameterised, ROUTES, routeByPath } from '../routes/registry.ts'
 import { buildFacts, factsEtag } from './build.ts'
 import { type LlmsPage, publishLlmsTxt } from './llms.ts'
 import { buildRobotsTxt } from './robots.ts'
@@ -113,16 +113,48 @@ export async function factsResponse(deps: FactsDeps, request: Request): Promise<
  * here on the day their unit lands, with no change to this file — which is the same property W-SITE-01
  * built the registry for.
  */
-export function llmsPages(): readonly LlmsPage[] {
-  return ROUTES.filter((route) => route.kind === 'document' && route.indexable).map((route) => ({
-    // The registry id, spelled for a reader: `kitchen-sink` -> `Kitchen sink`. Derived rather than a
-    // second field, so a page cannot be listed here under a name the registry does not know.
-    label: route.id.replaceAll('-', ' ').replace(/^./, (first) => first.toUpperCase()),
-    url: absoluteUrl(localisedPath(route.path, DEFAULT_LOCALE)),
-    alternates: LOCALES.filter((locale) => locale !== DEFAULT_LOCALE)
-      .filter((locale) => route.locales.includes(locale))
-      .map((locale) => absoluteUrl(localisedPath(route.path, locale))),
-  }))
+export function llmsPages(catalogue: readonly CataloguePage[] = []): readonly LlmsPage[] {
+  const pages: LlmsPage[] = []
+  for (const route of ROUTES) {
+    if (route.kind !== 'document' || !route.indexable) continue
+    const alternatesOf = (params: Readonly<Record<string, string>>): readonly string[] =>
+      LOCALES.filter((locale) => locale !== DEFAULT_LOCALE)
+        .filter((locale) => route.locales.includes(locale))
+        .map((locale) => absoluteUrl(fillParams(localisedPath(route.path, locale), params)))
+
+    if (!isParameterised(route.path)) {
+      pages.push({
+        // The registry id, spelled for a reader: `kitchen-sink` -> `Kitchen sink`. Derived rather than a
+        // second field, so a page cannot be listed here under a name the registry does not know.
+        label: route.id.replaceAll('-', ' ').replace(/^./, (first) => first.toUpperCase()),
+        url: absoluteUrl(localisedPath(route.path, DEFAULT_LOCALE)),
+        alternates: alternatesOf({}),
+      })
+      continue
+    }
+    // A parameterised route is a pattern, and `/llms.txt` is a list of URLs a reader may fetch. Listing the
+    // pattern would publish `https://…/treatments/[slug]` as a page — the one failure this file exists to
+    // avoid, since the whole point of it is that an assistant fetches what it names. The concrete pages come
+    // from the catalogue, which the caller has already read; with none, the route contributes nothing rather
+    // than a URL that 404s.
+    for (const page of catalogue) {
+      pages.push({
+        label: page.label,
+        url: absoluteUrl(
+          fillParams(localisedPath(route.path, DEFAULT_LOCALE), { slug: page.slug }),
+        ),
+        alternates: alternatesOf({ slug: page.slug }),
+      })
+    }
+  }
+  return pages
+}
+
+/** One catalogue-derived page, for the parameterised route `llmsPages` expands. */
+export interface CataloguePage {
+  readonly slug: string
+  /** The public display name, which is what a reader and an assistant look for. */
+  readonly label: string
 }
 
 /**
@@ -139,11 +171,16 @@ export async function llmsResponse(deps: FactsDeps): Promise<Response> {
   const read = await readPremisesFacts(deps.sql)
   if (read === null) return missingPremises()
   const policy: CompliancePolicy = await policyFor(deps.sql)
+  const facts = buildFacts(read, { generatedAt: deps.now(), origin: siteOrigin() })
   const body = publishLlmsTxt(
     {
-      facts: buildFacts(read, { generatedAt: deps.now(), origin: siteOrigin() }),
+      facts,
       origin: siteOrigin(),
-      pages: llmsPages(),
+      // The eight treatment pages by name, so the file names what it links to. The labels are the
+      // catalogue's linted public display names, never composed here.
+      pages: llmsPages(
+        facts.catalogue.services.map((service) => ({ slug: service.slug, label: service.name })),
+      ),
     },
     policy,
   )

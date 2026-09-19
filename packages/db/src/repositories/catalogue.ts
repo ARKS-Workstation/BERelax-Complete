@@ -568,10 +568,20 @@ export async function renameServiceSlug(
 /**
  * Takes a service off the menu without deleting anything.
  *
- * Three things happen together, and the third is the one that is easy to forget. Publication is
- * withdrawn in the same statement — `service_archived_is_not_published` refuses the alternative — and
- * every redirect pointing at the service's page is retargeted to the treatments index, because an
- * archived service's path 301s there (W-SITE-05) and a redirect to a redirect is two hops.
+ * Four things happen together, in this order, and none of them is optional:
+ *
+ *   1. every redirect pointing at the service's page is retargeted to the treatments index, because the
+ *      page is about to stop answering and a redirect to a redirect is two hops;
+ *   2. publication is withdrawn in the same statement that sets `archived_at` —
+ *      `service_archived_is_not_published` refuses the alternative;
+ *   3. the service's **own** path gets a 301 to the treatments index. This is the row W-SITE-05's
+ *      acceptance asks for ("an archived service leaves the sitemap and 301s to /treatments") and it is
+ *      written here rather than by the route, because `redirect_map` is the one mechanism that answers
+ *      "where does this path go" — a page-level fallback would be a second answer, resolved by whichever
+ *      code path ran first. It has to come *after* step 2: `redirect_source_still_live` (ZC007) refuses a
+ *      redirect from a path a live service answers on, which is exactly right and exactly why the order
+ *      is forced;
+ *   4. the audit row.
  *
  * The appointments are untouched. They hold a `service_variant` and a snapshotted gross, so a guest who
  * booked last week is still booked, at the price they were quoted.
@@ -579,13 +589,19 @@ export async function renameServiceSlug(
 export async function archiveService(
   uow: UnitOfWork,
   input: { readonly serviceId: string; readonly reason?: string },
-): Promise<{ readonly service: ServiceSnapshot; readonly retargeted: readonly string[] }> {
+): Promise<{
+  readonly service: ServiceSnapshot
+  readonly retargeted: readonly string[]
+  /** The 301 the archived page now answers with. */
+  readonly redirect: { readonly sourcePath: string; readonly targetPath: string }
+}> {
   const before = await mustRead(uow.sql, input.serviceId)
   const path = servicePath(before.slug)
+  const reason = input.reason ?? 'target service archived'
   const retargeted = await uow.sql<{ source_path: string }[]>`
     update redirect_map
        set target_path = ${TREATMENTS_INDEX_PATH},
-           reason      = ${input.reason ?? 'target service archived'}
+           reason      = ${reason}
      where target_path = ${path}
      returning source_path
   `
@@ -593,6 +609,17 @@ export async function archiveService(
     update service set archived_at = now(), published_at = null
      where id = ${input.serviceId}
      returning ${uow.sql.unsafe(SERVICE_COLUMNS)}
+  `
+  // `on conflict` rather than a plain insert: archiving an already-archived service is a button an owner
+  // may press twice, and the second press must not fail on the unique `source_path`. The update is the
+  // correct resolution rather than `do nothing` — if a row for this path already exists it was written
+  // for an earlier archival of the same page, and leaving a stale target would be a redirect nobody
+  // reconciles.
+  await uow.sql`
+    insert into redirect_map (source_path, target_path, reason, created_by)
+    values (${path}, ${TREATMENTS_INDEX_PATH}, ${reason}, ${'catalogue'})
+        on conflict (source_path)
+        do update set target_path = excluded.target_path, reason = excluded.reason
   `
   const after = snapshot(row as ServiceRow)
   await uow.audit.record({
@@ -605,9 +632,14 @@ export async function archiveService(
       archivedAt: after.archivedAt,
       publishedAt: after.publishedAt,
       retargeted: retargeted.map((r) => r.source_path),
+      redirect: { sourcePath: path, targetPath: TREATMENTS_INDEX_PATH, status: 301 },
     },
   })
-  return { service: after, retargeted: retargeted.map((r) => r.source_path) }
+  return {
+    service: after,
+    retargeted: retargeted.map((r) => r.source_path),
+    redirect: { sourcePath: path, targetPath: TREATMENTS_INDEX_PATH },
+  }
 }
 
 /**

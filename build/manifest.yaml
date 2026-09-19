@@ -6952,7 +6952,7 @@ units:
       loop, automatic 301 on slug change, question-shaped headings and the banned-claims lint on public
       display names.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-01
@@ -6986,12 +6986,195 @@ units:
       pain cure massage'' fails the build by rule name (gate-fires proof)'
     - Four Hands, Couple Massage and Full Body Shaving render as 'Price on request' publicly; the provisional
       derived figure is visible only in admin and is returned by the Unconfirmed Assumptions query
+    - 'NOTE: the routes are apps/web/app/(en)/(public)/{treatments,treatments/[slug],pricing}/page.tsx and
+      apps/web/app/(ar)/ar/{treatments,treatments/[slug],pricing}/page.tsx — six files, not three. W-SYS-01
+      landed two root layouts, (en) and (ar), and W-SITE-01''s registry test requires every DOCUMENT to be
+      served in both locales (an hreflang set with one locale pointing at a 404 invalidates the whole set), so
+      a catalogue page in one locale was not available. The structure is rendered once:
+      apps/web/app/_treatments/pages.tsx holds the three bodies and sections.tsx the one component that emits
+      an <h2>, with the per-locale copy in apps/web/src/treatments/copy-{en,ar}.ts. The underscore folder is
+      excluded from routing by Next, so the bijection is unaffected. There is no apps/web/app/(public)/
+      group and there never was — W-SITE-01''s own NOTE records why.'
+    - 'NOTE: `rendering: ''isr''` was added to the registry''s RenderingMode union, which W-SITE-01 left open
+      for exactly these routes. It is not decoration: an `isr` route reads the catalogue during `next build`,
+      and a route with a dynamic segment prerenders its `generateStaticParams` — so `.next/prerender-manifest.json`
+      holds 8 concrete English paths and 8 Arabic ones and never the pattern. `route-spine.itest.ts`''s
+      "prerendered exactly the routes declared static" case was rewritten to check that shape, and a new case
+      asserts one prerendered treatment path per published service in both locales (8 + 8, read off the
+      manifest rather than counted by hand).'
+    - 'NOTE: CI''s step order was WRONG for these routes and is fixed in .github/workflows/ci.yml. It built the
+      web application BEFORE `pnpm db:apply`, which was correct while no route read the database at build time
+      (`app/api/v1/otp/route.ts` and `src/facts/runtime.ts` both record that assumption). `generateStaticParams`
+      over the catalogue breaks it, and the failure is LOUD rather than silent — worth stating precisely, since
+      that was the question: with the old order `next build` reaches `readTreatmentPages` against the schema the
+      service container created EMPTY and fails on "relation service does not exist"; with the migrations
+      applied and no seed it reaches `treatmentPageData`, whose throw names the seed, because 0017 inserts the
+      eight services as DRAFTS and `premises` has no row. CI would have gone red at the build step rather than
+      shipping empty pages — but red on every branch, so the order had to change. `pnpm db:apply` and a new
+      `pnpm seed` step now run before the build — the seed as well as the migrations, because 0017 inserts the
+      8 services deliberately without their 32 prices (prices are business data a migration cannot re-run) and
+      `generateStaticParams` returns one path per PUBLISHED service. Gates 52k-52l assert the order with the
+      old order as the known-bad fixture, because block 29 checks presence and cannot see an order.'
+    - 'NOTE: the published price now resolves the effective-dated `price_list` row (0025) and falls back to
+      `service_variant.gross_price_fils`. This unit found the defect: `changeVariantPrice` — the only price
+      mutation — inserts a `price_list` row and deliberately never overwrites the variant (overwriting would
+      rewrite what last month''s bookings were worth), while `readPremisesFacts` read the variant alone. So a
+      price raised through the admin was charged at the till and published on no surface: not the treatment
+      page, not /pricing, not the Offer JSON-LD, not /api/facts. One lateral join in
+      packages/db/src/queries/premises-facts.ts fixes all five at once, because they are all one read. Gate 52j
+      restores the old SQL and asserts the published figure goes stale by name.'
+    - 'NOTE: `archiveService` now writes the 301 from the archived page to the treatments index, in the
+      transaction that archives it. 0029 anticipated this ("an archived service 301s to the treatments index
+      (W-SITE-05)") and `redirect_source_still_live` (ZC007) is what forces the order — the row may only be
+      written after publication is withdrawn. It is in the repository rather than in the page because
+      `redirect_map` is the one answer to "where does this path go"; a page-level fallback would be a second
+      answer, resolved by whichever ran first. `packages/db/src/repositories/catalogue.itest.ts` asserted the
+      archived path answered `not_found`; that expectation is now the 301, with the reason recorded there.'
+    - 'NOTE: SCOPED — the redirect''s status is 308, not 301. Next''s `redirect()` answers 307, which is
+      TEMPORARY and the one thing 0029 refuses in so many words; `permanentRedirect()` answers 308. 308 and 301
+      are the same signal to every search engine and differ only in whether a non-GET method survives, which
+      for a page is moot. `redirect_map.status_code` stays 301 because that is what a CDN rule or a proxy would
+      serve if one took this over, and `treatments.itest.ts` asserts the shape that is actually served: one
+      permanent hop to a 200, no chain, no loop. W-SITE-01 recorded the same distinction for Next''s own
+      doubled-slash 308.'
+    - 'NOTE: SCOPED — the redirect drops the query string, which B-CAT-05''s handler preserved. Reading
+      `searchParams` is a dynamic API, and a route with `generateStaticParams` renders an unlisted param as a
+      STATIC render at request time: the redirect branch then fails with `DYNAMIC_SERVER_USAGE` and answers
+      500. That was measured, not assumed. The choice is between prerendering the eight pages — this unit''s
+      acceptance criterion — and carrying `?utm_source=` across a redirect from a slug that no longer resolves;
+      prerendering wins, and the loss is asserted rather than hidden, so the day it is fixed the test fails and
+      is updated deliberately. The fix belongs in a layer that always sees the request: `proxy.ts` with a
+      snapshot of `redirect_map`, or a CDN rule generated from it. W-SITE-09 imports the legacy URLs into that
+      table and is where that layer belongs.'
+    - 'NOTE: DEFERRED — "the page''s FAQ entries equal their faq_entries source rows". `faq_entries` has no
+      link to a catalogue service at all (its fields are question, answer, topic — there is no
+      `catalogue_service_id`, unlike `service_narrative`), it holds zero rows, and there is no Payload read
+      path on any rendered route: `push` is off under NODE_ENV=production, so a `getPayload` read during
+      `next build` would query tables the build cannot be sure exist. W-SITE-03 deferred the same node for the
+      same reason and recorded that `/faq` is not in the registry. What IS delivered is the extractability the
+      criterion exists for: six question-shaped `<h2>`s per treatment page, each with a stable slugified id
+      identical in both locales, each immediately followed by the `<p>` that answers it — asserted over the
+      served DOM of all 8 pages in both locales, and over the data in `content.test.ts`. `pageGraph`''s `faq`
+      option is wired and unfed. Deferred to the unit that adds /faq and to W-SITE-10 for the Arabic narrative.'
+    - 'NOTE: the treatment NAME is not translated on the Arabic pages, and that is deliberate.
+      `service.public_display_name` is one column with one value (docs/13 §4 prints the menu in English), it is
+      the value B-CAT-05''s lexicon has passed, and it is what the `Offer` JSON-LD on the same page publishes.
+      An Arabic rendering invented here would be a second, unlinted name for the same treatment, disagreeing
+      with the schema block beside it. The Arabic pages therefore carry the catalogue''s name inside Arabic
+      sentences; the translated name arrives with the `service_narrative` CMS collection, where an editor
+      writes it and the publication lint reads it (W-SITE-10).'
+    - 'NOTE: the "provisional derived figure visible only in admin" half of the last acceptance line is
+      vacuously true and must stay that way. B-CAT-06 reversed the 1.8x derivation: `price_on_request` has no
+      price column at all (0032), so there is no figure anywhere — in admin or out of it — and
+      `price_on_request_row_is_always_unanswered` pins `is_provisional`. The three offerings render as "Price
+      on request" on /pricing in both locales, their `Offer` nodes carry no `price` and no `priceCurrency` (a
+      currency with no figure reads as free, and `validateGraph` refuses it), and all three are returned by
+      `unconfirmedAssumptionRows()` — asserted in `treatments.itest.ts`. Y9-poa-prices is unchanged.'
+    - 'NOTE: no migration. SCHEMA_VERSION stays 40 and 0047 is unused: everything this unit needed already
+      existed — `redirect_map` and its one-hop triggers (0029), `price_list` (0025), `price_on_request` (0032).
+      The new SQL is two reads in packages/db: the effective-price join in `premises-facts.ts` and
+      `queries/catalogue-pages.ts` (`readTreatmentPages`, which gives `generateStaticParams` its slugs and the
+      sitemap its `lastmod` from `updated_at` on the service, its variants and the price-list row in force).'
+    - 'NOTE: the sitemap. There is still no sitemap.xml — W-SITE-08 owns it — so "the sitemap contains exactly
+      8 treatment routes" is asserted against the two functions a sitemap builder may read:
+      `sitemapEntries()` in the registry, which now SKIPS a parameterised route (a `<loc>` of
+      `/treatments/[slug]` is a sitemap naming a 404) and exports `parameterisedSitemapRoutes()` so the skip
+      cannot be silent, and `treatmentSitemapEntries()` in apps/web/src/treatments/sitemap.ts, which expands it
+      over the catalogue: 8 distinct slugs, 16 entries (two locales, exactly as `/` and `/ar` are one route and
+      two entries), each with a `lastmod` from the rows. An archived service leaves both by construction, which
+      `treatments.itest.ts` asserts as a delta.'
+    - 'NOTE: the publish loop needed a trigger, and it is
+      apps/web/app/(admin)/settings/catalogue/revalidate/route.ts — POST only, because `revalidatePath` works
+      only inside the Next process and a GET would let any crawler invalidate the site''s caches on every visit.
+      It is unauthenticated, exactly as the three `/settings` handlers beside it record (there is no admin
+      session until W-SYS-01) and bounded to invalidating a cache: it reads no customer data and writes no row.
+      The decision — which paths, in which locales, and the retired path after a rename — is in
+      apps/web/src/revalidate/catalogue.ts and is unit-tested without a server, because the mistake to catch is
+      a forgotten `/ar` or a forgotten `/pricing` and an integration test that fetches the paths the report
+      names cannot see one.'
+    - 'NOTE: the tests are apps/web/src/treatments.itest.ts (the 8 routes, the 32 price rows, the h2 structure
+      over the served DOM, the Offer JSON-LD, the redirects, the delete refusal and the five-artefact publish
+      loop), apps/web/src/treatments/content.test.ts, apps/web/src/treatments/no-price-literals.test.ts (the
+      "no numeric price literal in any template" grep, with a closed exemption list) and
+      apps/web/src/revalidate/catalogue.test.ts — not tests/routes/treatments.spec.ts. This repository has no
+      tests/ directory: tests sit beside their source as *.test.ts and *.itest.ts. B-CAT-05''s
+      apps/web/src/treatment-path.itest.ts was DELETED with the `route.ts` it drove: a page.tsx and a route.ts
+      cannot share a segment, and every one of its cases is now asserted over HTTP against the real page.'
+    - 'NOTE: two findings in existing code, both fixed here. `llmsPages()` would have published
+      `https://…/treatments/[slug]` as a page in /llms.txt the moment this route landed — a URL the file exists
+      to have quoted, and a 404 — so it now expands a parameterised route over the catalogue and names the
+      eight treatment pages by their public display names. And `alternatesFor`/`routeMetadata`/`RouteNav` all
+      built URLs from `route.path` verbatim, which for a dynamic route is the pattern: `fillParams` throws on a
+      segment nobody filled rather than publishing one, and `registry.test.ts` asserts that with the pattern as
+      the fixture.'
+    - 'NOTE: Next 16.3.5 emits `location` TWICE on a redirect produced by an on-demand static render, with the
+      same value both times. `Headers#get` returns them joined by a comma, so an assertion of
+      `toBe(target)` on the raw header fails on a redirect that is correct. `treatments.itest.ts` compares every
+      value and asserts they agree rather than using `toContain`, which would have passed on two DIFFERENT
+      locations — a real defect if it ever happens.'
+    - 'NOTE: a third finding in existing code, fixed here because it failed this unit''s verify.
+      `packages/fixtures/src/message-lifecycle.ts` built the seeded fixture''s recipient as
+      `+9715${run.slice(0, 8)}` while `message-lifecycle.itest.ts` builds every live recipient as
+      `+9715${RUN.slice(0, 7)}${slot}` with slots 0-5. The two are the SAME number whenever the eighth
+      character of `run` is a digit some slot uses, so `listMessageInbox(recipient)` returns the four fixture
+      rows as well as the live ones: the frequency-cap case read six statuses where it expects two. The
+      itest''s own doc comment describes this hazard and records two earlier units hitting it — the fix it
+      describes was applied to the itest and never to the seed helper, which is where the eighth character
+      still was. Rate: 6 runs in 10 by construction, quantified rather than guessed, and 0 in 10 after. The
+      seed now shares the seven-character prefix and takes slot 9, which no live recipient uses; the file was
+      run six times to confirm (17 tests, six for six).'
+    - 'NOTE: a fourth finding, same class, also fixed because it failed this unit''s verify.
+      `apps/web/src/otp-route.itest.ts` read the stored client address with
+      `select host(request_ip) from otp_challenge order by issued_at limit 1`. `harness()` runs on a FROZEN
+      clock and 0019 gives `otp_challenge.issued_at` no default, so every row the case writes carries the
+      same timestamp: the ordering is one tie and Postgres may return any member, including the control
+      request''s row from 203.0.113.6 rather than the 203.0.113.5 rows the assertion is about. It returned
+      exactly that, on the run after the fixture fix. The read is now narrowed to `phone_e164 =
+      unknown(20)`, the first number the loop used and the only case that uses it — the assertion it was
+      making, made deterministically. Both this and the fixture finding are the hazard the brief names
+      (never read a shared table globally; narrow to a key), in code this unit did not write.'
+    - 'NOTE: the ISR cache lives on disk in `.next`, so a page this suite revalidated in one run is served from
+      that cache by the next run''s server — with the catalogue as it was then, probe services included. It
+      cost a run to find: the second run reported nine services on /pricing. `treatments.itest.ts` therefore
+      revalidates the menu pages in `beforeAll` (one POST, which is also an incidental proof the endpoint works
+      before anything depends on it) and gives every probe service a per-run slug.'
     files:
-    - apps/web/app/(public)/treatments/page.tsx
-    - apps/web/app/(public)/treatments/[slug]/page.tsx
-    - apps/web/app/(public)/pricing/page.tsx
+    - apps/web/app/(en)/(public)/treatments/page.tsx
+    - apps/web/app/(en)/(public)/treatments/[slug]/page.tsx
+    - apps/web/app/(en)/(public)/pricing/page.tsx
+    - apps/web/app/(ar)/ar/treatments/page.tsx
+    - apps/web/app/(ar)/ar/treatments/[slug]/page.tsx
+    - apps/web/app/(ar)/ar/pricing/page.tsx
+    - apps/web/app/_treatments/pages.tsx
+    - apps/web/app/_treatments/sections.tsx
+    - apps/web/app/(admin)/settings/catalogue/revalidate/route.ts
     - apps/web/src/revalidate/catalogue.ts
-    - tests/routes/treatments.spec.ts
+    - apps/web/src/revalidate/catalogue.test.ts
+    - apps/web/src/treatments/content.ts
+    - apps/web/src/treatments/copy-en.ts
+    - apps/web/src/treatments/copy-ar.ts
+    - apps/web/src/treatments/read.ts
+    - apps/web/src/treatments/sitemap.ts
+    - apps/web/src/treatments/content.test.ts
+    - apps/web/src/treatments/no-price-literals.test.ts
+    - apps/web/src/treatments.itest.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/routes/alternates.ts
+    - apps/web/src/seo/graph-input.ts
+    - apps/web/src/facts/handlers.ts
+    - packages/db/src/queries/catalogue-pages.ts
+    - packages/db/src/queries/premises-facts.ts
+    - packages/db/src/repositories/catalogue.ts
+    - packages/db/src/index.ts
+    - packages/core/src/seo/jsonld/offerings.ts
+    - packages/core/src/seo/jsonld/graph.ts
+    - packages/ui/src/patterns/price-table.tsx
+    - packages/ui/src/patterns/index.tsx
+    - packages/ui/src/layout/styles.tsx
+    - packages/fixtures/src/message-lifecycle.ts
+    - apps/web/src/otp-route.itest.ts
+    - scripts/test-gates.mjs
+    - .github/workflows/ci.yml
   - id: W-SYS-04
     order: 136
     title: 'Motion system: token overrides, distance-duration and the island budget'

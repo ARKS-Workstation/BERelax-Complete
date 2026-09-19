@@ -185,18 +185,31 @@ jobs:
       - name: Unit tests and coverage thresholds
         run: pnpm coverage
 
-      # The integration suite drives the *built* application: shell.itest.ts and kitchen-sink.itest.ts
-      # both spawn `next start`, which needs a build to start at all. Without this step those two files
-      # fail in CI on a missing `.next` while passing for anybody who had built locally.
-      - name: Build the web application
-        run: pnpm --filter @berelax/web build
-
       # The integration suite needs a MIGRATED database, and nothing here was giving it one: the service
       # container creates `berelax_test` empty, and `pnpm db:migrate:dry` below runs afterwards into a
       # throwaway database it then drops. Every integration file would have failed on an empty schema.
       # Nobody saw it because every local run applies the migrations by hand first, as the agent brief says.
+      #
+      # It runs BEFORE the build, and since W-SITE-05 that order is load-bearing rather than tidy: the three
+      # catalogue-derived routes prerender through `generateStaticParams` **over the catalogue**, so
+      # `next build` reads the database. With the old order — build, then migrate — the build read an empty
+      # schema and the eight most valuable pages on the site were prerendered as nothing at all.
       - name: Apply migrations to the test database
         run: pnpm db:apply
+
+      # And SEEDED, for the same reason: the migrations create the schema and `pnpm seed` writes the
+      # catalogue (0017 inserts the 8 services deliberately without their 32 prices, because prices are
+      # business data a migration cannot re-run). `generateStaticParams` returns one path per *published*
+      # service, so without this the build produces a treatments index with an empty menu and no treatment
+      # pages, and every assertion about the 8 routes fails after the build rather than during it.
+      - name: Seed the catalogue and the premises row
+        run: pnpm seed
+
+      # The integration suite drives the *built* application: shell.itest.ts, kitchen-sink.itest.ts and
+      # treatments.itest.ts all spawn `next start`, which needs a build to start at all. Without this step
+      # those files fail in CI on a missing `.next` while passing for anybody who had built locally.
+      - name: Build the web application
+        run: pnpm --filter @berelax/web build
 
       - name: Integration tests (real PostgreSQL)
         run: pnpm test:integration

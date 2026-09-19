@@ -30,7 +30,7 @@
 import { Icon } from '@berelax/ui/icon'
 import { Grid, GridCell, Section } from '@berelax/ui/layout'
 import { hreflangFor, type Locale, localisedPath } from '../../src/i18n/locales.ts'
-import { type RouteId, routeById } from '../../src/routes/registry.ts'
+import { fillParams, type RouteId, routeById } from '../../src/routes/registry.ts'
 
 interface SpineCopy {
   /** The accessible name of the nav. Distinct from the gallery's "On this page" in both languages. */
@@ -50,9 +50,18 @@ const SPINE_COPY: Readonly<Record<Locale, SpineCopy>> = {
 export interface RouteNavProps {
   readonly id: RouteId
   readonly locale: Locale
+  /**
+   * The params of the page being rendered, for a route with a dynamic segment.
+   *
+   * The locale switch is the visible half of the `hreflang` set, so it has to point at the *same document*
+   * in the other language: without the params it would point at `/ar/treatments/[slug]`, which is a link
+   * every reader on all eight treatment pages would follow to a 404. `fillParams` throws rather than
+   * publishing the pattern.
+   */
+  readonly params?: Readonly<Record<string, string>>
 }
 
-export function RouteNav({ id, locale }: RouteNavProps) {
+export function RouteNav({ id, locale, params = {} }: RouteNavProps) {
   const route = routeById(id)
   const copy = SPINE_COPY[locale]
   const isLocaleRoot = route.path === '/'
@@ -73,7 +82,7 @@ export function RouteNav({ id, locale }: RouteNavProps) {
               <a
                 key={target}
                 className="be-action be-action--quiet"
-                href={localisedPath(route.path, target)}
+                href={fillParams(localisedPath(route.path, target), params)}
                 // Both attributes, and they are not the same claim: `hreflang` tells a crawler what is at
                 // the other end, `lang` tells a screen reader which voice to say this label in. Without
                 // the second, "العربية" is announced by an English synthesiser.

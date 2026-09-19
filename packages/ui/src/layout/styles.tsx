@@ -18,6 +18,7 @@
  * of its own rather than a string — see `DESIGN_SYSTEM_CSS` below.
  */
 import { NAP_BLOCK_CSS } from '../patterns/nap-block.tsx'
+import { PRICE_TABLE_CSS } from '../patterns/price-table.tsx'
 import { SERVICE_ROW_CSS } from '../patterns/service-row.tsx'
 import { SLOT_GRID_CSS } from '../patterns/slot-grid.tsx'
 import { THERAPIST_CARD_CSS } from '../patterns/therapist-card.tsx'
@@ -166,6 +167,7 @@ export const DESIGN_SYSTEM_CSS = [
   FIELD_CSS,
   THERAPIST_CARD_CSS,
   SERVICE_ROW_CSS,
+  PRICE_TABLE_CSS,
   SLOT_GRID_CSS,
   NAP_BLOCK_CSS,
   DISCLOSURE_CSS,

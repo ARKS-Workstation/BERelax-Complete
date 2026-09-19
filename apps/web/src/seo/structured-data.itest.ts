@@ -23,7 +23,13 @@ import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from '../facts/build.ts'
 import { siteOrigin } from '../routes/alternates.ts'
-import { documentRoutes, ROUTES } from '../routes/registry.ts'
+import {
+  documentRoutes,
+  ROUTES,
+  routeById,
+  sampleParamsOf,
+  samplePathFor,
+} from '../routes/registry.ts'
 import { brandIsQualified } from './brand.ts'
 import { graphInputFor } from './graph-input.ts'
 
@@ -160,10 +166,41 @@ afterAll(async () => {
  * the same value on both sides by construction.
  */
 
-/** The registry documents that render a graph today, with the locale each is served in. */
+/**
+ * The sample slug the treatment route is visited with: the registry's own, not a second spelling.
+ *
+ * `treatments.itest.ts` asserts it resolves to a published service, so a renamed treatment fails there
+ * rather than making every assertion in this file compare two empty graphs.
+ */
+const SAMPLE_SLUG = sampleParamsOf(routeById('treatment'))['slug'] ?? ''
+
+/**
+ * The registry documents that render a graph, with the locale each is served in and the options the page
+ * built its graph with.
+ *
+ * W-SITE-05 added six of these. The options are part of the expectation because they are what the page
+ * decided: a treatment page publishes **one** `Service` — its own, scoped by `serviceSlugs` — and the index
+ * and `/pricing` publish the whole menu, because the menu is their subject.
+ */
 const GRAPH_ROUTES = [
-  { id: 'kitchen-sink' as const, locale: 'en' as const, path: '/kitchen-sink' },
-  { id: 'kitchen-sink' as const, locale: 'ar' as const, path: '/ar/kitchen-sink' },
+  { id: 'kitchen-sink' as const, locale: 'en' as const, path: '/kitchen-sink', options: {} },
+  { id: 'kitchen-sink' as const, locale: 'ar' as const, path: '/ar/kitchen-sink', options: {} },
+  { id: 'treatments' as const, locale: 'en' as const, path: '/treatments', options: {} },
+  { id: 'treatments' as const, locale: 'ar' as const, path: '/ar/treatments', options: {} },
+  { id: 'pricing' as const, locale: 'en' as const, path: '/pricing', options: {} },
+  { id: 'pricing' as const, locale: 'ar' as const, path: '/ar/pricing', options: {} },
+  {
+    id: 'treatment' as const,
+    locale: 'en' as const,
+    path: `/treatments/${SAMPLE_SLUG}`,
+    options: { serviceSlugs: [SAMPLE_SLUG], params: { slug: SAMPLE_SLUG } },
+  },
+  {
+    id: 'treatment' as const,
+    locale: 'ar' as const,
+    path: `/ar/treatments/${SAMPLE_SLUG}`,
+    options: { serviceSlugs: [SAMPLE_SLUG], params: { slug: SAMPLE_SLUG } },
+  },
 ]
 
 describe('every JSON-LD block on every registry document came out of a builder', () => {
@@ -181,6 +218,7 @@ describe('every JSON-LD block on every registry document came out of a builder',
             licenceClass,
             breadcrumb: { home: 'Home', page: 'Kitchen sink' },
             includeCatalogue: true,
+            ...route.options,
           }),
         ),
       )
@@ -207,7 +245,9 @@ describe('every JSON-LD block on every registry document came out of a builder',
     const accounted = new Set(GRAPH_ROUTES.map((route) => route.path))
     for (const route of documentRoutes()) {
       for (const locale of route.locales) {
-        const path = locale === 'en' ? route.path : `/ar${route.path === '/' ? '' : route.path}`
+        // `samplePathFor` rather than the pattern: a document with a dynamic segment has no fetchable path of
+        // its own, and fetching `/treatments/[slug]` would assert something about a 404.
+        const path = samplePathFor(route, locale)
         const html = await fetchDocument(path)
         const blocks = jsonLdBlocks(html)
         if (accounted.has(path)) {
@@ -474,10 +514,27 @@ describe('the registry is the list of routes this unit had to consider', () => {
     // Every indexable document either renders a graph or is a stated deferral. The registry is in exact
     // bijection with the filesystem (W-SITE-01), so this enumerates the whole site rather than a sample.
     const indexable = ROUTES.filter((route) => route.kind === 'document' && route.indexable)
-    expect(indexable.map((route) => route.id)).toEqual(['home'])
-    // `home` is `rendering: 'static'`: its markup is evaluated during `next build`, where there is no
-    // database by design, so a build-time read would bake a graph nothing could correct. W-SITE-04 renders it
-    // under ISR. Asserted rather than commented, so the day the registry says ISR this test says so too.
-    expect(indexable[0]?.rendering).toBe('static')
+    expect(indexable.map((route) => route.id)).toEqual([
+      'home',
+      'pricing',
+      'treatments',
+      'treatment',
+    ])
+    // `string` rather than the id union: the set is asked about `home`, which renders no graph and is
+    // therefore not one of `GRAPH_ROUTES`' ids — the whole point of the question.
+    const decided = new Set<string>(GRAPH_ROUTES.map((route) => route.id))
+    for (const route of indexable) {
+      if (route.id === 'home') {
+        // The one deferral left, and the reason is its rendering mode: `home` is `rendering: 'static'`, so its
+        // markup is evaluated during `next build` with no read of its own. W-SITE-04 renders it under ISR and
+        // puts the block on it. Asserted rather than commented, so the day the registry says `isr` this test
+        // says so too — and the three W-SITE-05 routes are `isr` precisely because they do read.
+        expect(route.rendering, route.id).toBe('static')
+        expect(decided.has(route.id), 'home renders a graph now').toBe(false)
+        continue
+      }
+      expect(route.rendering, route.id).toBe('isr')
+      expect(decided.has(route.id), `${route.id} renders no graph`).toBe(true)
+    }
   })
 })

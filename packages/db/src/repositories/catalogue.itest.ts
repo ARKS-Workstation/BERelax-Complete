@@ -492,9 +492,20 @@ describe('acceptance — a slug change writes the 301 in the same transaction', 
 
     const resolution = await resolveServicePath(sql, servicePath(`${PROBE_SLUG}-arch-a`))
     expect(resolution).toEqual({ kind: 'redirect', target: TREATMENTS_INDEX_PATH, status: 301 })
-    // And the archived service's own path answers nothing, rather than 301-ing to itself.
+    // And the archived service's own path 301s to the index as well, from the row `archiveService` writes in
+    // the same transaction. It answered `not_found` until W-SITE-05: the index did not exist, and a redirect
+    // to a page that is not there yet is worse than an honest 404. Now that it does, the row is what makes
+    // "an archived treatment 301s to /treatments" a property of `redirect_map` rather than a second answer
+    // living in a page — and 0029's ZC007 is what forces the order, since the row may only be written once
+    // publication has been withdrawn.
     expect(await resolveServicePath(sql, servicePath(`${PROBE_SLUG}-arch-b`))).toEqual({
-      kind: 'not_found',
+      kind: 'redirect',
+      target: TREATMENTS_INDEX_PATH,
+      status: 301,
+    })
+    expect(archived.redirect).toEqual({
+      sourcePath: servicePath(`${PROBE_SLUG}-arch-b`),
+      targetPath: TREATMENTS_INDEX_PATH,
     })
   })
 
@@ -555,9 +566,16 @@ describe('acceptance — a slug change writes the 301 in the same transaction', 
     `)
     expect(failure.code).toBe(CATALOGUE_SQLSTATE.redirectSourceStillLive)
     expect(catalogueError(failure)?.details['refusal']).toBe('redirect_source_still_live')
-    // Control: the same row is legitimate once the service is archived — which is how the archived
-    // page gets its 301 to the treatments index (W-SITE-05).
+    // Control: the same row is legitimate once the service is archived — which is how the archived page
+    // gets its 301 to the treatments index. Since W-SITE-05 `archiveService` writes that row itself, in
+    // the transaction that archives the service, so it is deleted first and then inserted by hand: the
+    // claim under test is that ZC007 no longer applies, and an insert is how that is shown.
     await withUnitOfWork(sql, ACTOR, (uow) => archiveService(uow, { serviceId }))
+    const [written] = await sql<{ target_path: string }[]>`
+      select target_path from redirect_map where source_path = ${servicePath(`${PROBE_SLUG}-live`)}
+    `
+    expect(written?.target_path).toBe(TREATMENTS_INDEX_PATH)
+    await sql`delete from redirect_map where source_path = ${servicePath(`${PROBE_SLUG}-live`)}`
     const accepted = await stateOf(sql`
       insert into redirect_map (source_path, target_path, reason)
       values (${servicePath(`${PROBE_SLUG}-live`)}, ${TREATMENTS_INDEX_PATH}, 'archived')

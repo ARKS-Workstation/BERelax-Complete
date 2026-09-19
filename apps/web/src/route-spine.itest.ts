@@ -27,10 +27,13 @@ import { alternatesFor, siteOrigin } from './routes/alternates.ts'
 import { canonicalPath } from './routes/canonical.ts'
 import {
   documentRoutes,
+  isParameterised,
   NOINDEX_ROBOTS_TAG,
   ROBOTS_HEADER,
   registryPaths,
   routePaths,
+  sampleParamsOf,
+  samplePathFor,
 } from './routes/registry.ts'
 
 /**
@@ -189,10 +192,17 @@ function destination(result: Walk): string {
   return result.visited[result.visited.length - 1] ?? ''
 }
 
-/** Every document path the registry claims, in both locales. */
+/**
+ * Every document path the registry claims, in both locales, as a path that can actually be fetched.
+ *
+ * `samplePathFor` substitutes a route's sample params, because a document with a dynamic segment has no path
+ * of its own: walking `/treatments/[slug]` would assert the normalisation rules against a 404 and the
+ * "canonical path is left alone" control would fail on a page that does not exist. W-SITE-05's treatment page
+ * is the first such document, and its sample slug is a seeded catalogue row.
+ */
 const DOCUMENT_PATHS: readonly string[] = routePaths()
   .filter((entry) => entry.route.kind === 'document')
-  .map((entry) => entry.path)
+  .map((entry) => (entry.locale === null ? entry.path : samplePathFor(entry.route, entry.locale)))
 
 /**
  * The spellings the proxy owns: wrong case, a trailing slash, or both.
@@ -277,17 +287,18 @@ describe('acceptance — every non-canonical spelling reaches the canonical path
     expect(destination(result)).toBe('/kitchen-sink?utm_source=gbp&utm_campaign=map')
   }, 30_000)
 
-  it('normalises the acceptance criterion literal paths, whose route is W-SITE-04s', async () => {
-    // `/treatments` is in docs/09 §1 and does not exist yet, so the destination is a 404 rather than a
-    // 200 — the normalisation is what is under test here, and it is asserted to be exactly one hop with
-    // no chain. When W-SITE-04 lands the route, the loop above covers it with no change to this file.
+  it('normalises the acceptance criterion literal paths, which are W-SITE-05s routes', async () => {
+    // These three used to end on a 404: `/treatments` did not exist, and the test asserted the hop count
+    // and the destination rather than the 200. W-SITE-05 landed the route, so the destination now answers —
+    // which is what the loops above assert for every document, and this case keeps the criterion's literal
+    // spellings covered by name.
     for (const variant of ['/Treatments/', '/treatments/', '/tReAtMeNtS']) {
       const result = await walk(variant)
       expect(result.hops, variant).toHaveLength(1)
       expect(result.hops[0]?.status, variant).toBe(301)
       expect(destination(result), variant).toBe(canonicalPath(variant))
       expect(result.final.location, `${variant}: chained`).toBeNull()
-      expect(result.final.status, variant).toBe(404)
+      expect(result.final.status, variant).toBe(200)
     }
     // `/treatments//x`, the third literal in the criterion, is Next's 308 rather than the proxy's 301:
     // repeated slashes are collapsed before any application code runs. One permanent hop, no chain.
@@ -410,12 +421,13 @@ describe('acceptance — EN at / and AR at /ar, with a reciprocal self-referenti
   it('emits the whole set on every registry document, in both locales', async () => {
     for (const route of documentRoutes()) {
       const heads = new Map<Locale, HeadLinks>()
+      const params = sampleParamsOf(route)
       for (const locale of route.locales) {
-        const path = localisedPath(route.path, locale)
+        const path = samplePathFor(route, locale)
         const head = await headLinks(path)
         heads.set(locale, head)
 
-        const expected = alternatesFor(route.id, locale)
+        const expected = alternatesFor(route.id, locale, params)
         // Enumerated: the whole map, compared as a map, so an extra or a missing hreflang fails. A
         // `toContain` here would pass on a set that had lost a locale.
         expect(head.alternates, path).toEqual(expected.languages)
@@ -424,7 +436,7 @@ describe('acceptance — EN at / and AR at /ar, with a reciprocal self-referenti
         expect(Object.values(head.alternates), path).toContain(expected.canonical)
         expect(head.alternates[hreflangFor(locale)], path).toBe(expected.canonical)
         expect(head.alternates[HREFLANG_DEFAULT], path).toBe(
-          alternatesFor(route.id, DEFAULT_LOCALE).canonical,
+          alternatesFor(route.id, DEFAULT_LOCALE, params).canonical,
         )
       }
 
@@ -443,7 +455,7 @@ describe('acceptance — EN at / and AR at /ar, with a reciprocal self-referenti
     // telling a crawler to ignore what it just said. Every advertised URL is fetched.
     for (const route of documentRoutes()) {
       for (const locale of route.locales) {
-        const head = await headLinks(localisedPath(route.path, locale))
+        const head = await headLinks(samplePathFor(route, locale))
         for (const href of [head.canonical, ...Object.values(head.alternates)]) {
           expect(href).not.toBeNull()
           if (href === null) continue
@@ -621,17 +633,52 @@ describe('acceptance — the registry agrees with what the build produced', () =
     expect(served).toEqual([...registryPaths()].sort())
   })
 
-  it('prerendered exactly the routes declared static', () => {
+  it('prerendered exactly the routes declared static or isr, and the params of the parameterised one', () => {
     const prerender = manifest<{ routes: Record<string, unknown> }>('prerender-manifest.json')
     const prerendered = new Set(Object.keys(prerender.routes))
     // The control: the manifest is not empty, so "declared dynamic, absent from it" cannot pass because
     // nothing was prerendered.
     expect(prerendered.has('/')).toBe(true)
     for (const { path, route } of routePaths()) {
+      if (isParameterised(path)) {
+        // A route with a dynamic segment is prerendered as its `generateStaticParams`, so the manifest holds
+        // its concrete paths and never the pattern. The catalogue decides how many, so the assertion is the
+        // shape rather than a count: at least one path under this prefix, and the pattern itself absent.
+        expect(prerendered.has(path), `${path} is a pattern and cannot be prerendered`).toBe(false)
+        // Only a document prerenders params. The portrait handler is `dynamic` and reads bytes off disk per
+        // request, so "no concrete path under its prefix" is the correct state rather than a missing build.
+        if (route.kind !== 'document' || route.rendering === 'dynamic') continue
+        const prefix = path.slice(0, path.indexOf('['))
+        const concrete = [...prerendered].filter(
+          (entry) => entry.startsWith(prefix) && !entry.includes('['),
+        )
+        expect(
+          concrete.length,
+          `${path} is declared ${route.rendering} and prerendered no params. These routes read the ` +
+            'catalogue at build time: the database must be migrated and seeded before `next build`.',
+        ).toBeGreaterThan(0)
+        continue
+      }
+      // `isr` is prerendered exactly as `static` is — the difference is that it was built from the database
+      // and is replaced by on-demand revalidation, not that it is built later.
       expect(prerendered.has(path), `${path} is declared ${route.rendering}`).toBe(
-        route.rendering === 'static',
+        route.rendering === 'static' || route.rendering === 'isr',
       )
     }
+  })
+
+  it('prerendered one treatment path per published service, in both locales', () => {
+    // The number the acceptance criterion names — 8 (style x treatment) services — read off what the build
+    // produced rather than counted by hand, and 16 documents because each is served in two locales. A count
+    // that drifted from the catalogue would mean `generateStaticParams` had read something else.
+    const prerender = manifest<{ routes: Record<string, unknown> }>('prerender-manifest.json')
+    const treatmentPaths = Object.keys(prerender.routes).filter((path) =>
+      /^(\/ar)?\/treatments\/[a-z0-9-]+$/.test(path),
+    )
+    const english = treatmentPaths.filter((path) => !path.startsWith('/ar/'))
+    const arabic = treatmentPaths.filter((path) => path.startsWith('/ar/'))
+    expect(english.length, english.join(', ')).toBe(8)
+    expect(arabic.map((path) => path.replace('/ar', '')).sort()).toEqual([...english].sort())
   })
 })
 
@@ -704,7 +751,11 @@ describe('acceptance — the screenshot harness reads the registry', () => {
       // The direction axis is the locale: an RTL cell is the Arabic document at that URL, not the
       // English one with an attribute flipped. `app/_document/shell.tsx` explains why that distinction
       // is the whole reason there are two root layouts.
-      const path = localisedPath(route.path, localeFor(target.direction))
+      //
+      // `samplePathFor`, not the route's path: a document with a dynamic segment has no path of its own, and
+      // photographing `/treatments/[slug]` captured a 404 page whose `<html>` carries no theme attribute —
+      // which is how this failed rather than silently filing a picture of an error page.
+      const path = samplePathFor(route, localeFor(target.direction))
       const png = await capture(target, path)
       expect(png.byteLength, `${target.page} ${target.viewport.name}`).toBeGreaterThan(1000)
       const filename = captureFilename(target)
@@ -715,5 +766,8 @@ describe('acceptance — the screenshot harness reads the registry', () => {
     // Named, not counted: `missingCaptures` reports which cell is absent, and a route added to the
     // registry without a capture fails here rather than quietly never being looked at.
     expect(missingCaptures(plan, written)).toEqual([])
-  }, 300_000)
+    // 420s rather than 300s since W-SITE-05: the registry gained three documents, so the matrix is 72 cells
+    // rather than 24 — six documents at twelve cells each, about two seconds per cell on a loaded box where
+    // several worktrees run this suite at once. The budget is for the matrix, not for one page.
+  }, 420_000)
 })

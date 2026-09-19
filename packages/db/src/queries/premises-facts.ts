@@ -108,7 +108,17 @@ export interface CataloguePriceRow {
   readonly slug: string
   readonly publicDisplayName: string
   readonly durationMinutes: number
-  /** Integer fils as a string — the `fils` domain is `bigint` and the driver never parses it. */
+  /**
+   * The gross a customer is quoted today, in integer fils as a string.
+   *
+   * A string because the `fils` domain is `bigint` and the driver never parses it — and **the price in
+   * force**, not `service_variant.gross_price_fils`. The two differ whenever an effective-dated
+   * `price_list` row (0025) covers today, which is what every price change through the admin writes:
+   * `changeVariantPrice` inserts a row and deliberately never UPDATEs the variant, because overwriting it
+   * would rewrite what last month's bookings were worth. A published page that read the variant would show
+   * yesterday's figure while the till charged today's — the disagreement docs/09 §"LLM SEO" calls a
+   * confident wrong answer about your prices, published under the business's own name.
+   */
   readonly grossPriceFils: string
 }
 
@@ -154,6 +164,15 @@ export interface PremisesFacts {
  * Exceptions are limited to those that have not finished. A fact sheet publishing last Ramadan's hours is
  * worse than one publishing none: a consumer cannot tell a stale exception from a current one, and this
  * is the endpoint whose whole purpose is that a third party may quote it.
+ *
+ * ## The price is the one in force today, not the catalogue's fallback
+ *
+ * `service_variant.gross_price_fils` is the catalogue's own figure and every price change since is an
+ * effective-dated `price_list` row (0025), because `changeVariantPrice` inserts rather than overwrites —
+ * overwriting would rewrite what last month's bookings were worth. So the price query joins the row in
+ * force on `current_date` and falls back to the variant. W-SITE-05 found this: the published treatment
+ * page, `/pricing`, the `Offer` JSON-LD and `/api/facts` all read this function, and every one of them
+ * was showing a figure the till would not charge the moment a price was raised through the admin.
  */
 export async function readPremisesFacts(sql: Sql): Promise<PremisesFacts | null> {
   const [premisesRows, legalRows, hourRows, exceptionRows, priceRows, onRequestRows] =
@@ -242,9 +261,23 @@ export async function readPremisesFacts(sql: Sql): Promise<PremisesFacts | null>
         }[]
       >`
         select s.style::text as style, s.treatment_key, s.slug, s.public_display_name,
-               v.duration_minutes, v.gross_price_fils::text as gross_price_fils
+               v.duration_minutes,
+               -- The price in force TODAY, not the catalogue fallback. See the note below.
+               coalesce(effective.gross_price_fils, v.gross_price_fils)::text as gross_price_fils
           from service_variant v
           join service s on s.id = v.service_id
+          -- The one row 0025's exclusion constraint allows to be effective on a date, by the same
+          -- predicate changeVariantPrice and selectEffectivePriceList use -- both ends inclusive.
+          -- A lateral join rather than a scalar subquery so the same shape holds when a caller needs a
+          -- second column off the effective row.
+          left join lateral (
+            select p.gross_price_fils
+              from price_list p
+             where p.service_variant_id = v.id
+               and p.valid_from <= current_date
+               and (p.valid_to is null or current_date <= p.valid_to)
+             limit 1
+          ) effective on true
          -- The one definition of bookable, the same predicate listBookableServices uses: a service
          -- withdrawn from the menu must leave the published price list on the same request.
          where s.published_at is not null and s.archived_at is null

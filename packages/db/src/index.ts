@@ -94,6 +94,11 @@ export {
   type WaitlistRow,
 } from './queries/availability.ts'
 export {
+  readArchivedTreatmentSlugs,
+  readTreatmentPages,
+  type TreatmentPageRow,
+} from './queries/catalogue-pages.ts'
+export {
   type BlockedInputVatLine,
   blockedInputVatLines,
   disclosureFor,

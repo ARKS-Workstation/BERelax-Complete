@@ -1,5 +1,5 @@
 /**
- * `@berelax/ui/patterns` — the four container-query components.
+ * `@berelax/ui/patterns` — the container-query components.
  *
  * A `.tsx` barrel behind a subpath export, for the reason given at the top of
  * `packages/ui/src/layout/index.tsx`: the root typecheck project has no `jsx`, and its `include` glob
@@ -11,6 +11,8 @@
 
 export type { NapBlockCopy, NapBlockLayout, NapBlockProps, NapFacts } from './nap-block.tsx'
 export { collapseHours, NAP_BLOCK_CSS, NAP_BLOCK_LAYOUTS, NapBlock } from './nap-block.tsx'
+export type { PriceTableGroup, PriceTableProps, PriceTableRow } from './price-table.tsx'
+export { PRICE_TABLE_CSS, PRICE_TABLE_LAYOUTS, PriceTable } from './price-table.tsx'
 export type { ServiceRowLayout, ServiceRowProps } from './service-row.tsx'
 export { SERVICE_ROW_CSS, SERVICE_ROW_LAYOUTS, ServiceRow } from './service-row.tsx'
 export type { Slot, SlotGridProps } from './slot-grid.tsx'

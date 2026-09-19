@@ -20,22 +20,48 @@ const check = (name, ok, detail = '') => {
   }
 }
 
+/*
+  One options object for every child process this file starts, and the reason is `maxBuffer`.
+
+  Node's default is 1 MiB, and `execFileSync` does not truncate at it — it THROWS `ENOBUFS`. So a command
+  whose output grows past a megabyte stops looking like a command with a lot to say and starts looking like
+  a command that failed, and every caller here reads a failure as the thing it was testing for. It happened
+  exactly once and cost an hour: `depcruise --output-type json apps/web` reached 1,067,701 bytes when
+  W-SITE-05 added its six pages, the cruise was thrown away, `JSON.parse` fell into its `catch`, and case
+  "boundaries cruise reaches apps/web" reported zero modules. The gate was right to refuse a green tick on
+  zero (ADR 0002); the cruise had been fine.
+
+  64 MiB because the output that got us here was one, and a limit that the tree grows into again in six
+  months is not a limit. `ENOBUFS` is now surfaced by name rather than folded in with an ordinary non-zero
+  exit, so the next person reads the cause instead of chasing the symptom.
+*/
+const CHILD = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }
+
+/** A child process whose output we could not capture is not evidence of anything. Say so loudly. */
+const assertCaptured = (err, cmd, args) => {
+  if (err?.code === 'ENOBUFS') {
+    throw new Error(
+      `${cmd} ${args.join(' ')} produced more output than maxBuffer (${CHILD.maxBuffer} bytes), so ` +
+        'nothing it said was read. Raise CHILD.maxBuffer — do not read this as the command failing.',
+    )
+  }
+}
+
 const runExpectingFailure = (cmd, args) => {
   try {
-    execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    execFileSync(cmd, args, CHILD)
     return { failed: false, output: '' }
   } catch (err) {
+    assertCaptured(err, cmd, args)
     return { failed: true, output: `${err.stdout ?? ''}${err.stderr ?? ''}` }
   }
 }
 
 const run = (cmd, args) => {
   try {
-    return {
-      failed: false,
-      output: execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
-    }
+    return { failed: false, output: execFileSync(cmd, args, CHILD) }
   } catch (err) {
+    assertCaptured(err, cmd, args)
     return { failed: true, output: `${err.stdout ?? ''}${err.stderr ?? ''}` }
   }
 }
@@ -540,7 +566,7 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
       '-c',
       "find packages/core/src -name '*.ts' ! -name '*.test.ts' ! -name '*.itest.ts' | xargs cat | wc -l",
     ],
-    { encoding: 'utf8' },
+    CHILD,
   )
   const uncoveredNeeded = Math.max(80, Math.ceil(Number(coreLines.trim()) / 90))
   const f = 'packages/core/src/__gate_fixture__.ts'
@@ -13076,7 +13102,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       '-c',
       "grep -rln 'chromium.launch' --include='*.ts' --include='*.mjs' packages apps scripts || true",
     ],
-    { encoding: 'utf8' },
+    CHILD,
   )
     .split('\n')
     .filter((line) => line.length > 0)
@@ -13121,6 +13147,384 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 52a-52l. (W-SITE-05) The catalogue-derived routes: the page-boundary lint, the question-shaped headings,
+// the price-literal scan, the publish loop's completeness, the pattern that may never be published as a URL,
+// the price a page is allowed to show, and the CI step order these routes now depend on.
+//
+// Seven rules, each failing in a way the other six cannot see.
+//
+// The **page-boundary lint**. The acceptance criterion is *"a fixture service named 'Therapeutic pain cure
+// massage' fails the build by rule name"*. A name is linted when it is written — `setPublicDisplayName` and
+// `seedCatalogue` both refuse an unlinted one — so the only way a non-compliant name reaches the catalogue is
+// a path that bypassed the repository: a psql session, a restored dump, a migration. The pages are where such
+// a row becomes published copy, so the pages are where it is refused, and the fixture is exactly that: the
+// row inserted with SQL, and the read every catalogue page performs run against it. `next build` is not
+// invoked (a minute per case, for the same assertion), but the function the build calls is, against the real
+// `regulatory_profile` — and the control proves the probe passes once the row is gone.
+//
+// The **question-shaped headings**. docs/09 §"LLM SEO" asks for question-shaped `<h2>`s with stable anchor
+// ids. Two mutations: a heading that is no longer a question, and a key that no longer reduces to an anchor.
+// The first is what an edit produces; the second is what a rename produces, and it is the one that would
+// publish `id=""` and silently break every citation pointing at the section.
+//
+// The **price-literal scan**, which is a claim about the repository rather than about a page: a template with
+// a figure typed into it renders the same whether or not the row is corrected, and the till charges the row.
+//
+// The **publish loop**. "Four out of five is a fail" is the criterion's own phrasing, so both halves are
+// fixtured: a path dropped from the set (the Arabic pricing page, which is the one nobody thinks of) and an
+// artefact dropped from the report.
+//
+// The **pattern**. `/treatments/[slug]` is not a URL. Two mutations, because it can be published two ways:
+// into a sitemap, and as a canonical link on all eight pages at once.
+//
+// The **price in force**. `changeVariantPrice` inserts an effective-dated `price_list` row and deliberately
+// never overwrites `service_variant`, so a published surface that reads the variant shows a figure the desk
+// will not charge. That is not hypothetical: it is the defect this unit found, and the mutation restores it.
+//
+// The **CI step order**. These routes prerender from the catalogue, so `next build` reads the database — and
+// CI used to build before applying the migrations. The check is order, not presence, which the completeness
+// case in block 29 cannot see.
+{
+  const RELAX_DB = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? ''
+  const CONTENT = 'apps/web/src/treatments/content.ts'
+  const COPY_EN = 'apps/web/src/treatments/copy-en.ts'
+  const PAGES = 'apps/web/app/_treatments/pages.tsx'
+  const REVALIDATE = 'apps/web/src/revalidate/catalogue.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+  const FACTS_QUERY = 'packages/db/src/queries/premises-facts.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  /** A published service with a name no licence permits, inserted the way a dump or a psql session would. */
+  const BAD_KEY = 'wsite05_gate_lint'
+  const BAD_SLUG = 'wsite05-gate-lint'
+  const BAD_NAME = 'Therapeutic pain cure massage'
+  const psql = (statement) =>
+    run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', RELAX_DB, '-c', statement])
+
+  const insertBadService = () =>
+    psql(
+      `begin;
+       insert into service (style, treatment_key, slug, internal_name, public_display_name,
+                            turnaround_minutes)
+       values ('asian', '${BAD_KEY}', '${BAD_SLUG}', 'Gate probe', '${BAD_NAME}', 20);
+       insert into service_room_type_compat (service_style, service_treatment_key, room_type)
+       values ('asian', '${BAD_KEY}', 'standard');
+       insert into service_resource_shape (service_style, service_treatment_key, shape,
+              therapists_required, rooms_required, min_room_capacity, required_room_type,
+              therapist_buffer_minutes)
+       values ('asian', '${BAD_KEY}', 'solo', 1, 1, 1, 'standard', 10);
+       insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select id, 60, 20000, 'W-SITE-05 gate fixture' from service where treatment_key = '${BAD_KEY}';
+       update service set published_at = now() where treatment_key = '${BAD_KEY}';
+       commit;`,
+    )
+
+  const removeBadService = () =>
+    psql(
+      `delete from service where treatment_key = '${BAD_KEY}';
+       delete from service_room_type_compat where service_treatment_key = '${BAD_KEY}';
+       delete from service_resource_shape where service_treatment_key = '${BAD_KEY}';`,
+    )
+
+  /** The read every catalogue page performs, as a script, so the refusal is the page's own. */
+  const PAGE_READ_PROBE = 'scripts/__gate_fixture__-wsite05-page-read.mts'
+  const pageReadProbe = [
+    "import { treatmentPageData } from '../apps/web/src/treatments/read.ts'",
+    '',
+    'try {',
+    '  await treatmentPageData()',
+    "  console.log('PAGE_READ_ACCEPTED')",
+    '  process.exit(0)',
+    '} catch (err) {',
+    '  console.error(err instanceof Error ? err.message : String(err))',
+    '  process.exit(1)',
+    '}',
+  ].join('\n')
+
+  if (RELAX_DB === '') {
+    check(
+      'W-SITE-05 gates have a database to run against',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL must be set: the page-boundary lint and the price-in-force ' +
+        'probe both read the real regulatory_profile and the real catalogue.',
+    )
+  } else {
+    // 52a. A published name no licence permits, refused by the read every catalogue page performs, naming the
+    //      rule rather than the sentence.
+    const inserted = insertBadService()
+    check(
+      'the lint fixture service was inserted',
+      !inserted.failed,
+      inserted.output.split('\n').slice(0, 6).join('\n'),
+    )
+    try {
+      const refused = withFixture(PAGE_READ_PROBE, pageReadProbe, () =>
+        runExpectingFailure('pnpm', ['exec', 'tsx', PAGE_READ_PROBE]),
+      )
+      checkRejectedBy(
+        'a treatment page refuses to render a public display name the licence does not permit',
+        refused,
+        'banned_claim_term',
+      )
+      // And it names the offending term, so the message an admin sees says what to change.
+      check(
+        'the refusal names the term as well as the rule',
+        refused.output.includes('therapeutic') || refused.output.includes('cure'),
+        refused.output.split('\n').slice(0, 6).join('\n'),
+      )
+    } finally {
+      removeBadService()
+    }
+
+    // 52b. The control. Without the fixture row the same probe accepts the catalogue — so 52a is the lint
+    //      firing and not the probe failing for a reason of its own (a missing seed, an unset APP_ENV).
+    const accepted = withFixture(PAGE_READ_PROBE, pageReadProbe, () =>
+      run('pnpm', ['exec', 'tsx', PAGE_READ_PROBE]),
+    )
+    check(
+      'control: the same read accepts the seeded catalogue',
+      !accepted.failed && accepted.output.includes('PAGE_READ_ACCEPTED'),
+      accepted.output.split('\n').slice(0, 8).join('\n'),
+    )
+  }
+
+  // 52c. A heading that is no longer a question. The shape is what makes a section quotable, and an edit that
+  //      turned one into a statement would otherwise be invisible.
+  {
+    const result = withEditedFile(
+      COPY_EN,
+      (text) =>
+        text.replace(
+          "'how-much-does-it-cost': 'How much does it cost?'",
+          "'how-much-does-it-cost': 'The cost'",
+        ),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/treatments/content.test.ts')),
+    )
+    checkRejectedBy(
+      'a heading that is not question-shaped fails the unit suite',
+      result,
+      'how-much-does-it-cost',
+    )
+  }
+
+  // 52d. A heading key that does not reduce to an anchor. `id=""` is a fragment every link to the section
+  //      resolves to the top of the page instead, and no browser reports it.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) => text.replace("  'how-much-does-it-cost',", "  '؟؟؟',"),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/treatments/content.test.ts')),
+    )
+    checkRejectedBy('a heading key with no usable anchor fails', result, 'usable anchor id')
+  }
+
+  // 52e. A price typed into a template.
+  {
+    const result = withEditedFile(
+      PAGES,
+      (text) => text.replace('<main>', '<main>\n      {/* AED 250 */}'),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/treatments/no-price-literals.test.ts')),
+    )
+    checkRejectedBy(
+      'a numeric price literal in a template is rejected',
+      result,
+      'price-literal-in-a-template',
+    )
+  }
+
+  // 52f. A path dropped from the publish loop: the Arabic pricing page, which is the member nobody thinks of
+  //      and the one whose absence leaves half the site quoting the old price.
+  {
+    const result = withEditedFile(
+      REVALIDATE,
+      (text) => text.replace("    paths.add(pathFor(routeById('pricing'), locale))\n", ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/revalidate/catalogue.test.ts')),
+    )
+    checkRejectedBy('a page dropped from the revalidation set is rejected', result, '/ar/pricing')
+  }
+
+  // 52g. An artefact dropped from the report. Four out of five is a fail, and the one that goes missing is
+  //      the sitemap's lastmod — the artefact a crawler reads to decide whether to come back.
+  {
+    const result = withEditedFile(
+      REVALIDATE,
+      (text) => text.replace("  'sitemap-lastmod',\n", ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/revalidate/catalogue.test.ts')),
+    )
+    checkRejectedBy('a missing publish-loop artefact is named', result, 'sitemap-lastmod')
+  }
+
+  // 52h. A pattern in the sitemap. `<loc>https://…/treatments/[slug]</loc>` is a sitemap asking a crawler to
+  //      fetch a 404, and the catalogue expansion is what replaces it.
+  {
+    const result = withEditedFile(
+      REGISTRY,
+      (text) => text.replace('    if (isParameterised(route.path)) continue\n', ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/routes/registry.test.ts')),
+    )
+    checkRejectedBy('a route pattern in the sitemap is rejected', result, '[slug]')
+  }
+
+  // 52i. A pattern published as a canonical URL. The most expensive one-line mistake available here: eight
+  //      pages each telling every crawler that their own address is a 404, with nothing on the page to show.
+  {
+    const result = withEditedFile(
+      REGISTRY,
+      (text) =>
+        text.replace(
+          '  if (isParameterised(filled)) {\n    throw new Error(',
+          '  if (false) {\n    throw new Error(',
+        ),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/routes/registry.test.ts')),
+    )
+    checkRejectedBy(
+      'an unfilled dynamic segment published as a URL is rejected',
+      result,
+      'unfilled dynamic segment',
+    )
+  }
+
+  // 52j. The price in force. The mutation is the defect as it was: the published read takes
+  //      `service_variant.gross_price_fils` and ignores the effective-dated `price_list` row, so a price
+  //      raised through the admin is charged at the till and published nowhere.
+  if (RELAX_DB !== '') {
+    const PRICE_KEY = 'wsite05_gate_price'
+    const PRICE_SLUG = 'wsite05-gate-price'
+    const PROBE = 'scripts/__gate_fixture__-wsite05-price-in-force.mts'
+    const probe = [
+      // Relative imports, like `check-job-registry.mjs` and `check-budgets.mjs`: there is no
+      // `node_modules/@berelax` at the repository root, so a workspace specifier does not resolve from
+      // `scripts/`. The modules' own imports resolve from their own package, which does have the links.
+      "import { createConnection } from '../packages/db/src/connection.ts'",
+      "import { readPremisesFacts } from '../packages/db/src/queries/premises-facts.ts'",
+      '',
+      "const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''",
+      'const sql = createConnection({ url, max: 1 })',
+      'try {',
+      '  const read = await readPremisesFacts(sql)',
+      `  const row = read?.prices.find((price) => price.slug === '${PRICE_SLUG}')`,
+      '  if (row === undefined) {',
+      "    console.error('price_probe_row_missing: the fixture service is not in the published price list')",
+      '    process.exit(1)',
+      '  }',
+      "  if (row.grossPriceFils !== '44500') {",
+      '    console.error(',
+      // Concatenation, not a template literal: Biome reads a `${…}` inside a plain string as a
+      // mistake, correctly — and this string is the fixture's source, not this file's.
+      "      'published_price_is_not_the_price_in_force: the page would publish ' +",
+      '        row.grossPriceFils +',
+      "        ' fils while the price_list row in force says 44500',",
+      '    )',
+      '    process.exit(1)',
+      '  }',
+      "  console.log('PRICE_IN_FORCE_PUBLISHED')",
+      '} finally {',
+      '  await sql.end({ timeout: 5 })',
+      '}',
+    ].join('\n')
+
+    const seedPriceFixture = psql(
+      `begin;
+       insert into service (style, treatment_key, slug, internal_name, public_display_name,
+                            turnaround_minutes)
+       values ('arabic', '${PRICE_KEY}', '${PRICE_SLUG}', 'Gate probe', 'Normal Massage (Arabic)', 20);
+       insert into service_room_type_compat (service_style, service_treatment_key, room_type)
+       values ('arabic', '${PRICE_KEY}', 'standard');
+       insert into service_resource_shape (service_style, service_treatment_key, shape,
+              therapists_required, rooms_required, min_room_capacity, required_room_type,
+              therapist_buffer_minutes)
+       values ('arabic', '${PRICE_KEY}', 'solo', 1, 1, 1, 'standard', 10);
+       insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select id, 90, 30000, 'W-SITE-05 gate fixture' from service where treatment_key = '${PRICE_KEY}';
+       update service set published_at = now() where treatment_key = '${PRICE_KEY}';
+       insert into price_list (service_variant_id, gross_price_fils, label, valid_from, valid_to)
+       select v.id, 44500, 'W-SITE-05 gate rise', current_date, null
+         from service_variant v join service s on s.id = v.service_id
+        where s.treatment_key = '${PRICE_KEY}';
+       commit;`,
+    )
+    check(
+      'the price-in-force fixture was seeded',
+      !seedPriceFixture.failed,
+      seedPriceFixture.output.split('\n').slice(0, 6).join('\n'),
+    )
+    try {
+      const published = withFixture(PROBE, probe, () => run('pnpm', ['exec', 'tsx', PROBE]))
+      check(
+        'the published price is the price_list row in force, not the catalogue fallback',
+        !published.failed && published.output.includes('PRICE_IN_FORCE_PUBLISHED'),
+        published.output.split('\n').slice(0, 8).join('\n'),
+      )
+      const stale = withEditedFile(
+        FACTS_QUERY,
+        (text) =>
+          text.replace(
+            'coalesce(effective.gross_price_fils, v.gross_price_fils)::text as gross_price_fils',
+            'v.gross_price_fils::text as gross_price_fils',
+          ),
+        () => withFixture(PROBE, probe, () => runExpectingFailure('pnpm', ['exec', 'tsx', PROBE])),
+      )
+      checkRejectedBy(
+        'a published read that ignores the effective price is detected',
+        stale,
+        'published_price_is_not_the_price_in_force',
+      )
+    } finally {
+      psql(
+        `delete from service where treatment_key = '${PRICE_KEY}';
+         delete from service_room_type_compat where service_treatment_key = '${PRICE_KEY}';
+         delete from service_resource_shape where service_treatment_key = '${PRICE_KEY}';`,
+      )
+    }
+  }
+
+  // 52k-52l. The CI step order. `pnpm db:apply` and `pnpm seed` must both precede the web build, because the
+  // catalogue routes prerender from the database: with the old order the build read an empty schema and the
+  // eight most valuable pages on the site were prerendered as nothing. Block 29 checks that every step is
+  // *present*, which cannot see an order, so the rule is here with the fixture that breaks it.
+  {
+    const ORDER_RULE = 'ci-builds-the-web-app-before-the-database-is-ready'
+    /** Returns the rule name when the workflow builds before it migrates or seeds, else null. */
+    const orderViolation = (workflow) => {
+      const at = (needle) => workflow.indexOf(needle)
+      const build = at('run: pnpm --filter @berelax/web build')
+      const apply = at('run: pnpm db:apply')
+      const seed = at('run: pnpm seed')
+      if (build < 0 || apply < 0 || seed < 0) {
+        return `${ORDER_RULE}: one of the three steps is missing altogether`
+      }
+      return apply < build && seed < build
+        ? null
+        : `${ORDER_RULE}: the catalogue routes prerender from the database, so the build must run after ` +
+            'both `pnpm db:apply` and `pnpm seed`'
+    }
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
+    check(
+      'CI applies the migrations and seeds the catalogue before building the web app',
+      orderViolation(workflow) === null,
+      orderViolation(workflow) ?? '',
+    )
+    // The known-bad fixture: the order as it was before this unit. The rule has to report it by name, or it
+    // is a comment rather than a check.
+    const reversed = workflow
+      .replace(
+        '      - name: Apply migrations to the test database\n        run: pnpm db:apply\n',
+        '',
+      )
+      .replace(
+        '      - name: Build the web application\n        run: pnpm --filter @berelax/web build\n',
+        '      - name: Build the web application\n        run: pnpm --filter @berelax/web build\n' +
+          '      - name: Apply migrations to the test database\n        run: pnpm db:apply\n',
+      )
+    const violation = orderViolation(reversed)
+    check(
+      'the step-order rule rejects a workflow that builds before it migrates',
+      violation?.includes(ORDER_RULE) === true,
+      `the reversed workflow was accepted: ${violation ?? 'no finding'}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -13163,6 +13567,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm coverage',
     'pnpm --filter @berelax/web build',
     'pnpm db:apply',
+    // W-SITE-05: the catalogue routes prerender from the database, so the build needs a seeded one. The
+    // ORDER of these three steps is the rule, and it is asserted in the 52k-52l block with the fixture
+    // that breaks it; this list is only about presence.
+    'pnpm seed',
     'pnpm test:integration',
     'pnpm db:migrate:dry',
     'pnpm db:drift',

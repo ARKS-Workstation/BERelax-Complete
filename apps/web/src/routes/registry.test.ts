@@ -33,8 +33,11 @@ import { type FilesystemRoute, sortedFilesystemRoutes } from './discover.ts'
 import {
   ADMIN_GROUP_PREFIXES,
   documentRoutes,
+  fillParams,
+  isParameterised,
   NOINDEX_PREFIXES,
   NOINDEX_ROBOTS_TAG,
+  parameterisedSitemapRoutes,
   pathFor,
   ROUTES,
   registryPaths,
@@ -42,6 +45,8 @@ import {
   routeById,
   routeByPath,
   routePaths,
+  sampleParamsOf,
+  samplePathFor,
   sitemapEntries,
 } from './registry.ts'
 
@@ -206,15 +211,30 @@ describe('the registry is internally consistent', () => {
       if (route.indexable) continue
       expect(inSitemap.has(path), `${path} is not indexable and is in the sitemap`).toBe(false)
     }
-    // The control: the one indexable route is in, in both locales, or this test passes on an empty
-    // sitemap — which is exactly how a sitemap gate becomes decoration.
-    expect([...inSitemap].sort()).toEqual(['/', '/ar'])
-    expect(sitemapEntries().every((entry) => entry.changefreq === 'weekly')).toBe(true)
+    // The control: the sitemap really holds the routes it should, or this test passes on an empty sitemap —
+    // which is exactly how a sitemap gate becomes decoration. `/treatments/[slug]` is deliberately absent:
+    // it is a pattern, and `treatmentSitemapEntries` expands it over the catalogue (8 routes, 16 entries).
+    expect([...inSitemap].sort()).toEqual([
+      '/',
+      '/ar',
+      '/ar/pricing',
+      '/ar/treatments',
+      '/pricing',
+      '/treatments',
+    ])
+    expect(sitemapEntries().every((entry) => entry.changefreq !== null)).toBe(true)
+  })
+
+  it('keeps every pattern out of the sitemap, and names the one a catalogue expands', () => {
+    // A `<loc>` of `https://…/treatments/[slug]` is a sitemap telling a crawler to fetch a 404. The entries
+    // function skips it; `parameterisedSitemapRoutes` is what stops that skip from being silent.
+    for (const entry of sitemapEntries()) expect(entry.path, entry.path).not.toContain('[')
+    expect(parameterisedSitemapRoutes().map((route) => route.path)).toEqual(['/treatments/[slug]'])
   })
 
   it('declares a rendering mode from a closed set', () => {
     for (const route of ROUTES) {
-      expect(['static', 'dynamic'], route.id).toContain(route.rendering)
+      expect(['static', 'dynamic', 'isr'], route.id).toContain(route.rendering)
     }
     // Asserted against `.next/prerender-manifest.json` — what the build produced — in the itest. Here it
     // is only the shape, so the itest's comparison has something to compare.
@@ -225,6 +245,34 @@ describe('the registry is internally consistent', () => {
     expect(ROUTES.filter((route) => route.rendering === 'static').map((route) => route.id)).toEqual(
       ['home'],
     )
+    // The catalogue-derived routes, added by W-SITE-05. `isr` rather than `static` because they read the
+    // database during `next build` and are replaced by on-demand revalidation when a row changes — a
+    // distinction with two consequences the itest checks against the build's own manifests: the database is
+    // a build dependency, and a route with a dynamic segment prerenders its params rather than its pattern.
+    expect(ROUTES.filter((route) => route.rendering === 'isr').map((route) => route.id)).toEqual([
+      'pricing',
+      'treatments',
+      'treatment',
+    ])
+  })
+
+  it('declares sample params exactly for the documents that have a dynamic segment', () => {
+    for (const route of ROUTES) {
+      // Documents only. A handler with a dynamic segment — the portrait route — is opened by nothing that
+      // needs a real path: it has no canonical URL, no hreflang set and no screenshot, which is what
+      // `kind: 'handler'` means. A document's pattern, by contrast, is opened by all three.
+      const parameterised = isParameterised(route.path) && route.kind === 'document'
+      expect(
+        Object.keys(sampleParamsOf(route)).length > 0,
+        `${route.id}: sampleParams iff dynamic document`,
+      ).toBe(parameterised)
+      if (!parameterised) continue
+      // And they have to fill it: `samplePathFor` throws on a segment nobody filled, which is what stops the
+      // screenshot harness and the normalisation walk from opening a pattern.
+      for (const locale of route.locales) {
+        expect(samplePathFor(route, locale), route.id).not.toContain('[')
+      }
+    }
   })
 
   it('explains itself', () => {
@@ -269,21 +317,33 @@ describe('acceptance — noindex covers the admin group and /analytics, and noth
     }
     expect(robotsTagFor('/kitchen-sink')).toBe(NOINDEX_ROBOTS_TAG)
     expect(robotsTagFor('/ar/kitchen-sink')).toBe(NOINDEX_ROBOTS_TAG)
+    // A real path under a non-indexable dynamic route, not the pattern: `/kitchen-sink/portrait/[index]`
+    // does not match `/kitchen-sink/portrait/3` as a prefix, so this is `matchesRoutePattern`'s job and the
+    // reason it exists. It was `/treatments/[slug]` until W-SITE-05 made that route public.
     expect(robotsTagFor('/kitchen-sink/portrait/3')).toBe(NOINDEX_ROBOTS_TAG)
-    // A real slug, not the pattern. `/treatments/[slug]` is the first non-indexable route that no literal
-    // prefix can cover — `/treatments/thai-massage` does not start with `/treatments/[slug]`, and the only
-    // prefix that would match is `/treatments`, which is where W-SITE-05 puts the public treatment pages.
-    // The control for this pair is in the next test: `/treatments` itself must stay indexable.
-    expect(robotsTagFor('/treatments/thai-massage')).toBe(NOINDEX_ROBOTS_TAG)
-    expect(robotsTagFor('/treatments/deep-tissue-60')).toBe(NOINDEX_ROBOTS_TAG)
-    // One segment, not any depth: a dynamic segment must not swallow a path below it.
-    expect(robotsTagFor('/treatments/thai-massage/reviews')).toBeNull()
+    // One segment, not any depth: a dynamic segment must not swallow a path below it. Here that is covered
+    // by the `/kitchen-sink` prefix, so the pattern matcher is checked on a path no prefix claims.
+    expect(robotsTagFor('/treatments/asian-normal-massage/reviews')).toBeNull()
   })
 
   it('leaves every public route alone', () => {
     // The control, and the most expensive one-line mistake available in this file: a prefix of `/` would
     // satisfy every assertion above and noindex the entire site.
-    for (const path of ['/', '/ar', '/api/facts', '/treatments', '/ar/treatments', '/settingsx']) {
+    for (const path of [
+      '/',
+      '/ar',
+      '/api/facts',
+      '/treatments',
+      '/ar/treatments',
+      '/pricing',
+      '/ar/pricing',
+      // The eight most valuable pages on the site. `indexable: true` on a route whose paths come from the
+      // catalogue is the one policy a prefix list could have silently reversed: `/treatments` as a noindex
+      // prefix would have suppressed every treatment page the day it landed.
+      '/treatments/asian-normal-massage',
+      '/ar/treatments/arabic-morocco-bath-jacuzzi',
+      '/settingsx',
+    ]) {
       expect(robotsTagFor(path), path).toBeNull()
     }
     expect(NOINDEX_PREFIXES).not.toContain('/')
@@ -386,7 +446,10 @@ describe('acceptance — the proxy is excluded from the CMS, the API and the bui
 describe('acceptance — the hreflang set is reciprocal, self-referential and has an x-default', () => {
   it('lists every locale and itself, from both documents', () => {
     for (const route of documentRoutes()) {
-      const sets = route.locales.map((locale) => alternatesFor(route.id, locale))
+      // A parameterised route's set is built for one real page — its sample params — because a set built for
+      // the pattern would name `/treatments/[slug]` in every entry.
+      const params = sampleParamsOf(route)
+      const sets = route.locales.map((locale) => alternatesFor(route.id, locale, params))
       for (const [index, alternates] of sets.entries()) {
         const locale = route.locales[index]
         expect(locale).toBeDefined()
@@ -396,14 +459,16 @@ describe('acceptance — the hreflang set is reciprocal, self-referential and ha
         expect(Object.values(alternates.languages), `${route.id}/${locale}`).toContain(
           alternates.canonical,
         )
-        expect(alternates.canonical).toBe(absoluteUrl(localisedPath(route.path, locale)))
+        expect(alternates.canonical).toBe(
+          absoluteUrl(fillParams(localisedPath(route.path, locale), params)),
+        )
         for (const served of route.locales) {
           expect(alternates.languages[hreflangFor(served)], `${route.id}/${locale}`).toBe(
-            absoluteUrl(localisedPath(route.path, served)),
+            absoluteUrl(fillParams(localisedPath(route.path, served), params)),
           )
         }
         expect(alternates.languages[HREFLANG_DEFAULT]).toBe(
-          absoluteUrl(localisedPath(route.path, DEFAULT_LOCALE)),
+          absoluteUrl(fillParams(localisedPath(route.path, DEFAULT_LOCALE), params)),
         )
       }
       // Reciprocal: both documents carry the *same* set, so neither can point at a URL the other does
@@ -431,6 +496,31 @@ describe('acceptance — the hreflang set is reciprocal, self-referential and ha
   it('refuses a handler and a locale a route is not served in', () => {
     expect(() => alternatesFor('otp', 'en')).toThrow(/handler/)
     expect(() => pathFor(routeById('otp'), 'en')).toThrow(/not served in locale/)
+  })
+
+  it('refuses to publish a pattern as a URL', () => {
+    // The most expensive silent mistake this file can catch: a treatment page that forgot to pass its slug
+    // would announce `https://…/treatments/[slug]` as its canonical URL, in the head of all eight pages,
+    // and nothing on the page would look wrong.
+    // The messages name the rule, because the gate that neuters `fillParams` reads this output for it:
+    // vitest prints "expected function to throw an error, but it didn't" and echoes nothing of the pattern,
+    // so a `toThrow(/…/)` alone would leave the gate green over a failing test (ADR 0003).
+    expect(
+      () => alternatesFor('treatment', 'en'),
+      'a pattern with an unfilled dynamic segment must be refused, not published as a URL',
+    ).toThrow(/unfilled dynamic segment/)
+    expect(
+      () => routeMetadata('treatment', 'en'),
+      'metadata for a route with an unfilled dynamic segment must be refused',
+    ).toThrow(/dynamic segment/)
+    expect(fillParams('/treatments/[slug]', { slug: 'asian-normal-massage' })).toBe(
+      '/treatments/asian-normal-massage',
+    )
+    // The control: a route with no dynamic segment needs no params and is unaffected.
+    expect(routeMetadata('pricing', 'en').alternates?.canonical).toBe(absoluteUrl('/pricing'))
+    expect(
+      routeMetadata('treatment', 'ar', { slug: 'asian-normal-massage' }).alternates?.canonical,
+    ).toBe(absoluteUrl('/ar/treatments/asian-normal-massage'))
   })
 
   it('carries the registry robots directive into the page metadata', () => {

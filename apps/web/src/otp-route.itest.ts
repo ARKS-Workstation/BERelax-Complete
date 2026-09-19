@@ -371,8 +371,15 @@ describe('refusals', () => {
 
     // `host()` and not `::text`: casting inet to text appends the /32 netmask, which is a property of
     // the cast rather than of what was stored.
+    //
+    // Narrowed by phone, not `order by issued_at limit 1`. `harness()` runs on a FROZEN clock and
+    // `otp_challenge.issued_at` has no default (0019 makes the application supply it), so every row this
+    // test writes carries the SAME timestamp: that ordering is one big tie and Postgres may return any
+    // member of it, including the control request's row from 203.0.113.6. It did, on W-SITE-05's verify.
+    // `unknown(20)` is the first number the loop used and only the loop used it, so this is the row the
+    // assertion is about.
     const [stored] = await sql<{ request_ip: string }[]>`
-      select host(request_ip) as request_ip from otp_challenge order by issued_at limit 1
+      select host(request_ip) as request_ip from otp_challenge where phone_e164 = ${unknown(20)}
     `
     expect(stored?.request_ip).toBe('203.0.113.5')
   })

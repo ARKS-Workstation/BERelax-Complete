@@ -3,7 +3,7 @@ import { join, relative, sep } from 'node:path'
 import { FAQ_ENTRIES } from '@berelax/cms'
 import { specimenFacts, validateGraph } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import { ROUTES } from '../routes/registry.ts'
+import { ROUTES, sampleParamsOf } from '../routes/registry.ts'
 import { breadcrumbTrailFor, graphInputFor, pageGraph } from './graph-input.ts'
 
 /**
@@ -228,6 +228,10 @@ describe('the graph for a registry route', () => {
     const documents = ROUTES.filter((route) => route.kind === 'document')
     expect(documents.length).toBeGreaterThan(0)
     for (const route of documents) {
+      // A route with a dynamic segment is built for one real page — its registry sample params. Without them
+      // `graphInputFor` throws rather than identifying the graph as `…/treatments/[slug]`, which is the guard
+      // W-SITE-05 added and the next case is the control for.
+      const params = sampleParamsOf(route)
       for (const locale of route.locales) {
         expect(
           () =>
@@ -236,10 +240,20 @@ describe('the graph for a registry route', () => {
               id: route.id,
               locale,
               breadcrumb: { home: 'Home', page: route.id },
+              params,
             }),
           `${route.id} (${locale})`,
         ).not.toThrow()
       }
     }
+  })
+
+  it('refuses to identify a graph by a route pattern', () => {
+    // The control on the case above, and the reason the params are not optional in practice: every `@id` in
+    // the graph and the `pageUrl` hang off the page's own URL, and `buildStructuredDataGraph`'s origin check
+    // cannot see the difference — `https://…/treatments/[slug]` is under the origin.
+    expect(() =>
+      pageGraph({ ...request, id: 'treatment', locale: 'en', includeCatalogue: true }),
+    ).toThrow(/unfilled dynamic segment/)
   })
 })

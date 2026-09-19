@@ -185,6 +185,20 @@ export interface ServiceNodesOptions {
   readonly areaServed: readonly PlaceNode[]
   /** Builds the public URL of one service's page, when there is one. W-SITE-05 adds the route. */
   readonly urlFor?: (slug: string) => string
+  /**
+   * The slugs this page is about, or absent for the whole menu.
+   *
+   * A treatment page's subject is **one** treatment. Publishing all eight services on it would put the
+   * same eight `Service` nodes and thirty-two `Offer`s on nine different documents, which is not more
+   * information: it is the same information a consumer has to reconcile once per page, and it makes the
+   * page's own subject harder for a machine to identify — the reason `includeCatalogue` is a flag at all
+   * (see `graph.ts`). The index and `/pricing` pass nothing, because the menu *is* their subject.
+   *
+   * An empty array is refused rather than treated as "everything": it is what an unfiltered `.filter()`
+   * produces, and a `Service` page with no service is the one thing the validator's
+   * `business_missing_required_property` cannot catch — the node would simply be absent.
+   */
+  readonly onlySlugs?: readonly string[]
 }
 
 /**
@@ -200,8 +214,19 @@ export interface ServiceNodesOptions {
  */
 export function serviceNodes(facts: Facts, options: ServiceNodesOptions): readonly ServiceNode[] {
   const nodes: ServiceNode[] = []
+  const wanted = options.onlySlugs
+  if (wanted !== undefined && wanted.length === 0) {
+    throw new AppError(
+      'validation',
+      'serviceNodes was asked for an empty set of slugs. A page whose subject is a treatment has to ' +
+        'publish that treatment; omit onlySlugs to publish the whole menu.',
+      { details: { rule: 'service_scope_empty' } },
+    )
+  }
+  const inScope = (slug: string): boolean => wanted === undefined || wanted.includes(slug)
 
   for (const service of facts.catalogue.services) {
+    if (!inScope(service.slug)) continue
     const identity = { origin: options.origin, slug: service.slug }
     const offers = service.variants.map(
       (variant): OfferNode =>
@@ -227,8 +252,22 @@ export function serviceNodes(facts: Facts, options: ServiceNodesOptions): readon
     })
   }
 
+  if (wanted !== undefined && nodes.length !== wanted.length) {
+    const found = new Set(nodes.map((node) => node.name))
+    throw new AppError(
+      'not_found',
+      `${wanted.length} slug(s) were asked for and ${nodes.length} matched a published service. A ` +
+        'treatment page asked to describe a service the catalogue does not publish would render with no ' +
+        `Service node at all, which no consumer reports. Found: ${[...found].join(', ') || 'none'}.`,
+      { details: { rule: 'service_scope_unresolved', slugs: [...wanted] } },
+    )
+  }
+
   for (const offering of facts.catalogue.onRequest) {
     const slug = slugifyLabel(offering.label)
+    // A price-on-request offering has no catalogue slug and no page of its own (0032), so it belongs to
+    // the menu rather than to any one treatment: a scoped page publishes none of them.
+    if (wanted !== undefined) continue
     const identity = { origin: options.origin, slug }
     nodes.push({
       '@type': serviceTypesFor(options.licence),

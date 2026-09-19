@@ -269,3 +269,41 @@ describe('slugifyLabel', () => {
     )
   })
 })
+
+describe('a page whose subject is one treatment publishes one Service (W-SITE-05)', () => {
+  const first = facts.catalogue.services[0]
+
+  it('publishes only the slugs asked for, with all their price points', () => {
+    expect(first).toBeDefined()
+    if (first === undefined) return
+    const scoped = serviceNodes(facts, { ...OPTIONS, onlySlugs: [first.slug] })
+    expect(scoped.map((node) => node.name)).toEqual([first.name])
+    expect(pricedOffersIn(scoped)).toHaveLength(first.variants.length)
+    // The control: unscoped, the same call publishes the whole menu and the price-on-request offerings.
+    expect(serviceNodes(facts, OPTIONS).length).toBeGreaterThan(scoped.length)
+  })
+
+  it('leaves the price-on-request offerings to the menu pages', () => {
+    expect(first).toBeDefined()
+    if (first === undefined) return
+    const scoped = serviceNodes(facts, { ...OPTIONS, onlySlugs: [first.slug] })
+    const labels = facts.catalogue.onRequest.map((offering) => offering.label)
+    expect(labels.length).toBeGreaterThan(0)
+    for (const label of labels) expect(scoped.map((node) => node.name)).not.toContain(label)
+    // …and the unscoped graph does carry them, or the assertion above would hold on a builder that had
+    // stopped emitting them altogether.
+    for (const label of labels) {
+      expect(serviceNodes(facts, OPTIONS).map((node) => node.name)).toContain(label)
+    }
+  })
+
+  it('refuses an empty scope and a slug the catalogue does not publish, by rule name', () => {
+    // Both produce a Service page with no Service node, which nothing downstream reports: the validator
+    // sees a graph whose only fault is an absence.
+    const empty = (): unknown => serviceNodes(facts, { ...OPTIONS, onlySlugs: [] })
+    expect(empty).toThrow(/service_scope_empty|empty set of slugs/)
+    const unknown = (): unknown =>
+      serviceNodes(facts, { ...OPTIONS, onlySlugs: ['no-such-treatment'] })
+    expect(unknown).toThrow(/service_scope_unresolved|matched a published service/)
+  })
+})

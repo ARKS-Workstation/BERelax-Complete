@@ -79,6 +79,14 @@ export interface StructuredDataInput {
   readonly sameAsProfiles?: readonly SameAsProfile[]
   /** Builds a treatment page URL from a slug, once W-SITE-05 has added the route. */
   readonly serviceUrlFor?: (slug: string) => string
+  /**
+   * The slugs this page is about, or absent for the whole menu.
+   *
+   * W-SITE-05's treatment page passes its own slug: its subject is one treatment, and eight `Service`
+   * nodes on it would be the same reconciliation problem `includeCatalogue` exists to avoid, repeated on
+   * nine documents. The index and `/pricing` pass nothing. See `serviceNodes`.
+   */
+  readonly serviceSlugs?: readonly string[]
 }
 
 /**
@@ -113,6 +121,7 @@ export function buildStructuredDataGraph(input: StructuredDataInput): Structured
         providerId: businessId(input.origin),
         areaServed: areaServedNodes(input.facts),
         ...(input.serviceUrlFor !== undefined ? { urlFor: input.serviceUrlFor } : {}),
+        ...(input.serviceSlugs !== undefined ? { onlySlugs: input.serviceSlugs } : {}),
       })
     : []
 

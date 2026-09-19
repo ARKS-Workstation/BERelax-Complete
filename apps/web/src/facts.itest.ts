@@ -481,11 +481,26 @@ describe('acceptance — /llms.txt is text/plain, derived, and linted', () => {
     // The page list is the registry's, so a route added tomorrow appears here with no change to the file
     // or to this test. That is also the statement that the treatment and therapist indexes are covered the
     // day they land: they are registry documents, `indexable: true`, and nothing else is needed.
-    const expected = ROUTES.filter((route) => route.kind === 'document' && route.indexable).map(
-      (route) => absoluteUrl(localisedPath(route.path, DEFAULT_LOCALE)),
+    const facts = await factsFrom()
+    // The catalogue-derived route is a pattern, so its pages are its slugs: `/llms.txt` lists eight treatment
+    // URLs and never `/treatments/[slug]`, which would be a page this file told an assistant to fetch and a
+    // 404 when it did.
+    const catalogue = facts.catalogue.services.map((service) => ({
+      slug: service.slug,
+      label: service.name,
+    }))
+    const expected = ROUTES.filter((route) => route.kind === 'document' && route.indexable).flatMap(
+      (route) =>
+        route.path.includes('[')
+          ? catalogue.map((page) =>
+              absoluteUrl(localisedPath(route.path.replace('[slug]', page.slug), DEFAULT_LOCALE)),
+            )
+          : [absoluteUrl(localisedPath(route.path, DEFAULT_LOCALE))],
     )
-    expect(llmsPages().map((page) => page.url)).toEqual(expected)
+    expect(llmsPages(catalogue).map((page) => page.url)).toEqual(expected)
     for (const page of expected) expect(body).toContain(page)
+    // The control on the expansion: the pattern itself is published nowhere.
+    expect(body).not.toContain('[slug]')
     // The control: a non-indexable route must NOT be listed, or the registry's policy is decoration.
     expect(body).not.toContain(absoluteUrl('/kitchen-sink'))
   })

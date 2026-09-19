@@ -37,13 +37,20 @@ export type RouteKind = 'document' | 'handler'
 /**
  * How the route is produced.
  *
- * `static` is prerendered at build; `dynamic` is rendered per request. Not decoration: the registry's
- * claim is checked against `.next/prerender-manifest.json` — what the build actually produced — by
- * `route-spine.itest.ts`, so a page that quietly became dynamic because something read a header fails
- * a test rather than a page-speed report six weeks later. ISR is not in the union until a route uses
- * it; docs/09 §1 plans it for the catalogue pages, which are W-SITE-04's.
+ * `static` is prerendered at build and never revalidated; `dynamic` is rendered per request; `isr` is
+ * prerendered at build **from the database** and replaced by on-demand revalidation when the row it was
+ * built from changes. Not decoration: the registry's claim is checked against
+ * `.next/prerender-manifest.json` — what the build actually produced — by `route-spine.itest.ts`, so a
+ * page that quietly became dynamic because something read a header fails a test rather than a page-speed
+ * report six weeks later.
+ *
+ * `isr` arrived with W-SITE-05 and the three catalogue-derived routes, which docs/09 §1 planned it for.
+ * The distinction from `static` is not a rendering detail: an `isr` route reads the catalogue during
+ * `next build`, so **the database must be migrated and seeded before the build** — and a route with a
+ * dynamic segment prerenders its `generateStaticParams`, so the prerender manifest holds its concrete
+ * paths and not the pattern this registry declares. Both are asserted in `route-spine.itest.ts`.
  */
-export type RenderingMode = 'static' | 'dynamic'
+export type RenderingMode = 'static' | 'dynamic' | 'isr'
 
 /** `<changefreq>` in a sitemap. A hint, and the only one of the sitemap fields that is a judgement. */
 export type ChangeFrequency =
@@ -72,6 +79,24 @@ export interface RouteEntry {
   readonly sitemap: boolean
   /** Null exactly when `sitemap` is false — there is nothing for a changefreq to describe. */
   readonly changefreq: ChangeFrequency | null
+  /**
+   * The params a **document** with a dynamic segment is *visited* with, declared exactly when it has one.
+   *
+   * `/treatments/[slug]` is a pattern, not a URL: nothing can fetch it, screenshot it or read its
+   * `hreflang` set. Every consumer of this registry that opens a route needs one real path, and the
+   * alternative to declaring it here was for each of them to invent one — the screenshot harness, the
+   * normalisation walk and the header assertions each hard-coding a slug, and each of them silently
+   * skipping the most valuable pages on the site the day the slug changed.
+   *
+   * It is a **catalogue** value in a registry, which is the one thing here that is not derived: the slug
+   * is the first row of docs/13 §4's menu, seeded by B-CAT-06. `apps/web/src/treatments.itest.ts`
+   * asserts it resolves to a published service, so a rename fails a test rather than leaving the harness
+   * photographing a 404.
+   *
+   * A parameterised **handler** declares none, and `registry.test.ts` asserts that asymmetry: nothing opens
+   * a handler's URL to screenshot it or to read an `hreflang` set out of it.
+   */
+  readonly sampleParams?: Readonly<Record<string, string>>
   /** Why this route is in the registry with these properties. Read by nobody; read by everybody. */
   readonly why: string
 }
@@ -227,6 +252,24 @@ export const ROUTES = [
       'immutable and already public. Absent from the sitemap because a sitemap lists documents.',
   },
   {
+    id: 'pricing',
+    path: '/pricing',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
+    why:
+      'The whole menu as one comparable table: 8 treatments x 4 durations, and the three offerings ' +
+      'docs/13 §4 prints with no figure. A route of its own rather than a section of the index because ' +
+      'it is the page a customer sends a friend and the page an assistant is asked to quote — docs/09 ' +
+      '§"LLM SEO" asks for "tables for comparable facts", and a price table is the comparable fact this ' +
+      'business has. Monthly: the price list changes when the owner changes it, which is a few times a ' +
+      'year, and claiming weekly on a page that does not move teaches a crawler to ignore the hint. ISR ' +
+      'because every figure on it is a row.',
+  },
+  {
     id: 'robots-txt',
     path: '/robots.txt',
     kind: 'handler',
@@ -241,6 +284,23 @@ export const ROUTES = [
       'are alternatives rather than layers, so the noindex prefixes here are deliberately not disallowed ' +
       'there: a crawler forbidden to fetch them could never read the header. Dynamic because SITE_ORIGIN ' +
       'is read at request time, so a build promoted between environments cannot serve the wrong host.',
+  },
+  {
+    id: 'catalogue-revalidate',
+    path: '/settings/catalogue/revalidate',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-05s publish loop: the POST that invalidates the cached copies of the catalogue-derived ' +
+      'pages after a price or a name changes. It exists because those pages are prerendered from the ' +
+      'database and `revalidatePath` only works inside the Next process, which is the whole reason this ' +
+      'is a route rather than a function the worker could call. Inside the (admin) group, so the ' +
+      '/settings noindex prefix covers it; POST only, because a GET would let any crawler invalidate the ' +
+      'site caches on every visit.',
   },
   {
     id: 'google-connect',
@@ -327,21 +387,40 @@ export const ROUTES = [
       'Google routes beside it; dynamic because it reads the message rows on every request.',
   },
   {
-    id: 'treatment-path',
-    path: '/treatments/[slug]',
-    kind: 'handler',
-    rendering: 'dynamic',
-    locales: [],
-    indexable: false,
-    sitemap: false,
-    changefreq: null,
+    id: 'treatments',
+    path: '/treatments',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
     why:
-      'B-CAT-05s slug resolver: a live treatment answers 200, a renamed or archived one 301s to where ' +
-      'it went. A handler rather than a document because a page.tsx and a route.ts cannot share a ' +
-      'segment, and W-SITE-05 supersedes it with the real treatment page — at which point `kind` ' +
-      'becomes `document`, `locales` becomes LOCALES and both flags flip, and this file is where that ' +
-      'is decided rather than discovered. Not indexable and absent from the sitemap while it serves ' +
-      'text/plain: asking a crawler to index a redirect stub is worse than not asking.',
+      'The treatments index: the 8 (style x treatment) services of docs/13 §4, each linking to its own ' +
+      'page. Also the destination every archived treatment 301s to (0029, `TREATMENTS_INDEX_PATH`), ' +
+      'which is why it has to exist before a service can be withdrawn without losing its inbound links. ' +
+      'ISR: it is generated from the catalogue, so a published price or a renamed treatment reaches it ' +
+      'by revalidation rather than by a deploy.',
+  },
+  {
+    id: 'treatment',
+    path: '/treatments/[slug]',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
+    sampleParams: { slug: 'asian-normal-massage' },
+    why:
+      'One treatment, one page, and the commercial core of the site: the four priced durations, the ' +
+      'question-shaped headings docs/09 §"LLM SEO" asks for, and the Service + Offer JSON-LD. It ' +
+      'replaced B-CAT-05s `route.ts` stub, which answered text/plain and was `indexable: false` for ' +
+      'exactly as long as it was a stub — a page.tsx and a route.ts cannot share a segment, so this ' +
+      'entry flipping to a document is what that supersession looks like. `generateStaticParams` over ' +
+      'the catalogue prerenders one path per published service (8 today, per locale), so the prerender ' +
+      'manifest holds those paths and not this pattern. Durations are rows on this page, never routes: ' +
+      '32 of them would be 32 near-duplicate pages competing with each other for one query.',
   },
   // `as const satisfies` rather than an annotation: the annotation would widen every `id` to `string`
   // and `RouteId` with it, so `routeById('hoem')` would compile.
@@ -467,6 +546,61 @@ export function pathFor(route: RouteEntry, locale: Locale): string {
   return localisedPath(route.path, locale)
 }
 
+/** Does this path carry a dynamic segment — `[slug]`, `[...rest]`, `[[...all]]`? */
+export function isParameterised(path: string): boolean {
+  return path.includes('[')
+}
+
+/**
+ * The sample params a route declares, as a record.
+ *
+ * A function rather than `route.sampleParams ?? {}` at each call site, and the reason is the registry's own
+ * type: `ROUTES` is `as const satisfies`, so each entry keeps its literal type and an entry **without**
+ * `sampleParams` has no such property at all — reading it off the union is a type error. Widening the
+ * parameter to `RouteEntry`, where the field is optional, is what makes the access legal, and it keeps every
+ * consumer from writing the same cast.
+ */
+export function sampleParamsOf(route: RouteEntry): Readonly<Record<string, string>> {
+  return route.sampleParams ?? {}
+}
+
+/**
+ * A route pattern with its dynamic segments filled in.
+ *
+ * **Throws when a segment is left unfilled**, and that is the whole reason this is a function rather than
+ * a template literal at each call site. An unfilled pattern does not fail: it produces a perfectly
+ * well-formed string — `/treatments/[slug]` — which a canonical link, an `hreflang` set, a sitemap entry
+ * and a breadcrumb will each publish as a URL. Nothing downstream can tell it from a real one, and the
+ * symptom is a page that tells every crawler its canonical URL is a 404.
+ */
+export function fillParams(path: string, params: Readonly<Record<string, string>> = {}): string {
+  const filled = path.replace(/\[+\.{0,3}([^\]]+)\]+/g, (segment, name: string) => {
+    const value = params[name]
+    if (value === undefined || value === '') return segment
+    return value
+  })
+  if (isParameterised(filled)) {
+    throw new Error(
+      `'${path}' still has an unfilled dynamic segment after substitution: '${filled}'. Every ` +
+        'consumer of a route path publishes it as a URL — a canonical link, an hreflang alternate, a ' +
+        'sitemap entry — and a pattern published as a URL is a page announcing that its own address is ' +
+        'a 404.',
+    )
+  }
+  return filled
+}
+
+/**
+ * One real, fetchable path for a route, in one locale.
+ *
+ * `pathFor` for a route with no dynamic segment; `pathFor` with `sampleParams` substituted for one that
+ * has. The screenshot harness, the normalisation walk and the header assertions all open routes, and
+ * this is the one place that knows a pattern is not a URL.
+ */
+export function samplePathFor(route: RouteEntry, locale: Locale): string {
+  return fillParams(pathFor(route, locale), sampleParamsOf(route))
+}
+
 /** One URL the registry claims, with the entry and locale it came from. */
 export interface RoutePath {
   readonly path: string
@@ -526,11 +660,28 @@ export function sitemapEntries(): readonly SitemapEntry[] {
   const entries: SitemapEntry[] = []
   for (const route of ROUTES) {
     if (!route.sitemap || route.changefreq === null) continue
+    // A pattern is not a URL. `/treatments/[slug]` is in the sitemap as its eight concrete paths, which
+    // only the catalogue knows — `treatmentSitemapEntries` in `src/treatments/sitemap.ts` expands it from
+    // the rows, and this function stays synchronous and database-free for every other route.
+    if (isParameterised(route.path)) continue
     for (const locale of route.locales) {
       entries.push({ path: pathFor(route, locale), locale, changefreq: route.changefreq })
     }
   }
   return entries
+}
+
+/**
+ * The sitemap routes whose paths only a database can enumerate.
+ *
+ * Exported so the expansion is driven by the registry rather than by a builder that happens to know about
+ * treatments: a second parameterised route in the sitemap appears here the day it is declared, and the
+ * expander fails naming it rather than silently omitting its pages.
+ */
+export function parameterisedSitemapRoutes(): readonly Route[] {
+  return ROUTES.filter(
+    (route) => route.sitemap && route.changefreq !== null && isParameterised(route.path),
+  )
 }
 
 /** The CMS routes hiding in a set of registry paths. Empty, and asserted to be. */

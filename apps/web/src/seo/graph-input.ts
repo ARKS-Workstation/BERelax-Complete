@@ -21,7 +21,7 @@ import {
 import type { Facts } from '@berelax/shared'
 import { type Locale, localisedPath } from '../i18n/locales.ts'
 import { absoluteUrl, siteOrigin } from '../routes/alternates.ts'
-import { type RouteId, routeById } from '../routes/registry.ts'
+import { fillParams, type RouteId, routeById } from '../routes/registry.ts'
 
 /** The two labels a trail needs, in the locale of the document. Copy belongs to the route. */
 export interface BreadcrumbCopy {
@@ -45,11 +45,26 @@ export function breadcrumbTrailFor(
   id: RouteId,
   locale: Locale,
   copy: BreadcrumbCopy,
+  params: Readonly<Record<string, string>> = {},
 ): readonly BreadcrumbStep[] {
   const route = routeById(id)
   const home: BreadcrumbStep = { name: copy.home, url: absoluteUrl(localisedPath('/', locale)) }
   if (route.path === '/') return [home]
-  return [home, { name: copy.page, url: absoluteUrl(localisedPath(route.path, locale)) }]
+  return [
+    home,
+    { name: copy.page, url: absoluteUrl(fillParams(localisedPath(route.path, locale), params)) },
+  ]
+}
+
+/**
+ * The public URL of one treatment page, absolute, in one locale.
+ *
+ * Built from the registry entry rather than from a template literal, so a `Service` node's `url` and the
+ * canonical link on the page it points at are the same string by construction. This is the function
+ * `serviceNodes`' `urlFor` hook was left for by W-SITE-03, whose comment says "W-SITE-05 adds the route".
+ */
+export function treatmentUrlFor(slug: string, locale: Locale): string {
+  return absoluteUrl(fillParams(localisedPath(routeById('treatment').path, locale), { slug }))
 }
 
 export interface PageGraphOptions {
@@ -79,6 +94,22 @@ export interface PageGraphOptions {
   readonly therapists?: readonly TherapistCandidate[]
   /** `faq_entries` rows, answers flattened to text. Empty until a route renders the FAQ. */
   readonly faq?: readonly FaqEntry[]
+  /**
+   * The params of the page being rendered, for a route with a dynamic segment.
+   *
+   * Every `@id` and the `pageUrl` hang off this: without it a treatment page's graph would identify itself
+   * as `https://…/treatments/[slug]`, and `buildStructuredDataGraph`'s own origin check would not notice,
+   * because the pattern is under the origin.
+   */
+  readonly params?: Readonly<Record<string, string>>
+  /**
+   * The catalogue slugs this page publishes, or absent for the whole menu.
+   *
+   * A treatment page passes its own slug: its subject is one treatment, and eight `Service` nodes with
+   * thirty-two `Offer`s on each of nine documents is the reconciliation problem `includeCatalogue` exists
+   * to avoid. The index and `/pricing` pass nothing, because the menu is what they are about.
+   */
+  readonly serviceSlugs?: readonly string[]
 }
 
 /**
@@ -104,17 +135,25 @@ export interface PageGraphOptions {
  */
 export function graphInputFor(options: PageGraphOptions): StructuredDataInput {
   const origin = siteOrigin()
+  const params = options.params ?? {}
   return {
     facts: options.facts,
-    pageUrl: absoluteUrl(localisedPath(routeById(options.id).path, options.locale)),
+    pageUrl: absoluteUrl(
+      fillParams(localisedPath(routeById(options.id).path, options.locale), params),
+    ),
     origin,
     licence: asLicenceClass(options.licenceClass),
     includeCatalogue: options.includeCatalogue,
     therapists: options.therapists ?? [],
     faq: options.faq ?? [],
-    breadcrumb: breadcrumbTrailFor(options.id, options.locale, options.breadcrumb),
+    breadcrumb: breadcrumbTrailFor(options.id, options.locale, options.breadcrumb, params),
     heroImage: null,
     heroVideo: null,
+    // Every `Service` node carries the URL of its own page, in the locale of the document it is on. The
+    // route exists as of W-SITE-05, so the hook `serviceNodes` left open is now always wired: a `Service`
+    // with no `url` is a treatment a consumer cannot link to, on a site that has a page for it.
+    serviceUrlFor: (slug: string) => treatmentUrlFor(slug, options.locale),
+    ...(options.serviceSlugs !== undefined ? { serviceSlugs: options.serviceSlugs } : {}),
   }
 }
 

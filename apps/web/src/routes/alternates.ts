@@ -26,7 +26,7 @@ import {
   localisedPath,
 } from '../i18n/locales.ts'
 import { canonicalPath } from './canonical.ts'
-import { type RouteId, routeById } from './registry.ts'
+import { fillParams, isParameterised, type RouteId, routeById } from './registry.ts'
 
 /**
  * The origin the site is served from, when the environment does not say.
@@ -92,22 +92,32 @@ export interface RouteAlternates {
  * Built from the route's own `locales`, so a route served in one locale gets a set of one plus
  * `x-default` rather than an alternate pointing at a 404 — the failure that makes a whole set invalid.
  */
-export function alternatesFor(id: RouteId, locale: Locale): RouteAlternates {
+export function alternatesFor(
+  id: RouteId,
+  locale: Locale,
+  params: Readonly<Record<string, string>> = {},
+): RouteAlternates {
   const route = routeById(id)
   if (route.kind !== 'document') {
     throw new Error(`Route '${id}' is a ${route.kind}, which has no canonical URL or hreflang set`)
   }
+  // The params are substituted before anything is published, and `fillParams` throws on a segment nobody
+  // filled. A treatment page that forgot to pass its slug would otherwise announce
+  // `https://…/treatments/[slug]` as canonical — in the `<head>` of all eight pages, each one telling
+  // every crawler to index a URL that 404s, and nothing on the page would look wrong.
+  const urlOf = (served: Locale): string =>
+    absoluteUrl(fillParams(localisedPath(route.path, served), params))
   const languages: Record<string, string> = {}
   for (const served of route.locales) {
-    languages[hreflangFor(served)] = absoluteUrl(localisedPath(route.path, served))
+    languages[hreflangFor(served)] = urlOf(served)
   }
   // x-default is the default locale's document, not a third URL: it answers "no language matched",
   // and pointing it at a language selector nobody built would be a redirect loop with extra steps.
   const fallback = route.locales.includes(DEFAULT_LOCALE) ? DEFAULT_LOCALE : route.locales[0]
   if (fallback !== undefined) {
-    languages[HREFLANG_DEFAULT] = absoluteUrl(localisedPath(route.path, fallback))
+    languages[HREFLANG_DEFAULT] = urlOf(fallback)
   }
-  return { canonical: absoluteUrl(localisedPath(route.path, locale)), languages }
+  return { canonical: urlOf(locale), languages }
 }
 
 /**
@@ -117,9 +127,19 @@ export function alternatesFor(id: RouteId, locale: Locale): RouteAlternates {
  * directive is here rather than on the page for the same reason the header is derived from the registry:
  * `indexable: false` is declared once, and a page cannot forget to restate it.
  */
-export function routeMetadata(id: RouteId, locale: Locale): Metadata {
+export function routeMetadata(
+  id: RouteId,
+  locale: Locale,
+  params: Readonly<Record<string, string>> = {},
+): Metadata {
   const route = routeById(id)
-  const alternates = alternatesFor(id, locale)
+  if (isParameterised(route.path) && Object.keys(params).length === 0) {
+    throw new Error(
+      `Route '${id}' has a dynamic segment, so its metadata needs the params of the page being ` +
+        'rendered. Without them the canonical URL and every hreflang alternate would name the pattern.',
+    )
+  }
+  const alternates = alternatesFor(id, locale, params)
   if (route.indexable) return { alternates }
   return { alternates, robots: { index: false, follow: false } }
 }
