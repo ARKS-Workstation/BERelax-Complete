@@ -64,17 +64,26 @@ if (!url) {
 }
 
 /** Unique per run, because nothing in this file can be deleted afterwards. */
-/**
- * A per-run suffix for every id and every recipient this file writes.
- *
- * Decimal digits (a pid and a random integer), and every recipient below is `+9715` + its first SEVEN
- * characters + one distinguishing digit. The shared helper used to take EIGHT characters instead, which
- * collided with the per-test recipient whose digit happened to equal RUN's eighth character — one chance in
- * two, since that character is a decimal digit and the per-test digits are 0-5. The failing test then read
- * every message this file had sent instead of its own one or two. Found by M-VAT-03, on the run where the
- * eighth character was a 5.
- */
 const RUN = `${process.pid}${Math.floor(Math.random() * 1e6)}`
+
+/**
+ * A recipient for this run, distinguished from every other by `slot` alone.
+ *
+ * Every recipient in this file MUST share one prefix and differ only in the last character, and that is a
+ * correctness requirement rather than a tidiness one. They were built inline, as two different
+ * truncations of the same string: eight characters of RUN for the seeded fixtures, seven plus a digit for
+ * the live sends. Those are the SAME number whenever the eighth character of RUN happens to equal that
+ * digit — and RUN ends in `Math.random()`, so it is roughly a one-in-ten run. What it produces is
+ * `listMessageInbox` returning the fixtures' rows as well as the live one, against a file whose own
+ * header promises that "every read here is narrowed to this run's own template keys, recipients and
+ * provider ids". G-CONN-09's verify caught it with eleven rows where one was expected, and M-VAT-03's
+ * caught the same thing independently on the run where that character was a 5 — which is the real rate:
+ * the five live recipients take the distinct digits 1 to 5, so exactly one of them collides whenever the
+ * eighth character of RUN is in that range, and that is one run in two, not one in ten.
+ *
+ * Slots are single characters and all distinct. `+9715` plus eight digits is a UAE mobile in E.164.
+ */
+const recipientFor = (slot: string): string => `+9715${RUN.slice(0, 7)}${slot}`
 
 const SENT_AT = '2026-09-18T10:00:00.000Z'
 const DELIVERED_AT = '2026-09-18T10:00:12.000Z'
@@ -112,7 +121,7 @@ async function sentMessage(suffix: string, costFils = 9, segments = 1) {
       messageClass: 'transactional',
       locale: 'en',
       vendor: 'smsala',
-      recipient: `+9715${RUN.slice(0, 7)}0`,
+      recipient: recipientFor('0'),
       senderId: 'BERELAX',
       subject: null,
       body: 'Your appointment is confirmed.',
@@ -269,7 +278,7 @@ describe('acceptance — the row carries the lifecycle, and a DLR cannot move it
     // the receipt; the row says which KIND of failure this was.
     expect(stored?.lastFailureReason).toBe('delivery_reported_failed')
     const [entry] = await listMessageInbox(sql, {
-      recipient: `+9715${RUN.slice(0, 7)}0`,
+      recipient: recipientFor('0'),
       limit: 200,
     })
     expect(entry).toBeDefined()
@@ -349,7 +358,7 @@ function liveRequest(recipient: string): RecordedSendRequest {
 
 describe('acceptance — every fake send is in the inbox, and a failure retries to a declared cap', () => {
   it('finds the inbox row a send just produced, with body, encoding, segments, cost and status', async () => {
-    const recipient = `+9715${RUN.slice(0, 7)}1`
+    const recipient = recipientFor('1')
     const harness = liveHarness()
     const outcome = await deliverMessage(harness.deps, liveRequest(recipient))
     expect(outcome.kind).toBe('sent')
@@ -382,7 +391,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
   })
 
   it('attempts a rejection once and a rate limit three times, both ending failed', async () => {
-    const rejectedRecipient = `+9715${RUN.slice(0, 7)}2`
+    const rejectedRecipient = recipientFor('2')
     const rejected = liveHarness()
     rejected.sms.failures.transactional.failAlways('rejected')
     const first = await deliverMessage(rejected.deps, liveRequest(rejectedRecipient))
@@ -399,7 +408,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
     })
     expect(rejected.waits).toEqual([])
 
-    const limitedRecipient = `+9715${RUN.slice(0, 7)}3`
+    const limitedRecipient = recipientFor('3')
     const limited = liveHarness()
     limited.sms.failures.transactional.failAlways('rate_limited')
     const second = await deliverMessage(limited.deps, liveRequest(limitedRecipient))
@@ -419,7 +428,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
   })
 
   it('leaves a retryable failure queued with its next attempt, which the schema only allows there', async () => {
-    const recipient = `+9715${RUN.slice(0, 7)}4`
+    const recipient = recipientFor('4')
     const harness = liveHarness()
     harness.sms.failures.transactional.failNext('rate_limited', 1)
     // One wait, then the provider recovers: the row passes through queued with a next_attempt_at, and
@@ -441,7 +450,7 @@ describe('acceptance — every fake send is in the inbox, and a failure retries 
 
 describe('acceptance — a delivery receipt cannot un-count a message against the frequency cap', () => {
   it('counts a promotional message from the moment it was sent, whatever happens to it after', async () => {
-    const recipient = `+9715${RUN.slice(0, 7)}5`
+    const recipient = recipientFor('5')
     const promotionalTemplateId = await ensureMessageTemplate(sql, {
       key: `bmsg04.${RUN}.promo`,
       channel: 'sms',

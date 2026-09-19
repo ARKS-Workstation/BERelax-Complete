@@ -39,9 +39,23 @@ const TOKEN_MODULES = new Set([
   'packages/google/src/oauth/reconnect.ts',
 ])
 
-/** The modules that may name a token column, because their job is to move those columns. */
+/**
+ * The modules that may name a token column, because their job is to move those columns.
+ *
+ * Note which list this is. It is **not** `TOKEN_MODULES` above — that one names the five modules allowed
+ * to hold a *plaintext* token, and it has not grown. This is a weaker guarantee about a different thing:
+ * these four may write the column *names*, and a DDL statement decrypts nothing.
+ *
+ * `0040_google_disconnect.sql` is the fourth entry, added by G-CONN-09. It drops NOT NULL from the five
+ * sealed refresh-token columns so that a disconnect can zeroise them, and adds the three CHECK
+ * constraints that fence the new nullability — it cannot do either without naming them. Every migration
+ * touching these columns is named here individually, deliberately: exempting `packages/db/migrations/`
+ * as a directory would let a future migration select a ciphertext into a temporary table with nothing
+ * saying so.
+ */
 const COLUMN_MODULES = new Set([
   'packages/db/migrations/0016_google_connection.sql',
+  'packages/db/migrations/0040_google_disconnect.sql',
   'packages/db/src/schema/google.ts',
   'packages/google/src/postgres-store.ts',
 ])

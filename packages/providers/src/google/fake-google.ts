@@ -26,6 +26,7 @@ import type {
   GbpAccount,
   GbpLocation,
   GoogleOAuthProvider,
+  GoogleRevocation,
   GoogleTokens,
   Review,
   SearchAnalyticsRow,
@@ -192,6 +193,17 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
   const pending = new Map<string, PendingConsent>()
   /** Codes already exchanged. A Google authorization code is single-use; so is this one. */
   const spent = new Set<string>()
+  /**
+   * Tokens this fake has revoked.
+   *
+   * The set is what makes the fake honest about the two things a disconnect depends on. A **second**
+   * revoke of the same token answers `already_revoked`, the way Google's 400 `invalid_token` does — so
+   * the idempotency the retry path relies on is exercised rather than assumed. And `refresh` of a revoked
+   * token throws `invalid_grant`, so *"the grant really is dead afterwards"* is observable instead of
+   * being a claim the test has to take on trust: a fake that went on refreshing a revoked token would let
+   * a disconnect that never called revoke pass every assertion.
+   */
+  const revoked = new Set<string>()
 
   /**
    * A stand-in id_token: a real JWT's three dot-separated segments, with an unverifiable signature.
@@ -353,6 +365,25 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         })
         throw failureError(GOOGLE_OAUTH, armed)
       }
+      // A revoked grant is dead, and this is where that becomes observable. Checked after the armed
+      // script so a test can still force another failure mode onto this call, and before the Testing
+      // expiry because an explicit revocation is the more specific fact about the same token.
+      if (revoked.has(refreshToken)) {
+        log.record({
+          provider: GOOGLE_OAUTH,
+          operation: 'refresh',
+          outcome: 'failure',
+          summary:
+            'Refresh rejected: invalid_grant. This token was revoked at the revocation endpoint, so ' +
+            'the grant no longer exists.',
+          detail: {
+            failureMode: 'invalid_grant',
+            reason: 'revoked',
+            refreshTokenFingerprint: fingerprint(refreshToken),
+          },
+        })
+        throw failureError(GOOGLE_OAUTH, 'invalid_grant')
+      }
       // The launch blocker, simulated. A Testing-status client's refresh token simply stops working on
       // day seven: no warning, no deprecation notice, and the same `invalid_grant` a revocation gives —
       // which is why the *reason* has to be recorded here and the tripwire has to have warned earlier.
@@ -394,6 +425,42 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
         },
       })
       return tokens
+    },
+
+    async revoke(refreshToken: string): Promise<GoogleRevocation> {
+      const armed = failures.take()
+      if (armed !== undefined) {
+        log.record({
+          provider: GOOGLE_OAUTH,
+          operation: 'revoke',
+          outcome: 'failure',
+          // A FINGERPRINT on the failure path too. This is the log line a support conversation about a
+          // half-finished offboarding actually reads, which makes it the one most likely to acquire the
+          // token itself (docs/10 §4).
+          summary: `Revocation failed: ${armed}. The grant may still be live.`,
+          detail: { failureMode: armed, refreshTokenFingerprint: fingerprint(refreshToken) },
+        })
+        throw failureError(GOOGLE_OAUTH, armed)
+      }
+
+      // A token this fake never issued is still revocable, for the reason `exchangeCode` gives about a
+      // made-up code: the alternative is a fake that only works for a caller who walked the whole browser
+      // flow, and every seeded connection in the integration suite seals a token of its own. What decides
+      // `already_revoked` is whether THIS fake has already revoked it — which is the property the retry
+      // path depends on, rather than the provenance of the string.
+      const outcome: GoogleRevocation = revoked.has(refreshToken) ? 'already_revoked' : 'revoked'
+      revoked.add(refreshToken)
+      log.record({
+        provider: GOOGLE_OAUTH,
+        operation: 'revoke',
+        outcome: 'success',
+        summary:
+          outcome === 'revoked'
+            ? `Grant revoked for sub ${sub}; every token issued under it is now dead`
+            : `Grant for sub ${sub} was already revoked; nothing left to kill`,
+        detail: { outcome, refreshTokenFingerprint: fingerprint(refreshToken) },
+      })
+      return outcome
     },
   }
 }

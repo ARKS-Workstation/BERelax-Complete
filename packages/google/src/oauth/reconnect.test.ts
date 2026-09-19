@@ -12,6 +12,7 @@ import { FailureScript } from '@berelax/providers/failure'
 import { createFakeGoogleOAuth } from '@berelax/providers/google'
 import { AppError } from '@berelax/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { assertRefreshTokenStored } from '../lifecycle.ts'
 import { connectionRecord, createMemoryConnectionStore } from '../memory-store.ts'
 import { connectionBinding, sealToken } from '../token-store.ts'
 import { buildAuthorizationRequest, type ConsentDeps } from './consent.ts'
@@ -226,7 +227,10 @@ describe('reconnect with a matching sub', () => {
     await applyConsent(store, deps(LATER_ISO), grant)
 
     const record = await store.load(id)
-    expect(record?.refreshToken.ct.equals(seeded?.refreshToken.ct as Buffer)).toBe(false)
+    if (record === null || seeded === null) throw new Error('missing rows')
+    expect(assertRefreshTokenStored(record).ct.equals(assertRefreshTokenStored(seeded).ct)).toBe(
+      false,
+    )
     // The old access token carried the OLD scope set and would keep working for up to an hour against a
     // product the owner may have just removed.
     expect(record?.accessToken).toBeNull()

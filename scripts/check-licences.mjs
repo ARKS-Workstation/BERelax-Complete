@@ -233,6 +233,66 @@ for (const { path, manifest } of workspaceManifests()) {
   }
 }
 
+/*
+ * The components this product distributes that are not npm packages.
+ *
+ * This gate reads `pnpm-lock.yaml`, so there are two things it structurally cannot see and both of them are
+ * copyleft. **ffmpeg** is an operating-system package in the worker image (W-SYS-06), which no lockfile
+ * mentions. **libvips** is in the lockfile as `@img/sharp-libvips-<platform>` and is accepted below — but
+ * the obligation it carries is that the *image* ships the LGPL text, and that package ships no copy of it,
+ * which is a fact about the image rather than about the graph.
+ *
+ * Both are therefore governed by `build/container-policy.json`, and the risk in splitting a subject across
+ * two files is that one of them stops mentioning it. So this asserts the split rather than trusting it:
+ * every component named here must be declared there, with a disposition and with its obligation written
+ * out. No licence string is duplicated — only the name — because two copies of a licence classification is
+ * one copy that can be wrong.
+ */
+{
+  const declaration = policy.nonNpmShippedComponents ?? {}
+  const expected = declaration.expect ?? []
+  const containerPolicyPath = declaration.governedBy ?? 'build/container-policy.json'
+  let governed = []
+  try {
+    governed =
+      JSON.parse(readFileSync(join(ROOT, containerPolicyPath.split('#')[0]), 'utf8'))
+        .imageComponents ?? []
+  } catch (cause) {
+    problems.push(
+      `${POLICY_PATH}  [non-npm-component-not-governed] nonNpmShippedComponents.governedBy points at ` +
+        `${containerPolicyPath}, which could not be read: ${String(cause)}`,
+    )
+  }
+  for (const name of expected) {
+    const entry = governed.find((candidate) => candidate.component === name)
+    if (entry === undefined) {
+      problems.push(
+        `${POLICY_PATH}  [non-npm-component-not-governed] \`${name}\` is declared here as a component ` +
+          `this product distributes outside the npm graph, and ${containerPolicyPath} does not declare ` +
+          'it. One of the two files stopped mentioning a copyleft component, which is how an obligation ' +
+          "becomes nobody's.",
+      )
+      continue
+    }
+    if ((entry.obligation ?? '').trim().length === 0) {
+      problems.push(
+        `${POLICY_PATH}  [non-npm-component-not-governed] \`${name}\` is declared in ` +
+          `${containerPolicyPath} with no obligation. "It is ${entry.licence}" is not a decision.`,
+      )
+    }
+  }
+  // And the converse, which is the direction that rots: a copyleft component added to the image and never
+  // reflected here would make this list a partial answer to "what does this product distribute".
+  for (const entry of governed) {
+    if (!['weakCopyleft', 'strongCopyleft'].includes(entry.disposition ?? '')) continue
+    if (expected.includes(entry.component)) continue
+    problems.push(
+      `${POLICY_PATH}  [non-npm-component-not-governed] ${containerPolicyPath} declares \`${entry.component}\` ` +
+        `as ${entry.licence} in a conveyed image and nonNpmShippedComponents.expect does not list it`,
+    )
+  }
+}
+
 // ADR 0003. `pnpm boundaries` once cruised zero modules and reported success; a licence gate that
 // resolved an empty closure would report a clean tree for the same reason.
 if (shipped.found.size < policy.minimumShippedPackages) {

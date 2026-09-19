@@ -33,7 +33,19 @@ export interface GoogleConnectionRecord {
   readonly lastOkAt: Instant | null
   readonly lastCheckedAt: Instant | null
   readonly accessExpiresAt: Instant | null
-  readonly refreshToken: SealedToken
+  /**
+   * The sealed refresh token, or null once a disconnect has zeroised it.
+   *
+   * Nullable since migration 0040. Before it the column was NOT NULL, which made erasure inexpressible:
+   * the only way to "delete" a token was to overwrite it with another ciphertext, which is not deletion.
+   * Null here means *there is no credential on this row* — never *there never was one*; the append-only
+   * `google_connection_events` log carries that history and a status change cannot rewrite it.
+   *
+   * Only a terminal status may carry null, enforced by `google_connections_live_grant_has_a_refresh_token`
+   * rather than by the type: a `needs_reauth` row with no ciphertext would be a grant that may still be
+   * live at Google and that nothing in this system could ever revoke.
+   */
+  readonly refreshToken: SealedToken | null
   /** Null until a token has been fetched, and after a re-auth clears the stale cache. */
   readonly accessToken: SealedToken | null
 }
@@ -286,4 +298,75 @@ export interface GoogleConsentStore {
   upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
   updateCapabilityHealth(write: CapabilityHealthWrite): Promise<void>
   appendEvent(event: ConnectionEventInput): Promise<void>
+}
+
+/**
+ * What a disconnect writes, as **one indivisible fact**.
+ *
+ * The three writes a disconnect makes — the status, the erased columns, and the events that are the only
+ * record either happened — commit together or not at all, and that is why they are one method rather than
+ * three calls a caller sequences. G-CONN-06 found the shape of the mistake next door:
+ * `accessTokenUnderLock` let a refresh failure propagate out of `sql.begin`, and the rollback destroyed the
+ * very rows that recorded a dead grant. Here the rows are worse than evidence — they are the *only* record
+ * that a credential was destroyed, because the credential itself is gone. A zeroised row with no
+ * `disconnected` event beside it is a connection that stopped working with nothing to say why, for ever.
+ *
+ * The network call is deliberately NOT in here. A revocation that hangs inside this transaction would hold
+ * a pooled connection and a row lock for the length of an HTTPS call, and a revocation that *threw* inside
+ * it would roll back the disconnect it had just achieved.
+ */
+export interface DisconnectWrite {
+  readonly connectionId: string
+  /**
+   * `manual` when Google has accounted for the token, `revoke_failed` when it has not.
+   *
+   * Not a free string: migration 0040's `google_connections_revoke_retry_keeps_its_token` keys on this
+   * exact value to refuse a `revoke_failed` row whose ciphertext has been erased.
+   */
+  readonly statusReason: 'manual' | 'revoke_failed'
+  /**
+   * Whether to NULL every token column on the row.
+   *
+   * **False is not a lesser version of true.** It is the retained-credential path: an unconfirmed
+   * revocation leaves the grant possibly live at Google, and the stored ciphertext is then the only thing
+   * that can still kill it. Erasing it there is the one half-failure nothing can recover from
+   * (`zeroisationIsSafe` in `oauth/revoke.ts` is the rule, and this flag is what carries its answer).
+   */
+  readonly zeroise: boolean
+  readonly at: Instant
+  /**
+   * The events to append in the same transaction as the columns they describe.
+   *
+   * Passed in rather than derived here, because *what happened* is a judgement — which verdict Google
+   * gave, who asked for the disconnect — and a store that composed its own events would be a second place
+   * that decides what a revocation meant.
+   */
+  readonly events: readonly ConnectionEventInput[]
+}
+
+/**
+ * What a disconnect needs, and nothing else.
+ *
+ * A fifth narrow seam beside `GoogleConnectionStore`, `GoogleConsentStore`,
+ * `GoogleCapabilitySelectionStore` and `GoogleHealthStore`, for the reason the other four already give:
+ * the narrowest interface that expresses what a caller needs is the cheapest way to guarantee it does
+ * nothing else. A disconnect reads one row and writes the terminal state of that row. It cannot refresh a
+ * token, insert a connection, exchange a consent, re-wrap a key or touch a capability — and it is the one
+ * operation in the system that destroys a secret, so the set of other things it might reach is exactly the
+ * set worth making empty.
+ */
+export interface GoogleDisconnectStore {
+  load(connectionId: string): Promise<GoogleConnectionRecord | null>
+  disconnect(write: DisconnectWrite): Promise<void>
+  /**
+   * Every connection whose revocation Google never confirmed: `status_reason = 'revoke_failed'`.
+   *
+   * The work queue for the retry, and deliberately **the row rather than a pg-boss job**. A job row can be
+   * lost to a failed enqueue, exhausted retries or a worker that died mid-attempt, and each of those would
+   * leave a possibly-live Google grant with nothing tracking it. This predicate cannot: 0040's
+   * `google_connections_revoke_retry_keeps_its_token` guarantees every row it returns still carries the
+   * ciphertext the retry needs, so the pair is coherent by construction. The pg-boss job only makes the
+   * retry prompt.
+   */
+  pendingRevocations(): Promise<readonly GoogleConnectionRecord[]>
 }

@@ -1,6 +1,10 @@
 import { AppError } from '@berelax/shared'
 import type { Sql } from '../connection.ts'
-import type { ReviewDeliveryMode, ReviewSource } from '../schema/reviews.ts'
+import {
+  REVIEW_ROUTING_VERDICTS,
+  type ReviewDeliveryMode,
+  type ReviewSource,
+} from '../schema/reviews.ts'
 import type { UnitOfWork } from '../tx.ts'
 
 /**
@@ -354,6 +358,106 @@ function notFound(reviewId: string): AppError {
   return new AppError('not_found', `No review ${reviewId}`)
 }
 
+/**
+ * A routing decision, as data. Computed in `packages/core` and handed here.
+ *
+ * `packages/db` may not import `packages/core` (ADR 0001), so this is a plain shape rather than the core
+ * `ReviewRoutingDecision` type — and that is not a workaround, it is the boundary working: the write path
+ * must not be able to *take* the decision, only to record one, so there is nothing here that could route a
+ * review differently from the table.
+ */
+export interface ReviewRoutingVerdictInput {
+  /** `auto_send` or `escalate`. Anything else is refused before the database has to. */
+  readonly verdict: string
+  /** Which row of the docs/07 §4 table decided it. */
+  readonly ruleId: string
+  /** The escalation lexicon version the text was compared against. */
+  readonly lexiconVersion: string
+  /** Every escalation term found, for the audit row. Empty for a star-only review. */
+  readonly matchedTerms?: readonly string[]
+  /** The categories those terms fall in. */
+  readonly categories?: readonly string[]
+}
+
+/**
+ * Records the verdict on a review, with the rule and the lexicon version that produced it.
+ *
+ * ## Why an auto_send is checked here as well as by the database
+ *
+ * 0037 carries the floor as three CHECK constraints — `rating >= 4`, `comment_text is null`,
+ * `delivery_mode = 'api'` — and they are the guarantee. This function checks the *vocabulary* before the
+ * statement runs, which the constraints cannot do for it: a verdict string this build does not know would
+ * be refused by `google_reviews_routing_verdict_known` with a constraint name, and a caller reading that
+ * message has to go and find out which of thirteen rule ids it came from. An `AppError` naming the value
+ * is the difference between a queue that explains itself and one that reports a SQLSTATE.
+ *
+ * It deliberately does **not** re-derive the verdict. Two implementations of docs/07 §4, one of them in
+ * SQL, is the shape that drifts; the second application of the rule belongs in `autoSendFloor`, beside the
+ * first, where both can be read at once.
+ *
+ * ## Idempotent per decision, and never a second verdict
+ *
+ * The UPDATE is guarded by `routing_verdict is null`, so a replayed agent run — routing is an at-least-once
+ * job like every other (docs/10 §7) — reaches `already_routed` and writes no second audit row. Re-routing
+ * a review is not this function's job and would be a different one: the stored verdict is the record of a
+ * decision that was taken, and overwriting it destroys the only evidence of what the queue actually did.
+ */
+export type RoutingWriteOutcome = 'routed' | 'already_routed'
+
+export async function recordRoutingVerdict(
+  uow: UnitOfWork,
+  reviewId: string,
+  decision: ReviewRoutingVerdictInput,
+): Promise<RoutingWriteOutcome> {
+  if (!(REVIEW_ROUTING_VERDICTS as readonly string[]).includes(decision.verdict)) {
+    throw new AppError(
+      'validation',
+      `Unknown routing verdict "${decision.verdict}". The vocabulary is ` +
+        `${REVIEW_ROUTING_VERDICTS.join(' | ')} and a third outcome is not a state docs/07 §4 describes`,
+    )
+  }
+  if (decision.ruleId.trim().length === 0 || decision.lexiconVersion.trim().length === 0) {
+    throw new AppError(
+      'validation',
+      'A routing verdict needs both the rule id that decided it and the lexicon version it was taken ' +
+        'against: a decision nobody can explain is not an auditable one',
+    )
+  }
+
+  const rows = await uow.sql<{ id: string }[]>`
+    update google_reviews set
+      routing_verdict         = ${decision.verdict},
+      routing_rule_id         = ${decision.ruleId},
+      routing_lexicon_version = ${decision.lexiconVersion},
+      routed_at               = now()
+    where id = ${reviewId} and routing_verdict is null
+    returning id
+  `
+  if (rows[0] === undefined) {
+    const [existing] = await uow.sql<{ id: string }[]>`
+      select id from google_reviews where id = ${reviewId}
+    `
+    if (existing === undefined) throw notFound(reviewId)
+    return 'already_routed'
+  }
+
+  await uow.audit.record({
+    action: 'google_review.routed',
+    entityType: 'google_review',
+    entityId: reviewId,
+    operation: 'update',
+    before: { routingVerdict: null },
+    after: {
+      routingVerdict: decision.verdict,
+      routingRuleId: decision.ruleId,
+      routingLexiconVersion: decision.lexiconVersion,
+      matchedTerms: decision.matchedTerms ?? [],
+      categories: decision.categories ?? [],
+    },
+  })
+  return 'routed'
+}
+
 export interface QueuedReview {
   readonly id: string
   readonly connectionId: string
@@ -371,6 +475,13 @@ export interface QueuedReview {
   readonly submittedAtIso: string | null
   readonly confirmedAtIso: string | null
   readonly postedManuallyAtIso: string | null
+  /** NULL until the router has seen the row. Never read as "auto_send" — see reviewVerdictForRule. */
+  readonly routingVerdict: string | null
+  /** Which row of the docs/07 §4 table decided it. */
+  readonly routingRuleId: string | null
+  /** The lexicon version the verdict was taken against, which is what reproduces it. */
+  readonly routingLexiconVersion: string | null
+  readonly routedAtIso: string | null
 }
 
 interface ReviewRow {
@@ -388,6 +499,10 @@ interface ReviewRow {
   readonly submitted_at: Date | null
   readonly confirmed_at: Date | null
   readonly posted_manually_at: Date | null
+  readonly routing_verdict: string | null
+  readonly routing_rule_id: string | null
+  readonly routing_lexicon_version: string | null
+  readonly routed_at: Date | null
 }
 
 const toQueued = (row: ReviewRow): QueuedReview => ({
@@ -405,11 +520,16 @@ const toQueued = (row: ReviewRow): QueuedReview => ({
   submittedAtIso: row.submitted_at?.toISOString() ?? null,
   confirmedAtIso: row.confirmed_at?.toISOString() ?? null,
   postedManuallyAtIso: row.posted_manually_at?.toISOString() ?? null,
+  routingVerdict: row.routing_verdict,
+  routingRuleId: row.routing_rule_id,
+  routingLexiconVersion: row.routing_lexicon_version,
+  routedAtIso: row.routed_at?.toISOString() ?? null,
 })
 
 const REVIEW_COLUMNS =
   'id, connection_id, place_id, google_review_id, source, delivery_mode, rating, comment_text, ' +
-  'reviewer_display_name, reviewed_at, reply_draft, submitted_at, confirmed_at, posted_manually_at'
+  'reviewer_display_name, reviewed_at, reply_draft, submitted_at, confirmed_at, posted_manually_at, ' +
+  'routing_verdict, routing_rule_id, routing_lexicon_version, routed_at'
 
 /**
  * The queue for one listing of one connection, newest first.

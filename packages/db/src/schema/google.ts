@@ -43,12 +43,21 @@ export const googleConnection = pgTable(
     googleEmail: text('google_email').notNull(),
     /** What Google returned, not what was requested. */
     grantedScopes: text('granted_scopes').array().notNull(),
-    refreshTokenCt: bytea('refresh_token_ct').notNull(),
-    refreshTokenNonce: bytea('refresh_token_nonce').notNull(),
-    refreshTokenWrappedKey: bytea('refresh_token_wrapped_key').notNull(),
-    /** KEK version. NOT NULL so the rotation job can always tell what to re-wrap from. */
-    refreshTokenKid: text('refresh_token_kid').notNull(),
-    refreshTokenAadFp: text('refresh_token_aad_fp').notNull(),
+    /**
+     * The five sealed refresh-token columns. NULLABLE since migration 0040.
+     *
+     * They were NOT NULL, which made zeroisation impossible: the only way to "delete" a token was to
+     * overwrite it with another ciphertext. A disconnect revokes at Google and then NULLs all five
+     * together, fenced by three named CHECK constraints — all-or-none, only a terminal status may hold
+     * none, and a row parked in `revoke_failed` must keep its ciphertext because that is the retry's
+     * only credential. `pnpm db:drift` compares columns, so those constraints live in the SQL alone.
+     */
+    refreshTokenCt: bytea('refresh_token_ct'),
+    refreshTokenNonce: bytea('refresh_token_nonce'),
+    refreshTokenWrappedKey: bytea('refresh_token_wrapped_key'),
+    /** KEK version. Present exactly when the ciphertext is, so the rotation job knows what to move. */
+    refreshTokenKid: text('refresh_token_kid'),
+    refreshTokenAadFp: text('refresh_token_aad_fp'),
     accessTokenCt: bytea('access_token_ct'),
     accessTokenNonce: bytea('access_token_nonce'),
     accessTokenWrappedKey: bytea('access_token_wrapped_key'),

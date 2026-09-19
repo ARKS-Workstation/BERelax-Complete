@@ -209,3 +209,66 @@ jobs:
 
       - name: Gates fire
         run: pnpm gates:test
+
+  # The half of container scanning that needs an image, which is why it is a job of its own and not a step
+  # in `verify`. H-HARD-02 deferred it to W-SYS-06 because there was no Dockerfile to scan; there is one
+  # now, it needs ffmpeg, and `build/container-policy.json` records the scan as enabled — a status this
+  # workflow has to earn: the container policy gate fails with `[image-scan-not-wired]` if this job or either
+  # of its two steps is removed, so deleting the scan is a build failure rather than a silent loss of
+  # coverage.
+  #
+  # The gate's name is deliberately not written out here. `scripts/test-gates.mjs` proves that deleting a
+  # `run:` step for one of the four supply-chain gates fails the completeness check, and it does that by
+  # blanking the step and asserting the gate's name no longer appears anywhere in this file — so a comment
+  # that spelled the name would keep the string alive and make that property pass on a workflow with the
+  # step removed. It fired on exactly that, in this comment.
+  #
+  # It does not gate `verify` and `verify` does not gate it: they test different things and a developer must
+  # be able to run every gate in `pnpm verify` offline, with no Docker daemon and no vulnerability database.
+  container:
+    name: container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The first build of apps/worker/Dockerfile. The agent that wrote it had no Docker daemon, so every
+      # offline container rule was proven there and this is where the build itself is proven.
+      - name: Build the worker image
+        run: docker build --file apps/worker/Dockerfile --tag berelax-worker:ci .
+
+      # The image carries ffmpeg, which pulls in libavcodec and a long tail of codec libraries — the exact
+      # reason docs/08 §8 calls ffmpeg in the worker image a cost that "must be budgeted", and the exact
+      # surface an npm advisory scan cannot see.
+      - name: Scan the worker image for OS and library vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: berelax-worker:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      # Evidence that the licence obligations the policy records are discharged by the image rather than by
+      # a paragraph: the two texts, the notice, the offer, and the recorded build of ffmpeg.
+      - name: Third-party licence notices are in the image
+        run: |
+          docker run --rm berelax-worker:ci sh -eu -c '
+            test -s /usr/share/common-licenses/LGPL-3
+            test -s /usr/share/common-licenses/GPL-3
+            test -s /usr/share/common-licenses/GPL-2
+            test -s /usr/share/berelax/THIRD-PARTY-NOTICES.md
+            test -s /usr/share/berelax/ffmpeg-buildconf.txt
+            test -s /usr/share/berelax/ffmpeg-packages.txt
+            test -s /usr/share/berelax/libvips-version.txt
+          '
+
+      # And that the encoder in the image is the one the renditions are specified against. `-c:v h264` on a
+      # build without libx264 silently selects whatever H.264 encoder is present, which is the failure
+      # `[video-encoder-not-available]` exists to refuse at run time.
+      - name: The image carries the encoders the renditions are specified with
+        run: |
+          docker run --rm berelax-worker:ci sh -eu -c '
+            ffmpeg -hide_banner -encoders | grep -q libx264
+            ffmpeg -hide_banner -encoders | grep -q libx265
+          '

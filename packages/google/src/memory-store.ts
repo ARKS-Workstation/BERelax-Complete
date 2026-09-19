@@ -8,6 +8,7 @@ import type {
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleDisconnectStore,
   GoogleHealthStore,
 } from './connection-store.ts'
 import type { SealedToken } from './token-store.ts'
@@ -45,6 +46,7 @@ export interface MemoryConnectionStore
   extends GoogleConnectionStore,
     GoogleConsentStore,
     GoogleCapabilitySelectionStore,
+    GoogleDisconnectStore,
     GoogleHealthStore {
   put(record: GoogleConnectionRecord): void
   putCapability(capability: GoogleCapabilityRecord): void
@@ -65,6 +67,27 @@ export function createMemoryConnectionStore(
     if (existing === undefined)
       throw new AppError('not_found', `No Google connection with id ${id}`)
     connections.set(id, { ...existing, ...patch })
+  }
+
+  /**
+   * The append with the token-payload refusal, as a local function.
+   *
+   * A local rather than `this.appendEvent` inside `disconnect`, because `this` on an object literal is
+   * whatever the call site bound — and a destructured `const { disconnect } = store` would silently
+   * append nothing while still zeroising the row, which is the one combination that must not be
+   * reachable.
+   */
+  const append = (event: ConnectionEventInput): void => {
+    const detail = event.detail ?? {}
+    const leaked = FORBIDDEN_DETAIL_KEYS.filter((key) => key in detail)
+    if (leaked.length > 0) {
+      throw new AppError(
+        'invariant_violated',
+        `An event payload may not carry ${leaked.join(', ')}. Rows reach query logs, ` +
+          'pg_stat_statements, backups and pg-boss job payloads.',
+      )
+    }
+    events.push(event)
   }
 
   return {
@@ -239,6 +262,18 @@ export function createMemoryConnectionStore(
     },
 
     async recordRefresh(write) {
+      // The `and status <> 'disconnected'` clause the SQL carries, reproduced. A fake more permissive
+      // than the database is how a bug reaches production green (see the header): without this, a unit
+      // test of a refresh racing a disconnect would cache an access token on a zeroised row and pass.
+      const existing = connections.get(write.connectionId)
+      if (existing?.status === 'disconnected') {
+        throw new AppError(
+          'not_found',
+          `No refreshable Google connection with id ${write.connectionId}: it is absent or it was ` +
+            'disconnected while this refresh was in flight. A disconnected connection must not acquire ' +
+            'a cached access token.',
+        )
+      }
       mutate(write.connectionId, {
         accessToken: write.accessToken,
         accessExpiresAt: write.accessExpiresAt,
@@ -301,22 +336,42 @@ export function createMemoryConnectionStore(
       } satisfies ConfirmedListing
     },
 
+    async pendingRevocations() {
+      // The same predicate the SQL uses, including the `refresh_token_ct is not null` half. A fake that
+      // returned a zeroised row would hand the retry a connection with no credential, which is a state
+      // `google_connections_revoke_retry_keeps_its_token` makes impossible in the database — and a fake
+      // more permissive than the database is how a bug reaches production green.
+      return [...connections.values()]
+        .filter((r) => r.statusReason === 'revoke_failed' && r.refreshToken !== null)
+        .sort((a, b) => a.id.localeCompare(b.id))
+    },
+
+    async disconnect(write) {
+      // Not atomic, and the comment says so rather than the name implying otherwise — the same caveat
+      // `createMemoryRefreshLock` records. There is no transaction here, so a body that failed halfway
+      // would leave the earlier writes in place. That difference is exactly why the claim *the zeroised
+      // columns and the events recording them commit together* is asserted against real PostgreSQL in
+      // `google-disconnect.itest.ts` and not here.
+      mutate(write.connectionId, {
+        status: 'disconnected',
+        statusReason: write.statusReason,
+        lastCheckedAt: write.at,
+        ...(write.zeroise ? { refreshToken: null } : {}),
+        // Unconditional, whatever the revocation said: an hour of full authority that nothing may spend
+        // again. See the SQL for why keeping it "until it expires" is not an option.
+        accessToken: null,
+        accessExpiresAt: null,
+      })
+      for (const event of write.events) append(event)
+    },
+
     async rewrapRefreshToken({ connectionId, refreshToken }) {
       // Narrow on purpose, exactly like the SQL: a rotation cannot reach a status or a capability.
       mutate(connectionId, { refreshToken })
     },
 
     async appendEvent(event) {
-      const detail = event.detail ?? {}
-      const leaked = FORBIDDEN_DETAIL_KEYS.filter((key) => key in detail)
-      if (leaked.length > 0) {
-        throw new AppError(
-          'invariant_violated',
-          `An event payload may not carry ${leaked.join(', ')}. Rows reach query logs, ` +
-            'pg_stat_statements, backups and pg-boss job payloads.',
-        )
-      }
-      events.push(event)
+      append(event)
     },
   }
 }
@@ -325,7 +380,8 @@ export function createMemoryConnectionStore(
 export function connectionRecord(args: {
   readonly id: string
   readonly googleSub: string
-  readonly refreshToken: SealedToken
+  /** Null for a connection a disconnect has already zeroised — the one state with no credential. */
+  readonly refreshToken: SealedToken | null
   readonly consentAt: Instant
   readonly googleEmail?: string
   readonly grantedScopes?: readonly string[]

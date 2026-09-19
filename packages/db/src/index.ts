@@ -307,11 +307,14 @@ export {
   type QueuedReview,
   type ReconciliationInput,
   type ReconciliationOutcome,
+  type ReviewRoutingVerdictInput,
+  type RoutingWriteOutcome,
   reconcileApiReviewId,
   recordManualReview,
   recordReplyConfirmedByGoogle,
   recordReplyPostedManually,
   recordReplySubmittedToApi,
+  recordRoutingVerdict,
 } from './repositories/reviews.ts'
 export * as schema from './schema/index.ts'
 export {
@@ -448,7 +451,10 @@ export {
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-// 37 is a unit in flight alongside this one. 36 is 0036_setting_justification.sql, 38 is
+// 41 is reserved for a unit in flight that turned out not to need it. 36 is
+// 0036_setting_justification.sql, 37 is 0037_review_routing_verdict.sql, 38 is
 // 0038_booking_transaction.sql — which corrects the unit `rooms.capacity` is counted in and adds the four
-// figures an appointment snapshots — and 39 is 0039_reverse_charge.sql.
-export const SCHEMA_VERSION = 39 as const
+// figures an appointment snapshots — 39 is 0039_reverse_charge.sql, and 40 is 0040_google_disconnect.sql,
+// which makes the five refresh-token columns nullable so a disconnect can zeroise them and fences that
+// nullability with three named CHECK constraints.
+export const SCHEMA_VERSION = 40 as const

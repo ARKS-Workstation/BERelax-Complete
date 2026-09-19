@@ -2,12 +2,13 @@
 /**
  * Container policy: the part of container scanning that can be done without an image.
  *
- * **There is no Dockerfile in this repository yet.** `apps/worker/Dockerfile` belongs to W-SYS-06,
- * which needs ffmpeg in the image, and scanning an image's OS packages for CVEs needs an image. So
- * this gate does not pretend to be Trivy against a container that does not exist — that half is
- * deferred, recorded in `build/container-policy.json` and in H-HARD-02's manifest entry, and will be a
- * CI step rather than part of `pnpm verify` when it lands, because it downloads a vulnerability
- * database.
+ * **`apps/worker/Dockerfile` exists now.** H-HARD-02 deferred image vulnerability scanning to W-SYS-06,
+ * because scanning an image's OS packages for CVEs needs an image and there was none; that unit wrote the
+ * Dockerfile, so `build/container-policy.json` records the image, every component it conveys, and an
+ * enabled Trivy scan as a CI job. This gate still runs offline and holds only the rules that need no
+ * image — the scan itself stays out of `pnpm verify`, which runs on every unit by every agent and must not
+ * depend on the network or on a Docker daemon. What this gate asserts about the scan is that it is
+ * *declared and wired*, which is the half a static check can prove.
  *
  * What there is today is a container surface that CI and local development already depend on, and it
  * has a real failure mode. `docker-compose.yml` and `.github/workflows/ci.yml` each name a PostgreSQL
@@ -18,8 +19,21 @@
  * the btree_gist exclusion constraint and the deferred capacity trigger (ADR 0015, ADR 0024), which is
  * the double-booking guard.
  *
- * The Dockerfile rules are written and live now, with known-bad fixtures proving they fire, so the
- * first Dockerfile is held to them on the commit that adds it rather than six months later.
+ * The Dockerfile rules were written and live before there was a Dockerfile, with known-bad fixtures
+ * proving they fire, so the first one was held to them on the commit that added it rather than six months
+ * later.
+ *
+ * ## What an image *conveys*, and why that is a container question rather than an npm one
+ *
+ * `scripts/check-licences.mjs` reads `pnpm-lock.yaml` and classifies npm packages. Two of the most
+ * consequential licences in this product are outside that graph: ffmpeg is an operating-system package,
+ * and libvips arrives inside a prebuilt binary package that ships **no copy of its own LGPL text**. Both
+ * are copyleft, both are conveyed in the worker image, and the obligation each one carries is about what is
+ * *in the image* — a licence text and a written offer — which is precisely the thing a lockfile scan cannot
+ * see. So `imageComponents` in the policy declares them with their obligation, and four rules here make
+ * that declaration mechanical rather than a paragraph: a package installed and not declared, a copyleft
+ * component with no obligation written out, a declared component nothing installs, and a notice the
+ * Dockerfile has stopped copying into the image.
  *
  * Usage: `node scripts/check-container.mjs [--policy build/container-policy.json]`
  */
@@ -160,14 +174,128 @@ for (const entry of declaredDockerfiles) {
   }
 }
 
+/**
+ * Every operating-system package a Dockerfile installs by name.
+ *
+ * `apt-get install` and `apk add` with their flags stripped: anything beginning with `-` is a flag, and
+ * everything after a `&&` belongs to the next command. Transitive dependencies are invisible here by
+ * construction — `libx264` arrives because `ffmpeg` depends on it — which is why the policy declares those
+ * with `installedBy: "apt-dependency"` and why the staleness rule below only holds directly-named packages
+ * to being findable.
+ */
+function installedPackages(text) {
+  const found = new Set()
+  const flattened = text.replace(/\\\s*\n/g, ' ')
+  for (const match of flattened.matchAll(/\b(?:apt-get\s+install|apk\s+add)\s+([^\n]*)/g)) {
+    for (const token of (match[1] ?? '').split(/\s+/)) {
+      if (token.length === 0 || token.startsWith('-')) continue
+      // The install command ends where the next one begins. Without this, everything in a `&&` chain —
+      // `rm`, `-rf`, `/var/lib/apt/lists/*` — is reported as an undeclared package.
+      if (token === '&&' || token === ';' || token === '||' || token === '|') break
+      found.add(token)
+    }
+  }
+  return [...found]
+}
+
+const imageComponents = policy.imageComponents ?? []
+const COPYLEFT = new Set(['weakCopyleft', 'strongCopyleft'])
+
 for (const file of dockerfiles()) {
-  if (!declaredDockerfiles.some((entry) => entry.path === file)) {
+  const declared = declaredDockerfiles.find((entry) => entry.path === file)
+  if (declared === undefined) {
     problems.push(
       `${file}  [dockerfile-not-declared] this image is not listed in ${POLICY_PATH} — every image ` +
         'the build produces has to be a reviewed one, with an owner',
     )
   }
-  const lines = readFileSync(join(ROOT, file), 'utf8').split('\n')
+  const text = readFileSync(join(ROOT, file), 'utf8')
+  const lines = text.split('\n')
+
+  // --- what the image conveys -----------------------------------------------------------------------
+  const componentsHere = imageComponents.filter((entry) => entry.dockerfile === file)
+  for (const name of installedPackages(text)) {
+    if (componentsHere.some((entry) => entry.component === name)) continue
+    problems.push(
+      `${file}  [image-component-undeclared] the image installs \`${name}\` and ${POLICY_PATH} does not ` +
+        'declare it. Every package in a conveyed image is a licence obligation until somebody has said ' +
+        'which one — ffmpeg is GPL because of the encoders it is built with, and nothing in a lockfile ' +
+        'scan can see an apt package at all.',
+    )
+  }
+  for (const entry of componentsHere) {
+    if (COPYLEFT.has(entry.disposition ?? '')) {
+      if ((entry.obligation ?? '').trim().length === 0) {
+        problems.push(
+          `${file}  [image-component-without-licence-obligation] \`${entry.component}\` is declared ` +
+            `${entry.licence} (${entry.disposition}) with no \`obligation\`. "It is copyleft" is not a ` +
+            'decision; "the image must carry the text and honour the offer to supply the source" is.',
+        )
+      }
+      const textPath = entry.licenceTextInImage
+      if (typeof textPath !== 'string' || !text.includes(textPath)) {
+        problems.push(
+          `${file}  [copyleft-notice-not-copied-into-image] \`${entry.component}\` is ${entry.licence} ` +
+            `and its licence text at \`${textPath ?? '(undeclared)'}\` is not named anywhere in this ` +
+            'Dockerfile. An obligation to carry a notice is discharged by the image carrying it, so the ' +
+            'build has to put it there or assert it is there.',
+        )
+      }
+    }
+    if (entry.installedBy === 'apt' && !installedPackages(text).includes(entry.component)) {
+      // The stale-exemption shape, and the dangerous direction: an entry that no longer covers anything
+      // silently covers whatever arrives under that name next.
+      problems.push(
+        `${file}  [declared-image-component-not-installed] ${POLICY_PATH} declares \`${entry.component}\` ` +
+          'as installed by apt and this Dockerfile does not install it — the declaration, and the licence ' +
+          'obligation attached to it, now describe an image that does not exist',
+      )
+    }
+  }
+
+  // The written offer and the notice itself, which is what makes an obligation discharged rather than
+  // recorded. Only demanded of an image that conveys something copyleft.
+  if (declared !== undefined && componentsHere.some((e) => COPYLEFT.has(e.disposition ?? ''))) {
+    for (const key of ['noticeSource', 'noticePathInImage']) {
+      const value = declared[key]
+      if (typeof value !== 'string' || !text.includes(value)) {
+        problems.push(
+          `${file}  [copyleft-notice-not-copied-into-image] this image conveys a copyleft component and ` +
+            `its \`${key}\` (${value ?? 'undeclared'}) is not named in the Dockerfile. The notice and the ` +
+            'offer have to be in the image, not only in the repository.',
+        )
+      }
+    }
+    if (
+      typeof declared.noticeSource === 'string' &&
+      !existsSync(join(ROOT, declared.noticeSource))
+    ) {
+      problems.push(
+        `${file}  [copyleft-notice-not-copied-into-image] \`${declared.noticeSource}\` is the notice this ` +
+          'image copies and it is not in the repository, so the COPY would fail at build time',
+      )
+    }
+  }
+
+  // `[env-file-copied-into-image]` reads COPY arguments and cannot see `COPY . .`, which is how an
+  // environment file actually reaches a layer. A whole-context copy therefore needs a .dockerignore.
+  if (policy.requireDockerignore === true && /^\s*(?:COPY|ADD)\s+\.\s+\S/im.test(text)) {
+    const ignorePath = join(ROOT, '.dockerignore')
+    const ignore = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : undefined
+    // Both spellings, because they are different files: `.env` is the one a developer has, `.env.*` is
+    // `.env.production` and `.env.local`. Excluding one and not the other has caught nothing.
+    const patterns = (ignore ?? '').split('\n').map((line) => line.trim())
+    const excludesEnv = patterns.includes('.env') && patterns.includes('.env.*')
+    if (!excludesEnv) {
+      problems.push(
+        `${file}  [dockerignore-does-not-exclude-env] this Dockerfile copies the whole build context and ` +
+          `${ignore === undefined ? 'there is no .dockerignore' : '.dockerignore does not exclude `.env` ' + 'and `.env.*`'}. ` +
+          'An image layer is immutable and readable by anyone who can pull it, so a credential copied in ' +
+          'cannot be removed by a later layer.',
+      )
+    }
+  }
+
   let lastUser
   let lastUserLine = 0
   for (const [index, raw] of lines.entries()) {
@@ -216,6 +344,41 @@ for (const file of dockerfiles()) {
   }
 }
 
+/*
+ * The image vulnerability scan, once it is no longer deferred.
+ *
+ * A status of `enabled` is a claim about CI, and a claim nobody checks is how a deferral gets discharged on
+ * paper. So the declared workflow file has to exist, has to contain the declared job, and has to run every
+ * step the policy names. This is deliberately *not* a scan — it needs an image and a vulnerability database
+ * — and it is deliberately not silent either: what can be proven offline is that the wiring is there.
+ */
+const scanningPolicy = policy.imageVulnerabilityScanning ?? {}
+if (scanningPolicy.status === 'enabled') {
+  const workflowPath = scanningPolicy.workflowFile
+  const workflow =
+    typeof workflowPath === 'string' && existsSync(join(ROOT, workflowPath))
+      ? readFileSync(join(ROOT, workflowPath), 'utf8')
+      : undefined
+  if (workflow === undefined) {
+    problems.push(
+      `[image-scan-not-wired] ${POLICY_PATH} says image vulnerability scanning is enabled and its ` +
+        `workflowFile (${workflowPath ?? 'undeclared'}) is not in this repository`,
+    )
+  } else {
+    const missing = [
+      ...(typeof scanningPolicy.ciJob === 'string' ? [`${scanningPolicy.ciJob}:`] : []),
+      ...(scanningPolicy.requiredSteps ?? []),
+    ].filter((needle) => !workflow.includes(needle))
+    if (missing.length > 0) {
+      problems.push(
+        `[image-scan-not-wired] ${workflowPath} is missing ${missing.join(', ')} — the policy records the ` +
+          'scan as enabled and H-HARD-02 deferred it only for as long as there was no image, so a status ' +
+          'of `enabled` with nothing running is worse than the deferral it replaced',
+      )
+    }
+  }
+}
+
 // ADR 0003. If the compose file and the workflow were renamed, every rule above would examine nothing
 // and this gate would print a clean result — which is the exact failure ADR 0002 records.
 if (imageReferences === 0) {
@@ -234,6 +397,7 @@ if (problems.length > 0) {
 
 const scanning = policy.imageVulnerabilityScanning ?? {}
 const found = dockerfiles()
+const copyleft = imageComponents.filter((entry) => COPYLEFT.has(entry.disposition ?? ''))
 console.log(
   `Container policy clear: ${imageReferences} image reference(s) across ` +
     `${composeAndWorkflowFiles().length} compose/workflow file(s), all pinned and on PostgreSQL ` +
@@ -241,8 +405,19 @@ console.log(
     `${declaredDockerfiles.length} declared. Image vulnerability scanning: ${scanning.status} ` +
     `(${scanning.unit}).`,
 )
+console.log(
+  `  ${imageComponents.length} declared image component(s), ${copyleft.length} copyleft: ` +
+    `${copyleft.map((entry) => `${entry.component} ${entry.licence}`).join(', ') || 'none'} — each with ` +
+    'its obligation written out and its licence text asserted in the build.',
+)
 
 // Deliberately not silent: a deferral that stops being visible stops being a deferral.
 if (scanning.status === 'deferred') {
   console.log(`  NOTE: ${scanning.reason}`)
+}
+for (const entry of declaredDockerfiles) {
+  // An image nobody has built is a reviewed Dockerfile and not a tested one, and saying so on every run is
+  // the only thing that stops the distinction being quietly lost.
+  if (typeof entry.unverified === 'string')
+    console.log(`  NOTE: ${entry.path} — ${entry.unverified}`)
 }

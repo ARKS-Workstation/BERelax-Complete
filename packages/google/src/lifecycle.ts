@@ -14,7 +14,8 @@ import { failureModeOf } from '@berelax/providers/failure'
 import type { GoogleOAuthProvider } from '@berelax/providers/google'
 import { AppError } from '@berelax/shared'
 import type { GoogleConnectionRecord, GoogleConnectionStore } from './connection-store.ts'
-import { connectionBinding, openToken, sealToken } from './token-store.ts'
+import { type RevokeVerdict, verdictForRevocation, verdictForRevokeError } from './oauth/revoke.ts'
+import { connectionBinding, openToken, type SealedToken, sealToken } from './token-store.ts'
 
 /**
  * The token lifecycle: obtain a usable access token, or say precisely why not.
@@ -171,6 +172,84 @@ export async function accessTokenFor(
 }
 
 /**
+ * The sealed refresh token, or a refusal naming why there is none.
+ *
+ * Nullable since migration 0040, which is what made zeroisation expressible: a completed disconnect NULLs
+ * all five columns. Every caller here is already behind `loadActiveConnection`, which refuses anything but
+ * `active`, and `google_connections_live_grant_has_a_refresh_token` refuses an `active` row with no
+ * ciphertext — so this is unreachable from a consistent database and is still written as a refusal rather
+ * than a `!`. A non-null assertion would turn the one state that genuinely has no credential into a
+ * `TypeError` with no connection id in it, on whichever cron happened to look first.
+ *
+ * Exported because six test files need it. Every assertion that a token round-tripped has to say what it
+ * means for the token to be absent now that it can be, and a `!` in each of them would report the one
+ * interesting case — a fixture built with no credential — as an unattributable TypeError. Reusing the
+ * production guard also means the tests and the code agree about what a missing token is.
+ */
+export function assertRefreshTokenStored(
+  connection: Pick<GoogleConnectionRecord, 'id' | 'refreshToken'>,
+): SealedToken {
+  if (connection.refreshToken === null) {
+    throw new AppError(
+      'invariant_violated',
+      `Google connection ${connection.id} holds no refresh token: it was zeroised by a disconnect. ` +
+        'Re-consent creates a new grant; nothing can revive this one.',
+      { details: { reason: 'google_refresh_token_zeroised', connectionId: connection.id } },
+    )
+  }
+  return connection.refreshToken
+}
+
+/**
+ * Asks Google to revoke the grant, and returns what that means. **Writes nothing.**
+ *
+ * ## Why this lives here and not in `oauth/revoke.ts`
+ *
+ * Because it decrypts, and decryption is the thing the chokepoint fences. Five modules may hold a
+ * plaintext Google token — `scripts/check-google-token-chokepoint.mjs` and the
+ * `google-tokens-only-in-with-google` rule name them — and this is one of them already, for the refresh.
+ * Putting the revocation in a sixth module would have widened that allow-list to buy a file boundary, and
+ * the allow-list is the guarantee. So the *I/O* is here beside the refresh it mirrors, and the *judgement*
+ * — may we now erase the credential — is in `oauth/revoke.ts`, which holds no key and touches no column.
+ *
+ * ## Why it does not go through `withGoogle`
+ *
+ * `withGoogle` resolves a connection **from a capability** and refuses anything that is not `active`. A
+ * disconnect has to work on precisely the connections it would refuse: one whose grant already looks dead
+ * (`needs_reauth`), and one that never got as far as having a capability row. It would also classify
+ * anything thrown inside its body through the Google taxonomy and write a `health_check_failed` row — and
+ * a revocation failure is not a capability health failure, so that row would report a broken capability
+ * for a connection somebody is deliberately taking out of service (G-CONN-05's laundering note). The
+ * disconnect writes its own rows, which are the ones the panel reads.
+ *
+ * ## Why the refresh token and not the access token
+ *
+ * Google's revocation endpoint accepts either, and revoking the refresh token kills the whole grant
+ * including every access token issued under it. The refresh token is also the credential we actually
+ * store, so revoking it is what makes the stored bytes worthless — which is the entire reason the
+ * revocation precedes the erasure.
+ */
+export async function revokeStoredGrant(
+  deps: Pick<TokenLifecycleDeps, 'oauth' | 'kek'>,
+  connection: Pick<GoogleConnectionRecord, 'id' | 'googleSub' | 'refreshToken'>,
+): Promise<RevokeVerdict> {
+  const binding = connectionBinding({
+    connectionId: connection.id,
+    googleSub: connection.googleSub,
+  })
+  const refreshToken = openToken(deps.kek, binding, assertRefreshTokenStored(connection))
+  try {
+    return verdictForRevocation(await deps.oauth.revoke(refreshToken))
+  } catch (error) {
+    // Caught, classified, returned — never rethrown. The caller has a status to write and an event to
+    // append on this path, and a throw here would make the decision at the call site a `catch` block
+    // somebody eventually widens. The classification is `oauth/revoke.ts`'s, so the rule that decides
+    // whether erasure is safe stays in one testable function.
+    return verdictForRevokeError(error)
+  }
+}
+
+/**
  * Trades the stored refresh token for a fresh access token, and records what happened either way.
  *
  * The write on the failure path matters as much as the one on the success path: a pg-boss job failure
@@ -185,7 +264,7 @@ export async function refreshAccessToken(
     connectionId: connection.id,
     googleSub: connection.googleSub,
   })
-  const refreshToken = openToken(deps.kek, binding, connection.refreshToken)
+  const refreshToken = openToken(deps.kek, binding, assertRefreshTokenStored(connection))
 
   let tokens: Awaited<ReturnType<GoogleOAuthProvider['refresh']>>
   try {

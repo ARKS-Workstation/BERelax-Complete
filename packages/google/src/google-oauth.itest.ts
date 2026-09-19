@@ -11,6 +11,7 @@ import { createFakeGoogleOAuth, type GoogleOAuthProvider } from '@berelax/provid
 import { AppError } from '@berelax/shared'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GoogleConsentStore } from './connection-store.ts'
+import { assertRefreshTokenStored } from './lifecycle.ts'
 import { buildAuthorizationRequest, type PendingConsent } from './oauth/consent.ts'
 import { type ConsentCallback, type ConsentGrant, exchangeConsentCode } from './oauth/exchange.ts'
 import { applyConsent, completeGoogleConsent } from './oauth/reconnect.ts'
@@ -160,7 +161,7 @@ describe('the first consent, against the real columns', () => {
     const plaintext = openToken(
       KEK,
       connectionBinding({ connectionId: record.id, googleSub: record.googleSub }),
-      record.refreshToken,
+      assertRefreshTokenStored(record),
     )
     expect(plaintext).toMatch(/^fake-refresh-/)
     const ct = row['refresh_token_ct'] as Buffer
@@ -287,8 +288,10 @@ describe('reconnect with a different google_sub', () => {
     const two = await store.load(second.connectionId)
     if (one === null || two === null) throw new Error('missing rows')
 
-    expect(one.refreshToken.ct.equals(two.refreshToken.ct)).toBe(false)
-    expect(one.refreshToken.aadFingerprint).not.toBe(two.refreshToken.aadFingerprint)
+    const oneToken = assertRefreshTokenStored(one)
+    const twoToken = assertRefreshTokenStored(two)
+    expect(oneToken.ct.equals(twoToken.ct)).toBe(false)
+    expect(oneToken.aadFingerprint).not.toBe(twoToken.aadFingerprint)
     // The AAD is {table, recordId, google_sub}: the second row's ciphertext cannot be opened with the
     // first row's binding. Without that, an attacker with UPDATE could transplant a token between
     // connections and it would decrypt cleanly — which is a reply posted to another business's listing.
@@ -296,7 +299,7 @@ describe('reconnect with a different google_sub', () => {
       openToken(
         KEK,
         connectionBinding({ connectionId: one.id, googleSub: one.googleSub }),
-        two.refreshToken,
+        twoToken,
       ),
     ).toThrow()
   })

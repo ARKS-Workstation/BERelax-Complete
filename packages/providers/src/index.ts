@@ -39,12 +39,14 @@ export {
 export type {
   BusinessProfileProvider,
   GoogleOAuthProvider,
+  GoogleRevocation,
   GoogleSub,
   GoogleTokens,
   Review,
   SearchAnalyticsRow,
   SearchConsoleProvider,
 } from './google/port.ts'
+export { GOOGLE_REVOKE_ENDPOINT } from './google/port.ts'
 export { createFakeLlm, FAKE_LLM } from './llm/fake-llm.ts'
 export type { LlmOutcome, LlmProvider, LlmPurpose, LlmRequest, LlmUsage } from './llm/port.ts'
 export { notImplemented, PENDING, type PendingIntegration } from './not-implemented.ts'

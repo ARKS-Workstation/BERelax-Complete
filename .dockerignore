@@ -1,0 +1,37 @@
+# The build context for apps/worker/Dockerfile.
+#
+# The first four lines are the load-bearing ones, and they are load-bearing for different reasons.
+#
+# **Environment files.** `apps/worker/Dockerfile` does `COPY . .`, so without this the build context carries
+# whatever `.env` a developer has locally, and an image layer is immutable and readable by anyone who can
+# pull it — a credential copied in cannot be removed by a later layer. `scripts/check-container.mjs` checks
+# both halves of this: `[env-file-copied-into-image]` on a COPY that names one, and
+# `[dockerignore-does-not-exclude-env]` on a Dockerfile that copies the whole context without this file
+# excluding them. The second rule exists because the first one cannot see `COPY . .`.
+#
+# **node_modules.** pnpm's tree is a forest of symlinks into `node_modules/.pnpm`, and copying a host one
+# into the image would land links pointing at paths that do not exist there. The image resolves its own.
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+
+# Build output and generated artefacts. None of it is input to the worker, and `.next` alone is most of a
+# gigabyte of chunks.
+.next
+**/.next
+dist
+**/dist
+artifacts
+playwright-report
+test-results
+coverage
+*.tsbuildinfo
+
+# Git history, worktrees and editor state. `.claude/worktrees` is a parallel checkout of this same
+# repository — copying it would put every other agent's work in progress into the image.
+.git
+.gitignore
+.claude
+.DS_Store

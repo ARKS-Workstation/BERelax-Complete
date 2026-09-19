@@ -6930,7 +6930,7 @@ units:
       hvc1, desktop and mobile), faststart, a seamless ping-pong loop, budget enforcement and content-addressed
       idempotent output. No VP9, no HLS.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-05
@@ -6952,6 +6952,134 @@ units:
       paths
     - Renditions are written to the public bucket with immutable cache headers while the master stays in
       the private bucket and is not publicly readable (fake storage adapter assertions on both)
+    - 'NOTE: ffmpeg is not installed in the container this unit was built in — `which ffmpeg` returns
+      nothing — and that is the scope boundary for criteria 1, 2 and 4. What runs unconditionally: the argv
+      for all four renditions is a pure function asserted flag by flag (-profile:v high, -level 4.0, -crf
+      26; -crf 28, -level 3.1; -tag:v hvc1; -preset veryslow; -movflags +faststart; -an; -pix_fmt yuv420p;
+      -f mp4) with controls proving the two crops really differ and that no libvpx, webm, hls or av1 token
+      appears anywhere; and the orchestration is driven end to end through an injected encoder returning
+      structurally real MP4s, so the head check, the probe, the caps, the bucket split, the cache headers,
+      the directory listing and the idempotence are all exercised against the real storage adapter. What is
+      deferred until ffmpeg exists is one real encode. The job refuses to fake it: `[ffmpeg-not-available]`
+      names the directories it searched, the integration test drives that path with PATH emptied so it
+      asserts the same thing on a runner that does have ffmpeg, and the public bucket is asserted still
+      empty afterwards. The new `container` job in .github/workflows/ci.yml builds the worker image and
+      asserts libx264 and libx265 are in it, which is the first execution of that path.'
+    - 'NOTE: criterion 2 is satisfied more strongly than it is written, and one step short of it. The
+      parenthetical asks for box order rather than the flag, so packages/media/src/video/probe.ts is a real
+      ISO BMFF parser: top-level box order, the stsd sample-entry 4cc, mvhd, mdhd, tkhd and stsz, refusing
+      [mp4-moov-after-mdat], [mp4-has-no-moov-and-mdat] and [mp4-codec-tag-unexpected] against hand-built
+      known-bad files in both directions, and every stored rendition is probed out of the bytes that were
+      written rather than the buffer that was returned. ffprobe itself cannot run here, so ffprobeStreams()
+      is implemented as the cross-check — the byte parser and ffprobe are required to agree and a
+      disagreement stops the job — and has never been executed. That is the whole of what criterion 2
+      defers.'
+    - 'NOTE: criterion 3 is split across two enforcement points, deliberately, because docs/08 section 8
+      splits them. The 2MB hard stop is the job: [video-rendition-over-hard-stop] carries the measured byte
+      count, refuses before the put, and an oversized-fixture test proves nothing reaches the bucket. The
+      350KB and 1.2MB budgets are the CI layer: a new `video` kind in build/budgets.json, mirrored from
+      packages/media/src/video/ladder.ts with [video-budget-not-mirrored-in-the-pipeline] failing in either
+      direction, measuring whatever the job last wrote into artifacts/media-outbox. Keeping the two apart is
+      what makes each reachable — a job that refused at the budget would make the hard stop a rule that can
+      never fire, which is ADR 0003 with a byte count attached. With no footage and no ffmpeg the weighing
+      half prints SKIP with its reason and the open-question id while the mirror check still runs, so the
+      entry is never measuring nothing, and a known-bad fixture proves the weighing path fails with the
+      measured number.'
+    - 'NOTE: criterion 4 is satisfied on duration and scoped on pixels. assertPingPongDuration compares each
+      rendition mvhd against the master and fails outside one frame period, with a known-bad fixture for a
+      reverse leg that did not run. The frame comparison is compareFrames, a pure per-channel diff with a
+      tolerance and a max-differing ratio, unit-tested with controls including a whole-frame mismatch;
+      extracting the first and last decoded frames needs ffmpeg, so that call is the part unexecuted. Also
+      recorded: the docs/08 section 6 spelling of the graph duplicates frame N at the turn — one held frame,
+      40ms at 25fps, inside the plus-or-minus one frame the criterion allows. trim=start_frame=1 would
+      remove it and make the output 2N-1 frames, at which point the duration is no longer twice the source,
+      so the documented graph is used verbatim and the duplicate is the deliberate choice.'
+    - 'NOTE: no migration. SCHEMA_VERSION stays at 36 and packages/db/migrations/0041 is unused. Every
+      criterion here is about files, bytes and paths; idempotence comes from the content-addressed path plus
+      a storage head(), not from a row — the same finding W-SYS-05 recorded for the image ladder. The media
+      row that would carry a rendition manifest belongs to W-SYS-09.'
+    - 'NOTE: the container deferral H-HARD-02 armed is discharged. apps/worker/Dockerfile exists,
+      build/container-policy.json records it as `present` with the base image pinned to node:22-bookworm-slim
+      at an @sha256 digest read from the registry, and imageVulnerabilityScanning moves from `deferred` to
+      `enabled` behind a new `container` job in .github/workflows/ci.yml that builds the image and runs Trivy
+      at HIGH and CRITICAL. It is a separate job rather than a step in verify because it needs a Docker
+      daemon and a vulnerability database, and pnpm verify must work offline. Five new rules ship with it,
+      each with a known-bad fixture: [image-component-undeclared], [image-component-without-licence-obligation],
+      [copyleft-notice-not-copied-into-image], [dockerignore-does-not-exclude-env] and [image-scan-not-wired].
+      The .dockerignore rule exists because [env-file-copied-into-image] reads COPY arguments and cannot see
+      `COPY . .`, which is how an environment file actually reaches a layer.'
+    - 'NOTE: the ffmpeg build, and what its licence requires. Debian bookworm ffmpeg, configured
+      --enable-gpl with libx264 and libx265, so the shipped binary is GPL-2.0-or-later (GPL-3.0-or-later
+      where --enable-version3 applies). That is not avoidable by choosing a different build: docs/08 section
+      6 and criterion 1 specify -profile:v high and -crf, which are x264 and x265 options, and the
+      LGPL-compatible encoders do not reach them — OpenH264 is Constrained Baseline with no CRF and kvazaar
+      is HEVC only. The obligation is the GPL text in the image plus a written offer of complete
+      corresponding source for all three, discharged by apps/worker/licences/THIRD-PARTY-NOTICES.md and by
+      RUN steps that assert /usr/share/common-licenses/GPL-2, GPL-3 and LGPL-3 are present and record
+      `ffmpeg -buildconf` and the installed package versions into the image. It does not reach BE RELAX
+      source: ffmpeg is exec-ed with an argument vector, nothing links libavcodec and nothing includes an
+      ffmpeg header, so the two are aggregated rather than one work — and if that ever changes the entry
+      stops being sufficient. resolveFfmpeg() reads the configuration line back at runtime and refuses to
+      encode when the detected licence is not one the notice covers ([ffmpeg-build-licence-unexpected]), in
+      both directions, because an LGPL build is less obligation and still makes the shipped notice wrong.
+      build/licence-policy.json gains a nonNpmShippedComponents block cross-referencing the container
+      policy, with [non-npm-component-not-governed] failing in both directions; it could not go in
+      `accepted`, which is matched against the npm graph and whose unused entries fail as
+      [stale-acceptance]. The patent question is separate from copyright and is not answered:
+      Y12-video-patents.'
+    - 'NOTE: the libvips LGPL obligation H-HARD-02 left for this unit is discharged, and the reason it could
+      not be discharged by copying node_modules is itself a finding: @img/sharp-libvips-linux-x64 ships NO
+      copy of the LGPL text — its contents are README.md, package.json, versions.json and lib/. An image
+      built from node_modules would carry the library and not its licence, and nothing in pnpm install, pnpm
+      licences or a code review would have said so. Debian base-files supplies
+      /usr/share/common-licenses/LGPL-3 and GPL-3 (LGPL-3.0 incorporates GPL-3.0 by reference); the
+      Dockerfile asserts both are present rather than assuming the slim image kept them, and records the
+      installed libvips version for the offer. The address the offer directs requests to is blank on
+      purpose: Y12-licence-contact.'
+    - 'NOTE: a video is not an image, and the image slot was not widened to take one. W-SYS-09 hero slot
+      keeps mimeTypes image/jpeg and image/png and its 8MiB cap, and validateUpload refuses a video/mp4
+      there by name (slot-mime-not-allowed) with an image control that passes — asserted, because every
+      other consumer of that descriptor is an image path (the AVIF ladder, the OKLCH placeholder, the
+      aspect-ratio a card reserves, the alt filter). What the two share is the frame: the 16:9 desktop
+      rendition and the 4:5 mobile rendition read their ratios from CROPS and SLOT_REGISTRY rather than
+      restating them, so the video and the poster behind it cannot art-direct differently. The master has
+      its own declaration — its own mime types, its own per-container byte caps, its own private prefix, its
+      own minimum geometry and a duration ceiling — and assertVideoSlot refuses every slot but hero.
+      scripts/check-media.mjs [no-private-origin-url] gains the video-master prefix as its own spelling with
+      its own fixture.'
+    - 'NOTE: where the two geometries come from. 1920x1080 and -level 4.0 are a matched pair, 8160 of the
+      8192 macroblocks the level allows. The mobile rendition is 720x900 at 4:5, and the declared -level 3.1
+      is what rules out the mobile *image* ladder widest rung as a video frame: 1080x1350 is 5780
+      macroblocks against 3600. Inside that ceiling the number is set by the 350KB budget, which over about
+      six and a half seconds of ping-pong is roughly 440 kbit/s, or 0.027 bits per pixel at 720x900x25 — a
+      larger frame inside the same level spends the same bytes on more pixels and looks softer. Asserted
+      both ways in ladder.test.ts, so a resolution raised without raising the level fails rather than
+      producing a file a phone decoder refuses to open.'
+    - 'NOTE: what plays, and when. The renditions are built here; attaching them is W-SYS-07. This unit adds
+      no media query and no second reduced-motion branch — pnpm layout asserts prefers-reduced-motion is
+      authored in exactly one file (packages/ui/src/tokens/scale.ts, W-SYS-04) and it still is. So the three
+      behaviours docs/08 section 6 requires are properties of the poster and the island rather than of this
+      job: the LCP element is a real img inside a picture and the video ships with no src and no poster
+      attribute, so the poster frame is the still and costs 0ms LCP; on a slow or metered connection the
+      PerformanceResourceTiming gate below 600 kbit/s means the src is never attached and the still remains;
+      and under prefers-reduced-motion the video is never attached at all, which is precisely why no motion
+      token is needed here — there is no animation to shorten, only bytes not to fetch. What this unit
+      contributes to all three is that the deferred bytes exist, are content-addressed, are capped at 350KB
+      and 1.2MB with a 2MB refusal, and are therefore cheap enough to be worth attaching.'
+    - 'NOTE: files beyond the declared list, all inside packages/media/src/video/. ladder.ts is the pure half
+      — the four renditions, the argv, the paths, the caps and the slot relation — and is exported as
+      @berelax/media/video with no sharp and no node imports, so W-SYS-07 can build its source list from the
+      same declaration the worker encoded against. probe.ts and encode.ts are as declared. stand-in.ts is
+      the marked stand-in master and testing.ts is the structural MP4 fixture builder, which is a module
+      rather than a helper duplicated across two test files because two copies of a byte format are two byte
+      formats and the copy in the test is the one that rots.'
+    - 'NOTE: found while building this, by a test rather than by a review. One byte cap for both master
+      containers was wrong by an order of magnitude — three seconds of 1080p is 233MB as an uncompressed y4m
+      and about 20MB coded — and the single 128MiB cap refused the stand-in master this unit ships.
+      MAX_MASTER_BYTES is now per container and maxMasterBytes() falls back to the tightest, so an unknown
+      container never receives the loosest allowance. The cap that actually bounds the work is
+      MAX_MASTER_SECONDS, because the cost is the reverse filter frame buffer and that is a function of
+      duration and geometry rather than of how the input was coded.'
     files:
     - apps/worker/src/jobs/build-video-renditions.ts
     - packages/media/src/video/encode.ts
@@ -8594,7 +8722,7 @@ units:
       from docs/10 SS5 becomes a runbook file with a test, because the Cloud project IAM step is the one
       everybody forgets.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - F06
@@ -8615,6 +8743,29 @@ units:
     - 'The migration path in docs/10 SS5 is covered by an integration test: a new sub connects, capabilities
       are verified against the same placeId, and only then is the old connection disconnected and revoked
       — asserted in that order by a recorded call sequence'
+    - 'NOTE: the ORDER is revoke-then-zeroise, and the erasure is CONDITIONAL on Google having accounted
+      for the token (a 200, or the 400 invalid_token that means it was already dead). On an unconfirmed
+      revocation the row is still marked disconnected so no consumer resolves it, but the ciphertext is
+      RETAINED with status_reason=revoke_failed, because it is the only credential that can still kill a
+      grant that may be live at Google. Erasing it there is the one half-failure nothing in this system
+      recovers from. Migration 0040''s google_connections_revoke_retry_keeps_its_token makes that state
+      unrepresentable rather than merely avoided in code'
+    - 'NOTE: zeroisation guarantees the credential is unrecoverable through SQL (all eleven sealed columns
+      NULL, proved by a keyless byte scan of every row in four encodings) and worthless if recovered by any
+      other route, because the grant is dead at Google. It does NOT overwrite the old heap tuple, the WAL,
+      a physical replica or any pre-disconnect backup, and it does not rotate the app KEK. The runbook
+      states all of that, and names backup retention and KEK rotation as a separate task rather than
+      pretending the bytes are gone'
+    - 'NOTE: deferred to G-CONN-07 — the operator-facing Disconnect control on the settings card, and the
+      transactional enqueue that wires announceRevokeRetry to pg-boss. That card does not exist yet
+      (G-CONN-07 is todo), so this unit ships the two seams it will call — disconnectGoogleConnection and
+      announceRevokeRetry — and the retry job''s own sweep, which finds its work by the ROW rather than by
+      a job payload and therefore needs no route to be correct'
+    - 'NOTE: the plaintext-token allow-list was NOT widened. The revocation needs a decrypted refresh
+      token, so the provider call lives in lifecycle.ts, which was already one of the five modules allowed
+      to hold one; oauth/revoke.ts holds only the judgement (may we erase now) and touches no key and no
+      column. The COLUMN-name list did grow by one entry, 0040_google_disconnect.sql, because a migration
+      that drops NOT NULL from those columns cannot avoid naming them. Gate 45m pins both'
     files:
     - packages/google/src/oauth/revoke.ts
     - packages/google/src/disconnect.ts
@@ -8760,7 +8911,7 @@ units:
       illness, pain, staff conduct, refunds, hygiene or legal threat, never auto-send. Auto-send is compliance-locked,
       not a setting that can be relaxed into a breach.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-REV-01
@@ -8780,13 +8931,24 @@ units:
       false, asserted against the settings registry default'
     - Every verdict persists the matched rule id and the lexicon version onto the review row, and a test
       reproduces a historical verdict from the stored version alone
+    - 'NOTE deferred to G-REV-02 and G-REV-04: nothing SCHEDULES routing. The table, the lexicon and the
+      verdict write are complete and exercised end to end, but no agent or cron walks the unrouted queue —
+      G-REV-02 owns the intake that creates the rows and G-REV-04 the reply generator that consumes a
+      verdict, and a cron here would be an agent with nothing to read on the day it landed. The partial
+      index google_reviews_unrouted_idx is the read that job will make'
+    - 'NOTE: the migration is 0037_review_routing_verdict.sql, not the 0044 this entry originally named —
+      units land in a different order from the one the plan numbered them in, and SCHEMA_VERSION is 37'
     - 'packages/core purity holds: routing receives the configured language set, lexicon and clock instant
       as arguments; the core-must-be-pure gate and a Date.now fixture prove no clock or I/O access'
     files:
     - packages/core/src/reviews/routing.ts
     - packages/core/src/reviews/escalation-lexicon.ts
+    - packages/core/src/reviews/language.ts
     - packages/core/src/reviews/routing.property.test.ts
-    - packages/db/migrations/0044_review_routing_verdict.sql
+    - packages/shared/src/review-autosend.ts
+    - packages/db/migrations/0037_review_routing_verdict.sql
+    - packages/fixtures/src/review-routing-table.test.ts
+    - packages/google/src/review-routing.itest.ts
   - id: G-REV-04
     order: 164
     title: 'Reply generator: house-voice templates plus LLM, review text as untrusted data'

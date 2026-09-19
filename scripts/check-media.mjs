@@ -208,6 +208,14 @@ const TEST_FILE = /\.(test|itest)\.tsx?$/
 const PRIVATE_ORIGIN = [
   { pattern: /\/originals\//, why: 'the private bucket holds originals; no URL may reach one' },
   {
+    // W-SYS-06. docs/08 §6 puts "originals, video masters, signed consent PDFs" in the same private
+    // bucket, and a video master is the heaviest object in it: a hero master is up to 128MiB, and a URL
+    // that reached one would serve that instead of the 350KB rendition the page is budgeted for. Added as
+    // its own spelling rather than widened out of `/originals/`, so a fixture proves each independently.
+    pattern: /\/video-masters\//,
+    why: 'the private bucket holds video masters; the page serves renditions, never a master',
+  },
+  {
     pattern: /digitaloceanspaces\.com/,
     why: 'derivatives are served same-origin; a Spaces host costs DNS, TCP and TLS before the hero',
   },

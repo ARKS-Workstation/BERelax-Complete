@@ -5,7 +5,7 @@ import { createCallLog } from '@berelax/providers/call-log'
 import { FailureScript } from '@berelax/providers/failure'
 import { createFakeGoogleOAuth } from '@berelax/providers/google'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { accessTokenFor } from './lifecycle.ts'
+import { accessTokenFor, assertRefreshTokenStored } from './lifecycle.ts'
 import { createPostgresConnectionStore } from './postgres-store.ts'
 import { rewrapRefreshTokens } from './rewrap.ts'
 import { connectionBinding, openToken, sealToken } from './token-store.ts'
@@ -113,7 +113,7 @@ describe('acceptance — ciphertext at rest', () => {
       openToken(
         KEK_V1,
         connectionBinding({ connectionId: record.id, googleSub: record.googleSub }),
-        record.refreshToken,
+        assertRefreshTokenStored(record),
       ),
     ).toBe(seeded.token)
   })
@@ -134,18 +134,18 @@ describe('acceptance — the re-wrap job', () => {
     }
 
     const report = await rewrapRefreshTokens({ store, oldKek: KEK_V1, newKek: KEK_V2 })
-    expect(report).toEqual({ scanned: 3, rewrapped: 3, alreadyCurrent: 0 })
+    expect(report).toEqual({ scanned: 3, rewrapped: 3, alreadyCurrent: 0, zeroised: 0 })
 
     for (const row of seeded) {
       const record = await store.load(row.id)
       if (record === null) throw new Error(`missing ${row.id}`)
-      expect(record.refreshToken.kid).toBe('v2')
+      expect(assertRefreshTokenStored(record).kid).toBe('v2')
       // Round-trip: the identical plaintext, under the new key.
       expect(
         openToken(
           KEK_V2,
           connectionBinding({ connectionId: record.id, googleSub: record.googleSub }),
-          record.refreshToken,
+          assertRefreshTokenStored(record),
         ),
       ).toBe(row.token)
 

@@ -1,6 +1,6 @@
 {
-  "about": "Container policy for scripts/check-container.mjs. There is no Dockerfile in this repository yet — apps/worker/Dockerfile belongs to W-SYS-06, which needs ffmpeg in the image — so image *vulnerability* scanning is deferred (see imageVulnerabilityScanning below) rather than invented. What exists today is the container surface CI and local development already run on, and the Dockerfile rules are live so that the first Dockerfile is held to them on the commit that adds it.",
-  "reviewedAt": "2026-09-18",
+  "about": "Container policy for scripts/check-container.mjs. W-SYS-06 created apps/worker/Dockerfile — the worker needs ffmpeg for the hero video renditions — which discharged H-HARD-02's deferral: this file now records the image, every operating-system component it conveys with the licence obligation that component carries, and an enabled image vulnerability scan. The Dockerfile rules were written and armed before there was a Dockerfile, so the first one was held to them on the commit that added it.",
+  "reviewedAt": "2026-09-19",
   "postgresMajor": "16",
   "postgresMajorReason": "The deployment target is a DigitalOcean PostgreSQL Managed Database on major 16. The migration dry run, pnpm db:drift and the integration suite all validate against whatever major CI starts, so a divergence between that container and the managed database means the thing validated is not the thing deployed. btree_gist exclusion constraints and the deferred capacity trigger (ADR 0015, ADR 0024) are exactly the behaviour that would be validated on the wrong engine.",
   "movingTags": [
@@ -22,18 +22,79 @@
   },
   "requireBaseImageDigest": true,
   "requireBaseImageDigestReason": "A tag is mutable: `node:22-bookworm-slim` is a different image every week, so the image CI builds and the image that was scanned are not the same bytes. A digest is the only pin that survives a re-push, and it is the difference between a container scan being evidence and being a snapshot of something else.",
+  "requireDockerignore": true,
+  "requireDockerignoreReason": "`[env-file-copied-into-image]` reads COPY and ADD arguments, and it cannot see `COPY . .` — which is how an environment file actually reaches a layer. A Dockerfile that copies the whole build context therefore needs a .dockerignore that excludes environment files, and that is checked rather than assumed: an image layer is immutable and readable by anyone who can pull it, so a credential copied in cannot be removed by a later layer.",
   "dockerfiles": [
     {
       "path": "apps/worker/Dockerfile",
       "unit": "W-SYS-06",
-      "status": "not-yet-created",
-      "reason": "The worker image needs ffmpeg for the hero video renditions, which is why W-SYS-06 owns it. When that unit creates the file, this entry's status must change to `present` — and that is the commit that must also enable imageVulnerabilityScanning below."
+      "status": "present",
+      "baseImage": "node:22-bookworm-slim",
+      "baseImageDigest": "sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5",
+      "noticePathInImage": "/usr/share/berelax/THIRD-PARTY-NOTICES.md",
+      "noticeSource": "apps/worker/licences/THIRD-PARTY-NOTICES.md",
+      "reason": "The worker image. ffmpeg is in it for the hero video renditions (W-SYS-06) and libvips is in it through sharp for the image derivatives (W-SYS-05); both are copyleft components this image conveys, which is why noticeSource has to be copied to noticePathInImage and why the gate fails if that COPY is removed.",
+      "unverified": "This Dockerfile has never been built. There is no Docker daemon in the agent container that authored it, so what is proven today is every static rule in scripts/check-container.mjs. The first build is the `container` job in .github/workflows/ci.yml, which is also the first run of the vulnerability scan below — that is the right place for it to fail, and it is recorded here rather than left to be discovered."
+    }
+  ],
+  "imageComponents": [
+    {
+      "component": "ffmpeg",
+      "installedBy": "apt",
+      "dockerfile": "apps/worker/Dockerfile",
+      "licence": "GPL-2.0-or-later",
+      "disposition": "strongCopyleft",
+      "licenceTextInImage": "/usr/share/common-licenses/GPL-2",
+      "reason": "The hero video encoder (W-SYS-06): four renditions per master, H.264 High and HEVC hvc1 at the two art-directed crops. ffmpeg's own code is LGPL-2.1-or-later; this build is GPL because Debian configures it --enable-gpl in order to include libx264 and libx265, and ffmpeg's configure refuses either without it. docs/08 §6 and the unit's acceptance specify -profile:v high and -crf, which are x264/x265 options, so an LGPL build is not an alternative that produces the specified output: OpenH264 is Constrained Baseline with no CRF and kvazaar covers HEVC only.",
+      "obligation": "The image must carry the GPL text (asserted at /usr/share/common-licenses/GPL-2) and a written offer to supply the complete corresponding source of ffmpeg, libx264 and libx265 for three years, at no more than the cost of distribution. The offer and the recorded package versions are in /usr/share/berelax/THIRD-PARTY-NOTICES.md and /usr/share/berelax/ffmpeg-packages.txt. It does NOT extend to BE RELAX's own source: ffmpeg is invoked as a separate process through execFile with an argument vector, nothing links libavcodec and nothing includes an ffmpeg header, so the two are aggregated rather than one work. A native binding or a static link would make this entry insufficient. resolveFfmpeg() reads the installed build's configuration line back at runtime and refuses to encode if the licence it detects is not one this policy declares.",
+      "notInLicencePolicy": "build/licence-policy.json reads pnpm-lock.yaml and classifies npm packages; an operating-system package is not in that graph and its `remove the dependency` remedy for strong copyleft does not apply to a separate process invoked over a command line. So this component is governed here, by pnpm container, and the npm gate is left saying only what it can see.",
+      "openQuestion": "Y12-video-patents"
+    },
+    {
+      "component": "libx264",
+      "installedBy": "apt-dependency",
+      "via": "ffmpeg",
+      "dockerfile": "apps/worker/Dockerfile",
+      "licence": "GPL-2.0-or-later",
+      "disposition": "strongCopyleft",
+      "licenceTextInImage": "/usr/share/common-licenses/GPL-2",
+      "reason": "A hard dependency of libavcodec, and the H.264 encoder every -crf and -profile:v high flag in docs/08 §6 is addressed to. Declared separately from ffmpeg because it is a separately licensed work with its own source offer, and because the version installed is recorded separately at /usr/share/berelax/ffmpeg-packages.txt.",
+      "obligation": "Same as ffmpeg: GPL text in the image, and the written offer covers its complete corresponding source.",
+      "openQuestion": "Y12-video-patents"
+    },
+    {
+      "component": "libx265",
+      "installedBy": "apt-dependency",
+      "via": "ffmpeg",
+      "dockerfile": "apps/worker/Dockerfile",
+      "licence": "GPL-2.0-or-later",
+      "disposition": "strongCopyleft",
+      "licenceTextInImage": "/usr/share/common-licenses/GPL-2",
+      "reason": "The HEVC encoder. docs/08 §6 marks `-tag:v hvc1` mandatory because Safari ignores an hev1-tagged track, and the tag is written by this encoder's muxing path.",
+      "obligation": "Same as ffmpeg: GPL text in the image, and the written offer covers its complete corresponding source.",
+      "openQuestion": "Y12-video-patents"
+    },
+    {
+      "component": "libvips",
+      "installedBy": "npm-prebuilt",
+      "via": "@img/sharp-libvips-linux-x64",
+      "dockerfile": "apps/worker/Dockerfile",
+      "licence": "LGPL-3.0-or-later",
+      "disposition": "weakCopyleft",
+      "licenceTextInImage": "/usr/share/common-licenses/LGPL-3",
+      "reason": "The image pipeline W-SYS-05 is built on, reaching this image inside sharp's prebuilt platform package rather than as an OS package. It is declared here as well as in build/licence-policy.json because the licence gate can see the npm package and cannot see whether the IMAGE carries the notice — and the notice is the whole obligation. H-HARD-02 wrote that duty down and said it lands on the unit that writes this Dockerfile.",
+      "obligation": "The image must carry libvips' LGPL text (asserted at /usr/share/common-licenses/LGPL-3, with /usr/share/common-licenses/GPL-3 because LGPL-3.0 incorporates GPL-3.0 by reference) and must honour the offer to supply the library's complete corresponding source or to permit its replacement. The library is a shared object loaded at runtime, unmodified and not statically linked into anything here, so LGPL §4's combined-work terms are satisfied by the shared-library mechanism already in place. Found while discharging this: the @img/sharp-libvips-linux-x64 package ships NO copy of the LGPL text — its contents are README.md, package.json, versions.json and lib/ — so an image built by copying node_modules carries the library and not its licence, and nothing in pnpm install, pnpm licences or a code review would have said so. Debian's own copy is used and its presence is asserted in the build."
     }
   ],
   "imageVulnerabilityScanning": {
-    "status": "deferred",
+    "status": "enabled",
     "unit": "W-SYS-06",
-    "reason": "Scanning an image's OS packages for CVEs needs an image. There is no Dockerfile in this repository and no registry to pull a built image from, so a gate asserting either would be asserting against something invented. The rules that can be checked without an image — tag pinning, the PostgreSQL major agreeing with the managed database, base-image digests, a non-root final user, no .env copied in — are enforced now and are proven to fire by known-bad fixtures in scripts/test-gates.mjs.",
-    "whenEnabled": "A Trivy (or Grype) filesystem-and-OS scan of the built worker image, as a CI step rather than part of pnpm verify: it downloads a vulnerability database, so it must not make a developer's verify depend on the network."
+    "tool": "trivy",
+    "workflowFile": ".github/workflows/ci.yml",
+    "ciJob": "container",
+    "requiredSteps": ["docker build", "aquasecurity/trivy-action"],
+    "severities": "HIGH,CRITICAL",
+    "reason": "Scanning an image's OS packages for CVEs needs an image, and H-HARD-02 deferred it for exactly as long as there was none. apps/worker/Dockerfile exists now, so the scan is enabled: a separate `container` job in the CI workflow builds the worker image and runs Trivy over it at HIGH and CRITICAL.",
+    "notInPnpmVerify": "It downloads a vulnerability database and builds a container image. `pnpm verify` runs on every unit by every agent and must work offline, so putting either in it would make a developer's verify depend on the network and add minutes to every run. The rules that need no image — tag pinning, the PostgreSQL major agreeing with the managed database, base-image digests, a non-root final user, no environment file in a layer, a .dockerignore behind a whole-context COPY, and every conveyed component declared with its licence obligation — are in pnpm verify and are proven to fire by known-bad fixtures in scripts/test-gates.mjs."
   }
 }

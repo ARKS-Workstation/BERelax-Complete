@@ -1,4 +1,4 @@
-import { createConnection, type Sql } from '@berelax/db'
+import { createConnection, type Sql, seedSettingDefaults } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FIXTURE_CLOSE, FIXTURE_OPEN } from './clock.ts'
 import { loadSalon, orderedLoaders, registerLoader } from './load.ts'
@@ -18,8 +18,23 @@ if (!url)
 let sql: Sql
 const salon = generateSalon()
 
-beforeAll(() => {
+beforeAll(async () => {
   sql = createConnection({ url, max: 2 })
+  /**
+   * The rows `settingsLoader` overrides have to exist before it can override them.
+   *
+   * It is an UPDATE, not an upsert — its job is to change three declared settings to the fixture's
+   * values, and creating a setting row is `seedSettingDefaults`'s job, from the registry, with the
+   * tier and provisional metadata a fixture has no business inventing. No migration seeds
+   * `app_setting`, so on a database nothing has seeded, that UPDATE matches zero rows and writes no
+   * history — and the audit-trail assertion below then compares 0 with 0 and fails.
+   *
+   * This file used to pass because some *other* integration file happened to run first and leave the
+   * keys behind. Which file that is depends on vitest's file ordering, so the failure arrives on
+   * whichever branch reshuffles it — the brief's rule 12 exactly. `seedSettingDefaults` is
+   * `on conflict do nothing`, so this is idempotent and changes nothing on a warm database.
+   */
+  await seedSettingDefaults(sql)
 })
 
 afterAll(async () => {

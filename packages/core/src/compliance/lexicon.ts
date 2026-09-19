@@ -258,8 +258,13 @@ export const COMPLIANCE_LEXICON: readonly LexiconEntry[] = Object.freeze([
  * assigns a person — so any of these that is not a title the profile permits is refused. `therapist`
  * is in the list on purpose: it is refused or permitted by `permittedPublicTitles`, which is data, and
  * hard-coding it as acceptable here would put the decision in two places.
+ *
+ * Exported for the review router, whose `names_an_individual` rule asks the opposite question of the
+ * same words: a review that says "the therapist Mina" identifies a person, and confirming publicly
+ * that a named individual was on shift — or was a client — is the confidentiality breach docs/07 §4
+ * names first. One list, two readings, rather than two lists that drift.
  */
-const PROVIDER_TITLES: readonly string[] = Object.freeze([
+export const PROVIDER_TITLES: readonly string[] = Object.freeze([
   'therapist',
   'masseuse',
   'masseur',
@@ -388,8 +393,16 @@ function tokenMatches(token: string, want: string): boolean {
   return want.endsWith('y') && token === `${want.slice(0, -1)}ies`
 }
 
-/** Whether a phrase — one word or several — appears in the tokens, as consecutive words. */
-function containsPhrase(tokens: readonly string[], phrase: string): boolean {
+/**
+ * Whether a phrase — one word or several — appears in the tokens, as consecutive words.
+ *
+ * Exported for the review router (G-REV-03), which reuses {@link COMPLIANCE_LEXICON} against review
+ * text rather than keeping a second list of the same terms. It must compare the same way this lint
+ * does, or a phrase this module refuses on a menu would be missed in a review that alleges we
+ * delivered it. The tokens are the caller's, because review text is not Latin-only — see
+ * `packages/core/src/reviews/escalation-lexicon.ts`.
+ */
+export function containsPhrase(tokens: readonly string[], phrase: string): boolean {
   const want = lexiconTokens(phrase)
   if (want.length === 0) return false
   for (let start = 0; start + want.length <= tokens.length; start += 1) {

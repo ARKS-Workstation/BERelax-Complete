@@ -10,6 +10,7 @@ import {
 } from '@berelax/providers/google'
 import type { PgBoss } from 'pg-boss'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { assertRefreshTokenStored } from './lifecycle.ts'
 import { createPostgresConnectionStore } from './postgres-store.ts'
 import {
   createPostgresRefreshLock,
@@ -599,7 +600,10 @@ describe('acceptance — a rotated refresh token is persisted', () => {
     // The ciphertext moved. Bytes, not a decrypted comparison: AES-GCM under a fresh data key produces
     // different bytes for the same plaintext, so this alone does not prove the token changed — which is
     // why the round-trip below is the actual assertion and this is only the necessary condition.
-    expect(after?.refreshToken.ct.equals(before?.refreshToken.ct as Buffer)).toBe(false)
+    if (after === null || before === null) throw new Error('missing rows')
+    expect(assertRefreshTokenStored(after).ct.equals(assertRefreshTokenStored(before).ct)).toBe(
+      false,
+    )
 
     const sealed = after?.refreshToken
     if (sealed === undefined || sealed === null) throw new Error('the connection lost its token')
@@ -654,8 +658,11 @@ describe('acceptance — a rotated refresh token is persisted', () => {
     expect(refreshCount(log)).toBe(1)
 
     const after = await store.load(connectionId)
-    expect(after?.refreshToken.ct.equals(before?.refreshToken.ct as Buffer)).toBe(true)
-    expect(after?.refreshToken.kid).toBe(before?.refreshToken.kid)
+    if (after === null || before === null) throw new Error('missing rows')
+    expect(assertRefreshTokenStored(after).ct.equals(assertRefreshTokenStored(before).ct)).toBe(
+      true,
+    )
+    expect(assertRefreshTokenStored(after).kid).toBe(assertRefreshTokenStored(before).kid)
 
     const [event] = await sql<{ detail: Record<string, unknown> }[]>`
       select detail from google_connection_events

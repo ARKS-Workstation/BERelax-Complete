@@ -1,5 +1,5 @@
 {
-  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. A `client-js` budget is read out of the real `next build`, so it needs `pnpm --filter @berelax/web build` first \u2014 CI runs that before this step and scripts/test-gates.mjs asserts the ordering.",
+  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. A `client-js` budget is read out of the real `next build`, so it needs `pnpm --filter @berelax/web build` first \u2014 CI runs that before this step and scripts/test-gates.mjs asserts the ordering. A `video` budget measures whatever the hero video job last wrote into the fake storage outbox, and always checks that its number is the one the pipeline itself enforces \u2014 so a budget with nothing to measure still fails when the two disagree.",
   "budgets": [
     {
       "id": "tokens-css",
@@ -108,6 +108,22 @@
       "format": "avif",
       "maxBytes": 97280,
       "why": "docs/08 \u00a78: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
+    },
+    {
+      "id": "hero-video-mobile",
+      "label": "Hero video, 4:5 mobile rendition",
+      "kind": "video",
+      "crop": "mobile",
+      "maxBytes": 358400,
+      "why": "docs/08 \u00a78: \"Hero video (deferred, gated) \u2264350KB\" on a phone, where the budget bites and where docs/08 \u00a78's cut order drops video to the still first. It is enforced in two places on purpose. Here it is a CI failure with the measured number \u2014 the second of docs/08 \u00a78's three enforcement layers. In the job it is not: the job refuses only at the 2MB hard stop, because a job that refused at the budget would make the hard stop a rule that can never fire, and docs/08 \u00a78's cut order is the documented route back under budget rather than a gate."
+    },
+    {
+      "id": "hero-video-desktop",
+      "label": "Hero video, 16:9 desktop rendition",
+      "kind": "video",
+      "crop": "desktop",
+      "maxBytes": 1258291,
+      "why": "docs/08 \u00a78: \"\u22641.2MB \u2014 hard stop 2MB\". 1.2 \u00d7 1048576 rounded, matching the KiB basis of every other budget in this file. The heaviest single thing the site serves, and the only one that is deferred until after LCP \u2014 docs/08 \u00a76 puts its LCP cost at 0ms because the element has no src until LCP is final, which is what makes a megabyte of decoration affordable at all."
     },
     {
       "id": "hero-avif-desktop",

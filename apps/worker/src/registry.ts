@@ -23,12 +23,14 @@ import type { Job, PgBoss } from 'pg-boss'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
+import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
 import {
   GOOGLE_HEALTH_AGENT,
   GOOGLE_LIVENESS_AGENT,
   googleHealthHandler,
   googleLivenessHandler,
 } from './jobs/google-connection-health.ts'
+import { GOOGLE_REVOKE_RETRY_JOB } from './jobs/google-revoke-retry.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
@@ -255,9 +257,19 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
+  // W-SYS-06, and the same shape again: a hero video master is written to the private bucket by the
+  // request that accepted it, and that request enqueues this. Separate from the image build rather than a
+  // branch inside it — four ffmpeg encodes at `veryslow` need an hour of `expireInSeconds` where
+  // twenty-four sharp encodes need ten minutes, and one queue cannot hold both ceilings.
+  BUILD_VIDEO_RENDITIONS_JOB,
   // The same shape, for the same reason. B-MSG-04: a delivery receipt is announced by the vendor's
   // webhook, so a cron here would be a poller looking for work an enqueue already announced.
   RECONCILE_DLR_JOB,
+  // And again. G-CONN-09: an unconfirmed revocation is announced by the disconnect that could not finish
+  // it, and the *row* is the work item rather than the job — `status_reason = 'revoke_failed'` with a
+  // retained ciphertext, a pair migration 0040 guarantees — so the sweep is safe to reclaim, safe to
+  // repeat and healthy when it finds nothing.
+  GOOGLE_REVOKE_RETRY_JOB,
 ]
 
 /**

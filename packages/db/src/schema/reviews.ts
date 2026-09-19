@@ -50,6 +50,21 @@ export const googleReview = pgTable(
     postedManuallyAt: timestamp('posted_manually_at', { withTimezone: true }),
     /** When a manual row acquired its `googleReviewId`. */
     reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    /**
+     * The docs/07 §4 routing verdict (migration 0037). NULL until the router has seen the row.
+     *
+     * The database also carries the floor as three CHECK constraints — an `auto_send` verdict requires
+     * `rating >= 4`, `comment_text is null` and `delivery_mode = 'api'`. They are invisible here, because
+     * `pnpm db:drift` compares columns only; `packages/db/src/schema/reviews.itest.ts` asserts them by
+     * name against the applied schema, which is the only place that can.
+     */
+    routingVerdict: text('routing_verdict'),
+    /** Which row of the table decided it, so an audit can explain any decision. */
+    routingRuleId: text('routing_rule_id'),
+    /** The escalation lexicon version the text was compared against. Reproduces a stored verdict. */
+    routingLexiconVersion: text('routing_lexicon_version'),
+    /** When the verdict was taken — not when the review was recorded. */
+    routedAt: timestamp('routed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
@@ -64,6 +79,14 @@ export const googleReview = pgTable(
     index('google_reviews_unmatched_idx')
       .on(t.connectionId, t.rating, t.reviewedAt)
       .where(sql`google_review_id is null`),
+    // The two reads the routing agent and the operator's queue make (0037). Partial, because both are a
+    // small and differently-growing fraction of the table.
+    index('google_reviews_escalated_idx')
+      .on(t.connectionId, t.placeId, t.reviewedAt)
+      .where(sql`routing_verdict = 'escalate'`),
+    index('google_reviews_unrouted_idx')
+      .on(t.connectionId, t.reviewedAt)
+      .where(sql`routing_verdict is null`),
   ],
 )
 
@@ -79,3 +102,18 @@ export type ReviewSource = (typeof REVIEW_SOURCES)[number]
  */
 export const REVIEW_DELIVERY_MODES = ['api', 'manual'] as const
 export type ReviewDeliveryMode = (typeof REVIEW_DELIVERY_MODES)[number]
+
+/**
+ * The two routing verdicts, mirroring the CHECK constraint in 0037.
+ *
+ * Spelled here as well as in `packages/core/src/reviews/routing.ts` because `packages/db` may not import
+ * `packages/core` (ADR 0001) — the same two-hand-kept-lists situation as `EXCLUSION_REASONS` and
+ * `ELIGIBILITY_EXCLUSION_REASONS`, and held together the same way: `packages/fixtures` imports both and
+ * asserts they are equal, which is the only place that may.
+ *
+ * The **rule id** is deliberately not mirrored. It is a list of fourteen that changes when the routing
+ * table changes, a copy here would silently disagree between deploys, and an id this build does not know
+ * is answered `escalate` by `reviewVerdictForRule` — which is the safe direction and needs no list.
+ */
+export const REVIEW_ROUTING_VERDICTS = ['auto_send', 'escalate'] as const
+export type ReviewRoutingVerdictName = (typeof REVIEW_ROUTING_VERDICTS)[number]

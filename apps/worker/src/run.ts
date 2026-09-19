@@ -3,6 +3,7 @@ import { createConnection, createPostgresMessageStore } from '@berelax/db'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
 import { createBoss, shutdown } from './boss.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
+import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
 import { JOB_REGISTRY, registerJobs, setMaintenanceSql, startWorkers } from './registry.ts'
 
@@ -51,7 +52,12 @@ async function main(): Promise<void> {
   setMaintenanceSql(sql)
   // Before `startWorkers`, for the same reason as the SQL connection: a handler that attached first
   // would take a job off the queue and fail on a missing adapter, burning a retry on nothing.
-  setMediaStorage(createMediaStorageFor(config.MEDIA_STORAGE))
+  const mediaStorage = createMediaStorageFor(config.MEDIA_STORAGE)
+  setMediaStorage(mediaStorage)
+  // One adapter, two jobs. The video job resolves ffmpeg lazily rather than at boot on purpose: a worker
+  // with no video work to do should not refuse to start over a missing encoder, and a worker handed video
+  // work must refuse to pretend it has one — which is what `[ffmpeg-not-available]` does.
+  setVideoRenditionStorage(mediaStorage)
   // The DLR pass drains the transports the sends went through, which with the fakes means *this*
   // process's instances: a fake queues the receipt it will report inside the instance that accepted the
   // send. SMS only for now, deliberately — the Resend transport takes its verified sending address as a

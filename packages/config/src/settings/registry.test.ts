@@ -1,4 +1,9 @@
-import type { AppError } from '@berelax/shared'
+import {
+  type AppError,
+  DETECTABLE_REVIEW_LANGUAGES,
+  MINIMUM_REVIEW_COOLING_OFF_HOURS,
+  REVIEW_AUTOSEND_SETTING_KEYS,
+} from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
 import {
   assertRoleMayEdit,
@@ -56,15 +61,59 @@ describe('registry integrity — properties over the whole registry, not example
       'booking.same_gender_matching',
       'messaging.promotional_window',
       'agents.review_autosend_enabled',
+      // G-REV-03: shortening the cooling-off is the only way to make an auto-send happen SOONER, so the
+      // delay is locked for the same reason the switch is.
+      'agents.review_autosend_cooling_off_hours',
     ]) {
       expect(getDefinition(key).tier, key).toBe('compliance_locked')
     }
+  })
+
+  it('every autosend-related setting is declared, so the routing combination test varies a real set', () => {
+    // The hole this closes: `REVIEW_AUTOSEND_SETTING_KEYS` is what
+    // `packages/core/src/reviews/routing.test.ts` iterates. A key spelled differently there than here
+    // would be a setting that test never varies and this one never notices.
+    for (const key of REVIEW_AUTOSEND_SETTING_KEYS) {
+      expect(getDefinition(key).key, key).toBe(key)
+    }
+    expect(REVIEW_AUTOSEND_SETTING_KEYS).toHaveLength(4)
+  })
+
+  it('the review-reply language set can only ever name a language the router can identify', () => {
+    // Why this setting is `operational` and still cannot relax the rule: the schema is an enum of the
+    // detectable languages, so there is no value an admin can write that widens what auto-sends.
+    const definition = getDefinition('agents.review_reply_languages')
+    expect(definition.tier).toBe('operational')
+    expect(definition.schema.safeParse(['tl']).success).toBe(false)
+    expect(definition.schema.safeParse(['en', 'ar']).success).toBe(true)
+    // ...and the empty set is refused too: an owner who wants nothing answered has asked for the
+    // autoresponder to be switched off, which is a different setting.
+    expect(definition.schema.safeParse([]).success).toBe(false)
+  })
+
+  it('refuses a cooling-off delay below the floor, and accepts one above it', () => {
+    const definition = getDefinition('agents.review_autosend_cooling_off_hours')
+    expect(definition.defaultValue).toBe(MINIMUM_REVIEW_COOLING_OFF_HOURS)
+    expect(definition.schema.safeParse(MINIMUM_REVIEW_COOLING_OFF_HOURS - 1).success).toBe(false)
+    expect(definition.schema.safeParse(0).success).toBe(false)
+    expect(definition.schema.safeParse(MINIMUM_REVIEW_COOLING_OFF_HOURS).success).toBe(true)
+    expect(definition.schema.safeParse(168).success).toBe(true)
   })
 
   it('provisional defaults are the strict option, so an uncorrected assumption stays conservative', () => {
     expect(getDefinition('booking.same_gender_matching').defaultValue).toBe('strict')
     expect(getDefinition('agents.review_autosend_enabled').defaultValue).toBe(false)
     expect(getDefinition('agents.llm_provider').defaultValue).toBe('fake')
+    // G-REV-03's two: the shortest delay this build will apply, and the two languages it can identify.
+    expect(getDefinition('agents.review_autosend_cooling_off_hours').defaultValue).toBe(
+      MINIMUM_REVIEW_COOLING_OFF_HOURS,
+    )
+    expect(getDefinition('agents.review_reply_languages').defaultValue).toEqual([
+      ...DETECTABLE_REVIEW_LANGUAGES,
+    ])
+    // The one that matters most, asserted against the registry rather than against a comment: API-mode
+    // access is assumed NOT granted, so nothing can auto-send in a fresh database whatever else is set.
+    expect(getDefinition('google.business_profile_access_granted').defaultValue).toBe(false)
   })
 })
 

@@ -40,7 +40,19 @@ describe('password policy', () => {
   })
 })
 
-describe('password hashing', () => {
+/*
+  An explicit timeout, because every test in here is deliberately expensive.
+
+  `hashPassword` is scrypt at N=65536, r=8 — the cost is the point, and `verifyPassword` pays it again. The
+  four derivations in "produces a different hash each time" take about 800ms on an idle machine, against
+  vitest's default 5s: a margin of roughly six times, which several test suites running at once erase.
+  Three units in a row have had a full `pnpm verify` fail here on nothing but load, and the failure is
+  expensive to read because it surfaces through whichever gate was running the nested vitest.
+
+  30s rather than a raised global default: the slowness is a property of these four tests and of nothing
+  else in the repository, and a global timeout would also hide a genuine hang somewhere cheap.
+*/
+describe('password hashing', { timeout: 30_000 }, () => {
   it('verifies a correct password and rejects a wrong one', async () => {
     const stored = await hashPassword('CorrectHorse1Battery')
     expect(await verifyPassword('CorrectHorse1Battery', stored)).toBe(true)

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CMS_ROBOTS_TAG, cmsRoutesIn, isCmsRoute } from '@berelax/cms'
 import { captureFilename, capturePlan, missingCaptures } from '@berelax/harness/matrix'
+import { DETECTABLE_REVIEW_LANGUAGES } from '@berelax/shared'
 import fc from 'fast-check'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -518,6 +519,17 @@ describe('the locale prefix is written down once', () => {
     expect(localisedPath('/kitchen-sink', 'ar')).toBe('/ar/kitchen-sink')
     expect(neutralPath('/ar/kitchen-sink')).toBe('/kitchen-sink')
     expect(neutralPath('/ar')).toBe('/')
+  })
+
+  it('serves exactly the languages the review router can identify', () => {
+    // G-REV-03's `DETECTABLE_REVIEW_LANGUAGES` decides which languages a review reply may be written in,
+    // and it is spelled in `@berelax/shared` because that package is the leaf and may import no sibling —
+    // so it cannot import `Locale` from `@berelax/ui` or `LOCALES` from here. Two hand-kept lists of one
+    // fact, and this is the assertion that holds them together: a third locale added to the site without
+    // a review-language detector would make every review in it escalate silently, and a language added
+    // there that the site does not serve would let a reply be drafted in a language with no page to link
+    // to. This test is named in that module's own comment.
+    expect([...DETECTABLE_REVIEW_LANGUAGES]).toEqual([...LOCALES])
   })
 
   it('reads the locale off a path by segment, not by prefix', () => {

@@ -34,6 +34,7 @@ export type {
   GbpLocation,
   GbpPostalAddress,
   GoogleOAuthProvider,
+  GoogleRevocation,
   GoogleSub,
   GoogleTokens,
   LocationsGetRequest,
@@ -45,3 +46,4 @@ export type {
   SitePermissionLevel,
   VoiceOfMerchantState,
 } from './port.ts'
+export { GOOGLE_REVOKE_ENDPOINT } from './port.ts'

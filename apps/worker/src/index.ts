@@ -15,6 +15,13 @@ export {
   setMediaStorage,
 } from './jobs/build-derivatives.ts'
 export {
+  BUILD_VIDEO_RENDITIONS_JOB,
+  type BuildVideoRenditionsData,
+  runBuildVideoRenditions,
+  setVideoEncoderFactory,
+  setVideoRenditionStorage,
+} from './jobs/build-video-renditions.ts'
+export {
   assertRegistry,
   cronRegistrations,
   deadLetterFor,

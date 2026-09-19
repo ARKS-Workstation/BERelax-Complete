@@ -2,6 +2,7 @@ import { generateKek } from '@berelax/clinical'
 import { instantFromIso } from '@berelax/core'
 import { AppError } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
+import { assertRefreshTokenStored } from './lifecycle.ts'
 import { connectionRecord, createMemoryConnectionStore } from './memory-store.ts'
 import { rewrapRefreshTokens } from './rewrap.ts'
 import { connectionBinding, openToken, sealToken } from './token-store.ts'
@@ -41,17 +42,17 @@ describe('the KEK rotation job', () => {
   it('moves every row from v1 to v2 and the tokens decrypt identically afterwards', async () => {
     const store = seededStore()
     const report = await rewrapRefreshTokens({ store, oldKek: KEK_V1, newKek: KEK_V2 })
-    expect(report).toEqual({ scanned: 3, rewrapped: 3, alreadyCurrent: 0 })
+    expect(report).toEqual({ scanned: 3, rewrapped: 3, alreadyCurrent: 0, zeroised: 0 })
 
     for (const seed of SEEDS) {
       const record = store.records().find((r) => r.id === seed.id)
       if (record === undefined) throw new Error(`missing ${seed.id}`)
-      expect(record.refreshToken.kid).toBe('v2')
+      expect(assertRefreshTokenStored(record).kid).toBe('v2')
       expect(
         openToken(
           KEK_V2,
           connectionBinding({ connectionId: seed.id, googleSub: seed.sub }),
-          record.refreshToken,
+          assertRefreshTokenStored(record),
         ),
       ).toBe(seed.token)
     }
@@ -98,7 +99,7 @@ describe('the KEK rotation job', () => {
     const store = seededStore()
     await rewrapRefreshTokens({ store, oldKek: KEK_V1, newKek: KEK_V2 })
     const second = await rewrapRefreshTokens({ store, oldKek: KEK_V1, newKek: KEK_V2 })
-    expect(second).toEqual({ scanned: 3, rewrapped: 0, alreadyCurrent: 3 })
+    expect(second).toEqual({ scanned: 3, rewrapped: 0, alreadyCurrent: 3, zeroised: 0 })
     expect(store.events()).toHaveLength(3)
   })
 

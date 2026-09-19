@@ -72,11 +72,13 @@ export type {
   ConfirmedListing,
   ConnectionEventInput,
   ConsentWrite,
+  DisconnectWrite,
   GoogleCapabilityRecord,
   GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleDisconnectStore,
   GoogleHealthStore,
   NewConnection,
   RefreshWrite,
@@ -94,6 +96,16 @@ export {
   indexByCapability,
   isDeclaredCapability,
 } from './consumers.ts'
+export {
+  type DisconnectActor,
+  type DisconnectDeps,
+  type DisconnectOutcome,
+  type DisconnectOutcomeKind,
+  disconnectGoogleConnection,
+  type RetryAnnouncement,
+  type RevokeRetryReport,
+  retryPendingRevocations,
+} from './disconnect.ts'
 export {
   capabilityHealthFor,
   classifyGoogleError,
@@ -155,6 +167,7 @@ export {
   grantFailureFromError,
   loadActiveConnection,
   refreshAccessToken,
+  revokeStoredGrant,
   type TokenLifecycleDeps,
 } from './lifecycle.ts'
 export {
@@ -198,6 +211,20 @@ export {
   completeGoogleConsent,
   type GoogleAccountMismatch,
 } from './oauth/reconnect.ts'
+export {
+  DISCONNECT_REASON_DONE,
+  DISCONNECT_REASON_REVOKE_FAILED,
+  type DisconnectStatusReason,
+  GOOGLE_REVOKE_ENDPOINT,
+  REVOKE_VERDICTS,
+  type RevokeVerdict,
+  type RevokeVerdictKind,
+  revokeDetail,
+  statusReasonFor,
+  verdictForRevocation,
+  verdictForRevokeError,
+  zeroisationIsSafe,
+} from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
 /**

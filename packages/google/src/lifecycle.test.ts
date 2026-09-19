@@ -15,6 +15,7 @@ import { AppError, isAppError } from '@berelax/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   accessTokenFor,
+  assertRefreshTokenStored,
   grantFailureFromError,
   refreshAccessToken,
   type TokenLifecycleDeps,
@@ -222,7 +223,7 @@ describe('a rotated refresh token', () => {
     // token stops working at a moment nothing in the deploy log explains.
     const stored = store.records()[0]
     if (stored === undefined) throw new Error('no record')
-    const before = stored.refreshToken.ct
+    const before = assertRefreshTokenStored(stored).ct
 
     // The fake issues a refresh token only on consent, so exchangeCode is how a rotation is simulated.
     const consent = await deps.oauth.exchangeCode('code-1')
@@ -237,7 +238,7 @@ describe('a rotated refresh token', () => {
     await refreshAccessToken(rotatedDeps, stored)
 
     const after = store.records()[0]?.refreshToken
-    if (after === undefined) throw new Error('no record')
+    if (after === undefined || after === null) throw new Error('no record')
     expect(after.ct.equals(before)).toBe(false)
     expect(openToken(KEK, binding, after)).toBe('fake-refresh-rotated')
     expect(store.events()[0]?.detail).toMatchObject({ rotatedRefreshToken: true })
@@ -246,9 +247,11 @@ describe('a rotated refresh token', () => {
   it('leaves the stored token alone when Google returns none', async () => {
     const stored = store.records()[0]
     if (stored === undefined) throw new Error('no record')
-    const before = stored.refreshToken.ct
+    const before = assertRefreshTokenStored(stored).ct
     await accessTokenFor(deps, CONNECTION_ID)
-    expect(store.records()[0]?.refreshToken.ct.equals(before)).toBe(true)
+    const after = store.records()[0]
+    if (after === undefined) throw new Error('no record')
+    expect(assertRefreshTokenStored(after).ct.equals(before)).toBe(true)
     expect(store.events()[0]?.detail).toMatchObject({ rotatedRefreshToken: false })
   })
 })

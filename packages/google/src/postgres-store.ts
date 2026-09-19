@@ -13,11 +13,13 @@ import type {
   ConfirmedListing,
   ConnectionEventInput,
   ConsentWrite,
+  DisconnectWrite,
   GoogleCapabilityRecord,
   GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleDisconnectStore,
   GoogleHealthStore,
   NewConnection,
   RefreshWrite,
@@ -44,11 +46,11 @@ interface ConnectionRow {
   readonly last_ok_at: Date | null
   readonly last_checked_at: Date | null
   readonly access_expires_at: Date | null
-  readonly refresh_token_ct: Buffer
-  readonly refresh_token_nonce: Buffer
-  readonly refresh_token_wrapped_key: Buffer
-  readonly refresh_token_kid: string
-  readonly refresh_token_aad_fp: string
+  readonly refresh_token_ct: Buffer | null
+  readonly refresh_token_nonce: Buffer | null
+  readonly refresh_token_wrapped_key: Buffer | null
+  readonly refresh_token_kid: string | null
+  readonly refresh_token_aad_fp: string | null
   readonly access_token_ct: Buffer | null
   readonly access_token_nonce: Buffer | null
   readonly access_token_wrapped_key: Buffer | null
@@ -88,13 +90,23 @@ function toRecord(row: ConnectionRow): GoogleConnectionRecord {
     lastOkAt: instantOrNull(row.last_ok_at),
     lastCheckedAt: instantOrNull(row.last_checked_at),
     accessExpiresAt: instantOrNull(row.access_expires_at),
-    refreshToken: {
-      ct: row.refresh_token_ct,
-      nonce: row.refresh_token_nonce,
-      wrappedKey: row.refresh_token_wrapped_key,
-      kid: row.refresh_token_kid,
-      aadFingerprint: row.refresh_token_aad_fp,
-    },
+    // Five columns or none of them; `google_connections_refresh_token_complete` (0040) guarantees it, so
+    // one null test is enough and a half-wiped credential cannot reach this point. Null is a completed
+    // disconnect: the token was revoked at Google and then erased here.
+    refreshToken:
+      row.refresh_token_ct === null ||
+      row.refresh_token_nonce === null ||
+      row.refresh_token_wrapped_key === null ||
+      row.refresh_token_kid === null ||
+      row.refresh_token_aad_fp === null
+        ? null
+        : {
+            ct: row.refresh_token_ct,
+            nonce: row.refresh_token_nonce,
+            wrappedKey: row.refresh_token_wrapped_key,
+            kid: row.refresh_token_kid,
+            aadFingerprint: row.refresh_token_aad_fp,
+          },
     accessToken,
   }
 }
@@ -112,6 +124,7 @@ export type { NewConnection } from './connection-store.ts'
 export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
   GoogleConsentStore &
   GoogleCapabilitySelectionStore &
+  GoogleDisconnectStore &
   GoogleHealthStore & {
     allocateId(): Promise<string>
     insert(connection: NewConnection): Promise<string>
@@ -199,11 +212,25 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
           last_checked_at = ${new Date(write.lastOkAt)},
           status          = ${write.status},
           status_reason   = ${write.statusReason}
-        where id = ${write.connectionId}
+        -- The status clause is not belt-and-braces; it closes a race a disconnect cannot otherwise win.
+        -- accessTokenUnderLock re-reads the row inside its advisory lock and refuses a disconnected one,
+        -- but under READ COMMITTED a disconnect can commit AFTER that re-read and before this UPDATE:
+        -- the UPDATE then waits on the row lock, re-evaluates its WHERE against the new row version,
+        -- and — without this clause — writes a freshly minted access token onto a row whose credentials
+        -- were just zeroised on purpose. An hour of full authority over the listing, cached on a
+        -- connection an operator was told had been disconnected. Zero rows here raises not_found, the
+        -- refresh transaction rolls back, and the next attempt degrades through loadActiveConnection
+        -- the way every other caller of a disconnected connection does.
+        where id = ${write.connectionId} and status <> 'disconnected'
         returning id
       `
       if (rows.length === 0) {
-        throw new AppError('not_found', `No Google connection with id ${write.connectionId}`)
+        throw new AppError(
+          'not_found',
+          `No refreshable Google connection with id ${write.connectionId}: it is absent or it was ` +
+            'disconnected while this refresh was in flight. A disconnected connection must not acquire ' +
+            'a cached access token.',
+        )
       }
     },
 
@@ -378,6 +405,75 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
       if (rows.length === 0) {
         throw new AppError('not_found', `No Google connection with id ${connectionId}`)
       }
+    },
+
+    async pendingRevocations() {
+      // `status_reason` rather than a flag column: the state already has a canonical spelling and a second
+      // representation of it would be a second thing to keep in step. Ordered by id so a pass and the pass
+      // resuming it visit the rows in the same order, the way `listAll` does.
+      const rows = await sql<ConnectionRow[]>`
+        select ${sql.unsafe(SELECT_COLUMNS)} from google_connections
+        where status_reason = 'revoke_failed' and refresh_token_ct is not null
+        order by id
+      `
+      return rows.map(toRecord)
+    },
+
+    async disconnect(write: DisconnectWrite) {
+      // `sql.begin` **inside** the store, which nothing else in this file does, and the reason is that
+      // the three writes below are one fact. The zeroised columns and the append-only events that record
+      // why they were zeroised have to commit together: a row with no credential and no `disconnected`
+      // event beside it is a connection that stopped working with nothing anywhere to say why, and
+      // because the credential is gone there is no second chance to write the record. On a caller that
+      // already holds a transaction (the retry job's unit of work) postgres.js makes this a SAVEPOINT,
+      // so the atomicity composes rather than conflicting.
+      //
+      // The revocation is NOT in here. An HTTPS call inside this transaction would hold a pooled
+      // connection and a row lock for its duration, and a call that threw would roll back the disconnect
+      // it had just achieved — which is the defect G-CONN-06 fixed one module over.
+      await sql.begin(async (tx) => {
+        const rows = await tx`
+          update google_connections set
+            status          = 'disconnected',
+            status_reason   = ${write.statusReason},
+            last_checked_at = ${new Date(write.at)},
+            -- All eleven columns, in one statement, or none of them. Both CHECK constraints —
+            -- google_connections_refresh_token_complete (0040) and
+            -- google_connections_access_token_complete (0016) — are all-or-nothing, so a partial wipe
+            -- is refused by the database rather than left as a row that cannot be opened, cannot be
+            -- re-wrapped and cannot be told apart from corruption.
+            refresh_token_ct          = case when ${write.zeroise}::boolean then null else refresh_token_ct end,
+            refresh_token_nonce       = case when ${write.zeroise}::boolean then null else refresh_token_nonce end,
+            refresh_token_wrapped_key = case when ${write.zeroise}::boolean then null else refresh_token_wrapped_key end,
+            refresh_token_kid         = case when ${write.zeroise}::boolean then null else refresh_token_kid end,
+            refresh_token_aad_fp      = case when ${write.zeroise}::boolean then null else refresh_token_aad_fp end,
+            -- The cached access token goes unconditionally, whatever the revocation said. It is an hour
+            -- of full authority over the listing and nothing can legitimately spend it again: every
+            -- reader is behind loadActiveConnection, which refuses a disconnected row. Keeping it
+            -- until it expires would be a live bearer credential on a connection an operator has been
+            -- told is disconnected.
+            access_token_ct           = null,
+            access_token_nonce        = null,
+            access_token_wrapped_key  = null,
+            access_token_kid          = null,
+            access_token_aad_fp       = null,
+            access_expires_at         = null
+          where id = ${write.connectionId}
+          returning id
+        `
+        if (rows.length === 0) {
+          throw new AppError('not_found', `No Google connection with id ${write.connectionId}`)
+        }
+        for (const event of write.events) {
+          await tx`
+            insert into google_connection_events
+              (connection_id, google_sub, event, actor_kind, actor_label, detail)
+            values (${event.connectionId}, ${event.googleSub}, ${event.event},
+                    ${event.actorKind ?? 'system'}, ${event.actorLabel ?? null},
+                    ${tx.json((event.detail ?? {}) as never)})
+          `
+        }
+      })
     },
 
     async appendEvent(event: ConnectionEventInput) {

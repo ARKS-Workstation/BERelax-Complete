@@ -54,6 +54,29 @@ export interface ExchangeCodeOptions {
   readonly redirectUri?: string
 }
 
+/**
+ * The endpoint docs/10 §5 names by hand: `POST https://oauth2.googleapis.com/revoke`.
+ *
+ * A constant on the port rather than a string in an adapter, because the offboarding runbook cites it and
+ * a test asserts the two agree. An offboarding step that names the wrong endpoint is a step that reports
+ * success and leaves the grant live.
+ */
+export const GOOGLE_REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
+
+/**
+ * What Google says when asked to revoke a token, as the two answers that both mean *the grant is dead*.
+ *
+ * `revoked` is HTTP 200. `already_revoked` is the 400 `invalid_token` Google returns for a token it does
+ * not recognise — which is what a **second** revoke of the same token gets, and therefore what makes the
+ * whole disconnect safely repeatable. Collapsing the two into a boolean would lose the distinction an
+ * operator needs (*did we just kill it, or was it already gone*), and treating the 400 as a failure would
+ * make a retry loop forever on a grant that is already dead.
+ *
+ * Anything else — a 5xx, a timeout, a rate limit — is THROWN, because it is the one case where the grant
+ * may still be live and the caller must not zeroise the credential that could still kill it.
+ */
+export type GoogleRevocation = 'revoked' | 'already_revoked'
+
 export interface GoogleOAuthProvider {
   readonly name: string
   /** The URL a browser is sent to. The real adapter builds it; the fake returns a local stand-in. */
@@ -68,6 +91,18 @@ export interface GoogleOAuthProvider {
    * happens to every connection until the OAuth consent screen is published (docs/10 §4).
    */
   refresh(refreshToken: string): Promise<GoogleTokens>
+  /**
+   * `POST https://oauth2.googleapis.com/revoke` — kills the grant at Google.
+   *
+   * Takes a refresh token (revoking it revokes the whole grant, access tokens included). It is the step
+   * docs/10 §5 requires of an offboarding *before* the stored ciphertext is erased, and the ordering is
+   * the reason it is on this port at all: without it, a disconnect can only delete our copy, which
+   * leaves a live credential for control of the business's Google presence held by whoever is leaving.
+   *
+   * Resolves for both answers that mean the grant is dead. Throws only when the revocation is
+   * unconfirmed — and an unconfirmed revocation is what must stop the caller zeroising.
+   */
+  revoke(refreshToken: string): Promise<GoogleRevocation>
 }
 
 export interface Review {

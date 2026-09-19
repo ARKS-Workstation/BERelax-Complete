@@ -21,6 +21,16 @@ export interface RewrapReport {
   readonly rewrapped: number
   /** Already on the new kid. A second run over a partly rotated estate must be a no-op on those rows. */
   readonly alreadyCurrent: number
+  /**
+   * Connections a disconnect has zeroised. There is no wrapped key to move, so they are skipped.
+   *
+   * Counted separately rather than folded into `alreadyCurrent`, and the distinction is the point:
+   * `alreadyCurrent` is a claim that the row is sealed under the NEW key, and a rotation that made that
+   * claim about a row holding no key at all would let a retired KEK be discarded while a real row was
+   * still on it. `scanned = rewrapped + alreadyCurrent + zeroised` is then an arithmetic identity a
+   * caller can check, which is what makes a silently skipped row impossible.
+   */
+  readonly zeroised: number
 }
 
 /**
@@ -45,8 +55,16 @@ export async function rewrapRefreshTokens(deps: {
   const connections = await deps.store.listAll()
   let rewrapped = 0
   let alreadyCurrent = 0
+  let zeroised = 0
 
   for (const connection of connections) {
+    if (connection.refreshToken === null) {
+      // A disconnect revoked this grant at Google and erased the five sealed columns (migration 0040).
+      // There is nothing to re-wrap, and — the part worth stating — nothing is lost by skipping it: the
+      // plaintext is dead at Google, so no key protects anything here any more.
+      zeroised += 1
+      continue
+    }
     if (connection.refreshToken.kid === deps.newKek.version) {
       alreadyCurrent += 1
       continue
@@ -79,5 +97,5 @@ export async function rewrapRefreshTokens(deps: {
     rewrapped += 1
   }
 
-  return { scanned: connections.length, rewrapped, alreadyCurrent }
+  return { scanned: connections.length, rewrapped, alreadyCurrent, zeroised }
 }

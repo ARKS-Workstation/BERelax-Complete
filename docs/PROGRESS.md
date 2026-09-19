@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**62 / 207 units complete.**
+**65 / 207 units complete.**
 
 ## Next up
 
@@ -152,7 +152,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 135 | `W-SITE-05` | Catalogue-derived routes: /treatments, /treatments/[slug], /pricing | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-03`, `W-SYS-02` | — | Y9-poa-prices |
 | [x] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
 | [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
-| [ ] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
+| [x] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
 | [ ] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
 | [ ] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |
 | [x] | 141 | `W-SYS-08` | Payload CMS v3 embedded, content model and the catalogue boundary | `F07`, `F09`, `W-SYS-01` | — | — |
@@ -174,10 +174,10 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 157 | `G-CONN-07` | Connection state machine, plain-English states, Test connection, settings card | `G-CONN-06`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 158 | `G-AGT-02` | Agent console: last success, cost against budget, pending approvals, kill switches | `G-AGT-01`, `G-CONN-07`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |
-| [ ] | 160 | `G-CONN-09` | Disconnect with revocation at Google, zeroisation, and the offboarding runbook | `F06`, `G-CONN-04` | — | — |
+| [x] | 160 | `G-CONN-09` | Disconnect with revocation at Google, zeroisation, and the offboarding runbook | `F06`, `G-CONN-04` | — | — |
 | [x] | 161 | `G-REV-01` | Review data model: nullable google_review_id, delivery_mode as a column | `G-CONN-01` | — | — |
 | [ ] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
-| [ ] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
+| [x] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
 | [ ] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
 | [ ] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 166 | `G-REV-06` | Approval queue: Copy reply, deep link, Marked as posted | `G-REV-05`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |

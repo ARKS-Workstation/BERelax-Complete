@@ -1,7 +1,16 @@
 import {
   AppError,
+  DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
   genderMatchingModeSchema,
+  MINIMUM_REVIEW_COOLING_OFF_HOURS,
+  REVIEW_AUTOSEND_DISABLED,
+  REVIEW_AUTOSEND_SETTING_KEY,
+  REVIEW_COOLING_OFF_SETTING_KEY,
+  REVIEW_REPLY_LANGUAGES_SETTING_KEY,
+  reviewAutosendEnabledSchema,
+  reviewCoolingOffHoursSchema,
+  reviewReplyLanguagesSchema,
   STRICT_GENDER_MATCHING,
 } from '@berelax/shared'
 import { z } from 'zod'
@@ -334,13 +343,70 @@ export const SETTINGS = [
     },
   }),
   define({
-    key: 'agents.review_autosend_enabled',
+    key: REVIEW_AUTOSEND_SETTING_KEY,
     tier: 'compliance_locked',
-    schema: z.boolean(),
-    defaultValue: false,
+    /**
+     * `reviewAutosendEnabledSchema`, not a local `z.boolean()`.
+     *
+     * The schema here says what may be *written*; `reviewAutosendEnabled` in `@berelax/shared` says what
+     * a stored value *means*, and answers `false` for everything that is not the boolean `true`. A second
+     * spelling of the type in this file is a second place for the two to disagree, which is the shape of
+     * defect B-AVAIL-05 found in `booking.same_gender_matching`: the registry accepted a third value that
+     * no document supported and nothing downstream had been taught to refuse.
+     */
+    schema: reviewAutosendEnabledSchema,
+    defaultValue: REVIEW_AUTOSEND_DISABLED,
     label: 'Auto-send replies to 5-star reviews with no comment',
     help: 'Only ever applies to 4-5 star reviews with no free text and no named individual, in API mode, after a cooling-off delay. Everything else always needs a human.',
     editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+  }),
+  define({
+    /**
+     * How long after a review is left before a reply may be auto-sent.
+     *
+     * `compliance_locked` and owner-only, for the same reason the switch above is: shortening it is the
+     * only way to make an auto-send *happen sooner*, and the risk it exists to hold back is a reply
+     * published under the business's name to a review the reviewer has since edited or deleted — which is
+     * far more common in the first day than after it, and is not retractable through the API.
+     *
+     * The registry refuses a value below `MINIMUM_REVIEW_COOLING_OFF_HOURS` so the admin screen explains
+     * itself, and `reviewCoolingOffHours` refuses one below the floor again when the value is *read*,
+     * because a row written before this schema existed is not validated by it.
+     */
+    key: REVIEW_COOLING_OFF_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: reviewCoolingOffHoursSchema,
+    defaultValue: MINIMUM_REVIEW_COOLING_OFF_HOURS,
+    label: 'Review auto-send cooling-off delay (hours)',
+    help: 'How long a 4-5 star review with no comment must sit before a reply may be sent without a human. Can be lengthened; cannot be set below 24 hours, because a reviewer editing or deleting a review in the first day is common and a published reply cannot be taken back.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-cooling-off',
+      note: 'docs/07 §4 says "after a cooling-off delay" and names no number. 24 hours is the floor, not a figure somebody chose: it is the shortest delay this build will apply, and the owner has not been asked what it should be.',
+    },
+  }),
+  define({
+    /**
+     * The languages a reply may be written in — docs/07 §4's "configured set".
+     *
+     * `operational` rather than `compliance_locked`, and that is not a relaxation. Widening this setting
+     * cannot widen what auto-sends, because the enum is
+     * `DETECTABLE_REVIEW_LANGUAGES`: a language this build cannot *identify* in a review cannot be in the
+     * set, so a review in it is `'unknown'` and escalates however the row is written. Narrowing it only
+     * escalates more. There is therefore no value here that relaxes the rule below its floor, which is
+     * what decides the tier rather than the subject matter sounding compliance-shaped.
+     */
+    key: REVIEW_REPLY_LANGUAGES_SETTING_KEY,
+    tier: 'operational',
+    schema: reviewReplyLanguagesSchema,
+    defaultValue: [...DETECTABLE_REVIEW_LANGUAGES],
+    label: 'Languages review replies may be written in',
+    help: 'A review in any other language — or in none this system can identify — is always escalated to a human. Adding a language here does not make replies in it possible; it has to be one the review router can recognise.',
+    editableBy: OWNER_MANAGER,
     audited: true,
     invalidates: [],
   }),

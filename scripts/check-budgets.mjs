@@ -18,6 +18,8 @@ import { join } from 'node:path'
  */
 import { gzipSync } from 'node:zlib'
 import { encodeRendition } from '../packages/media/src/derivatives.ts'
+import { DEFAULT_OUTBOX } from '../packages/media/src/storage/fake.ts'
+import { VIDEO_BUDGET_BYTES, VIDEO_HARD_STOP_BYTES } from '../packages/media/src/video/ladder.ts'
 import { embeddedFontBytes } from '../packages/pdf/src/fonts.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -60,6 +62,81 @@ async function derivativeBytes(budget) {
     focal: { x: asset.focalX ?? 50, y: asset.focalY ?? 50 },
   })
   return encoded.length
+}
+
+/*
+ * ── The hero video budget ────────────────────────────────────────────────────────────────────────
+ *
+ * docs/08 §8 budgets the hero video at ≤350KB on a phone and ≤1.2MB on a desktop, with a 2MB hard stop, and
+ * docs/08 §8's enforcement section puts the budget in the CI layer and the publish-time weight check in a
+ * third. This is the CI layer, and it has an awkward property no other budget in this file has: **there is
+ * no hero footage**. `assets/media/` holds twenty-five real files from the prototype and not one frame of
+ * video (`Y12-hero-video`), and there is no ffmpeg in the container these renditions are developed in. So a
+ * `video` budget has nothing to encode at check time the way a `derivative` budget does.
+ *
+ * Two halves, therefore, and the first one runs unconditionally so the entry is never measuring nothing:
+ *
+ *  - **The number is the one the pipeline enforces.** `build/budgets.json` and
+ *    `packages/media/src/video/ladder.ts` both carry the per-crop budget, and a budget nobody can reach from
+ *    the code that produces the bytes is a number in a file. `[video-budget-not-mirrored-in-the-pipeline]`
+ *    fails when they disagree, in either direction.
+ *  - **The bytes, when there are bytes.** `media.build-video-renditions` with the default fake adapter
+ *    writes every put into `artifacts/media-outbox/`, so a local run leaves the four renditions on disk and
+ *    this measures the heaviest of each crop through the same `[over-budget]` path every other budget uses,
+ *    with the measured number. With no run, it says so and names the open question rather than passing
+ *    quietly.
+ */
+const OUTBOX_PUBLIC = join(ROOT, DEFAULT_OUTBOX, 'public')
+
+/** Every `.mp4` the video job has written into the fake outbox, with its size. */
+function outboxVideos(directory = OUTBOX_PUBLIC) {
+  let entries
+  try {
+    entries = readdirSync(directory, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const found = []
+  for (const entry of entries) {
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) found.push(...outboxVideos(full))
+    else if (entry.name.endsWith('.mp4'))
+      found.push({ name: entry.name, bytes: statSync(full).size })
+  }
+  return found
+}
+
+/**
+ * Measures one `video` budget: the mirror check always, the bytes when a run has produced any.
+ *
+ * Returns `null` for "nothing to weigh", which the loop below turns into a SKIP — but only after the
+ * violations it returns have been counted, so a mirrored-number failure is a failure whether or not
+ * anything has been encoded.
+ */
+function videoBytes(budget) {
+  const violations = []
+  const declared = VIDEO_BUDGET_BYTES[budget.crop]
+  if (declared !== budget.maxBytes) {
+    violations.push(
+      `[video-budget-not-mirrored-in-the-pipeline] ${budget.id}: build/budgets.json says ` +
+        `${budget.maxBytes} bytes and packages/media/src/video/ladder.ts enforces ${declared}. The budget ` +
+        'and the pipeline have to be one number: a budget the encoder cannot reach is a number in a file, ' +
+        'and an encoder cap CI does not know about is a breach nobody is told about.',
+    )
+  }
+  if (VIDEO_HARD_STOP_BYTES <= budget.maxBytes) {
+    // docs/08 §8 writes the two as different thresholds, and they have to stay different: the job refuses at
+    // the hard stop and CI fails at the budget, so a hard stop at or below the budget is a rule that can
+    // never fire.
+    violations.push(
+      `[video-budget-not-mirrored-in-the-pipeline] ${budget.id}: the ${VIDEO_HARD_STOP_BYTES}-byte hard ` +
+        `stop is not above the ${budget.maxBytes}-byte budget, so the job would refuse before CI could ` +
+        'ever measure a breach and the hard stop could never fire',
+    )
+  }
+  const matching = outboxVideos().filter((file) => file.name.includes(`-video-${budget.crop}-`))
+  const heaviest = matching.reduce((worst, file) => (file.bytes > worst ? file.bytes : worst), 0)
+  return { bytes: matching.length === 0 ? null : heaviest, found: matching.length, violations }
 }
 
 /*
@@ -324,6 +401,24 @@ for (const budget of budgets) {
     actual = embeddedFontBytes()
   } else if (budget.kind === 'derivative') {
     actual = await derivativeBytes(budget)
+  } else if (budget.kind === 'video') {
+    const measured = videoBytes(budget)
+    ruleViolations = measured.violations
+    if (measured.bytes === null) {
+      // Not a quiet pass. The mirror check above has already run and its violations are reported below, so
+      // what is skipped here is only the weighing — and the reason is named, with the open question.
+      console.log(
+        `SKIP  ${budget.label.padEnd(42)} no rendition in ${DEFAULT_OUTBOX} — there is no hero footage ` +
+          '(Y12-hero-video) and no ffmpeg here; run the job to weigh one',
+      )
+      skipped += 1
+      for (const violation of ruleViolations) {
+        failures += 1
+        console.error(`      ${violation}`)
+      }
+      continue
+    }
+    actual = measured.bytes
   } else if (budget.kind === 'client-js') {
     const measured = clientJsBytes(budget)
     if (measured === null) {

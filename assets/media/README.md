@@ -33,6 +33,19 @@ The focal points there are a reasonable default, derived from the framing, not f
 position in each frame. Setting them properly is a media audit — `Y12-photos` — and it is exactly the
 kind of work a placeholder at the correct ratio is supposed to expose rather than disguise.
 
+## There is no video here
+
+Not one frame. docs/08 §6's shot list opens with "hero loop" and the prototype has none, so W-SYS-06 built
+the four-rendition video pipeline — H.264 High and HEVC `hvc1`, at the 16:9 desktop and 4:5 mobile crops —
+with nothing real to encode. `Y12-hero-video` in [OPEN-QUESTIONS](../../docs/OPEN-QUESTIONS.md) tracks it.
+
+What stands in is deliberately not footage and says so in its own bytes. `standInMasterY4m()` renders
+`photos/hero-team.jpg` as a `scale(1.0 → 1.06)` ramp — docs/08 §8's cut-order option 6, which that section
+already offers as an intentional shipping choice rather than an apology — into an **uncompressed** y4m whose
+header carries `BERELAX-STAND-IN-NOT-REAL-FOOTAGE-Y12-hero-video`. It is read back by `describeMaster()`,
+reported in the build result, and printed in the job's log line, so no run can report renditions of footage
+that does not exist. Nothing is committed: a y4m of three seconds at 1080p is 233MB.
+
 ## Derivatives
 
 None are committed. Sized and re-encoded variants are built at deploy time into the public media

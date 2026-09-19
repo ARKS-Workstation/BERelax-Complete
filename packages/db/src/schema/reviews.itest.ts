@@ -358,3 +358,151 @@ describe('acceptance — source, and the listing a review belongs to', () => {
     expect(left?.n).toBe('0')
   })
 })
+
+describe('acceptance — the routing verdict columns, and the floor the database owns (0037)', () => {
+  /** The four columns 0037 adds, all nullable because "not routed yet" is a real state of the queue. */
+  const ROUTING_COLUMNS = [
+    'routing_verdict',
+    'routing_rule_id',
+    'routing_lexicon_version',
+    'routed_at',
+  ] as const
+
+  it('adds four nullable columns with no default', async () => {
+    const rows = await sql<
+      { column_name: string; is_nullable: string; column_default: string | null }[]
+    >`
+      select column_name, is_nullable, column_default from information_schema.columns
+      where table_name = 'google_reviews' and column_name = any(${sql.array([...ROUTING_COLUMNS])})
+      order by column_name
+    `
+    expect(rows.map((row) => row.column_name).sort()).toEqual([...ROUTING_COLUMNS].sort())
+    for (const row of rows) {
+      // Nullable: an unrouted review has no verdict, and a default would let a row read as decided.
+      expect(row.is_nullable, row.column_name).toBe('YES')
+      expect(row.column_default, row.column_name).toBeNull()
+    }
+  })
+
+  it('refuses a verdict recorded without its rule or its lexicon version', async () => {
+    const connection = await seedConnection('sub-routing-partial', PLACE_A)
+    const id = await insertReview(connection, PLACE_A, { rating: 1 })
+    // Half a decision. A verdict with no rule is one nobody can audit, and a rule with no verdict is a
+    // reason for nothing.
+    await expect(
+      sql`update google_reviews set routing_verdict = 'escalate' where id = ${id}`,
+    ).rejects.toThrow(/google_reviews_routing_recorded_together/)
+    await expect(
+      sql`update google_reviews set routing_rule_id = 'rating_escalates' where id = ${id}`,
+    ).rejects.toThrow(/google_reviews_routing_recorded_together/)
+    // The control: all four together is accepted, so the constraint is not refusing everything.
+    await sql`
+      update google_reviews set routing_verdict = 'escalate', routing_rule_id = 'rating_escalates',
+        routing_lexicon_version = '2026-09-19', routed_at = now()
+      where id = ${id}
+    `
+    const [row] = await sql<{ routing_verdict: string }[]>`
+      select routing_verdict from google_reviews where id = ${id}
+    `
+    expect(row?.routing_verdict).toBe('escalate')
+  })
+
+  it('constrains the verdict to exactly auto_send|escalate', async () => {
+    const connection = await seedConnection('sub-routing-vocab', PLACE_A)
+    const id = await insertReview(connection, PLACE_A, { rating: 1 })
+    await expect(
+      sql`
+        update google_reviews set routing_verdict = 'send_it', routing_rule_id = 'x',
+          routing_lexicon_version = 'v', routed_at = now()
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_routing_verdict_known/)
+  })
+
+  it('refuses a blank rule id or lexicon version, so absent has one spelling', async () => {
+    const connection = await seedConnection('sub-routing-blank', PLACE_A)
+    const id = await insertReview(connection, PLACE_A, { rating: 1 })
+    await expect(
+      sql`
+        update google_reviews set routing_verdict = 'escalate', routing_rule_id = '   ',
+          routing_lexicon_version = 'v', routed_at = now()
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_routing_rule_id_not_blank/)
+    await expect(
+      sql`
+        update google_reviews set routing_verdict = 'escalate', routing_rule_id = 'x',
+          routing_lexicon_version = '', routed_at = now()
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_routing_lexicon_version_not_blank/)
+  })
+
+  it('accepts any rule id, deliberately, because the closed set lives in packages/core', async () => {
+    // Asserted as a deliberate ABSENCE. The rule list changes when the routing table changes, a copy in
+    // SQL would silently disagree between deploys, and `packages/db` may not import `packages/core` to
+    // keep them in step. So an id this build does not know is stored and is read as `escalate` by
+    // `reviewVerdictForRule` — proved in packages/google/src/review-routing.itest.ts. This assertion is
+    // here so that ADDING such a constraint fails a test rather than looking like an improvement.
+    const connection = await seedConnection('sub-routing-open', PLACE_A)
+    const id = await insertReview(connection, PLACE_A, { rating: 1 })
+    await sql`
+      update google_reviews set routing_verdict = 'escalate',
+        routing_rule_id = 'a_rule_a_later_build_added', routing_lexicon_version = 'v2', routed_at = now()
+      where id = ${id}
+    `
+    const [row] = await sql<{ routing_rule_id: string }[]>`
+      select routing_rule_id from google_reviews where id = ${id}
+    `
+    expect(row?.routing_rule_id).toBe('a_rule_a_later_build_added')
+  })
+
+  it('refuses auto_send on a low rating, on a texted review, and outside api delivery', async () => {
+    const connection = await seedConnection('sub-routing-floor', PLACE_A)
+    const route = (id: string) => sql`
+      update google_reviews set routing_verdict = 'auto_send', routing_rule_id = 'forced',
+        routing_lexicon_version = 'v', routed_at = now()
+      where id = ${id}
+    `
+    // Each probe leaves only ONE floor able to refuse it, so the constraint named is the one under test
+    // rather than whichever Postgres happened to evaluate first (ADR 0003).
+    const lowRated = await insertReview(connection, PLACE_A, { rating: 1, delivery_mode: 'api' })
+    await expect(route(lowRated)).rejects.toThrow(/google_reviews_autosend_needs_high_rating/)
+
+    const texted = await insertReview(connection, PLACE_A, {
+      rating: 5,
+      delivery_mode: 'api',
+      comment_text: 'Lovely, thank you.',
+    })
+    await expect(route(texted)).rejects.toThrow(/google_reviews_autosend_needs_no_comment/)
+
+    const manual = await insertReview(connection, PLACE_A, { rating: 5, delivery_mode: 'manual' })
+    await expect(route(manual)).rejects.toThrow(/google_reviews_autosend_needs_api_delivery/)
+
+    // The control: the one shape docs/07 §4 permits is accepted. Without it, a CHECK that refused every
+    // auto_send would satisfy all three probes above.
+    const quiet = await insertReview(connection, PLACE_A, { rating: 4, delivery_mode: 'api' })
+    await route(quiet)
+    const [row] = await sql<{ routing_verdict: string }[]>`
+      select routing_verdict from google_reviews where id = ${quiet}
+    `
+    expect(row?.routing_verdict).toBe('auto_send')
+  })
+
+  it('indexes the escalation queue and the unrouted backlog partially', async () => {
+    const rows = await sql<{ indexname: string; indexdef: string }[]>`
+      select indexname, indexdef from pg_indexes
+      where tablename = 'google_reviews'
+        and indexname in ('google_reviews_escalated_idx', 'google_reviews_unrouted_idx')
+      order by indexname
+    `
+    expect(rows.map((row) => row.indexname)).toEqual([
+      'google_reviews_escalated_idx',
+      'google_reviews_unrouted_idx',
+    ])
+    // The predicate is the point: both reads are a small and differently-growing fraction of the table,
+    // and an unpartitioned index would grow with every review ever left.
+    expect(rows[0]?.indexdef).toMatch(/WHERE \(routing_verdict = 'escalate'/)
+    expect(rows[1]?.indexdef).toMatch(/WHERE \(routing_verdict IS NULL\)/)
+  })
+})

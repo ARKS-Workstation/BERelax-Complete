@@ -139,12 +139,64 @@ describe('acceptance — status and granted_scopes', () => {
   })
 
   it('requires refresh_token_kid, so the rotation job can always tell what to re-wrap from', async () => {
+    // The guarantee is unchanged and the enforcement moved. It was NOT NULL on the column until migration
+    // 0040, which had to drop it so that a disconnect could zeroise the credential — a NOT NULL column can
+    // only be "deleted" by overwriting it with another ciphertext, which is not deletion. So the rule is
+    // now `google_connections_refresh_token_complete`: five columns or none of them. A ciphertext with no
+    // key version is still refused, which is what the rotation job depends on, and the row that would
+    // otherwise exist is worse than either — it cannot be opened, cannot be re-wrapped, and cannot be told
+    // apart from corruption.
+    //
+    // Asserted by CONSTRAINT NAME rather than by the column name in the message, because a message that
+    // happened to mention the column would also be produced by a typo in the insert.
     await expect(sql`
       insert into google_connections
         (google_sub, google_email, granted_scopes, refresh_token_ct, refresh_token_nonce,
          refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp)
       values ('sub-no-kid', 'x@berelax.ae', '{}', ${CT}, ${CT}, ${CT}, null, 'fp')
-    `).rejects.toThrow(/refresh_token_kid/)
+    `).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'google_connections_refresh_token_complete',
+    })
+  })
+
+  it('accepts an insert with all five sealed columns, so the refusal above is about the missing one', async () => {
+    // The control. Without it, a constraint written the wrong way round would refuse every insert and the
+    // case above would still pass.
+    const id = await insertConnection({ sub: 'sub-all-five', email: 'x@berelax.ae' })
+    const [row] = await sql<{ kid: string | null }[]>`
+      select refresh_token_kid as kid from google_connections where id = ${id}
+    `
+    expect(row?.kid).not.toBeNull()
+  })
+
+  it('allows the five sealed columns to be NULL together, but only on a terminal status', async () => {
+    // What 0040 bought, and the fence around it. A disconnect revokes at Google and then NULLs all five;
+    // an `active` or `needs_reauth` row with no credential would be a grant nothing in this system could
+    // ever revoke, which is why the second half is a constraint rather than a convention.
+    const id = await insertConnection({ sub: 'sub-zeroised', email: 'x@berelax.ae' })
+    await sql`
+      update google_connections set
+        status = 'disconnected', status_reason = 'manual',
+        refresh_token_ct = null, refresh_token_nonce = null, refresh_token_wrapped_key = null,
+        refresh_token_kid = null, refresh_token_aad_fp = null
+      where id = ${id}
+    `
+    const [row] = await sql<{ ct: Buffer | null }[]>`
+      select refresh_token_ct as ct from google_connections where id = ${id}
+    `
+    expect(row?.ct).toBeNull()
+
+    const live = await insertConnection({ sub: 'sub-live-no-token', email: 'x@berelax.ae' })
+    await expect(sql`
+      update google_connections set
+        refresh_token_ct = null, refresh_token_nonce = null, refresh_token_wrapped_key = null,
+        refresh_token_kid = null, refresh_token_aad_fp = null
+      where id = ${live}
+    `).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'google_connections_live_grant_has_a_refresh_token',
+    })
   })
 })
 

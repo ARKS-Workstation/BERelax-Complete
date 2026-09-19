@@ -557,18 +557,34 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     '--coverage.enabled',
   ])
   rmSync(f, { force: true })
+  /*
+    Three outcomes, not two, because the middle one used to be reported as the third.
+
+    A nested vitest run can fail for a reason that has nothing to do with coverage — one slow test timing
+    out under load is the one that actually happens, and this gate's run pays for the whole unit suite
+    including scrypt at N=65536. `failed` is then true and there is no `ERROR: Coverage` line at all, and
+    the old diagnostic said "the run failed but not on the core floor — a fixture large enough to breach
+    the GLOBAL floor proves nothing about the higher one" followed by an empty list. That is a wrong
+    diagnosis of a right observation, and it sent two units looking at the fixture's size when the cause
+    was a timeout in packages/auth.
+  */
+  const coverageErrors = output
+    .split('\n')
+    .filter((line) => line.includes('ERROR: Coverage'))
+    .join('\n')
   check(
     'coverage thresholds reject an uncovered file in packages/core',
     failed && output.includes('packages/core/src/**'),
-    failed
-      ? `the run failed but not on the core floor — a fixture large enough to breach the GLOBAL floor ` +
-          `proves nothing about the higher one:\n${output
-            .split('\n')
-            .filter((l) => l.includes('ERROR: Coverage'))
-            .join('\n')}`
-      : `${uncoveredNeeded} uncovered statements in packages/core did not breach the 95% floor. The floor ` +
-          'is either gone from vitest.config.ts or its glob no longer matches — check that before enlarging ' +
-          'the fixture.',
+    failed && coverageErrors === ''
+      ? 'the nested run failed without reporting any coverage threshold at all, so this says nothing ' +
+          'about the core floor either way. That is a test failure inside the run — a timeout under load ' +
+          `is the usual one — not a fixture-size problem:\n${output.split('\n').slice(-25).join('\n')}`
+      : failed
+        ? `the run failed on a coverage threshold, but not the core one — a fixture large enough to breach ` +
+          `the GLOBAL floor proves nothing about the higher one:\n${coverageErrors}`
+        : `${uncoveredNeeded} uncovered statements in packages/core did not breach the 95% floor. The floor ` +
+          'is either gone from vitest.config.ts or its glob no longer matches — check that before ' +
+          'enlarging the fixture.',
   )
 }
 
@@ -9406,6 +9422,1283 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'widening an Offer price to accept a float fails the typechecker',
       result,
       'TS2578',
+    )
+  }
+}
+
+// 44a-44ah. (G-REV-03) The docs/07 §4 safety routing table is executable, total and settings-proof —
+//            and every clause of that sentence has a mutant here.
+//
+// This is a safety control in a licensed massage and spa business in Abu Dhabi (ADDED licences the
+// activity, the Department of Health the health services). What it prevents is a reply published in the
+// business's name, with nobody reading it, to a review alleging injury, harassment, a hygiene failure or a
+// licensing breach — and every failure below is silent in production. Nothing throws, nothing logs, and
+// the only symptom is a reply on a public listing.
+//
+// Six classes of defect, each with at least one mutant:
+//
+//   - a NORMALISER that resolves an absent or unreadable setting to the PERMISSIVE value. The whole unit
+//     exists to prevent this: `Boolean(value)` on the compliance-locked switch enables auto-send in every
+//     database where a form post stored the string 'false';
+//   - a FLOOR that can be lowered. A cooling-off of 0 honoured as 0 publishes a reply to a review the
+//     reviewer is still editing, which the API cannot retract;
+//   - a ROW dropped, inverted or reordered. The table is the implementation, so a row that stops matching
+//     is a rule that has stopped existing;
+//   - the SECOND application removed. `autoSendFloor` re-applies row 1 independently, and it is what
+//     catches a mistake in any of the nine rows above it;
+//   - an UNRECOGNISED rule id read as permission. `reviewVerdictForRule` must answer `escalate` for every
+//     id this build does not declare, including one a later build writes;
+//   - the DOCUMENT and the table drifting apart. A row deleted from docs/07 §4, or reworded to mean
+//     something else, is a change to a signed-off requirement.
+//
+// Plus the database floor: six CHECK constraints, probed eight times, that hold whatever the
+// application believes. Each probe
+// leaves exactly ONE of them able to refuse it, because a bare non-zero exit is also what a typo in a
+// column name produces (ADR 0003), and because two floors refusing one row would let a probe report a pass
+// for the constraint it is not testing — which is how the first draft of this block passed while asserting
+// the wrong name.
+//
+// Mutations are applied to the SHIPPED modules with `withEditedFile`, which writes the original bytes back
+// in a `finally`. A fixture file would prove only that a fixture can fail.
+{
+  const ROUTING = 'packages/core/src/reviews/routing.ts'
+  const LEXICON = 'packages/core/src/reviews/escalation-lexicon.ts'
+  const LANGUAGE = 'packages/core/src/reviews/language.ts'
+  const FLOORS = 'packages/shared/src/review-autosend.ts'
+  const REGISTRY = 'packages/config/src/settings/registry.ts'
+  const DB_SCHEMA = 'packages/db/src/schema/reviews.ts'
+  const DOC = 'docs/07-frontend-and-agents-requirements.md'
+
+  const REVIEW_UNIT_SUITES = [
+    'packages/core/src/reviews/routing.test.ts',
+    'packages/core/src/reviews/routing.property.test.ts',
+    'packages/core/src/reviews/escalation-lexicon.test.ts',
+    'packages/core/src/reviews/language.test.ts',
+    'packages/shared/src/review-autosend.test.ts',
+    'packages/config/src/settings/registry.test.ts',
+  ]
+  const DOCS_PAIR_SUITE = 'packages/fixtures/src/review-routing-table.test.ts'
+  const ROUTING_ITEST = 'packages/google/src/review-routing.itest.ts'
+  const SCHEMA_ITEST = 'packages/db/src/schema/reviews.itest.ts'
+
+  /** Replaces one anchor in a shipped file, runs `body`, and restores the original bytes. */
+  const reviewMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes every assertion below vacuous, so it is an error rather than a
+        // no-op replace: `String.replace` with a missing needle returns the text unchanged, and the
+        // "mutant" would then be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the G-REV-03 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const reviewUnits = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...REVIEW_UNIT_SUITES])
+  const docsPair = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', DOCS_PAIR_SUITE])
+  const routingItest = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', ROUTING_ITEST])
+
+  // --- the table is executable: a category with no route cannot compile -------------------------
+  //
+  // 44a. The acceptance line asks that "a category added without a route fails to compile or fails a
+  //      gate". `ROWS` is a `Record` over the rule union, so the compiler is the gate — and this is the
+  //      probe that proves it, because a `Record` that had been loosened to `Partial` or to
+  //      `Record<string, …>` would still typecheck and nothing else would notice.
+  {
+    const typecheck = reviewMutant(
+      ROUTING,
+      "  'quiet_high_rating_may_auto_send',\n] as const",
+      "  'quiet_high_rating_may_auto_send',\n  'a_category_added_without_a_route',\n] as const",
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'review routing gate: a category added without a route fails typecheck in routing.ts',
+      typecheck.failed && typecheck.output.includes('reviews/routing.ts'),
+      typecheck.output,
+    )
+  }
+
+  // 44b. The control for 44a. Without it, a tree that does not typecheck at all satisfies the probe.
+  {
+    const clean = run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+    check(
+      'review routing gate: the committed routing table typechecks, so 44a means something',
+      !clean.failed,
+      clean.output,
+    )
+  }
+
+  // --- the normalisers: the permissive answer must be asked for exactly -------------------------
+  //
+  // 44c. `Boolean(value)` on the compliance-locked switch. The strings 'false' and '0' are both truthy,
+  //      and either is what arrives from a form post that skipped validation.
+  checkRejectedBy(
+    'review routing gate: a truthiness test on review_autosend_enabled is caught',
+    reviewMutant(
+      FLOORS,
+      'export function reviewAutosendEnabled(value: unknown): boolean {\n  return value === true\n}',
+      'export function reviewAutosendEnabled(value: unknown): boolean {\n  return Boolean(value)\n}',
+      reviewUnits,
+    ),
+    'answers false for every value that is not exactly true',
+  )
+
+  // 44d. The cooling-off floor, honouring whatever number it is given. A 0 here publishes a reply to a
+  //      review inside the window in which reviewers edit and delete them.
+  checkRejectedBy(
+    'review routing gate: a cooling-off floor that honours a shortened delay is caught',
+    reviewMutant(
+      FLOORS,
+      "  if (typeof value !== 'number' || !Number.isInteger(value)) return MINIMUM_REVIEW_COOLING_OFF_HOURS\n  return Math.max(value, MINIMUM_REVIEW_COOLING_OFF_HOURS)",
+      "  return typeof value === 'number' ? value : MINIMUM_REVIEW_COOLING_OFF_HOURS",
+      reviewUnits,
+    ),
+    'answers the floor for every unreadable or too-short value',
+  )
+
+  // 44e. The language set, taken as stored instead of intersected with what can be identified. This is
+  //      what would make `agents.review_reply_languages` able to relax the rule — and the reason that
+  //      setting is safe to leave at `operational` tier.
+  checkRejectedBy(
+    'review routing gate: a configured language set that admits an unidentifiable language is caught',
+    reviewMutant(
+      FLOORS,
+      '  return Object.freeze(DETECTABLE_REVIEW_LANGUAGES.filter((language) => stored.has(language)))',
+      '  return Object.freeze([...stored] as DetectableReviewLanguage[])',
+      reviewUnits,
+    ),
+    'drops a language this build cannot identify',
+  )
+
+  // 44f. `reviewReplyMode` treating anything truthy as API mode. Draft mode is the launch mode for weeks
+  //      (docs/10 §6), so this mutant auto-sends through an API whose quota is 0 QPM.
+  checkRejectedBy(
+    'review routing gate: an API mode derived from a truthy access setting is caught',
+    reviewMutant(
+      FLOORS,
+      "export function reviewReplyMode(value: unknown): ReviewReplyMode {\n  return value === true ? 'api' : 'draft'\n}",
+      "export function reviewReplyMode(value: unknown): ReviewReplyMode {\n  return value ? 'api' : 'draft'\n}",
+      reviewUnits,
+    ),
+    'answers draft for every value that is not exactly true',
+  )
+
+  // --- the rows: dropped, inverted, or no longer consulted --------------------------------------
+  //
+  // 44g. docs/07 §4 row 2 stops matching. The row that says "1-2 star: always escalated to a human.
+  //      Never auto-sent" is the one this business would be judged on.
+  checkRejectedBy(
+    'review routing gate: a row 2 predicate that never matches is caught',
+    reviewMutant(
+      ROUTING,
+      '    matches: (context) => context.review.rating <= HIGHEST_ALWAYS_ESCALATED_RATING,',
+      '    matches: () => false,',
+      reviewUnits,
+    ),
+    'a one- or two-star review is always escalated',
+  )
+
+  // 44h. The second application removed. `autoSendFloor` returning `true` unconditionally is what a
+  //      "this check is redundant, the table already does it" cleanup looks like — and the table is
+  //      exactly what it exists to disbelieve.
+  checkRejectedBy(
+    'review routing gate: an autoSendFloor that agrees with everything is caught',
+    reviewMutant(
+      ROUTING,
+      '    review.rating >= LOWEST_AUTO_SENDABLE_RATING &&\n    !hasFreeText(review) &&',
+      '    true ||\n    !hasFreeText(review) &&',
+      reviewUnits,
+    ),
+    'refuses an auto_send the independent re-check does not agree with',
+  )
+
+  // 44i. An unrecognised rule id read as permission. The shape is `row?.verdict ?? 'auto_send'`, which is
+  //      how a stored value from a later build — or a misspelling — becomes a reply.
+  checkRejectedBy(
+    'review routing gate: an unrecognised rule id defaulting to auto_send is caught',
+    reviewMutant(
+      ROUTING,
+      "  return row?.verdict === 'auto_send' ? 'auto_send' : 'escalate'",
+      "  return row?.verdict ?? 'auto_send'",
+      reviewUnits,
+    ),
+    'reads an unrecognised stored rule id as escalate, never as auto_send',
+  )
+
+  // 44j. The language row, identifying any Latin text as English. A five-star Tagalog review would then
+  //      be answered in English, which is the acceptance criterion this row exists for.
+  checkRejectedBy(
+    'review routing gate: a language detector that guesses English for any Latin text is caught',
+    reviewMutant(
+      LANGUAGE,
+      "  return evidence.size >= ENGLISH_FUNCTION_WORDS_REQUIRED ? 'en' : 'unknown'",
+      "  return 'en'",
+      reviewUnits,
+    ),
+    'declines Tagalog, Bahasa, transliterated Russian and French',
+  )
+
+  // --- the lexicon: reuse, and the Arabic matcher -----------------------------------------------
+  //
+  // 44k. The reuse of B-CAT-05's display-name lexicon dropped. A review alleging we performed hijama, or
+  //      using the solicitation vocabulary, would then be an ordinary complaint — and those are the two
+  //      allegations that reach a regulator in this trade.
+  checkRejectedBy(
+    'review routing gate: dropping the reused compliance lexicon is caught',
+    reviewMutant(
+      LEXICON,
+      '    const category = COMPLIANCE_RULE_CATEGORY[entry.rule]\n    if (category === null) continue',
+      '    const category = COMPLIANCE_RULE_CATEGORY[entry.rule]\n    if (category !== null) continue',
+      reviewUnits,
+    ),
+    'crediting the shared rule',
+  )
+
+  // 44l. The naive Arabic matcher: a substring test instead of clitic stripping. It escalates EVERYTHING
+  //      in Arabic, because the pain term is a substring of the everyday words for "the place" and "the
+  //      massage" — a rule indistinguishable, in the queue, from having no rule at all. This is the
+  //      mutant whose fixtures would all still pass, which is why the control that catches it is an
+  //      assertion about innocent text rather than about a match.
+  checkRejectedBy(
+    'review routing gate: a substring Arabic matcher that escalates every Arabic review is caught',
+    reviewMutant(
+      LEXICON,
+      '      return token.slice(prefix.length) === want',
+      '      return token.includes(want)',
+      reviewUnits,
+    ),
+    'shows the naive Arabic matcher would have escalated every Arabic review',
+  )
+
+  // --- the registry: a schema that stops explaining itself --------------------------------------
+  //
+  // 44m. Re-widening the cooling-off schema to accept any non-negative number. The normaliser would still
+  //      hold the floor, so nothing unsafe happens — and that is precisely why this needs a gate: the
+  //      screen would silently accept a value it then ignores, and the owner would believe replies go out
+  //      in an hour.
+  checkRejectedBy(
+    'review routing gate: a cooling-off schema that accepts a shortened delay is caught',
+    reviewMutant(
+      REGISTRY,
+      '    schema: reviewCoolingOffHoursSchema,',
+      '    schema: z.number().int().min(0).max(720),',
+      reviewUnits,
+    ),
+    'refuses a cooling-off delay below the floor',
+  )
+
+  // 44n. The acceptance control for 44c-44m. Without it, eleven mutants are satisfied by a suite that
+  //      fails on the unmutated tree as well — and the name each of them matches would be printed by a
+  //      suite that never passes.
+  {
+    const clean = reviewUnits()
+    check(
+      'review routing gate: the same suites pass on this tree, so the eleven mutants above mean something',
+      !clean.failed,
+      clean.output,
+    )
+  }
+
+  // --- the document and the table must not drift ------------------------------------------------
+  //
+  // 44o. A row deleted from docs/07 §4. The acceptance line is that a row "cannot be silently dropped",
+  //      and the only thing that can assert it is a test that reads the table.
+  checkRejectedBy(
+    'review routing gate: deleting a row from the docs/07 table is caught',
+    reviewMutant(DOC, '| Language outside the configured set | Always escalated |\n', '', docsPair),
+    'implements exactly as many documented rows as the table has',
+  )
+
+  // 44p. A row REWORDED to mean something else. "3-5 star" for "4-5 star" widens the only permissive row
+  //      of a safety control by a whole rating, and reads like a typo.
+  checkRejectedBy(
+    'review routing gate: rewording the auto-send band in docs/07 is caught',
+    reviewMutant(
+      DOC,
+      '| 4–5 star, no free text, no named individual |',
+      '| 3–5 star, no free text, no named individual |',
+      docsPair,
+    ),
+    'names each row by the subject the document gives it',
+  )
+
+  // 44q. The seven escalation categories, taken from row 3's own cell. Removing one from the document
+  //      must fail rather than leaving a lexicon category nothing requires.
+  checkRejectedBy(
+    'review routing gate: removing a category from the docs/07 row 3 cell is caught',
+    reviewMutant(DOC, 'staff conduct, refunds, hygiene', 'staff conduct, hygiene', docsPair),
+    'takes the seven escalation categories from row 3',
+  )
+
+  // 44r. The verdict vocabulary, which `packages/core` and `packages/db` each spell once because neither
+  //      may import the other. A value on one side only is a verdict the database refuses and the router
+  //      emits, discovered at a write rather than at a typecheck.
+  checkRejectedBy(
+    'review routing gate: a verdict vocabulary that drifts between core and db is caught',
+    reviewMutant(
+      DB_SCHEMA,
+      "export const REVIEW_ROUTING_VERDICTS = ['auto_send', 'escalate'] as const",
+      "export const REVIEW_ROUTING_VERDICTS = ['auto_send', 'escalate', 'draft'] as const",
+      docsPair,
+    ),
+    'agrees between packages/core and packages/db',
+  )
+
+  // 44s. The acceptance control for 44o-44r.
+  {
+    const clean = docsPair()
+    check(
+      'review routing gate: the docs pair test passes on this tree',
+      !clean.failed,
+      clean.output,
+    )
+  }
+
+  // --- purity: the routing table decides nothing from a clock or an environment -----------------
+  //
+  // 44t. A clock read in the reviews module. The acceptance line asks that routing receive the instant as
+  //      an argument, and a `Date.now()` here would make a stored verdict unreproducible — which is the
+  //      one thing the lexicon version column exists to prevent.
+  {
+    const fixture = 'packages/core/src/reviews/__gate_fixture__.ts'
+    const result = withFixture(fixture, 'export const routedAt = (): number => Date.now()', () =>
+      run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'purity gate rejects a clock read in packages/core/src/reviews',
+      result,
+      'inject a Clock and pass the instant in',
+    )
+  }
+
+  // 44u. And an environment read, which is the likelier mistake here: an escalation term list or a
+  //      "disable auto-send" flag is exactly what somebody reaches for `process.env` to override.
+  {
+    const fixture = 'packages/core/src/reviews/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      "export const extraTerms = (): string => process.env['ESCALATION_TERMS'] ?? ''",
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'purity gate rejects an environment read in packages/core/src/reviews',
+      result,
+      'pass configuration in as an argument',
+    )
+  }
+
+  // 44v. The control for both. The instant, the lexicon and the language set arrive as arguments — that
+  //      is the whole design, and a gate that rejected it would make the module unwritable.
+  {
+    const fixture = 'packages/core/src/reviews/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      [
+        'export const cooledOff = (now: number, reviewedAt: number, hours: number): boolean =>',
+        '  (now - reviewedAt) / 3_600_000 >= hours',
+      ].join('\n'),
+      () => run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(
+      'purity gate allows routing whose clock instant is an argument',
+      !result.failed,
+      `rejected the mechanism G-REV-03 specifies:\n${result.output}`,
+    )
+  }
+
+  // --- the database floor: four CHECK constraints, asserted by name -----------------------------
+  //
+  // docs/07 §4 permits an auto-sent reply in exactly one case, so three of its conditions are on the row
+  // itself and the database owns them. An owner cannot enable their way past a CHECK, a future caller
+  // cannot write an auto_send onto a one-star review, and a bug in any row of the routing table fails at
+  // the UPDATE instead of publishing a reply.
+  //
+  // `VERBOSITY=verbose` so the SQLSTATE and the constraint name are both in psql's output. Every probe
+  // runs inside `begin; … ; rollback;`, so a probe that is wrongly ACCEPTED leaves nothing behind —
+  // which matters more here than usual, because `google_reviews.connection_id` is ON DELETE RESTRICT and
+  // a committed fixture row would fail the next suite's connection cleanup on an unrelated constraint.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    const SUB = 'GATE-GREV03-SUB'
+    const PLACE = 'GATE-GREV03-PLACE'
+
+    const psqlProbe = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statements}; rollback;`,
+      ])
+
+    /** A connection plus the gbp_reviews capability naming the listing, which 0020's trigger requires. */
+    const connection =
+      'insert into google_connections (google_sub, google_email, granted_scopes, refresh_token_ct, ' +
+      'refresh_token_nonce, refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp) values (' +
+      `'${SUB}', 'owner@berelax.ae', array['https://www.googleapis.com/auth/business.manage'], ` +
+      "'\\x00'::bytea, '\\x00'::bytea, '\\x00'::bytea, 'v1', 'fp'); " +
+      // is_primary false: a primary capability may be unique per capability across the table, and this
+      // probe must not depend on what earlier suites left behind.
+      'insert into google_capabilities (connection_id, capability, resource_ref, health, is_primary) ' +
+      `select id, 'gbp_reviews', '{"placeId":"${PLACE}"}'::jsonb, 'permission_missing', false ` +
+      `from google_connections where google_sub = '${SUB}'`
+
+    /** One review row. `A Google user` is Google's own placeholder — no invented name. */
+    const review = (rating, mode, comment) =>
+      'insert into google_reviews (connection_id, place_id, source, delivery_mode, rating, ' +
+      `comment_text, reviewer_display_name, reviewed_at) select id, '${PLACE}', 'api', '${mode}', ` +
+      `${rating}, ${comment}, 'A Google user', '2026-09-10T00:00:00Z' ` +
+      `from google_connections where google_sub = '${SUB}'`
+
+    /** The verdict write, with any column overridden. The defaults are a verdict that is accepted. */
+    const route = (overrides = {}) => {
+      const v = {
+        verdict: "'auto_send'",
+        ruleId: "'quiet_high_rating_may_auto_send'",
+        version: "'2026-09-19'",
+        routedAt: 'now()',
+        ...overrides,
+      }
+      return (
+        `update google_reviews set routing_verdict = ${v.verdict}, routing_rule_id = ${v.ruleId}, ` +
+        `routing_lexicon_version = ${v.version}, routed_at = ${v.routedAt} where place_id = '${PLACE}'`
+      )
+    }
+
+    // 44w-44ad. The eight probes, each naming the ONE constraint left able to refuse it.
+    const probes = [
+      {
+        name: 'review routing gate rejects an auto_send verdict on a one-star review',
+        rule: 'google_reviews_autosend_needs_high_rating',
+        // API delivery and no comment, so the other two floors are satisfied and only the rating can
+        // refuse this. A manual-mode row would be rejected by the delivery floor first and this probe
+        // would report a pass for a constraint it is not testing.
+        sql: `${connection}; ${review(1, 'api', 'null')}; ${route()}`,
+      },
+      {
+        name: 'review routing gate rejects an auto_send verdict on a review with free text',
+        rule: 'google_reviews_autosend_needs_no_comment',
+        sql: `${connection}; ${review(5, 'api', "'Lovely, thank you.'")}; ${route()}`,
+      },
+      {
+        name: 'review routing gate rejects an auto_send verdict outside API delivery',
+        rule: 'google_reviews_autosend_needs_api_delivery',
+        sql: `${connection}; ${review(5, 'manual', 'null')}; ${route()}`,
+      },
+      {
+        name: 'review routing gate rejects a verdict recorded without its rule id',
+        rule: 'google_reviews_routing_recorded_together',
+        sql: `${connection}; ${review(5, 'api', 'null')}; ${route({ ruleId: 'null' })}`,
+      },
+      {
+        name: 'review routing gate rejects a verdict recorded without its lexicon version',
+        rule: 'google_reviews_routing_recorded_together',
+        sql: `${connection}; ${review(5, 'api', 'null')}; ${route({ version: 'null' })}`,
+      },
+      {
+        name: 'review routing gate rejects a third routing verdict',
+        rule: 'google_reviews_routing_verdict_known',
+        // `draft` is the plausible third value — it is a real word in this domain (draft mode) and not a
+        // routing verdict, which is exactly the shape a well-meaning addition takes.
+        sql: `${connection}; ${review(5, 'api', 'null')}; ${route({ verdict: "'draft'" })}`,
+      },
+      {
+        name: 'review routing gate rejects a blank rule id',
+        rule: 'google_reviews_routing_rule_id_not_blank',
+        sql: `${connection}; ${review(5, 'api', 'null')}; ${route({ ruleId: "'   '" })}`,
+      },
+      {
+        name: 'review routing gate rejects a blank lexicon version',
+        rule: 'google_reviews_routing_lexicon_version_not_blank',
+        sql: `${connection}; ${review(5, 'api', 'null')}; ${route({ version: "''" })}`,
+      },
+    ]
+
+    if (!dbUrl) {
+      check(
+        'review routing gate has a database to probe',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required; the constraint probes cannot run without one',
+      )
+    } else {
+      for (const probe of probes) checkRejectedBy(probe.name, psqlProbe(probe.sql), probe.rule)
+
+      // 44ae. The acceptance control for all eight. A CHECK that refused every verdict would satisfy
+      //       every probe above, and so would a broken `connection` prelude — this is the statement that
+      //       says the fixtures are insertable and the one permitted shape is accepted.
+      const accepted = psqlProbe(`${connection}; ${review(4, 'api', 'null')}; ${route()}`)
+      check(
+        'review routing gate accepts the one shape docs/07 §4 permits',
+        !accepted.failed,
+        `the committed schema refused a 4-star, comment-less, api-delivery auto_send:\n${accepted.output}`,
+      )
+
+      // 44af. And an `escalate` verdict is accepted on the row every floor above refuses, so the three
+      //       floors are scoped to auto_send rather than refusing any verdict at all.
+      const escalated = psqlProbe(
+        `${connection}; ${review(1, 'manual', "'They hurt my back.'")}; ` +
+          `${route({ verdict: "'escalate'", ruleId: "'rating_escalates'" })}`,
+      )
+      check(
+        'review routing gate accepts an escalate verdict on a one-star, texted, manual row',
+        !escalated.failed,
+        `the floors are refusing more than auto_send:\n${escalated.output}`,
+      )
+    }
+  }
+
+  // --- the pair against a real database ---------------------------------------------------------
+  //
+  // 44ag. The integration suite proves the triple — core's table, db's write, the real review fixtures.
+  //       A pair test that cannot connect fails with a message about a connection while naming nothing,
+  //       so this is what says the mutants above failed for the reason claimed.
+  {
+    const clean = routingItest()
+    check(
+      'review routing gate: the routing pair test passes against real PostgreSQL',
+      !clean.failed,
+      clean.output,
+    )
+  }
+
+  // 44ah. And the schema suite, which asserts the 0037 columns and constraints against the applied
+  //       migration rather than against the file. Reading the SQL and agreeing with it proves nothing:
+  //       the constraint could be in the file and absent from the database a half-applied migration left.
+  {
+    const clean = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      SCHEMA_ITEST,
+    ])
+    check(
+      'review routing gate: the review schema suite passes against the applied migration',
+      !clean.failed,
+      clean.output,
+    )
+  }
+}
+
+// 45a-45m. (G-CONN-09) The disconnect's ordering is enforced by the database, the runbook can be made to
+//           fail, and the plaintext-token allow-list did not grow.
+//
+// This unit destroys a credential, which makes it the one place where getting a check wrong is not
+// recoverable by running something again. Three groups of fixtures, each for a different way the unit could
+// silently stop being what it claims:
+//
+//   - **Migration 0040's three CHECK constraints.** They exist because the unrecoverable half-failure —
+//     erase the ciphertext, then discover the revocation failed — has to be unrepresentable rather than
+//     merely avoided in code. Each is asserted BY NAME, because a fixture rejected by a neighbouring
+//     constraint would leave the one under test free to stop matching anything while this file reported
+//     PASS for ever (ADR 0003). `google_connections_live_grant_has_a_refresh_token` and
+//     `google_connections_refresh_token_complete` overlap on an `active` row, so the second fixture puts
+//     the row in a terminal status first to isolate it — that is the same trap, one constraint away.
+//   - **The shipped ordering rule, edited in place.** `zeroisationIsSafe` is the whole unit in one
+//     function, and the branch that carries the weight is the one that REFUSES erasure. A suite that
+//     passed with that branch removed would be a suite that never exercised it, so the shipped file is
+//     made to answer `true` unconditionally and the unit test is watched failing by name. The same is done
+//     to the environment guard at the revocation seam and to the runbook, whose missing-step check is the
+//     kind that passes trivially once the parser stops matching.
+//   - **The plaintext-token allow-list.** Five modules may hold a decrypted Google token. Revocation needs
+//     one, which made this the unit most likely to need a sixth — so the pin asserts it stayed at five and
+//     that neither of this unit's two new `packages/google` modules is on it, the same shape G-CONN-05's
+//     pin takes. The *column-name* list did grow, by one migration, which is a different and weaker list;
+//     that is asserted explicitly rather than left as an absence.
+//
+// Every SQL probe runs inside `begin; … ; rollback;`, so a probe that is wrongly ACCEPTED leaves nothing
+// behind either.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const SUB = 'sub-gate-fixture-disconnect'
+  // Not a token and not pretending to be one: these rows never leave the rolled-back transaction, and what
+  // is under test is the CHECK constraints rather than anything cryptographic.
+  const BYTES = "'\\x00'::bytea"
+  const seed =
+    'insert into google_connections (google_sub, google_email, granted_scopes, refresh_token_ct, ' +
+    'refresh_token_nonce, refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp) values ' +
+    `('${SUB}', 'google-admin@berelax.ae', array['openid'], ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'fp')`
+
+  /** Every refresh-token column to null, which is what a completed disconnect writes. */
+  const ERASE_REFRESH =
+    'refresh_token_ct = null, refresh_token_nonce = null, refresh_token_wrapped_key = null, ' +
+    'refresh_token_kid = null, refresh_token_aad_fp = null'
+  /** Every access-token column to null. Written unconditionally, whatever the revocation said. */
+  const ERASE_ACCESS =
+    'access_token_ct = null, access_token_nonce = null, access_token_wrapped_key = null, ' +
+    'access_token_kid = null, access_token_aad_fp = null, access_expires_at = null'
+  const setOn = (clause) => `update google_connections set ${clause} where google_sub = '${SUB}'`
+
+  const psqlProbe = (...statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statements.join('; ')}; rollback;`,
+    ])
+
+  if (!dbUrl) {
+    check(
+      'google disconnect constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 45a. The unrecoverable half-failure, as a row. `revoke_failed` means Google never accounted for the
+    //      token, so the stored ciphertext is the retry's only credential — and a live grant with
+    //      business.manage on the listing and nothing able to revoke it is not a state to leave reachable.
+    checkRejectedBy(
+      'disconnect gate rejects a revoke_failed row whose ciphertext has been erased',
+      psqlProbe(
+        setOn(`status = 'disconnected', status_reason = 'revoke_failed', ${ERASE_REFRESH}`),
+      ),
+      'google_connections_revoke_retry_keeps_its_token',
+    )
+
+    // 45b. A LIVE grant losing its credential. `needs_reauth` is the state this protects: one
+    //      `invalid_grant` is not proof the grant is gone at Google, and a needs_reauth row with no
+    //      ciphertext can never be revoked by anything.
+    checkRejectedBy(
+      'disconnect gate rejects an active connection with no refresh token',
+      psqlProbe(setOn(ERASE_REFRESH)),
+      'google_connections_live_grant_has_a_refresh_token',
+    )
+    checkRejectedBy(
+      'disconnect gate rejects a needs_reauth connection with no refresh token',
+      psqlProbe(
+        setOn(`status = 'needs_reauth', status_reason = 'invalid_grant', ${ERASE_REFRESH}`),
+      ),
+      'google_connections_live_grant_has_a_refresh_token',
+    )
+
+    // 45c. A PARTIAL wipe: the ciphertext erased and the kid kept "for the audit trail". The row that
+    //      leaves cannot be opened, cannot be re-wrapped, and cannot be told apart from corruption — and
+    //      the rotation job stops on it without being able to say why. Isolated by disconnecting first,
+    //      because on an active row 45b's constraint fires instead.
+    checkRejectedBy(
+      'disconnect gate rejects a partial wipe of the refresh token',
+      psqlProbe(
+        setOn("status = 'disconnected', status_reason = 'manual'"),
+        setOn('refresh_token_ct = null'),
+      ),
+      'google_connections_refresh_token_complete',
+    )
+
+    // 45d. The same rule on the cached access token, which 0016 already had and which this unit now writes
+    //      on every disconnect path. Six columns or none.
+    checkRejectedBy(
+      'disconnect gate rejects a partial write of the cached access token',
+      psqlProbe(setOn(`access_token_ct = ${BYTES}`)),
+      'google_connections_access_token_complete',
+    )
+
+    // 45e. The controls. Four refusals above, and without these a constraint written the wrong way round
+    //      would refuse every write while all four reported PASS.
+    const completed = psqlProbe(
+      setOn(`status = 'disconnected', status_reason = 'manual', ${ERASE_REFRESH}, ${ERASE_ACCESS}`),
+    )
+    check(
+      'disconnect gate accepts the completed disconnect the code actually writes',
+      !completed.failed,
+      `the constraints refused a confirmed revocation's erasure:\n${completed.output}`,
+    )
+    const retained = psqlProbe(
+      setOn(`status = 'disconnected', status_reason = 'revoke_failed', ${ERASE_ACCESS}`),
+    )
+    check(
+      'disconnect gate accepts the retained-credential row an unconfirmed revocation writes',
+      !retained.failed,
+      'the constraints refused the revoke_failed path, which is the path that must stay open:\n' +
+        retained.output,
+    )
+
+    // 45f. The append-only re-assertion this unit's acceptance asks for. The disconnect's events are the
+    //      ONLY record that a credential existed and was destroyed, so an UPDATE that could edit them
+    //      afterwards would leave nothing trustworthy at all. The trigger raises with errcode
+    //      restrict_violation — the older append-only tables use a rule that reports success, and for this
+    //      table that would be the wrong trade.
+    const eventRow = (event) =>
+      'insert into google_connection_events (connection_id, google_sub, event, actor_kind, actor_label, ' +
+      `detail) select id, google_sub, '${event}', 'staff', 'owner@berelax.ae', ` +
+      `'{"source":"disconnect","revokeVerdict":"revoked"}'::jsonb from google_connections ` +
+      `where google_sub = '${SUB}'`
+    checkRejectedBy(
+      'disconnect gate rejects an UPDATE of the disconnected event it just wrote',
+      psqlProbe(
+        eventRow('disconnected'),
+        `update google_connection_events set detail = '{}'::jsonb where google_sub = '${SUB}'`,
+      ),
+      'append-only',
+    )
+    checkRejectedBy(
+      'disconnect gate rejects a DELETE of the revoked event it just wrote',
+      psqlProbe(
+        eventRow('revoked'),
+        `delete from google_connection_events where google_sub = '${SUB}'`,
+      ),
+      'append-only',
+    )
+    // 45g. The control for 45f: both event names this unit writes are accepted, with the real payload.
+    for (const event of ['revoked', 'disconnected']) {
+      const accepted = psqlProbe(eventRow(event))
+      check(
+        `disconnect gate accepts the ${event} event the disconnect appends`,
+        !accepted.failed,
+        `the event vocabulary or the no-token CHECK refused a row this unit writes:\n${accepted.output}`,
+      )
+    }
+  }
+}
+
+// 45h-45i. (G-CONN-09) The ordering rule must be able to fail.
+//
+// `zeroisationIsSafe` is the whole unit in one function, and the branch that carries the weight is the one
+// that REFUSES erasure after an unconfirmed revocation. A suite that went on passing with that branch
+// removed would be a suite that never exercised it — so the shipped file is edited to answer `true`
+// unconditionally, which is exactly the mistake somebody makes while "simplifying" it, and the unit test is
+// watched failing by name.
+//
+// Edited in place rather than copied: the assertion is about the function every caller uses, and a copy
+// would prove only that a copy can fail.
+{
+  const RULE = 'packages/google/src/oauth/revoke.ts'
+  const TEST = 'packages/google/src/disconnect.test.ts'
+  const result = withEditedFile(
+    RULE,
+    (text) =>
+      text.replace(
+        "  return verdict.kind !== 'unconfirmed'",
+        '  return true // gate fixture: erase whatever Google said',
+      ),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the disconnect test fails when an unconfirmed revocation is allowed to erase the credential',
+    result,
+    'RETAINS the ciphertext',
+  )
+  // The control. Without it the case above is satisfied by a test file that fails for any reason at all,
+  // including a syntax error introduced by the edit.
+  const clean = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST])
+  check(
+    'the disconnect test passes on the committed tree',
+    !clean.failed,
+    `the committed disconnect does not satisfy its own test:\n${clean.output}`,
+  )
+}
+
+// 45j-45k. (G-CONN-09) The runbook's missing-step check must be able to fail.
+//
+// A documentation test is the kind that goes vacuous most quietly: change a heading prefix and the parser
+// matches nothing, at which point every "this step is present" assertion passes by examining nothing. So
+// the shipped runbook is edited to delete the step docs/10 §5 says everybody forgets, and the test is
+// watched failing on that step by name.
+{
+  const RUNBOOK = 'docs/runbooks/google-offboarding.md'
+  const TEST = 'packages/google/src/offboarding-runbook.test.ts'
+  const result = withEditedFile(
+    RUNBOOK,
+    (text) =>
+      text.replace(
+        '## Step 5 — Remove from Google Cloud project IAM',
+        '## Step 5 — Remove from the marketing mailing list',
+      ),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the runbook test fails when the Cloud IAM step is dropped',
+    result,
+    'Google Cloud project IAM',
+  )
+  // And the ordering half, separately: a swap of the two sub-steps of step 2 must fail, because a Primary
+  // Owner cannot be removed and a runbook that put the removal first strands the operator for a week.
+  const swapped = withEditedFile(
+    RUNBOOK,
+    (text) =>
+      text
+        .replace('### Step 2a — Transfer Primary Ownership', '@@HOLD@@')
+        .replace(
+          '### Step 2b — Remove the account as a Business Profile user',
+          '### Step 2a — Transfer Primary Ownership',
+        )
+        .replace('@@HOLD@@', '### Step 2b — Remove the account as a Business Profile user'),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the runbook test fails when user removal is ordered before the ownership transfer',
+    swapped,
+    'the transfer heading comes first',
+  )
+  const clean = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST])
+  check(
+    'the runbook test passes on the committed document',
+    !clean.failed,
+    `the committed runbook does not satisfy its own test:\n${clean.output}`,
+  )
+}
+
+// 45l. (G-CONN-09) The environment guard at the revocation seam must be able to fail.
+//
+// A revocation sent to a stand-in is reported as SUCCESS, after which the disconnect erases the only
+// credential that could have performed it for real — the unrecoverable half-failure, reached by a
+// configuration mistake rather than by a network error. So the refusal is removed from the shipped file and
+// its test is watched failing.
+{
+  const SEAM = 'apps/worker/src/jobs/google-revoke-retry.ts'
+  const TEST = 'apps/worker/src/jobs/google-revoke-retry.test.ts'
+  const result = withEditedFile(
+    SEAM,
+    (text) =>
+      text.replace("if (config.GOOGLE_PROVIDER === 'real') {", 'if (config.APP_ENV === null) {'),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the revocation seam test fails when the real provider is allowed to resolve to a stand-in',
+    result,
+    // The TEST NAME, not the `expect.unreachable` message: vitest truncates a long assertion message in
+    // its summary, and a needle that only matched the untruncated form would leave this case reporting a
+    // bare non-zero exit — which is also what a syntax error in the edit produces.
+    'throws rather than revoking against a stand-in',
+  )
+  const clean = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST])
+  check(
+    'the revocation seam test passes on the committed tree',
+    !clean.failed,
+    `the committed seam does not satisfy its own test:\n${clean.output}`,
+  )
+}
+
+// 45m. (G-CONN-09) The plaintext-token allow-list did not grow, and the column list grew by exactly one.
+//
+// Revocation needs a decrypted refresh token, which made this the unit most likely to need a sixth entry on
+// the list of modules allowed to hold one. It did not: the decryption stayed in `lifecycle.ts`, which was
+// already on the list for the refresh, and the *judgement* about what a revocation meant went into a module
+// that holds no key and names no column. So this pins the list at five and asserts that neither module this
+// unit added to `packages/google` is on it — the same shape G-CONN-05's pin takes, and for the same reason:
+// an allow-list grows one deliberate exception at a time.
+//
+// The COLUMN list did grow, by `0040_google_disconnect.sql`, and that is asserted explicitly rather than
+// left as an absence. A migration that alters those columns cannot avoid naming them, and a DDL statement
+// decrypts nothing — but "it had to" is the sentence every future widening will also use, so the entry is
+// pinned to the one file rather than to the directory.
+{
+  const scanner = readFileSync('scripts/check-google-token-chokepoint.mjs', 'utf8')
+  const cruiser = readFileSync('.dependency-cruiser.cjs', 'utf8')
+  const tokenList = scanner.slice(
+    scanner.indexOf('const TOKEN_MODULES'),
+    scanner.indexOf('])', scanner.indexOf('const TOKEN_MODULES')),
+  )
+  const columnList = scanner.slice(
+    scanner.indexOf('const COLUMN_MODULES'),
+    scanner.indexOf('])', scanner.indexOf('const COLUMN_MODULES')),
+  )
+  const rule = cruiser.slice(
+    cruiser.indexOf('google-tokens-only-in-with-google'),
+    cruiser.indexOf('dependencyTypesNot', cruiser.indexOf('google-tokens-only-in-with-google')),
+  )
+  const tokenEntries = tokenList.match(/'packages\/google\/src\/[^']+'/g) ?? []
+  check(
+    'the plaintext-token allow-list still holds exactly five modules',
+    tokenList.length > 0 && tokenEntries.length === 5,
+    `read ${tokenEntries.length} entries out of TOKEN_MODULES. If a sixth was added deliberately, say so ` +
+      'prominently and change this number.',
+  )
+  const newModules = ['packages/google/src/disconnect.ts', 'packages/google/src/oauth/revoke.ts']
+  const named = newModules.filter(
+    (module) =>
+      tokenList.includes(module) ||
+      rule.includes(module.replace('packages/google/src/', '').replace('.ts', '')),
+  )
+  check(
+    'the Google token allow-list was not widened for the disconnect',
+    named.length === 0,
+    `${named.join(', ')} appears in the plaintext-token allow-list. The disconnect's decryption stays in ` +
+      'lifecycle.ts, which was already on it: if that has changed, move the list deliberately and say so.',
+  )
+  // The pin is about modules that exist. An allow-list assertion written the obvious way passes trivially
+  // once the files it names are deleted or renamed.
+  const missing = newModules.filter((module) => {
+    try {
+      readFileSync(module, 'utf8')
+      return false
+    } catch {
+      return true
+    }
+  })
+  check(
+    'the disconnect modules this pin is about are actually on disk',
+    missing.length === 0,
+    `absent, so the pin above proved nothing: ${missing.join(', ')}`,
+  )
+  const columnEntries = columnList.match(/'[^']+'/g) ?? []
+  check(
+    'the column-name allow-list names migration 0040 and not the migrations directory',
+    columnList.includes('packages/db/migrations/0040_google_disconnect.sql') &&
+      !/migrations\/\*/.test(columnList) &&
+      columnEntries.length === 4,
+    `COLUMN_MODULES holds ${columnEntries.length} entries and must name 0040 explicitly: a ` +
+      'directory-wide exemption would let any future migration select a ciphertext with nothing saying so.',
+  )
+}
+
+// 46a-46n. (W-SYS-06) The hero video renditions: the container rules that arrived with the first
+// Dockerfile, the licence cross-reference between the two policies, the private video-master prefix, the
+// video byte budget, and two mutations proving the encoder assertions are not vacuous.
+//
+// H-HARD-02 armed `[dockerfile-appeared]` so this deferral could not be forgotten, and the rules it wrote
+// without a subject now have one. The five new container rules are all about what a conveyed image contains
+// rather than about what a lockfile says, which is the half `scripts/check-licences.mjs` structurally cannot
+// see: ffmpeg is an operating-system package and libvips arrives inside a prebuilt binary package that ships
+// no copy of its own LGPL text.
+{
+  const CONTAINER = 'scripts/check-container.mjs'
+  const realPolicy = JSON.parse(readFileSync('build/container-policy.json', 'utf8'))
+  const policyFixture = 'build/__gate_fixture_video_container_policy__.json'
+  const WORKER = 'apps/worker/Dockerfile'
+
+  /** Runs the container gate against a policy derived from the real one. */
+  const againstPolicy = (mutate) =>
+    withFixture(policyFixture, JSON.stringify(mutate(structuredClone(realPolicy))), () =>
+      run('node', [CONTAINER, '--policy', policyFixture]),
+    )
+
+  // 46a. A package installed into a conveyed image that nobody declared. ffmpeg is GPL because of the
+  // encoders it is built with, and no npm licence scan can see an apt package at all — so an undeclared one
+  // is a licence obligation nobody has written down.
+  {
+    const dockerfile = 'apps/worker/Dockerfile.gate-fixture-video'
+    const result = withFixture(
+      dockerfile,
+      [
+        // Assembled rather than written out: a 64-character hex literal is one of the shapes
+        // `pnpm secrets` matches, and this file is scanned like every other.
+        `FROM node:22-bookworm-slim@sha256:${'0'.repeat(64)}`,
+        'RUN apt-get update && apt-get install --yes --no-install-recommends imagemagick ghostscript',
+        'USER node',
+        '',
+      ].join('\n'),
+      () => run('node', [CONTAINER]),
+    )
+    checkRejectedBy(
+      'container gate rejects an operating-system package the policy does not declare',
+      result,
+      '[image-component-undeclared]',
+    )
+    check(
+      'the undeclared-component finding names the package',
+      result.output.includes('imagemagick') && result.output.includes('ghostscript'),
+      `a finding with no package name is not actionable:\n${result.output}`,
+    )
+    // The control that matters for the parser rather than the rule: everything after `&&` belongs to the
+    // next command, so `rm` and `-rf` must not be reported as packages.
+    check(
+      'the install parser stops at the end of the install command',
+      !result.output.includes('`rm`') && !result.output.includes('`update`'),
+      `the parser read the rest of the shell chain as packages:\n${result.output}`,
+    )
+  }
+
+  // 46b. "It is copyleft" is not a decision. A declared component with a copyleft disposition and no
+  // obligation written out is the paragraph-instead-of-a-rule failure this whole policy exists to avoid.
+  {
+    const result = againstPolicy((policy) => {
+      for (const component of policy.imageComponents) {
+        if (component.component === 'ffmpeg') component.obligation = ''
+      }
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects a copyleft image component with no obligation',
+      result,
+      '[image-component-without-licence-obligation]',
+    )
+  }
+
+  // 46c. The obligation both copyleft components carry is that the IMAGE carries a notice. Two ways for that
+  // to stop being true: the licence text path is no longer named in the build, or the notice itself is not
+  // copied in.
+  {
+    const textMoved = againstPolicy((policy) => {
+      for (const component of policy.imageComponents) {
+        if (component.component === 'libvips') {
+          component.licenceTextInImage = '/usr/share/nowhere/LGPL-3'
+        }
+      }
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects a copyleft licence text the build never puts in the image',
+      textMoved,
+      '[copyleft-notice-not-copied-into-image]',
+    )
+    const noticeDropped = againstPolicy((policy) => {
+      for (const entry of policy.dockerfiles) {
+        if (entry.path === WORKER) entry.noticeSource = 'apps/worker/licences/NOT-COPIED.md'
+      }
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects a third-party notice the Dockerfile does not copy in',
+      noticeDropped,
+      '[copyleft-notice-not-copied-into-image]',
+    )
+  }
+
+  // 46d. The stale-exemption shape, in the dangerous direction: a declaration that no longer covers anything
+  // silently covers whatever arrives under that name next.
+  {
+    const result = againstPolicy((policy) => {
+      policy.imageComponents.push({
+        component: 'imagemagick',
+        installedBy: 'apt',
+        dockerfile: WORKER,
+        licence: 'ImageMagick',
+        disposition: 'permissive',
+        reason: 'a gate fixture, declared and never installed',
+      })
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects a declared component nothing installs',
+      result,
+      '[declared-image-component-not-installed]',
+    )
+  }
+
+  // 46e. `[env-file-copied-into-image]` reads COPY arguments and cannot see `COPY . .`, which is how an
+  // environment file actually reaches a layer. The real Dockerfile copies the whole context, so the real
+  // .dockerignore is the thing standing between a developer's credentials and an immutable public layer.
+  {
+    const result = withEditedFile(
+      '.dockerignore',
+      (text) => text.replace(/^\.env\n/m, '').replace(/^\.env\.\*\n/m, ''),
+      () => run('node', [CONTAINER]),
+    )
+    checkRejectedBy(
+      'container gate rejects a whole-context COPY with no environment-file exclusion',
+      result,
+      '[dockerignore-does-not-exclude-env]',
+    )
+  }
+
+  // 46f. A status of `enabled` is a claim about CI, and a claim nobody checks is how a deferral gets
+  // discharged on paper. Two ways to break it: the workflow is gone, or the job and its steps are.
+  {
+    const missingFile = againstPolicy((policy) => {
+      policy.imageVulnerabilityScanning.workflowFile = '.github/workflows/does-not-exist.yml'
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects an enabled image scan whose workflow does not exist',
+      missingFile,
+      '[image-scan-not-wired]',
+    )
+    const missingJob = againstPolicy((policy) => {
+      policy.imageVulnerabilityScanning.ciJob = 'no-such-job'
+      policy.imageVulnerabilityScanning.requiredSteps = ['no-such-step']
+      return policy
+    })
+    checkRejectedBy(
+      'container gate rejects an enabled image scan the workflow does not run',
+      missingJob,
+      '[image-scan-not-wired]',
+    )
+  }
+
+  // 46g. The control for 46a-46f, and it is not a formality: the committed Dockerfile is the first one this
+  // repository has ever had, and every rule above was written before there was anything to hold to them.
+  {
+    const clean = run('node', [CONTAINER])
+    check(
+      'the committed worker Dockerfile satisfies every container rule',
+      !clean.failed,
+      `the real Dockerfile does not pass the real policy:\n${clean.output}`,
+    )
+    check(
+      'the container gate reports the copyleft components the image conveys',
+      clean.output.includes('ffmpeg GPL-2.0-or-later') &&
+        clean.output.includes('libvips LGPL-3.0-or-later'),
+      `a conveyed obligation that stops being printed stops being visible:\n${clean.output}`,
+    )
+    // An image nobody has built is a reviewed Dockerfile and not a tested one, and saying so on every run is
+    // what stops the distinction being quietly lost.
+    check(
+      'the container gate says out loud that the image has never been built',
+      clean.output.includes('has never been built'),
+      `the unverified note is no longer printed:\n${clean.output}`,
+    )
+  }
+
+  // 46h. The two policies describe one subject from two sides, and the risk in splitting a subject across two
+  // files is that one of them stops mentioning it. `accepted` could not hold ffmpeg: it is matched against the
+  // npm graph and an entry matching nothing fails as `[stale-acceptance]`.
+  {
+    const licencePolicy = JSON.parse(readFileSync('build/licence-policy.json', 'utf8'))
+    const fixture = 'build/__gate_fixture_video_licence_policy__.json'
+    const missing = withFixture(
+      fixture,
+      JSON.stringify({
+        ...licencePolicy,
+        nonNpmShippedComponents: {
+          ...licencePolicy.nonNpmShippedComponents,
+          expect: [...licencePolicy.nonNpmShippedComponents.expect, 'libwebp'],
+        },
+      }),
+      () => run('node', ['scripts/check-licences.mjs', '--policy', fixture]),
+    )
+    checkRejectedBy(
+      'licence gate rejects a non-npm component the container policy does not govern',
+      missing,
+      '[non-npm-component-not-governed]',
+    )
+    // And the converse, which is the direction that rots: a copyleft component in the image that this file
+    // has stopped listing would make it a partial answer to "what does this product distribute".
+    const dropped = withFixture(
+      fixture,
+      JSON.stringify({
+        ...licencePolicy,
+        nonNpmShippedComponents: {
+          ...licencePolicy.nonNpmShippedComponents,
+          expect: licencePolicy.nonNpmShippedComponents.expect.filter((n) => n !== 'ffmpeg'),
+        },
+      }),
+      () => run('node', ['scripts/check-licences.mjs', '--policy', fixture]),
+    )
+    checkRejectedBy(
+      'licence gate rejects a conveyed copyleft component this policy has stopped listing',
+      dropped,
+      '[non-npm-component-not-governed]',
+    )
+  }
+
+  // 46i. The private bucket holds video masters as well as originals (docs/08 §6), and a master is the
+  // heaviest object in it — up to 128MiB against the 350KB rendition the page is budgeted for. Its own
+  // spelling, so it has its own fixture rather than riding on `/originals/`.
+  {
+    const fixture = 'packages/media/src/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      "export const src = '/video-masters/0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f.mp4'",
+      () => run('node', ['scripts/check-media.mjs']),
+    )
+    checkRejectedBy(
+      'media gate rejects a URL reaching a private video master',
+      result,
+      '[no-private-origin-url]',
+    )
+    // The control: a rendition path under the public prefix is the URL a page is supposed to hold.
+    const allowed = withFixture(
+      fixture,
+      "export const src = '/m/0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f/0123456789abcdef/hero-video-desktop-hevc.mp4'",
+      () => run('node', ['scripts/check-media.mjs']),
+    )
+    check(
+      'media gate accepts a content-addressed rendition URL',
+      !allowed.failed,
+      `the rule fired on the URL the site is supposed to serve:\n${allowed.output}`,
+    )
+  }
+
+  // 46j. The video budget and the cap the pipeline enforces have to be one number. A budget the encoder
+  // cannot reach is a number in a file; an encoder cap CI does not know about is a breach nobody is told
+  // about. This is the half that runs even with no footage and no ffmpeg, so the entry is never measuring
+  // nothing.
+  {
+    const result = withEditedFile(
+      'build/budgets.json',
+      (text) => text.replace('"maxBytes": 358400', '"maxBytes": 300000'),
+      () => run('pnpm', ['-s', 'budgets']),
+    )
+    checkRejectedBy(
+      'budget gate rejects a video budget the pipeline does not enforce',
+      result,
+      '[video-budget-not-mirrored-in-the-pipeline]',
+    )
+  }
+
+  // 46k. And the weighing half, with the measured number — the thing docs/08 §8's CI layer is for. An
+  // oversized rendition is written into the outbox the job writes to, because that is what the budget reads.
+  {
+    const directory = 'artifacts/media-outbox/public/m/__gate_fixture__/0123456789abcdef'
+    run('mkdir', ['-p', directory])
+    try {
+      const oversized = `${directory}/hero-video-mobile-h264.mp4`
+      const result = withFixture(oversized, 'x'.repeat(400_000), () =>
+        run('pnpm', ['-s', 'budgets']),
+      )
+      checkRejectedBy(
+        'budget gate rejects an oversized hero video rendition',
+        result,
+        '[over-budget] hero-video-mobile',
+      )
+      check(
+        'the video budget failure carries the measured byte count',
+        /measured 400001 bytes/.test(result.output),
+        `a breached budget has to say by how much:\n${result.output}`,
+      )
+    } finally {
+      run('rm', ['-rf', 'artifacts/media-outbox/public/m/__gate_fixture__'])
+    }
+  }
+
+  // 46l-46m. Two mutations of the shipped ladder, because an argv assertion that has never been seen to fail
+  // is a string comparison rather than a check. Both restore the original bytes in a `finally`.
+  {
+    const LADDER = 'packages/media/src/video/ladder.ts'
+    const TESTS = 'packages/media/src/video/ladder.test.ts'
+    const withoutFaststart = withEditedFile(
+      LADDER,
+      (text) => text.replace("    '+faststart',\n", "    'x-not-faststart',\n"),
+      () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TESTS]),
+    )
+    checkRejectedBy(
+      'the ladder test fails when +faststart stops reaching the encoder',
+      withoutFaststart,
+      'always asks for faststart',
+    )
+    // docs/08 §6 marks `-tag:v hvc1` mandatory, because Safari ignores an hev1-tagged track without firing
+    // an error — the poster simply stays and nothing reports why.
+    const withoutHvc1 = withEditedFile(
+      LADDER,
+      (text) => text.replaceAll('hvc1', 'hev1'),
+      () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TESTS]),
+    )
+    checkRejectedBy(
+      'the ladder test fails when HEVC stops being tagged hvc1',
+      withoutHvc1,
+      'tags HEVC hvc1',
+    )
+  }
+
+  // 46n. The control for 46l-46m and for the whole unit: the four video suites pass on the committed tree,
+  // which is also what proves the two mutations above were rejected for their own reason.
+  {
+    const clean = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      'packages/media/src/video',
+    ])
+    check(
+      'the video suites pass on the committed ladder',
+      !clean.failed,
+      `the committed pipeline does not satisfy its own tests:\n${clean.output}`,
     )
   }
 }

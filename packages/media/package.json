@@ -10,7 +10,10 @@
     "./placeholder": "./src/placeholder.ts",
     "./sharp": "./src/sharp.ts",
     "./slots": "./src/slots/index.ts",
-    "./url": "./src/url.ts"
+    "./url": "./src/url.ts",
+    "./video": "./src/video/ladder.ts",
+    "./video/encode": "./src/video/encode.ts",
+    "./video/probe": "./src/video/probe.ts"
   },
   "dependencies": {
     "@berelax/shared": "workspace:*",
