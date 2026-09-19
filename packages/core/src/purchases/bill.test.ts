@@ -13,6 +13,7 @@ import {
   deriveBillLine,
   isBlocked,
   RECOVERABLE_INPUT_VAT_ACCOUNT,
+  selfAccountsVat,
   TRADE_PAYABLES_ACCOUNT,
 } from './bill.ts'
 
@@ -77,10 +78,17 @@ describe('gross is authoritative and VAT is the remainder', () => {
 
 describe('only a VAT-bearing treatment carries VAT', () => {
   it('leaves net equal to gross for every treatment that carries none, and claims nothing', () => {
-    // Two of the six treatments carry VAT: a recoverable line and a blocked one. For the other four
-    // there is nothing to carve out — an unregistered supplier cannot charge VAT at all, and a
-    // zero-rated, exempt or out-of-scope supply has none.
-    for (const treatment of BILL_TAX_TREATMENTS.filter((t) => !carriesVat(t))) {
+    // Two of the seven treatments carry VAT THE SUPPLIER CHARGED: a recoverable line and a blocked one.
+    // For the rest there is nothing to carve out — an unregistered supplier cannot charge VAT at all, and
+    // a zero-rated, exempt or out-of-scope supply has none.
+    //
+    // `imported_services_reverse_charge` is left out of this loop and has its own tests in
+    // `../tax/reverse-charge.test.ts`: it also leaves net equal to gross, because an offshore supplier
+    // charges no UAE VAT — but it keeps its rate and self-accounts a pair of its own, so "claims nothing"
+    // is false for it in the one way that matters.
+    for (const treatment of BILL_TAX_TREATMENTS.filter(
+      (t) => !carriesVat(t) && !selfAccountsVat(t),
+    )) {
       const line = deriveBillLine({
         description: `A ${treatment} supply`,
         account: ACCOUNTS.licenceAndGovernmentFees,
@@ -431,7 +439,10 @@ describe('blocked input VAT is charged, not recoverable, and part of the cost', 
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 1_000_000_000 }),
-        fc.constantFrom(...BILL_TAX_TREATMENTS),
+        // Every treatment but the reverse charge, which partitions a tax NOBODY charged: its two figures
+        // are its own self-assessment and its `vat` is zero by construction, so it satisfies the identity
+        // below trivially and is proved properly in `../tax/reverse-charge.test.ts`.
+        fc.constantFrom(...BILL_TAX_TREATMENTS.filter((t) => !selfAccountsVat(t))),
         (grossFils, treatment) => {
           const line = deriveBillLine({
             description: 'Anything',

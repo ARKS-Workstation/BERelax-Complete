@@ -64,6 +64,16 @@ if (!url) {
 }
 
 /** Unique per run, because nothing in this file can be deleted afterwards. */
+/**
+ * A per-run suffix for every id and every recipient this file writes.
+ *
+ * Decimal digits (a pid and a random integer), and every recipient below is `+9715` + its first SEVEN
+ * characters + one distinguishing digit. The shared helper used to take EIGHT characters instead, which
+ * collided with the per-test recipient whose digit happened to equal RUN's eighth character — one chance in
+ * two, since that character is a decimal digit and the per-test digits are 0-5. The failing test then read
+ * every message this file had sent instead of its own one or two. Found by M-VAT-03, on the run where the
+ * eighth character was a 5.
+ */
 const RUN = `${process.pid}${Math.floor(Math.random() * 1e6)}`
 
 const SENT_AT = '2026-09-18T10:00:00.000Z'
@@ -102,7 +112,7 @@ async function sentMessage(suffix: string, costFils = 9, segments = 1) {
       messageClass: 'transactional',
       locale: 'en',
       vendor: 'smsala',
-      recipient: `+9715${RUN.slice(0, 8)}`,
+      recipient: `+9715${RUN.slice(0, 7)}0`,
       senderId: 'BERELAX',
       subject: null,
       body: 'Your appointment is confirmed.',
@@ -259,7 +269,7 @@ describe('acceptance — the row carries the lifecycle, and a DLR cannot move it
     // the receipt; the row says which KIND of failure this was.
     expect(stored?.lastFailureReason).toBe('delivery_reported_failed')
     const [entry] = await listMessageInbox(sql, {
-      recipient: `+9715${RUN.slice(0, 8)}`,
+      recipient: `+9715${RUN.slice(0, 7)}0`,
       limit: 200,
     })
     expect(entry).toBeDefined()

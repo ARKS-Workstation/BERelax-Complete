@@ -28,6 +28,7 @@ import {
   shiftDate,
 } from './purchases.ts'
 import { RECOVERABILITY_BILL_SHAPES } from './recoverability.ts'
+import { REVERSE_CHARGE_BILL_SHAPES } from './reverse-charge.ts'
 
 /**
  * The committed purchase fixtures, checked against the pure derivation before any database is involved.
@@ -84,14 +85,17 @@ describe('every committed bill shape', () => {
     // The vacuity guard on the whole file: without it, a shape silently dropped would leave a treatment
     // with no coverage at all and every assertion below would still pass.
     //
-    // Over BOTH fixture files, because `blocked_not_recoverable` arrived with M-VAT-02 and its committed
-    // worked example lives in ./recoverability.ts — next to the disclosure figures it is the whole point
-    // of. Narrowing this assertion to the shapes in this file instead would have been the smaller edit
-    // and would have turned the guard into "the treatments we happen to cover are covered".
+    // Over ALL THREE fixture files, because a treatment arrives with the unit that can post it and its
+    // committed worked example lives next to the figures it is the whole point of: `blocked_not_recoverable`
+    // in ./recoverability.ts (M-VAT-02) and `imported_services_reverse_charge` in ./reverse-charge.ts
+    // (M-VAT-03). Narrowing this assertion to the shapes in this file instead would have been the smaller
+    // edit and would have turned the guard into "the treatments we happen to cover are covered".
     const exercised = new Set(
-      [...FIXTURE_BILL_SHAPES, ...RECOVERABILITY_BILL_SHAPES].flatMap((s) =>
-        s.lines.map((l) => l.treatment),
-      ),
+      [
+        ...FIXTURE_BILL_SHAPES,
+        ...RECOVERABILITY_BILL_SHAPES,
+        ...REVERSE_CHARGE_BILL_SHAPES,
+      ].flatMap((s) => s.lines.map((l) => l.treatment)),
     )
     expect([...exercised].sort()).toEqual([...BILL_TAX_TREATMENTS].sort())
     // And the one this file owns is still the one it names: a blocked shape here would post VAT to an

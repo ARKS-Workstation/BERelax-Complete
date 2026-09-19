@@ -956,6 +956,8 @@ units:
     - packages/db/src/repositories/eligibility.test.ts
     - packages/db/src/repositories/eligibility.itest.ts
     - packages/fixtures/src/therapist-eligibility.itest.ts
+    - packages/fixtures/src/load.ts
+    - packages/fixtures/src/message-lifecycle.itest.ts
     - scripts/test-gates.mjs
   - id: B-CAT-04
     order: 25
@@ -2793,7 +2795,7 @@ units:
       netting to zero in the ledger while appearing in both VAT201 boxes. A nightly pg-boss job reports
       any offshore bill lacking the pair, and never reports success silently.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F06
@@ -2813,11 +2815,151 @@ units:
       a committed worked example to the fils
     - DigitalOcean, Resend, Google, Meta and Anthropic are seeded as offshore; a test fails if any of the
       five is marked domestic
+    - 'NOTE: the pair is TWO columns on the line and two on the header —
+      reverse_charge_output_vat_fils (declared, Cr 2035 Reverse-charge VAT payable) and
+      reverse_charge_input_vat_fils (reclaimed, Dr 1080 Recoverable input VAT) — and never one net figure.
+      Where the account is recoverable the two are equal and the net cash effect is nil, which is exactly why
+      the obligation is the most commonly missed: nothing is owed, so nothing prompts anybody, and a return
+      that omits BOTH sides balances as well as one that carries them. Where the account is blocked (0034) the
+      declaration stands alone, the tax is debited to the expense with the rest of the line, and the reverse
+      charge costs real money. `borne` (declared - reclaimed) is derived on the way out rather than stored: a
+      third column could disagree with the two it is made of.'
+    - 'NOTE: the reverse charge is NOT part of gross_fils, net_fils or vat_fils. gross = net on an imported
+      service, because the supplier charged nothing — adding the self-accounted tax to the gross would inflate
+      trade payables by tax the vendor never invoiced, and the payment run would overpay every offshore
+      supplier by 5%. For the same reason the claim is its own column rather than recoverable_input_vat_fils:
+      that claim rests on a supplier TRN (bill_recoverable_needs_a_trn) and an offshore supplier holds none,
+      because the document behind a reverse-charge claim is the business''s own self-assessment.'
+    - 'NOTE: the VAT201 BOX NUMBERS are not stated anywhere in this unit. Y11-vat201-boxes is open — the
+      numbers await a tax agent and its recorded answer is "held in a data table with a test proving the
+      mapping is data not code" — and that table, vat_box_mapping, is M-VAT-07''s. So the acceptance''s "read
+      from the box mapping table rather than hard-coded constants" is satisfied against the mapping this build
+      HAS: account.vat_box (0018). reverseChargeBoxes(chart) reads the grouping of each side off its account,
+      the tests assert the figures under the groupings the mapping names rather than under a literal, and a
+      re-tagged 2035 or 1080 fails them. A constant 3 or 10 here would be a number nobody has confirmed and
+      indistinguishable from one somebody had.'
+    - 'NOTE: found while writing the box assertion, and it is M-VAT-07''s problem rather than this unit''s.
+      account.vat_box tags an ACCOUNT, so it cannot be summed as "the amount in a box": every recoverable
+      expense account carries recoverable_input_tax too, and a sum over that grouping adds the rent expense to
+      the input VAT (measured: 2,006,706 where the claim was 6,706). The itest therefore groups by account and
+      asserts each account''s grouping against the mapping. A box table mapping BOX to the accounts and SIDES
+      that feed it is what M-VAT-07 needs; this column cannot do it.'
+    - 'NOTE: the place-of-supply rule is deliberately NOT snapshotted onto the bill, unlike the TRN and the
+      residency, and this is what makes the nightly report structurally capable of finding anything. The two
+      cases are opposites: a supplier''s REGISTRATION genuinely changes over time, so the TRN must be frozen or
+      a later registration would make January recoverable. The place of supply does not change — it is a fact
+      about the supply that was recorded correctly or was not, and if it was wrong the RETURN was wrong. So
+      correcting supplier_tax_profile.place_of_supply_rule (which 0028 grants UPDATE for) makes every bill
+      already posted a missing reverse charge, retroactively: PostgreSQL does not re-validate a CHECK on a row
+      nobody touched and `bill` is append-only, so nothing fires and nothing can. Freezing the rule instead
+      would leave the report able to report only success.'
+    - 'NOTE: the report''s four kinds are four different failures. missing_pair (the supplier supplies imported
+      services and the bill declares nothing), pair_disagrees (a line reclaims part of what it declared, or the
+      bill reclaims more than it declared), totals_disagree (the header''s two figures are not the sum of its
+      lines'' — re-summed from the rows, because a report that trusted the header could be lied to by the
+      corruption it exists to find) and ledger_disagrees (the journal entry does not carry the pair the bill
+      records). The last matters most: the output box is summed from the LEDGER and the input working paper from
+      bill_line, so a bill can satisfy one source and not the other. An offshore bill whose rule is
+      outside_scope is NOT an exception — a report that cries wolf is one nobody opens.'
+    - 'NOTE: the job writes an outbox event on EVERY pass, including the empty ones, and its idempotency key is
+      the business day — so a second pass of the same day publishes nothing rather than a duplicate and the
+      DATABASE is what makes a repeated pass report once. Identical output across two runs is a property of the
+      report being derived rather than accumulated: nothing is written to a report table, the rows are ordered
+      by business day and then by our own gapless internal reference, and the window is resolved with
+      tradingDateAt rather than from a clock. The window is twelve months back from the business day, the same
+      figure and the same reasoning as RECURRING_COST_LOOK_BACK_MONTHS; the cron is 04:15 Asia/Dubai, AFTER
+      recurring-cost.check at 03:45, because that pass can post a recurring offshore bill and a report run
+      before it would miss the bill it had just created.'
+    - 'NOTE: postBill takes the DECLARED figure from the caller (reverseChargeOn in @berelax/core) and derives
+      the CLAIMED one itself from account.vat_box and account.input_vat_recoverable. The declared figure is a
+      rounding — a reverse charge has no gross to take a remainder from, unlike ADR 0007''s sales VAT — so it is
+      stated in core and a second time in SQL as bill_line_reverse_charge_output_matches_the_rate, the same
+      arrangement as payables_aging_bucket(), with packages/fixtures/src/reverse-charge.itest.ts asserting the
+      two agree over the half-fils boundary (4,010 fils: 201 half-up, 200 truncated, and the truncated figure
+      is refused by name). The claimed side is not accepted from a caller at all: it is the answer to "may this
+      category be recovered", the chart is the authority, and a caller able to supply it is a caller able to
+      claim tax on entertainment.'
+    - 'NOTE: three files outside this unit changed, all for the treatment rather than for the report.
+      packages/core/src/purchases/bill.ts gains imported_services_reverse_charge (its arithmetic branch is
+      extracted as deriveImportedServiceLine, because it is a different derivation rather than a special case:
+      no gross to split, a rate that survives, and the pair supplied by the caller), the three new figures on
+      DerivedBillLine, the two lines billEntryDraft posts and billCreditTotal — which is new because this is
+      the first bill that credits something the supplier is not owed, and a caller comparing billDebitTotal
+      against the gross alone would find every offshore bill out of balance by exactly the tax it declared.
+      packages/db/src/services/post-bill.ts gains the treatment, the two refusals about the place-of-supply
+      rule, the 2035 credit and the reverse-charge 1080 debit; its two existing refusal blocks are extracted as
+      assertSupplierCouldChargeVat and assertLinesMatchPlaceOfSupply to keep the function under Biome''s
+      complexity ceiling, with the refusal ORDER unchanged. 0031''s recurring_cost_tax_treatment_allowed is
+      extended BY NAME (what 0034 renamed it for), because every offshore vendor 0028 seeds is a monthly
+      subscription.'
+    - 'NOTE: the treatment is refused for a line whose supplier''s rule is not imported_services_reverse_charge
+      and required for every line whose supplier''s rule IS — so a MIXED invoice, an imported-services supplier
+      billing something genuinely outside the scope of UAE VAT on the same document, is refused rather than
+      accepted. There is no per-line place of supply in this schema to record such a line''s basis with, and
+      under-declaring the reverse charge is the failure this unit exists to prevent, so the conservative
+      direction is to refuse and name the supplier''s rule as the thing to change. Expressing a per-supply place
+      of supply is a schema change, which is the same answer 0028 gives for a new document series.'
+    - 'NOTE: the seeded fixture bill posted without a pair is not a shape any code path can produce — postBill
+      and ZV008 both refuse an imported service that declares nothing. It exists because
+      fixture-offshore-misclassified is recorded outside_scope when the bill arrives (a legitimate position,
+      accepted by every layer) and its rule is CORRECTED afterwards. That is the exception a scan finds and a
+      constraint cannot, and it is the only fixture in the worked example that is not also a posting test.
+      docs/OPEN-QUESTIONS.md is untouched: nothing here needed a new provisional value, and no fixture bill is
+      posted against any of the five REAL offshore vendors, whose residency 0028 seeds and whose names would
+      otherwise become payables somebody eventually pays.'
+    - 'NOTE: two vacuity guards outside this unit had to move with the treatment, both because they enumerate
+      every treatment the system supports. packages/core/src/purchases/bill.test.ts asserted properties over
+      BILL_TAX_TREATMENTS that an imported service cannot satisfy — it keeps its rate and its pair is supplied
+      rather than carved out of a gross — so the reverse charge is excluded from those two loops by
+      selfAccountsVat and proved properly in packages/core/src/tax/reverse-charge.test.ts. The "exercises every
+      tax treatment the unit supports" guard in packages/fixtures/src/purchases.test.ts now reads all THREE
+      fixture files, for the reason M-VAT-02 gave when it made it read two: a treatment arrives with the unit
+      that can post it, and its worked example lives next to the figures it exists for.'
+    - 'NOTE: found and fixed, unrelated to this unit.
+      packages/fixtures/src/therapist-eligibility.itest.ts (B-AVAIL-05) ended its empty-settings probe with
+      `expect(count).toBeGreaterThan(0)` after rolling back a `delete from app_setting`. Nothing in a migration
+      seeds app_setting, so that assertion was about a row some OTHER suite happened to have written first, and
+      it fails on any database created that morning — which is what every agent worktree does. Proved by running
+      the file alone against a fresh database. Now an equality with the count taken before the probe, which is
+      what the comment always claimed it meant: a delta rather than a total, exactly rule 12 of
+      docs/CONTRIBUTING-AGENT-BRIEF.md.'
+    - 'NOTE: two more defects found and fixed, both unrelated to this unit and both of the class rule 12 of
+      docs/CONTRIBUTING-AGENT-BRIEF.md catalogues — a test that depends on a row some other file left behind.
+      They surfaced because two new integration files change the order vitest runs the suite in, and both fail
+      on a database created that morning. (1) packages/fixtures/src/load.ts''s settings loader UPDATEd three
+      keys that NOTHING creates: no migration seeds app_setting, and the only rows on any database came from
+      settings-store.itest.ts and availability.itest.ts calling seedSettingDefaults in their beforeAll. So the
+      loader matched zero rows while returning values.length — a seed reporting success for work it had not
+      done, which is ADR 0002''s failure mode. It now calls seedSettingDefaults (on conflict do nothing, so
+      still idempotent) and returns the rows it actually changed; seedSettingDefaults is exported from
+      @berelax/db for it. (2) packages/fixtures/src/message-lifecycle.itest.ts built its shared helper
+      recipient from RUN.slice(0, 8) and its five per-test recipients from RUN.slice(0, 7) plus a digit 0-5 —
+      so whenever RUN''s eighth character (a decimal digit) matched one of those digits, one test read every
+      message the file had sent instead of its own. One run in two. All six recipients now share the
+      seven-character prefix and differ only in the final digit.'
+    - 'NOTE: this unit took migration 0039 and SCHEMA_VERSION ends at 39. 0037 and 0038 belong to other units in
+      flight, so this worktree has 0001-0036 plus 0039 and the comment in packages/db/src/index.ts says so.'
     files:
     - packages/core/src/tax/reverse-charge.ts
     - packages/core/src/tax/reverse-charge.test.ts
+    - packages/core/src/tax/index.ts
+    - packages/core/src/purchases/bill.ts
+    - packages/db/migrations/0039_reverse_charge.sql
+    - packages/db/src/schema/bill.ts
+    - packages/db/src/schema/recurring-cost.ts
+    - packages/db/src/services/post-bill.ts
+    - packages/db/src/queries/reverse-charge-exceptions.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/reverse-charge.ts
+    - packages/fixtures/src/reverse-charge.test.ts
+    - packages/fixtures/src/reverse-charge.itest.ts
     - apps/worker/src/jobs/reverse-charge-exceptions.ts
     - apps/worker/src/jobs/reverse-charge-exceptions.itest.ts
+    - apps/worker/src/registry.ts
+    - packages/core/src/purchases/bill.test.ts
+    - packages/fixtures/src/purchases.test.ts
+    - packages/fixtures/src/therapist-eligibility.itest.ts
+    - scripts/test-gates.mjs
   - id: M-VAT-04
     order: 59
     title: Recurring cost register with fixed/variable split and variance alerting

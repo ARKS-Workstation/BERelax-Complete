@@ -33,6 +33,7 @@ import {
   type Sql,
   seedCatalogue,
   seedPremises,
+  seedSettingDefaults,
 } from '@berelax/db'
 import {
   FIXTURE_CLOSE,
@@ -121,23 +122,36 @@ const settingsLoader: Loader = {
   after: ['premises'],
   async load(sql, salon) {
     void salon
+    // The registry's defaults FIRST, because nothing else creates an `app_setting` row: no migration seeds
+    // the table, and `readSetting` deliberately falls back to the declared default for an absent key — so
+    // the three UPDATEs below matched zero rows on any database that had not already run
+    // `settings-store.itest.ts` or `availability.itest.ts`, while this loader went on reporting three
+    // settings written. `seedSettingDefaults` is `on conflict do nothing`, which is what keeps the loader
+    // idempotent (the acceptance criterion for every loader here). Found by M-VAT-03, whose two new
+    // integration files changed the order vitest runs them in.
+    await seedSettingDefaults(sql)
     const values: readonly [string, unknown][] = [
       ['booking.turnaround_minutes_standard', 15],
       ['booking.turnaround_minutes_wet', 30],
       ['packages.default_validity_months', 6],
     ]
+    let changed = 0
     for (const [key, value] of values) {
       // `sql.json(value)` rather than `JSON.stringify(value)::jsonb`. postgres.js infers a string
       // parameter destined for jsonb as JSON and encodes it again, so the number 15 lands as the
       // JSON string "15" — which type-checks, stores, reads back, and is wrong.
-      await sql`
+      // `returning key`, and the count is what this loader reports: it used to return `values.length`
+      // whatever it had done, which is a loader that says it seeded three settings while touching none.
+      const result = await sql`
         update app_setting
         set value = ${sql.json(value as never)},
             updated_by = 'fixture-seed'
         where key = ${key}
+        returning key
       `
+      changed += result.length
     }
-    return values.length
+    return changed
   },
 }
 

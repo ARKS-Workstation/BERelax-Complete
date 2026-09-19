@@ -884,6 +884,14 @@ describe('acceptance — with NO app_setting row, the database still enforces st
     // mode from the database rather than assuming it, feed THAT value to both implementations, and solve.
     // A test that passed `'strict'` as a literal would prove the strict path and nothing about the
     // default — and the default is what a fresh deployment actually runs on.
+    //
+    // The count BEFORE the probe, because the assertion after the rollback is that the table came back as it
+    // was — not that it is non-empty. It asserted non-empty until M-VAT-03 ran the suite against a database
+    // created that morning and found zero: nothing in a migration seeds `app_setting`, so the rows this file
+    // was relying on had been written by whichever suite happened to run before it. A total that depends on a
+    // foreign row is the failure docs/CONTRIBUTING-AGENT-BRIEF.md rule 12 catalogues, and it passed for weeks
+    // on databases the suite had already been run against.
+    const [seeded] = await sql<{ n: string }[]>`select count(*)::text as n from app_setting`
     await expect(
       sql.begin(async (tx) => {
         const scoped = tx as unknown as Sql
@@ -945,8 +953,11 @@ describe('acceptance — with NO app_setting row, the database still enforces st
       }),
     ).rejects.toThrow(/rollback: the empty-settings probe/)
 
-    // The rollback happened, so nothing after this file sees an empty settings table.
+    // The rollback happened, so nothing after this file sees a settings table this probe emptied. An
+    // equality with what was there rather than "more than none": where the table is already empty there is
+    // nothing to restore and nothing to protect, and it is the `rejects.toThrow` above plus the in-transaction
+    // count of zero that prove the probe was entered and abandoned.
     const [after] = await sql<{ n: string }[]>`select count(*)::text as n from app_setting`
-    expect(Number(after?.n)).toBeGreaterThan(0)
+    expect(Number(after?.n)).toBe(Number(seeded?.n))
   })
 })

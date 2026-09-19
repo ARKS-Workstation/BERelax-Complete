@@ -8050,6 +8050,506 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 42a-42w. (M-VAT-03) The reverse charge is a PAIR, and the database refuses every way of recording one
+//          side of it, as known-bad fixtures against real PostgreSQL.
+//
+// The failure this unit exists to prevent is silent in a way nothing else in the system is. An offshore bill
+// with no reverse charge posts, balances, carries the right payable, reconciles to the supplier's invoice to
+// the fils and ages correctly in the payables report. The only thing wrong with it is a figure missing from a
+// return nobody has filed yet — and a reverse charge recorded as ONE figure is worse, because it declares
+// nothing in the output box and claims nothing in the input box while looking accounted for.
+//
+// So the pair is enforced in four places and each is probed separately here:
+//
+//   the CHECKs on `bill_line`    what a declared figure must be, that an imported service declares one, that
+//                                the claim is all of it or none, and that nothing else carries one at all
+//   the CHECKs on `bill`         the header cannot reclaim more than it declares, and no domestic bill can
+//                                hold a reverse charge at all
+//   the ZV007/ZV008 trigger      a pair that is due is accounted for, one that is not due is not invented,
+//                                and the input side matches the account's recovery classification
+//   the deferred totals trigger  the header's two figures are a summary of its lines, at COMMIT
+//
+// `VERBOSITY=verbose` is set so psql prints the SQLSTATE and the constraint name, which is what lets every
+// probe assert **the rule written for it** rather than a bare non-zero exit — a typo in a column name also
+// exits non-zero, and the rule under test would then be dead while this file reported PASS for ever (ADR
+// 0003).
+//
+// The fixtures are isolated by construction, and the isolation is not cosmetic: a BEFORE trigger runs before
+// any CHECK, so a fixture that broke a trigger rule as well would be reported against the trigger and the
+// CHECK under test would never be reached. Hence two offshore suppliers — one supplying imported services and
+// one whose supply is outside the scope of UAE VAT — and every probe is built on whichever of them lets the
+// rule it names fire first.
+//
+// Every probe runs inside `begin; … ; rollback;`, which matters here more than elsewhere: `bill` and
+// `bill_line` refuse DELETE for every role including the owner, so a committed fixture could not be swept up
+// afterwards by anything.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  // After the provisional opening date (2026-09-01) and before any period this suite's siblings lock, so a
+  // refusal below is the rule under test rather than ZL002 or ZL004.
+  const DATE = "'2026-09-18'"
+  const TRN = "'000000000000003'"
+  // The three supplier positions this unit turns on. `IMPORTS` owes the reverse charge; `OUT_OF_SCOPE` is
+  // offshore and owes none, which is a legitimate position and the one that lets a CHECK be reached without
+  // the ZV008 trigger pre-empting it; `DOMESTIC` can hold no reverse charge at all.
+  const IMPORTS = 'gate-mvat03-imports'
+  const OUT_OF_SCOPE = 'gate-mvat03-outside-scope'
+  const DOMESTIC = 'gate-mvat03-domestic'
+  // 6075 is recoverable and 6090 is blocked (0034), and which is which is asserted against the applied chart
+  // by the controls below — so a renumbered account fails here rather than silently probing the wrong rule.
+  const IMPORTED_SERVICES = '6075'
+  const ENTERTAINMENT = '6090'
+
+  const supplier = (code, residency, rule, trn) =>
+    `insert into supplier (code, legal_name) values ('${code}', 'gate fixture supplier'); ` +
+    'insert into supplier_tax_profile (supplier_id, residency, place_of_supply_rule, trn) ' +
+    `select supplier_id, '${residency}', '${rule}', ${trn} from supplier where code = '${code}'`
+
+  const setup = [
+    supplier(IMPORTS, 'offshore', 'imported_services_reverse_charge', 'null'),
+    supplier(OUT_OF_SCOPE, 'offshore', 'outside_scope', 'null'),
+    supplier(DOMESTIC, 'domestic', 'domestic_uae', TRN),
+  ].join('; ')
+
+  /**
+   * A bill, its journal entry and one line.
+   *
+   * The journal side posts the real shape — **Dr expense (net + the tax borne), Cr payables (net), Cr 2035
+   * (declared), Dr 1080 (reclaimed)** — with the two VAT lines omitted when they are zero, because
+   * `journal_line_exactly_one_side` refuses a line that is 0 on both sides. `number` is distinct per call and
+   * `display_number` derived from it, so a probe is refused by the rule it names rather than by
+   * `bill_internal_number_unique` — which is a real constraint and the wrong one to be testing by accident.
+   */
+  const bill = ({
+    n,
+    code = IMPORTS,
+    reference = `GATE-MVAT03-${n}`,
+    account = IMPORTED_SERVICES,
+    net = 100000,
+    rate = 500,
+    declared = 5000,
+    reclaimed = 5000,
+    treatment = 'imported_services_reverse_charge',
+    lineDeclared = declared,
+    lineReclaimed = reclaimed,
+    lineRate = rate,
+  }) => {
+    const entryId = `JE-GATE-MVAT03-${n}`
+    const expense = net + lineDeclared - lineReclaimed
+    const journal = [
+      `('${entryId}', 1, '${account}', ${expense}, 0)`,
+      `('${entryId}', 2, '2010', 0, ${net})`,
+    ]
+    if (lineDeclared > 0) journal.push(`('${entryId}', 3, '2035', 0, ${lineDeclared})`)
+    if (lineReclaimed > 0) journal.push(`('${entryId}', 4, '1080', ${lineReclaimed}, 0)`)
+    return [
+      'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('${entryId}', ${DATE}, 'gate fixture imported service', 'supplier_bill')`,
+      'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+        journal.join(', '),
+      'insert into bill (supplier_id, supplier_reference, series_code, period_key, number, ' +
+        'display_number, bill_date, due_date, entry_id, net_fils, gross_fils, ' +
+        'recoverable_input_vat_fils, blocked_input_vat_fils, reverse_charge_output_vat_fils, ' +
+        'reverse_charge_input_vat_fils, received_by) select supplier_id, ' +
+        `'${reference}', 'SUPP-BILL', '', ${940000 + n}, 'BILL-GATE-MVAT03-${n}', ${DATE}, ${DATE}, ` +
+        `'${entryId}', ${net}, ${net}, 0, 0, ${declared}, ${reclaimed}, 'gate' ` +
+        `from supplier where code = '${code}'`,
+      'insert into bill_line (bill_id, line_no, description, expense_account_code, tax_treatment, ' +
+        'vat_rate_bp, net_fils, gross_fils, recoverable_input_vat_fils, blocked_input_vat_fils, ' +
+        'reverse_charge_output_vat_fils, reverse_charge_input_vat_fils) ' +
+        `select bill_id, 1, 'Gate fixture line', '${account}', '${treatment}', ${lineRate}, ` +
+        `${net}, ${net}, 0, 0, ${lineDeclared}, ${lineReclaimed} ` +
+        `from bill where supplier_reference = '${reference}'`,
+    ].join('; ')
+  }
+
+  const psqlProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      // So the SQLSTATE and the constraint name are printed, and a probe can assert `ZV008` rather than a
+      // sentence a future release is free to reword.
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${setup}; ${statement}; rollback;`,
+    ])
+
+  const probes = [
+    {
+      name: 'reverse charge gate rejects an invented treatment, so the vocabulary grew by exactly one value',
+      rule: 'bill_line_tax_treatment_check',
+      // 'reverse_charge' is not 'imported_services_reverse_charge'. A CHECK widened to anything containing the
+      // words would accept a treatment no posting path implements, which is the failure 0028 and 0034 both
+      // refused to risk by leaving the value out until this unit.
+      //
+      // On the out-of-scope supplier, because the ZV008 trigger runs BEFORE any CHECK and would otherwise
+      // refuse this row for owing a reverse charge it does not declare.
+      sql: bill({
+        n: 1,
+        code: OUT_OF_SCOPE,
+        treatment: 'reverse_charge',
+        rate: 0,
+        declared: 0,
+        reclaimed: 0,
+      }),
+    },
+    {
+      name: 'reverse charge gate still rejects a rate on a treatment that carries no VAT',
+      rule: 'bill_line_rate_matches_treatment',
+      // The constraint was WIDENED by 0039 to let an imported service carry a rate. This is the probe that
+      // the widening did not open it to everything: an out-of-scope line at 5% is a preparer who described
+      // the line wrongly, and it is the description that decides what is claimed.
+      //
+      // On the out-of-scope supplier, because the ZV008 trigger runs BEFORE any CHECK: on a supplier that
+      // owes the reverse charge this row would be refused for declaring nothing, one layer earlier.
+      sql: bill({ n: 2, code: OUT_OF_SCOPE, treatment: 'out_of_scope', declared: 0, reclaimed: 0 }),
+    },
+    {
+      name: 'reverse charge gate rejects an imported service at no rate at all',
+      rule: 'bill_line_reverse_charge_carries_a_rate',
+      // The rate is what the declared figure was computed at, and a filed line keeps the rate it was filed
+      // at (0028). A reverse charge at 0 bp has no rate for the figure below to be checkable against.
+      sql: bill({ n: 3, rate: 0 }),
+    },
+    {
+      name: 'reverse charge gate rejects a declared figure on a line that is not an imported service',
+      rule: 'bill_line_reverse_charge_only_on_an_imported_service',
+      // A reverse charge on anything else would declare output VAT on a supply UAE VAT never reached, or —
+      // on a domestic one — on tax the supplier already charged.
+      sql: bill({ n: 4, treatment: 'out_of_scope', rate: 0, lineRate: 0 }),
+    },
+    {
+      name: 'reverse charge gate rejects an imported service that declares nothing',
+      rule: 'bill_line_imported_service_accounts_for_output_vat',
+      // THE rule of this unit at row level, and the one a single net figure of zero satisfies: the bill
+      // posts, balances, reconciles to the invoice, and declares its output VAT nowhere.
+      //
+      // On the out-of-scope supplier again, because ZV008 refuses this shape one layer earlier when the
+      // supplier owes the charge — which is the next probe.
+      sql: bill({ n: 5, code: OUT_OF_SCOPE, declared: 0, reclaimed: 0 }),
+    },
+    {
+      name: 'reverse charge gate rejects a declared figure that is not its rate applied to the consideration',
+      rule: 'bill_line_reverse_charge_output_matches_the_rate',
+      // 4,010 × 5% is 200.5, so half-up gives 201 and truncation gives 200. The SQL rounding is stated a
+      // second time precisely so a hand-computed figure can be refused, and this is the figure that proves
+      // the two statements are the same rule rather than two.
+      sql: bill({ n: 6, net: 4010, declared: 200, reclaimed: 200 }),
+    },
+    {
+      name: 'reverse charge gate rejects a partial claim, which is an apportionment nothing computes',
+      rule: 'bill_line_reverse_charge_input_is_all_or_nothing',
+      // Recovery is a property of the ACCOUNT, so a line is coded either to a category that allows it or to
+      // one that does not. A proportion is a figure nobody could reproduce from the row years later.
+      sql: bill({ n: 7, reclaimed: 2500, lineReclaimed: 2500 }),
+    },
+    {
+      name: 'reverse charge gate rejects a bill reclaiming more than it declared',
+      rule: 'bill_reverse_charge_input_not_above_output',
+      // On the HEADER, where a mixed invoice legitimately sits between all and nothing — so the rule there is
+      // not all-or-nothing but "never more than declared", which is the direction that claims tax nobody
+      // accounted for.
+      sql: bill({ n: 8, reclaimed: 6000 }),
+    },
+    {
+      name: 'reverse charge gate rejects a reverse charge on a domestic supplier',
+      rule: 'bill_reverse_charge_needs_an_offshore_supplier',
+      // Asserted against the SNAPSHOT on the bill, so it holds for every role and cannot be undone by a later
+      // correction to the supplier. A domestic reverse charge would declare VAT the supplier already charged
+      // and then claim it a second time.
+      sql: bill({ n: 9, code: DOMESTIC }),
+    },
+    {
+      name: 'reverse charge gate rejects an imported service recorded as anything else',
+      rule: 'ZV008',
+      // The missing pair at its source, caught at the statement that wrote it. The rule turns on
+      // `supplier_tax_profile.place_of_supply_rule`, which no CHECK on the bill can see — which is why this
+      // layer is a trigger and why the nightly report exists for the case the rule is corrected afterwards.
+      sql: bill({
+        n: 10,
+        treatment: 'out_of_scope',
+        rate: 0,
+        lineRate: 0,
+        declared: 0,
+        reclaimed: 0,
+      }),
+    },
+    {
+      name: 'reverse charge gate rejects a reverse charge on a supply that owes none',
+      rule: 'ZV008',
+      // The other direction, and the one nobody would think to look for: declaring output tax on a supply
+      // outside the scope of UAE VAT overstates the return.
+      sql: bill({ n: 11, code: OUT_OF_SCOPE }),
+    },
+    {
+      name: 'reverse charge gate rejects a claim on an account the chart classifies blocked',
+      rule: 'ZV007',
+      // The declaration stands and the claim does not: a reverse charge on entertainment costs the business
+      // the tax (0034, docs/04 §4). Claiming it back is the over-claim the FTA disallows.
+      sql: bill({ n: 12, account: ENTERTAINMENT, net: 42000, declared: 2100, reclaimed: 2100 }),
+    },
+    {
+      name: 'reverse charge gate rejects declaring the output and abandoning a claim the chart allows',
+      rule: 'ZV007',
+      // The under-claim, which is not a compliance failure and is still wrong: it pays the FTA tax the
+      // business was entitled to reclaim, and it is the half of the pair nobody notices is missing.
+      sql: bill({ n: 13, reclaimed: 0 }),
+    },
+    {
+      name: 'reverse charge gate rejects a header whose pair its lines do not support, at COMMIT',
+      rule: 'ZV002',
+      // The line-level CHECKs pin each line's declaration to its own rate, so a header that disagrees is the
+      // only way to state a pair the rows do not support. What this proves is that the deferred trigger READS
+      // the two columns: before 0039 it summed four figures and this bill would have committed with an output
+      // figure no document produced.
+      sql: [
+        bill({
+          n: 14,
+          code: OUT_OF_SCOPE,
+          treatment: 'out_of_scope',
+          rate: 0,
+          lineRate: 0,
+          lineDeclared: 0,
+          lineReclaimed: 0,
+        }),
+        'set constraints all immediate',
+      ].join('; '),
+    },
+    {
+      name: 'reverse charge gate rejects an invented treatment in the recurring cost register too',
+      rule: 'recurring_cost_tax_treatment_allowed',
+      // 0031 posts recurring bills through the same postBill, and every offshore vendor 0028 seeds is a
+      // monthly subscription — so the register speaks this vocabulary or it cannot describe the cost. Extended
+      // BY NAME, which is what 0034 renamed the CHECK for.
+      sql:
+        'insert into recurring_cost (code, description, supplier_id, expense_account_code, ' +
+        'tax_treatment, cadence, first_due_date, cost_kind, expected_amount_fils, ' +
+        "variance_tolerance_bp) select 'gate-mvat03-invented', 'Gate fixture cost', supplier_id, " +
+        `'${IMPORTED_SERVICES}', 'reverse_charge', 'monthly', ${DATE}, 'fixed', 100000, 0 ` +
+        `from supplier where code = '${IMPORTS}'`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'reverse charge constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statement } of probes) {
+      checkRejectedBy(name, psqlProbe(statement), rule)
+    }
+
+    // The controls, and the reason the fifteen above mean anything: the same tables accept the legitimate
+    // row. Without these, a broken connection string or a renamed column would reject every probe and this
+    // gate would report fifteen passes while examining nothing.
+    const recoverablePair = psqlProbe([bill({ n: 20 }), 'set constraints all immediate'].join('; '))
+    check(
+      'reverse charge gate accepts an imported service declaring and reclaiming in equal fils',
+      !recoverablePair.failed,
+      `rejected a legitimate reverse-charge pair:\n${recoverablePair.output}`,
+    )
+
+    // The blocked case, which is where M-VAT-02's classification decides a figure here: the declaration
+    // stands alone and the tax is debited to the expense with the rest of the line.
+    const blockedPair = psqlProbe(
+      [
+        bill({ n: 21, account: ENTERTAINMENT, net: 42000, declared: 2100, reclaimed: 0 }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'reverse charge gate accepts a blocked import that declares and reclaims nothing',
+      !blockedPair.failed,
+      `rejected a legitimate blocked reverse charge:\n${blockedPair.output}`,
+    )
+
+    // The half-fils figure the truncation probe above is paired with. Without this the SQL rounding could be
+    // refusing everything and the probe would still pass.
+    const halfFils = psqlProbe(
+      [
+        bill({ n: 22, net: 4010, declared: 201, reclaimed: 201 }),
+        'set constraints all immediate',
+      ].join('; '),
+    )
+    check(
+      'reverse charge gate accepts the half-up figure the truncated one was refused for',
+      !halfFils.failed,
+      `rejected 201 fils on a 4,010 consideration, which is 200.5 rounded half-up:\n${halfFils.output}`,
+    )
+
+    // And the register accepts the new treatment, which is the other half of the vocabulary probe.
+    const importedRecurring = psqlProbe(
+      'insert into recurring_cost (code, description, supplier_id, expense_account_code, ' +
+        'tax_treatment, cadence, first_due_date, cost_kind, expected_amount_fils, ' +
+        "variance_tolerance_bp) select 'gate-mvat03-hosting', 'Gate fixture cost', supplier_id, " +
+        `'${IMPORTED_SERVICES}', 'imported_services_reverse_charge', 'monthly', ${DATE}, 'fixed', ` +
+        `100000, 0 from supplier where code = '${IMPORTS}'`,
+    )
+    check(
+      'reverse charge gate accepts a recurring cost that is an imported service',
+      !importedRecurring.failed,
+      `rejected an offshore subscription as a recurring cost:\n${importedRecurring.output}`,
+    )
+
+    // The two VAT201 groupings, read back from the APPLIED chart rather than from the TypeScript: the
+    // declaration lands in `reverse_charge` and the claim in `recoverable_input_tax`. Y11-vat201-boxes is
+    // open — the FTA's box NUMBERS await a tax agent — so this is the mapping the build actually holds, and a
+    // re-tagged account fails here rather than in a return six months later.
+    const boxes = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(code || '=' || coalesce(vat_box, 'null'), ',' order by code) " +
+        "from account where code in ('1080', '2035')",
+    ])
+    check(
+      'reverse charge gate finds both sides of the pair tagged with their own VAT201 grouping',
+      !boxes.failed && boxes.output.trim() === '1080=recoverable_input_tax,2035=reverse_charge',
+      `the pair does not map to two distinct groupings: ${boxes.output}`,
+    )
+
+    // The five offshore vendors docs/04 §4 names, read from the applied database. An offshore supplier marked
+    // domestic loses its reverse charge silently, which is the one fact about them the system must not be
+    // able to get wrong.
+    const vendorQuery =
+      "select coalesce(string_agg(s.code, ',' order by s.code), 'none') from supplier s " +
+      'join supplier_tax_profile p on p.supplier_id = s.supplier_id ' +
+      "where s.code in ('digitalocean', 'resend', 'google', 'meta', 'anthropic') " +
+      "and p.residency = 'offshore'"
+    const vendors = run('psql', ['--no-psqlrc', '-At', dbUrl, '-c', vendorQuery])
+    check(
+      'reverse charge gate finds all five named offshore vendors marked offshore',
+      !vendors.failed && vendors.output.trim() === 'anthropic,digitalocean,google,meta,resend',
+      `the five offshore vendors are not all offshore: ${vendors.output}`,
+    )
+
+    // And the control on that, because "all five are offshore" is also what a query matching nothing at all
+    // would report if the join were wrong: flipping ONE of them inside a rolled-back transaction must change
+    // the answer. `place_of_supply_rule` moves with it, because
+    // supplier_tax_profile_rule_matches_residency refuses domestic plus a reverse charge.
+    const flipped = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "begin; update supplier_tax_profile p set residency = 'domestic', " +
+        "place_of_supply_rule = 'domestic_uae' from supplier s " +
+        "where s.supplier_id = p.supplier_id and s.code = 'digitalocean'; " +
+        `${vendorQuery}; rollback;`,
+    ])
+    check(
+      'reverse charge gate notices when one of the five is marked domestic',
+      !flipped.failed && !flipped.output.includes('digitalocean'),
+      `flipping DigitalOcean to domestic did not change the answer, so the check is vacuous: ${flipped.output}`,
+    )
+  }
+}
+
+// 42x-42y. (M-VAT-03) The nightly report must be able to fail: a missing pair it cannot see, and an empty
+//          report it does not announce.
+//
+// Both halves of this unit's other acceptance are assertions about behaviour rather than about a constraint,
+// so neither can be probed with a known-bad row. They are probed the way `36j` probes the two Google crons:
+// by breaking the shipped code and requiring the test that claims to cover it to fail, **by name**.
+{
+  const QUERY = 'packages/db/src/queries/reverse-charge-exceptions.ts'
+  const JOB = 'apps/worker/src/jobs/reverse-charge-exceptions.ts'
+  const FIXTURES_ITEST = 'packages/fixtures/src/reverse-charge.itest.ts'
+  const JOB_ITEST = 'apps/worker/src/jobs/reverse-charge-exceptions.itest.ts'
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The missing-pair predicate, which is the report's whole reason for existing. Blinding it must fail the
+  // test that asserts the one seeded fixture bill is found.
+  const predicate =
+    "place_of_supply_rule = 'imported_services_reverse_charge' and declared_fils = 0"
+  const querySource = readFileSync(QUERY, 'utf8')
+  check(
+    'the reverse-charge scan still tests the missing-pair predicate this gate blinds',
+    querySource.includes(predicate),
+    `${QUERY} no longer contains the missing-pair predicate — the mutation below would be a no-op, and a ` +
+      'no-op mutation makes this gate report a pass for a defect it is not testing',
+  )
+  const blinded = withEditedFile(
+    QUERY,
+    (text) => text.split(predicate).join('false'),
+    () => runExpectingFailure('pnpm', integration(FIXTURES_ITEST)),
+  )
+  checkRejectedBy(
+    'the reverse-charge suite fails when the scan cannot see a missing pair',
+    blinded,
+    'finds the one missing pair and nothing else',
+  )
+
+  // And the other half: an empty report must still write an outbox event, because a job that published only
+  // on failure is indistinguishable from a job that has stopped running (docs/10 §6).
+  //
+  // The row is removed first. The integration suite runs before this gate in `pnpm verify`, so by now the
+  // day's event exists — and a mutated pass that published nothing would then still find the row from the
+  // clean run and this probe would report a pass for a defect it is not testing.
+  const ASOF = '2028-06-08'
+  const clearEvent = () =>
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? '',
+      '-c',
+      'delete from outbox_event where idempotency_key = ' +
+        `'vat.reverse_charge.exceptions_reported:${ASOF}'`,
+    ])
+  const publishCall = 'const eventId = await uow.publish({'
+  const jobSource = readFileSync(JOB, 'utf8')
+  check(
+    'the reverse-charge job still publishes unconditionally, which is what this gate removes',
+    jobSource.includes(publishCall),
+    `${JOB} no longer publishes unconditionally — the mutation below would be a no-op`,
+  )
+  clearEvent()
+  const silent = withEditedFile(
+    JOB,
+    (text) =>
+      text.replace(
+        publishCall,
+        'const eventId = exceptions.length === 0 ? null : await uow.publish({',
+      ),
+    () => runExpectingFailure('pnpm', integration(JOB_ITEST)),
+  )
+  checkRejectedBy(
+    'the reverse-charge job suite fails when an empty report writes no event',
+    silent,
+    'writes an outbox event on a pass that finds nothing',
+  )
+
+  // The control: the committed files pass. Without it a suite broken for any other reason satisfies both
+  // probes above, which is exactly how a gate comes to report a pass for a rule it has stopped testing.
+  clearEvent()
+  const cleanJob = run('pnpm', integration(JOB_ITEST))
+  check(
+    'the reverse-charge job suite passes on the committed job',
+    !cleanJob.failed,
+    `the committed nightly pass failed its own suite:\n${cleanJob.output}`,
+  )
+  const cleanQuery = run('pnpm', integration(FIXTURES_ITEST))
+  check(
+    'the reverse-charge suite passes on the committed scan',
+    !cleanQuery.failed,
+    `the committed scan failed its own suite:\n${cleanQuery.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

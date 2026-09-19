@@ -31,6 +31,7 @@ import {
 } from './jobs/google-connection-health.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
+import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
@@ -189,6 +190,27 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     handler: recurringCostHandler,
   },
   {
+    name: 'vat.reverse-charge-exceptions',
+    purpose:
+      'Scans every offshore bill in the last twelve months for a missing reverse-charge pair, a pair whose ' +
+      'two sides do not agree, and a pair the ledger does not carry — then writes an outbox event whether ' +
+      'or not it found any. The failure is silent: a bill with no reverse charge posts, balances and ' +
+      'reconciles to the supplier invoice, and understates the return (M-VAT-03, docs/04 §4).',
+    // 04:15 Asia/Dubai, after trading closes at 02:00 and after recurring-cost.check at 03:45 — that pass
+    // can POST a recurring offshore bill, and a report run before it would miss the bill it just created
+    // and then wait a day. The window ends on the business day that has just closed, so running inside
+    // trading hours would date the scan on a session that is not over yet.
+    cron: '15 4 * * *',
+    agent: 'reverse_charge_exceptions',
+    retryLimit: 3,
+    retryDelaySeconds: 60,
+    retryBackoff: true,
+    // One query over twelve months of bills plus one outbox insert. Five minutes is generous; a pass still
+    // running past it is blocked on a lock rather than slow, and reclaiming it is the right answer.
+    expireInSeconds: 300,
+    handler: reverseChargeHandler,
+  },
+  {
     name: 'google-connection.health',
     purpose:
       'Forces a token refresh, makes one cheap read per granted capability, diffs granted scopes ' +
@@ -313,6 +335,35 @@ async function recurringCostHandler(_data: never, context: JobContext): Promise<
   console.log(
     `recurring-cost.check ${result.asOf}: ${result.generated} period(s) generated, ` +
       `${result.raised.length} alert(s) raised`,
+  )
+}
+
+/**
+ * The reverse-charge exception report's pass.
+ *
+ * Thin, like the recurring register's: the business day and the window are resolved by
+ * `runReverseChargeExceptionReport`, which takes its instant as an argument so the integration suite can
+ * drive it at a frozen clock. What this wrapper adds is the connection and the log line — and the log line
+ * reports the count, which on a healthy ledger is zero every night. Zero is the evidence, not the silence:
+ * the outbox row is what a reader looks at, and one is written on every pass.
+ */
+async function reverseChargeHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The reverse-charge exception report ran before setMaintenanceSql() supplied a connection. run.ts ' +
+        'calls it before startWorkers().',
+    )
+  }
+  const result = await runReverseChargeExceptionReport(sql, context.now())
+  const summary =
+    result.exceptions.length === 0
+      ? 'no exceptions'
+      : result.exceptions.map((row) => `${row.reference} ${row.kind}`).join(', ')
+  console.log(
+    `vat.reverse-charge-exceptions ${result.from}..${result.asOf}: ` +
+      `${result.exceptions.length} exception(s) — ${summary}`,
   )
 }
 

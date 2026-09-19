@@ -106,6 +106,27 @@ export const bill = pgTable(
      * the business bore tax on and cannot claim is a disclosure rather than an absence.
      */
     blockedInputVatFils: bigint('blocked_input_vat_fils', { mode: 'bigint' }).notNull(),
+    /**
+     * The reverse-charge VAT this bill declares (0039): the sum of its imported-services lines.
+     *
+     * It is NOT inside `grossFils`. An offshore supplier charges no UAE VAT and is owed none, so the
+     * payable is the consideration and this tax is owed to the FTA — adding it to the gross would overpay
+     * every offshore vendor by 5% on the next payment run.
+     */
+    reverseChargeOutputVatFils: bigint('reverse_charge_output_vat_fils', {
+      mode: 'bigint',
+    }).notNull(),
+    /**
+     * The same VAT reclaimed, where the chart allows recovery on the category.
+     *
+     * Two columns rather than one net figure, which is the whole of M-VAT-03: where the input is
+     * recoverable the pair is equal and the net effect is nil, and a single figure of zero is
+     * indistinguishable from a bill that declared nothing at all. Below the output total by exactly the tax
+     * the business bore on blocked categories.
+     */
+    reverseChargeInputVatFils: bigint('reverse_charge_input_vat_fils', {
+      mode: 'bigint',
+    }).notNull(),
     /** A label. The `audit_event` row written in the same transaction carries the full actor (F06). */
     receivedBy: text('received_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
@@ -120,6 +141,10 @@ export const bill = pgTable(
     unique('bill_internal_number_unique').on(t.seriesCode, t.periodKey, t.number),
     index('bill_supplier_idx').on(t.supplierId, t.billDate),
     index('bill_due_date_idx').on(t.dueDate),
+    // The population the nightly exception report scans: an offshore bill accounting for no reverse charge.
+    index('bill_reverse_charge_missing_idx')
+      .on(t.supplierId, t.entryId)
+      .where(sql`${t.supplierResidency} = 'offshore' and ${t.reverseChargeOutputVatFils} = 0`),
     check('bill_gross_positive', sql`${t.grossFils} > 0`),
     check('bill_net_positive', sql`${t.netFils} > 0`),
     check('bill_gross_not_below_net', sql`${t.grossFils} >= ${t.netFils}`),
@@ -147,6 +172,18 @@ export const bill = pgTable(
       'bill_recoverable_needs_a_trn',
       sql`${t.recoverableInputVatFils} = 0 or ${t.supplierTrn} is not null`,
     ),
+    // The header cannot claim more reverse-charge VAT than it declares. NOT all-or-nothing here, unlike the
+    // line: one offshore invoice may legitimately mix a recoverable line with a blocked one.
+    check(
+      'bill_reverse_charge_input_not_above_output',
+      sql`${t.reverseChargeInputVatFils} <= ${t.reverseChargeOutputVatFils}`,
+    ),
+    // Asserted against the SNAPSHOT, so a later correction to the supplier cannot undo it: a reverse charge
+    // on a domestic supply would declare VAT the supplier already charged and then claim it twice.
+    check(
+      'bill_reverse_charge_needs_an_offshore_supplier',
+      sql`${t.reverseChargeOutputVatFils} = 0 or ${t.supplierResidency} = 'offshore'`,
+    ),
     check('bill_currency_check', sql`${t.currency} = 'AED'`),
     check('bill_number_check', sql`${t.number} >= 1`),
     check('bill_supplier_reference_check', sql`btrim(${t.supplierReference}) <> ''`),
@@ -166,13 +203,15 @@ export const bill = pgTable(
  * (0034), whose VAT is cost because UAE VAT denies recovery on the category — entertainment, or a staff
  * benefit the business is not obliged to provide (docs/04 §4, §7).
  *
- * The imported-services reverse charge (M-VAT-03) is still absent on purpose rather than declared and
- * unimplemented: it needs posting behaviour no code path here has, and a value the schema accepts but
- * nothing posts correctly would record a bill that looks complete and understates the return.
+ * `imported_services_reverse_charge` (0039) carries neither: an offshore supplier charges no UAE VAT, so
+ * the line's `grossFils === netFils`, and the business declares the tax itself and reclaims it where the
+ * category allows recovery. Two figures, on their own columns, never one — a single net figure is zero for
+ * every recoverable import, which is indistinguishable from a bill that declared nothing.
  */
 export const BILL_TAX_TREATMENTS = [
   'standard_recoverable',
   'blocked_not_recoverable',
+  'imported_services_reverse_charge',
   'no_trn_not_recoverable',
   'zero_rated',
   'exempt',
@@ -211,6 +250,19 @@ export const billLine = pgTable(
      * claim it.
      */
     blockedInputVatFils: bigint('blocked_input_vat_fils', { mode: 'bigint' }).notNull(),
+    /** The reverse-charge VAT this imported service declares: `Cr 2035`, whose `vat_box` is `reverse_charge`. */
+    reverseChargeOutputVatFils: bigint('reverse_charge_output_vat_fils', {
+      mode: 'bigint',
+    }).notNull(),
+    /**
+     * The same VAT reclaimed: `Dr 1080`, whose `vat_box` is `recoverable_input_tax`.
+     *
+     * Zero on a blocked or out-of-scope category, which is the one case a reverse charge costs real money —
+     * and the case a single net figure hides completely.
+     */
+    reverseChargeInputVatFils: bigint('reverse_charge_input_vat_fils', {
+      mode: 'bigint',
+    }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -227,10 +279,42 @@ export const billLine = pgTable(
       sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable')
             or ${t.grossFils} = ${t.netFils}`,
     ),
+    // An imported service carries a RATE although it carries no supplier VAT: the rate is what the
+    // self-accounted figure was computed at, and a filed line keeps the rate it was filed at.
     check(
       'bill_line_rate_matches_treatment',
-      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable')
+      sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable',
+                               'imported_services_reverse_charge')
             or ${t.vatRateBp} = 0`,
+    ),
+    check(
+      'bill_line_reverse_charge_carries_a_rate',
+      sql`${t.taxTreatment} <> 'imported_services_reverse_charge' or ${t.vatRateBp} > 0`,
+    ),
+    check(
+      'bill_line_reverse_charge_only_on_an_imported_service',
+      sql`${t.taxTreatment} = 'imported_services_reverse_charge'
+            or (${t.reverseChargeOutputVatFils} = 0 and ${t.reverseChargeInputVatFils} = 0)`,
+    ),
+    // The rule of 0039 at row level: an imported service that declares nothing posts, balances, reconciles
+    // to the supplier's invoice to the fils — and declares its output VAT nowhere.
+    check(
+      'bill_line_imported_service_accounts_for_output_vat',
+      sql`${t.taxTreatment} <> 'imported_services_reverse_charge'
+            or ${t.reverseChargeOutputVatFils} > 0`,
+    ),
+    // The rate applied to the consideration, rounded half-up in `numeric` so nothing is a float. The same
+    // rule as `reverseChargeOn` in @berelax/core, which packages/db may not import.
+    check(
+      'bill_line_reverse_charge_output_matches_the_rate',
+      sql`${t.reverseChargeOutputVatFils} = round(${t.netFils}::numeric * ${t.vatRateBp} / 10000)
+            or ${t.taxTreatment} <> 'imported_services_reverse_charge'`,
+    ),
+    // Recovery is a property of the account, so the input side is all of the output or none of it. Anything
+    // between is an apportionment nothing here computes and nobody could reproduce from the row.
+    check(
+      'bill_line_reverse_charge_input_is_all_or_nothing',
+      sql`${t.reverseChargeInputVatFils} in (0, ${t.reverseChargeOutputVatFils})`,
     ),
     // A blocked line is one the supplier DID charge VAT on. With no VAT there is nothing blocked, and
     // the treatment would be a preparer using it as a catch-all for "not recoverable".
@@ -254,6 +338,7 @@ export const billLine = pgTable(
     check(
       'bill_line_tax_treatment_check',
       sql`${t.taxTreatment} in ('standard_recoverable', 'blocked_not_recoverable',
+                               'imported_services_reverse_charge',
                                'no_trn_not_recoverable', 'zero_rated', 'exempt', 'out_of_scope')`,
     ),
   ],

@@ -42,9 +42,19 @@ import type { LocalDate } from '../time.ts'
  * thing to keep in agreement with the other two, and this module cannot see a supplier's TRN anyway:
  * what matters is the TRN **at the time of the bill**, which is a snapshot on the row.
  *
- * The imported-services reverse charge (M-VAT-03) is absent for the same reason the database vocabulary
- * omits it: a treatment nothing posts correctly would produce a bill that looks complete and understates
- * the return.
+ * ## The imported-services reverse charge is TWO figures
+ *
+ * `imported_services_reverse_charge` is the treatment for a supply an offshore supplier made to us. They
+ * charged no UAE VAT — they are not established here and issue no UAE tax invoice — so the line's
+ * `gross === net` and its `vat` is zero. The tax is not absent: on an imported service the recipient
+ * accounts for it, which produces an **output** figure (VAT declared as though we had charged ourselves)
+ * and an **input** figure (the same VAT reclaimed, where the category allows recovery). Both are carried,
+ * never one: a reverse charge recorded as a single net-zero figure declares nothing in the output box and
+ * claims nothing in the input box, which is wrong on both sides while the ledger still balances.
+ *
+ * The pair is supplied by the caller from `reverseChargeOn` in `../tax/reverse-charge.ts` rather than
+ * computed here, because the input side depends on the classification of the **account** — a chart fact
+ * this module is not given — and because the dependency runs `tax` -> `purchases` and not back.
  *
  * ## Blocked input VAT is charged, is not recoverable, and is cost
  *
@@ -98,6 +108,12 @@ export const BILL_TAX_TREATMENTS = [
   'zero_rated',
   /** An exempt supply: no VAT was chargeable. */
   'exempt',
+  /**
+   * A service imported from an offshore supplier: they charged no UAE VAT, and we account for it
+   * ourselves in two entries (docs/04 §4). The line carries no supplier VAT and its own
+   * {@link ReverseChargePair}.
+   */
+  'imported_services_reverse_charge',
   /** Outside the scope of UAE VAT, e.g. a supply made and consumed abroad. */
   'out_of_scope',
 ] as const
@@ -125,6 +141,37 @@ export function carriesVat(treatment: BillTaxTreatment): boolean {
   return isRecoverable(treatment) || isBlocked(treatment)
 }
 
+/**
+ * True for the one treatment where the business accounts for the VAT itself.
+ *
+ * Deliberately NOT part of {@link carriesVat}. The question `carriesVat` answers is "did the supplier
+ * charge VAT inside this gross", and for an imported service the answer is no — the gross is the
+ * consideration and the tax is owed to the FTA rather than to the vendor. Folding the reverse charge into
+ * `carriesVat` would carve the tax out of the amount the supplier is owed, and the payment run would then
+ * underpay every offshore vendor by 5%.
+ */
+export function selfAccountsVat(treatment: BillTaxTreatment): boolean {
+  return treatment === 'imported_services_reverse_charge'
+}
+
+/**
+ * The two sides of one reverse charge, as the caller derived them.
+ *
+ * Declared here, on the bill, and produced by `reverseChargeOn` in `../tax/reverse-charge.ts`: the shape
+ * belongs to the document and the arithmetic belongs to the tax module, and stating the type here is what
+ * keeps the import running one way.
+ *
+ * `inputVat` is the whole of `outputVat` or nothing. Recovery is a property of the account, so a line is
+ * coded either to a category that allows it or to one that does not; a partial claim would be an
+ * apportionment nothing in this system computes.
+ */
+export interface ReverseChargePair {
+  /** Declared: the VAT the business accounts for as though it had charged itself. */
+  readonly outputVat: Money
+  /** Reclaimed: equal to `outputVat` on a recoverable category, and zero on a blocked one. */
+  readonly inputVat: Money
+}
+
 export interface BillLineDraft {
   readonly description: string
   /** The expense this line is. A chart code, so a typo is a compile-time or FK failure, not a report. */
@@ -139,6 +186,14 @@ export interface BillLineDraft {
    * preparer who described the line wrongly, and it is the description that decides what is claimed.
    */
   readonly rateBp?: VatRateBp
+  /**
+   * The reverse charge this line self-accounts, from `reverseChargeOn` in `../tax/reverse-charge.ts`.
+   *
+   * Required for `imported_services_reverse_charge` and refused for every other treatment. Required
+   * rather than defaulted, because the input side depends on the account's recovery classification and a
+   * default would have to guess it — and the guess that claims the tax back is the over-claim.
+   */
+  readonly reverseCharge?: ReverseChargePair
 }
 
 export interface DerivedBillLine {
@@ -160,12 +215,26 @@ export interface DerivedBillLine {
    * one is tax the business bore and the other is tax that never existed.
    */
   readonly blockedInputVat: Money
+  /** The VAT this imported service declares. Zero for every other treatment. */
+  readonly reverseChargeOutputVat: Money
+  /** The same VAT reclaimed. Zero on a blocked or out-of-scope category, where the tax is a real cost. */
+  readonly reverseChargeInputVat: Money
   /**
-   * What the expense account is debited: the net, plus any blocked VAT.
+   * `reverseChargeOutputVat - reverseChargeInputVat`: the reverse-charge tax the business bore.
+   *
+   * Zero wherever the input is recoverable, which is why the obligation is the one most commonly missed —
+   * nothing is owed, so nothing prompts anybody. Non-zero is the case that costs money, and it is derived
+   * from the pair rather than stored, because a third figure is a third thing that can disagree with the
+   * two it is made of.
+   */
+  readonly reverseChargeBorneVat: Money
+  /**
+   * What the expense account is debited: the net, plus any blocked VAT, plus any reverse-charge VAT the
+   * business bore.
    *
    * Carried rather than recomputed by each caller, because "the expense is the net" is true for every
-   * treatment but one, and the caller that forgets the exception posts an entry that does not balance —
-   * or, worse, balances by dropping the blocked tax into the claim.
+   * treatment but two, and the caller that forgets an exception posts an entry that does not balance —
+   * or, worse, balances by dropping tax that cannot be reclaimed into the claim.
    */
   readonly expenseDebit: Money
 }
@@ -178,6 +247,80 @@ export interface DerivedBill {
   readonly recoverableInputVat: Money
   /** The period's non-recoverable disclosure figure, summed from the lines. */
   readonly blockedInputVat: Money
+  /** The reverse-charge VAT this bill declares: the output side, summed from the lines. */
+  readonly reverseChargeOutputVat: Money
+  /** The reverse-charge VAT it reclaims: the input side. Below the output by the tax it bore. */
+  readonly reverseChargeInputVat: Money
+  /** `output - input`. Zero where every reverse-charge line is recoverable, which is the usual case. */
+  readonly reverseChargeBorneVat: Money
+}
+
+/**
+ * The imported-services branch of {@link deriveBillLine}, extracted so neither is hard to read.
+ *
+ * Its own function because it is a different derivation, not a special case of the same one: there is no
+ * gross to split, the rate survives, and the two figures come from the caller rather than from arithmetic
+ * here.
+ */
+function deriveImportedServiceLine(draft: BillLineDraft): DerivedBillLine {
+  // The consideration IS the gross: the supplier charged nothing, so nothing is carved out of it and the
+  // payable to them is the whole amount. The rate survives, unlike every other non-VAT-bearing
+  // treatment, because it is what the self-assessed figure was computed at and a filed line keeps it.
+  const rateBp = draft.rateBp ?? UAE_STANDARD_VAT_BP
+  if (rateBp === 0) {
+    throw new AppError(
+      'validation',
+      `Bill line "${draft.description}" is an imported service at 0 bp, which would account for no ` +
+        'VAT at all. A supply outside the scope of UAE VAT is out_of_scope, not a nil reverse charge.',
+    )
+  }
+  const pair = draft.reverseCharge
+  if (pair === undefined) {
+    throw new AppError(
+      'validation',
+      `Bill line "${draft.description}" is an imported service and states no reverse charge. Derive ` +
+        'the pair with reverseChargeOn(): the output side is declared whatever the category, and the ' +
+        'input side is claimable only where the account allows recovery.',
+    )
+  }
+  if (pair.outputVat.fils <= 0) {
+    throw new AppError(
+      'validation',
+      `Bill line "${draft.description}" declares ${pair.outputVat.fils} fils of reverse-charge VAT. ` +
+        'An imported service that declares nothing is the missing pair this treatment exists to make ' +
+        'impossible.',
+    )
+  }
+  if (pair.inputVat.fils !== 0 && pair.inputVat.fils !== pair.outputVat.fils) {
+    throw new AppError(
+      'validation',
+      `Bill line "${draft.description}" declares ${pair.outputVat.fils} fils of reverse-charge VAT ` +
+        `and reclaims ${pair.inputVat.fils}. Recovery is a property of the account, so the input side ` +
+        'is the whole of the output or none of it; anything between is an apportionment nothing here ' +
+        'computes.',
+    )
+  }
+  const borne = subtract(pair.outputVat, pair.inputVat)
+  return {
+    description: draft.description,
+    account: draft.account,
+    treatment: draft.treatment,
+    rateBp,
+    gross: draft.gross,
+    net: draft.gross,
+    vat: ZERO_AED,
+    // Not `recoverableInputVat`: that claim rests on a supplier's tax invoice, and the document behind
+    // this one is our own self-assessment. Keeping them apart is what lets the no-TRN rule go on
+    // applying unchanged to the claim it was written for.
+    recoverableInputVat: ZERO_AED,
+    // Nor `blockedInputVat`, which is tax a supplier charged and we may not reclaim. Here nobody
+    // charged us: the borne figure is the difference between the two sides of our own pair.
+    blockedInputVat: ZERO_AED,
+    reverseChargeOutputVat: pair.outputVat,
+    reverseChargeInputVat: pair.inputVat,
+    reverseChargeBorneVat: borne,
+    expenseDebit: add(draft.gross, borne),
+  }
 }
 
 /**
@@ -200,12 +343,22 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
     )
   }
 
+  if (selfAccountsVat(draft.treatment)) return deriveImportedServiceLine(draft)
+
   if (!carriesVat(draft.treatment)) {
     if (draft.rateBp !== undefined && draft.rateBp !== 0) {
       throw new AppError(
         'validation',
         `Bill line "${draft.description}" is ${draft.treatment} but carries a rate of ` +
           `${draft.rateBp} bp. A line that cannot carry VAT carries none.`,
+      )
+    }
+    if (draft.reverseCharge !== undefined) {
+      throw new AppError(
+        'validation',
+        `Bill line "${draft.description}" is ${draft.treatment} and states a reverse charge. Only an ` +
+          'imported service self-accounts VAT: on a domestic supply it would declare tax the supplier ' +
+          'already charged and then claim it twice.',
       )
     }
     return {
@@ -218,8 +371,18 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
       vat: ZERO_AED,
       recoverableInputVat: ZERO_AED,
       blockedInputVat: ZERO_AED,
+      reverseChargeOutputVat: ZERO_AED,
+      reverseChargeInputVat: ZERO_AED,
+      reverseChargeBorneVat: ZERO_AED,
       expenseDebit: draft.gross,
     }
+  }
+  if (draft.reverseCharge !== undefined) {
+    throw new AppError(
+      'validation',
+      `Bill line "${draft.description}" is ${draft.treatment} and states a reverse charge. A supplier ` +
+        'who charged UAE VAT is registered here, so there is nothing to self-account.',
+    )
   }
 
   const rateBp = draft.rateBp ?? UAE_STANDARD_VAT_BP
@@ -245,6 +408,9 @@ export function deriveBillLine(draft: BillLineDraft): DerivedBillLine {
     // charged and may not be reclaimed — and a report that read `vat` would silently claim it.
     recoverableInputVat: blocked ? ZERO_AED : breakdown.vat,
     blockedInputVat: blocked ? breakdown.vat : ZERO_AED,
+    reverseChargeOutputVat: ZERO_AED,
+    reverseChargeInputVat: ZERO_AED,
+    reverseChargeBorneVat: ZERO_AED,
     // A blocked line's tax is part of the cost, so the expense carries the whole gross.
     expenseDebit: blocked ? breakdown.gross : breakdown.net,
   }
@@ -272,6 +438,12 @@ export function deriveBill(drafts: readonly BillLineDraft[]): DerivedBill {
     gross,
     recoverableInputVat: sum(lines.map((line) => line.recoverableInputVat)),
     blockedInputVat: sum(lines.map((line) => line.blockedInputVat)),
+    // Summed from the lines, both sides separately. Summing only the net effect would hide exactly the
+    // case that costs money: one blocked reverse-charge line inside a bill of recoverable ones nets to a
+    // figure that looks like the blocked line is not there.
+    reverseChargeOutputVat: sum(lines.map((line) => line.reverseChargeOutputVat)),
+    reverseChargeInputVat: sum(lines.map((line) => line.reverseChargeInputVat)),
+    reverseChargeBorneVat: sum(lines.map((line) => line.reverseChargeBorneVat)),
   }
 }
 
@@ -285,13 +457,28 @@ export interface BillEntryInput {
 }
 
 /**
- * The journal entry a bill posts: **Dr expense (net, plus any blocked VAT) per line, Dr recoverable
- * input VAT (total VAT recoverable), Cr trade payables (gross)**.
+ * The journal entry a bill posts: **Dr expense (net, plus any blocked VAT, plus any reverse-charge VAT
+ * borne) per line, Dr recoverable input VAT, Dr recoverable input VAT again for the reverse-charge claim,
+ * Cr reverse-charge VAT payable, Cr trade payables (gross)**.
  *
- * One credit, not one per line: the payable is what is owed to the supplier for this invoice, and a
- * per-line credit would make the payables ledger a list of line items nobody can pay against. One
- * VAT debit for the same reason — the claim is a period figure, and per-line debits would make the
- * VAT201 a thousand rows that have to be summed anyway.
+ * One credit to the payable, not one per line: the payable is what is owed to the supplier for this
+ * invoice, and a per-line credit would make the payables ledger a list of line items nobody can pay
+ * against. One VAT debit per kind for the same reason — the claim is a period figure, and per-line debits
+ * would make the VAT201 a thousand rows that have to be summed anyway.
+ *
+ * ## The reverse charge is two lines, and they are not netted
+ *
+ * The credit to `2035 Reverse-charge VAT payable` is the output side and the debit to `1080` is the input
+ * side, and they are posted separately even though they are equal on a recoverable category. Netting them
+ * to nothing would leave the output box empty and the input box short by the same amount: a return that is
+ * wrong twice and a ledger that balances. Where the category is blocked, the input side is absent
+ * altogether and the output stands against the expense — which is the one case a reverse charge costs
+ * money, and the reason the pair is never collapsed into a single figure.
+ *
+ * The reverse-charge claim is its own line rather than added to the ordinary one. The two cannot co-occur
+ * in practice — an offshore supplier holds no UAE TRN, so no line on its bill can be `standard_recoverable`
+ * — and keeping them apart is what lets the drill-down from the input box say which document supports
+ * which claim: a supplier's tax invoice, or our own self-assessment.
  *
  * The result is a draft, not a `JournalEntry`: pass it through `postEntry(draft, chart)` to get the
  * balance check and the chart validation. `postBill` in `@berelax/db` writes the same shape, because
@@ -315,6 +502,24 @@ export function billEntryDraft(input: BillEntryInput): EntryDraft {
       ),
     )
   }
+  if (input.bill.reverseChargeInputVat.fils > 0) {
+    lines.push(
+      debit(
+        ACCOUNTS.recoverableInputVat,
+        input.bill.reverseChargeInputVat,
+        'Reverse-charge input VAT on imported services',
+      ),
+    )
+  }
+  if (input.bill.reverseChargeOutputVat.fils > 0) {
+    lines.push(
+      credit(
+        ACCOUNTS.reverseChargeVatPayable,
+        input.bill.reverseChargeOutputVat,
+        'Reverse-charge output VAT on imported services',
+      ),
+    )
+  }
   lines.push(credit(ACCOUNTS.tradePayables, input.bill.gross, input.narrative))
   return {
     entryId: entryId(input.entryId),
@@ -328,13 +533,29 @@ export function billEntryDraft(input: BillEntryInput): EntryDraft {
 /**
  * The debit side of the entry, as a figure a caller can assert against without building the draft.
  *
- * Equal to the gross by construction for every mix of treatments: a line with no VAT has `net === gross`,
- * a recoverable line contributes its net plus its claim, and a blocked line contributes its net plus its
- * blocked tax — which is its gross. Exported because "it balances" is the property every later gate
- * asserts, and a test that re-adds the lines itself would be asserting its own arithmetic.
+ * Equal to the credit side by construction for every mix of treatments: a line with no VAT has
+ * `net === gross`, a recoverable line contributes its net plus its claim, a blocked line contributes its
+ * net plus its blocked tax — which is its gross — and an imported service contributes its net, the tax it
+ * bore and the tax it reclaimed, which together are its net plus the whole output side. The credit side is
+ * `gross + reverseChargeOutputVat`, so the two agree. Exported because "it balances" is the property every
+ * later gate asserts, and a test that re-adds the lines itself would be asserting its own arithmetic.
  */
 export function billDebitTotal(bill: DerivedBill): Money {
-  return add(add(bill.net, bill.recoverableInputVat), bill.blockedInputVat)
+  return add(
+    add(add(bill.net, bill.recoverableInputVat), bill.blockedInputVat),
+    bill.reverseChargeOutputVat,
+  )
+}
+
+/**
+ * The credit side: the payable plus the reverse-charge VAT declared.
+ *
+ * Stated because a reverse charge is the first thing a bill credits that is not owed to the supplier, and a
+ * caller comparing {@link billDebitTotal} against the gross alone would find every offshore bill out of
+ * balance by exactly the tax it declared.
+ */
+export function billCreditTotal(bill: DerivedBill): Money {
+  return add(bill.gross, bill.reverseChargeOutputVat)
 }
 
 /** The account a recoverable claim is debited to. Exported so a caller need not spell '1080'. */

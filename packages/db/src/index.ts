@@ -87,6 +87,13 @@ export {
   recurringCostSchedule,
 } from './queries/recurring-cost-forecast.ts'
 export {
+  REVERSE_CHARGE_EXCEPTION_KINDS,
+  type ReverseChargeException,
+  type ReverseChargeExceptionKind,
+  type ReverseChargePeriod,
+  reverseChargeExceptions,
+} from './queries/reverse-charge-exceptions.ts'
+export {
   isBalanced,
   type TrialBalance,
   type TrialBalanceRow,
@@ -334,11 +341,13 @@ export {
   type BillTaxTreatment,
   type BillToPost,
   findSupplierByCode,
+  IMPORTED_SERVICES_TREATMENT,
   INPUT_VAT_RECOVERABILITIES,
   type InputVatRecoverability,
   isBlockedRecoverabilityRefusal,
   isDuplicateSupplierReference,
   isInputVatWithoutTrn,
+  isReverseChargeRefusal,
   PLACE_OF_SUPPLY_RULES,
   type PlaceOfSupplyRule,
   type PostedBill,
@@ -347,6 +356,7 @@ export {
   postBill,
   purchaseError,
   RECOVERABLE_INPUT_VAT_ACCOUNT_CODE,
+  REVERSE_CHARGE_VAT_PAYABLE_ACCOUNT_CODE,
   readBill,
   recordSupplier,
   SUPPLIER_RESIDENCIES,
@@ -401,6 +411,10 @@ export {
 } from './settings/availability.ts'
 export {
   readSetting,
+  // Exported for `packages/fixtures/src/load.ts`, which seeds the settings table before overriding three
+  // of its values: every key in the registry is a row nothing else creates, and the two itests that
+  // called this directly were the only reason any app_setting row existed on a fresh database.
+  seedSettingDefaults,
   type UnconfirmedAssumptionRow,
   unconfirmedAssumptionRows,
   type WriteResult,
@@ -408,6 +422,6 @@ export {
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
-// 33 and 35 are units in flight alongside this one; 34 is 0034_blocked_input_vat.sql and 36 is
-// 0036_setting_justification.sql.
-export const SCHEMA_VERSION = 36 as const
+// 37 and 38 are units in flight alongside this one; 36 is 0036_setting_justification.sql and 39 is
+// 0039_reverse_charge.sql.
+export const SCHEMA_VERSION = 39 as const
