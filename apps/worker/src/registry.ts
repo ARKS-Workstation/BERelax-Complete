@@ -15,6 +15,7 @@
  * `agent_definition` row a job belongs to, and its registry-completeness gate enumerates
  * `cronRegistrations()` and fails naming any cron with no such row.
  */
+import { type Config, loadConfig } from '@berelax/config'
 import { instantFromIso } from '@berelax/core'
 import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
@@ -22,6 +23,12 @@ import type { Job, PgBoss } from 'pg-boss'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
+import {
+  GOOGLE_HEALTH_AGENT,
+  GOOGLE_LIVENESS_AGENT,
+  googleHealthHandler,
+  googleLivenessHandler,
+} from './jobs/google-connection-health.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 
@@ -181,6 +188,48 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     expireInSeconds: 300,
     handler: recurringCostHandler,
   },
+  {
+    name: 'google-connection.health',
+    purpose:
+      'Forces a token refresh, makes one cheap read per granted capability, diffs granted scopes ' +
+      'against required, re-resolves the stored placeId and compares the title and postal address ' +
+      'against what the owner confirmed, reads Voice of Merchant, and writes last_ok_at plus ' +
+      'per-capability health. Every invalidation in docs/10 §4 is silent; this is the thing that ' +
+      'looks (G-CONN-06).',
+    // 03:00 Asia/Dubai. After trading closes at 02:00 and at the same hour as audit.ensure-partitions,
+    // which is the quietest point in the day — and a forced token refresh holds an advisory lock for the
+    // length of an HTTPS call to Google, which is not something to do while the booking flow is busy.
+    // Asia/Dubai is UTC+4 with no DST, so this is 23:00 UTC every night of the year; `registerJobs`
+    // passes the zone to pg-boss rather than this file pre-computing an offset.
+    cron: '0 3 * * *',
+    agent: GOOGLE_HEALTH_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 120,
+    retryBackoff: true,
+    // One forced refresh plus one read per capability per connection, each with a 10-second lock
+    // timeout. Ten minutes is generous for the single connection this business has; a pass still running
+    // past it is blocked rather than slow, and reclaiming it is the right answer.
+    expireInSeconds: 600,
+    handler: googleHealthHandler_,
+  },
+  {
+    name: 'google-connection.liveness',
+    purpose:
+      'One cheap authenticated call per connection, so a revoked or expired grant is found within the ' +
+      'hour rather than at 03:00 the following morning. Search Console first, because it is not behind ' +
+      'the Business Profile application (G-CONN-06, docs/10 §9).',
+    // Minute 0 of every hour. A separate agent from the deep check on purpose: sharing one heartbeat
+    // would keep it minutes old for ever and make a dead daily pass invisible (migration 0033).
+    cron: '0 * * * *',
+    agent: GOOGLE_LIVENESS_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 30,
+    retryBackoff: true,
+    // One read per connection and no forced refresh. A minute is ample; the next pass is an hour away,
+    // so a run that outlives its window is better reclaimed than left holding a connection.
+    expireInSeconds: 120,
+    handler: googleLivenessHandler_,
+  },
   // A queue with no cron, and therefore no agent. W-SYS-05: a derivative build is announced by the
   // upload that produced the original, so the thing being watched is the request that accepted the file.
   BUILD_DERIVATIVES_JOB,
@@ -212,6 +261,34 @@ async function watchdogHandler(_data: never, context: JobContext): Promise<void>
       `agent watchdog raised ${result.raised.length} alert(s): ${result.raised.join(', ')}`,
     )
   }
+}
+
+/**
+ * The two Google passes' handlers.
+ *
+ * Each loads its own configuration and opens its own connection rather than using `maintenanceSql`, and
+ * that is deliberate: a forced token refresh holds an advisory transaction lock for the duration of an
+ * HTTPS call to Google, and a four-connection pool shared with the audit partition job is how one slow
+ * Google call becomes `53300 too_many_connections` for something unrelated (G-CONN-04's `lock_timeout`
+ * note). The instant comes from the job context so the pass never reads the clock itself.
+ */
+async function googleHealthHandler_(_data: never, context: JobContext): Promise<void> {
+  await googleHealthHandler(googleConfig(), context.now(), context.jobId)
+}
+
+async function googleLivenessHandler_(_data: never, context: JobContext): Promise<void> {
+  await googleLivenessHandler(googleConfig(), context.now(), context.jobId)
+}
+
+/**
+ * Configuration for the Google handlers.
+ *
+ * Read per run rather than captured at import, because `GOOGLE_PROVIDER` decides whether this pass talks
+ * to a stand-in — and a value captured at boot would survive a restart-free configuration change while
+ * the log line went on claiming a real check.
+ */
+function googleConfig(): Config {
+  return loadConfig()
 }
 
 /**

@@ -153,6 +153,51 @@ export async function listLocationsUnder(
 }
 
 /**
+ * One location as the daily health check needs it: no account, because it is not enumerating.
+ *
+ * A separate return shape from `EnumeratedLocation`, and the difference is the point. The picker found a
+ * location *under an account* and has to persist which one, because the legacy v4 reviews path is built
+ * from it. The health check already has the account — it is in the stored `resource_ref` — and is asking
+ * a different question: *is the listing behind this reference still the listing the owner confirmed.*
+ * Reusing the enumerated shape would have meant fabricating a `GbpAccount` to flatten against, and the
+ * `accountName` and `type` on it would have been invented values in a structure that also carries real
+ * ones (the brief's rule 15).
+ */
+export interface LocationSnapshot {
+  /** `locations/{location}`, as returned. */
+  readonly location: string
+  readonly title: string
+  readonly placeId: string
+  readonly address: string
+  readonly websiteUri: string | null
+}
+
+/**
+ * Reads one location for comparison against what the owner confirmed.
+ *
+ * The mask is a required parameter that accepts `undefined` for the same reason `listLocationsUnder`'s
+ * is: forgetting it must be a compile error, and passing a bad one must be a refusal *before* the
+ * transport is touched — and a non-nullable parameter would put that refusal beyond the reach of any
+ * test. Without `metadata` in the mask Google answers 200 with no `placeId` at all, and a drift check
+ * comparing `undefined` against the stored id would report every listing as moved.
+ */
+export async function readLocationSnapshot(
+  transport: Pick<BusinessProfileProvider, 'getLocation'>,
+  locationName: string,
+  readMask: readonly string[] | undefined,
+): Promise<LocationSnapshot> {
+  assertReadMask('locations.get', readMask)
+  const location = await transport.getLocation({ name: locationName, readMask })
+  return {
+    location: location.name,
+    title: location.title,
+    placeId: location.metadata.placeId,
+    address: oneLineAddress(location.storefrontAddress),
+    websiteUri: location.websiteUri ?? null,
+  }
+}
+
+/**
  * Re-reads one location, so a selection is confirmed against Google rather than against a stale list.
  *
  * The list the owner clicked may be seconds or minutes old, and a listing can be merged or moved between

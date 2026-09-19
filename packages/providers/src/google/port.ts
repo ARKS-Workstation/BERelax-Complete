@@ -154,6 +154,26 @@ export interface LocationsGetRequest {
   readonly readMask?: readonly string[]
 }
 
+/**
+ * Verifications v1 — what Google will let this listing actually do.
+ *
+ * *"Voice of Merchant"* is Google's own name for the state, and reading it is the only clean
+ * programmatic answer to the question docs/10 §7 says most implementations cannot answer: **why are my
+ * writes failing when my token is fine.** A suspended or unverified listing accepts the OAuth grant,
+ * accepts the read, and refuses the reply — and every other signal available is a 403 indistinguishable
+ * from a quota of zero.
+ *
+ * Two booleans rather than one, because they fail differently. `hasVoiceOfMerchant` false means the
+ * listing is not verified or is suspended, which is something the owner fixes in the Business Profile
+ * and no approval from Google will change. `hasBusinessAuthority` false means the *connected account*
+ * is not trusted to act for the business, which is fixed by a role change on the listing. Collapsing
+ * them would send the owner to verify a listing that is already verified.
+ */
+export interface VoiceOfMerchantState {
+  readonly hasVoiceOfMerchant: boolean
+  readonly hasBusinessAuthority: boolean
+}
+
 export interface BusinessProfileProvider {
   readonly name: string
   /**
@@ -168,6 +188,8 @@ export interface BusinessProfileProvider {
   listLocations(request: LocationsListRequest): Promise<readonly GbpLocation[]>
   /** Business Information v1 `locations.get`. Also `readMask`-mandatory. */
   getLocation(request: LocationsGetRequest): Promise<GbpLocation>
+  /** Verifications v1 `locations.getVoiceOfMerchantState`. Cheap, and in MVP (docs/10 §7). */
+  getVoiceOfMerchantState(locationName: string): Promise<VoiceOfMerchantState>
   listReviews(locationId: string): Promise<readonly Review[]>
   /** Replying twice overwrites; there is no separate create and update. */
   updateReply(args: { locationId: string; reviewId: string; comment: string }): Promise<void>

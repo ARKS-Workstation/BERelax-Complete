@@ -43,4 +43,5 @@ export type {
   SearchConsoleProvider,
   SearchConsoleSite,
   SitePermissionLevel,
+  VoiceOfMerchantState,
 } from './port.ts'

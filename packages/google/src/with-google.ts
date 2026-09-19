@@ -186,10 +186,21 @@ export type WithGoogleOutcome<T> =
  * make the only path to a selection unreachable. It is spelled as a named union rather than a boolean so
  * the call site reads as a claim about the call, and the default is the strict value, which is what keeps
  * the guarantee for everybody else.
+ *
+ * G-CONN-06's hourly liveness probe is the second caller of `enumerating`, and for the same reason
+ * rather than for convenience: it asks *"is this grant alive"*, which is a question about the account.
+ * Requiring a resource would make it answer `ResourceNotSelected` for a connection whose token is
+ * perfectly alive and whose listing simply has not been picked yet — and the one thing the probe exists
+ * to do is notice a dead token within the hour.
+ *
+ * **`refresh: 'forced'`.** Added by G-CONN-06, with one caller: the daily deep check. See
+ * `AccessTokenOptions.force` in `token-refresh.ts` for why a cached token cannot answer the question that
+ * check exists to ask.
  */
 export interface WithGoogleOptions {
   readonly connectionId?: string
   readonly resource?: 'required' | 'enumerating'
+  readonly refresh?: 'when_due' | 'forced'
 }
 
 interface ResolvedTarget {
@@ -348,6 +359,7 @@ export async function withGoogle<T>(
   emit('info', 'google call started', null, {
     degradesTo: declaration.degradesTo,
     resource: options.resource ?? 'required',
+    refresh: options.refresh ?? 'when_due',
   })
   deps.errors?.addBreadcrumb({
     category: 'google',
@@ -384,6 +396,7 @@ export async function withGoogle<T>(
         lock: deps.lock,
       },
       target.connectionId,
+      { force: options.refresh === 'forced' },
     )
     const value = await body({
       accessToken: grant.accessToken,

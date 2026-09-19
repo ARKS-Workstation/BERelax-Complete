@@ -135,3 +135,18 @@ export function isDeclaredCapability(
 ): capability is DeclaredCapability {
   return BY_CAPABILITY.has(capability)
 }
+
+/**
+ * The capabilities some consumer has declared, as a list.
+ *
+ * Derived from the table rather than written out, so it cannot fall behind it. Read by G-CONN-06: a
+ * consent registers a row for **every** capability in `GOOGLE_CAPABILITIES`, including
+ * `gbp_performance`, which no consumer declares and for which there is no client at all — docs/10 §7
+ * records that even the Performance API's hostname is unresolved. Its health is therefore permanently
+ * `unknown`, and a derivation that counted that as a failing capability would put an amber badge on a
+ * perfectly healthy connection forever, for a capability nothing reads. See
+ * `capabilityStatesForDisplay` in `@berelax/core`.
+ */
+export function declaredCapabilities(): readonly DeclaredCapability[] {
+  return [...BY_CAPABILITY.keys()] as readonly DeclaredCapability[]
+}

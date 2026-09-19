@@ -31,6 +31,11 @@ import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patte
 import type { Metadata } from 'next'
 import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import {
+  MotionGallery,
+  type MotionGalleryCopy,
+  MotionHeader,
+} from '../../../_dev/motion-gallery.tsx'
 import { NAP_COPY_EN } from '../../../_dev/nap-copy.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
 import { RouteNav } from '../../../_routes/route-nav.tsx'
@@ -152,12 +157,44 @@ const PRIMITIVE_COPY: PrimitiveGalleryCopy = {
   },
 }
 
+/**
+ * The motion system's copy. W-SYS-04.
+ *
+ * The price is the 60-minute hot oil treatment from docs/13 §4, formatted rather than typed, because the
+ * element it sits in is the one the reduced-motion cross-fade is proved against and a number that has
+ * changed is the commonest thing a cross-fade communicates.
+ */
+const MOTION_COPY: MotionGalleryCopy = {
+  brand: 'BE RELAX',
+  scrolled: 'Scroll: the header condenses',
+  heading: 'Motion',
+  body:
+    'Five durations, four easings, three movement distances and one stagger, all of them tokens. ' +
+    'Movement is a distance multiplied by a direction, so nothing is authored twice for Arabic; how ' +
+    'long a movement takes is a function of how far it goes; and reduced motion is one override in ' +
+    'the token layer rather than a branch in each component.',
+  groups: {
+    small: 'Six siblings, stepping 40ms',
+    large: 'Ten siblings, stepping 24ms',
+    capped: 'Fourteen siblings, which animate as one group',
+  },
+  row: 'Row',
+  crossfade:
+    'Movement is zero under reduced motion and this cross-fade is not: a price that changes without ' +
+    'one is a price nobody saw change.',
+  price: formatMoney(aed(250)),
+  reveal:
+    'This paragraph arrived on a scroll-driven timeline — no JavaScript, no observer, and nothing ' +
+    'above the fold at opacity zero.',
+}
+
 export default async function KitchenSinkPage() {
   // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
   const facts = await readFactsForPage()
   return (
     <main>
       <DesignSystemStyles />
+      <MotionHeader copy={MOTION_COPY} />
       <RouteNav id="kitchen-sink" locale="en" />
 
       <Section as="header">
@@ -354,6 +391,17 @@ export default async function KitchenSinkPage() {
             properties and neither has been confirmed; a block that picked one would be
             indistinguishable from a block that knew.
           </Measure>
+        </Grid>
+      </Section>
+
+      <Section surface="sand" id="motion">
+        <Grid>
+          <Measure cap="h2" as="h2" className="text-xl be-section__heading">
+            {MOTION_COPY.heading}
+          </Measure>
+          <GridCell span="wide">
+            <MotionGallery copy={MOTION_COPY} />
+          </GridCell>
         </Grid>
       </Section>
 

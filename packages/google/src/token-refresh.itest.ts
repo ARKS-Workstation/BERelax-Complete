@@ -182,6 +182,14 @@ function rig(
     readonly rotatesRefreshToken?: boolean
     /** Replaces the store `withGoogle` reads through. Used to hold every reader on the stale row. */
     readonly store?: WithGoogleDeps['store']
+    /**
+     * Arms the OAuth endpoint itself, rather than the API call.
+     *
+     * Added by G-CONN-06. Every test in this file until then armed only `api`, so the refresh ALWAYS
+     * succeeded and the failure path inside the lock had never run — which is how the rollback defect the
+     * last describe block in this file is about survived a green suite.
+     */
+    readonly oauthFailures?: FailureScript
   } = {},
 ): Rig {
   const log = createCallLog(() => NOW_ISO)
@@ -205,9 +213,9 @@ function rig(
       lock: options.lock === undefined ? counted : options.lock(counted),
       oauth: createFakeGoogleOAuth({
         log,
-        // A separate script would be needed to fail a refresh; every test here wants the refresh to
-        // succeed and arms only the API call.
-        failures: new FailureScript(),
+        // Most tests here want the refresh to succeed and arm only the API call; `oauthFailures` is how
+        // the one that needs the refresh itself to fail gets it.
+        failures: options.oauthFailures ?? new FailureScript(),
         now: () => NOW_ISO,
         sub: SUB,
         ...(options.rotatesRefreshToken === undefined
@@ -714,5 +722,71 @@ describe('acceptance — the token reaches no job payload', () => {
     expect(await jobPayloadHits(REFRESH_TOKEN)).toBe(1)
     await sql`delete from pgboss.job where id = ${jobId}::uuid`
     expect(await jobPayloadHits(REFRESH_TOKEN)).toBe(0)
+  })
+})
+
+describe('acceptance — a refresh that dies inside the lock still records why', () => {
+  /**
+   * The defect this block exists for, found by G-CONN-06's day-eight Testing-expiry test.
+   *
+   * `refreshAccessToken`'s failure path writes the two rows that ARE the detection of a dead grant: the
+   * status moving to `needs_reauth` with `status_reason = invalid_grant`, and the append-only
+   * `reauth_required` event the connection panel renders and the owner's email is deduplicated against.
+   * Both are written through the store scoped to the locking transaction — so when the failure was
+   * rethrown out of `sql.begin`, PostgreSQL rolled the transaction back and took both with it.
+   *
+   * The consequence was not subtle. A revoked grant, or a Testing-status client on day seven, would be
+   * discovered by every pass and forgotten by every pass: the row stayed `active`, no event was written,
+   * no email was owed, and the only symptom was every Google capability degrading for ever with nothing
+   * anywhere saying why. The whole of docs/10 §4's detection-and-recovery section depended on rows that
+   * were being rolled back.
+   *
+   * It survived a green suite because no test in this file had ever failed the **refresh** — every one of
+   * them armed the API call instead, which happens after the token is in hand.
+   */
+  it('commits needs_reauth and the reauth_required event, then propagates the failure', async () => {
+    // An expired token, so a refresh is genuinely due and the locked path is the one taken.
+    const connectionId = await seed(null)
+    const { deps, profile } = rig({
+      oauthFailures: new FailureScript().failAlways('invalid_grant'),
+    })
+
+    const outcome = await withGoogle(deps, 'gbp_reviews', async () =>
+      profile.listReviews(RESOURCE.location),
+    )
+    // The consumer still degrades, which is the chokepoint's job and was never in question.
+    if (outcome.kind !== 'degraded') throw new Error('expected the declared degraded mode')
+    expect(outcome.cause).toBe('GoogleReauthRequired')
+
+    // And the evidence survived the failure, which is what was broken.
+    const stored = await store.load(connectionId)
+    expect(stored?.status).toBe('needs_reauth')
+    expect(stored?.statusReason).toBe('invalid_grant')
+
+    const [reauth] = await sql<{ n: string }[]>`
+      select count(*)::text as n from google_connection_events
+      where connection_id = ${connectionId} and event = 'reauth_required'
+    `
+    expect(Number(reauth?.n ?? '0')).toBe(1)
+    // And nothing claimed a successful refresh happened.
+    expect(await refreshedEvents(connectionId)).toBe(0)
+  })
+
+  it('and the control: a refresh that succeeds writes neither of those rows', async () => {
+    // Without this, the assertions above are satisfied by a store that writes `needs_reauth`
+    // unconditionally — which would mark every working connection dead on every pass.
+    const connectionId = await seed(null)
+    const { deps, profile } = rig()
+    const outcome = await withGoogle(deps, 'gbp_reviews', async () =>
+      profile.listReviews(RESOURCE.location),
+    )
+    expect(outcome.kind).toBe('ok')
+    expect((await store.load(connectionId))?.status).toBe('active')
+    const [reauth] = await sql<{ n: string }[]>`
+      select count(*)::text as n from google_connection_events
+      where connection_id = ${connectionId} and event = 'reauth_required'
+    `
+    expect(Number(reauth?.n ?? '0')).toBe(0)
+    expect(await refreshedEvents(connectionId)).toBe(1)
   })
 })

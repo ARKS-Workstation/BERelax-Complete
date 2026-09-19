@@ -7413,6 +7413,643 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 38a-38q. (W-SYS-04) The motion system: one reduced-motion override, two scroll-driven effects, two
+//           dynamically imported islands, and an island budget measured out of the real build.
+//
+//      Every rule here guards a defect that is invisible in a diff and invisible on the page.
+//
+//      A second `prefers-reduced-motion` block is the per-component branch docs/08 §5 exists to prevent,
+//      and nobody reviews with the setting on. A third `animation-timeline` is a page whose every scroll
+//      frame recomputes another effect. An island imported statically still works — it is simply in the
+//      importer's chunk, which is the one thing splitting it was for. And an island in the shared layout
+//      puts an animation runtime on every route in the application, including the ones that animate
+//      nothing.
+//
+//      The budget cases are the ADR 0003 ones. A budget over a module the build does not contain measures
+//      zero bytes and passes forever, so `[missing-client-module]` is asserted to fire; and the island
+//      measurement is asserted to be a real, non-zero number by lowering the budget under it.
+{
+  const BUDGETS = ['exec', 'tsx', 'scripts/check-budgets.mjs']
+  const budgetsPath = 'build/budgets.json'
+  const scalePath = 'packages/ui/src/tokens/scale.ts'
+  const motionCss = 'packages/ui/src/motion/tokens.css'
+
+  const editBudget = (id, change) => (text) => {
+    const config = JSON.parse(text)
+    change(config.budgets.find((budget) => budget.id === id))
+    return `${JSON.stringify(config, null, 2)}\n`
+  }
+
+  // 38a. A second reduced-motion block, in the shape it actually arrives: a component deciding for
+  //      itself. The override is a token override or it is nothing.
+  {
+    const result = withFixture(
+      'packages/ui/src/__gate_fixture__.css',
+      [
+        '@media (prefers-reduced-motion: reduce) {',
+        '  .gate-fixture { transition: none; animation: none; }',
+        '}',
+      ].join('\n'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects a second prefers-reduced-motion block',
+      result,
+      '[reduced-motion-belongs-to-the-token-layer]',
+    )
+  }
+
+  // 38b. And the other direction, which a "at most one" rule would miss entirely: the override deleted.
+  //      Every duration and every distance is then back in force for a reader who asked for none, and the
+  //      only symptom is motion nobody on the team can see.
+  {
+    const result = withEditedFile(
+      scalePath,
+      (text) =>
+        text.replace('@media (prefers-reduced-motion: reduce) {', '@media (min-width: 0px) {'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects the reduced-motion override having been removed',
+      result,
+      '[reduced-motion-belongs-to-the-token-layer]',
+    )
+  }
+
+  // 38c. A third scroll-driven effect. docs/08 §7 says exactly two exist, and the cost of a third is not
+  //      the declaration — it is another effect recomputed on every frame of every scroll.
+  {
+    const result = withFixture(
+      'packages/ui/src/__gate_fixture__.css',
+      [
+        '.gate-fixture {',
+        '  animation: gate-fixture-parallax linear both;',
+        '  animation-timeline: scroll();',
+        '}',
+      ].join('\n'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects a third scroll-driven effect',
+      result,
+      '[at-most-two-scroll-driven-effects]',
+    )
+    check(
+      'layout gate names the file the third effect is in',
+      result.output.includes('__gate_fixture__.css'),
+      result.output,
+    )
+  }
+
+  // 38d. The same rule with the count intact: one of the two effects moved out of the motion stylesheet,
+  //      where the two can be counted at all. The fixture takes the header's declaration so the total
+  //      stays at two and only the location rule can fire.
+  {
+    const result = withEditedFile(
+      motionCss,
+      (text) => text.replace('    animation-timeline: scroll();\n', ''),
+      () =>
+        withFixture(
+          'packages/ui/src/__gate_fixture__.css',
+          '.gate-fixture { animation-timeline: scroll(); }',
+          () => run('node', LAYOUT),
+        ),
+    )
+    checkRejectedBy(
+      'layout gate rejects a scroll-driven effect outside the motion stylesheet',
+      result,
+      '[at-most-two-scroll-driven-effects]',
+    )
+  }
+
+  // 38e. An island imported statically. It still renders; it is just no longer code-split, and the bytes
+  //      move into whatever chunk the importer landed in.
+  {
+    const result = withFixture(
+      'apps/web/app/_dev/__gate_fixture__.tsx',
+      [
+        "import RevealFallback from '@berelax/ui/motion/reveal'",
+        'export const Fixture = RevealFallback',
+      ].join('\n'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects a static import of a motion island',
+      result,
+      '[motion-island-must-be-a-dynamic-client-module]',
+    )
+  }
+
+  // 38f. An island with no `'use client'`. A server component whose effect never runs, and the page looks
+  //      exactly the same as one whose fallback works.
+  {
+    const result = withFixture(
+      'packages/ui/src/motion/__gate_fixture__.tsx',
+      ['export default function GateFixture() {', '  return null', '}'].join('\n'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects a motion island without a use client directive',
+      result,
+      '[motion-island-must-be-a-dynamic-client-module]',
+    )
+  }
+
+  // 38g. A third island, correctly written. docs/08 §7 allows two, and `build/budgets.json` measures the
+  //      two it declares — a third is a chunk nothing has a budget for.
+  {
+    const result = withFixture(
+      'packages/ui/src/motion/__gate_fixture__.tsx',
+      ["'use client'", '', 'export default function GateFixture() {', '  return null', '}'].join(
+        '\n',
+      ),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects a third motion island',
+      result,
+      '[at-most-two-motion-islands]',
+    )
+  }
+
+  // 38h. The animation library imported by something that is not an island. It is 32-36KB gzip, and
+  //      everything else on this site animates in CSS at no cost at all.
+  {
+    const result = withFixture(
+      'apps/web/app/_dev/__gate_fixture__.tsx',
+      ["import { animate } from 'motion'", 'export const move = animate'].join('\n'),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects the motion library outside a client island',
+      result,
+      '[motion-library-only-in-a-client-island]',
+    )
+  }
+
+  // 38i. The control for 38a-38h, and it is the one that would catch a rule that had started rejecting
+  //      everything: the tree as it stands has one override, two effects and two islands, and says so.
+  {
+    const clean = run('node', LAYOUT)
+    check('layout rules pass on this tree', !clean.failed, clean.output)
+    check(
+      'layout gate reports the two scroll-driven effects and the two islands it found',
+      clean.output.includes('2 scroll-driven effects ([data-reveal], .be-header)') &&
+        clean.output.includes('2 dynamically imported motion island(s)'),
+      clean.output,
+    )
+  }
+
+  // 38j. An island reached from a layout primitive. Every page composes those, so the island would be in
+  //      every page's graph.
+  {
+    const result = withFixture(
+      'packages/ui/src/layout/__gate_fixture__.tsx',
+      [
+        "import RevealFallback from '@berelax/ui/motion/reveal'",
+        'export const Fixture = RevealFallback',
+      ].join('\n'),
+      () =>
+        run('pnpm', [
+          'exec',
+          'depcruise',
+          '--config',
+          '.dependency-cruiser.cjs',
+          'packages',
+          'apps',
+        ]),
+    )
+    checkRejectedBy(
+      'boundary gate rejects a motion island imported by a layout primitive',
+      result,
+      'no-motion-in-the-shared-layout',
+    )
+  }
+
+  // 38k. The library in the document shell, which every route in the application renders. Two spellings
+  //      resolve here — an installed package into node_modules and an uninstalled one to its bare name —
+  //      and this is the uninstalled one, which is the state of the repository today.
+  {
+    const result = withFixture(
+      'apps/web/app/_document/__gate_fixture__.ts',
+      ["import { animate } from 'motion'", 'export const move = animate'].join('\n'),
+      () =>
+        run('pnpm', [
+          'exec',
+          'depcruise',
+          '--config',
+          '.dependency-cruiser.cjs',
+          'packages',
+          'apps',
+        ]),
+    )
+    checkRejectedBy(
+      'boundary gate rejects the motion library in the document shell',
+      result,
+      'no-motion-in-the-shared-layout',
+    )
+  }
+
+  // 38l. The control for 38j and 38k. The shell does import from the motion system — `motionBootstrapScript`,
+  //      a pure function returning the inline script that decides the fallback before the first paint — and
+  //      a rule that banned the whole directory would have made that impossible while proving nothing
+  //      extra. A string is not a bundle.
+  {
+    const result = withFixture(
+      'apps/web/app/_document/__gate_fixture__.ts',
+      [
+        "import { motionBootstrapScript } from '@berelax/ui'",
+        'export const script = motionBootstrapScript()',
+      ].join('\n'),
+      () =>
+        run('pnpm', [
+          'exec',
+          'depcruise',
+          '--config',
+          '.dependency-cruiser.cjs',
+          'packages',
+          'apps',
+        ]),
+    )
+    check(
+      'boundary gate allows the shell to reach the motion bootstrap string',
+      !result.failed,
+      `rejected the inline bootstrap, which is the only thing keeping the fallback flicker-free:\n${result.output}`,
+    )
+  }
+
+  // The three budget cases need a build. `.next` is gitignored, CI runs `pnpm --filter @berelax/web build`
+  // before `pnpm budgets`, and 38q asserts that ordering — so this is a developer who has not built yet,
+  // and it fails loudly rather than skipping, because a skipped fixture is a rule nobody has seen fire.
+  const built = existsSync('apps/web/.next/server/app')
+  if (!built) {
+    check(
+      'island budget fixtures have a build to measure',
+      false,
+      'apps/web/.next is absent. Run `pnpm --filter @berelax/web build` — the island budget is measured ' +
+        'out of the real build, so without one these three cases would pass by measuring nothing.',
+    )
+  }
+
+  // 38m. The island measurement is a real, non-zero number. A budget lowered under it must fail **with
+  //      the measured byte count**, which is also how this case proves the chunk attribution found
+  //      something: a measurement of zero would satisfy any budget above it forever.
+  if (built) {
+    const result = withEditedFile(
+      budgetsPath,
+      editBudget('motion-islands', (budget) => {
+        budget.maxBytes = 512
+      }),
+      () => run('pnpm', BUDGETS),
+    )
+    checkRejectedBy(
+      'budget gate rejects an oversized motion island',
+      result,
+      '[over-budget] motion-islands',
+    )
+    check(
+      'budget gate reports the measured island bytes',
+      /\[over-budget] motion-islands: measured \d{3,} bytes against a budget of 512 bytes/.test(
+        result.output,
+      ),
+      result.output,
+    )
+  }
+
+  // 38n. A client reference that every route ships and nothing declared. This is the rule that would fire
+  //      if a motion island — or anything else with an effect in it — were imported by the shell: the
+  //      shared set is an allow-list, and a new name in it fails by name rather than by two kilobytes
+  //      nobody reads.
+  if (built) {
+    const result = withEditedFile(
+      budgetsPath,
+      editBudget('shared-layout-client-js', (budget) => {
+        budget.declaredModules = budget.declaredModules.filter(
+          (module) => !module.includes('theme-provider'),
+        )
+      }),
+      () => run('pnpm', BUDGETS),
+    )
+    checkRejectedBy(
+      'budget gate rejects an undeclared client module in the shared layout',
+      result,
+      '[undeclared-shared-client-module] packages/ui/src/theme/theme-provider.tsx',
+    )
+  }
+
+  // 38o. The vacuity guard, and the reason it is here: a budget over a module the build does not contain
+  //      measures zero bytes and passes. ADR 0003 in one line.
+  if (built) {
+    const result = withEditedFile(
+      budgetsPath,
+      editBudget('motion-islands', (budget) => {
+        budget.modules = [...budget.modules, 'packages/ui/src/motion/nothing-renders-this.tsx']
+      }),
+      () => run('pnpm', BUDGETS),
+    )
+    checkRejectedBy(
+      'budget gate rejects a declared island the build does not contain',
+      result,
+      '[missing-client-module] packages/ui/src/motion/nothing-renders-this.tsx',
+    )
+  }
+
+  // 38p. The control for 38m-38o: the three client-JS budgets pass on the build as it stands, and they are
+  //      measured rather than skipped. Without this, a gate that had stopped finding the manifests would
+  //      satisfy every rejection above by failing everything.
+  if (built) {
+    const clean = run('pnpm', BUDGETS)
+    check('byte budgets pass on this build', !clean.failed, clean.output)
+    for (const label of [
+      'PASS  Client JS every route ships',
+      'PASS  The two motion islands',
+      'PASS  Client JS the kitchen sink adds',
+    ]) {
+      check(
+        `budget gate measured '${label.slice(6).trim()}'`,
+        clean.output.includes(label),
+        clean.output,
+      )
+    }
+  }
+
+  // 38q. The ordering CI depends on. `pnpm budgets` reads `apps/web/.next`, so a workflow that measured
+  //      before it built would SKIP the three client-JS budgets and report success — the island budget
+  //      would be a paragraph in a JSON file. Asserted as an ordering rather than as presence, because
+  //      both steps are already named in case 29's list and both would be there either way.
+  {
+    const workflow = readFileSync('.github/workflows/ci.yml', 'utf8')
+    const buildStep = workflow.indexOf('pnpm --filter @berelax/web build')
+    const budgetStep = workflow.indexOf('pnpm budgets')
+    check(
+      'CI builds the web application before it measures the byte budgets',
+      buildStep !== -1 && budgetStep !== -1 && buildStep < budgetStep,
+      `build at ${buildStep}, budgets at ${budgetStep}`,
+    )
+  }
+}
+
+// 36a-36k. (G-CONN-06) The daily health check's vocabulary is enforced by the database, every agent has a
+//           heartbeat the watchdog can join to, and the Testing-expiry tripwire can be made to fail.
+//
+// This unit writes four things nothing checked before: a capability `health`, a `health_check_ok` or
+// `health_check_failed` event carrying findings, an `agent_definition` plus `agent_heartbeat` pair for the
+// hourly probe, and a rendered expiry date. Each of the first three is single-valued only because a
+// constraint says so, and every one of those constraints is easy to believe without checking:
+//
+//   - `google_capabilities_health_check` closes the health vocabulary. This pass is the only thing in the
+//     system that may write `ok`, and an invented value — `degraded`, say, borrowed from the *presentation*
+//     states — would be stored happily by a column with no CHECK and then never match any branch of
+//     `partitionCapabilities`, so the capability would read as failing for ever with no way to tell why.
+//   - `google_connection_events_event_check` closes the event vocabulary, and the fixture is the name this
+//     unit was actually tempted to add: `listing_drift`. A drift finding is a `health_check_failed` row
+//     with a `finding` in its detail precisely because the vocabulary is closed and a synonym would have
+//     cost a migration to say the same thing.
+//   - `google_connection_events_no_token` stands between a convenient 2am debugging line and a bearer
+//     credential in a query log. The summary row this pass writes is the largest payload anything puts in
+//     that table — capability list, findings, expiry date — so it is the one most likely to acquire a
+//     field somebody thought was harmless.
+//
+// The fourth is the substantive risk of the unit and gets a different shape of fixture: a **shipped file,
+// edited in place**, so the tripwire is made to render in both branches and the test that says it must not
+// is watched failing. A tripwire nobody has seen fail is a decoration (ADR 0003), and the same is done to
+// the two-agent claim migration 0033 exists for.
+//
+// Every SQL probe runs inside `begin; … ; rollback;`, so a probe that is wrongly ACCEPTED leaves nothing
+// behind either, and each asserts its rule BY NAME — a bare non-zero exit is also what a typo in a column
+// name produces, and the constraint under test would then be dead while this file reported PASS for ever.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const SUB = 'sub-gate-fixture-health-check'
+  // Not a token and not pretending to be one: these rows never leave the rolled-back transaction, and what
+  // is under test is the CHECK constraints rather than anything cryptographic.
+  const BYTES = "'\\x00'::bytea"
+  const seed =
+    'insert into google_connections (google_sub, google_email, granted_scopes, refresh_token_ct, ' +
+    'refresh_token_nonce, refresh_token_wrapped_key, refresh_token_kid, refresh_token_aad_fp) values ' +
+    `('${SUB}', 'google-admin@berelax.ae', array['openid'], ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'fp')`
+
+  const REF = `'{"account":"accounts/1","location":"locations/2","placeId":"ChIJ-gate-fixture"}'::jsonb`
+  const capabilityRow = (health) =>
+    'insert into google_capabilities (connection_id, capability, resource_ref, health, is_primary) ' +
+    `select id, 'gbp_location', ${REF}, '${health}', true from google_connections ` +
+    `where google_sub = '${SUB}'`
+  const eventRow = (event, detail) =>
+    'insert into google_connection_events (connection_id, google_sub, event, actor_kind, actor_label, ' +
+    `detail) select id, google_sub, '${event}', 'agent', 'google-connection-health', ${detail}::jsonb ` +
+    `from google_connections where google_sub = '${SUB}'`
+
+  /** The summary row the daily pass really writes, findings and expiry date and all. */
+  const REAL_SUMMARY =
+    `'{"source":"google-connection-health","pass":"deep","displayState":"degraded",` +
+    `"status":"active","totalFailure":false,"notify":"none","reachedGoogle":true,` +
+    `"testingExpiresAt":"2026-09-25","hoursUntilTestingExpiry":48,` +
+    `"capabilities":[{"capability":"gbp_location","health":"ok","probe":"ok","called":true,` +
+    `"reason":null,"correlationId":"corr-gate-fixture"}],` +
+    `"findings":[{"kind":"listing_drift","capability":"gbp_location","drifted":` +
+    `[{"field":"title","stored":"BE RELAX","returned":"BE RELAX SPA"}]}]}'`
+
+  const psqlProbe = (...statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statements.join('; ')}; rollback;`,
+    ])
+
+  if (!dbUrl) {
+    check(
+      'google health check constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 36a. A health value borrowed from the presentation states. `degraded` is a *connection* state that
+    //      `deriveConnectionHealth` computes; a capability has no such health, and a column that accepted
+    //      it would store a value no branch of `partitionCapabilities` matches.
+    checkRejectedBy(
+      'health gate rejects a capability health that is not in the closed set',
+      psqlProbe(capabilityRow('degraded')),
+      'google_capabilities_health_check',
+    )
+
+    // 36b. `listing_drift` as an EVENT name — the exact synonym this unit was tempted to add. The finding
+    //      travels in the detail of a `health_check_failed` row instead, and this is why.
+    checkRejectedBy(
+      'health gate rejects listing_drift as an event name rather than as a finding',
+      psqlProbe(eventRow('listing_drift', `'{"capability":"gbp_location"}'`)),
+      'google_connection_events_event_check',
+    )
+
+    // 36c. The summary payload with a token in it. Rows reach query logs, pg_stat_statements, backups and
+    //      pg-boss payloads (docs/10 §4), so this is a constraint rather than a review comment.
+    checkRejectedBy(
+      'health gate rejects a health-check summary whose payload carries a token',
+      psqlProbe(
+        eventRow(
+          'health_check_ok',
+          `'{"source":"google-connection-health","accessToken":"ya29.gate-fixture"}'`,
+        ),
+      ),
+      'google_connection_events_no_token',
+    )
+
+    // 36d. The controls for the three above. Without them a renamed table or a broken connection string
+    //      would reject every probe and this gate would report three passes while examining nothing.
+    //
+    //      Every legitimate health value, one row at a time: the pass writes four of the five, and the
+    //      fifth (`unknown`) is what a consent leaves behind.
+    for (const health of ['ok', 'permission_missing', 'not_verified', 'quota_zero', 'unknown']) {
+      const accepted = psqlProbe(capabilityRow(health))
+      check(
+        `health gate accepts the capability health '${health}'`,
+        !accepted.failed,
+        `the CHECK refused a value the health check writes:\n${accepted.output}`,
+      )
+    }
+
+    // 36e. Both event names this pass uses, and the real summary payload — the largest thing anything puts
+    //      in that table, and therefore the one most likely to acquire a field somebody thought harmless.
+    for (const event of ['health_check_ok', 'health_check_failed']) {
+      const accepted = psqlProbe(eventRow(event, REAL_SUMMARY))
+      check(
+        `health gate accepts the ${event} summary the daily pass writes`,
+        !accepted.failed,
+        `the CHECK refused the real payload:\n${accepted.output}`,
+      )
+    }
+
+    // 36f. Every agent has a heartbeat row, because `agentsWithHeartbeat` INNER joins and an agent with no
+    //      heartbeat is one the watchdog silently never checks. The probe is written as a query that FAILS
+    //      when any definition is unmatched, so it can be watched failing.
+    const ORPHAN_PROBE =
+      'do $$ declare missing int; begin ' +
+      'select count(*) into missing from agent_definition d ' +
+      'left join agent_heartbeat h on h.agent_key = d.agent_key where h.agent_key is null; ' +
+      "if missing > 0 then raise exception 'agent_definition_without_heartbeat: % agent(s)', missing; " +
+      'end if; end $$'
+    checkRejectedBy(
+      'health gate rejects an agent_definition with no agent_heartbeat row',
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-q',
+        dbUrl,
+        '-c',
+        'begin; insert into agent_definition (agent_key, display_name, purpose, ' +
+          "expected_interval_seconds) values ('gate_fixture_unwatched', 'Gate fixture', " +
+          "'An agent with no heartbeat, which the watchdog would never check.', 3600); " +
+          `${ORPHAN_PROBE}; rollback;`,
+      ]),
+      'agent_definition_without_heartbeat',
+    )
+
+    // 36g. The control, and it is the assertion migration 0033 exists for: the shipped rows satisfy the
+    //      probe, and BOTH Google agents are present with a heartbeat and with their own interval. A
+    //      shared heartbeat would let the hourly probe keep the daily check's silence at minutes for ever.
+    const shipped = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl,
+      '-c',
+      ORPHAN_PROBE,
+    ])
+    check(
+      'health gate accepts the shipped agent rows, every one with a heartbeat',
+      !shipped.failed,
+      `an agent in this database has no heartbeat row:\n${shipped.output}`,
+    )
+    const googleAgents = run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl,
+      '-c',
+      "select string_agg(d.agent_key || ':' || d.expected_interval_seconds || ':' || " +
+        "(h.agent_key is not null), ',' order by d.agent_key) from agent_definition d " +
+        'left join agent_heartbeat h on h.agent_key = d.agent_key ' +
+        "where d.agent_key in ('google_health', 'google_liveness')",
+    ])
+    check(
+      'health gate finds both Google agents, each with its own interval and a heartbeat',
+      !googleAgents.failed &&
+        googleAgents.output.trim() === 'google_health:86400:true,google_liveness:3600:true',
+      `the two Google agents are not both present with distinct intervals: ${googleAgents.output}`,
+    )
+  }
+}
+
+// 36h-36i. (G-CONN-06) The Testing-expiry tripwire must be able to fail.
+//
+// The substantive risk of the unit: a tripwire that is always rendered reports the launch blocker in both
+// branches, which is the same as reporting nothing. `renderTestingExpiry` returns the empty string for a
+// published consent screen, and that branch is what the acceptance is about — so the shipped file is edited
+// to render regardless, and the test is watched failing by name.
+//
+// Edited in place rather than copied: the assertion is about the function every caller uses, and a copy
+// would prove only that a copy can fail.
+{
+  const TRIPWIRE = 'packages/google/src/health/testing-expiry.ts'
+  const TEST = 'packages/google/src/health/testing-expiry.test.ts'
+  const result = withEditedFile(
+    TRIPWIRE,
+    (text) =>
+      text.replace(
+        "  if (view === null) return ''",
+        // A literal element rather than an interpolated one: `${…}` inside a single-quoted string is what
+        // `noTemplateCurlyInString` warns about, and the constant's value is pinned by its own unit test.
+        '  if (view === null) return \'<p data-tripwire="google-testing-expiry"></p>\'',
+      ),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the tripwire test fails when the expiry element is rendered for a published consent screen',
+    result,
+    'renders NOTHING for a published consent screen',
+  )
+  // The control: unedited, it passes. Without it the case above is satisfied by a test file that fails for
+  // any reason at all, including a syntax error introduced by the edit.
+  const clean = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST])
+  check(
+    'the tripwire test passes on the committed tree',
+    !clean.failed,
+    `the committed tripwire renderer does not satisfy its own test:\n${clean.output}`,
+  )
+}
+
+// 36j-36k. (G-CONN-06) The two Google crons must not share one agent, and that must be watchable.
+//
+// Migration 0033 exists for exactly one reason: the watchdog measures the absence of a success **per
+// agent**, so an hourly probe writing the daily check's heartbeat would keep it minutes old for ever and a
+// deep check that had stopped running entirely would be invisible. Nothing in the database prevents the
+// mistake — `google_health` is a perfectly valid agent for any cron to name — so the check is a test, and a
+// test of this kind is worth nothing until it has been seen to fail.
+{
+  const REGISTRY = 'apps/worker/src/registry.ts'
+  const TEST = 'apps/worker/src/jobs/google-connection-health.test.ts'
+  const result = withEditedFile(
+    REGISTRY,
+    (text) => text.replace('agent: GOOGLE_LIVENESS_AGENT,', 'agent: GOOGLE_HEALTH_AGENT,'),
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST]),
+  )
+  checkRejectedBy(
+    'the schedule test fails when the hourly probe reports to the daily agent',
+    result,
+    'declares both crons, each naming its own agent',
+  )
+  const clean = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', TEST])
+  check(
+    'the schedule test passes on the committed registry',
+    !clean.failed,
+    `the committed registry does not satisfy its own schedule test:\n${clean.output}`,
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

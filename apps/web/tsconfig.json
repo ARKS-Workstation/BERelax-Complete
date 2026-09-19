@@ -37,6 +37,8 @@
       "@berelax/ui/direction": ["../../packages/ui/src/primitives/direction.tsx"],
       "@berelax/ui/icon": ["../../packages/ui/src/icon.tsx"],
       "@berelax/ui/layout": ["../../packages/ui/src/layout/index.tsx"],
+      "@berelax/ui/motion/header-condense": ["../../packages/ui/src/motion/header-condense.tsx"],
+      "@berelax/ui/motion/reveal": ["../../packages/ui/src/motion/reveal.tsx"],
       "@berelax/ui/patterns": ["../../packages/ui/src/patterns/index.tsx"],
       "@berelax/ui/primitives": ["../../packages/ui/src/primitives/index.tsx"],
       "@berelax/ui/theme-provider": ["../../packages/ui/src/theme/theme-provider.tsx"],

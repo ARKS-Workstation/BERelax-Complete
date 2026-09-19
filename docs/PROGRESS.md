@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**57 / 207 units complete.**
+**59 / 207 units complete.**
 
 ## Next up
 
@@ -150,7 +150,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 133 | `W-SITE-02` | The premises row as the only NAP source: /api/facts, /llms.txt, robots policy | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `F09`, `W-SITE-01` | — | Y1-nap |
 | [ ] | 134 | `W-SITE-03` | JSON-LD generated from the database | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-02` | — | Y1-licence, Y2-gbp-status |
 | [ ] | 135 | `W-SITE-05` | Catalogue-derived routes: /treatments, /treatments/[slug], /pricing | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `W-SITE-03`, `W-SYS-02` | — | Y9-poa-prices |
-| [ ] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
+| [x] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
 | [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
 | [ ] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
 | [ ] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
@@ -170,7 +170,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 153 | `G-CONN-03` | withGoogle: the single chokepoint, error taxonomy and declared degradation | `G-CONN-02` | — | — |
 | [x] | 154 | `G-CONN-04` | Proactive token refresh under an advisory transaction lock, double-checked | `G-CONN-03` | — | — |
 | [x] | 155 | `G-CONN-05` | Account and location picker, LOCATION_GROUP enumeration, GSC selected independently | `G-CONN-03` | — | Y10-consent, Y2-listing-owner |
-| [ ] | 156 | `G-CONN-06` | Daily health check, Testing-expiry tripwire, listing-drift detection | `G-AGT-01`, `G-CONN-04`, `G-CONN-05` | — | Y4-token-test |
+| [x] | 156 | `G-CONN-06` | Daily health check, Testing-expiry tripwire, listing-drift detection | `G-AGT-01`, `G-CONN-04`, `G-CONN-05` | — | Y4-token-test |
 | [ ] | 157 | `G-CONN-07` | Connection state machine, plain-English states, Test connection, settings card | `G-CONN-06`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 158 | `G-AGT-02` | Agent console: last success, cost against budget, pending approvals, kill switches | `G-AGT-01`, `G-CONN-07`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |

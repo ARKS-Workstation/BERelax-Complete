@@ -276,6 +276,64 @@ export const SETTINGS = [
     invalidates: [],
   }),
   define({
+    /**
+     * The OAuth consent screen's publishing status, and therefore whether every grant carries a fuse.
+     *
+     * A setting rather than an environment variable because it is a fact about the **Google Cloud
+     * project**, not about this deployment: the owner (or whoever holds the Cloud project) publishes the
+     * consent screen once, and every environment's grants stop expiring at the same moment. An env var
+     * would have to be changed per environment by whoever happened to deploy next, and the tripwire
+     * would go on telling the owner about a deadline that no longer exists — which is worse than no
+     * tripwire, because a warning that turns out to be false teaches them to ignore the next one.
+     *
+     * The default is the strict answer and the reason is in docs/10 §3: **Testing is the default state
+     * of every Cloud project**, so assuming Production is the same thing as not deciding, and it
+     * silences the one check that catches the launch blocker.
+     */
+    key: 'google.consent_screen_publishing_status',
+    tier: 'operational',
+    schema: z.enum(['testing', 'production']),
+    defaultValue: 'testing' as const,
+    label: 'Google OAuth consent screen status',
+    help: 'While this says Testing, the Google connection stops working seven days after it was authorised and the settings page shows the date it will happen. Change it to Production only once the consent screen has actually been published in the Google Cloud console.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y4-token-test',
+      note: 'Testing assumed, which is the strictest safe answer: it is the default state of every Cloud project, and assuming otherwise would silence the seven-day tripwire. The nine-day experiment in docs/10 §8 settles it.',
+    },
+  }),
+  define({
+    /**
+     * Whether Google has approved Basic API Access for the Cloud project.
+     *
+     * It changes what a refused Business Profile read *means*, which is why it has to be recorded
+     * somewhere rather than inferred. While access is pending, quota sits at 0 QPM and every GBP call
+     * fails however valid the token is — the launch-day normal for weeks, which the panel shows as
+     * *Business Profile access pending Google approval* rather than as a fault (docs/10 §1). Once
+     * approved, the identical refusal is a genuine permission problem the owner has to act on.
+     *
+     * Deriving it from the failures themselves is the obvious alternative and it is circular: the check
+     * would conclude "not approved" from the very refusal it is trying to classify, so a real permission
+     * problem would read as the launch-day normal for ever. The observable fact is quota moving 0 → 300
+     * in the Cloud console, and a human is the only thing that can see it.
+     */
+    key: 'google.business_profile_access_granted',
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: false,
+    label: 'Google Business Profile API access approved',
+    help: 'Google grants Business Profile API access by reviewing an application, not by enabling an API. Leave this off until the quota in the Cloud console moves from 0 to 300 QPM; while it is off, failing Business Profile checks are reported as waiting for Google rather than as a fault.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y2-gbp-status',
+      note: 'Not approved assumed, because no application has been submitted yet. The conservative answer: it reports a pending approval rather than raising a fault the owner cannot fix.',
+    },
+  }),
+  define({
     key: 'agents.review_autosend_enabled',
     tier: 'compliance_locked',
     schema: z.boolean(),

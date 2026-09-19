@@ -72,28 +72,12 @@ export const EASING = {
 /** Movement distances, zeroed by the reduced-motion override rather than branched per component. */
 export const MOVE = { sm: '8px', md: '16px', lg: '32px' } as const
 
-/**
- * Distance-aware duration, in milliseconds.
- *
- * A 900px sheet and an 8px chevron animating for the same 200ms both feel wrong — one sluggish, one
- * abrupt. 8px gives 125ms, 400px gives 360ms, and everything is clamped so nothing crawls.
+/*
+ * The distance-duration law and the stagger were here until W-SYS-04. They are behaviour rather than
+ * scale — a function of a measured distance and of a sibling count — and they now live beside the CSS
+ * that uses them, at `packages/ui/src/motion/duration.ts` and `packages/ui/src/motion/stagger.ts`. Both
+ * are re-exported from the same `@berelax/ui` barrel, so no call site changed.
  */
-export function durationForDistance(distancePx: number): number {
-  return Math.round(Math.min(480, Math.max(120, 120 + 0.6 * distancePx)))
-}
-
-/**
- * Stagger delay per sibling, in milliseconds, and how many actually animate.
- *
- * Above twelve items the container animates once and the children do not: a list of thirty rows
- * staggered at any interval is a progress bar the reader did not ask for.
- */
-export function staggerFor(count: number): { delayMs: number; animateChildren: boolean } {
-  if (count > 12) return { delayMs: 0, animateChildren: false }
-  const delayMs = count <= 6 ? 40 : 24
-  // Total stagger is capped at 240ms however many siblings there are.
-  return { delayMs: Math.min(delayMs, Math.floor(240 / Math.max(1, count))), animateChildren: true }
-}
 
 /** Minimum touch target in pixels. Mobile is larger because a thumb is not a mouse. */
 export const TOUCH_TARGET = { desktop: 40, mobile: 48, minGap: 8 } as const

@@ -161,6 +161,42 @@ module.exports = {
       to: { path: '(^|/)node_modules/lucide-react/|^lucide-react(/|$)' },
     },
     {
+      name: 'no-motion-in-the-shared-layout',
+      comment:
+        'docs/08 §7 budgets the motion library at "≤2 code-split islands, never in the shared layout". ' +
+        'This is the "never in the shared layout" half, and it is a rule rather than a convention ' +
+        'because the cost is invisible at the call site: every route in the application renders ' +
+        'app/_document/shell.tsx through one of the four root layouts, so a client reference imported ' +
+        'there is in the chunk every page loads — about 33KB gzip for `motion` v12, on a home route ' +
+        'budgeted at 110KB for all of its first-party JavaScript (docs/08 §8). Nothing in the diff says ' +
+        'so: the page renders, the animation works, and the number moves. ' +
+        'WHAT IS FORBIDDEN, and what is deliberately not. The `to` names two things: the motion ' +
+        'ISLANDS — the .tsx files in packages/ui/src/motion — and the motion LIBRARY itself, in both ' +
+        'spellings, because an uninstalled package resolves to its bare name and an installed one ' +
+        'resolves into node_modules (the same trap that left no-lucide-outside-the-icon-wrapper ' +
+        'configured, green and dead). It does not forbid the rest of that directory: the shell imports ' +
+        'motionBootstrapScript from motion/bootstrap.ts, which is a pure function returning a string ' +
+        'that goes inline into the document head, and it is exactly what lets the fallback decide ' +
+        'before the first paint without the shared layout carrying a single byte of motion JavaScript. ' +
+        'A type or a token is not a bundle. ' +
+        'Dynamic imports are forbidden here too, and that is not an oversight. A dynamic import in the ' +
+        'shared layout still puts the island on every route in the application; it only changes when it ' +
+        'is fetched. The `from` list is the four root layouts, the document shell they all render, and ' +
+        'packages/ui/src/layout — the layout primitives, which are server components that every page ' +
+        'composes and which have no business owning a browser-only behaviour. ' +
+        'The byte-level half of the same claim is build/budgets.json: shared-layout-client-js measures ' +
+        'the chunks every route loads, with the two client modules that are allowed named explicitly, ' +
+        'because this rule sees module-to-module edges and cannot see a library bundled inside a module ' +
+        'it permits.',
+      severity: 'error',
+      from: {
+        path: '^(apps/web/app/\\([a-z]+\\)/layout\\.tsx$|apps/web/app/_document/|packages/ui/src/layout/)',
+      },
+      to: {
+        path: '^packages/ui/src/motion/[^/]+\\.tsx$|(^|/)node_modules/(motion|framer-motion)/|^(motion|framer-motion)(/|$)',
+      },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',

@@ -1,55 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  BREAKPOINTS,
-  durationForDistance,
-  GUTTERS,
-  MEASURE,
-  RADIUS,
-  SPACE,
-  scaleCss,
-  staggerFor,
-  TOUCH_TARGET,
-} from './scale.ts'
-
-describe('durationForDistance', () => {
-  it('matches the four worked examples in docs/08', () => {
-    expect(durationForDistance(8)).toBe(125)
-    expect(durationForDistance(100)).toBe(180)
-    expect(durationForDistance(400)).toBe(360)
-    expect(durationForDistance(900)).toBe(480)
-  })
-
-  it('clamps at both ends, so nothing is abrupt and nothing crawls', () => {
-    expect(durationForDistance(0)).toBe(120)
-    expect(durationForDistance(-50)).toBe(120)
-    expect(durationForDistance(10_000)).toBe(480)
-  })
-
-  it('is monotonic', () => {
-    let previous = 0
-    for (let distance = 0; distance <= 1200; distance += 37) {
-      const current = durationForDistance(distance)
-      expect(current).toBeGreaterThanOrEqual(previous)
-      previous = current
-    }
-  })
-})
-
-describe('staggerFor', () => {
-  it('never lets the total stagger exceed 240ms', () => {
-    for (let count = 1; count <= 12; count += 1) {
-      const { delayMs, animateChildren } = staggerFor(count)
-      expect(animateChildren).toBe(true)
-      expect(delayMs * count).toBeLessThanOrEqual(240)
-    }
-  })
-
-  it('stops animating children above twelve siblings', () => {
-    // A list of thirty rows staggered at any interval is a progress bar nobody asked for.
-    expect(staggerFor(13)).toEqual({ delayMs: 0, animateChildren: false })
-    expect(staggerFor(200).animateChildren).toBe(false)
-  })
-})
+import { BREAKPOINTS, GUTTERS, MEASURE, RADIUS, SPACE, scaleCss, TOUCH_TARGET } from './scale.ts'
 
 describe('scales', () => {
   it('keeps the spacing ramp strictly increasing', () => {

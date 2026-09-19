@@ -30,5 +30,4 @@ export {
   DISCLOSURE_CSS,
   FIELD_CSS,
   FOCUS_CSS,
-  MOTION_CSS,
 } from './styles.tsx'

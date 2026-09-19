@@ -6404,7 +6404,7 @@ units:
       and stagger helpers, exactly two scroll-driven effects, and hard limits on where the motion library
       may be imported.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-02
@@ -6426,13 +6426,115 @@ units:
       with a stubbed observer)
     - 'Build assertion: shared layout client JS contains zero bytes attributable to `motion`, and each motion
       island is <=40KB gzip, failing the build with the measured number above it'
+    - 'NOTE: the `motion` library is NOT installed, so zero modules import it — which satisfies "at most
+      two" and is the reason the fourth criterion is a fence rather than a measurement of one. Nothing in
+      this unit needs it: both scroll-driven effects are CSS, and docs/08 §5''s springs are the sheet drag,
+      the admin scheduler drag and the success checkmark, which belong to the units that render them.
+      Installing 33KB gzip to import it nowhere would be weight for no feature. What is built instead is
+      the whole fence, live today against the two islands this unit does ship: `no-motion-in-the-shared-layout`
+      in .dependency-cruiser.cjs (both spellings — an installed package resolves into node_modules and an
+      uninstalled one to its bare name, the trap that left no-lucide-outside-the-icon-wrapper green and
+      dead), and three named rules in `pnpm layout` —
+      motion-island-must-be-a-dynamic-client-module, at-most-two-motion-islands and
+      motion-library-only-in-a-client-island. The first unit that needs a spring inherits all of it.'
+    - 'NOTE: the fourth criterion names apps/web/app/layout.tsx, which does not exist — W-SYS-01 landed four
+      root layouts, (en), (ar), (admin) and (payload), each rendering app/_document/shell.tsx. The
+      dependency-cruiser rule''s `from` is all four root layouts, the shell they share and
+      packages/ui/src/layout, and it forbids a dynamic import as well as a static one: a dynamic import in
+      the shared layout still puts the island on every route, it only changes when it is fetched. The shell
+      does import from packages/ui/src/motion — `motionBootstrapScript`, a pure function returning the
+      inline script described below — so the rule names the island .tsx files and the library rather than
+      the directory. A string is not a bundle, and case 38l asserts that path stays open.'
+    - 'NOTE: the island budget is three entries in build/budgets.json, read out of the real `next build` by
+      `pnpm budgets` (kind: client-js). Measured today: shared layout client JS 812 bytes gzip of 4096
+      (3.2KB headroom, and the two client modules it may contain are named, so a new one fails by rule
+      name); the two motion islands 906 bytes gzip of 40960 (39.1KB headroom); the kitchen-sink route
+      45,796 bytes gzip of 53,248 (7.3KB headroom, of which about 31KB is the Radix dialog, popover and
+      select). Three scopes rather than one because Turbopack gives every client module on a route the
+      SAME chunk list, so a chunk list cannot be divided between the modules that share it: the narrow
+      number is the chunk that *defines* a module, found by the Turbopack module id the manifest records,
+      and the wide number is the route''s whole client group, which is what would move if a 33KB library
+      joined an island''s graph and were put in a chunk of its own. "Zero bytes attributable to motion in
+      the shared layout" is asserted three ways: no motion module in the shared set, none of the shared
+      chunks defining one, and a byte budget with too little room to hide an animation runtime.'
+    - 'NOTE: `pnpm budgets` SKIPs the three client-js budgets when apps/web/.next is absent, because they
+      can only be measured against a build. CI builds before it measures and case 38q asserts that
+      ordering, so a skip is a developer who has not built rather than CI measuring nothing.'
+    - 'NOTE: the specimen is on the existing kitchen sink (app/_dev/motion-gallery.tsx, rendered by both
+      locales) rather than on a route of its own. A reveal has to be below the fold to be a reveal and the
+      header has to be at the top of a page long enough to scroll, both of which that route already
+      provides — and a new document route would have to be declared in the registry in both locales, take
+      a screenshot slot and join the twelve-render axe sweep, for a second dev surface. The browser proofs
+      are apps/web/src/motion.itest.ts, port range 4700 (shell 3200, primitives 3800, route spine 4100,
+      kitchen sink 4400 are taken), 14 assertions.'
+    - 'NOTE: the reduced-motion grep is scoped to authored, non-generated, non-test files under packages/ui
+      and apps/web, where `prefers-reduced-motion` appears in exactly one: packages/ui/src/tokens/scale.ts,
+      the emitter of tokens.css. The generated stylesheet carries the same block because it is that file
+      emitted, and `pnpm tokens` fails on any difference between them; tokens/scale.test.ts and
+      apps/web/src/motion.itest.ts both have to write the forbidden thing in order to check it, and a test
+      ships nowhere. The rule fires in BOTH directions — zero blocks is the override deleted, which puts
+      every duration and distance back in force for a reader who asked for none, and case 38b proves it.'
+    - 'NOTE: the reduced-motion override does not touch the header condensation, and that is deliberate:
+      its height and blur are driven by the reader''s own scroll rather than by a duration or a distance
+      token, which is the standard exemption. What docs/08 §8 does ask for is honoured — 8px of blur
+      maximum, dropped to none under `prefers-reduced-transparency` with the translucent fill becoming an
+      opaque one, so text over it keeps its measured contrast either way.'
+    - 'NOTE: three corrections to code this unit took over, each with the reason. (1) staggerFor(12) is
+      21ms, not the 24ms docs/08 §5 states: the last child''s delay is (count-1) x step, so twelve at 24ms
+      finishes arriving 264ms after the first, over the stated 240ms total. The total wins, because it is
+      what a reader perceives; docs/08 §5 should say the step is a target and the total is a limit. The
+      previous implementation divided the cap by `count` rather than by the gaps, which under-used the
+      budget at every size and still left the step wrong at twelve. (2) durationForDistance now takes the
+      magnitude of the distance, so a mirrored RTL offset gets the same duration as its LTR twin — it used
+      to clamp a negative to the 120ms floor, which would have animated the Arabic page in 120ms where the
+      English one took 139ms from the same authored distance. (3) The container of a staggered group
+      publishes `--stagger-scale`, a unitless factor, and never the step as a time: an inline
+      `--stagger: 24ms` on the container SHADOWS the token, so the reduced-motion override never reaches
+      the children. That was written the obvious way first and the browser assertion caught it — the
+      delays were right in every other respect, and a reader who asked for no motion still got a list
+      arriving over a fifth of a second.'
+    - 'NOTE: W-SYS-03''s deferral is discharged. [data-reveal] was a 500ms animation that played on load,
+      which is not a below-fold reveal; it is now driven by `animation-timeline: view()` and moved from
+      packages/ui/src/layout/styles.tsx to packages/ui/src/motion/tokens.css, imported by
+      apps/web/app/globals.css. One consequence in another unit''s test: a progress-based animation has no
+      current time in milliseconds — Chromium throws NotSupportedError on `currentTime = 0` for one — so
+      the rewind in kitchen-sink.itest.ts''s `revealAt` is now conditional on the animation being on
+      `document.timeline`, which is the case its control (a literal translateX, no timeline) actually
+      needs. The mirroring assertion is unchanged and still passes, and motion.itest.ts adds the same
+      claim across the two real documents.'
+    - 'NOTE: the fallback for a browser with no scroll-driven animations (Firefox today) is a blocking
+      inline script plus one island, not the island alone. An island runs after the first paint, so the
+      reveal would play and the reader would then watch content that was already on screen vanish and come
+      back; the script is ~300 bytes of inline HTML, no chunk, and it is why the shared layout still ships
+      zero bytes of motion JavaScript. It also removes its own attribute after three seconds if no island
+      claims the handshake, because `data-motion-fallback` holds every [data-reveal] at opacity 0 and a
+      chunk that 404s after a deploy would otherwise leave the page permanently blank where its content
+      should be. A pure `@supports not (...)` query cannot do this: CSS can hide-then-auto-reveal only
+      through an animation delay, and changing that delay when the island arrives makes the animation jump
+      to its end rather than play. The header needs none of it — an un-condensed header is the correct
+      header — so its scroll-driven rule sits inside a positive @supports and its fallback is a
+      transition, which is the asymmetry the two observer shapes in motion/observe.ts follow.'
+    - 'NOTE: found in existing code and NOT fixed here — MOTION_STORAGE_KEY (''berelax:motion'',
+      packages/ui/src/theme/theme.ts) is declared and nothing reads or writes it. The token stylesheet''s
+      reader escape hatch is `:root:not([data-motion="full"])`, so a reader who has opted into full motion
+      has no way to say so: whichever unit ships the WCAG 2.2.2 pause control (docs/08 §6) or the Motion
+      setting (docs/08 §9) has to apply the stored value in the document bootstrap, beside the theme''s.
+      Out of scope here — this unit''s criterion is the media query, not the setting.'
     files:
     - packages/ui/src/motion/tokens.css
     - packages/ui/src/motion/duration.ts
     - packages/ui/src/motion/stagger.ts
+    - packages/ui/src/motion/observe.ts
+    - packages/ui/src/motion/bootstrap.ts
+    - packages/ui/src/motion/index.ts
     - packages/ui/src/motion/reveal.tsx
     - packages/ui/src/motion/header-condense.tsx
+    - apps/web/app/_dev/motion-gallery.tsx
+    - apps/web/src/motion.itest.ts
     - .dependency-cruiser.cjs
+    - scripts/check-layout-rules.mjs
+    - scripts/check-budgets.mjs
+    - build/budgets.json
     - scripts/test-gates.mjs
   - id: W-SYS-05
     order: 137
@@ -7855,7 +7957,7 @@ units:
       health. Plus a cheap hourly liveness pass and the consent_at + 7 days tripwire that surfaces the bomb
       instead of waiting for it.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - G-AGT-01
@@ -7886,11 +7988,164 @@ units:
       failure'
     - The run writes an agent heartbeat through G-AGT-01, so a missed daily check is caught by the watchdog
       at 48h (asserted end to end on a frozen clock)
+    - 'NOTE: migration 0033_google_liveness_agent.sql, and SCHEMA_VERSION moves to 33. NOT the
+      0042_google_capability_health.sql this entry named: google_capabilities.health already exists in 0016
+      with exactly the closed set this pass writes, so there was no column to add. What the migration is
+      for is the SECOND agent_definition row, and it is the whole reason the hourly pass is a separate cron:
+      the watchdog measures the absence of a success PER AGENT, so an hourly probe writing google_health''s
+      heartbeat would keep it minutes old for ever and a deep check that had stopped running entirely would
+      be invisible. google_liveness declares a 1h interval (the watchdog alerts at 2h) beside
+      google_health''s 24h (alerts at 48h), and it seeds an agent_heartbeat row too, because
+      agentsWithHeartbeat INNER joins and an agent with no heartbeat is one the watchdog never checks —
+      the same reason M-VAT-04 seeded both.'
+    - 'NOTE: the owner-confirmed snapshot listing drift is measured against is the capability_changed row
+      the PICKER wrote, not a new table. That row is already append-only, already mirrored into audit_event
+      by a trigger in the same transaction, already carries the actor, and is already what the connection
+      panel renders — a google_listing_snapshot table beside it would be a second answer to one question,
+      and the interesting case (which of the two did the owner actually click) would have no answer at all.
+      It could also only be filled by this unit, which would mean comparing a listing against a snapshot
+      taken from the same read: a check that cannot fail. One line was added to G-CONN-05''s writeSelection
+      for it — the one-line postal ADDRESS, beside the title it already recorded. Without the address,
+      drift over the address could never run, and the address is the field that matters most: "Be Relax" is
+      also an airport spa chain, so a listing merged into other premises under the same name changes only
+      the address. A connection selected before this change has no address in its event and
+      confirmedListing returns null for it — reported as reason no_confirmed_listing rather than as "no
+      drift", because a check compared against its own input is not a check.'
+    - 'NOTE: a DEFECT in existing code, found by this unit''s own day-eight test and fixed here.
+      accessTokenUnderLock ran refreshAccessToken inside sql.begin and let a failure propagate — so
+      PostgreSQL rolled the transaction back and took the two rows that ARE the detection of a dead grant
+      with it: status moving to needs_reauth with status_reason = invalid_grant, and the append-only
+      reauth_required event the panel renders and the owner''s email is deduplicated against. A revoked
+      grant, or a Testing-status client on day seven, was therefore discovered by every pass and forgotten
+      by every pass: the row stayed active, no event was written, and the only symptom was every Google
+      capability degrading for ever with nothing saying why. The whole of docs/10 §4''s detection and
+      recovery section depended on rows that were being discarded. The fix returns a
+      {kind:''failed'',error} union from the locked body so the transaction COMMITS the evidence, and
+      rethrows outside the lock so the consumer still degrades. It survived a green suite because no test
+      in token-refresh.itest.ts had ever failed the REFRESH — every one armed the API call instead, which
+      happens after the token is in hand. rig() gained an oauthFailures option and the file gained the
+      pair: the failure commits needs_reauth and one reauth_required event, and the control asserts a
+      successful refresh writes neither.'
+    - 'NOTE: withGoogle gained ONE option, refresh: ''forced'', with one caller. The cached-token fast path
+      cannot fail: a token with fifty minutes to live proves only that something refreshed recently, and
+      the seven-day Testing expiry and the six-months-unused auto-invalidation are observable ONLY by
+      asking Google for a token. The lock is still taken — the point of the lock is that this pass, the
+      review poll and the SEO crawl can start in the same second — and what is skipped is only the double
+      CHECK, because the winner''s fresh token is exactly the answer a forced refresh must not accept. Its
+      control is the hourly probe, which does NOT force: a test asserts the probe makes zero refresh
+      requests against the same connection the deep check refreshed, because 24 forced refreshes a day
+      against a 100-token-per-account limit is a cost with no answer attached. resource: ''enumerating''
+      gained a second caller for the same structural reason the picker had: liveness asks "is this GRANT
+      alive", which is a question about the account, and requiring a resource would answer
+      ResourceNotSelected for a connection whose token is perfectly alive.'
+    - 'NOTE: both passes CATCH the classes withGoogle throws (RateLimited, TransientUpstream) rather than
+      letting them propagate, and that is a decision rather than defensive coding. The product of a health
+      pass is the record, not the read: a throw on the first capability would abandon every capability and
+      every connection after it and leave the summary row unwritten, so the owner''s evidence for the night
+      would be a pgboss.job row — which docs/10 §4 says is no evidence at all. The retry decision is not
+      discarded; it travels as retryable and runDeepCheck decides once at the end, with the whole picture:
+      retryWorthwhile is true only when EVERY connection was a total failure and at least one cause was
+      retryable. Retrying because one capability got a 500 would spend three more forced refreshes to
+      re-learn what is already recorded.'
+    - 'NOTE: the presentation state is derived over the DECLARED capabilities only, via
+      capabilityStatesForDisplay in @berelax/core. A consent registers a row for all four capabilities
+      including gbp_performance, which no consumer declares and for which there is no client at all —
+      docs/10 §7 cannot even resolve its hostname — so its health is permanently unknown and counting it
+      would report every connection in the system as degraded or pending_gbp_approval for ever. An amber
+      badge that is always on is a badge nobody looks at, which is the mechanism this whole unit exists to
+      make trustworthy. The filter is scoped to the declared SET rather than to the unknown VALUE, and its
+      control asserts a declared capability at unknown still reads as not-healthy: that case is exactly
+      what the owner needs told about.'
+    - 'NOTE: two settings were added to the registry because the tripwire and the failure classification
+      each need an answer nothing in the system holds.
+      google.consent_screen_publishing_status (testing|production, default testing, Y4-token-test) is what
+      the acceptance line''s two branches ARE; the default is the strict answer because Testing is the
+      default state of every Cloud project, so assuming Production is the same thing as not deciding.
+      google.business_profile_access_granted (boolean, default false, Y2-gbp-status) decides whether a
+      refused GBP read reads as the launch-day normal or as a fault. Deriving that from the failures
+      themselves is circular — the run would conclude "not approved" from the very refusal it is trying to
+      classify, so a genuine permission problem would read as pending approval for ever. Both are read
+      through readSetting, which falls back to the declared default, so a fresh database behaves like a
+      seeded one; a status neither branch understands stops the pass rather than being coerced, because the
+      only two candidates for a coercion are the value that shows the expiry and the value that hides it.'
+    - 'NOTE: the settings surface is a route HANDLER answering an HTML fragment —
+      apps/web/app/(admin)/settings/integrations/google/health/route.ts plus handler.ts — for the reason
+      G-CONN-05''s picker records: W-SITE-01''s registry is in exact bijection with the filesystem and
+      requires every DOCUMENT in both locales, so a page.tsx would need an Arabic admin document and the
+      shell W-SYS-01 builds. It is read-only and makes NO Google call, needs no KEK and no token, which is
+      not a convenience: the tripwire has to be readable on exactly the day the grant died, and a surface
+      that reached Google to render it would show nothing precisely then. G-CONN-07 replaces the fragment
+      with the rendered card and reuses the same derivation. Like the two routes beside it, it is NOT
+      authenticated until W-SYS-01.'
+    - 'NOTE: the fake OAuth provider gained consentAtIso and publishingStatus so the day-seven
+      invalid_grant genuinely happens. Until they existed the launch blocker was unreachable from any test
+      and the detection path, the state transition and the deduplicated notification could only be
+      exercised against a hand-armed FailureScript — which proves the taxonomy works and proves nothing
+      about whether the expiry is ever noticed. The fake defaults to production (no fuse) while the
+      application defaults to testing (fuse assumed), and each default is the safe one for what it governs:
+      a fake that expired every token after seven days would break unrelated tests whose frozen clock sits
+      more than a week after their fixture''s consent. A unit test asserts the fake''s
+      TESTING_REFRESH_TOKEN_DAYS equals @berelax/core''s, so the fake and the tripwire cannot drift apart.
+      The port also gained getVoiceOfMerchantState (Verifications v1, docs/10 §7 "In MVP"): an unverified
+      or suspended listing answers every read perfectly and refuses every reply, so nothing else in the
+      system can explain "my token is fine and my writes fail".'
+    - 'NOTE: the token allow-list was NOT widened. Both passes are consumers: they obtain their token from
+      withGoogle, name no accessor and never import token-store.ts, so pnpm chokepoint still reports five
+      modules. One consequence is visible in the tests: apps/worker and apps/web cannot seal a token at
+      all, so their integration files construct a SealedToken-shaped value that will never open — which
+      turns out to be the test only they can make (a pass that aborted on one unreadable connection would
+      leave no heartbeat, and the watchdog would then alert two days later for the wrong reason). Every
+      claim needing a token that DOES open lives in packages/google/src/google-health.itest.ts, inside the
+      boundary that may seal one.'
+    - 'NOTE deferred to G-CONN-08: nothing here SENDS anything. The run computes the deduplicated
+      notification decision (notify: reauth_required | predictive_warning) and records it on the summary
+      row the panel renders; the Resend templates, the T-48h predictive email and the one-per-incident
+      reactive email are that unit''s. Deferred with it: the Places API review-count trigger from docs/10
+      §6, which is a different daily job with a different failure mode.'
+    - 'NOTE: three health values are written and one is deliberately not. A listing_drift finding leaves the
+      capability health alone: the listing resolved and the reply path works, so the capability is ok and
+      what changed is whether it is still the listing the owner confirmed — writing amber on a working
+      capability is the mistake this pass refuses everywhere else, and it would make the badge mean two
+      things. The finding is a health_check_failed row with kind: listing_drift in its detail, and a gate
+      fixture pins the reason: google_connection_events_event_check refuses listing_drift as an EVENT name,
+      which is the synonym this unit was tempted to add.'
     files:
     - apps/worker/src/jobs/google-connection-health.ts
+    - apps/worker/src/jobs/google-connection-health.test.ts
+    - apps/worker/src/jobs/google-connection-health.itest.ts
+    - apps/worker/src/registry.ts
+    - apps/worker/package.json
     - packages/google/src/health/deep-check.ts
+    - packages/google/src/health/deep-check.test.ts
     - packages/google/src/health/testing-expiry.ts
-    - packages/db/migrations/0042_google_capability_health.sql
+    - packages/google/src/health/testing-expiry.test.ts
+    - packages/google/src/health/liveness.ts
+    - packages/google/src/health/liveness.test.ts
+    - packages/google/src/google-health.itest.ts
+    - packages/google/src/connection-store.ts
+    - packages/google/src/postgres-store.ts
+    - packages/google/src/memory-store.ts
+    - packages/google/src/capability-resolver.ts
+    - packages/google/src/consumers.ts
+    - packages/google/src/with-google.ts
+    - packages/google/src/token-refresh.ts
+    - packages/google/src/token-refresh.itest.ts
+    - packages/google/src/adapters/business-information.ts
+    - packages/google/src/index.ts
+    - packages/core/src/google/health.ts
+    - packages/core/src/google/health.test.ts
+    - packages/core/src/google/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/providers/src/google/port.ts
+    - packages/providers/src/google/fake-google.ts
+    - packages/providers/src/google/index.ts
+    - packages/db/migrations/0033_google_liveness_agent.sql
+    - packages/db/src/index.ts
+    - apps/web/app/(admin)/settings/integrations/google/health/route.ts
+    - apps/web/app/(admin)/settings/integrations/google/health/handler.ts
+    - apps/web/src/google-health-fragment.itest.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
   - id: G-CONN-07
     order: 157
     title: Connection state machine, plain-English states, Test connection, settings card

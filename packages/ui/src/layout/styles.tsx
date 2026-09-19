@@ -13,8 +13,9 @@
  * 3. **One `<style>` element, once.** React hoists it and deduplicates by `href`, so a page that
  *    renders two primitives does not ship two copies.
  *
- * The reveal and the focus ring live here rather than beside a component because they are properties of
- * the system: one keyframe set, one ring, applied to whatever asks for them.
+ * The focus ring lives here rather than beside a component because it is a property of the system: one
+ * ring, applied to whatever asks for it. The motion system is next door in `../motion/`, as a stylesheet
+ * of its own rather than a string — see `DESIGN_SYSTEM_CSS` below.
  */
 import { NAP_BLOCK_CSS } from '../patterns/nap-block.tsx'
 import { SERVICE_ROW_CSS } from '../patterns/service-row.tsx'
@@ -120,36 +121,15 @@ export const FIELD_CSS = `
 .be-field__select { border-radius: var(--radius-2); }
 `
 
-/**
- * The below-fold reveal, authored once for both directions.
+/*
+ * The reveal was here until W-SYS-04.
  *
- * The inline component of the movement is multiplied by `--dir`, which is `1` under `dir="ltr"` and
- * `-1` under `dir="rtl"` (`tokens/scale.ts`). That is the whole RTL mechanism: one keyframe set, two
- * directions, numerically mirrored transforms. The alternative — a second `@keyframes` named `-rtl` and
- * a `[dir="rtl"]` rule to select it — is two animations to keep in step, and `pnpm layout` rejects it.
- *
- * `--move-*` is zeroed by the reduced-motion token override, so movement disappears and the opacity
- * cross-fade survives without a per-component branch.
- *
- * Reveals are below the fold only. docs/08 §5 bans entrance animations above it: an element at
- * `opacity: 0` is not painted, and a 500ms fade on the hero h1 costs about 0.7s of LCP.
+ * It moved to `packages/ui/src/motion/tokens.css`, with the scroll trigger it was always missing — it
+ * played on load, which is not a below-fold reveal — and with the header condensation beside it. The
+ * motion system is one stylesheet for the same reason this is one stylesheet: `animation-timeline` may
+ * appear in exactly two selectors on this site, and `pnpm layout` can only count them if they are
+ * somewhere findable.
  */
-export const MOTION_CSS = `
-@keyframes be-reveal {
-  from {
-    opacity: 0;
-    transform: translate(calc(var(--move-lg) * var(--dir)), var(--move-md));
-  }
-  to {
-    opacity: 1;
-    transform: translate(0, 0);
-  }
-}
-
-[data-reveal] {
-  animation: be-reveal var(--dur-reveal) var(--ease-out-soft) both;
-}
-`
 
 /** A disclosure, which is here because a `<summary>` is a touch target and rarely treated as one. */
 export const DISCLOSURE_CSS = `
@@ -169,7 +149,15 @@ export const DISCLOSURE_CSS = `
 }
 `
 
-/** The whole system, in the order a cascade wants it: layout, then components, then state. */
+/**
+ * The whole system, in the order a cascade wants it: layout, then components, then state.
+ *
+ * The motion system is deliberately not in this list. It is a stylesheet of its own
+ * (`@berelax/ui/motion.css`, imported by `apps/web/app/globals.css`) rather than a string in a
+ * `<style>` element, because it is not per-component CSS: it is two scroll-driven effects and one
+ * keyframe set that belong to the document, and a `<style>` element rendered by a component is not
+ * present on a route that renders no component.
+ */
 export const DESIGN_SYSTEM_CSS = [
   GRID_CSS,
   SECTION_CSS,
@@ -182,7 +170,6 @@ export const DESIGN_SYSTEM_CSS = [
   NAP_BLOCK_CSS,
   DISCLOSURE_CSS,
   FOCUS_CSS,
-  MOTION_CSS,
 ]
   .join('\n')
   .trim()

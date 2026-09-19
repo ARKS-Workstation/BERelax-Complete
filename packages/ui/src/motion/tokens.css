@@ -1,0 +1,210 @@
+/*
+ * The motion system's CSS — docs/08 §5 and §7.
+ *
+ * Hand-authored, like `theme/arabic.css` and unlike `tokens/tokens.css`: nothing here is derived from a
+ * value in TypeScript, so there is nothing for a generator to generate. The *durations, easings,
+ * distances and the stagger step* are tokens and do come from `tokens/scale.ts`; this file is what uses
+ * them.
+ *
+ * Four things live here and nowhere else:
+ *
+ *  1. **One keyframe set**, `be-reveal`, whose inline distance is multiplied by `--dir`. That is the
+ *     whole RTL mechanism: one animation, two directions, numerically mirrored transforms. A second
+ *     `@keyframes …-rtl` is rejected by `pnpm layout`.
+ *  2. **Exactly two scroll-driven effects** — the below-fold reveal and the header condensation — which
+ *     is the only place `animation-timeline` may appear. A third is rejected by `pnpm layout`.
+ *  3. **The stagger**, as a multiplication rather than a delay per child, so the reduced-motion token
+ *     override zeroes every delay in the document at once.
+ *  4. **No `prefers-reduced-motion` block.** There is exactly one in this repository, in the token
+ *     layer, and this file inherits all of its behaviour through `--move-*`, `--dur-*` and `--stagger`.
+ *     `pnpm layout` fails the build if a second one appears anywhere.
+ */
+
+/*
+ * The below-fold reveal. docs/08 §5: opacity plus a rise, 500ms, once.
+ *
+ * `--move-*` is zeroed by the reduced-motion override, so movement disappears and the opacity
+ * cross-fade survives without a per-component branch.
+ *
+ * Reveals are below the fold only. docs/08 §5 bans entrance animations above it: an element at
+ * `opacity: 0` is not painted, and a 500ms fade on the hero h1 costs about 0.7s of LCP.
+ */
+@keyframes be-reveal {
+  from {
+    opacity: 0;
+    transform: translate(calc(var(--move-lg) * var(--dir)), var(--move-md));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+}
+
+/*
+ * The time-based form: a state change, not an arrival.
+ *
+ * Same frames, driven by the clock rather than by scroll, at `--dur-base` — which the reduced-motion
+ * override keeps at 120ms rather than zeroing, because a number that changes without a cross-fade is a
+ * number the reader did not see change. This is what a staggered group entrance uses (docs/08 §5's
+ * number cross-fade, and the slot list after a date change); the attribute is what a component adds
+ * when the value behind it has changed.
+ */
+[data-crossfade] {
+  animation: be-reveal var(--dur-base) var(--ease-out-quiet) both;
+}
+
+/*
+ * The stagger, as a multiplication of three things, none of which is a per-component time.
+ *
+ * `--stagger` is the base step and lives in the token layer, where the reduced-motion override sets it to
+ * `0ms`. `--stagger-scale` is how much a larger group compresses that step (1 at six siblings, 0.6 at
+ * ten), and the group carries it as a **number**: a container that carried the step itself as a time
+ * would shadow the token, and the reduced-motion override would never reach the children — which is what
+ * the first version of this did, silently, until a browser assertion caught it. `--stagger-index` is the
+ * child's position. `0ms × anything` is `0ms`.
+ *
+ * Above twelve siblings `staggerChildVars` gives no index, the fallback `0` applies, and every child's
+ * delay is zero while the container carries the single animation (`motion/stagger.ts`).
+ *
+ * This is for a group that arrives on a *state change*. A scroll-driven reveal needs no delay at all:
+ * each child has its own `view()` timeline and therefore its own position in the scroll, which staggers
+ * the group by geometry instead — and a delay is ignored on a progress-based timeline anyway.
+ */
+[data-stagger] > * {
+  animation-delay: calc(var(--stagger) * var(--stagger-scale, 1) * var(--stagger-index, 0));
+}
+
+/* 1 of 2 scroll-driven effects: the reveal, driven by the element's own passage through the viewport. */
+[data-reveal] {
+  animation: be-reveal var(--dur-reveal) var(--ease-out-soft) both;
+  animation-timeline: view();
+  /*
+   * Begin as the leading edge crosses into view and finish before the element is centred: a reveal that
+   * completes at `cover 100%` is still fading while the reader is already reading it.
+   */
+  animation-range: entry 0% cover 30%;
+}
+
+/*
+ * The fallback, for a browser with no scroll-driven animations (Firefox, as of writing).
+ *
+ * There, `animation-timeline` is dropped by the parser and the rule above becomes an ordinary 500ms
+ * animation that plays on load — which is not a below-fold reveal: it has finished before the reader
+ * scrolled to it. `data-motion-fallback` holds it at its first frame instead, and
+ * `motion/reveal.tsx` releases each element as it arrives.
+ *
+ * The attribute is set by a blocking inline script rather than by the island, because an island runs
+ * after the first paint: the reveal would play, and the reader would then watch content that was
+ * already on screen vanish and come back. And the script removes the attribute again if no island
+ * claims it within three seconds — see `motion/bootstrap.ts`, which is also where the reason a
+ * `@supports not (...)` query cannot do this job is written down.
+ */
+[data-motion-fallback] [data-reveal] {
+  animation-play-state: paused;
+}
+
+[data-motion-fallback] [data-reveal][data-revealed] {
+  animation-play-state: running;
+}
+
+/*
+ * The header, and the one paint on this site that has to be budgeted.
+ *
+ * docs/08 §8: `backdrop-filter` blur in the condensed header is the most expensive paint here and
+ * measurably hurts scroll smoothness on mid-tier Android — a large share of UAE traffic. 8px maximum,
+ * dropped under `prefers-reduced-transparency`, where the translucent fill becomes an opaque one so the
+ * text over it keeps its measured contrast either way.
+ */
+:root {
+  --header-block-size: var(--space-13);
+  --header-block-size-condensed: var(--space-11);
+  --header-blur: 8px;
+  --header-fill: color-mix(in oklab, var(--color-ground) 72%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --header-blur: 0px;
+    --header-fill: var(--color-ground);
+  }
+}
+
+.be-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-inline: var(--gutter);
+  block-size: var(--header-block-size);
+  border-block-end: 1px solid var(--color-hairline);
+}
+
+/*
+ * Height and blur, as one scroll-driven animation. The custom properties are resolved where they are
+ * used, so the `prefers-reduced-transparency` override above changes what this interpolates towards
+ * without a second set of frames.
+ */
+@keyframes be-header-condense {
+  from {
+    block-size: var(--header-block-size);
+    background-color: transparent;
+    backdrop-filter: blur(0);
+  }
+  to {
+    block-size: var(--header-block-size-condensed);
+    background-color: var(--header-fill);
+    backdrop-filter: blur(var(--header-blur));
+  }
+}
+
+/*
+ * 2 of 2 scroll-driven effects.
+ *
+ * Inside a positive feature query, unlike the reveal, and the asymmetry is the point: a header's
+ * un-condensed state is the *correct* state, so a browser without scroll timelines can simply not
+ * condense — no script, no held frame, nothing to undo. Content held at `opacity: 0` is not correct,
+ * which is why the reveal needs the script and this does not.
+ */
+@supports (animation-timeline: scroll()) {
+  .be-header {
+    animation: be-header-condense var(--dur-slow) linear both;
+    animation-timeline: scroll();
+    /* Condensed by the time the reader has scrolled one header's height. */
+    animation-range: 0 var(--header-block-size);
+  }
+}
+
+/*
+ * The header's fallback: the same two ends, as a state the island's sentinel toggles.
+ *
+ * A transition rather than an animation, because this is a change between two states that can go back,
+ * and because a transition cannot play on load — which an animation would do in exactly the browser
+ * this branch is for.
+ */
+.be-header {
+  transition:
+    block-size var(--dur-slow) var(--ease-calm),
+    background-color var(--dur-slow) linear,
+    backdrop-filter var(--dur-slow) linear;
+}
+
+.be-header[data-condensed] {
+  block-size: var(--header-block-size-condensed);
+  background-color: var(--header-fill);
+  backdrop-filter: blur(var(--header-blur));
+}
+
+/*
+ * The fallback's sentinel, rendered by `motion/header-condense.tsx`.
+ *
+ * One header's height of scroll — the same token the `animation-range` above uses, so the CSS threshold
+ * and the JavaScript one cannot drift — and an equal negative margin, so it occupies no space at all.
+ */
+.be-header-sentinel {
+  display: block;
+  block-size: var(--header-block-size);
+  margin-block-end: calc(var(--header-block-size) * -1);
+  pointer-events: none;
+}

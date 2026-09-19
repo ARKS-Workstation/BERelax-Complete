@@ -160,6 +160,78 @@ export interface CapabilityHealthWrite {
   readonly health: GoogleCapabilityHealth
 }
 
+/**
+ * What the daily health run and the hourly liveness probe write about a connection as a whole.
+ *
+ * `lastOkAt` is nullable and that nullability is the whole point. `recordRefresh` moves `last_ok_at`
+ * because a refresh **is** a successful authenticated call, but a health pass that read a location
+ * without needing a new token has also just proved the connection works — and nothing else in the
+ * store could say so. Without this write, a connection whose token has fifty minutes left is silently
+ * un-verifiable: the deep check succeeds, `last_ok_at` stays where it was, and after 48 hours
+ * `deriveConnectionHealth` calls a working connection `degraded`.
+ *
+ * A pass that failed writes `lastOkAt: null` and still moves `lastCheckedAt`, so *"we looked and it did
+ * not work"* is distinguishable from *"nothing has looked"*. Those need different actions and the panel
+ * shows different things for each.
+ */
+export interface CheckOutcomeWrite {
+  readonly connectionId: string
+  /** Null when nothing in the pass reached Google. Never a guess. */
+  readonly lastOkAt: Instant | null
+  readonly lastCheckedAt: Instant
+}
+
+/**
+ * The listing the owner confirmed, read back out of the append-only event the picker wrote.
+ *
+ * Deliberately **not** a new table. The `capability_changed` row G-CONN-05 appends when somebody picks
+ * a listing already is the record of what was confirmed, when, and by whom: it is append-only, it is
+ * mirrored into `audit_event` by a trigger in the same transaction, and it is what the connection panel
+ * renders. A `google_listing_snapshot` table beside it would be a second answer to one question, and
+ * the interesting case — *which* of the two is what the owner actually clicked — would have no answer
+ * at all. It also could only be filled by this unit, which would mean comparing a listing against a
+ * snapshot taken from the same read: a check that cannot fail.
+ */
+export interface ConfirmedListing {
+  readonly placeId: string
+  readonly title: string
+  readonly address: string
+  readonly confirmedAt: Instant
+  /** Who chose it, as the event recorded them. Null for a row written before actors were carried. */
+  readonly actorLabel: string | null
+}
+
+/**
+ * What the daily health check needs, and nothing else.
+ *
+ * A fourth narrow seam beside `GoogleConnectionStore`, `GoogleConsentStore` and
+ * `GoogleCapabilitySelectionStore`, for the reason the other three already give: the narrowest
+ * interface that expresses what a caller needs is the cheapest way to guarantee it does nothing else.
+ * A health check reads, writes a health, records that it looked, and appends an event. It cannot insert
+ * a connection, exchange a consent, choose a resource or touch a token column — and it is a cron, which
+ * is the one caller nobody is watching while it runs.
+ */
+export interface GoogleHealthStore {
+  listAll(): Promise<readonly GoogleConnectionRecord[]>
+  /**
+   * Re-reads one connection after the pass has made its calls.
+   *
+   * Needed because the pass can change the thing it is describing. A forced refresh that comes back
+   * `invalid_grant` moves `status` to `needs_reauth` *inside* the pass, and a summary derived from the row
+   * as it was loaded would report the connection `healthy` in the same breath as recording that its grant
+   * is dead. That is not a cosmetic inconsistency: `displayState` is what the banner and the email read.
+   */
+  load(connectionId: string): Promise<GoogleConnectionRecord | null>
+  capabilitiesFor(connectionId: string): Promise<readonly GoogleCapabilityRecord[]>
+  confirmedListing(args: {
+    readonly connectionId: string
+    readonly capability: GoogleCapability
+  }): Promise<ConfirmedListing | null>
+  updateCapabilityHealth(write: CapabilityHealthWrite): Promise<void>
+  recordCheckOutcome(write: CheckOutcomeWrite): Promise<void>
+  appendEvent(event: ConnectionEventInput): Promise<void>
+}
+
 export interface GoogleConnectionStore {
   load(connectionId: string): Promise<GoogleConnectionRecord | null>
   /**

@@ -205,6 +205,22 @@ export const ROUTES = [
       'before it is written.',
   },
   {
+    id: 'google-health',
+    path: '/settings/integrations/google/health',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-CONN-06s connection health fragment: the plain-English state of every Google connection, how ' +
+      'recently it was verified, and — while the OAuth consent screen is in Testing — the date the ' +
+      'grant expires. A handler rather than a document for the reason the picker beside it gives, and ' +
+      'read-only: it makes no Google call, so it still renders on the day the grant dies. G-CONN-07 ' +
+      'replaces the fragment with the rendered card. Covered by the /settings noindex prefix.',
+  },
+  {
     id: 'google-picker',
     path: '/settings/integrations/google/picker',
     kind: 'handler',

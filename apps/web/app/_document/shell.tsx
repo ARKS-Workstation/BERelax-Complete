@@ -3,6 +3,7 @@ import {
   directionFor,
   LIGHT_PALETTE,
   type Locale,
+  motionBootstrapScript,
   themeBootstrapScript,
 } from '@berelax/ui'
 import { DirectionProvider } from '@berelax/ui/direction'
@@ -87,6 +88,23 @@ export function DocumentShell({ locale, children }: { locale: Locale; children: 
         <script
           // biome-ignore lint/security/noDangerouslySetInnerHtml: a constant from themeBootstrapScript(), never user input, and it has to be inline to run before paint
           dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }}
+        />
+        {/*
+          The same trick for the same reason, one line further down: the reveal.
+
+          In a browser with no `animation-timeline`, `[data-reveal]` is an ordinary animation that plays
+          on load, so the below-fold reveal has finished before the reader has scrolled to it. The
+          fallback holds each one at its first frame instead — which only works if the decision is made
+          before the first paint, or the reveal plays and the reader then watches content that was
+          already on screen vanish and come back when the island hydrates.
+
+          It is a string, not a module. That is what keeps `build/budgets.json`'s claim true — the shared
+          layout ships zero bytes of motion JavaScript — while the shell still carries the decision, and
+          `@berelax/ui/motion/reveal` stays a code-split island nothing here imports.
+        */}
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: a constant from motionBootstrapScript(), never user input, and it has to be inline to run before paint
+          dangerouslySetInnerHTML={{ __html: motionBootstrapScript() }}
         />
       </head>
       <body>

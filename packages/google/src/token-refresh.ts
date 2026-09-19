@@ -228,6 +228,26 @@ export interface ProactiveRefreshDeps extends TokenLifecycleDeps {
   readonly lock: RefreshLockRunner
 }
 
+export interface AccessTokenOptions {
+  /**
+   * Refresh even when the cached token has plenty of life left. Default false.
+   *
+   * There is exactly one caller: the daily health check (G-CONN-06). Its whole job is to answer *"does
+   * this grant still work"*, and the cached-token fast path cannot answer it — a token with fifty
+   * minutes to live proves only that something refreshed recently. Two invalidations in docs/10 §4 are
+   * invisible to any other path: the **seven-day Testing expiry**, which is the launch blocker, and the
+   * **six-months-unused** auto-invalidation, which the daily check is what makes structurally
+   * impossible. Both are discovered by *asking Google for a token* and by nothing else.
+   *
+   * The lock is still taken, and that is not a formality: the point of the lock is that the health
+   * check, the review poll and the SEO crawl can start in the same second on different workers, and a
+   * forced refresh outside it would be the one refresh that races. What is skipped is only the
+   * double **check** — deliberately, because the winner's fresh token is precisely the answer a forced
+   * refresh must not accept.
+   */
+  readonly force?: boolean
+}
+
 /**
  * Obtains an access token, refreshing it proactively and at most once across every worker.
  *
@@ -244,22 +264,64 @@ export interface ProactiveRefreshDeps extends TokenLifecycleDeps {
 export async function accessTokenUnderLock(
   deps: ProactiveRefreshDeps,
   connectionId: string,
+  options: AccessTokenOptions = {},
 ): Promise<AccessTokenGrant> {
   const connection = await loadActiveConnection(deps.store, connectionId)
-  const cached = cachedAccessGrant(deps, connection)
-  if (cached !== null) return cached
+  if (options.force !== true) {
+    const cached = cachedAccessGrant(deps, connection)
+    if (cached !== null) return cached
+  }
 
-  return deps.lock.withConnectionLock(connectionId, async (scope) => {
-    // The double check. Read through the LOCKED store, not the outer one: the outer store is a
-    // different pooled connection and its read would not be inside the transaction the lock belongs to.
-    const locked = await loadActiveConnection(scope.store, connectionId)
-    const winner = cachedAccessGrant(deps, locked)
-    if (winner !== null) return winner
+  const outcome = await deps.lock.withConnectionLock<LockedRefreshOutcome>(
+    connectionId,
+    async (scope) => {
+      // The double check. Read through the LOCKED store, not the outer one: the outer store is a
+      // different pooled connection and its read would not be inside the transaction the lock belongs to.
+      const locked = await loadActiveConnection(scope.store, connectionId)
+      if (options.force !== true) {
+        const winner = cachedAccessGrant(deps, locked)
+        if (winner !== null) return { kind: 'ok', grant: winner }
+      }
 
-    // Both writes `refreshAccessToken` makes — the token columns and the append-only `refreshed` event —
-    // now happen inside this transaction, so they commit together or not at all. Outside a transaction
-    // they are two statements, and a crash between them leaves a refreshed token with no event beside
-    // it: the connection panel then shows a successful call that the log says never happened.
-    return refreshAccessToken({ ...deps, store: scope.store }, locked)
-  })
+      // Both writes `refreshAccessToken` makes — the token columns and the append-only `refreshed` event —
+      // now happen inside this transaction, so they commit together or not at all. Outside a transaction
+      // they are two statements, and a crash between them leaves a refreshed token with no event beside
+      // it: the connection panel then shows a successful call that the log says never happened.
+      try {
+        return {
+          kind: 'ok',
+          grant: await refreshAccessToken({ ...deps, store: scope.store }, locked),
+        }
+      } catch (error) {
+        // **Caught so the transaction commits, and rethrown outside it.** This is not defensive coding;
+        // it is the difference between detecting a dead grant and not.
+        //
+        // `refreshAccessToken`'s failure path writes the two rows that *are* the detection: the status
+        // moving to `needs_reauth` with `status_reason = invalid_grant`, and the append-only
+        // `reauth_required` event that the connection panel renders and that deduplicates the owner's
+        // email to one per incident. Both are written through `scope.store`, which is this transaction.
+        // Letting the throw propagate out of `sql.begin` rolls the transaction back and takes both of
+        // them with it — so a revoked grant, or a Testing-status client on day seven, would be
+        // discovered and then forgotten, every time, silently. The connection would stay `active` with a
+        // valid-looking row and no event, and the only symptom would be every Google capability quietly
+        // degrading for ever.
+        //
+        // It was found by G-CONN-06's own day-eight test, not by review: the success path's atomicity was
+        // argued carefully and the failure path was overlooked.
+        return { kind: 'failed', error }
+      }
+    },
+  )
+  if (outcome.kind === 'failed') throw outcome.error
+  return outcome.grant
 }
+
+/**
+ * The two shapes a locked refresh can end in, so a failure can commit its evidence before it propagates.
+ *
+ * A union rather than a throw, and the reason is the comment inside `accessTokenUnderLock`: the rows that
+ * record *why* a grant died are written inside the locking transaction, and a throw rolls them back.
+ */
+type LockedRefreshOutcome =
+  | { readonly kind: 'ok'; readonly grant: AccessTokenGrant }
+  | { readonly kind: 'failed'; readonly error: unknown }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Six rules about layout, motion and elevation that a design document cannot enforce on its own.
+ * Eleven rules about layout, motion and elevation that a design document cannot enforce on its own.
  *
  * Each violation is reported with its **rule name** first, so `scripts/test-gates.mjs` can assert that a
  * known-bad fixture was rejected by the rule written for it. A bare non-zero exit is how a gate ends up
@@ -35,6 +35,32 @@
  * `box-shadow` written inside a dark-theme block is at best dead code and at worst a literal that
  * defeats the token.
  *
+ * **7. `reduced-motion-belongs-to-the-token-layer`.** docs/08 §5 makes reduced motion "a token override,
+ * not a per-component branch": one `@media (prefers-reduced-motion: reduce)` block sets the durations to
+ * 120ms, the movement distances to 0px and the stagger to 0ms, and every component inherits compliance
+ * through `var()`. A second block anywhere is the beginning of the other design, where each component
+ * decides for itself — and the ones that get it wrong are invisible, because nobody reviews with the
+ * setting on. So the media query may appear in exactly **one** authored file, and it is the emitter of the
+ * token stylesheet.
+ *
+ * **8. `at-most-two-scroll-driven-effects`.** docs/08 §7: "**Exactly two** scroll-driven effects exist:
+ * header condensation and below-fold reveal." Counted as *declarations*, because that is what costs
+ * something: a scroll-driven animation is cheap in isolation and a page of them is a page whose every
+ * frame recomputes. The count is asserted in both directions — a third is decoration, and a missing one is
+ * an effect somebody deleted, which is equally worth a failing build.
+ *
+ * **9. `motion-island-must-be-a-dynamic-client-module`.** docs/08 §7 puts the motion library in "≤2
+ * code-split islands, never in the shared layout". An island that is missing `'use client'` is not an
+ * island at all, and an island reached by a *static* import is in the importer's chunk — which is the one
+ * thing code-splitting was for. Both are silent: the page still works, and the bytes move.
+ *
+ * **10. `at-most-two-motion-islands`.** The other half of "≤2": a third island is a third chunk on a
+ * route, and the budget in `build/budgets.json` measures the ones that are declared there.
+ *
+ * **11. `motion-library-only-in-a-client-island`.** `motion`/`framer-motion` is 32-36KB gzip. It may be
+ * imported only by an island, so that the fence above applies to it too — and a component that reaches
+ * for it directly gets a build failure rather than a page that now carries an animation runtime.
+ *
  * Scanned: CSS and TS/TSX under `packages/ui` and `apps/web` — the design system and the app that
  * renders it. Component CSS in this project is authored in template literals (see
  * `packages/ui/src/layout/styles.tsx`), so the scanner reads the whole file with comments blanked rather
@@ -63,6 +89,27 @@ const OVERLAY_NAME = /(overlay|dialog|sheet|toast|popover|tooltip|menu|drawer|mo
 
 /** The only shadow. Anything else is a second elevation language. */
 const ALLOWED_SHADOW = /^(var\(\s*--shadow-overlay\s*\)|none|inherit|initial|unset|revert)$/i
+
+/** Where the motion system lives. The islands are the `.tsx` files directly inside it. */
+const MOTION_DIRECTORY = 'packages/ui/src/motion/'
+
+/** The one authored file that may carry the reduced-motion override: the token stylesheet's emitter. */
+const REDUCED_MOTION_SOURCE = 'packages/ui/src/tokens/scale.ts'
+
+/** docs/08 §7: header condensation and below-fold reveal. Neither more nor fewer. */
+const SCROLL_DRIVEN_EFFECTS = 2
+
+/** The animation library docs/08 §7 budgets at two islands, installed or not. */
+const MOTION_LIBRARY = /^(motion|framer-motion)(\/|$)/
+
+const REDUCED_MOTION_QUERY = /prefers-reduced-motion/i
+const ANIMATION_TIMELINE_DECLARATION = /(^|[;{\s])animation-timeline\s*:/gi
+/** `'use client'` or `"use client"`, as the first statement. A directive anywhere else is a string. */
+const USE_CLIENT_DIRECTIVE = /^\s*(?:['"]use client['"])/
+/** `from '…'` and a bare `import '…'`; the capture is the specifier. */
+const STATIC_IMPORT = /(?:^|[\n;])\s*import\s+(?:[^'"\n]*?from\s*)?['"]([^'"]+)['"]/g
+/** `import('…')` — including the `next/dynamic` spelling, which is what an island is reached by. */
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g
 
 const RTL_SELECTOR = /\[dir\s*=\s*['"]?rtl['"]?\]|:dir\(\s*rtl\s*\)/i
 const DARK_SCOPE = /\[data-theme\s*=\s*['"]?dark['"]?\]|prefers-color-scheme\s*:\s*dark/i
@@ -117,6 +164,31 @@ function enclosing(blocks, index) {
     .sort((a, b) => b.start - a.start)
 }
 
+/**
+ * A file the repository generates. Its `prefers-reduced-motion` is the authored one, emitted.
+ *
+ * Judged against the **raw** text, not the scanned text: the marker is in a comment, and this scanner
+ * blanks comments before it looks at anything. Reading the stripped copy reported `tokens/tokens.css` as a
+ * second authored reduced-motion block on the first run of this rule.
+ *
+ * A hand-edit to a generated stylesheet is `pnpm tokens`' failure to report, not this one's — it compares
+ * the committed file against a fresh emit and fails on any difference at all.
+ */
+function isGenerated(file, raw) {
+  return file.includes('.generated.') || /GENERATED/.test(raw.slice(0, 400))
+}
+
+/** A test ships nowhere, and one of them asserts the emitted reduced-motion block by reading it. */
+function isTest(file) {
+  return /\.(test|itest)\.[tj]sx?$/.test(file)
+}
+
+/** The path a specifier points at, reduced to what identifies an island: `motion/<name>`. */
+function motionSpecifier(specifier) {
+  const match = /(?:^|\/)motion\/([a-z0-9-]+)(?:\.tsx?)?$/.exec(specifier)
+  return match?.[1]
+}
+
 function* walk(dir) {
   let entries
   try {
@@ -138,6 +210,13 @@ function* walk(dir) {
 const violations = []
 let scanned = 0
 
+/** Rules 7-11 are about the tree rather than about one file, so the scan collects and then judges. */
+const reducedMotionFiles = []
+const scrollDrivenEffects = []
+const islands = new Map()
+const staticIslandImports = []
+const libraryImports = []
+
 for (const root of ROOTS) {
   try {
     statSync(root)
@@ -148,10 +227,84 @@ for (const root of ROOTS) {
   for (const file of walk(root)) {
     // Comments blanked, strings kept: the CSS this gate polices lives inside template literals, and a
     // rule explained in its own doc comment must not be reported as a violation of itself.
-    const text = stripNonCode(readFileSync(file, 'utf8'), { lineComments: !file.endsWith('.css') })
+    const raw = readFileSync(file, 'utf8')
+    const text = stripNonCode(raw, { lineComments: !file.endsWith('.css') })
     const blocks = blocksOf(text)
     const overlay = OVERLAY_NAME.test(basename(file))
     scanned += 1
+
+    const relative = file.replaceAll('\\', '/')
+
+    /*
+     * Rules 7-11 skip tests and generated files, and both exemptions are load-bearing.
+     *
+     * A test ships nowhere, so nothing in one is an effect on the site — and two of them have to *write*
+     * the things these rules forbid in order to check them: `tokens/scale.test.ts` reads the emitted
+     * reduced-motion block back, and `apps/web/src/motion.itest.ts` injects
+     * `animation-timeline: auto` to simulate a browser that has no scroll timelines, which is the only
+     * way to drive the fallback in a browser that does. Counting either as a third scroll-driven effect
+     * reported the motion system as over budget for writing its own tests.
+     *
+     * A generated stylesheet is the authored one, emitted. `pnpm tokens` fails on any difference at all
+     * between the committed copy and a fresh emit, so a hand-edit there is caught by the gate that owns it.
+     */
+    if (!isTest(relative)) {
+      // Rule 7 — the reduced-motion override, in one authored place.
+      if (REDUCED_MOTION_QUERY.test(text) && !isGenerated(relative, raw)) {
+        reducedMotionFiles.push(
+          `${relative}:${lineAt(text, REDUCED_MOTION_QUERY.exec(text)?.index ?? 0)}`,
+        )
+      }
+
+      // Rule 8 — every `animation-timeline` declaration, with the selector it is in.
+      for (const match of text.matchAll(ANIMATION_TIMELINE_DECLARATION)) {
+        const [innermost] = enclosing(blocks, match.index)
+        scrollDrivenEffects.push({
+          at: `${relative}:${lineAt(text, match.index)}`,
+          selector: innermost?.prelude ?? '(top level)',
+        })
+      }
+
+      // Rules 9-11 — the islands, who imports them, and who imports the library.
+      if (relative.startsWith(MOTION_DIRECTORY) && relative.endsWith('.tsx')) {
+        islands.set(relative, { useClient: USE_CLIENT_DIRECTIVE.test(text) })
+      }
+      for (const match of text.matchAll(STATIC_IMPORT)) {
+        const specifier = match[1] ?? ''
+        // An island importing its sibling is how `reveal.tsx` reaches `observe.ts`; the rule is about who
+        // reaches an island from outside the motion system. Which of those a specifier names is decided
+        // after the walk, against the islands that were actually found — `@berelax/ui/motion/bootstrap` is
+        // a pure module the document shell legitimately imports, and a rule matching the directory rather
+        // than the island would have forbidden it.
+        const named = motionSpecifier(specifier)
+        if (named !== undefined && !relative.startsWith(MOTION_DIRECTORY)) {
+          staticIslandImports.push({
+            at: `${relative}:${lineAt(text, match.index)}`,
+            specifier,
+            named,
+          })
+        }
+        if (MOTION_LIBRARY.test(specifier)) {
+          libraryImports.push({
+            at: `${relative}:${lineAt(text, match.index)}`,
+            file: relative,
+            specifier,
+          })
+        }
+      }
+      // A dynamic import of the *library* is still the library. Only an island may reach it, however it
+      // is spelled; what may be dynamic is the island itself.
+      for (const match of text.matchAll(DYNAMIC_IMPORT)) {
+        const specifier = match[1] ?? ''
+        if (MOTION_LIBRARY.test(specifier)) {
+          libraryImports.push({
+            at: `${relative}:${lineAt(text, match.index)}`,
+            file: relative,
+            specifier,
+          })
+        }
+      }
+    }
 
     // Rule 1 — a direction selector inside a keyframes block.
     for (const block of blocks) {
@@ -227,6 +380,76 @@ for (const root of ROOTS) {
   }
 }
 
+// Rule 7. One authored file, and it is the token emitter — not "at most one", because zero means the
+// override was deleted and every component's movement is back on for a reader who asked for none.
+if (reducedMotionFiles.length !== 1 || !reducedMotionFiles[0]?.startsWith(REDUCED_MOTION_SOURCE)) {
+  violations.push(
+    `[reduced-motion-belongs-to-the-token-layer] prefers-reduced-motion is authored in ` +
+      `${reducedMotionFiles.length} file(s) — ${reducedMotionFiles.join(', ') || 'none'} — and docs/08 ` +
+      `§5 puts it in exactly one, ${REDUCED_MOTION_SOURCE}, as a token override. A second block is a ` +
+      'per-component branch, which is the design where each component decides for itself and the ones ' +
+      'that get it wrong are invisible because nobody reviews with the setting on.',
+  )
+}
+
+// Rule 8. Exactly two, and both in the motion stylesheet where they can be counted.
+if (scrollDrivenEffects.length !== SCROLL_DRIVEN_EFFECTS) {
+  violations.push(
+    `[at-most-two-scroll-driven-effects] ${scrollDrivenEffects.length} animation-timeline ` +
+      `declaration(s), and docs/08 §7 says exactly ${SCROLL_DRIVEN_EFFECTS} — header condensation and ` +
+      `the below-fold reveal: ${scrollDrivenEffects.map((effect) => `${effect.at} (${effect.selector})`).join('; ') || 'none'}`,
+  )
+}
+for (const effect of scrollDrivenEffects) {
+  if (effect.at.startsWith(MOTION_DIRECTORY)) continue
+  violations.push(
+    `${effect.at}  [at-most-two-scroll-driven-effects] a scroll-driven animation outside ` +
+      `${MOTION_DIRECTORY} — the two this site has are counted, and a rule can only be counted where it ` +
+      'is expected to be',
+  )
+}
+
+// Rule 9. Every island carries the directive, and nothing imports one statically.
+for (const [island, { useClient }] of islands) {
+  if (useClient) continue
+  violations.push(
+    `${island}  [motion-island-must-be-a-dynamic-client-module] no 'use client' directive — a motion ` +
+      'island runs in the browser by definition, and without the directive it is a server component ' +
+      'whose effects never run',
+  )
+}
+/** The islands by the name a specifier carries: `reveal.tsx` is imported as `…/motion/reveal`. */
+const islandNames = new Set(
+  [...islands.keys()].map((island) => basename(island).replace(/\.tsx$/, '')),
+)
+for (const { at, specifier, named } of staticIslandImports) {
+  if (!islandNames.has(named)) continue
+  violations.push(
+    `${at}  [motion-island-must-be-a-dynamic-client-module] static import of '${specifier}' — an island ` +
+      "reached statically is in the importer's chunk, which is the one thing splitting it was for. Use " +
+      "dynamic(() => import('…')).",
+  )
+}
+
+// Rule 10.
+if (islands.size > 2) {
+  violations.push(
+    `[at-most-two-motion-islands] ${islands.size} islands in ${MOTION_DIRECTORY} — ` +
+      `${[...islands.keys()].join(', ')}. docs/08 §7 allows two, and build/budgets.json measures the ` +
+      'ones it declares.',
+  )
+}
+
+// Rule 11.
+for (const { at, file, specifier } of libraryImports) {
+  if (file.startsWith(MOTION_DIRECTORY) && file.endsWith('.tsx')) continue
+  violations.push(
+    `${at}  [motion-library-only-in-a-client-island] imports '${specifier}', which is 32-36KB gzip. ` +
+      `docs/08 §7 allows it in at most two code-split islands under ${MOTION_DIRECTORY} and never in ` +
+      'the shared layout; everything else on this site animates in CSS, which costs nothing.',
+  )
+}
+
 if (violations.length > 0) {
   console.error('Layout, motion and elevation violations:\n')
   for (const violation of violations) console.error(`  ${violation}`)
@@ -236,5 +459,8 @@ if (violations.length > 0) {
 
 console.log(
   `Layout rules hold across ${scanned} source files: one animation per direction pair, no page ` +
-    'breakpoint in a container component, one shadow and none in the dark.',
+    'breakpoint in a container component, one shadow and none in the dark, one reduced-motion override, ' +
+    `${scrollDrivenEffects.length} scroll-driven effects (${scrollDrivenEffects
+      .map((effect) => effect.selector)
+      .join(', ')}) and ${islands.size} dynamically imported motion island(s).`,
 )

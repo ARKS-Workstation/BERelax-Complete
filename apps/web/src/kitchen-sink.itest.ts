@@ -516,10 +516,18 @@ interface Reveal {
 /**
  * The reveal's first keyframe, in a direction.
  *
- * The animation is paused and rewound rather than caught while running: it is a 500ms animation on a
- * page that finished loading long before the assertion, so by the time anything is read it has played.
- * `getAnimations()` returns the real `CSSAnimation` built from the authored keyframes, which is the
- * thing under test — authoring the transform in the test would prove only that the test can do algebra.
+ * The animation is paused and rewound rather than caught while running: a *time-based* one is a 500ms
+ * animation on a page that finished loading long before the assertion, so by the time anything is read it
+ * has played. `getAnimations()` returns the real `CSSAnimation` built from the authored keyframes, which
+ * is the thing under test — authoring the transform in the test would prove only that the test can do
+ * algebra.
+ *
+ * W-SYS-04 made the reveal scroll-driven, and a **progress-based** animation has no current time in
+ * milliseconds: Chromium throws `NotSupportedError` on `currentTime = 0` for one. It also needs no
+ * rewinding, because at scroll position zero an element below the fold is already at its first frame.
+ * So the rewind now applies to the timeline it was written for, which is also the one the control case in
+ * this file uses — an animation authored with a literal `translateX(32px)` and no timeline, which does
+ * play on load and does have to be put back.
  */
 async function revealAt(page: Page, direction: 'ltr' | 'rtl', selector: string): Promise<Reveal> {
   return await page.evaluate(
@@ -530,7 +538,7 @@ async function revealAt(page: Page, direction: 'ltr' | 'rtl', selector: string):
       const animations = element.getAnimations()
       for (const animation of animations) {
         animation.pause()
-        animation.currentTime = 0
+        if (animation.timeline === document.timeline) animation.currentTime = 0
       }
       return {
         dir: getComputedStyle(document.documentElement).getPropertyValue('--dir').trim(),

@@ -6,11 +6,14 @@
  *  1. The generated tokens — colours, scales, shadow. The source of truth is `scripts/palette.py`.
  *  2. The measured font fallbacks, so a swap reflows nothing.
  *  3. The Arabic recalibration.
- *  4. Tailwind, and the theme that replaces its defaults.
+ *  4. The motion system, which uses the duration, easing, distance and stagger tokens from 1 — and
+ *     which is where every `animation-timeline` and every keyframe on this site lives (docs/08 §5).
+ *  5. Tailwind, and the theme that replaces its defaults.
  */
 @import "@berelax/ui/tokens.css";
 @import "@berelax/ui/font-fallbacks.css";
 @import "@berelax/ui/arabic.css";
+@import "@berelax/ui/motion.css";
 
 @import "tailwindcss";
 

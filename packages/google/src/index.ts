@@ -22,11 +22,13 @@ export {
   type EnumeratedLocation,
   getLocationUnder,
   LOCATION_READ_MASK,
+  type LocationSnapshot,
   listLocationsUnder,
   oneLineAddress,
   READ_MASK_INCOMPLETE,
   READ_MASK_MISSING,
   REQUIRED_READ_MASK_FIELDS,
+  readLocationSnapshot,
 } from './adapters/business-information.ts'
 export {
   assertSiteSelectable,
@@ -66,6 +68,8 @@ export {
 export type {
   CapabilityHealthWrite,
   CapabilityResourceWrite,
+  CheckOutcomeWrite,
+  ConfirmedListing,
   ConnectionEventInput,
   ConsentWrite,
   GoogleCapabilityRecord,
@@ -73,6 +77,7 @@ export type {
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleHealthStore,
   NewConnection,
   RefreshWrite,
   StatusWrite,
@@ -84,6 +89,7 @@ export {
   type DeclaredCapability,
   type DegradedMode,
   declarationFor,
+  declaredCapabilities,
   type GoogleConsumer,
   indexByCapability,
   isDeclaredCapability,
@@ -101,6 +107,46 @@ export {
   type UpstreamFingerprint,
   upstreamFingerprint,
 } from './errors.ts'
+export {
+  type CapabilityCheck,
+  type ConnectionCheck,
+  checkConnection,
+  type DeepCheckResult,
+  HEALTH_EVENT_FAILED,
+  HEALTH_EVENT_OK,
+  HEALTH_NO_CONFIRMED_LISTING,
+  HEALTH_NO_CONSUMER,
+  HEALTH_NO_RESOURCE_SELECTED,
+  HEALTH_RESOURCE_REF_MALFORMED,
+  HEALTH_SCOPE_MISSING,
+  type HealthCheckDeps,
+  type HealthFinding,
+  type ListingNotVerifiedFinding,
+  runDeepCheck,
+} from './health/deep-check.ts'
+export {
+  type LivenessDeps,
+  type LivenessProbe,
+  type LivenessResult,
+  type LivenessSkip,
+  livenessCapabilityFor,
+  runLiveness,
+} from './health/liveness.ts'
+export {
+  type ConnectionHealthCard,
+  connectionHealthCards,
+  connectionSnapshot,
+  escapeHtml,
+  GOOGLE_PUBLISHING_STATUSES,
+  type GooglePublishingStatus,
+  isGooglePublishingStatus,
+  renderConnectionHealth,
+  renderTestingExpiry,
+  spellDate,
+  TESTING_EXPIRY_TRIPWIRE,
+  type TestingExpiryView,
+  testingExpiryFor,
+} from './health/testing-expiry.ts'
 export {
   type AccessTokenGrant,
   accessTokenFor,
@@ -169,6 +215,7 @@ export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
  * `SealedToken` stays: it is the five sealed columns as a type, and a type decrypts nothing.
  */
 export {
+  type AccessTokenOptions,
   accessTokenUnderLock,
   assertReadCommitted,
   createMemoryRefreshLock,

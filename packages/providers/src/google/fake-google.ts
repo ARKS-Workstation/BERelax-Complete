@@ -31,6 +31,7 @@ import type {
   SearchAnalyticsRow,
   SearchConsoleProvider,
   SearchConsoleSite,
+  VoiceOfMerchantState,
 } from './port.ts'
 
 export const GOOGLE_OAUTH = 'google-oauth'
@@ -91,6 +92,40 @@ export interface FakeGoogleOptions {
    */
   readonly rotatesRefreshToken?: boolean
   /**
+   * When consent was granted, and with it the seven-day fuse a Testing-status client carries.
+   *
+   * Absent by default, which means no fuse — the fake behaves like a published client. Supplying it
+   * with `publishingStatus: 'testing'` is what makes `refresh` throw `invalid_grant` on day seven, and
+   * that is the whole reason this option exists: until it did, **the launch blocker was unreachable
+   * from any test**. The detection path, the state transition, the deduplicated notification decision
+   * and the tripwire that is supposed to warn *before* all of it could only be exercised against a
+   * hand-armed `FailureScript`, which proves the taxonomy works and proves nothing about whether the
+   * expiry is ever noticed.
+   *
+   * `now()` is already injected, so the expiry is a function of the frozen clock and a test can stand
+   * on either side of it without waiting a week (docs/10 §4, §8 blocker 1).
+   */
+  readonly consentAtIso?: string
+  /**
+   * The OAuth consent screen's publishing status. Default `production` — no fuse.
+   *
+   * Default chosen the opposite way round from the application's own setting, and deliberately: the
+   * application assumes `testing` because that is the default state of every Cloud project and
+   * assuming otherwise would silence the tripwire, whereas a *fake* that expired every token after
+   * seven days by default would break every unrelated test whose frozen clock happens to sit more than
+   * a week after its fixture's consent. The hazard is opt-in here and opt-out there, and each default
+   * is the safe one for what it governs.
+   */
+  readonly publishingStatus?: 'testing' | 'production'
+  /**
+   * What `locations.getVoiceOfMerchantState` reports. Default: verified, with authority.
+   *
+   * False is the state that explains *"my token is fine and my writes fail"* (docs/10 §7), and it is
+   * reachable only because this option exists: nothing else in the fake can produce a listing that
+   * reads perfectly and refuses a reply.
+   */
+  readonly voiceOfMerchant?: VoiceOfMerchantState
+  /**
    * The accounts `accounts.list` returns. Default: the two fixtures below.
    *
    * `[]` is the case the picker gets wrong most easily: **HTTP 200 with an empty list**, which means the
@@ -148,6 +183,8 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
     email = DEFAULT_FAKE_EMAIL,
     grantedScopes = FAKE_GRANTED_SCOPES,
     rotatesRefreshToken = false,
+    publishingStatus = 'production',
+    consentAtIso,
   } = options
   let issuedRefreshTokens = 0
   let issuedCodes = 0
@@ -183,6 +220,20 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
       ),
     )
     return `${header}.${payload}.fake-unverifiable-signature`
+  }
+
+  /**
+   * True once a Testing-status grant has passed its seventh day.
+   *
+   * Computed from the **injected** clock and the recorded consent instant, so it is a function of its
+   * inputs rather than of when the test ran — `TESTING_REFRESH_TOKEN_DAYS` is asserted equal to
+   * `@berelax/core`'s constant of the same name by a unit test, so the fake and the tripwire that warns
+   * about it cannot drift apart.
+   */
+  const testingGrantExpired = (): boolean => {
+    if (publishingStatus !== 'testing' || consentAtIso === undefined) return false
+    const expiresAt = Date.parse(consentAtIso) + TESTING_REFRESH_TOKEN_DAYS * 86_400_000
+    return Date.parse(now()) >= expiresAt
   }
 
   const issue = (scopes: readonly string[], withRefresh: boolean): GoogleTokens => {
@@ -301,6 +352,27 @@ export function createFakeGoogleOAuth(options: FakeGoogleOptions): GoogleOAuthPr
           detail: { failureMode: armed },
         })
         throw failureError(GOOGLE_OAUTH, armed)
+      }
+      // The launch blocker, simulated. A Testing-status client's refresh token simply stops working on
+      // day seven: no warning, no deprecation notice, and the same `invalid_grant` a revocation gives —
+      // which is why the *reason* has to be recorded here and the tripwire has to have warned earlier.
+      // Checked after the armed script so a test can still force any other failure mode on this call.
+      if (testingGrantExpired()) {
+        log.record({
+          provider: GOOGLE_OAUTH,
+          operation: 'refresh',
+          outcome: 'failure',
+          summary:
+            'Refresh rejected: invalid_grant. The OAuth consent screen is in Testing, so this grant ' +
+            `expired ${TESTING_REFRESH_TOKEN_DAYS} days after consent (${consentAtIso}).`,
+          detail: {
+            failureMode: 'invalid_grant',
+            reason: 'testing_publishing_status_expiry',
+            consentAtIso,
+            testingRefreshTokenDays: TESTING_REFRESH_TOKEN_DAYS,
+          },
+        })
+        throw failureError(GOOGLE_OAUTH, 'invalid_grant')
       }
       // Rotation off by default: Google normally returns the same refresh token and omits the field,
       // and a fake that rotated on every call would make "the stored ciphertext changed" true whatever
@@ -467,6 +539,10 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
   const { log, failures, now } = options
   const accounts = options.accounts ?? GBP_ACCOUNT_FIXTURES
   const locationsByAccount = options.locationsByAccount ?? GBP_LOCATION_FIXTURES
+  const voiceOfMerchant = options.voiceOfMerchant ?? {
+    hasVoiceOfMerchant: true,
+    hasBusinessAuthority: true,
+  }
   const reviews = new Map(REVIEW_FIXTURES.map((review) => [review.reviewId, { ...review }]))
 
   const guard = (operation: string, summary: string): void => {
@@ -572,6 +648,20 @@ export function createFakeBusinessProfile(options: FakeGoogleOptions): BusinessP
         detail: { name, placeId: found.metadata.placeId },
       })
       return found
+    },
+
+    async getVoiceOfMerchantState(locationName: string) {
+      guard('getVoiceOfMerchantState', `Reading the verification state of ${locationName} failed`)
+      log.record({
+        provider: GOOGLE_BUSINESS_PROFILE,
+        operation: 'getVoiceOfMerchantState',
+        outcome: 'success',
+        summary: voiceOfMerchant.hasVoiceOfMerchant
+          ? `${locationName} is verified with Google`
+          : `${locationName} is NOT verified with Google: reads work, replies will be refused`,
+        detail: { locationName, ...voiceOfMerchant },
+      })
+      return voiceOfMerchant
     },
 
     async listReviews(locationId: string) {

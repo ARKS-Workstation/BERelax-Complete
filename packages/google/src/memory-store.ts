@@ -1,12 +1,14 @@
 import type { Instant } from '@berelax/core'
 import { AppError } from '@berelax/shared'
 import type {
+  ConfirmedListing,
   ConnectionEventInput,
   GoogleCapabilityRecord,
   GoogleCapabilitySelectionStore,
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleHealthStore,
 } from './connection-store.ts'
 import type { SealedToken } from './token-store.ts'
 
@@ -42,7 +44,8 @@ const sameResource = (
 export interface MemoryConnectionStore
   extends GoogleConnectionStore,
     GoogleConsentStore,
-    GoogleCapabilitySelectionStore {
+    GoogleCapabilitySelectionStore,
+    GoogleHealthStore {
   put(record: GoogleConnectionRecord): void
   putCapability(capability: GoogleCapabilityRecord): void
   records(): readonly GoogleConnectionRecord[]
@@ -254,6 +257,48 @@ export function createMemoryConnectionStore(
         statusReason: write.statusReason,
         lastCheckedAt: write.lastCheckedAt,
       })
+    },
+
+    async recordCheckOutcome(write) {
+      // The `coalesce` the SQL does, reproduced: a failed pass moves `last_checked_at` and leaves
+      // `last_ok_at` alone. A fake that wrote null over the last success would make a working
+      // connection read as never-verified in every unit test above it.
+      mutate(write.connectionId, {
+        lastCheckedAt: write.lastCheckedAt,
+        ...(write.lastOkAt === null ? {} : { lastOkAt: write.lastOkAt }),
+      })
+    },
+
+    async confirmedListing({ connectionId, capability }) {
+      // Last match wins, which is `order by id desc limit 1` over an append-only log: a re-pick
+      // supersedes the earlier choice, and the earlier row stays where it is because history is not
+      // rewritten.
+      const matches = events.filter(
+        (event) =>
+          event.connectionId === connectionId &&
+          event.event === 'capability_changed' &&
+          event.detail?.['capability'] === capability &&
+          typeof event.detail?.['placeId'] === 'string',
+      )
+      const latest = matches[matches.length - 1]
+      if (latest === undefined) return null
+      const detail = latest.detail ?? {}
+      const placeId = detail['placeId']
+      const title = detail['title']
+      const address = detail['address']
+      if (typeof placeId !== 'string' || typeof title !== 'string' || typeof address !== 'string') {
+        // All three or nothing, exactly as the SQL decides it. See `ConfirmedListing`.
+        return null
+      }
+      return {
+        placeId,
+        title,
+        address,
+        // The memory store has no `occurred_at`; the event's own ordinal stands in, which is enough for
+        // the only thing a caller does with it — say when the listing was confirmed relative to now.
+        confirmedAt: 0 as Instant,
+        actorLabel: latest.actorLabel ?? null,
+      } satisfies ConfirmedListing
     },
 
     async rewrapRefreshToken({ connectionId, refreshToken }) {

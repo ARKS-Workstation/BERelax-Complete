@@ -400,8 +400,11 @@ export {
   setGenderMatching,
 } from './settings/availability.ts'
 export {
+  readSetting,
   type UnconfirmedAssumptionRow,
   unconfirmedAssumptionRows,
+  type WriteResult,
+  writeSetting,
 } from './settings-store.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 

@@ -27,6 +27,11 @@ import { NapBlock, ServiceRow, SlotGrid, TherapistCard } from '@berelax/ui/patte
 import type { Metadata } from 'next'
 import { readFactsForPage } from '../../../../src/facts/page-facts.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
+import {
+  MotionGallery,
+  type MotionGalleryCopy,
+  MotionHeader,
+} from '../../../_dev/motion-gallery.tsx'
 import { NAP_COPY_AR } from '../../../_dev/nap-copy.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
 import { RouteNav } from '../../../_routes/route-nav.tsx'
@@ -128,12 +133,43 @@ const PRIMITIVE_COPY: PrimitiveGalleryCopy = {
   },
 }
 
+/**
+ * The motion system's copy, in Arabic. W-SYS-04.
+ *
+ * The brand name stays in Latin script and the price is formatted for `ar-AE` with Latin digits, which is
+ * docs/08 §7: every number, price and Latin brand name is wrapped so a right-to-left paragraph cannot
+ * reorder it. The gallery puts both inside `<bdi dir="ltr">`.
+ */
+const MOTION_COPY: MotionGalleryCopy = {
+  brand: 'BE RELAX',
+  scrolled: 'مرِّر الصفحة: يتقلّص الشريط',
+  heading: 'الحركة',
+  body:
+    'خمس مُدد وأربع منحنيات تسارع وثلاث مسافات وتدرّج واحد، وكلها رموز في طبقة واحدة. المسافة ' +
+    'مضروبة في اتجاه المستند، فلا تُكتب أي حركة مرتين للعربية؛ ومدة الحركة دالة في المسافة التي ' +
+    'تقطعها؛ وتخفيض الحركة تجاوز واحد في طبقة الرموز لا فرع في كل مكوّن.',
+  groups: {
+    small: 'ستة عناصر بفاصل 40 مللي ثانية',
+    large: 'عشرة عناصر بفاصل 24 مللي ثانية',
+    capped: 'أربعة عشر عنصرًا تتحرك كمجموعة واحدة',
+  },
+  row: 'صف',
+  crossfade:
+    'الحركة تساوي صفرًا عند تخفيض الحركة، أما هذا التلاشي المتقاطع فلا: سعر يتغيّر بدونه هو سعر لم ' +
+    'يره أحد يتغيّر.',
+  price: formatMoney(aed(250), 'ar'),
+  reveal:
+    'ظهرت هذه الفقرة على مِحور زمني مرتبط بالتمرير — بلا جافاسكربت ولا مُراقِب، ولا عنصر فوق حدّ ' +
+    'الشاشة عند شفافية صفر.',
+}
+
 export default async function ArabicKitchenSinkPage() {
   // Fail-soft: `null` when the singleton has not been seeded in this database. See `readFactsForPage`.
   const facts = await readFactsForPage()
   return (
     <main>
       <DesignSystemStyles />
+      <MotionHeader copy={MOTION_COPY} />
       <RouteNav id="kitchen-sink" locale="ar" />
 
       <Section as="header">
@@ -227,6 +263,17 @@ export default async function ArabicKitchenSinkPage() {
             ) : (
               <NapBlock copy={NAP_COPY_AR} facts={facts} />
             )}
+          </GridCell>
+        </Grid>
+      </Section>
+
+      <Section surface="sand" id="motion">
+        <Grid>
+          <Measure cap="h2" as="h2" className="text-xl be-section__heading">
+            {MOTION_COPY.heading}
+          </Measure>
+          <GridCell span="wide">
+            <MotionGallery copy={MOTION_COPY} />
           </GridCell>
         </Grid>
       </Section>

@@ -1,5 +1,5 @@
 {
-  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. W-SYS adds the JavaScript bundles once apps/web ships a route with script on it.",
+  "note": "Byte budgets for everything shipped to a browser or embedded in a document. A `derivative` budget is built with sharp at check time from the real original, because no derivative is committed. A `client-js` budget is read out of the real `next build`, so it needs `pnpm --filter @berelax/web build` first \u2014 CI runs that before this step and scripts/test-gates.mjs asserts the ordering.",
   "budgets": [
     {
       "id": "tokens-css",
@@ -54,7 +54,40 @@
       "kind": "file",
       "path": "packages/pdf/fixtures/receipt-ar.pdf",
       "maxBytes": 83968,
-      "why": "The form issued most often — every walk-in gets one — and the shortest. The floor is the embedded fonts, so this budget is really a fence around the document furniture."
+      "why": "The form issued most often \u2014 every walk-in gets one \u2014 and the shortest. The floor is the embedded fonts, so this budget is really a fence around the document furniture."
+    },
+    {
+      "id": "shared-layout-client-js",
+      "label": "Client JS every route ships",
+      "kind": "client-js",
+      "scope": "shared",
+      "maxBytes": 4096,
+      "declaredModules": [
+        "packages/ui/src/primitives/direction.tsx",
+        "packages/ui/src/theme/theme-provider.tsx"
+      ],
+      "why": "docs/08 \u00a77: the motion library lives in \"\u22642 code-split islands, never in the shared layout\". This is the shared layout, measured \u2014 the chunks every route in the application loads before any page of its own. Two things make \"zero bytes attributable to motion\" checkable rather than asserted. The allow-list catches a motion island, or anything else, becoming a client reference the whole site pays for: a new name here fails by rule name. And the number catches what a module list cannot see, because a library imported *inside* an allowed module is bundled into that module's chunk and appears nowhere as a module of its own \u2014 motion v12 is 32-36KB gzip, and this budget has under 3.5KB of room. The two modules that are allowed are the theme and the direction provider, both of which exist because localStorage and Radix portals cannot be read on the server."
+    },
+    {
+      "id": "motion-islands",
+      "label": "The two motion islands",
+      "kind": "client-js",
+      "scope": "modules",
+      "modules": [
+        "packages/ui/src/motion/header-condense.tsx",
+        "packages/ui/src/motion/reveal.tsx"
+      ],
+      "why": "docs/08 \u00a77 budgets each island at \"roughly 32-36KB gzip (UNVERIFIED)\" for the motion library, and W-SYS-04 caps an island at 40KB gzip. Measured over the chunk that *defines* the islands rather than the chunk group loaded with them, because Turbopack gives every client module on a route the same chunk list and a shared list cannot be divided between its modules. Both islands land in one chunk today, so this one number is the stronger reading of \"each island\": if the pair is inside the per-island budget, either alone is. The wider question \u2014 a library joining an island's import graph and being put in a chunk of its own \u2014 is the kitchen-sink route budget below, and neither measurement replaces the other.",
+      "maxBytes": 40960
+    },
+    {
+      "id": "kitchen-sink-client-js",
+      "label": "Client JS the kitchen sink adds",
+      "kind": "client-js",
+      "scope": "route",
+      "entry": "app/(en)/(dev)/kitchen-sink/page",
+      "maxBytes": 53248,
+      "why": "Everything the route with the most client code on it loads beyond the shared layout: the Radix dialog, popover and select (about 31KB gzip of the total, and W-SYS-09's note about the primitives barrel is why they are on this route at all), Next's own dynamic-import helpers, and the motion islands at under a kilobyte. It is the number that moves when a library arrives anywhere in an island's graph rather than in the island's own chunk, which is exactly what a `motion` import would do \u2014 32-36KB gzip against about 7KB of headroom. docs/08 \u00a78 budgets first-party JS on the home route at 110KB gzip; the home route ships none of this, and this dev surface is deliberately the worst case on the site."
     },
     {
       "id": "gallery-page",
@@ -74,7 +107,7 @@
       "width": 1080,
       "format": "avif",
       "maxBytes": 97280,
-      "why": "docs/08 §8: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
+      "why": "docs/08 \u00a78: the LCP element on a phone. 95KB is affordable only because this photography is soft and low-detail; a high-contrast replacement needs 140-180KB for the same perceptual quality, and the first thing that tells us is this number. The other three heroes are measured in packages/fixtures/src/media-derivatives.itest.ts; one hero here keeps `pnpm budgets` to two encodes."
     },
     {
       "id": "hero-avif-desktop",
@@ -85,7 +118,7 @@
       "width": 2560,
       "format": "avif",
       "maxBytes": 174080,
-      "why": "docs/08 §8, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
+      "why": "docs/08 \u00a78, the heaviest single derivative the site serves. The worst of the four heroes already uses about 90% of this, so it is a live budget rather than a round number."
     }
   ]
 }

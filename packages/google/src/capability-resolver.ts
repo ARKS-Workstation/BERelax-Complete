@@ -605,6 +605,13 @@ export async function selectGbpLocation(
         account: choice.account,
         location: choice.location,
         title: choice.title,
+        // The one-line postal address, and it is the row the daily health check reads back as the
+        // owner-confirmed snapshot (G-CONN-06). The title alone is not enough to detect drift: "Be Relax"
+        // is also the name of an airport spa chain, so a listing merged into other premises under the same
+        // name changes only the address — which is precisely why the picker shows the address in the first
+        // place. Recording it here rather than in a new table keeps one answer to "what did the owner
+        // confirm": this append-only row, mirrored into `audit_event`, with the actor beside it.
+        address: choice.address,
         accountType: choice.accountType,
       },
     })

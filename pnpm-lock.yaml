@@ -178,6 +178,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@berelax/clinical':
+        specifier: workspace:*
+        version: link:../../packages/clinical
       '@berelax/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -187,12 +190,18 @@ importers:
       '@berelax/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@berelax/google':
+        specifier: workspace:*
+        version: link:../../packages/google
       '@berelax/media':
         specifier: workspace:*
         version: link:../../packages/media
       '@berelax/messaging':
         specifier: workspace:*
         version: link:../../packages/messaging
+      '@berelax/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@berelax/shared':
         specifier: workspace:*
         version: link:../../packages/shared

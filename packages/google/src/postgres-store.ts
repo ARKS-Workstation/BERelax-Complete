@@ -9,6 +9,8 @@ import { AppError } from '@berelax/shared'
 import type {
   CapabilityHealthWrite,
   CapabilityResourceWrite,
+  CheckOutcomeWrite,
+  ConfirmedListing,
   ConnectionEventInput,
   ConsentWrite,
   GoogleCapabilityRecord,
@@ -16,6 +18,7 @@ import type {
   GoogleConnectionRecord,
   GoogleConnectionStore,
   GoogleConsentStore,
+  GoogleHealthStore,
   NewConnection,
   RefreshWrite,
   StatusWrite,
@@ -108,7 +111,8 @@ export type { NewConnection } from './connection-store.ts'
 
 export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
   GoogleConsentStore &
-  GoogleCapabilitySelectionStore & {
+  GoogleCapabilitySelectionStore &
+  GoogleHealthStore & {
     allocateId(): Promise<string>
     insert(connection: NewConnection): Promise<string>
     upsertCapability(capability: GoogleCapabilityRecord): Promise<void>
@@ -282,6 +286,66 @@ export function createPostgresConnectionStore(sql: Sql): GoogleConnectionStore &
             'registers one per capability; without it there is nothing for a selection to fill.',
         )
       }
+    },
+
+    async recordCheckOutcome(write: CheckOutcomeWrite) {
+      // `coalesce` on the parameter rather than a conditional statement: a failed pass must move
+      // `last_checked_at` and must NOT move `last_ok_at`, and expressing that as two code paths is how
+      // one of them ends up writing `now()` into both and reporting a broken connection as verified.
+      const rows = await sql`
+        update google_connections set
+          last_ok_at      = coalesce(${write.lastOkAt === null ? null : new Date(write.lastOkAt)}, last_ok_at),
+          last_checked_at = ${new Date(write.lastCheckedAt)}
+        where id = ${write.connectionId}
+        returning id
+      `
+      if (rows.length === 0) {
+        throw new AppError('not_found', `No Google connection with id ${write.connectionId}`)
+      }
+    },
+
+    async confirmedListing({ connectionId, capability }) {
+      // The most recent `capability_changed` row that carries a listing. Ordered by `id desc` rather
+      // than by `occurred_at desc`: the column defaults to `now()`, which is the transaction's start
+      // time, so three rows written by one selection share it exactly — and the identity column is the
+      // only tie-break that reflects insertion order. Ordering by the timestamp alone would return an
+      // arbitrary one of the three, which is harmless while they agree and is the wrong answer the day
+      // a re-pick lands in the same transaction as something else.
+      const rows = await sql<
+        {
+          place_id: string | null
+          title: string | null
+          address: string | null
+          occurred_at: Date
+          actor_label: string | null
+        }[]
+      >`
+        select detail->>'placeId'  as place_id,
+               detail->>'title'    as title,
+               detail->>'address'  as address,
+               occurred_at,
+               actor_label
+        from google_connection_events
+        where connection_id = ${connectionId}
+          and event = 'capability_changed'
+          and detail->>'capability' = ${capability}
+          and detail ? 'placeId'
+        order by id desc
+        limit 1
+      `
+      const row = rows[0]
+      if (row === undefined) return null
+      // All three or nothing. A partial snapshot cannot be compared without inventing which fields
+      // count, and "the title matches so the listing is fine" is exactly the answer that misses a
+      // listing merged into another company's premises under the same name.
+      if (row.place_id === null || row.title === null || row.address === null) return null
+      return {
+        placeId: row.place_id,
+        title: row.title,
+        address: row.address,
+        confirmedAt: instant(row.occurred_at),
+        actorLabel: row.actor_label,
+      } satisfies ConfirmedListing
     },
 
     async recordStatus(write: StatusWrite) {

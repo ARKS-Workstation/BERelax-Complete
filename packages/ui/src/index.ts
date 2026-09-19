@@ -12,6 +12,7 @@
  * which only an app imports.
  */
 
+export * from './motion/index.ts'
 export {
   type Direction,
   directionFor,
