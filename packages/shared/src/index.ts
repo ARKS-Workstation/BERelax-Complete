@@ -12,6 +12,14 @@ export {
   STRICT_GENDER_MATCHING,
 } from './gender-matching.ts'
 export {
+  DEFAULT_LLM_PROVIDER,
+  LLM_PROVIDER_NAMES,
+  LLM_PROVIDER_SETTING_KEY,
+  type LlmProviderName,
+  llmProviderName,
+  llmProviderSchema,
+} from './llm-provider.ts'
+export {
   advanceMessageStatus,
   type Channel,
   DELIVERY_REPORTED_FAILED,

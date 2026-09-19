@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createConnection, createPostgresMessageStore, type Sql } from '@berelax/db'
 import { ARABIC_150, type SeededMessagingFixture, seedMessagingFixture } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -118,7 +119,10 @@ beforeAll(async () => {
     },
   })
   await waitForServer()
-  browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
+  // The shared list, not a hand-written one: `--disable-skia-runtime-opts` and `--disable-lcd-text` are
+  // what make the repeat capture below byte-identical, and this file used to launch without them. See
+  // `packages/harness/src/determinism.ts`.
+  browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 180_000)
 
 afterAll(async () => {
@@ -162,6 +166,9 @@ async function withCell<T>(
     })
     const page = await context.newPage()
     await page.goto(`${BASE}${pagePath}`, { waitUntil: 'networkidle' })
+    // The harness's determinism CSS, for the reason `determinism.ts` gives: this file asserts a
+    // byte-identical repeat capture and used to launch and render without any of it.
+    await page.addStyleTag({ content: DETERMINISM_CSS })
     await page.evaluate(async () => {
       await document.fonts.ready
     })

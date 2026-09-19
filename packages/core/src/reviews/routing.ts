@@ -6,7 +6,6 @@ import {
   reviewCoolingOffHours,
   reviewReplyMode,
 } from '@berelax/shared'
-import { PROVIDER_TITLES } from '../compliance/lexicon.ts'
 import type { Instant } from '../time.ts'
 import {
   matchedEscalationCategories,
@@ -15,8 +14,8 @@ import {
   type ReviewEscalationCategory,
   type ReviewEscalationLexicon,
   type ReviewEscalationMatch,
-  reviewTokens,
 } from './escalation-lexicon.ts'
+import { textNamesAnIndividual } from './individuals.ts'
 import { detectReviewLanguage, languageIsConfigured } from './language.ts'
 
 /**
@@ -250,9 +249,9 @@ function hasFreeText(review: RoutableReview): boolean {
 /**
  * Whether the text identifies an individual.
  *
- * Two signals, both generous. A provider title from {@link PROVIDER_TITLES} — the same list the
- * display-name lint refuses on a menu, asked the opposite question — and a capitalised word that is not
- * the first word of its sentence and is not one of {@link PROPER_NOUN_ALLOWLIST}.
+ * Delegates to {@link textNamesAnIndividual} in `individuals.ts`, which is where the heuristic lives so
+ * that this row and the reply generator's response screen (G-REV-04) cannot disagree about what a name
+ * is. The two ask the same question of different text and a second copy would drift.
  *
  * Generous is safe **here and only here**: this row can fire only on a review that carries free text,
  * and the row immediately below it escalates any review that carries free text. So a false positive
@@ -260,74 +259,8 @@ function hasFreeText(review: RoutableReview): boolean {
  * at all. That asymmetry is why a heuristic is acceptable in this row and would not be in row 2.
  */
 function namesAnIndividual(review: RoutableReview): boolean {
-  const text = review.commentText
-  if (text === null) return false
-  if (reviewTokens(text).some((token) => PROVIDER_TITLES.includes(token))) return true
-
-  // Sentence-initial capitals carry no information, so each sentence's first word is skipped. The
-  // remainder is checked for a capitalised word that is not a place, a brand or a calendar word.
-  for (const sentence of text.split(/[.!?\n]+/)) {
-    const words = sentence
-      .trim()
-      .split(/\s+/)
-      .filter((word) => word.length > 0)
-    for (const word of words.slice(1)) {
-      const bare = word.replace(/[^\p{L}]/gu, '')
-      if (bare.length < 2) continue
-      const first = bare.slice(0, 1)
-      // All-caps is an acronym or emphasis ("GREAT"), not a name.
-      if (bare === bare.toUpperCase()) continue
-      if (first !== first.toUpperCase()) continue
-      if (PROPER_NOUN_ALLOWLIST.has(bare.toLowerCase())) continue
-      return true
-    }
-  }
-  return false
+  return textNamesAnIndividual(review.commentText)
 }
-
-/**
- * Capitalised words that are not a person.
- *
- * Places, the business's own name, the platform, and the calendar. Deliberately short: a word missing
- * from it produces a false positive, and a false positive in this row is harmless (see
- * {@link namesAnIndividual}). Lengthening it to reduce noise is a change that can only make the rule
- * quieter, so it needs a reason each time.
- */
-const PROPER_NOUN_ALLOWLIST: ReadonlySet<string> = new Set([
-  'abu',
-  'dhabi',
-  'uae',
-  'emirates',
-  'corniche',
-  'google',
-  'maps',
-  'be',
-  'relax',
-  'berelax',
-  'spa',
-  'massage',
-  'january',
-  'february',
-  'march',
-  'april',
-  'may',
-  'june',
-  'july',
-  'august',
-  'september',
-  'october',
-  'november',
-  'december',
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-  'sunday',
-  'ramadan',
-  'eid',
-])
 
 /**
  * Every row, keyed by rule id.

@@ -65,6 +65,30 @@ export const googleReview = pgTable(
     routingLexiconVersion: text('routing_lexicon_version'),
     /** When the verdict was taken — not when the review was recorded. */
     routedAt: timestamp('routed_at', { withTimezone: true }),
+    /**
+     * The provenance of a machine-written draft (migration 0048). All six together or none.
+     *
+     * Together with `replyDraft` these make the draft **reproducible**: the skeleton id plus the aspects
+     * plus the language re-render the exact bytes, so an edit is a comparison rather than a memory, and
+     * the prompt fingerprint says which review text it was written against — the check that catches a
+     * draft approved against a review the reviewer has since changed.
+     *
+     * 0048 also carries the ordering as a CHECK: `reply_draft_skeleton_id is null or routing_verdict is
+     * not null`, so no machine draft can exist for a review the docs/07 §4 table never saw. Invisible
+     * here, because `pnpm db:drift` compares columns only; `reviews.itest.ts` asserts it by name.
+     */
+    replyDraftSkeletonId: text('reply_draft_skeleton_id'),
+    replyDraftAspects: text('reply_draft_aspects').array(),
+    replyDraftLanguage: text('reply_draft_language'),
+    replyDraftPromptVersion: text('reply_draft_prompt_version'),
+    replyDraftPromptFingerprint: text('reply_draft_prompt_fingerprint'),
+    replyDraftGeneratedAt: timestamp('reply_draft_generated_at', { withTimezone: true }),
+    /**
+     * Why no draft was produced, when the reason is that the model's response showed signs of having
+     * been steered by the review. A quarantined row carries no machine draft; 0048 refuses the pair.
+     */
+    draftQuarantineReason: text('draft_quarantine_reason'),
+    draftQuarantinedAt: timestamp('draft_quarantined_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
@@ -87,6 +111,12 @@ export const googleReview = pgTable(
     index('google_reviews_unrouted_idx')
       .on(t.connectionId, t.reviewedAt)
       .where(sql`routing_verdict is null`),
+    // The read the reply generator makes (0048): routed, and neither drafted nor quarantined yet.
+    index('google_reviews_undrafted_idx')
+      .on(t.connectionId, t.reviewedAt)
+      .where(
+        sql`routing_verdict is not null and reply_draft is null and draft_quarantine_reason is null`,
+      ),
   ],
 )
 

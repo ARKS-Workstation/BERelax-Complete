@@ -238,18 +238,47 @@ export async function readMandatoryDocumentTypes(sql: Sql): Promise<readonly str
 }
 
 /**
- * The pool for one trading date.
+ * A nested postgres.js fragment: SQL text plus its own bound parameters, spliceable into a statement.
  *
- * Two statements, and they are separate for a reason that is visible in the second: the presence
- * query subtracts approved leave from the roster with multirange difference and then `unnest`es the
- * result, so it returns *n rows per therapist*. Folding it into the first query would multiply every
- * therapist's row by the number of fragments their day is broken into, and the skills array would be
- * duplicated along with it.
+ * Named rather than left inline because it is the mechanism that makes the availability read one round
+ * trip, and a reader has to be able to find it.
  */
-export async function readEligibleTherapists(
-  sql: Sql,
-  query: EligibilityQueryInput,
-): Promise<TherapistPoolRead> {
+export type SqlFragment = ReturnType<Sql>
+
+/**
+ * {@link therapistPoolCtes}'s query, which differs from {@link EligibilityQueryInput} in one field.
+ *
+ * `requiredSkill` may be a **SQL expression** as well as a value. B-AVAIL-07 resolves the skill from the
+ * service variant inside the same statement — `(select required_skill from av_variant)` — because the
+ * skill a treatment's style requires is not known until the variant has been read, and reading it first
+ * would make the availability query two round trips instead of one. A value is still the ordinary case
+ * and `readEligibleTherapists` passes one.
+ */
+export type TherapistPoolCtesQuery = Omit<EligibilityQueryInput, 'requiredSkill'> & {
+  readonly requiredSkill: TherapistSkill | SqlFragment
+}
+
+/**
+ * The whole therapist read model as a **composable SQL fragment**: the CTEs, and nothing else.
+ *
+ * Exported and used by two callers, and the point is that there is only one of it. B-AVAIL-07's
+ * availability query has to answer a `(business_day, service_variant, therapist?)` request in a SINGLE
+ * round trip, so the pool cannot arrive from a second statement; and re-typing this SQL there would be a
+ * second answer to "is this therapist bookable", which is exactly what B-AVAIL-04 was built to prevent.
+ * postgres.js interpolates a nested `sql` fragment with its parameters intact, so the same text and the
+ * same binds serve `readEligibleTherapists` below and the one-statement read in `queries/availability.ts`.
+ *
+ * Every CTE is prefixed `tp_` so a composing statement's own CTEs cannot collide with these. The two a
+ * caller reads are the last two:
+ *
+ *   - `tp_pool(employee_id, gender, skills, reason)` — one row per candidate. `reason` null means
+ *     eligible; anything else is an `EligibilityExclusionReason`.
+ *   - `tp_presence(employee_id, starts_at, ends_at)` — presence net of approved leave, **n rows per
+ *     therapist**, because the multirange difference is `unnest`ed. That is why this was two statements
+ *     before and why a caller that wants both either runs two queries or aggregates each side to JSON:
+ *     joining them multiplies every therapist's row by the number of fragments their day is broken into.
+ */
+export function therapistPoolCtes(sql: Sql, query: TherapistPoolCtesQuery) {
   const { tradingDate, requiredSkill, employeeIds } = query
   // `null` rather than an empty array for "every employee": `= any(array[]::uuid[])` is false for
   // every row, so an empty array would silently mean "nobody" where the caller meant "everybody".
@@ -261,138 +290,142 @@ export async function readEligibleTherapists(
   // know how to be strict about. `genderMatchingMode` is the same function core applies.
   const strictGender = genderMatchingMode(query.genderMatching) === 'strict'
 
-  const rows = await sql<PoolQueryRow[]>`
-    with profile as (
+  return sql`
+    tp_profile as (
       select mandatory_therapist_document_types as mandatory from regulatory_profile_current
     ),
-    candidate as (
+    tp_candidate as (
       select e.id, e.gender, e.employed_from, e.employed_until
         from employee e
        where ${narrowed} :: uuid[] is null or e.id = any(${narrowed} :: uuid[])
     ),
-    skill as (
+    tp_skill as (
       select es.employee_id, array_agg(es.skill::text order by es.skill::text) as skills
         from employee_skill es
-        join candidate c on c.id = es.employee_id
+        join tp_candidate c on c.id = es.employee_id
        group by es.employee_id
     ),
     -- The LATEST expiry per (employee, type). A renewal is a new row rather than an edit
     -- (employee_document_one_row_per_expiry), so max() is what says "currently held": taking any
     -- other row reports a therapist as expired on the strength of a licence already replaced.
-    latest_document as (
+    tp_latest_document as (
       select ed.employee_id, ed.document_type, max(ed.expires_on) as expires_on
         from employee_document ed
-        join candidate c on c.id = ed.employee_id
+        join tp_candidate c on c.id = ed.employee_id
        group by ed.employee_id, ed.document_type
     ),
     -- One row per candidate, whatever the mandatory list holds. The LEFT JOIN LATERAL over an EMPTY
     -- list yields a single row whose document_type is null, which is why both aggregates test
     -- m.document_type first: without that, an empty mandatory list - a legitimate value meaning "no
     -- credential gate" - would read as "every mandatory type is missing" and exclude everybody.
-    credential as (
+    tp_credential as (
       select c.id as employee_id,
              bool_or(m.document_type is not null and ld.employee_id is null) as any_missing,
              bool_or(ld.expires_on is not null and ld.expires_on < ${tradingDate}::date)
                as any_expired
-        from candidate c
-        cross join profile p
+        from tp_candidate c
+        cross join tp_profile p
         left join lateral unnest(p.mandatory) as m(document_type) on true
-        left join latest_document ld
+        left join tp_latest_document ld
           on ld.employee_id = c.id and ld.document_type = m.document_type
        group by c.id
     ),
-    roster as (
+    tp_roster as (
       select sa.employee_id, range_agg(s.period) as rostered
         from shift_assignment sa
         join shift s on s.id = sa.shift_id
-        join candidate c on c.id = sa.employee_id
+        join tp_candidate c on c.id = sa.employee_id
        where s.trading_date = ${tradingDate}::date
        group by sa.employee_id
     ),
     -- Narrowed to leave that overlaps the trading day's own span, so the subtraction below reads only
     -- the rows that can change the answer. The view, never leave_request: a PENDING request must not
     -- make a therapist unbookable.
-    day_span as (
+    tp_day_span as (
       select tstzrange(opens_at, closes_at, '[)') as span
         from business_day where trading_date = ${tradingDate}::date
     ),
-    taken as (
+    tp_taken as (
       select al.employee_id, range_agg(al.period) as leave
         from employee_approved_leave al
-        join candidate c on c.id = al.employee_id
-        join day_span d on al.period && d.span
+        join tp_candidate c on c.id = al.employee_id
+        join tp_day_span d on al.period && d.span
        group by al.employee_id
     ),
-    presence as (
+    tp_net as (
       select r.employee_id,
              case when t.leave is null then r.rostered else r.rostered - t.leave end as net
-        from roster r
-        left join taken t on t.employee_id = r.employee_id
+        from tp_roster r
+        left join tp_taken t on t.employee_id = r.employee_id
+    ),
+    tp_pool as (
+      select c.id as employee_id,
+             c.gender::text as gender,
+             coalesce(sk.skills, array[]::text[]) as skills,
+             -- The order is ELIGIBILITY_EXCLUSION_REASONS in @berelax/core, and it has to be: a
+             -- therapist failing two checks must be reported the same way by both implementations.
+             case
+               when c.employed_from > ${tradingDate}::date
+                 or (c.employed_until is not null and c.employed_until < ${tradingDate}::date)
+                 then 'not_employed'
+               when not (coalesce(sk.skills, array[]::text[]) @> array[${requiredSkill}::text])
+                 then 'missing_skill'
+               when cr.any_missing then 'credential_missing'
+               when cr.any_expired then 'credential_expired'
+               when p.employee_id is null then 'not_rostered'
+               when isempty(p.net) then 'on_approved_leave'
+               -- Same-gender matching (B-AVAIL-05), LAST. "is distinct from" and not "<>": a therapist
+               -- whose gender nobody has recorded (Y8-staff leaves employee.gender nullable) is a
+               -- MISMATCH and not a wildcard, and "<>" against NULL is NULL, which a case treats as
+               -- false - the permissive answer, reached by writing the obvious operator.
+               when ${strictGender}::boolean
+                    and ${clientGender}::employee_gender is not null
+                    and c.gender is distinct from ${clientGender}::employee_gender
+                 then 'gender_mismatch'
+             end as reason
+        from tp_candidate c
+        left join tp_skill sk on sk.employee_id = c.id
+        left join tp_credential cr on cr.employee_id = c.id
+        left join tp_net p on p.employee_id = c.id
+    ),
+    tp_presence as (
+      select n.employee_id,
+             lower(fragment) as starts_at,
+             upper(fragment) as ends_at
+        from tp_net n
+        cross join lateral unnest(n.net) as fragment
     )
-    select c.id as employee_id,
-           c.gender::text as gender,
-           coalesce(sk.skills, array[]::text[]) as skills,
-           -- The order is ELIGIBILITY_EXCLUSION_REASONS in @berelax/core, and it has to be: a
-           -- therapist failing two checks must be reported the same way by both implementations.
-           case
-             when c.employed_from > ${tradingDate}::date
-               or (c.employed_until is not null and c.employed_until < ${tradingDate}::date)
-               then 'not_employed'
-             when not (coalesce(sk.skills, array[]::text[]) @> array[${requiredSkill}::text])
-               then 'missing_skill'
-             when cr.any_missing then 'credential_missing'
-             when cr.any_expired then 'credential_expired'
-             when p.employee_id is null then 'not_rostered'
-             when isempty(p.net) then 'on_approved_leave'
-             -- Same-gender matching (B-AVAIL-05), LAST. "is distinct from" and not "<>": a therapist
-             -- whose gender nobody has recorded (Y8-staff leaves employee.gender nullable) is a
-             -- MISMATCH and not a wildcard, and "<>" against NULL is NULL, which a case treats as
-             -- false - the permissive answer, reached by writing the obvious operator.
-             when ${strictGender}::boolean
-                  and ${clientGender}::employee_gender is not null
-                  and c.gender is distinct from ${clientGender}::employee_gender
-               then 'gender_mismatch'
-           end as reason
-      from candidate c
-      left join skill sk on sk.employee_id = c.id
-      left join credential cr on cr.employee_id = c.id
-      left join presence p on p.employee_id = c.id
-     order by c.id
+  `
+}
+
+/**
+ * The pool for one trading date.
+ *
+ * Two statements, and they are separate for a reason that is visible in the second: the presence
+ * query subtracts approved leave from the roster with multirange difference and then `unnest`es the
+ * result, so it returns *n rows per therapist*. Folding it into the first query would multiply every
+ * therapist's row by the number of fragments their day is broken into, and the skills array would be
+ * duplicated along with it.
+ *
+ * Both statements are the SAME fragment — {@link therapistPoolCtes} — read from two different ends, so
+ * the two halves cannot disagree about who the query was about, and a third caller composing the pool
+ * into one larger statement (B-AVAIL-07) gets this rule rather than a copy of it.
+ */
+export async function readEligibleTherapists(
+  sql: Sql,
+  query: EligibilityQueryInput,
+): Promise<TherapistPoolRead> {
+  const ctes = therapistPoolCtes(sql, query)
+
+  const rows = await sql<PoolQueryRow[]>`
+    with ${ctes}
+    select employee_id, gender, skills, reason from tp_pool order by employee_id
   `
 
   const presenceRows = await sql<PresenceQueryRow[]>`
-    with candidate as (
-      select e.id from employee e
-       where ${narrowed} :: uuid[] is null or e.id = any(${narrowed} :: uuid[])
-    ),
-    roster as (
-      select sa.employee_id, range_agg(s.period) as rostered
-        from shift_assignment sa
-        join shift s on s.id = sa.shift_id
-        join candidate c on c.id = sa.employee_id
-       where s.trading_date = ${tradingDate}::date
-       group by sa.employee_id
-    ),
-    day_span as (
-      select tstzrange(opens_at, closes_at, '[)') as span
-        from business_day where trading_date = ${tradingDate}::date
-    ),
-    taken as (
-      select al.employee_id, range_agg(al.period) as leave
-        from employee_approved_leave al
-        join candidate c on c.id = al.employee_id
-        join day_span d on al.period && d.span
-       group by al.employee_id
-    )
-    select r.employee_id,
-           lower(fragment) as starts_at,
-           upper(fragment) as ends_at
-      from roster r
-      left join taken t on t.employee_id = r.employee_id
-      cross join lateral unnest(
-        case when t.leave is null then r.rostered else r.rostered - t.leave end
-      ) as fragment
-     order by r.employee_id, lower(fragment)
+    with ${therapistPoolCtes(sql, query)}
+    select employee_id, starts_at, ends_at from tp_presence
+     order by employee_id, starts_at
   `
 
   const therapists: EligibleTherapistRow[] = []

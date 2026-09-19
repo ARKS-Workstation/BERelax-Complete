@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./accessibility": "./src/accessibility.ts",
+    "./determinism": "./src/determinism.ts",
     "./matrix": "./src/matrix.ts",
     "./touch-targets": "./src/touch-targets.ts"
   },

@@ -45,6 +45,55 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  type AlternativesOptions,
+  type AlternativeTherapist,
+  AVAILABILITY_OCCUPANCY_PAD_MINUTES,
+  AVAILABILITY_REFUSALS,
+  type AvailabilityAnswer,
+  type AvailabilityBlockFacts,
+  type AvailabilityCache,
+  type AvailabilityCacheEntry,
+  type AvailabilityDayHours,
+  type AvailabilityDeps,
+  type AvailabilityFacts,
+  type AvailabilityRefusal,
+  type AvailabilityRequest,
+  type AvailabilityRoomFacts,
+  type AvailabilityShapeFacts,
+  type AvailabilityShiftFacts,
+  type AvailabilitySlot,
+  type AvailabilitySolve,
+  type AvailabilitySolveInput,
+  type AvailabilitySolveResult,
+  type AvailabilityTherapistFacts,
+  type AvailabilityVariantFacts,
+  availabilityCacheTag,
+  availabilityError,
+  availabilityRefusalOf,
+  createAvailabilityCache,
+  DEFAULT_ALTERNATIVE_SEARCH_DAYS,
+  DEFAULT_AVAILABILITY_TTL_MS,
+  explainAvailabilityFacts,
+  joinWaitlist,
+  MAX_AVAILABILITY_TTL_MS,
+  type NearestDay,
+  type NoAvailabilityAnswer,
+  noAvailabilityAlternatives,
+  peekAvailabilityCache,
+  queryAvailability,
+  readAvailabilityEpochRow,
+  readAvailabilityEpochs,
+  readAvailabilityFacts,
+  readWaitlistFor,
+  WAITLIST_INELIGIBILITY,
+  WAITLIST_WINDOW_CONSTRAINT,
+  type WaitlistEligibility,
+  type WaitlistIneligibility,
+  type WaitlistJoinInput,
+  type WaitlistJoinResult,
+  type WaitlistRow,
+} from './queries/availability.ts'
+export {
   type BlockedInputVatLine,
   blockedInputVatLines,
   disclosureFor,
@@ -209,8 +258,11 @@ export {
   readEligibleTherapists,
   readMandatoryDocumentTypes,
   type ScheduledAppointmentRow,
+  type SqlFragment,
+  type TherapistPoolCtesQuery,
   type TherapistPoolRead,
   type TherapistShiftRow,
+  therapistPoolCtes,
 } from './repositories/eligibility.ts'
 export {
   type CustomerSnapshotInput,
@@ -314,19 +366,25 @@ export {
 export {
   type ApiIngestOutcome,
   type ApiReviewPayload,
+  type DraftWriteOutcome,
   getReview,
   type IngestedReview,
   ingestApiReview,
   listReviewQueue,
+  listUndraftedReviews,
   type ManualReviewInput,
+  type QuarantineWriteOutcome,
   type QueuedReview,
   type ReconciliationInput,
   type ReconciliationOutcome,
+  type ReplyDraftInput,
   type ReviewRoutingVerdictInput,
   type RoutingWriteOutcome,
   reconcileApiReviewId,
+  recordDraftQuarantine,
   recordManualReview,
   recordReplyConfirmedByGoogle,
+  recordReplyDraft,
   recordReplyPostedManually,
   recordReplySubmittedToApi,
   recordRoutingVerdict,
@@ -471,7 +529,11 @@ export {
   tradingDateAt,
 } from './services/recurring-cost.ts'
 export {
+  type AvailabilityLimits,
   GENDER_MATCHING_SETTING_KEY,
+  MAX_ADVANCE_SETTING_KEY,
+  MIN_LEAD_SETTING_KEY,
+  readAvailabilityLimits,
   readGenderMatching,
   setGenderMatching,
 } from './settings/availability.ts'
@@ -499,4 +561,12 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 0046_appointment_lifecycle.sql — which gives the transition chain its actor, F07 role and reason
 // through the transaction-local settings 0036 introduced, because the trigger that writes the row cannot
 // see a value that is not a column on `appointment`.
-export const SCHEMA_VERSION = 46 as const
+//
+// 45 is 0045_waitlist.sql — `waitlist` with its UNIQUE NULLS NOT DISTINCT key, which is what makes a
+// repeat join idempotent rather than a row per page refresh; `availability_epoch` with the four triggers
+// that advance it (appointment, shift, resource_block and APPROVED leave_request); and
+// `appointment_period_idx`, the GiST index the availability read runs through because 0024's leads with
+// `room_id`. 47 is unused — W-SITE-05 holds it while that unit is in flight. 48 is 0048_review_draft.sql:
+// the reply draft's provenance, the quarantine that is the absence of one, and the CHECK that makes
+// "generation consumes a routing verdict" a fact the database holds rather than a call order.
+export const SCHEMA_VERSION = 48 as const

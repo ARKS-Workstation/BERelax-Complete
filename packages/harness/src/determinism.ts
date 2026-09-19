@@ -11,6 +11,35 @@
 import type { PageGlobalsForHarness } from './page-globals.ts'
 
 /**
+ * The Chromium flags a repeat capture depends on.
+ *
+ * These live here, beside the CSS and the frozen clock, because they are the same claim expressed at a
+ * lower level, and because a caller who writes their own list gets a screenshot gate that passes locally
+ * and flaps under load. Two tests did exactly that — `breakpoint-preview.itest.ts` and
+ * `messages-inbox.itest.ts` launched with `--no-sandbox` and `--font-render-hinting=none` alone — and
+ * both failed their own byte-identical assertions intermittently while every capture through
+ * `packages/harness/src/capture.ts` stayed stable.
+ *
+ * `--disable-skia-runtime-opts` is the one that matters most and the one nobody guesses: without it Skia
+ * selects runtime-optimised raster paths from CPU feature detection, so the SAME image can rasterise
+ * differently between two captures in one session, which is why the failures correlated with load rather
+ * than with anything on the page. `--disable-lcd-text` removes subpixel antialiasing,
+ * `--force-color-profile=srgb` pins the profile the host would otherwise supply, and `--hide-scrollbars`
+ * stops a scrollbar appearing in one capture and not the other.
+ */
+export const DETERMINISTIC_LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  // Host-dependent hinting and subpixel antialiasing are the two things that make the same page
+  // render differently on two machines. Neither is worth a visual gate that only works locally.
+  '--font-render-hinting=none',
+  '--disable-lcd-text',
+  '--hide-scrollbars',
+  '--force-color-profile=srgb',
+  '--disable-skia-runtime-opts',
+] as const
+
+/**
  * CSS injected before capture.
  *
  * `animation: none` rather than `animation-duration: 0s`: a zero-duration animation still applies its

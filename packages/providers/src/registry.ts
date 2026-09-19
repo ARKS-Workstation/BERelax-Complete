@@ -20,6 +20,12 @@
  * and a test has a single place to arm a failure.
  */
 import type { Config } from '@berelax/config'
+import {
+  AppError,
+  LLM_PROVIDER_NAMES,
+  type LlmProviderName,
+  llmProviderName,
+} from '@berelax/shared'
 import { type CallLog, createCallLog } from './call-log.ts'
 import { createFakeResend } from './email/fake-resend.ts'
 import type { EmailProvider } from './email/port.ts'
@@ -35,6 +41,7 @@ import type {
   SearchConsoleProvider,
 } from './google/port.ts'
 import { createFakeLlm } from './llm/fake-llm.ts'
+import { createFakeDeepSeek, createFakeMiniMax } from './llm/named-fakes.ts'
 import type { LlmProvider } from './llm/port.ts'
 import { notImplemented } from './not-implemented.ts'
 import { createFakeCardGateway } from './payments/fake-gateway.ts'
@@ -53,7 +60,23 @@ export interface Providers {
   readonly till: PaymentProvider
   /** Online cards. Absent until a gateway is chosen — see docs/01 decision on card payments. */
   readonly cards: PaymentProvider
+  /** The default adapter, from `LLM_PROVIDER`. What a caller with no setting to consult uses. */
   readonly llm: LlmProvider
+  /**
+   * The adapter for a stored `agents.llm_provider` value.
+   *
+   * This is where "provider selectable in settings, no code change" actually lives: a consumer passes
+   * the setting it read and gets an adapter. Switching from DeepSeek to MiniMax changes the row and
+   * nothing else — no branch at any call site, because there is no call site that knows the names.
+   *
+   * It **throws** for a name this build has no adapter for, which is deliberately the opposite of the
+   * auto-send floors in `@berelax/shared`. There, an unreadable setting resolves to the strictest
+   * answer because the permissive one publishes a reply. Here the analogous fallback — quietly using
+   * the local fake — would generate drafts with a provider the owner did not choose and bill an
+   * account they did not agree, with nothing saying so. A throw reaches `withAgentRun`, which records
+   * the run as failed and leaves `last_success_at` alone, so the watchdog reports the agent silent.
+   */
+  llmFor(setting: unknown): LlmProvider
   /** Every call any of them made, in order. The admin inbox and the tests read this. */
   readonly calls: CallLog
   /** Arm a failure on the next call, or on every call. Shared by all providers. */
@@ -98,7 +121,55 @@ export function createProviders(options: ProviderRegistryOptions): Providers {
         ? notImplemented('card-gateway')
         : createFakeCardGateway(shared),
     llm: config.LLM_PROVIDER === 'real' ? notImplemented('llm') : createFakeLlm({ log, failures }),
+    llmFor(setting: unknown): LlmProvider {
+      const name = llmProviderName(setting)
+      if (name === null) {
+        throw new AppError(
+          'validation',
+          `agents.llm_provider holds ${JSON.stringify(setting)}, which is not one of ` +
+            `${LLM_PROVIDER_NAMES.join(' | ')}. No draft is generated with a provider nobody chose.`,
+          { details: { setting } },
+        )
+      }
+      const adapter = ADAPTERS[name]
+      if (adapter === null) {
+        throw new AppError(
+          'provider_unavailable',
+          `agents.llm_provider is '${name}', for which no adapter has been built. The names that ` +
+            `resolve today are ${BUILT_LLM_PROVIDERS.join(' | ')}.`,
+          { details: { provider: name } },
+        )
+      }
+      return adapter(shared)
+    },
     calls: log,
     failures,
   }
 }
+
+/**
+ * The adapter table. `null` is a declared name with nothing behind it.
+ *
+ * A table rather than a `switch`, and `Record<LlmProviderName, …>` rather than a partial map, so a name
+ * added to `LLM_PROVIDER_NAMES` in `@berelax/shared` stops this file compiling until somebody decides
+ * whether it has an adapter. A `switch` with a `default` would resolve it silently.
+ */
+const ADAPTERS: Readonly<
+  Record<
+    LlmProviderName,
+    ((shared: { log: CallLog; failures: FailureScript }) => LlmProvider) | null
+  >
+> = Object.freeze({
+  fake: (shared) => createFakeLlm(shared),
+  deepseek: (shared) => createFakeDeepSeek(shared),
+  minimax: (shared) => createFakeMiniMax(shared),
+  // Declared in the setting because it is the obvious third candidate; no adapter yet. An owner who
+  // picks it gets a sentence naming what does work, which is better than not offering it and being
+  // told the system cannot.
+  claude: null,
+})
+
+/** The names that resolve to an adapter today. For the message a refusal shows. */
+export const BUILT_LLM_PROVIDERS: readonly LlmProviderName[] = Object.freeze(
+  LLM_PROVIDER_NAMES.filter((name) => ADAPTERS[name] !== null),
+)

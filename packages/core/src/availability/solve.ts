@@ -229,12 +229,64 @@ export function appointmentTherapistPeriod(appointment: ScheduledAppointment): P
 }
 
 /**
+ * Every committed appointment's occupancy, grouped by the resource it holds.
+ *
+ * A **derived index and not a new rule**: `byRoom` holds `appointmentRoomPeriod` and `byTherapist` holds
+ * `appointmentTherapistPeriod`, which are the same two functions {@link roomsFreeFor} and
+ * {@link therapistsFreeFor} apply. It exists because those two are called once per candidate start, and
+ * the occupancy of an already-committed appointment does not change between starts.
+ *
+ * The arithmetic this removes is not marginal. A fifteen-hour trading day on a fifteen-minute grid is
+ * about fifty-five candidate starts; with ten rooms, eight therapists and thirty committed appointments,
+ * the shape this replaced computed 55 x (10 x 30) room occupancies and 55 x (8 x 30) therapist
+ * occupancies — roughly 30,000 interval computations for a query whose inputs contain sixty distinct
+ * ones. B-AVAIL-07 measured the difference while satisfying its own p95 acceptance line.
+ *
+ * Passed in rather than cached in a module-level map, deliberately: `packages/core` is pure, and a memo
+ * keyed on object identity would go stale the moment a caller rebuilt an appointment record with the same
+ * id and a different period. The lifetime of this index is one solve, and it is visible at the call site.
+ */
+export interface AppointmentOccupancy {
+  /** Room-busy intervals per `roomId`: the treatment plus **that appointment's** turnaround. */
+  readonly byRoom: ReadonlyMap<string, readonly Period[]>
+  /** Therapist-busy intervals per therapist id: the treatment plus **that appointment's** buffer. */
+  readonly byTherapist: ReadonlyMap<string, readonly Period[]>
+}
+
+/** Groups a set of committed appointments into {@link AppointmentOccupancy}. One pass, no sorting. */
+export function appointmentOccupancy(
+  appointments: readonly ScheduledAppointment[],
+): AppointmentOccupancy {
+  const byRoom = new Map<string, Period[]>()
+  const byTherapist = new Map<string, Period[]>()
+  for (const appointment of appointments) {
+    const roomPeriod = appointmentRoomPeriod(appointment)
+    const held = byRoom.get(appointment.roomId)
+    if (held === undefined) byRoom.set(appointment.roomId, [roomPeriod])
+    else held.push(roomPeriod)
+
+    const therapistPeriod = appointmentTherapistPeriod(appointment)
+    for (const therapistId of appointment.therapistIds) {
+      const busy = byTherapist.get(therapistId)
+      if (busy === undefined) byTherapist.set(therapistId, [therapistPeriod])
+      else busy.push(therapistPeriod)
+    }
+  }
+  return { byRoom, byTherapist }
+}
+
+/**
  * The rooms that can take the booking over `period`.
  *
  * Compatibility, capacity, decommissioning and blocks are `bookableRoomsFor`'s (B-CAT-02) — re-deriving
  * overlap here would give the availability engine a second opinion about what "busy" means, and the
  * two would drift at the boundary minute. What is added is the appointments, because a room is also
  * busy for another booking's turnaround.
+ *
+ * `occupancy` is optional and defaults to computing it from `appointments`, so every existing caller is
+ * unchanged and a caller in a loop can hoist it. It is **derived from `appointments`**, never a second
+ * opinion about them: supplying one computed from a different set is the one way to make this function
+ * answer about rows it was not given, and that is why the parameter is documented rather than convenient.
  */
 export function roomsFreeFor(args: {
   readonly rooms: readonly Room[]
@@ -243,15 +295,12 @@ export function roomsFreeFor(args: {
   readonly blocks: readonly ResourceBlock[]
   readonly appointments: readonly ScheduledAppointment[]
   readonly clients?: number
+  readonly occupancy?: AppointmentOccupancy
 }): Room[] {
   const { rooms, compatibleRoomTypes, period, blocks, appointments, clients = 1 } = args
+  const occupied = (args.occupancy ?? appointmentOccupancy(appointments)).byRoom
   return bookableRoomsFor({ rooms, compatibleRoomTypes, period, blocks, clients }).filter(
-    (room) => {
-      const occupied = appointments
-        .filter((appointment) => appointment.roomId === room.id)
-        .map(appointmentRoomPeriod)
-      return !overlapsAny(period, occupied)
-    },
+    (room) => !overlapsAny(period, occupied.get(room.id) ?? []),
   )
 }
 
@@ -268,18 +317,39 @@ export function therapistsFreeFor(args: {
   readonly period: Period
   readonly shifts: readonly TherapistShift[]
   readonly appointments: readonly ScheduledAppointment[]
+  /** Derived from `appointments`. See {@link roomsFreeFor}; hoisting it is the only reason it is here. */
+  readonly occupancy?: AppointmentOccupancy
+  /** Presence grouped by therapist, derived from `shifts`. Hoisted for the same reason. */
+  readonly rostered?: ReadonlyMap<string, readonly Period[]>
 }): string[] {
   const { therapistIds, period, shifts, appointments } = args
+  const busyBy = (args.occupancy ?? appointmentOccupancy(appointments)).byTherapist
+  const rosteredBy = args.rostered ?? rosteredByTherapist(shifts)
   return therapistIds.filter((therapistId) => {
-    const rostered = shifts
-      .filter((shift) => shift.therapistId === therapistId)
-      .map((shift) => shift.period)
-    if (!coveredWithoutGap(period, rostered)) return false
-    const busy = appointments
-      .filter((appointment) => appointment.therapistIds.includes(therapistId))
-      .map(appointmentTherapistPeriod)
-    return !overlapsAny(period, busy)
+    // Presence first, and the short-circuit is kept: a therapist who is not rostered for the whole
+    // interval is out whatever their appointments say, and "a shift overlaps it" would send somebody home
+    // at 22:00 in the middle of a treatment that started at 21:00.
+    if (!coveredWithoutGap(period, rosteredBy.get(therapistId) ?? [])) return false
+    return !overlapsAny(period, busyBy.get(therapistId) ?? [])
   })
+}
+
+/**
+ * Rostered spans grouped by therapist. Two overlapping shifts for one person are ONE presence.
+ *
+ * A grouping and not a merge: `coveredWithoutGap` unions them itself (`mergePeriods`), so merging here
+ * would be the second implementation of that union — and the one that disagreed at the boundary minute.
+ */
+export function rosteredByTherapist(
+  shifts: readonly TherapistShift[],
+): ReadonlyMap<string, readonly Period[]> {
+  const byTherapist = new Map<string, Period[]>()
+  for (const shift of shifts) {
+    const held = byTherapist.get(shift.therapistId)
+    if (held === undefined) byTherapist.set(shift.therapistId, [shift.period])
+    else held.push(shift.period)
+  }
+  return byTherapist
 }
 
 /**
@@ -363,6 +433,14 @@ export function solveAvailability(request: SlotRequest): SlotSolution {
   const earliestStart = addMinutes(now, minLeadMinutes)
   const daysAhead = calendarDaysBetween(advanceAnchorDate(now, hoursFor, zone), tradingDate)
 
+  // Hoisted out of the grid, because neither depends on the candidate start. A committed appointment's
+  // occupancy and a therapist's rostered presence are the same at 11:00 as at 23:45, and computing them
+  // inside the loop made the whole of both O(starts): about fifty-five times more interval arithmetic
+  // than the inputs contain. The functions below still accept `appointments` and `shifts` and still
+  // derive these when they are not supplied, so nothing outside this loop changed.
+  const occupancy = appointmentOccupancy(appointments)
+  const rostered = rosteredByTherapist(shifts)
+
   const slots: CandidateSlot[] = []
   const rejected: RejectedStart[] = []
 
@@ -393,6 +471,7 @@ export function solveAvailability(request: SlotRequest): SlotSolution {
         blocks,
         appointments,
         clients,
+        occupancy,
       })
       if (availableRooms.length === 0) {
         rejected.push({ startsAt, reason: 'no_room_available' })
@@ -409,6 +488,8 @@ export function solveAvailability(request: SlotRequest): SlotSolution {
         period: therapistPeriod,
         shifts,
         appointments,
+        occupancy,
+        rostered,
       })
       if (availableTherapistIds.length === 0) {
         rejected.push({ startsAt, reason: 'no_therapist_available' })

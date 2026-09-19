@@ -506,3 +506,198 @@ describe('acceptance — the routing verdict columns, and the floor the database
     expect(rows[1]?.indexdef).toMatch(/WHERE \(routing_verdict IS NULL\)/)
   })
 })
+
+describe('acceptance — the reply draft columns, and the ordering the database owns (0048)', () => {
+  /** The eight columns 0048 adds, all nullable because "not drafted yet" is a real state of the queue. */
+  const DRAFT_COLUMNS = [
+    'reply_draft_skeleton_id',
+    'reply_draft_aspects',
+    'reply_draft_language',
+    'reply_draft_prompt_version',
+    'reply_draft_prompt_fingerprint',
+    'reply_draft_generated_at',
+    'draft_quarantine_reason',
+    'draft_quarantined_at',
+  ] as const
+
+  /** A routed review, which is the only state a draft may be written against. */
+  async function routedReview(sub: string, overrides: ReviewColumns = {}): Promise<string> {
+    const connection = await seedConnection(sub, PLACE_A)
+    const id = await insertReview(connection, PLACE_A, overrides)
+    await sql`
+      update google_reviews set routing_verdict = 'escalate', routing_rule_id = 'free_text_present',
+        routing_lexicon_version = '2026-09-19', routed_at = now()
+      where id = ${id}
+    `
+    return id
+  }
+
+  /** Every provenance column at once, which is the only shape the group constraint accepts. */
+  const provenance = (draft: string) => ({
+    reply_draft: draft,
+    reply_draft_skeleton_id: 'positive_thanks',
+    reply_draft_language: 'en',
+    reply_draft_prompt_version: 'g-rev-04-1',
+    reply_draft_prompt_fingerprint: 'deadbeef',
+  })
+
+  it('adds eight nullable columns with no default', async () => {
+    const rows = await sql<
+      { column_name: string; is_nullable: string; column_default: string | null }[]
+    >`
+      select column_name, is_nullable, column_default from information_schema.columns
+      where table_name = 'google_reviews' and column_name = any(${sql.array([...DRAFT_COLUMNS])})
+      order by column_name
+    `
+    expect(rows.map((row) => row.column_name).sort()).toEqual([...DRAFT_COLUMNS].sort())
+    for (const row of rows) {
+      expect(row.is_nullable, row.column_name).toBe('YES')
+      expect(row.column_default, row.column_name).toBeNull()
+    }
+  })
+
+  it('refuses half a provenance, so a draft nobody can reproduce cannot be stored', async () => {
+    const id = await routedReview('sub-draft-partial', {
+      comment_text: 'Great massage, thank you.',
+    })
+    // Each probe leaves exactly ONE constraint able to refuse it, which is the difference between
+    // asserting a name and asserting that something went wrong. The draft is written alongside the half
+    // provenance so that `..._needs_a_draft` is satisfied, and the row is routed so that
+    // `..._needs_a_verdict` is too — leaving `..._provenance_together` as the only possible objection.
+    await expect(
+      sql`
+        update google_reviews
+        set reply_draft = 'Thank you for the rating.', reply_draft_skeleton_id = 'positive_thanks'
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_draft_provenance_together/)
+    await expect(
+      sql`
+        update google_reviews
+        set reply_draft = 'Thank you for the rating.', reply_draft_prompt_fingerprint = 'deadbeef'
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_draft_provenance_together/)
+    // The control: all six together is accepted, so the constraint is not refusing everything.
+    await sql`
+      update google_reviews set ${sql({ ...provenance('Thank you for the rating.'), reply_draft_aspects: sql.array(['treatment']), reply_draft_generated_at: new Date() })}
+      where id = ${id}
+    `
+    const [row] = await sql<{ reply_draft_skeleton_id: string }[]>`
+      select reply_draft_skeleton_id from google_reviews where id = ${id}
+    `
+    expect(row?.reply_draft_skeleton_id).toBe('positive_thanks')
+  })
+
+  it('refuses provenance with no draft to describe', async () => {
+    const id = await routedReview('sub-draft-orphan', { comment_text: 'Good massage, very clean.' })
+    await expect(
+      sql`
+        update google_reviews set ${sql({ reply_draft: null, reply_draft_skeleton_id: 'positive_thanks', reply_draft_language: 'en', reply_draft_prompt_version: 'g-rev-04-1', reply_draft_prompt_fingerprint: 'deadbeef', reply_draft_aspects: sql.array([]), reply_draft_generated_at: new Date() })}
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_draft_provenance_needs_a_draft/)
+  })
+
+  it('refuses a machine draft on a review nobody routed, which is the ordering as a database fact', async () => {
+    // THE constraint. Generation consumes a verdict (docs/07 §4 decides whether a human must read the
+    // review at all), so a draft on an unrouted row is a reply outside the table entirely.
+    const connection = await seedConnection('sub-draft-unrouted', PLACE_A)
+    const id = await insertReview(connection, PLACE_A, { comment_text: 'Lovely, thank you all.' })
+    await expect(
+      sql`
+        update google_reviews set ${sql({ ...provenance('Thank you for the rating.'), reply_draft_aspects: sql.array([]), reply_draft_generated_at: new Date() })}
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_draft_needs_a_verdict/)
+
+    // The control: the identical write on a ROUTED row is accepted. Without it this would pass on any
+    // constraint that refused the write for some other reason.
+    await sql`
+      update google_reviews set routing_verdict = 'escalate', routing_rule_id = 'free_text_present',
+        routing_lexicon_version = '2026-09-19', routed_at = now()
+      where id = ${id}
+    `
+    await sql`
+      update google_reviews set ${sql({ ...provenance('Thank you for the rating.'), reply_draft_aspects: sql.array([]), reply_draft_generated_at: new Date() })}
+      where id = ${id}
+    `
+    const [row] = await sql<{ reply_draft: string }[]>`
+      select reply_draft from google_reviews where id = ${id}
+    `
+    expect(row?.reply_draft).toBe('Thank you for the rating.')
+  })
+
+  it('constrains the reply language to exactly en|ar', async () => {
+    const [check] = await sql<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid = 'google_reviews'::regclass
+        and conname = 'google_reviews_draft_language_known'
+    `
+    const def = check?.def ?? ''
+    expect(def).toContain('en')
+    expect(def).toContain('ar')
+    // Exactly two. A third is a language nothing can identify, so a reply in it cannot be checked.
+    expect(def.match(/'[a-z]+'::text/g)).toHaveLength(2)
+  })
+
+  it('refuses a blank skeleton id, prompt version or fingerprint, so absent has one spelling', async () => {
+    const id = await routedReview('sub-draft-blank', { comment_text: 'Very good, thank you.' })
+    const withBlank = (overrides: ReviewColumns) =>
+      sql`
+        update google_reviews set ${sql({ ...provenance('Thank you for the rating.'), reply_draft_aspects: sql.array([]), reply_draft_generated_at: new Date(), ...overrides })}
+        where id = ${id}
+      `
+    await expect(withBlank({ reply_draft_skeleton_id: '   ' })).rejects.toThrow(
+      /google_reviews_draft_skeleton_not_blank/,
+    )
+    await expect(withBlank({ reply_draft_prompt_version: '' })).rejects.toThrow(
+      /google_reviews_draft_prompt_version_not_blank/,
+    )
+    await expect(withBlank({ reply_draft_prompt_fingerprint: ' ' })).rejects.toThrow(
+      /google_reviews_draft_fingerprint_not_blank/,
+    )
+  })
+
+  it('refuses half a quarantine, and refuses a quarantine that carries a machine draft', async () => {
+    const id = await routedReview('sub-draft-quarantine', {
+      comment_text: 'Fine, thanks for that.',
+    })
+    await expect(
+      sql`update google_reviews set draft_quarantine_reason = 'response_promises_money' where id = ${id}`,
+    ).rejects.toThrow(/google_reviews_draft_quarantine_together/)
+    await expect(
+      sql`update google_reviews set draft_quarantined_at = now() where id = ${id}`,
+    ).rejects.toThrow(/google_reviews_draft_quarantine_together/)
+    await expect(
+      sql`update google_reviews set draft_quarantine_reason = '  ', draft_quarantined_at = now() where id = ${id}`,
+    ).rejects.toThrow(/google_reviews_draft_quarantine_reason_not_blank/)
+
+    // The control: the pair together is accepted.
+    await sql`
+      update google_reviews set draft_quarantine_reason = 'response_promises_money',
+        draft_quarantined_at = now()
+      where id = ${id}
+    `
+    // And a machine draft cannot now be added beside it. A bland house sentence offered next to "this
+    // review attempted a prompt injection" is a sentence that gets approved.
+    await expect(
+      sql`
+        update google_reviews set ${sql({ ...provenance('Thank you for the rating.'), reply_draft_aspects: sql.array([]), reply_draft_generated_at: new Date() })}
+        where id = ${id}
+      `,
+    ).rejects.toThrow(/google_reviews_draft_quarantine_has_no_machine_draft/)
+  })
+
+  it('indexes the undrafted backlog partially, because it is a small and differently-growing slice', async () => {
+    const [index] = await sql<{ indexdef: string }[]>`
+      select indexdef from pg_indexes
+      where tablename = 'google_reviews' and indexname = 'google_reviews_undrafted_idx'
+    `
+    const def = index?.indexdef ?? ''
+    expect(def).toContain('WHERE')
+    expect(def).toContain('routing_verdict IS NOT NULL')
+    expect(def).toContain('reply_draft IS NULL')
+    expect(def).toContain('draft_quarantine_reason IS NULL')
+  })
+})

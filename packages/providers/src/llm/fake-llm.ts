@@ -11,9 +11,17 @@
  * money is a legal statement, and the correct behaviour is to put it in front of a person. The
  * routing that does so is tested against this fake, so it exists before the first real API key does.
  */
+import { UNTRUSTED_GUTTER } from '@berelax/core'
 import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
-import type { LlmOutcome, LlmProvider, LlmRequest, LlmUsage } from './port.ts'
+import {
+  type LlmOutcome,
+  type LlmPricing,
+  type LlmProvider,
+  type LlmRequest,
+  type LlmUsage,
+  validateLlmKey,
+} from './port.ts'
 
 export const FAKE_LLM = 'fake-llm'
 
@@ -44,6 +52,29 @@ const REFUSAL_TRIGGERS: readonly { readonly pattern: RegExp; readonly reason: st
   },
 ]
 
+/**
+ * The part of a prompt a refusal may be about.
+ *
+ * A real model declines because of what the **review** says, not because of what the instructions say.
+ * This fake matched {@link REFUSAL_TRIGGERS} against the whole prompt, which was indistinguishable from
+ * that right up to the moment a prompt's instructions legitimately used one of the words: G-REV-04's
+ * instruction section forbids mentioning a refund, and therefore contains the word "refund", so **every**
+ * review-reply prompt drew a refusal and the autoresponder quarantined 100% of reviews under the DEFAULT
+ * provider. Nothing threw; the queue simply filled with "the model returned nothing to select from".
+ *
+ * So the untrusted region is what is judged when there is one. It is the block of lines carrying
+ * {@link UNTRUSTED_GUTTER} (packages/core/src/reviews/prompt-builder.ts), which is exactly the text a
+ * reviewer wrote. A prompt with no such block is judged whole, which is what the SEO agent's prompts and
+ * every existing test want, and is why this change moves no existing behaviour.
+ */
+function refusableText(prompt: string): string {
+  const reviewText = prompt
+    .split('\n')
+    .filter((line) => line.startsWith(UNTRUSTED_GUTTER))
+    .map((line) => line.slice(UNTRUSTED_GUTTER.length))
+  return reviewText.length > 0 ? reviewText.join('\n') : prompt
+}
+
 /** FNV-1a. Small, dependency-free, and stable across runs and machines — which is all that is needed. */
 function hash(text: string): number {
   let value = 0x811c9dc5
@@ -73,6 +104,18 @@ const SEO_TEMPLATES = [
   'Brand queries convert at 45% CTR and already sit at position 1.2. There is nothing to win there; the opportunity is entirely in the non-brand tail.',
 ] as const
 
+/**
+ * The local fake bills nothing.
+ *
+ * Zero rather than a provisional figure: this adapter reaches no vendor, so any number here would be an
+ * invented cost for a call that costs nothing — and it would make the per-run cap testable only by
+ * accident. The named fakes carry the provisional prices, and they are the ones a cost test uses.
+ */
+export const LOCAL_FAKE_PRICING: LlmPricing = Object.freeze({
+  inputFilsPerMillionTokens: 0,
+  outputFilsPerMillionTokens: 0,
+})
+
 export interface FakeLlmOptions {
   readonly log: CallLog
   readonly failures: FailureScript
@@ -89,6 +132,18 @@ export function createFakeLlm(options: FakeLlmOptions): LlmProvider {
 
   return {
     name: FAKE_LLM,
+    pricing: LOCAL_FAKE_PRICING,
+
+    /**
+     * The local fake costs nothing and accepts any key long enough to be one.
+     *
+     * It still runs the local checks, because the *caller* under test is the settings save path and a
+     * provider that accepted an empty string would make that path untestable against the default
+     * provider — which is the one every developer and every CI run uses.
+     */
+    async validateKey(key: string): Promise<void> {
+      validateLlmKey(FAKE_LLM, key)
+    },
 
     async complete(request: LlmRequest): Promise<LlmOutcome> {
       const armed = failures.take()
@@ -118,7 +173,9 @@ export function createFakeLlm(options: FakeLlmOptions): LlmProvider {
       const input = estimate(request.prompt)
       inputTokens += input
 
-      const trigger = REFUSAL_TRIGGERS.find((entry) => entry.pattern.test(request.prompt))
+      const trigger = REFUSAL_TRIGGERS.find((entry) =>
+        entry.pattern.test(refusableText(request.prompt)),
+      )
       if (trigger !== undefined) {
         const refusal: LlmOutcome = {
           kind: 'refusal',

@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
 import { captureFilename, THEMES, VIEWPORTS } from '@berelax/harness/matrix'
 import { buildDerivatives, storeOriginal } from '@berelax/media'
 import { CROPS, cropRectFor } from '@berelax/media/ladders'
@@ -264,7 +265,10 @@ beforeAll(async () => {
   cookies.set('manager', await signIn(manager))
   cookies.set('receptionist', await signIn(receptionist))
 
-  browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
+  // The shared list, not a hand-written one: `--disable-skia-runtime-opts` and `--disable-lcd-text` are
+  // what make the repeat capture below byte-identical, and this file used to launch without them. See
+  // `packages/harness/src/determinism.ts`.
+  browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 900_000)
 
 afterAll(async () => {
@@ -360,6 +364,10 @@ async function open(
     await route.continue()
   })
   await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
+  // The harness's own determinism CSS: animations and transitions off, the caret transparent, motion
+  // tokens zeroed. `animations: 'disabled'` on the screenshot call is not the same thing — it freezes CSS
+  // animation at capture time and knows nothing about a blinking caret or a token a script reads.
+  await page.addStyleTag({ content: DETERMINISM_CSS })
   await page.evaluate(async () => {
     await document.fonts.ready
     await Promise.all(
@@ -372,6 +380,22 @@ async function open(
           }),
       ),
     )
+    /*
+     * And then DECODED, which `complete` does not mean.
+     *
+     * `complete` is true once the bytes have arrived. Turning those bytes into a frame the compositor can
+     * paint is a separate, asynchronous step, and `decoding="sync"` on the element is a hint rather than a
+     * guarantee. `HTMLImageElement.decode()` is the one API that resolves when an image is ready to paint
+     * without flicker, so this is what closes the gap the byte-identical assertion kept falling into: the
+     * first capture painted a frame that had not finished decoding and the second found it in the decoded
+     * cache, which is why the two differed and why the difference changed sign between runs. Seven frames
+     * at 390px, each a different derivative, is the cell with the most to decode and the one that failed.
+     *
+     * Rejections are swallowed deliberately: `decode()` rejects for an image that failed to load, and a
+     * broken frame is this page's own subject — the alt-failure and over-budget fixtures render one on
+     * purpose. A rejection here means "nothing to wait for", not "give up".
+     */
+    await Promise.all([...document.images].map((image) => image.decode().catch(() => undefined)))
     /*
      * Two frames, so the paint the screenshot captures is a committed one.
      *

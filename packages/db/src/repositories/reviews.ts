@@ -458,6 +458,150 @@ export async function recordRoutingVerdict(
   return 'routed'
 }
 
+/**
+ * A machine-written draft and its provenance, as data. Computed in `packages/core` and handed here.
+ *
+ * The same boundary `ReviewRoutingVerdictInput` describes, for the same reason: the write path must not
+ * be able to *produce* a draft, only to record one. There is nothing in `packages/db` that could render a
+ * reply, so there is no second place a reply can come from.
+ */
+export interface ReplyDraftInput {
+  readonly draft: string
+  readonly skeletonId: string
+  readonly aspects: readonly string[]
+  /** 'en' | 'ar'. Refused by the database if it is neither (0048). */
+  readonly language: string
+  readonly promptVersion: string
+  readonly promptFingerprint: string
+  /** The lint version that cleared it, for the audit row. G-REV-05 persists its own. */
+  readonly lintVersion: string
+}
+
+export type DraftWriteOutcome = 'drafted' | 'already_drafted'
+
+/**
+ * Records a draft, once.
+ *
+ * ## Guarded by `reply_draft is null`, and why that is not merely idempotence
+ *
+ * The generator is an at-least-once job like every other (docs/10 §7), so a replayed run must not write a
+ * second draft. But the stronger reason is that the draft is **the only part of the row a human touches**:
+ * an owner edits it before approving, and an overwrite would silently discard that edit and put the
+ * machine's sentence back in front of them with no sign anything had changed. `reconcileApiReviewId` makes
+ * the same promise for the same reason.
+ *
+ * The routing verdict is not re-derived and not checked here beyond what 0048's CHECK enforces — the
+ * database refuses a draft on an unrouted review, which is the guarantee; a second implementation of
+ * docs/07 §4 in SQL is the shape that drifts.
+ */
+export async function recordReplyDraft(
+  uow: UnitOfWork,
+  reviewId: string,
+  input: ReplyDraftInput,
+): Promise<DraftWriteOutcome> {
+  if (input.draft.trim().length === 0) {
+    throw new AppError('validation', 'A reply draft cannot be blank; record a quarantine instead')
+  }
+  if (input.skeletonId.trim().length === 0 || input.promptFingerprint.trim().length === 0) {
+    throw new AppError(
+      'validation',
+      'A reply draft needs both the skeleton it was rendered from and the fingerprint of the review ' +
+        'text it was written against: a draft nobody can reproduce is not an auditable one',
+    )
+  }
+
+  const rows = await uow.sql<{ id: string }[]>`
+    update google_reviews set
+      reply_draft                    = ${input.draft},
+      reply_draft_skeleton_id        = ${input.skeletonId},
+      reply_draft_aspects            = ${uow.sql.array([...input.aspects])},
+      reply_draft_language           = ${input.language},
+      reply_draft_prompt_version     = ${input.promptVersion},
+      reply_draft_prompt_fingerprint = ${input.promptFingerprint},
+      reply_draft_generated_at       = now()
+    where id = ${reviewId} and reply_draft is null and draft_quarantine_reason is null
+    returning id
+  `
+  if (rows[0] === undefined) {
+    const [existing] = await uow.sql<{ id: string }[]>`
+      select id from google_reviews where id = ${reviewId}
+    `
+    if (existing === undefined) throw notFound(reviewId)
+    return 'already_drafted'
+  }
+
+  await uow.audit.record({
+    action: 'google_review.draft_recorded',
+    entityType: 'google_review',
+    entityId: reviewId,
+    operation: 'update',
+    before: { replyDraft: null },
+    after: {
+      skeletonId: input.skeletonId,
+      aspects: [...input.aspects],
+      language: input.language,
+      promptVersion: input.promptVersion,
+      promptFingerprint: input.promptFingerprint,
+      lintVersion: input.lintVersion,
+      // The draft itself is in the row and in the audit row's `after`, which is right: the audit has to
+      // be able to show what was put in front of the owner, and that is the whole point of it here.
+      replyDraft: input.draft,
+    },
+  })
+  return 'drafted'
+}
+
+export type QuarantineWriteOutcome = 'quarantined' | 'already_decided'
+
+/**
+ * Records that no draft was produced, and why.
+ *
+ * A row, not a log line. The reason is the screen rule that refused the model's response, and it is the
+ * difference between "nothing has run yet" and "this review tried to steer the model and a human should
+ * write this one" — two states an operator treats completely differently and which a NULL cannot
+ * distinguish.
+ *
+ * Guarded the same way as the draft, so a replayed run does not re-quarantine, and 0048 refuses a row
+ * that carries both a quarantine and a machine draft.
+ */
+export async function recordDraftQuarantine(
+  uow: UnitOfWork,
+  reviewId: string,
+  reason: string,
+): Promise<QuarantineWriteOutcome> {
+  if (reason.trim().length === 0) {
+    throw new AppError(
+      'validation',
+      'A quarantine needs the rule that refused the response: a refusal nobody can name is not one an ' +
+        'operator can act on',
+    )
+  }
+
+  const rows = await uow.sql<{ id: string }[]>`
+    update google_reviews set
+      draft_quarantine_reason = ${reason},
+      draft_quarantined_at    = now()
+    where id = ${reviewId} and reply_draft is null and draft_quarantine_reason is null
+    returning id
+  `
+  if (rows[0] === undefined) {
+    const [existing] = await uow.sql<{ id: string }[]>`
+      select id from google_reviews where id = ${reviewId}
+    `
+    if (existing === undefined) throw notFound(reviewId)
+    return 'already_decided'
+  }
+
+  await uow.audit.record({
+    action: 'google_review.draft_quarantined',
+    entityType: 'google_review',
+    entityId: reviewId,
+    operation: 'update',
+    after: { quarantineReason: reason },
+  })
+  return 'quarantined'
+}
+
 export interface QueuedReview {
   readonly id: string
   readonly connectionId: string
@@ -482,6 +626,17 @@ export interface QueuedReview {
   /** The lexicon version the verdict was taken against, which is what reproduces it. */
   readonly routingLexiconVersion: string | null
   readonly routedAtIso: string | null
+  /** The provenance of a machine-written draft (0048). NULL together, or not at all. */
+  readonly replyDraftSkeletonId: string | null
+  readonly replyDraftAspects: readonly string[] | null
+  readonly replyDraftLanguage: string | null
+  readonly replyDraftPromptVersion: string | null
+  /** The fingerprint of the review text the draft was written against. Detects a stale draft. */
+  readonly replyDraftPromptFingerprint: string | null
+  readonly replyDraftGeneratedAtIso: string | null
+  /** Why no draft was produced, when the model's response showed signs of having been steered. */
+  readonly draftQuarantineReason: string | null
+  readonly draftQuarantinedAtIso: string | null
 }
 
 interface ReviewRow {
@@ -503,6 +658,14 @@ interface ReviewRow {
   readonly routing_rule_id: string | null
   readonly routing_lexicon_version: string | null
   readonly routed_at: Date | null
+  readonly reply_draft_skeleton_id: string | null
+  readonly reply_draft_aspects: string[] | null
+  readonly reply_draft_language: string | null
+  readonly reply_draft_prompt_version: string | null
+  readonly reply_draft_prompt_fingerprint: string | null
+  readonly reply_draft_generated_at: Date | null
+  readonly draft_quarantine_reason: string | null
+  readonly draft_quarantined_at: Date | null
 }
 
 const toQueued = (row: ReviewRow): QueuedReview => ({
@@ -524,12 +687,23 @@ const toQueued = (row: ReviewRow): QueuedReview => ({
   routingRuleId: row.routing_rule_id,
   routingLexiconVersion: row.routing_lexicon_version,
   routedAtIso: row.routed_at?.toISOString() ?? null,
+  replyDraftSkeletonId: row.reply_draft_skeleton_id,
+  replyDraftAspects: row.reply_draft_aspects,
+  replyDraftLanguage: row.reply_draft_language,
+  replyDraftPromptVersion: row.reply_draft_prompt_version,
+  replyDraftPromptFingerprint: row.reply_draft_prompt_fingerprint,
+  replyDraftGeneratedAtIso: row.reply_draft_generated_at?.toISOString() ?? null,
+  draftQuarantineReason: row.draft_quarantine_reason,
+  draftQuarantinedAtIso: row.draft_quarantined_at?.toISOString() ?? null,
 })
 
 const REVIEW_COLUMNS =
   'id, connection_id, place_id, google_review_id, source, delivery_mode, rating, comment_text, ' +
   'reviewer_display_name, reviewed_at, reply_draft, submitted_at, confirmed_at, posted_manually_at, ' +
-  'routing_verdict, routing_rule_id, routing_lexicon_version, routed_at'
+  'routing_verdict, routing_rule_id, routing_lexicon_version, routed_at, ' +
+  'reply_draft_skeleton_id, reply_draft_aspects, reply_draft_language, reply_draft_prompt_version, ' +
+  'reply_draft_prompt_fingerprint, reply_draft_generated_at, draft_quarantine_reason, ' +
+  'draft_quarantined_at'
 
 /**
  * The queue for one listing of one connection, newest first.
@@ -547,6 +721,30 @@ export async function listReviewQueue(
     where connection_id = ${scope.connectionId} and place_id = ${scope.placeId}
     order by reviewed_at desc
     limit ${scope.limit ?? 200}
+  `
+  return rows.map(toQueued)
+}
+
+/**
+ * The reviews the generator still has to draft for: routed, and neither drafted nor quarantined.
+ *
+ * Scoped by connection and ordered oldest-first, which is the opposite of the operator's queue and is
+ * right for a job: the oldest undrafted review is the one closest to the cooling-off window closing, and
+ * a newest-first job starves the tail of the queue the first time it falls behind. It reads
+ * `google_reviews_undrafted_idx` (0048).
+ */
+export async function listUndraftedReviews(
+  sql: Sql,
+  scope: { readonly connectionId: string; readonly limit?: number },
+): Promise<readonly QueuedReview[]> {
+  const rows = await sql<ReviewRow[]>`
+    select ${sql.unsafe(REVIEW_COLUMNS)} from google_reviews
+    where connection_id = ${scope.connectionId}
+      and routing_verdict is not null
+      and reply_draft is null
+      and draft_quarantine_reason is null
+    order by reviewed_at asc
+    limit ${scope.limit ?? 50}
   `
   return rows.map(toQueued)
 }

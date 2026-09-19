@@ -1,8 +1,11 @@
 import {
   AppError,
+  DEFAULT_LLM_PROVIDER,
   DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
   genderMatchingModeSchema,
+  LLM_PROVIDER_SETTING_KEY,
+  llmProviderSchema,
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
   REVIEW_AUTOSEND_DISABLED,
   REVIEW_AUTOSEND_SETTING_KEY,
@@ -263,12 +266,15 @@ export const SETTINGS = [
     invalidates: ['theme'],
   }),
   define({
-    key: 'agents.llm_provider',
+    // Bound to `@berelax/shared`'s vocabulary rather than spelling the enum again, the same way the
+    // four auto-send settings are. `packages/providers` turns the stored name into an adapter and
+    // `packages/db` reads the row; three copies of one list is two chances to disagree.
+    key: LLM_PROVIDER_SETTING_KEY,
     tier: 'operational',
-    schema: z.enum(['fake', 'deepseek', 'minimax', 'claude']),
-    defaultValue: 'fake' as const,
+    schema: llmProviderSchema,
+    defaultValue: DEFAULT_LLM_PROVIDER,
     label: 'LLM provider',
-    help: 'Used by both the review autoresponder and the SEO agent. The key is validated against the provider before saving.',
+    help: 'Used by both the review autoresponder and the SEO agent. The key is validated against the provider before saving: an invalid key is refused with the reason rather than stored and discovered by a silent agent.',
     editableBy: OWNER_ONLY,
     audited: true,
     invalidates: [],

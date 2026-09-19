@@ -47,8 +47,27 @@ export type {
   SearchConsoleProvider,
 } from './google/port.ts'
 export { GOOGLE_REVOKE_ENDPOINT } from './google/port.ts'
-export { createFakeLlm, FAKE_LLM } from './llm/fake-llm.ts'
-export type { LlmOutcome, LlmProvider, LlmPurpose, LlmRequest, LlmUsage } from './llm/port.ts'
+export { createFakeLlm, FAKE_LLM, LOCAL_FAKE_PRICING } from './llm/fake-llm.ts'
+export {
+  createFakeDeepSeek,
+  createFakeMiniMax,
+  DEEPSEEK,
+  MINIMAX,
+  PROVISIONAL_DEEPSEEK_PRICING,
+  PROVISIONAL_MINIMAX_PRICING,
+  REJECTED_KEY_MARKER,
+} from './llm/named-fakes.ts'
+export {
+  costOfFils,
+  type LlmOutcome,
+  type LlmPricing,
+  type LlmProvider,
+  type LlmPurpose,
+  type LlmRequest,
+  type LlmUsage,
+  MINIMUM_LLM_KEY_LENGTH,
+  validateLlmKey,
+} from './llm/port.ts'
 export { notImplemented, PENDING, type PendingIntegration } from './not-implemented.ts'
 export { createFakeCardGateway, FAKE_GATEWAY, REFERENCE_MARKERS } from './payments/fake-gateway.ts'
 export { createManualPaymentProvider, MANUAL } from './payments/manual.ts'
@@ -61,7 +80,12 @@ export type {
   PaymentProvider,
   Refund,
 } from './payments/port.ts'
-export { createProviders, type ProviderRegistryOptions, type Providers } from './registry.ts'
+export {
+  BUILT_LLM_PROVIDERS,
+  createProviders,
+  type ProviderRegistryOptions,
+  type Providers,
+} from './registry.ts'
 export {
   createFakeSmsala,
   PROVISIONAL_COST_PER_SEGMENT_FILS,

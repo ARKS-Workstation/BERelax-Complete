@@ -3,7 +3,8 @@ import { aed } from '@berelax/core'
 import { isAppError } from '@berelax/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { FAILURE_MODES, type FailureMode, failureModeOf } from './failure.ts'
-import { createProviders, type Providers } from './registry.ts'
+import { DEEPSEEK, MINIMAX } from './llm/named-fakes.ts'
+import { BUILT_LLM_PROVIDERS, createProviders, type Providers } from './registry.ts'
 
 /**
  * H02 conformance: the contract every fake must satisfy, asserted for all of them at once.
@@ -37,10 +38,22 @@ function fakeConfig() {
  * provider means adding a row; forgetting to means the completeness assertion fails.
  */
 interface Exercise {
-  readonly key: keyof Providers
+  /**
+   * The registry key, or `llmFor:<name>` for an adapter reached through the selector.
+   *
+   * `llmFor` is a selector rather than a provider, so it cannot be exercised as one — and exempting it
+   * would let the DeepSeek and MiniMax fakes behind it escape all three rules, which is the hole this
+   * file exists to close. So the completeness assertion covers the registry's providers **and** every
+   * name `llmFor` resolves, and each of those is a row here.
+   */
+  readonly key: string
   readonly provider: string
   readonly call: (providers: Providers) => Promise<unknown>
 }
+
+/** The prompt shape the review generator sends. Any string would do; this is the real one. */
+const SELECTION_PROMPT =
+  'ALLOWED_ASPECTS: treatment, team, cleanliness\nSelect the aspects the reviewer cared about.'
 
 const EXERCISES: readonly Exercise[] = [
   {
@@ -119,6 +132,42 @@ const EXERCISES: readonly Exercise[] = [
         idempotencyKey: `llm-${Math.random()}`,
       }),
   },
+  {
+    key: 'llmFor:fake',
+    provider: 'fake-llm',
+    call: (p) =>
+      p.llmFor('fake').complete({
+        purpose: 'review_reply',
+        prompt: SELECTION_PROMPT,
+        locale: 'en',
+        maxOutputTokens: 200,
+        idempotencyKey: `llm-fake-${Math.random()}`,
+      }),
+  },
+  {
+    key: `llmFor:${DEEPSEEK}`,
+    provider: DEEPSEEK,
+    call: (p) =>
+      p.llmFor(DEEPSEEK).complete({
+        purpose: 'review_reply',
+        prompt: SELECTION_PROMPT,
+        locale: 'en',
+        maxOutputTokens: 200,
+        idempotencyKey: `llm-deepseek-${Math.random()}`,
+      }),
+  },
+  {
+    key: `llmFor:${MINIMAX}`,
+    provider: MINIMAX,
+    call: (p) =>
+      p.llmFor(MINIMAX).complete({
+        purpose: 'review_reply',
+        prompt: SELECTION_PROMPT,
+        locale: 'en',
+        maxOutputTokens: 200,
+        idempotencyKey: `llm-minimax-${Math.random()}`,
+      }),
+  },
 ]
 
 let providers: Providers
@@ -131,9 +180,12 @@ describe('the registry covers every provider the system uses', () => {
   it('exercises every provider on the registry, so none can opt out of the rules below', () => {
     const exercised = new Set(EXERCISES.map((exercise) => exercise.key))
     const onRegistry = (Object.keys(providers) as (keyof Providers)[]).filter(
-      (key) => key !== 'calls' && key !== 'failures',
+      (key) => key !== 'calls' && key !== 'failures' && key !== 'llmFor',
     )
-    expect([...exercised].sort()).toEqual([...onRegistry].sort())
+    // The providers, plus every name the selector resolves. Both halves, and the size, so a provider
+    // added to either place without a row here fails rather than opting out.
+    const expected = [...onRegistry, ...BUILT_LLM_PROVIDERS.map((name) => `llmFor:${name}`)]
+    expect([...exercised].sort()).toEqual([...expected].sort())
   })
 })
 

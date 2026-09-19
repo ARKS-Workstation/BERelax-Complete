@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**69 / 207 units complete.**
+**71 / 207 units complete.**
 
 ## Next up
 
-1. **B-AVAIL-07 — Availability query service, brief cache with write invalidation, alternatives and waitlist**
-1. **W-SITE-05 — Catalogue-derived routes: /treatments, /treatments/[slug], /pricing**  — **needs owner input:** Y9-poa-prices
-1. **W-SYS-07 — HeroMedia: the LCP-safe poster and the attach island**
+1. **B-LIFE-03 — Reschedule, cancellation, no-show and the cancellation policy**  — **needs owner input:** Y9-windows
+1. **B-UI-01 — Public booking flow: service, therapist and slot selection**
+1. **M-VAT-10 — Compliance calendar engine and blocking obligations**
 
 ## All units
 
@@ -43,7 +43,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 26 | `B-AVAIL-06` | The booking transaction: room row lock, idempotency, all-or-none, price snapshot | `B-AVAIL-01`, `B-AVAIL-03`, `B-AVAIL-05`, `B-CAT-04`, `F06` | — | — |
 | [x] | 27 | `B-CAT-05` | Catalogue mutation guard rails and the public display-name compliance lint | `B-AVAIL-01`, `B-CAT-04` | — | — |
 | [x] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
-| [ ] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
+| [x] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
 | [x] | 30 | `B-LIFE-01` | Appointment lifecycle state machine with actor permissions and declared side effects | `B-AVAIL-06`, `F06`, `F07` | — | — |
 | [ ] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
 | [x] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
@@ -178,7 +178,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 161 | `G-REV-01` | Review data model: nullable google_review_id, delivery_mode as a column | `G-CONN-01` | — | — |
 | [ ] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
 | [x] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
-| [ ] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
+| [x] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
 | [ ] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 166 | `G-REV-06` | Approval queue: Copy reply, deep link, Marked as posted | `G-REV-05`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 167 | `G-REV-07` | API delivery mode: the legacy v4 reviews adapter, isolated, flipped by a row | `G-CONN-05`, `G-REV-06`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y3-gbp-api, Y2-gbp-status, Y2-listing-owner |

@@ -146,6 +146,44 @@ module.exports = {
       },
     },
     {
+      name: 'reviews-generator-must-not-reach-clinical-data',
+      comment:
+        'The review reply prompt builder and the reply generator must not import packages/clinical or ' +
+        'any intake repository. docs/07 SS4: "No clinical or intake data ever enters any LLM prompt." ' +
+        'WHY THIS IS A RULE AND NOT A CONVENTION. The mistake is the most natural one in the unit: a ' +
+        'treatment note, a contraindication flag or an intake answer is exactly the "context" somebody ' +
+        'reaches for to make a reply feel personal, and it would work — the draft would be better, and ' +
+        'the breach would be invisible until a reply quoted a health disclosure on a public listing. ' +
+        'F08 built the boundary that makes the data unreachable at the database (a separate schema, no ' +
+        'cross-schema foreign key, the application role denied); this closes the import path, which is ' +
+        'the half a database grant cannot close because the generator runs as a role that could be ' +
+        'granted it later. ' +
+        'WHAT IS IN THE `to`, and why each entry. packages/clinical is the package itself, including its ' +
+        'envelope and its store. The two path patterns after it are any db repository or schema module ' +
+        'whose name carries `intake` or `clinical`: there is no intake repository today, and naming the ' +
+        'shape now is deliberate, because the day one is added is the day this rule has to already ' +
+        'exist — a rule added after the import is a rule added after the review that would have caught ' +
+        'it. ' +
+        'WHAT IS DELIBERATELY NOT FORBIDDEN. `@berelax/db` as a whole: the generator has to read the ' +
+        'review row and write the draft, and a rule banning the database would ban the unit. The ' +
+        'boundary being defended is clinical data, not persistence. ' +
+        'A type-only exemption is deliberately absent, unlike google-tokens-only-in-with-google: there ' +
+        'is no legitimate reason for the prompt builder to name a clinical TYPE either, because a type ' +
+        'here would only ever be the shape of a field somebody intends to interpolate. ' +
+        'The known-bad fixture is in scripts/test-gates.mjs and asserts this rule fires BY NAME, from ' +
+        'packages/google/src/reviews — where no other rule forbids clinical, so the fixture proves this ' +
+        'rule rather than an older one shadowing it.',
+      severity: 'error',
+      from: { path: '^(packages/core/src/reviews/|packages/google/src/reviews/)' },
+      to: {
+        path: [
+          '^packages/clinical/',
+          '^packages/db/src/repositories/[^/]*(intake|clinical)',
+          '^packages/db/src/schema/[^/]*(intake|clinical)',
+        ],
+      },
+    },
+    {
       name: 'no-lucide-outside-the-icon-wrapper',
       comment:
         'Only packages/ui/src/icon.tsx may import Lucide. docs/08 §7 asks for it "behind a wrapped ' +

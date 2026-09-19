@@ -245,6 +245,21 @@ export {
   zeroisationIsSafe,
 } from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
+export {
+  DRAFT_DECLINED_REASONS,
+  type DraftDeclinedReason,
+  type DraftRunSummary,
+  draftOne,
+  type GenerateDraftsDeps,
+  generateReplyDrafts,
+  type NoDraftReason,
+  type ReviewDraftOutcome,
+} from './reviews/generate-draft.ts'
+export {
+  type LlmProviderChoice,
+  readLlmProviderChoice,
+  saveLlmProviderChoice,
+} from './reviews/llm-provider.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
 export {
   assertWindowRespectsLag,

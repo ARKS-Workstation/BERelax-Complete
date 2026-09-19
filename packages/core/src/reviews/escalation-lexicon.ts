@@ -204,8 +204,14 @@ function arabicTokenMatches(token: string, want: string): boolean {
   return false
 }
 
-/** Whether an Arabic phrase appears in the tokens as consecutive, clitic-tolerant words. */
-function containsArabicPhrase(tokens: readonly string[], phrase: string): boolean {
+/**
+ * Whether an Arabic phrase appears in the tokens as consecutive, clitic-tolerant words.
+ *
+ * Exported for G-REV-04's response screen, which asks the same question of a model's answer. One clitic
+ * list, two callers: a screen with its own copy would be blind to `\u0628\u0627\u0633\u062a\u0631\u062f\u0627\u062f` the day somebody added the
+ * preposition to this one and not to that one.
+ */
+export function containsArabicPhrase(tokens: readonly string[], phrase: string): boolean {
   const want = termTokens(phrase)
   if (want.length === 0) return false
   for (let start = 0; start + want.length <= tokens.length; start += 1) {

@@ -218,6 +218,10 @@ export const appointment = pgTable(
     index('appointment_room_period_idx')
       .using('gist', t.roomId, t.period)
       .where(sql`${t.holdsResources}`),
+    // 0045. The availability read asks "what occupies ANY room during this trading day's padded
+    // window" and constrains no room, so the index above cannot serve it — its leading column is
+    // unconstrained. Partial on the same generated column, for the same reason.
+    index('appointment_period_idx').using('gist', t.period).where(sql`${t.holdsResources}`),
     check('appointment_period_upper_after_lower', sql`upper(${t.period}) > lower(${t.period})`),
     check(
       'appointment_period_bounded',

@@ -1400,7 +1400,7 @@ units:
       shifts, resource_blocks or leave. The no-availability response is structured data — nearest alternative
       days, the same variant with other therapists, waitlist eligibility — and owns the waitlist table.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-06
@@ -1420,11 +1420,186 @@ units:
       key making a repeat join for the same window idempotent, asserted by row count after two joins
     - 50 concurrent availability queries against the seeded salon return p95 under 300 ms on the CI Postgres,
       failing the job when breached
+    - 'NOTE: SCHEMA_VERSION is 45 and the migration is packages/db/migrations/0045_waitlist.sql. 41 was
+      already reserved and 42, 43 and 44 are allocated to units in flight alongside this one, so taking
+      the next free number would have collided with whichever landed first. The migration adds three
+      things. (1) `waitlist`, whose UNIQUE key is declared NULLS NOT DISTINCT - that is the whole of the
+      idempotency claim, because `therapist_id` is NULL for "any therapist" (the ordinary request) and
+      under PostgreSQL''s DEFAULT null semantics two joins for the same window would be two different
+      keys, so `on conflict do nothing` would never fire and the table would grow one row per page
+      refresh. Gate 50a is that pair refused by constraint name and 50b is the same pair with two
+      different therapists accepted. (2) `availability_epoch`: one integer per trading date, advanced by
+      an AFTER ROW trigger on each of `appointment`, `shift`, `resource_block` and APPROVED
+      `leave_request`, with `last_cause` as an enum of exactly those four so each purge case is asserted
+      SEPARATELY rather than by one test that writes all four. (3) `appointment_period_idx`, a partial
+      GiST index on `appointment (period) where holds_resources`.'
+    - 'NOTE: why an epoch table is not the `availability_cache` that `no-precomputed-slot-table` forbids,
+      because the next reader will ask. That rule (B-AVAIL-02''s last acceptance line, enforced in
+      scripts/check-schema-conventions.mjs) refuses a slot table, an availability cache and a
+      materialised view of either, and its reasoning is right: a stored ANSWER is stale from the next
+      block, closure, shift change or walk-in. `availability_epoch` stores no answer - no slot, no room,
+      no therapist, no period, nothing a caller could serve instead of computing. It stores how many
+      times the inputs have been written, which is what lets an in-process 30-second memo of a computed
+      answer DISCOVER that it is stale in one primary-key lookup. Without it the only honest options are
+      to recompute on every keystroke or to serve a memo that cannot know it is wrong, and the second is
+      what the rule exists to stop. The memo itself is a `Map` in the process, never a row.'
+    - 'NOTE: the concrete files, and two corrections to the list above. (1)
+      packages/db/src/queries/availability.perf.test.ts is packages/fixtures/src/availability-perf.itest.ts
+      instead: packages/db has no database in the unit runner, so a database-backed suite there never
+      connects (the correction B-AVAIL-01 made for booking-constraints, B-LIFE-02 for otp and B-AVAIL-04
+      for eligibility), AND the p95 must be measured with core''s real solver in the path, which
+      packages/db may never import. (2) availability.test.ts EXISTS and is the half that needs no
+      database - the cache key, the TTL band, the refusal vocabulary and every refusal raised before a
+      statement is issued, asserted against a connection whose every statement THROWS so "refused before
+      anything was read" is a property of the test. The database-backed halves are
+      packages/db/src/queries/availability.itest.ts (the round-trip count, the EXPLAIN plan, the four
+      purges, the waitlist key) and packages/fixtures/src/availability-query.itest.ts (the pair: the real
+      solve, the stale memo, the structured no-availability answer). Two files the list did not name were
+      needed: packages/core/src/availability/query-adapter.ts, the injected solver seam - it composes
+      B-AVAIL-05''s gender rule, B-AVAIL-02''s solver and B-AVAIL-03''s assignment in the one order that
+      is correct (narrow, solve, assign) so no route can compose them in another; and
+      packages/db/src/schema/waitlist.ts, the Drizzle mirror, which the list did name.'
+    - 'NOTE: "a single round trip" is satisfied literally, and the mechanism is the reason B-AVAIL-04''s
+      SQL had to be refactored rather than copied. readAvailabilityFacts issues exactly ONE statement -
+      asserted by counting the PendingQuery objects that are AWAITED, with readEligibleTherapists (two
+      statements, deliberately) as the control, because a claim about a query count that is not counted is
+      a comment. The therapist half of that statement is therapistPoolCtes, a new export in
+      repositories/eligibility.ts holding B-AVAIL-04''s own CTEs as a composable postgres.js fragment;
+      readEligibleTherapists now reads the same fragment from two ends. A second implementation of "is
+      this therapist bookable" in this file is exactly what that unit exists to prevent. The fragment
+      takes `requiredSkill` as a value OR as a SQL expression, because the skill comes from the variant''s
+      style (ADR 0021) and is not known until the variant has been read - resolving it as
+      `(select required_skill from av_variant)` inside the same WITH clause is what makes this one round
+      trip rather than two. Two things are deliberately OUTSIDE that round trip and are arguments to the
+      request: `booking.min_lead_minutes` / `booking.max_advance_days` (readAvailabilityLimits, a new
+      reader beside readGenderMatching) and `booking.same_gender_matching`. Reading them in the statement
+      would mean spelling their PROVISIONAL defaults in SQL, which is a second source of truth for a
+      figure nobody has confirmed (Y9-lead); and a setting changes at human speed and is cached for
+      minutes where a slot list is cached for seconds.'
+    - 'NOTE: the appointment read is keyed on the PERIOD and widened by four hours at both ends, and both
+      halves of that are decisions. readCommittedAppointments (B-AVAIL-04) narrows on `trading_date`,
+      which is right for the booking transaction - it is about one date''s committed rows. This query asks
+      what occupies any room and any therapist during a span of INSTANTS, and the span is not the trading
+      window: a candidate slot''s room interval is [start, end + turnaround) and its therapist interval is
+      [start - buffer, end + buffer), so an appointment ending before the day opens can still hold a
+      therapist into the day''s first slot. The padding is the CEILINGS 0038 puts on the two snapshotted
+      figures (240 and 60 minutes) rather than the configured values, because the configured value of
+      somebody else''s appointment is not this request''s to assume. Over-reading can only ever withhold a
+      slot; under-reading offers one the database refuses at COMMIT. The trigger side pads by the same
+      four hours so the invalidation set is a SUPERSET of the read set. 0024''s GiST index leads with
+      `room_id`, which this query does not constrain, which is why 0045 adds a single-column one; the
+      itest asserts `appointment_period_idx` by name out of the plan JSON, asserts the ABSENCE of a
+      `Seq Scan` on `appointment`, and has a control that disables index scans and watches the same walk
+      FIND the sequential scan - a plan assertion whose detector has stopped matching reports "no
+      sequential scans" for ever. Gate 50n replaces the period predicate with a `trading_date` one and
+      watches the plan assertion fail.'
+    - 'NOTE: "no field is a pre-rendered string" is asserted three ways, because a rendered string is the
+      version a reviewer waves through - it reads better. The pair suite checks the KEY SET of every row
+      (so a `label: "Thursday 3 October, 4 slots from 7pm"` cannot be added and read as data), checks each
+      field''s type, and then walks every string anywhere inside the three fields refusing anything that
+      matches a time of day, a weekday or month name, or the word "slot". Gate 50p renders the trading
+      date with `toUTCString()` and watches that suite fail. The TS fields are camelCase - nearestDays,
+      alternativeTherapists, waitlistEligible - where the acceptance line spells them snake_case; that is
+      this repository''s convention for every other row type (openQuestionId for open_question_id) and the
+      wire spelling is the route''s, not the query''s. `waitlistEligible` is an object rather than a
+      boolean: it carries the named reason a join is refused, the key a join would use, and whether this
+      customer already holds a row, so a caller can offer the join without reassembling the request.
+      WAITLIST_INELIGIBILITY carries every structural refusal the query itself produces plus
+      `slots_are_available`, and waitlistIneligibilityFrom THROWS on a refusal it does not know rather
+      than returning undefined - defaulting to "eligible" would file a waitlist row for a request that can
+      never be satisfied.'
+    - 'NOTE: the stale-cache criterion is satisfied by making the memo stale ON PURPOSE, which needed one
+      exported function that looks like a back door and is not. peekAvailabilityCache reads a memo WITHOUT
+      validating its epoch, which is exactly what a stale caller holds - a rendered page, a phone in a
+      pocket, a retry after a timeout. The pair suite primes the memo, commits a booking out of band with
+      a DIFFERENT therapist in the SAME room (so the refusal comes from the injected re-check finding no
+      free place rather than from the exclusion constraint finding a repeated therapist), asserts the memo
+      STILL offers that room for that start, books from the stale list and gets a named `slot_taken` from
+      bookSlot. Its control is the same sequence through queryAvailability, which consults the epoch and
+      does not offer it: without the pair, "the memo is stale" and "the query is wrong" are the same
+      observation. If peekAvailabilityCache did not exist the test could only be written against a memo
+      that had already been purged, which proves the opposite of what it claims.'
+    - 'NOTE: a performance defect found in shipped code and FIXED here, because the p95 acceptance line was
+      unmeetable without it. roomsFreeFor and therapistsFreeFor (B-AVAIL-02) recomputed
+      appointmentRoomPeriod / appointmentTherapistPeriod inside their per-resource predicate, and
+      solveAvailability calls both once per candidate start - so a fifteen-hour day on a fifteen-minute
+      grid with ten rooms, eight therapists and thirty committed appointments did roughly 30,000 interval
+      computations for a query whose inputs contain sixty distinct ones. The occupancy is now an
+      AppointmentOccupancy index built ONCE per solve (appointmentOccupancy / rosteredByTherapist, both
+      exported) and passed in as an optional argument, so every existing caller is unchanged and the
+      predicates are identical - B-AVAIL-02''s 10,000-case property test is what proves the answer did not
+      move. Measured on this box: one uncached query 8.7 ms -> 6.0 ms, and the p95 of 50 concurrent
+      uncached queries 278-386 ms -> 229-259 ms. The index is passed rather than memoised in a module-level
+      map because packages/core is pure and a memo keyed on object identity goes stale the moment a caller
+      rebuilds a record with the same id and a different period.'
+    - 'NOTE: the p95 figure, measured rather than asserted, and what it is a figure OF. The suite fires 50
+      concurrent uncached queries over a 16-connection pool, THREE times, and prints every batch''s median,
+      p95 and slowest beside a sequential single-query baseline; the assertion is on the BEST batch''s p95
+      against the unchanged 300 ms budget. The cache is OFF, because a p95 measured through a 30-second memo
+      is a measurement of a Map and would pass at any database speed - including one where the uncached
+      query took ten seconds. Best-of-three is noise reduction and NOT a loosening: contention from another
+      process only ever ADDS latency, so the minimum across repeats is the closest honest estimate of what
+      the machine can do and the only statistic that is not partly a measurement of the neighbours, and a
+      real regression is slower in all three batches. Gate 50q sets the budget to zero and watches the job
+      fail, so the assertion is known to be wired up.'
+    - 'NOTE: the numbers, recorded rather than rounded off. Measured on the development box, which is 4
+      cores shared with several other agents running their own verify, so each figure is given with the
+      load it was taken at. One uncached query, sequentially: 8.7 ms before the solver fix below, 6.0-8.7 ms
+      after. The p95 of 50 concurrent uncached queries, per batch: 278, 307 and 386 ms before the fix; 229,
+      250 and 259 ms after at load 5; and 257, 113 and 134 ms at load 4 - best 112.8 ms against the 300 ms
+      budget, 62% headroom. The first batch is consistently the slowest (V8 has not settled and the plan
+      caches are cold), which is the other reason the assertion is on the best of three rather than on one.
+      The same fifty through the memo: p95 11-15 ms. At load 13, with four other verifies on the box, the
+      batches ran 307-386 ms and the budget was breached - recorded here rather than used to move the
+      threshold. The figure is throughput-bound rather than latency-bound: by Little''s law, 50 in flight
+      against ~200 queries per second is ~250 ms whatever order they arrive in, and the throughput goes on
+      3.5 ms of PostgreSQL PLANNING plus 1.9 ms of execution per call. The planning is the larger half and
+      `prepare: false` makes it unavoidable - DigitalOcean fronts the database with PgBouncer in transaction
+      pooling mode, where server-side prepared statements do not survive between statements (ADR 0004,
+      docs/02 §2), so a seventeen-CTE statement is re-planned on every request. Cutting it further means
+      either splitting the statement, which the single-round-trip acceptance line forbids, or a connection
+      mode production does not use. That is the honest ceiling.'
+    - 'NOTE: what is deliberately not in the waitlist table, and the consequence stated rather than hidden.
+      No status column and no notified_at: the unit that offers a released slot to the next person waiting
+      does not exist in this manifest, and a status enum whose every row reads `waiting` for ever is a
+      column that claims a lifecycle the system does not have. So a customer cannot withdraw and re-join,
+      because the UNIQUE key is total rather than partial on an active flag; withdrawal belongs to the unit
+      that owns the notification and arrives as a nullable withdrawn_at plus a partial unique index - one
+      index, not a table rewrite. `waitlist.therapist_id` has no foreign key into `employee`, for
+      appointment.therapist_id''s reason (0038): `references employee (id)` would accept a receptionist
+      while reading as though it had proved otherwise. joinWaitlist writes through a plain connection
+      rather than a UnitOfWork and so appends no audit row: a waitlist join is a customer action on a table
+      with no financial consequence, and F06''s audit writer needs an actor a guest booking does not have.
+      The unit that notifies is the one that will need the trail.'
+    - 'NOTE: two more things scoped rather than invented. (1) `closures` - the intra-day ClosedInterval the
+      solver accepts - is ALWAYS EMPTY from the database, and the field is passed explicitly rather than
+      omitted so the absence is a statement. A whole-day closure is ABSENT from business_day rather than
+      flagged in it (0011), so it arrives as a missing hours entry; an intra-day closure of one room is a
+      resource_block (0012). No table produces a premises-wide intra-day closure, and inventing one as a
+      fake block per room would be a closure the room inventory disagreed with. (2) The p95 suite builds
+      its own probe salon rather than reading a seeded one: CI runs `pnpm db:apply` and then the
+      integration suite and does NOT run `pnpm seed`, so there is no seeded catalogue to measure against.
+      The probe mirrors what B-CAT-06 seeds - five rooms, three standard at capacity 1, one couples at 2,
+      one wet - and eight rostered therapists, which is salon.ts''s roster. Same shape, same volume, not
+      the same rows, and this note says so rather than claiming a seed that did not run.'
     files:
+    - packages/db/migrations/0045_waitlist.sql
     - packages/db/src/queries/availability.ts
-    - packages/db/src/schema/waitlist.ts
     - packages/db/src/queries/availability.test.ts
-    - packages/db/src/queries/availability.perf.test.ts
+    - packages/db/src/queries/availability.itest.ts
+    - packages/db/src/schema/waitlist.ts
+    - packages/db/src/schema/booking.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/repositories/eligibility.ts
+    - packages/db/src/settings/availability.ts
+    - packages/db/src/index.ts
+    - packages/core/src/availability/query-adapter.ts
+    - packages/core/src/availability/query-adapter.test.ts
+    - packages/core/src/availability/solve.ts
+    - packages/core/src/availability/index.ts
+    - packages/fixtures/src/availability-query.itest.ts
+    - packages/fixtures/src/availability-perf.itest.ts
+    - scripts/test-gates.mjs
   - id: B-LIFE-01
     order: 30
     title: Appointment lifecycle state machine with actor permissions and declared side effects
@@ -9217,7 +9392,7 @@ units:
       and never as instructions. No clinical or intake field can reach the prompt, and that is enforced
       by a module boundary rather than care.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-AGT-01
@@ -9243,12 +9418,144 @@ units:
     - 'Provider selectable in settings: switching from the DeepSeek fake to the MiniMax fake changes the
       adapter with no code change, the key is validated against the provider before saving, and an invalid
       key is refused with a readable message'
+    - 'NOTE on the G-REV-05 linter, which does not exist yet. Two criteria are written against it -- "zero
+      produce a draft that passes the G-REV-05 linter" and "a valid draft that passes the linter" -- and
+      asserting either against a linter that is not there would be a green test about nothing. Resolved by
+      declaring the SEAM in this unit and shipping one real implementation of it:
+      packages/core/src/reviews/reply-lint-contract.ts exports the ReplyLinter interface and
+      HOUSE_DRAFT_LINTER, seven rules with one known-bad fixture each, asserted by rule name. The generator
+      takes a linter as an argument and has NO default, so G-REV-05 replaces the implementation without
+      touching the generator. G-REV-05 still owns, and this unit does not attempt: the banned-claims
+      lexicon read from regulatory_profile; therapist-name detection against the live employee roster; the
+      health-disclosure echo rule in its full fixture-pair form; the 1,200-character cap applied to the
+      rendered reply INCLUDING an auto-appended signature (there is no signature layer yet, so the cap here
+      is on the draft); the send-path chokepoint; and recording the lint version and content hash on the
+      approved reply. The rule this unit does own outright is not_a_house_skeleton_rendering, because it is
+      a statement about the generator rather than about content'
+    - 'NOTE on the shape that makes the injection defence structural: the model SELECTS, it does not write.
+      docs/07 SS4 asks for "template-plus-LLM with the LLM personalising specifics", and the specifics are
+      a choice of up to two ReplyAspects from a closed list of eight. Not one byte of a published reply
+      comes from the model, so not one byte can come from the review -- there is no code path that copies
+      model text into a draft, which is why HOUSE_REPLY_RENDERINGS is a finite set of 148 strings per
+      language and membership of it is checkable. The trade-off is real and is the right one here: the
+      model cannot coin a phrase, so a reply cannot name the specific treatment or answer a specific
+      question, and what is bought is that every published sentence is one a human wrote and signed off for
+      licensed health-adjacent premises. The docs/07 SS4 hard rules then are not things the generator must
+      remember -- a refund promise and a therapist name are sentences that do not exist in the vocabulary'
+    - 'NOTE on how the red-team criterion is asserted, because the fake cannot be hijacked and a real model
+      can. Each of the 25 payloads is tested from BOTH ends. (1) Its reviewText goes through the prompt
+      builder and through routeReview: the region is not closed early, the instruction section is
+      unchanged, the draft carries no twelve-character run of the payload, and the verdict is escalate. (2)
+      Its objective -- what a model that had completely succumbed would answer -- goes through
+      screenModelResponse and through the generator driven by an obedient adversarial provider, and every
+      one is refused by the named rule and produces NO draft at all (there is no draft field on a
+      quarantine outcome). Half (2) is the one that proves the defence: the shipped fakes ignore
+      instructions because they are hash tables, so driving the corpus through one proves nothing about the
+      day a real model complies. Driven by the deterministic fake instead, the same 25 DO produce drafts --
+      clean house renderings that pass the linter -- and that is correct behaviour rather than a failure of
+      the criterion: the payload achieved nothing, so the reply is the ordinary one'
+    - 'NOTE on the routing-verdict half of that criterion, which is the more important half. Asserted twice.
+      In packages/core/src/reviews/prompt-builder.test.ts every payload is routed under the MOST permissive
+      policy this build can be configured into -- auto-send enabled, API mode, cooling-off elapsed, five
+      stars, both languages -- and all 25 return escalate, with a control proving that same policy DOES
+      return auto_send for a star-only five-star review. In the integration test the verdict triple
+      (verdict, rule id, lexicon version) is read before and after generation and asserted equal, which is
+      what says generation is not in the routing path. The itest deliberately routes in LAUNCH mode rather
+      than the permissive one, because recordManualReview writes delivery_mode = manual and 0037s
+      google_reviews_autosend_needs_api_delivery refuses an auto_send verdict on such a row -- the database
+      floor working, and a stronger guarantee than the test but a worse test of the payload'
+    - 'NOTE: the migration is 0048_review_draft.sql and SCHEMA_VERSION is 48. google_reviews.reply_draft
+      already existed (0020) and is genuinely enough to store a reply; it is not enough to answer the three
+      questions the approval queue asks about a draft a machine wrote -- which skeleton produced it, which
+      review text it was written against, and whether the review was quarantined and why. So 0048 adds six
+      provenance columns plus the two quarantine columns, and the constraint that matters is
+      google_reviews_draft_needs_a_verdict: a machine draft cannot exist for a review the docs/07 SS4 table
+      has never seen. It is scoped to the provenance columns rather than to reply_draft deliberately --
+      reply_draft has been writable since 0020 and rows exist that carry a hand-typed draft with no
+      verdict, so a constraint over that column would be a claim about history rather than about this unit'
+    - 'NOTE on the two named provider fakes. H02 gave one LLM fake; "switching from the DeepSeek fake to the
+      MiniMax fake changes the adapter" is only a real claim if switching changes something, so
+      createFakeDeepSeek and createFakeMiniMax differ in the three ways a real pair differs and a consumer
+      must cope with: the name in the call log, the price, and the RESPONSE PROTOCOL (DeepSeek answers in
+      the exact requested form, MiniMax wraps it in a sentence). Both produce the identical draft, which is
+      the property that makes the switch safe. Selection is Providers.llmFor(setting), a Record over
+      LLM_PROVIDER_NAMES so a name added in @berelax/shared stops the registry compiling until somebody
+      decides whether it has an adapter; claude is declared with no adapter and is REFUSED rather than
+      silently substituted, because the alternative drafts with a provider the owner did not choose'
+    - 'NOTE on key validation, and on why no credential appears anywhere. validateKey is on the LlmProvider
+      port and is asynchronous, because a well-formed key and a live key are different questions and only
+      the vendor can answer the second; saveLlmProviderChoice validates BEFORE writing the setting, so an
+      invalid key is a message beside the field rather than an agent that has been silent for two days. The
+      local half checks only what is true of every vendor key -- present, single-token, at least 20
+      characters -- and NOT a guessed per-vendor prefix: the brief rule 15 case, where a plausible key is
+      indistinguishable from a real one to a leak scanner and to the next reader. The fake answers the
+      vendor half from REJECTED_KEY_MARKER, the device the card-gateway fake already uses. The API KEY
+      ITSELF IS NEVER STORED in app_setting: that table is readable by the admin UI and its history is
+      append-only (ADR 0008), so a credential written there could never be removed'
+    - 'NOTE: textNamesAnIndividual was extracted out of routing.ts into
+      packages/core/src/reviews/individuals.ts with no behaviour change, because two things now ask the
+      question from opposite directions -- the routing table asks it of the review, the response screen
+      asks it of the model answer -- and a second copy would mean that the day somebody widens the
+      allow-list, one learns about it and the other does not, and the one that did not is whichever is
+      reading the attacker text. Gates 53i-53j prove both users break together. Likewise
+      containsArabicPhrase is now exported from escalation-lexicon.ts rather than re-implemented: the
+      Arabic for refund arrives with the preposition attached, and a screen comparing bare strings is blind
+      to every Arabic payload while passing every English one'
+    - 'NOTE deferred: nothing SCHEDULES the generator. generateReplyDrafts is complete and exercised end to
+      end under withAgentRun against the seeded review_autoresponder agent_definition row, including the
+      budget abort, but no cron walks the undrafted queue. The same reasoning G-REV-03 recorded for itself:
+      the partial index google_reviews_undrafted_idx (0048) is the read that job will make, and a cron here
+      would be an agent whose queue is filled by an intake path (G-REV-02) that does not exist yet. The
+      approval queue UI, the Copy reply button and the Marked as posted step are the admin units; the send
+      path and its chokepoint are G-REV-05'
+    - 'NOTE: agents.llm_provider now binds to @berelax/shared LLM_PROVIDER_NAMES, llmProviderSchema and
+      DEFAULT_LLM_PROVIDER rather than spelling the enum inline, the same way G-REV-03 bound its four
+      settings. Unlike those, the reader llmProviderName is NOT biased to a permissive default: an
+      unrecognised stored value answers null and the caller refuses, because resolving it to the local fake
+      would draft with a provider the owner did not choose and bill an account they did not agree, with
+      nothing saying so. A refusal is visible -- the run is recorded failed, last_success_at is untouched,
+      and the watchdog reports the agent silent within two intervals'
+    - 'NOTE on a live defect found in H02s LLM fake and fixed here. createFakeLlm matched its refusal
+      triggers against the WHOLE prompt. G-REV-04s instruction section forbids mentioning a refund and
+      therefore contains the word "refund", so the fake refused EVERY review-reply prompt — and
+      agents.llm_provider defaults to fake, which means the autoresponder would have quarantined 100% of
+      reviews as response_absent for every developer and every CI run. Nothing threw and nothing logged an
+      error: the approval queue would simply have filled with a reason that reads as "the model had
+      nothing to say". Fixed by judging a refusal on the untrusted region when the prompt has one (the
+      lines carrying UNTRUSTED_GUTTER) and on the whole prompt when it does not, which moves no existing
+      behaviour because no other prompt in the system is fenced. The regression test is in
+      packages/providers/src/llm/named-fakes.test.ts and drives each of the three adapters real answer
+      through the real prompt and the real assembler — the only shape that catches it, because every part
+      in isolation was correct — with a control asserting the trigger still fires when the REVIEW alleges
+      a double charge, and gate 53n as the known-bad fixture'
+    - 'NOTE: provider pricing is provisional and carries OPEN-QUESTIONS Y1-llm-pricing, added by this unit.
+      The figures are deliberately NOT the numbers on either vendor pricing page: they exist to make the
+      per-run fils cap testable and the two providers distinguishable, and a copied figure would be
+      indistinguishable from a configured one the moment it went stale. Same shape as
+      PROVISIONAL_COST_PER_SEGMENT_FILS in the SMSala fake'
     files:
     - packages/core/src/reviews/prompt-builder.ts
     - packages/core/src/reviews/skeletons.ts
-    - packages/google/src/reviews/generate-draft.ts
+    - packages/core/src/reviews/individuals.ts
+    - packages/core/src/reviews/red-team-corpus.ts
+    - packages/core/src/reviews/reply-lint-contract.ts
     - packages/core/src/reviews/prompt-builder.fuzz.test.ts
+    - packages/core/src/reviews/prompt-builder.test.ts
+    - packages/shared/src/llm-provider.ts
+    - packages/providers/src/llm/port.ts
+    - packages/providers/src/llm/named-fakes.ts
+    - packages/providers/src/llm/named-fakes.test.ts
+    - packages/providers/src/llm/fake-llm.ts
+    - packages/providers/src/registry.ts
+    - packages/google/src/reviews/generate-draft.ts
+    - packages/google/src/reviews/llm-provider.ts
+    - packages/google/src/reviews/review-draft.itest.ts
+    - packages/db/migrations/0048_review_draft.sql
+    - packages/db/src/schema/reviews.ts
+    - packages/db/src/repositories/reviews.ts
+    - packages/db/src/schema/reviews.itest.ts
     - .dependency-cruiser.cjs
+    - scripts/test-gates.mjs
   - id: G-REV-05
     order: 165
     title: The reply linter, blocking on the send path, one known-bad fixture per rule

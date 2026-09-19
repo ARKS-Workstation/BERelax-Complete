@@ -6213,11 +6213,16 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // what `noTemplateCurlyInString` flags — and switching this anchor to a template literal would make
     // the linter interpolate the very thing the anchor has to match.
     const param = (name) => ['$', '{', name, '}'].join('')
+    // The indentation is two spaces deeper than when this gate was written, and the anchor check above is
+    // what noticed. B-AVAIL-07 moved these CTEs into `therapistPoolCtes`, a composable fragment two
+    // callers share, which nested them one level further in. The arm itself is unchanged; only its
+    // leading whitespace moved, and an anchor that had silently stopped matching would have left this
+    // mutant applying nothing while the gate reported PASS.
     const genderArm =
-      `             when ${param('strictGender')}::boolean\n` +
-      `                  and ${param('clientGender')}::employee_gender is not null\n` +
-      `                  and c.gender is distinct from ${param('clientGender')}::employee_gender\n` +
-      `               then 'gender_mismatch'\n`
+      `               when ${param('strictGender')}::boolean\n` +
+      `                    and ${param('clientGender')}::employee_gender is not null\n` +
+      `                    and c.gender is distinct from ${param('clientGender')}::employee_gender\n` +
+      `                 then 'gender_mismatch'\n`
     checkRejectedBy(
       'gender gate: dropping the gender arm from the SQL case breaks the pair test',
       genderMutant(GENDER_READER, genderArm, '', genderPairSuite),
@@ -12302,6 +12307,817 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'lifecycle gate: the committed write path passes its pair suite',
     !lifePairClean.failed,
     `the committed transition repository failed its own pair suite:\n${lifePairClean.output}`,
+  )
+}
+
+// 50a-50t. (B-AVAIL-07) The availability read path: the rules 0045 added, and the six properties of the
+//           read that stop being true when a line is removed.
+//
+// Two kinds of fixture, because this unit has two kinds of claim.
+//
+// **The schema half** is a set of psql probes, each a statement the database must refuse by the NAME of
+// the rule written for it, plus two that must be ACCEPTED. A bare non-zero exit is also what a typo in a
+// column name produces, and the rule under test would then be dead while this file reported PASS for ever
+// (ADR 0003). Every probe runs inside `begin; … ; rollback;` and creates its own customer, trading day and
+// variant, so none of it depends on a seeded catalogue and a probe that is wrongly accepted leaves nothing
+// behind.
+//
+// The centre of it is 50a and 50b. `waitlist_one_row_per_window` is declared `UNIQUE NULLS NOT DISTINCT`,
+// and that is the whole of the idempotency claim the acceptance list makes: `therapist_id` is NULL for
+// "any therapist", which is the ordinary request, and under PostgreSQL's DEFAULT null semantics two joins
+// for the same customer, variant, date and window would be two different keys — `on conflict do nothing`
+// would never fire, and the table would grow one row per page refresh. 50a is that pair refused; 50b is
+// the same pair with two DIFFERENT therapists ACCEPTED, so 50a cannot be satisfied by a constraint that
+// refuses everything.
+//
+// **The code half** is six mutants, each run against the suite that is supposed to catch it. A cache
+// purge, a query plan, an index choice and "no field is a pre-rendered string" are not expressible as
+// constraints, so the only way to know the tests are testing them is to break each one and watch the
+// right suite fail. Every anchor is asserted to exist first: `String.replace` with a missing needle
+// returns the text unchanged, and the mutant would then be the shipped code passing its own tests.
+{
+  const availDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const AVAIL_MARKER = 'gate fixture availability'
+  const AVAIL_DATE = "'2095-04-03'"
+  const AVAIL_PHONE = "'+971500000197'"
+  const AVAIL_CUSTOMER = `(select id from customer where phone_e164 = ${AVAIL_PHONE})`
+  // Selected WITHOUT the fixture marker, deliberately. The setup below inserts a 120-minute Arabic
+  // Normal Massage as a fall-back for a database that has not been seeded, and `pnpm verify` runs
+  // `test:integration` BEFORE this file — which seeds the real catalogue, so the conflict clause leaves the
+  // SEEDED row and a marker-filtered selector returns NULL. Every probe then failed on
+  // `service_variant_id` being not-null instead of on the rule it was written for, which is precisely
+  // what `checkRejectedBy` exists to notice (ADR 0003). Ordered, so the row picked is the same one twice.
+  const AVAIL_VARIANT =
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    `where s.style = 'arabic' and s.treatment_key = 'normal_massage' ` +
+    'order by v.duration_minutes, v.id limit 1)'
+  const availTherapist = (suffix) => `'50000000-0000-4000-8000-0000000000${suffix}'::uuid`
+  /** The trading day itself, which is the window a waitlist row is filed for. */
+  const availWindow = (from = '07', to = '22', bounds = '[)') =>
+    `tstzrange('2095-04-03 ${from}:00:00+00','2095-04-03 ${to}:00:00+00','${bounds}')`
+
+  const availSetup = [
+    `insert into customer (phone_e164, created_via) values (${AVAIL_PHONE}, 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${AVAIL_DATE}, '2095-04-03 07:00:00+00', '2095-04-03 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    // Arabic rather than Asian, and 120 minutes: gate 41 already owns the 60-minute Asian variant, and
+    // service_variant_service_duration_unique makes one price per (service, duration).
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 120, 45000, '${AVAIL_MARKER}' from service s
+        where s.style = 'arabic' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+  ].join('; ')
+
+  /** One waitlist row, with every column the acceptance list names stated. */
+  const availWaitlistRow = ({ therapist = 'null', window = availWindow(), shape = 'solo' } = {}) =>
+    'insert into waitlist (customer_id, service_variant_id, trading_date, desired_period, shape, ' +
+    `therapist_id) values (${AVAIL_CUSTOMER}, ${AVAIL_VARIANT}, ${AVAIL_DATE}, ${window}, ` +
+    `'${shape}', ${therapist})`
+
+  const availProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      availDbUrl ?? '',
+      '-c',
+      `begin; ${availSetup}; ${statement}; rollback;`,
+    ])
+
+  if (!availDbUrl) {
+    check(
+      'the availability read path constraints hold',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 50a. THE case. Two joins for the same window with NO therapist named are ONE key, because the
+    //      constraint is NULLS NOT DISTINCT. Under PostgreSQL's default null semantics they would be two,
+    //      and a repeat join would not be idempotent.
+    checkRejectedBy(
+      'availability gate rejects a second waitlist join for the same window with no therapist named',
+      availProbe([availWaitlistRow(), availWaitlistRow()].join('; ')),
+      'waitlist_one_row_per_window',
+    )
+
+    // 50b. The control for 50a, from the other side: two DIFFERENT therapists for the same window are
+    //      two different requests and both are accepted. Without it, 50a is satisfied by a key that
+    //      refuses every second row whatever it holds.
+    const availTwoTherapists = availProbe(
+      [
+        availWaitlistRow({ therapist: availTherapist('a1') }),
+        availWaitlistRow({ therapist: availTherapist('a2') }),
+      ].join('; '),
+    )
+    check(
+      'availability gate accepts two waitlist joins for the same window with different therapists',
+      !availTwoTherapists.failed,
+      `refused two different therapist-specific waiting requests:\n${availTwoTherapists.output}`,
+    )
+
+    // 50c. An empty window accepts nothing while reading as a request, so the row would sit in the table
+    //      looking like a waiting customer and never match a released slot.
+    //
+    //      The rule that REPORTS it is `waitlist_period_bounded`, not `waitlist_period_nonempty`, and that
+    //      is a fact about ranges rather than about this table: PostgreSQL canonicalises every empty range
+    //      to one value with NO bounds, so `lower(period) is not null` fails on it too and gets there
+    //      first. 0024 records the same thing for `appointment_period_upper_after_lower` — "on an EMPTY
+    //      range both bounds are null, so this evaluates to null and PASSES" — which is why the two checks
+    //      are separate constraints in `resource_block`, `shift`, `leave_request` and here.
+    checkRejectedBy(
+      'availability gate rejects a waitlist window that covers no time',
+      availProbe(availWaitlistRow({ window: availWindow('19', '19') })),
+      'waitlist_period_bounded',
+    )
+
+    // 50c2. And `waitlist_period_nonempty` is a live rule rather than one permanently shadowed.
+    //
+    //       An empty range fails ALL THREE period checks — it has no bounds, so `lower_inc` is false too —
+    //       and PostgreSQL reports them in name order, which puts `nonempty` last of three. So the only way
+    //       to see it fire is with the other two out of the way, inside the probe's own transaction. The
+    //       same is true of `resource_block`, `shift` and `leave_request`, which all carry the same trio.
+    //
+    //       Worth the exotic fixture: `joinWaitlist`'s refusal message cites this constraint by name, and
+    //       without this probe it would be a constraint nobody had ever seen fire (ADR 0003) — deleting it
+    //       would look safe, because every other test would still pass.
+    checkRejectedBy(
+      'availability gate: the waitlist empty-window rule fires when the other two are out of the way',
+      availProbe(
+        [
+          'alter table waitlist drop constraint waitlist_period_bounded',
+          'alter table waitlist drop constraint waitlist_period_half_open',
+          availWaitlistRow({ window: availWindow('19', '19') }),
+        ].join('; '),
+      ),
+      'waitlist_period_nonempty',
+    )
+
+    // 50d. An unbounded window waits for ever, and the way that is discovered is a customer offered a
+    //      slot two years out.
+    checkRejectedBy(
+      'availability gate rejects an unbounded waitlist window',
+      availProbe(availWaitlistRow({ window: "tstzrange('2095-04-03 07:00:00+00', null, '[)')" })),
+      'waitlist_period_bounded',
+    )
+
+    // 50e. Half-open, always, matching appointment, resource_block, shift and leave_request. Mixing bound
+    //      styles in one schema guarantees two of them are compared one day.
+    checkRejectedBy(
+      'availability gate rejects a waitlist window with an inclusive upper bound',
+      availProbe(availWaitlistRow({ window: availWindow('07', '22', '[]') })),
+      'waitlist_period_half_open',
+    )
+
+    // 50f. The trading calendar is a TABLE (0011), not a rule. A waiting customer cannot be filed under a
+    //      day the premises does not trade, exactly as an appointment cannot be.
+    checkRejectedBy(
+      'availability gate rejects a waitlist row filed under a date the premises does not trade',
+      availProbe(
+        'insert into waitlist (customer_id, service_variant_id, trading_date, desired_period, shape) ' +
+          `values (${AVAIL_CUSTOMER}, ${AVAIL_VARIANT}, '2095-12-25', ${availWindow()}, 'solo')`,
+      ),
+      'waitlist_trading_date_fkey',
+    )
+
+    // 50g. The epoch is monotonic and never reset. A counter that could go backwards — or start at zero —
+    //      makes a stale memo look current exactly once, and that once sells a slot that no longer exists.
+    checkRejectedBy(
+      'availability gate rejects an availability epoch of zero',
+      availProbe(
+        'insert into availability_epoch (trading_date, epoch, last_cause) ' +
+          `values (${AVAIL_DATE}, 0, 'appointment')`,
+      ),
+      'availability_epoch_epoch_check',
+    )
+
+    // 50h. The four causes are an ENUM and not text. With free text a fifth writer invents a fifth
+    //      spelling, and the four separate purge assertions collapse into one that proves only that
+    //      something fired.
+    checkRejectedBy(
+      'availability gate rejects a cache-invalidation cause outside the four',
+      availProbe(
+        'insert into availability_epoch (trading_date, epoch, last_cause) ' +
+          `values (${AVAIL_DATE}, 1, 'settings_change')`,
+      ),
+      'availability_epoch_cause',
+    )
+
+    // 50i. The PENDING leave request must not move the epoch, and it is asserted here as well as in the
+    //      itest because this is the direction that fails silently: availability reads
+    //      employee_approved_leave (0030), and a trigger that ignored the status would make the
+    //      approved-leave purge case pass against a build that never consulted it.
+    const availPending = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      '-At',
+      availDbUrl,
+      '-c',
+      `begin; ${availSetup};
+       insert into employee (staff_reference, gender, employed_from, notes)
+         values ('gate-avail-unapproved', 'female', '2095-01-01', '${AVAIL_MARKER}');
+       insert into leave_request (employee_id, period, kind, status, reason)
+         values ((select id from employee where staff_reference = 'gate-avail-unapproved'),
+                 ${availWindow('08', '20')}, 'annual', 'pending', '${AVAIL_MARKER}');
+       select coalesce((select last_cause::text from availability_epoch
+                         where trading_date = ${AVAIL_DATE}), 'no-epoch-row') as cause;
+       rollback;`,
+    ])
+    check(
+      'availability gate: a PENDING leave request moves no availability epoch',
+      !availPending.failed && availPending.output.includes('no-epoch-row'),
+      `a pending leave request purged an availability memo:\n${availPending.output}`,
+    )
+
+    // 50j. The control for 50i, and the one that makes the four-cause enum worth having: APPROVING the
+    //      same request moves the epoch and names itself. Without this pair, "pending does not purge" is
+    //      also satisfied by a trigger that never fires at all.
+    const availApproved = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      '-At',
+      availDbUrl,
+      '-c',
+      `begin; ${availSetup};
+       insert into employee (staff_reference, gender, employed_from, notes)
+         values ('gate-avail-approved', 'female', '2095-01-01', '${AVAIL_MARKER}');
+       insert into leave_request (employee_id, period, kind, status, decided_at, reason)
+         values ((select id from employee where staff_reference = 'gate-avail-approved'),
+                 ${availWindow('08', '20')}, 'annual', 'approved', now(), '${AVAIL_MARKER}');
+       select coalesce((select last_cause::text from availability_epoch
+                         where trading_date = ${AVAIL_DATE}), 'no-epoch-row') as cause;
+       rollback;`,
+    ])
+    check(
+      'availability gate: an APPROVED leave request moves the epoch and names approved_leave',
+      !availApproved.failed && availApproved.output.includes('approved_leave'),
+      `approved leave did not purge the availability memo:\n${availApproved.output}`,
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case a
+    // probe is wrongly accepted, and because a row left behind fails a later gate with an error about
+    // something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      availDbUrl,
+      '-c',
+      `delete from waitlist where customer_id = ${AVAIL_CUSTOMER}; ` +
+        `delete from leave_request where reason = '${AVAIL_MARKER}'; ` +
+        `delete from employee where notes = '${AVAIL_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${AVAIL_MARKER}'; ` +
+        `delete from availability_epoch where trading_date = ${AVAIL_DATE}; ` +
+        `delete from business_day where trading_date = ${AVAIL_DATE}; ` +
+        `delete from customer where phone_e164 = ${AVAIL_PHONE};`,
+    ])
+  }
+
+  // 50k-50t. The code half. Each mutant removes or reverses one line the read path depends on and the
+  //          named suite must fail; the committed files must then pass. Without the controls, a suite
+  //          broken for any other reason satisfies every probe.
+  const AVAIL_QUERY = 'packages/db/src/queries/availability.ts'
+  const AVAIL_DB_SUITE = 'packages/db/src/queries/availability.itest.ts'
+  const AVAIL_PAIR = 'packages/fixtures/src/availability-query.itest.ts'
+  const AVAIL_PERF = 'packages/fixtures/src/availability-perf.itest.ts'
+  const AVAIL_UNIT = 'packages/db/src/queries/availability.test.ts'
+
+  const availMutant = (file, anchor, replacement, body) =>
+    withEditedFile(
+      file,
+      (text) => {
+        // An anchor that has moved makes the assertion below vacuous, so it is an error rather than a
+        // no-op replace: `String.replace` with a missing needle returns the text unchanged, and the
+        // mutant would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the B-AVAIL-07 gate's anchor is no longer in ${file}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const availIntegration = (file) => () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file])
+  const availUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', AVAIL_UNIT])
+
+  // 50k. The epoch comparison. Without it the memo is served for its whole TTL whatever has been written,
+  //      which is the acceptance line's four purge cases all at once — and the failure mode is a page
+  //      offering a slot the floor has already sold.
+  checkRejectedBy(
+    'availability gate: serving the memo without comparing the epoch is caught',
+    availMutant(
+      AVAIL_QUERY,
+      'if (fresh && held.epoch === current) {',
+      'if (fresh) {',
+      availIntegration(AVAIL_DB_SUITE),
+    ),
+    'purges the tag',
+  )
+
+  // 50l. The cache KEY. Two requests differing only in the client's gender would share a memo, and the
+  //      second caller would be shown the first caller's cross-gender slots under a strict rule — a
+  //      compliance constraint defeated by a cache key (ADR 0020, B-AVAIL-05).
+  checkRejectedBy(
+    'availability gate: dropping the client gender from the cache key is caught',
+    availMutant(
+      AVAIL_QUERY,
+      "    request.clientGender ?? 'unknown',",
+      "    'unknown',",
+      availUnitSuite,
+    ),
+    'separates every other field that changes the ANSWER',
+  )
+
+  // 50m. The alternatives. `assignShape` picks ONE therapist per start — the lowest id — so counting the
+  //      chosen one instead of the free set reports a single alternative however many were free, and the
+  //      no-availability answer names the wrong person. This is the defect this unit found by measuring.
+  checkRejectedBy(
+    'availability gate: counting alternatives from the ASSIGNED therapist rather than the free set is caught',
+    availMutant(
+      AVAIL_QUERY,
+      'for (const therapistId of slot.availableTherapistIds) {',
+      'for (const therapistId of slot.therapistIds) {',
+      availIntegration(AVAIL_PAIR),
+    ),
+    'populates nearest_days, alternative_therapists and waitlist_eligible',
+  )
+
+  // 50n. The index the whole read is keyed on. Narrowing appointments by `trading_date` instead of by the
+  //      padded period is the plausible wrong version — it is cheaper on one date and it cannot express
+  //      the padded window, so an appointment whose turnaround reaches into the day is invisible. The
+  //      plan assertion is what notices, which is what makes it an assertion rather than a comment.
+  checkRejectedBy(
+    'availability gate: narrowing appointments by trading_date instead of the padded period is caught',
+    availMutant(
+      AVAIL_QUERY,
+      'where a.period && (select padded from av_window)',
+      'where a.trading_date = (select trading_date::date from av_solved)',
+      availIntegration(AVAIL_DB_SUITE),
+    ),
+    'reads appointment through the GiST index on period, by name',
+  )
+
+  // 50o. The idempotent join. Without the conflict clause a repeat join raises instead of returning the
+  //      row it already has, and a refreshed booking page becomes an error.
+  checkRejectedBy(
+    'availability gate: dropping the waitlist conflict clause breaks the idempotent repeat join',
+    availMutant(
+      AVAIL_QUERY,
+      '    on conflict on constraint waitlist_one_row_per_window do nothing\n',
+      '',
+      availIntegration(AVAIL_DB_SUITE),
+    ),
+    'makes a repeat join idempotent',
+  )
+
+  // 50p. "No field is a pre-rendered string." A rendered trading date is the exact shape the acceptance
+  //      line forbids, and it is the one a reviewer would wave through: it reads better. The pair suite's
+  //      structure and regex assertions are what refuse it.
+  checkRejectedBy(
+    'availability gate: pre-rendering the trading date in nearest_days is caught',
+    availMutant(
+      AVAIL_QUERY,
+      '      tradingDate,\n      slotCount: answer.slots.length,',
+      '      tradingDate: new Date(first).toUTCString(),\n      slotCount: answer.slots.length,',
+      availIntegration(AVAIL_PAIR),
+    ),
+    'carries no pre-rendered string',
+  )
+
+  // 50q. The p95 budget must be able to fail the job. Asserted by setting the budget to zero, because the
+  //      acceptance line says "failing the job when breached" and a threshold that has never been seen to
+  //      fail is a threshold nobody has checked is wired up.
+  checkRejectedBy(
+    'availability gate: the p95 budget fails the job when breached',
+    availMutant(
+      AVAIL_PERF,
+      'const P95_BUDGET_MS = 300',
+      'const P95_BUDGET_MS = 0',
+      availIntegration(AVAIL_PERF),
+    ),
+    'breaches the',
+  )
+
+  // 50r-50t. The controls. The committed files pass all three suites, so the seven probes above are the
+  //          lines they change and not a suite that fails for its own reasons.
+  const availDbClean = availIntegration(AVAIL_DB_SUITE)()
+  check(
+    'availability gate: the committed query passes its database suite',
+    !availDbClean.failed,
+    `the committed availability query failed its own database suite:\n${availDbClean.output}`,
+  )
+  const availPairClean = availIntegration(AVAIL_PAIR)()
+  check(
+    'availability gate: the committed query passes its pair suite',
+    !availPairClean.failed,
+    `the committed availability query failed its own pair suite:\n${availPairClean.output}`,
+  )
+  const availUnitClean = availUnitSuite()
+  check(
+    'availability gate: the committed query passes its unit suite',
+    !availUnitClean.failed,
+    `the committed availability query failed its own unit suite:\n${availUnitClean.output}`,
+  )
+}
+
+// 53a-53q. (G-REV-04) The reply generator: review text is untrusted data, the clinical boundary is a
+//           dependency rule, and every part of that sentence has a mutant here.
+//
+// What this unit prevents is a reply published under the business's name, on a public Google listing, that
+// a reviewer wrote. Every failure below is silent: nothing throws, nothing logs, the draft reads perfectly
+// well, and the only symptom is a reply that offers a refund, names the therapist who was on shift, admits
+// liability, or quotes a customer's health disclosure back at them in public.
+//
+// Six classes of defect, each with at least one mutant:
+//
+//   - the UNTRUSTED REGION losing its fence. The gutter and the content-bound fingerprint are two
+//     independent defences and each has its own mutant, because a build with one of them still refuses
+//     this corpus and a build with neither does not;
+//   - INPUT REACHING THE INSTRUCTIONS. The fuzz test's real assertion is that the instruction section is
+//     byte-identical across 200 adversarial strings; the mutant is the one-line "give the model a bit more
+//     context" change that makes it false;
+//   - the RESPONSE SCREEN switched off, or switched off for half the reviews. Dropping the Arabic matcher
+//     leaves a screen that works in English and is blind to every Arabic payload, which is the failure
+//     that looks like a working system;
+//   - MODEL TEXT BECOMING REPLY TEXT. `draft: args.response ?? render(...)` is the obvious "use the
+//     model's answer, it is better" cleanup, and it is the whole injection surface reopened in one line;
+//   - the CLOSED SET of house renderings stopping being checked, which is what makes "zero payloads
+//     produce a passing draft" structural rather than a claim about a lexicon's coverage;
+//   - the CLINICAL BOUNDARY. A dependency-cruiser rule, because the mistake is the natural one: a
+//     treatment note is exactly the context somebody reaches for to make a reply personal.
+//
+// Plus the write guard: a second draft on one row would silently discard an owner's edit, and the queue
+// read alone does not catch it because the read is stale for any at-least-once job (docs/10 §7).
+//
+// Mutations are applied to the SHIPPED modules with `withEditedFile`, which writes the original bytes back
+// in a `finally`. A fixture file would prove only that a fixture can fail.
+{
+  const PROMPT = 'packages/core/src/reviews/prompt-builder.ts'
+  const LINT = 'packages/core/src/reviews/reply-lint-contract.ts'
+  const REVIEWS_REPO = 'packages/db/src/repositories/reviews.ts'
+
+  const CORE_SUITES = [
+    'packages/core/src/reviews/prompt-builder.fuzz.test.ts',
+    'packages/core/src/reviews/prompt-builder.test.ts',
+  ]
+  const DRAFT_ITEST = 'packages/google/src/reviews/review-draft.itest.ts'
+
+  /** Replaces one anchor in a shipped file, runs `body`, and restores the original bytes. */
+  const draftMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes every assertion below vacuous, so it is an error rather than a
+        // no-op replace: `String.replace` with a missing needle returns the text unchanged, and the
+        // "mutant" would then be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the G-REV-04 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const coreUnits = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...CORE_SUITES])
+  const draftItest = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', DRAFT_ITEST])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // --- the clinical boundary: a dependency rule, proved by name ---------------------------------
+  //
+  // 53a. The generator importing @berelax/clinical. The fixture is in packages/google/src/reviews on
+  //      purpose: no OTHER rule forbids clinical from there, so a pass here is this rule firing and not
+  //      an older one shadowing it.
+  checkRejectedBy(
+    'review draft gate: the generator importing @berelax/clinical is rejected by name',
+    withFixture(
+      'packages/google/src/reviews/__gate_fixture__.ts',
+      [
+        "import { generateKek } from '@berelax/clinical'",
+        '',
+        'export const wrong = generateKek',
+      ].join('\n'),
+      cruise,
+    ),
+    'reviews-generator-must-not-reach-clinical-data',
+  )
+
+  // 53b. The control for 53a, and it is not a formality: `no-lucide-outside-the-icon-wrapper` was
+  //      configured, green and dead for months. A rule that fires on a fixture and never on the tree is
+  //      only half proved.
+  {
+    const clean = cruise()
+    check(
+      'review draft gate: the committed tree cruises clean, so 53a means something',
+      !clean.failed,
+      clean.output,
+    )
+  }
+
+  // 53c. The prompt builder's side of the same boundary. `core-must-not-import-infrastructure` also
+  //      fires here, which is why the assertion is on THIS rule's name rather than on a non-zero exit.
+  checkRejectedBy(
+    'review draft gate: the prompt builder importing clinical data is rejected by name',
+    withFixture(
+      'packages/core/src/reviews/__gate_fixture__.ts',
+      [
+        "import { generateKek } from '../../../clinical/src/index.ts'",
+        '',
+        'export const wrong = generateKek',
+      ].join('\n'),
+      cruise,
+    ),
+    'reviews-generator-must-not-reach-clinical-data',
+  )
+
+  // 53d. The half of the rule that is about a module nobody has written yet: an intake repository. The
+  //      rule names the shape now, because the day one is added is the day the rule has to already
+  //      exist — a rule added after the import is a rule added after the review that would have caught
+  //      it. Two fixtures, because the forbidden module has to exist to be imported.
+  checkRejectedBy(
+    'review draft gate: the generator importing an intake repository is rejected by name',
+    withFixture('packages/db/src/repositories/__gate_intake__.ts', 'export const flag = 1', () =>
+      withFixture(
+        'packages/google/src/reviews/__gate_fixture__.ts',
+        [
+          "import { flag } from '../../../db/src/repositories/__gate_intake__.ts'",
+          '',
+          'export const wrong = flag',
+        ].join('\n'),
+        cruise,
+      ),
+    ),
+    'reviews-generator-must-not-reach-clinical-data',
+  )
+
+  // --- the untrusted region: two independent defences, two mutants ------------------------------
+  //
+  // 53e. The guttering step removed. Every line of the body then begins at column 0, so a review
+  //      containing the closing fence closes the region — and the corpus contains several that do.
+  //      Caught by the builder's own self-check, which is what a broken escaper should hit.
+  checkRejectedBy(
+    'review draft gate: an un-guttered untrusted region is caught',
+    draftMutant(
+      PROMPT,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a mutation anchor is a byte-exact copy of the shipped line, and the shipped line is a template literal
+      '    ...lines.map((line) => `${UNTRUSTED_GUTTER}${line}`),',
+      '    ...lines.map((line) => line),',
+      coreUnits,
+    ),
+    'is not guttered',
+  )
+
+  // 53f. The gutter emptied rather than removed. This is the subtler shape, because
+  //      `line.startsWith('')` is true for every line — so the obvious assertion goes vacuous and only
+  //      the explicit non-empty check catches it. That assertion exists because of this mutant.
+  checkRejectedBy(
+    'review draft gate: an empty gutter is caught rather than silently satisfying the check',
+    draftMutant(
+      PROMPT,
+      "export const UNTRUSTED_GUTTER = '> '",
+      "export const UNTRUSTED_GUTTER = ''",
+      coreUnits,
+    ),
+    'expected 0 to be greater than 0',
+  )
+
+  // 53g. The fingerprint made a constant, which is what a "why hash it, just use a fixed marker"
+  //      simplification looks like. The fences then stop being bound to the content and a review
+  //      carrying the fence text closes the region — the builder refuses to return a prompt at all.
+  checkRejectedBy(
+    'review draft gate: a constant fence fingerprint is caught',
+    draftMutant(
+      PROMPT,
+      "  return value.toString(16).padStart(8, '0')",
+      "  return '00000000'",
+      coreUnits,
+    ),
+    'not delimited exactly once',
+  )
+
+  // --- no input reaches the instructions --------------------------------------------------------
+  //
+  // 53h. The one-line "give the model a bit more context" change. The instruction section stops being
+  //      byte-identical across the 200, which is the acceptance criterion's real assertion — and the
+  //      one that says there is no injection surface rather than that this corpus did not find one.
+  checkRejectedBy(
+    'review draft gate: review text interpolated into the instructions is caught',
+    draftMutant(
+      PROMPT,
+      '    instructions: INSTRUCTIONS,',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a mutation anchor is a byte-exact copy of the shipped line, and the shipped line is a template literal
+      '    instructions: `${INSTRUCTIONS}\\nThe reviewer wrote: ${raw}`,',
+      coreUnits,
+    ),
+    'holds for the instructions, the facts and the closing',
+  )
+
+  // --- the response screen ----------------------------------------------------------------------
+  //
+  // 53i. The screen switched off for the role-override class. Six of the 25 payloads land, and the only
+  //      symptom is a quarantine that stops happening.
+  checkRejectedBy(
+    'review draft gate: a response screen that stops matching role overrides is caught',
+    draftMutant(
+      PROMPT,
+      "  if (mentionsAny(response, INSTRUCTION_TERMS)) return 'response_carries_instructions'",
+      "  if (false) return 'response_carries_instructions'",
+      coreUnits,
+    ),
+    'response_carries_instructions',
+  )
+
+  // 53j. The Arabic matcher dropped, so the screen compares bare strings. `bi-istirdad` — the Arabic for
+  //      refund with its preposition attached — stops matching, and the screen is blind to every Arabic
+  //      payload while passing every English one. Half of the reviews this business receives.
+  checkRejectedBy(
+    'review draft gate: a response screen blind to Arabic is caught, by the payload id',
+    draftMutant(
+      PROMPT,
+      '    ARABIC_TERM.test(term) ? containsArabicPhrase(tokens, term) : containsPhrase(tokens, term),',
+      '    containsPhrase(tokens, term),',
+      coreUnits,
+    ),
+    'role_override_arabic',
+  )
+
+  // --- model text must never become reply text --------------------------------------------------
+  //
+  // 53k. The whole defence undone in one line: use the model's answer when there is one. It reads as an
+  //      improvement — the reply would be more specific — and it is the injection surface reopened.
+  checkRejectedBy(
+    'review draft gate: using the model response as the draft is caught',
+    draftMutant(
+      PROMPT,
+      '    draft: renderReplySkeleton({ skeleton, aspects, language: args.language }),',
+      '    draft: args.response ?? renderReplySkeleton({ skeleton, aspects, language: args.language }),',
+      coreUnits,
+    ),
+    'an unhijacked model produces a house draft carrying no byte of any payload',
+  )
+
+  // 53l. The closed-set check answering yes to everything. This is the rule that makes the red-team
+  //      criterion structural rather than a statement about how complete a lexicon is, so a version of
+  //      it that cannot fail is the most expensive defect in the unit.
+  checkRejectedBy(
+    'review draft gate: a house-rendering check that accepts any draft is caught',
+    draftMutant(
+      LINT,
+      '  return HOUSE_REPLY_RENDERINGS[language].has(draft)',
+      '  return true',
+      coreUnits,
+    ),
+    'not_a_house_skeleton_rendering',
+  )
+
+  // --- the write guard --------------------------------------------------------------------------
+  //
+  // 53m. The guard removed from the draft write. The queue read does not catch this, because the read is
+  //      stale for any at-least-once job and for two overlapping runs — and what is overwritten is the
+  //      one part of the row a human touched.
+  checkRejectedBy(
+    'review draft gate: a draft write that can overwrite an owner edit is caught',
+    draftMutant(
+      REVIEWS_REPO,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a mutation anchor is a byte-exact copy of the shipped line, and the shipped line is a template literal
+      'where id = ${reviewId} and reply_draft is null and draft_quarantine_reason is null\n    returning id',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a mutation anchor is a byte-exact copy of the shipped line, and the shipped line is a template literal
+      'where id = ${reviewId}\n    returning id',
+      draftItest,
+    ),
+    'already_drafted',
+  )
+
+  // 53n. (G-REV-04) The LLM fake judging a refusal on the WHOLE prompt rather than on the untrusted
+  //      region. This was a live defect, not a hypothetical: the instruction section forbids mentioning a
+  //      refund and therefore contains the word, so the DEFAULT provider refused every review-reply
+  //      prompt and the queue filled with "the model returned nothing to select from". Nothing threw.
+  checkRejectedBy(
+    'review draft gate: a fake that refuses on the instruction text rather than the review is caught',
+    draftMutant(
+      'packages/providers/src/llm/fake-llm.ts',
+      'entry.pattern.test(refusableText(request.prompt)),',
+      'entry.pattern.test(request.prompt),',
+      () =>
+        run('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          'packages/providers/src/llm/named-fakes.test.ts',
+        ]),
+    ),
+    'refused a benign review',
+  )
+
+  // 53o-53q. The controls. Without them a tree whose suites cannot run at all satisfies every case above.
+  {
+    const units = coreUnits()
+    check(
+      'review draft gate: the committed prompt builder and corpus suites pass, so 53e-53n mean something',
+      !units.failed,
+      units.output,
+    )
+    const itest = draftItest()
+    check(
+      'review draft gate: the committed draft integration suite passes, so 53m means something',
+      !itest.failed,
+      itest.output,
+    )
+    // And the corpus is the size the criterion names, read out of the source rather than from a test
+    // that could have been edited to agree with it.
+    const corpus = readFileSync('packages/core/src/reviews/red-team-corpus.ts', 'utf8')
+    const payloads = corpus.match(/^ {4}id: '/gm)?.length ?? 0
+    check(
+      'review draft gate: the red-team corpus is exactly 25 payloads',
+      payloads === 25,
+      `found ${payloads} payloads in red-team-corpus.ts`,
+    )
+  }
+}
+
+// 55a-55c. A test that asserts a byte-identical repeat capture must launch with the shared flags.
+//
+// Two did not, and both flapped: `breakpoint-preview.itest.ts` and `messages-inbox.itest.ts` launched
+// Chromium with `--no-sandbox` and `--font-render-hinting=none` alone while asserting that two captures of
+// one page are equal byte for byte. The flag that mattered is `--disable-skia-runtime-opts` — without it
+// Skia picks raster paths from CPU feature detection, so the SAME image can rasterise differently between
+// two captures in one session, which is why the failures tracked machine load rather than anything on the
+// page. It cost this build four verify runs and two wrong diagnoses: a layout settle signal and an
+// image-decode wait, both worth keeping, neither the cause.
+//
+// The rule is deliberately scoped to the files that COMPARE two captures, and the first version of this
+// gate got that wrong in a way worth recording: it demanded the shared list at every `chromium.launch` in
+// the tree, which is not merely noisy but wrong. `--hide-scrollbars` changes the layout width a page is
+// measured at, so a test asserting `clientWidth` or a touch-target size must NOT have it. The flags buy
+// reproducibility at the cost of fidelity, and only a repeat-capture assertion is worth that trade.
+{
+  // The launch call's own argument list, not the file: the import line and the comment above each launch
+  // both mention the constant, so a whole-file search reports every reverted file as compliant. That was
+  // the second defect in this gate's first version, and it made the fixture below unable to fail.
+  const launchArgs = (body) =>
+    /chromium\.launch\(\{[^)]*?args:\s*\[([^\]]*)\]/.exec(body)?.[1] ?? null
+  const comparesTwoCaptures = (body) =>
+    body.includes('Buffer.compare') && body.includes('.screenshot(')
+
+  const launchers = execFileSync(
+    'sh',
+    [
+      '-c',
+      "grep -rln 'chromium.launch' --include='*.ts' --include='*.mjs' packages apps scripts || true",
+    ],
+    { encoding: 'utf8' },
+  )
+    .split('\n')
+    .filter((line) => line.length > 0)
+  const comparers = launchers
+    // This file is not a caller. It matches the greps because the fixture below QUOTES a launch line, and
+    // counting it would make the rule depend on the wording of its own fixture.
+    .filter((file) => file !== 'scripts/test-gates.mjs')
+    .filter((file) => comparesTwoCaptures(readFileSync(file, 'utf8')))
+
+  check(
+    'this gate can see the files that compare two captures',
+    comparers.length >= 2,
+    `found ${comparers.length} of them: a grep that matches nothing would pass the next case for ever`,
+  )
+
+  const adHoc = comparers.filter((file) => {
+    const args = launchArgs(readFileSync(file, 'utf8'))
+    return args === null || !args.includes('DETERMINISTIC_LAUNCH_ARGS')
+  })
+  check(
+    'every repeat-capture test launches from DETERMINISTIC_LAUNCH_ARGS',
+    adHoc.length === 0,
+    `${adHoc.join(', ')} builds its own flag list, so a repeat capture there is not reproducible`,
+  )
+
+  // The known-bad fixture, so the rule above is known to fire rather than assumed to.
+  withEditedFile(
+    'apps/web/src/breakpoint-preview.itest.ts',
+    (body) =>
+      body.replace(
+        'chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })',
+        "chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })",
+      ),
+    () => {
+      const args = launchArgs(readFileSync('apps/web/src/breakpoint-preview.itest.ts', 'utf8'))
+      check(
+        'reverting a launch to its own flag list is caught',
+        args !== null && !args.includes('DETERMINISTIC_LAUNCH_ARGS'),
+        `the fixture did not take — the launch args now read ${JSON.stringify(args)}`,
+      )
+    },
   )
 }
 

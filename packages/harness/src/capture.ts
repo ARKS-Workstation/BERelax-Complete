@@ -11,20 +11,10 @@
 import { type Browser, chromium, type Page } from 'playwright'
 import { type AccessibilityResult, type AxeViolation, auditPage } from './accessibility.ts'
 import { type CritiqueResult, critiqueInPage, critiqueInputFor, type Finding } from './critique.ts'
-import { DETERMINISM_CSS, freezePageEnvironment } from './determinism.ts'
+import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS, freezePageEnvironment } from './determinism.ts'
 import { type CaptureTarget, captureFilename, targetsFor } from './matrix.ts'
 
-const LAUNCH_ARGS = [
-  '--no-sandbox',
-  '--disable-dev-shm-usage',
-  // Host-dependent hinting and subpixel antialiasing are the two things that make the same page
-  // render differently on two machines. Neither is worth a visual gate that only works locally.
-  '--font-render-hinting=none',
-  '--disable-lcd-text',
-  '--hide-scrollbars',
-  '--force-color-profile=srgb',
-  '--disable-skia-runtime-opts',
-]
+const LAUNCH_ARGS = [...DETERMINISTIC_LAUNCH_ARGS]
 
 export interface Capture {
   readonly target: CaptureTarget

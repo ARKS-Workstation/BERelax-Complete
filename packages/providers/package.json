@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./google": "./src/google/index.ts",
+    "./llm": "./src/llm/index.ts",
     "./failure": "./src/failure.ts",
     "./call-log": "./src/call-log.ts"
   },

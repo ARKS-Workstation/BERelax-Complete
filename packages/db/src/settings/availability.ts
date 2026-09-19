@@ -51,6 +51,64 @@ export async function readGenderMatching(sql: Sql): Promise<GenderMatchingMode> 
   return genderMatchingMode(await readSetting(sql, GENDER_MATCHING_SETTING_KEY))
 }
 
+/** `booking.min_lead_minutes`. Provisionally 120 (Y9-lead). */
+export const MIN_LEAD_SETTING_KEY = 'booking.min_lead_minutes'
+/** `booking.max_advance_days`, counted in trading dates. Provisionally 90 (Y9-lead). */
+export const MAX_ADVANCE_SETTING_KEY = 'booking.max_advance_days'
+
+/** The two horizons the availability solver needs, as the settings registry declares them. */
+export interface AvailabilityLimits {
+  readonly minLeadMinutes: number
+  readonly maxAdvanceDays: number
+}
+
+/**
+ * The lead and advance horizons in force.
+ *
+ * A **separate** call from the availability query, deliberately, and B-AVAIL-07's own header says why: a
+ * setting changes at human speed and is cached for minutes, where a slot list is cached for seconds — and
+ * reading these two in the availability statement would mean spelling their provisional defaults in SQL,
+ * which is a second source of truth for a figure nobody has confirmed. `readSetting` is the one read path
+ * for a setting: it checks the key against the registry and falls back to the registry's declared default,
+ * so a freshly migrated database with no `app_setting` rows behaves identically to a seeded one.
+ *
+ * Both values are coerced through `Number` and refused when they are not finite integers. The registry's
+ * Zod schema validates a WRITE; this is a READ, and the value may have been written by an older build
+ * whose schema was wider — the same reason `genderMatchingMode` normalises rather than trusts.
+ */
+export async function readAvailabilityLimits(sql: Sql): Promise<AvailabilityLimits> {
+  const [lead, advance] = await Promise.all([
+    readSetting<unknown>(sql, MIN_LEAD_SETTING_KEY),
+    readSetting<unknown>(sql, MAX_ADVANCE_SETTING_KEY),
+  ])
+  return {
+    minLeadMinutes: wholeMinutes(MIN_LEAD_SETTING_KEY, lead, 0),
+    maxAdvanceDays: wholeMinutes(MAX_ADVANCE_SETTING_KEY, advance, 1),
+  }
+}
+
+/**
+ * A stored setting as a whole number at or above `floor`, or a refusal naming the key.
+ *
+ * Throwing rather than falling back, and that is the opposite of {@link readGenderMatching}'s choice for a
+ * reason worth stating. A corrupted gender-matching value has a *stricter* reading to fall back to, so
+ * falling back is safe; a corrupted lead time has no safe reading — a zero offers slots in the next minute
+ * and a very large one offers none at all, and both look like working software.
+ */
+function wholeMinutes(key: string, value: unknown, floor: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(parsed) || parsed < floor) {
+    throw new AppError(
+      'invariant_violated',
+      `Setting "${key}" holds ${JSON.stringify(value)}, which is not a whole number of at least ` +
+        `${floor}. Availability cannot be computed from it, and there is no safe reading to fall back ` +
+        'to: a zero offers slots in the next minute and a large one offers none at all.',
+      { details: { key, value } },
+    )
+  }
+  return parsed
+}
+
 /**
  * Changes the mode. Owner-only, audited, and the reason is a required argument rather than an option.
  *
