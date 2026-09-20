@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { CMS_ROBOTS_TAG, CMS_ROUTE_PREFIXES, cmsRoutesIn, isCmsRoute } from '@berelax/cms'
 import { describe, expect, it } from 'vitest'
 import nextConfig from '../next.config.ts'
+import { assertPayloadSecretConfigured } from '../payload.config.ts'
 
 /**
  * W-SYS-08 — the admin is noindex, and it is not part of the public site.
@@ -112,5 +115,51 @@ describe('acceptance — the CMS is absent from the public route registry', () =
     // `@berelax/cms` ships TypeScript source like every other workspace package. Without it in
     // `transpilePackages` the build fails on the first type annotation in the content model.
     expect(nextConfig.transpilePackages ?? []).toContain('@berelax/cms')
+  })
+})
+
+describe('acceptance — only the CMS needs PAYLOAD_SECRET, and both its entry points refuse without it', () => {
+  const read = (path: string): string => readFileSync(join('apps', 'web', path), 'utf8')
+
+  /**
+   * The two files that can mint a session token.
+   *
+   * `/admin` is the document and `/cms-api` is the REST API — `/cms-api/users/login` is there, not under
+   * `/admin` — so guarding one and not the other would leave a login able to sign a token with the
+   * placeholder secret. Source text rather than behaviour, and that is the right level here: the claim is
+   * that the call exists at module scope in both files, and calling it in a test would only prove the
+   * function works.
+   */
+  const ENTRY_POINTS = [
+    join('app', '(payload)', 'layout.tsx'),
+    join('app', '(payload)', 'cms-api', '[...slug]', 'route.ts'),
+  ]
+
+  it('asserts the secret in every entry point that can sign a token', () => {
+    for (const path of ENTRY_POINTS) {
+      const source = read(path)
+      expect(source, path).toContain('assertPayloadSecretConfigured')
+      // At module scope, not inside a handler: a request that reaches a handler has already loaded the
+      // module, and Payload's own middleware runs before ours.
+      expect(source, path).toMatch(/^assertPayloadSecretConfigured\(\)$/m)
+    }
+  })
+
+  it('does not make a public page depend on the admin’s signing key', () => {
+    // The control, and the defect this replaced. `payloadSecret()` used to throw during module evaluation
+    // whenever NODE_ENV was production outside a build — so the moment a public page imported the config to
+    // read CMS content, every one of those pages answered 500 in an environment with no PAYLOAD_SECRET. The
+    // prerendered copy was served happily and the first revalidation turned the page into an error, which is
+    // how `content.itest.ts` found it.
+    for (const path of [
+      join('app', '(en)', '(public)', 'faq', 'page.tsx'),
+      join('app', '(en)', '(public)', 'journal', 'page.tsx'),
+      join('src', 'cms', 'read.ts'),
+    ]) {
+      expect(read(path), path).not.toContain('assertPayloadSecretConfigured')
+    }
+    // And the guard really is conditional on the environment rather than on nothing: with no NODE_ENV of
+    // production it returns, which is what lets development and this suite import the config at all.
+    expect(() => assertPayloadSecretConfigured()).not.toThrow()
   })
 })

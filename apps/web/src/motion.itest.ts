@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import { testPort } from '@berelax/harness/ports'
 import {
   MOTION_FALLBACK_ATTRIBUTE,
   MOTION_READY_ATTRIBUTE,
@@ -35,11 +36,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 /**
  * A random port in this suite's own range.
  *
- * The four server-starting suites take disjoint ranges — shell 3200, primitives 3800, route spine 4100,
- * kitchen sink 4400 — so that two worktrees running at once cannot have one suite's `next start` answer
- * for another's build. This one takes 4700.
+ * The ranges are disjoint, and `@berelax/harness/ports` is what makes them so, rather than each suite
+ * listing its neighbours here: two worktrees running at once must not have one suite's `next start` answer
+ * for another's build.
  */
-const PORT = 4700 + Math.floor(Math.random() * 300)
+const PORT = testPort('motion')
 const BASE = `http://127.0.0.1:${PORT}`
 const ROUTE = `${BASE}/kitchen-sink`
 

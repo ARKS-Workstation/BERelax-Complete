@@ -19,8 +19,11 @@
  */
 import { DesignSystemStyles, Grid, Section } from '@berelax/ui/layout'
 import type { Metadata } from 'next'
+import { navLabels } from '../../../src/cms/content.ts'
+import { CONTENT_COPY_AR } from '../../../src/cms/copy-ar.ts'
 import { routeMetadata } from '../../../src/routes/alternates.ts'
 import { RouteNav } from '../../_routes/route-nav.tsx'
+import { SiteNav } from '../../_routes/site-nav.tsx'
 
 export const metadata: Metadata = routeMetadata('home', 'ar')
 
@@ -36,6 +39,16 @@ export default function ArabicHomePage() {
           <p>مركز مساج وسبا.</p>
         </Grid>
       </Section>
+
+      {/* W-SITE-07's site navigation, in Arabic. One graph per locale is what reachability means: an Arabic
+          page reachable only by following the locale switch out of an English one is not reachable in
+          Arabic, and a reader arriving on `/ar` from a search result would never find it. */}
+      <SiteNav
+        current="home"
+        locale="ar"
+        label={CONTENT_COPY_AR.labels.nav}
+        labels={navLabels(CONTENT_COPY_AR)}
+      />
     </main>
   )
 }

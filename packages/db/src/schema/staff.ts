@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   check,
   customType,
@@ -49,6 +50,16 @@ const tstzrange = customType<{ data: string; driverData: string }>({
 })
 
 /**
+ * Ciphertext columns (0050), the same representation `./google.ts` and `./customer.ts` declare.
+ *
+ * `Buffer`, never a string: a base64 round trip through the mirror would be a second encoding of a
+ * ciphertext, and the one thing an envelope cannot survive is two spellings of the same bytes.
+ */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+})
+
+/**
  * female | male.
  *
  * Read by the strict same-gender matching rule of B-AVAIL-05, not by any report. Nullable on
@@ -88,12 +99,33 @@ export const leaveStatus = pgEnum('leave_status', ['pending', 'approved', 'rejec
 export const leaveKind = pgEnum('leave_kind', ['annual', 'sick', 'unpaid', 'other'])
 
 /**
- * The minimal employee availability reads.
+ * The work pattern, added by 0050. Two labels, and a third is a migration.
  *
- * There is deliberately **no `display_name`**. ADR 0020 needs a display name *and* a recorded
- * photography consent before a therapist page exists, and a nullable column here is the one an admin
- * screen fills in without the consent row — at which point the guard is invisible. `staffReference` is
- * an internal handle ("Therapist 07"), never a person's name.
+ * The same weight `employeeGender` chose, for the same reason. Federal Decree-Law 33 of 2021 replaced
+ * the limited/unlimited distinction and MOHRE's work models are listed in docs/04 §7 under an explicit
+ * "all figures to confirm" — so enumerating them here would be a guess at the vocabulary of contracts
+ * nobody has shown the build. `full_time` and `part_time` are the two the rota and leave accrual
+ * distinguish. Nullable on `employee`: nineteen employment records and no contracts (Y8-staff).
+ */
+export const employeeContractType = pgEnum('employee_contract_type', ['full_time', 'part_time'])
+
+/**
+ * A language a member of staff speaks (0050).
+ *
+ * Two labels because the business publishes EN and AR and nothing has been said about the nineteen
+ * therapists. An enum rather than `text[]` for the reason `employeeDocumentType` is one: a typo in an
+ * array is a language nothing matches, so a client asking for Arabic is offered nobody.
+ */
+export const staffLanguage = pgEnum('staff_language', ['arabic', 'english'])
+
+/**
+ * The employment record: what availability reads (0030) plus the employment terms P-HR-01 added (0050).
+ *
+ * `displayName` arrived in 0050 **with the guard 0030 refused to ship without**. ADR 0020 needs a
+ * display name *and* a recorded photography consent before a therapist page exists, and a bare
+ * nullable column is the one an admin screen fills in without the consent row — at which point the
+ * guard is invisible. So `isPublishable` is GENERATED in the database from both, and nothing may write
+ * it. `staffReference` remains an internal handle ("Therapist 07"), never a person's name.
  */
 export const employee = pgTable(
   'employee',
@@ -116,9 +148,47 @@ export const employee = pgTable(
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+
+    // --- 0050: the employment terms, the publication guard and the provenance trio ---------------
+    /** Set in the backend by the admin (docs/13 §5). NULL for all nineteen therapists (Y12-names). */
+    displayName: text('display_name'),
+    /** False by default: the default of a consent flag is the answer nobody has given. */
+    photoConsent: boolean('photo_consent').notNull(),
+    photoConsentRecordedAt: timestamp('photo_consent_recorded_at', { withTimezone: true }),
+    photoConsentRecordedBy: text('photo_consent_recorded_by'),
+    /**
+     * GENERATED as `display_name is not null and photo_consent`, never written.
+     *
+     * Declared here as an ordinary column, the way `bill.vatFils` is: the mirror records the shape and
+     * the generation expression lives in the migration that owns it.
+     */
+    isPublishable: boolean('is_publishable').notNull(),
+    contractType: employeeContractType('contract_type'),
+    /**
+     * Integer fils on the `fils_nonneg` domain (ADR 0007), `mode: 'bigint'` for `ledger.ts`'s reason:
+     * the driver returns bigint as a string so an amount cannot silently lose precision, and a mirror
+     * that re-introduced a JS number would undo that for a figure a WPS file is built from.
+     *
+     * All four nullable. A wage nobody has supplied is not zero — zero is a figure that would flow
+     * into a salary file and a gratuity accrual as though somebody had agreed it (Y8-staff).
+     */
+    basicWageFils: bigint('basic_wage_fils', { mode: 'bigint' }),
+    housingAllowanceFils: bigint('housing_allowance_fils', { mode: 'bigint' }),
+    transportAllowanceFils: bigint('transport_allowance_fils', { mode: 'bigint' }),
+    otherAllowanceFils: bigint('other_allowance_fils', { mode: 'bigint' }),
+    /**
+     * basic + housing + transport + other, GENERATED. End-of-service gratuity accrues on the BASIC
+     * wage alone (docs/04 §7), which is why that figure is a column of its own and not a share of this.
+     */
+    totalWageFils: bigint('total_wage_fils', { mode: 'bigint' }),
+    /** The provenance trio `unconfirmedAssumptionRows()` reads, as `employeeSkill` carries it. */
+    isProvisional: boolean('is_provisional').notNull(),
+    provisionalNote: text('provisional_note'),
+    openQuestionId: text('open_question_id'),
   },
   (t) => [
     index('employee_employment_idx').on(t.employedFrom, t.employedUntil),
+    unique('employee_display_name_unique').on(t.displayName),
     check(
       'employee_staff_reference_not_placeholder',
       sql`not is_placeholder_text(${t.staffReference})`,
@@ -126,6 +196,20 @@ export const employee = pgTable(
     check(
       'employee_employment_period_ordered',
       sql`${t.employedUntil} is null or ${t.employedUntil} >= ${t.employedFrom}`,
+    ),
+    check(
+      'employee_display_name_not_placeholder',
+      sql`${t.displayName} is null or not is_placeholder_text(${t.displayName})`,
+    ),
+    // Consent is a record of an act by a person, not a boolean somebody ticks: without this the
+    // publication guard is one UPDATE away from being satisfied with no evidence behind it.
+    check(
+      'employee_photo_consent_has_a_record',
+      sql`not ${t.photoConsent} or (${t.photoConsentRecordedAt} is not null and ${t.photoConsentRecordedBy} is not null and not is_placeholder_text(${t.photoConsentRecordedBy}))`,
+    ),
+    check(
+      'employee_provisional_names_a_question',
+      sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
     ),
   ],
 )
@@ -311,6 +395,21 @@ export const employeeDocument = pgTable(
     expiresOn: date('expires_on').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+
+    // --- 0050: the document number, sealed ---------------------------------------------------------
+    /**
+     * The document number under envelope encryption (docs/04 §7), bound to this row by AAD.
+     *
+     * Five nullable columns because a document may be on file before its number has been entered;
+     * `employee_document_sealed_number_is_complete` is what stops that meaning "four of the five".
+     * `_kid` is the **STAFF_PII_KEK** version, not the clinical one — 0016's spelling, because this
+     * estate has the Google estate's shape: its own key and its own re-wrap primitive.
+     */
+    numberCt: bytea('number_ct'),
+    numberNonce: bytea('number_nonce'),
+    numberWrappedKey: bytea('number_wrapped_key'),
+    numberKid: text('number_kid'),
+    numberAadFp: text('number_aad_fp'),
   },
   (t) => [
     index('employee_document_current_idx').on(t.employeeId, t.documentType, t.expiresOn.desc()),
@@ -322,6 +421,21 @@ export const employeeDocument = pgTable(
     check(
       'employee_document_expiry_after_issue',
       sql`${t.issuedOn} is null or ${t.expiresOn} >= ${t.issuedOn}`,
+    ),
+    check(
+      'employee_document_sealed_number_is_complete',
+      sql`(${t.numberCt} is null and ${t.numberNonce} is null and ${t.numberWrappedKey} is null and ${t.numberKid} is null and ${t.numberAadFp} is null) or (${t.numberCt} is not null and ${t.numberNonce} is not null and ${t.numberWrappedKey} is not null and ${t.numberKid} is not null and ${t.numberAadFp} is not null)`,
+    ),
+    // The plaintext `reference` column may hold a licence number. It may NOT hold an identity number:
+    // an Emirates ID typed there is the disclosure the envelope exists to prevent, and it looks exactly
+    // like ordinary data entry.
+    check(
+      'employee_document_identity_number_is_encrypted',
+      sql`not (${t.documentType} in ('emirates_id', 'passport') and ${t.reference} is not null)`,
+    ),
+    check(
+      'employee_document_number_kid_shape',
+      sql`${t.numberKid} is null or ${t.numberKid} ~ '^[a-z0-9][a-z0-9._-]{0,31}$'`,
     ),
   ],
 )

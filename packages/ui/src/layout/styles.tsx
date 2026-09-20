@@ -42,7 +42,8 @@ export const FOCUS_CSS = `
   .be-card__link,
   .be-disclosure__summary,
   .be-field__input,
-  .be-field__select
+  .be-field__select,
+  .be-hero__control
 ):focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;

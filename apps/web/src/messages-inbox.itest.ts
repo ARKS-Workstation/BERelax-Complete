@@ -9,6 +9,7 @@ import {
   DETERMINISM_CSS,
   DETERMINISTIC_LAUNCH_ARGS,
 } from '@berelax/harness/determinism'
+import { testPort } from '@berelax/harness/ports'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -40,7 +41,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  */
 
 /** A port from the same range as the other web itests, chosen at random for the same reason. */
-const PORT = 3800 + Math.floor(Math.random() * 200)
+const PORT = testPort('messages-inbox')
 const BASE = `http://127.0.0.1:${PORT}`
 const SCREENS = new URL('../../../artifacts/screens', import.meta.url).pathname
 

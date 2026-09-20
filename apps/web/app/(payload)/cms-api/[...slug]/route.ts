@@ -6,7 +6,7 @@ import {
   REST_POST,
   REST_PUT,
 } from '@payloadcms/next/routes'
-import config from '../../../../payload.config.ts'
+import config, { assertPayloadSecretConfigured } from '../../../../payload.config.ts'
 
 /**
  * Payload's REST API, which its own admin client calls.
@@ -20,6 +20,13 @@ import config from '../../../../payload.config.ts'
  * Every handler runs Payload's access control, which is the F07 matrix; see `src/payload/access.ts`. There
  * is no separate authorisation path for the API.
  */
+/*
+ * The second entry point that can mint a session token — `/cms-api/users/login` is here, not under `/admin` —
+ * and therefore the second that refuses to serve with the placeholder secret. See the admin layout and
+ * `payload.config.ts` for why the refusal is at these two places rather than in the config's module body.
+ */
+assertPayloadSecretConfigured()
+
 export const GET = REST_GET(config)
 export const POST = REST_POST(config)
 export const DELETE = REST_DELETE(config)

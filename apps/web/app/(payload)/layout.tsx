@@ -2,7 +2,7 @@
 import { handleServerFunctions, RootLayout } from '@payloadcms/next/layouts'
 import type { ServerFunctionClient } from 'payload'
 import type { ReactNode } from 'react'
-import config from '../../payload.config.ts'
+import config, { assertPayloadSecretConfigured } from '../../payload.config.ts'
 import { importMap } from './admin/importMap.js'
 /*
  * Payload's admin stylesheet, imported HERE and nowhere else.
@@ -32,6 +32,15 @@ import '@payloadcms/next/css'
  * So `(payload)` is a sibling route group with no shared ancestor, which is exactly what Next's App Router
  * route groups are for. Nothing in `_document/shell.tsx` runs for an admin request.
  */
+/*
+ * One of the two entry points that can mint a session token, and therefore one of the two that refuse to
+ * serve with the placeholder secret. `payload.config.ts` records why the refusal is here rather than in the
+ * config's module body: a public page reads CMS content now, and a module-evaluation throw made every one of
+ * those pages answer 500 in an environment with no PAYLOAD_SECRET. `payload-routes.test.ts` asserts both call
+ * sites, with a public page as the control.
+ */
+assertPayloadSecretConfigured()
+
 const serverFunction: ServerFunctionClient = async function serverFunction(args) {
   'use server'
   return handleServerFunctions({ ...args, config, importMap })

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -11,6 +12,7 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 import { serviceShape, serviceVariant } from './catalogue.ts'
@@ -206,6 +208,26 @@ export const appointment = pgTable(
     priceListId: uuid('price_list_id').references(() => priceList.id, { onDelete: 'restrict' }),
     /** No `promotion` table exists yet (B-CAT-04), so this references nothing. */
     promotionId: text('promotion_id'),
+    /**
+     * The appointment this row replaced, when a reschedule created it (0049, B-LIFE-03).
+     *
+     * On the successor rather than the predecessor, because `rescheduled` is terminal and the row that
+     * still exists is the new one: the value is part of the INSERT that creates it, so a superseded row
+     * is never momentarily pointing at nothing. Partially UNIQUE in the database — one predecessor has
+     * at most one successor, which is `repeat: 'refused'` on `rescheduled` expressed as an index.
+     */
+    rescheduledFromId: uuid('rescheduled_from_id').references((): AnyPgColumn => appointment.id, {
+      onUpdate: 'cascade',
+    }),
+    /**
+     * True when the cancellation arrived inside `booking.cancellation_window_hours` (0049).
+     *
+     * A flag and never a charge. The setting is provisional (Y9-windows), no fee policy is agreed and
+     * the business takes no card payments, so a late cancellation writes no payment, invoice or fee row.
+     */
+    lateCancellation: boolean('late_cancellation').notNull(),
+    /** The window in force when the flag was set. Whole-or-nothing with it: a flag with no figure. */
+    lateCancellationWindowHours: smallint('late_cancellation_window_hours'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
@@ -222,6 +244,11 @@ export const appointment = pgTable(
     // window" and constrains no room, so the index above cannot serve it — its leading column is
     // unconstrained. Partial on the same generated column, for the same reason.
     index('appointment_period_idx').using('gist', t.period).where(sql`${t.holdsResources}`),
+    // 0049. Partial, because NULL is the ordinary case — every appointment that was never rescheduled —
+    // and a total unique index would permit exactly one of them.
+    uniqueIndex('appointment_one_successor_per_predecessor')
+      .on(t.rescheduledFromId)
+      .where(sql`${t.rescheduledFromId} is not null`),
     check('appointment_period_upper_after_lower', sql`upper(${t.period}) > lower(${t.period})`),
     check(
       'appointment_period_bounded',
@@ -245,6 +272,24 @@ export const appointment = pgTable(
     check(
       'appointment_promotion_id_nonempty',
       sql`${t.promotionId} is null or btrim(${t.promotionId}) <> ''`,
+    ),
+    // 0049, B-LIFE-03. A row cannot supersede itself, the late-cancellation flag and the window it was
+    // judged against are whole or nothing, and only a cancellation may carry the flag.
+    check(
+      'appointment_reschedule_is_not_self',
+      sql`${t.rescheduledFromId} is null or ${t.rescheduledFromId} <> ${t.id}`,
+    ),
+    check(
+      'appointment_late_cancellation_is_whole',
+      sql`(${t.lateCancellation}) = (${t.lateCancellationWindowHours} is not null)`,
+    ),
+    check(
+      'appointment_late_cancellation_needs_a_cancellation',
+      sql`not ${t.lateCancellation} or ${t.status} in ('cancelled_by_customer', 'cancelled_by_salon')`,
+    ),
+    check(
+      'appointment_late_cancellation_window_bounded',
+      sql`${t.lateCancellationWindowHours} is null or ${t.lateCancellationWindowHours} between 0 and 168`,
     ),
     // `appointment_therapist_no_overlap` — EXCLUDE USING gist (therapist_id WITH =, period WITH &&)
     // WHERE (holds_resources) — is not expressible in Drizzle. It lives in

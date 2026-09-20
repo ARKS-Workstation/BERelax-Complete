@@ -6,6 +6,7 @@ import {
   can,
   canReadFieldGroup,
   FIELD_GROUPS,
+  type FieldGroup,
   PERMISSIONS,
   type Permission,
   ROLE_DEFINITIONS,
@@ -24,6 +25,32 @@ describe('deny by default', () => {
     for (const group of FIELD_GROUPS) {
       expect(canReadFieldGroup('marketer', group)).toBe(false)
     }
+  })
+
+  it('refuses a field group that is not in the catalogue, even for the wildcard role', () => {
+    // `can()` has refused an unrecognised permission string since F07; `canReadFieldGroup` did not until
+    // P-HR-01, so the two halves of one policy disagreed in the direction that matters: `owner` holds
+    // every group as `'all'`, which answered TRUE for a group nobody had declared — and the group nobody
+    // has declared is a field somebody has just added. The `owner` case is the whole assertion; a
+    // non-wildcard role was already refused by the `includes` that follows.
+    expect(canReadFieldGroup('owner', 'employee.made_up' as FieldGroup)).toBe(false)
+    expect(canReadFieldGroup('manager', 'employee.made_up' as FieldGroup)).toBe(false)
+    expect(() => assertCanReadFieldGroup('owner', 'employee.made_up' as FieldGroup)).toThrow(
+      AppError,
+    )
+  })
+
+  it('grants the manager the HR file and NOT the wage, which keeps the projection reachable', () => {
+    // P-HR-01 widened the manager to the two groups an HR screen cannot work without, and deliberately
+    // not to `employee.salary`. This pins both halves: the second is what makes `manager` the role that
+    // holds `employee:read` without `employee.salary`, so the field-level projection in
+    // `../hr/employee.ts` drops a column for somebody rather than for nobody.
+    expect(canReadFieldGroup('manager', 'employee.bank')).toBe(true)
+    expect(canReadFieldGroup('manager', 'employee.identity_documents')).toBe(true)
+    expect(canReadFieldGroup('manager', 'employee.salary')).toBe(false)
+    expect(can('manager', 'employee:read')).toBe(true)
+    // And the clinical boundary is untouched by that widening: it is a different boundary (ADR 0010).
+    expect(canReadFieldGroup('manager', 'clinical.notes')).toBe(false)
   })
 
   it('assertCan throws a forbidden AppError naming the role and permission', () => {

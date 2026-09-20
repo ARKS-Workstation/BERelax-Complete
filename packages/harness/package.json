@@ -8,6 +8,7 @@
     "./accessibility": "./src/accessibility.ts",
     "./determinism": "./src/determinism.ts",
     "./matrix": "./src/matrix.ts",
+    "./ports": "./src/ports.ts",
     "./touch-targets": "./src/touch-targets.ts"
   },
   "dependencies": {

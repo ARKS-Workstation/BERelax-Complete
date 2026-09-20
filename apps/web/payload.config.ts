@@ -43,25 +43,49 @@ import { PAYLOAD_GLOBALS } from './src/globals/index.ts'
  * Read here rather than through `@berelax/config`'s `loadConfig`: this file is also loaded by Payload's
  * own CLI (`generate:importmap`, `migrate`) outside the app's boot path, and a config loader that
  * validated the whole environment would make those commands need a full production environment to run.
- * Absent in development, present or the process fails in production.
+ * Absent in development; in production the two admin entry points refuse to serve without it — see
+ * {@link assertPayloadSecretConfigured}, which is where that refusal moved to and why.
  */
+/** Deliberately recognisable if it ever appears in a log, and refused by the two admin entry points. */
+export const PAYLOAD_PLACEHOLDER_SECRET = 'berelax-placeholder-payload-secret-not-for-serving'
+
 function payloadSecret(): string {
   const secret = process.env['PAYLOAD_SECRET'] ?? ''
-  if (secret !== '') return secret
+  // Development, test, and the build step. `next build` loads this config to collect route metadata, with
+  // NODE_ENV=production and no runtime environment, and throwing there would make the secret a BUILD
+  // dependency — the image could not be built without the production signing key, which is the opposite of
+  // where that key should live. Nothing is signed during a build.
+  return secret === '' ? PAYLOAD_PLACEHOLDER_SECRET : secret
+}
 
-  // `next build` loads this config to collect route metadata, with NODE_ENV=production and no runtime
-  // environment. Throwing there would make the secret a BUILD dependency — the image could not be built
-  // without the production signing key, which is the opposite of where that key should live. Nothing is
-  // signed during a build, so the placeholder is safe here and only here.
+/**
+ * Refuses to serve anything that could sign a token with the placeholder.
+ *
+ * ## Why this moved out of `payloadSecret()`, where it was a throw
+ *
+ * It used to throw during module evaluation whenever `NODE_ENV === 'production'` outside a build — which was
+ * right while the only importers of this config were the admin and its REST API. W-SITE-07 made `/faq`,
+ * `/journal` and `/about` read CMS content, so this module is now imported by **public pages**, and a
+ * module-evaluation throw made every one of them answer 500 in any environment without `PAYLOAD_SECRET`: the
+ * prerendered copy was served happily and the first on-demand revalidation turned the page into an error. It
+ * was found exactly that way, by a revalidation in `content.itest.ts`.
+ *
+ * Coupling a public content page to the admin's session-signing key is the wrong dependency in any case. What
+ * the secret protects is a token, and the only requests that can mint one are Payload's admin document and
+ * its REST API — so the refusal belongs at those two entry points, where it is *stronger* than before: a
+ * production server with no secret now serves the site and refuses the admin, rather than refusing both.
+ *
+ * Both call sites are asserted by `apps/web/src/payload-routes.test.ts`, with a public page as the control,
+ * so a third entry point that could sign a token cannot be added without one.
+ */
+export function assertPayloadSecretConfigured(): void {
   const isBuild = process.env['NEXT_PHASE'] === 'phase-production-build'
-  if (process.env['NODE_ENV'] === 'production' && !isBuild) {
-    throw new Error(
-      'PAYLOAD_SECRET is required. Without it every admin session token is signed with a value an ' +
-        'attacker also knows.',
-    )
-  }
-  // Development, test, and the build step. Deliberately recognisable if it ever appears in a log.
-  return 'berelax-placeholder-payload-secret-not-for-serving'
+  if (isBuild || process.env['NODE_ENV'] !== 'production') return
+  if ((process.env['PAYLOAD_SECRET'] ?? '') !== '') return
+  throw new Error(
+    'PAYLOAD_SECRET is required to serve the CMS admin or its API. Without it every admin session token ' +
+      'is signed with a value an attacker also knows. The public site does not need it and is unaffected.',
+  )
 }
 
 export default buildConfig({
@@ -103,8 +127,19 @@ export default buildConfig({
    * the one that happens not to be checked, so the generated pair is kept where it cannot be imported by
    * accident. Payload writes this file on its own in development; `.next` is gitignored and no gate
    * scans it.
+   *
+   * ## Why it is not under `.next/types/`, which is where it was
+   *
+   * W-SITE-07 found that `apps/web/tsconfig.json` includes `.next/types/**\/*.ts` — for Next's own generated
+   * route types, which is the whole reason that glob exists — so the file WAS scanned, by the one tool the
+   * paragraph above assumes is not looking: `tsc`. Payload writes it whenever it initialises outside a
+   * production build, which the integration suite does on every run. The consequence was a `pnpm typecheck`
+   * that passed on a clean worktree and then failed with twenty errors in three itests nobody had touched,
+   * the moment `pnpm test:integration` had run once — and `pnpm verify` runs typecheck *before* the
+   * integration suite, so its first run passed and its second did not. One directory up is outside the glob,
+   * which makes the claim above true rather than nearly true.
    */
-  typescript: { outputFile: `${import.meta.dirname}/.next/types/payload-types.ts` },
+  typescript: { outputFile: `${import.meta.dirname}/.next/payload-types.ts` },
   db: postgresAdapter({
     pool: { connectionString: process.env['DATABASE_URL'] ?? '' },
     schemaName: 'payload',

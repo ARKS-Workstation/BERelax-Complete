@@ -523,13 +523,17 @@ async function readFootprint(sql: Sql, delivery: BookingDeliveryInput): Promise<
 }
 
 /**
- * Locks every room this booking will write, in ascending room-id order.
+ * Locks every room a transaction will write, in ascending room-id order.
  *
  * The order is the deadlock-avoidance rule: two transactions taking the same set of rows in the same
  * order queue instead of waiting on each other. Ascending id is a *total* order that every writer can
  * compute alone, which is what makes it work without any coordination between them.
+ *
+ * Exported for B-LIFE-03's reschedule, which writes appointment rows into the same rooms and must
+ * therefore take the same locks in the same order — two writers ordering differently is the deadlock this
+ * function exists to prevent, and a second copy of it would be a second order.
  */
-async function lockRooms(sql: Sql, roomIds: readonly string[]): Promise<SlotRecheckRoom[]> {
+export async function lockRooms(sql: Sql, roomIds: readonly string[]): Promise<SlotRecheckRoom[]> {
   const locked: SlotRecheckRoom[] = []
   // ONE STATEMENT PER ROOM, in the order given — which the caller has sorted by id.
   //

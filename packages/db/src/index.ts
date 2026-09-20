@@ -187,6 +187,30 @@ export {
   transitionRefusalOf,
 } from './repositories/appointment-transition.ts'
 export {
+  CANCELLATION_REFUSALS,
+  CANCELLATION_STATUSES,
+  type CancelAppointmentInput,
+  type CancelBookingInput,
+  type CancelBookingResult,
+  type CancelDeps,
+  type CancellationClassification,
+  type CancellationPolicy,
+  type CancellationRefusal,
+  type CancellationStatus,
+  type CancelledAppointment,
+  cancelAppointment,
+  cancelAppointmentTx,
+  cancelBooking,
+  cancelBookingTx,
+  cancellationRefusalOf,
+  type MarkNoShowInput,
+  markNoShow,
+  markNoShowTx,
+  type NoShowClockCheck,
+  type NoShowDeps,
+  type NoShowResult,
+} from './repositories/cancel.ts'
+export {
   archiveService,
   assertPublicDisplayNameLinted,
   CATALOGUE_REFUSALS,
@@ -369,6 +393,23 @@ export {
   verifyOtpCode,
 } from './repositories/otp.ts'
 export {
+  RESCHEDULE_REFUSALS,
+  type RescheduleDeps,
+  type RescheduledRow,
+  type RescheduleInput,
+  type RescheduleRefusal,
+  type RescheduleResult,
+  readScheduledStepKeys,
+  rescheduleAppointment,
+  rescheduleAppointmentTx,
+  rescheduleRefusalOf,
+  type ScheduledStepKeyReader,
+  type ScheduledStepKeys,
+  type TradingDateResolution,
+  type TradingDateResolver,
+  type TradingDayHours,
+} from './repositories/reschedule.ts'
+export {
   type ApiIngestOutcome,
   type ApiReviewPayload,
   type DraftWriteOutcome,
@@ -452,6 +493,13 @@ export {
   WHATSAPP_CANDIDATES,
   WHATSAPP_PENDING,
 } from './seed/premises.ts'
+export {
+  seedTherapistRoster,
+  THERAPIST_HEADCOUNT,
+  type TherapistRosterResult,
+  therapistStaffReference,
+  therapistStyleSkill,
+} from './seed/therapists.ts'
 export {
   type ImportedOpeningBalances,
   importOpeningBalances,
@@ -543,6 +591,10 @@ export {
   setGenderMatching,
 } from './settings/availability.ts'
 export {
+  CANCELLATION_WINDOW_SETTING_KEY,
+  readCancellationWindow,
+} from './settings/cancellation.ts'
+export {
   readSetting,
   // Exported for `packages/fixtures/src/load.ts`, which seeds the settings table before overriding three
   // of its values: every key in the registry is a row nothing else creates, and the two itests that
@@ -574,4 +626,18 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `room_id`. 47 is unused — W-SITE-05 holds it while that unit is in flight. 48 is 0048_review_draft.sql:
 // the reply draft's provenance, the quarantine that is the absence of one, and the CHECK that makes
 // "generation consumes a routing verdict" a fact the database holds rather than a call order.
-export const SCHEMA_VERSION = 48 as const
+//
+// 49 is 0049_reschedule.sql: `appointment.rescheduled_from_id`, the successor's link to the row it
+// replaced — partially UNIQUE, which is `repeat: 'refused'` on `rescheduled` expressed as an index — plus
+// `late_cancellation` and the window figure it was judged against. The flag charges nothing: the
+// cancellation window is provisional (Y9-windows), no fee policy is agreed and the business takes no card
+// payments, so there is deliberately no fee column for a later reader to mistake for a capability.
+//
+// 50 is 0050_employee.sql: the employment record layered expand-only over 0030's therapist rows — the
+// terms (contract type, wages in the `fils_nonneg` domain), the GENERATED `employee.is_publishable` that
+// makes ADR 0020's publication guard a column nothing can write, `employee_language`,
+// `employee_bank_detail` with one sealed payload per account, and `employee_document`'s sealed number.
+//
+// 41 and 47 are still unused and will stay unused: renumbering to close a gap is how two branches come to
+// apply the same number to different SQL.
+export const SCHEMA_VERSION = 50 as const

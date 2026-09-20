@@ -22,7 +22,18 @@
  * makes a compile error to break. So every glyph is hidden from the accessibility tree and no icon here
  * takes a `title`: a tooltip on an SVG is a name that only a mouse can reach.
  */
-import { Calendar, Check, ChevronDown, ChevronLeft, Clock, Phone, Search, X } from 'lucide-react'
+import {
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  Clock,
+  Pause,
+  Phone,
+  Play,
+  Search,
+  X,
+} from 'lucide-react'
 import { ICON_SIZE, ICON_STROKE_WIDTH, type IconPlacement } from './primitives/contract.ts'
 
 /**
@@ -37,6 +48,10 @@ const GLYPHS = {
   chevron: ChevronDown,
   back: ChevronLeft,
   clock: Clock,
+  // The hero loop's WCAG 2.2.2 control (docs/08 §6). One control, both glyphs in the markup, and the
+  // state attribute decides which is drawn — see packages/ui/src/media/pause-control.tsx.
+  pause: Pause,
+  play: Play,
   phone: Phone,
   search: Search,
   close: X,

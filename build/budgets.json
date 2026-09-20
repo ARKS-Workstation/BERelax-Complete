@@ -90,6 +90,15 @@
       "why": "Everything the route with the most client code on it loads beyond the shared layout: the Radix dialog, popover and select (about 31KB gzip of the total, and W-SYS-09's note about the primitives barrel is why they are on this route at all), Next's own dynamic-import helpers, and the motion islands at under a kilobyte. It is the number that moves when a library arrives anywhere in an island's graph rather than in the island's own chunk, which is exactly what a `motion` import would do \u2014 32-36KB gzip against about 7KB of headroom. docs/08 \u00a78 budgets first-party JS on the home route at 110KB gzip; the home route ships none of this, and this dev surface is deliberately the worst case on the site."
     },
     {
+      "id": "hero-attach-island",
+      "label": "The hero video attach island",
+      "kind": "client-js",
+      "scope": "modules",
+      "modules": ["packages/ui/src/media/attach-video.island.tsx"],
+      "maxBytes": 2048,
+      "why": "docs/08 \u00a76 budgets \"a ~1.4KB island\" to attach the hero video after LCP, and W-SYS-07's acceptance holds it to \u22642KB gzip. Measured over the chunk that DEFINES the module, the same narrow reading as the two motion islands above \u2014 Turbopack gives every client module on a route the same chunk list, so a chunk list cannot be divided between the modules that share it. The number is what makes the design checkable rather than asserted: the whole point of this island is that the hero costs ~0ms LCP and a kilobyte or two of deferred JavaScript, and an island that quietly grew a library would still work, still pass every behavioural test, and cost what the video hero was supposed to save. `[missing-client-module]` is the vacuity guard in the other direction: a budget over a module no route ships measures zero bytes and passes forever, which is exactly how a check stops being one (ADR 0003)."
+    },
+    {
       "id": "gallery-page",
       "label": "Screenshot gallery page",
       "kind": "file",

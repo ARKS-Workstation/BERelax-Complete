@@ -8,6 +8,7 @@ import {
   DETERMINISTIC_LAUNCH_ARGS,
 } from '@berelax/harness/determinism'
 import { captureFilename, THEMES, VIEWPORTS } from '@berelax/harness/matrix'
+import { testPort } from '@berelax/harness/ports'
 import { buildDerivatives, storeOriginal } from '@berelax/media'
 import { CROPS, cropRectFor } from '@berelax/media/ladders'
 import { sharp } from '@berelax/media/sharp'
@@ -57,7 +58,7 @@ import { appMediaStorage, mediaOutboxRoot } from './media/storage.ts'
  * would depend on which ran first, and the first version of this file did exactly that and reported 200
  * where 422 was expected.
  */
-const PORT = 4400 + Math.floor(Math.random() * 300)
+const PORT = testPort('breakpoint-preview')
 const BASE = `http://127.0.0.1:${PORT}`
 const SCREENS = new URL('../../../artifacts/screens', import.meta.url).pathname
 const REPO = new URL('../../../', import.meta.url).pathname

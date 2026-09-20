@@ -204,7 +204,35 @@ export const ROLE_DEFINITIONS: Readonly<Record<Role, RoleDefinition>> = Object.f
       'settings:write',
       'agent:configure',
     ],
-    fieldGroups: ['clinical.flags', 'customer.contact', 'customer.spend_history'],
+    /**
+     * `employee.bank` and `employee.identity_documents` were added by P-HR-01. `employee.salary` was
+     * deliberately NOT.
+     *
+     * The manager holds the HR file: docs/04 §7's credential registry, the visa and Emirates ID expiry
+     * dates that gate bookable availability, and the bank account a WPS file pays into. `employee:write`
+     * without those two groups is a permission that cannot do its job — the screen that files a document
+     * cannot read the number it is filing — and the way that gets resolved under pressure is a wider
+     * grant made in a hurry.
+     *
+     * Pay is different and stays with the owner and the accountant. A wage is a term of employment the
+     * proprietor sets and the books record; the floor manager needs the account a salary is sent to, not
+     * the amount. It is also what keeps the field-level projection honest rather than theoretical:
+     * `manager` is the role that holds `employee:read` and not `employee.salary`, so
+     * `projectEmployeeRecord` really does drop the wage columns for somebody, and
+     * `packages/hr/src/employee.itest.ts` asserts it on a real row.
+     *
+     * Still NOT `clinical.notes`: the floor manager has no clinical role, and that is a different
+     * boundary (ADR 0010). Every read of a bank or identity field, by any role, writes an audit row with
+     * a declared purpose — `packages/hr/src/employee-repository.ts` — which is the insider-threat
+     * control docs/06 D4 asks for, and it is what makes these two grants reviewable rather than invisible.
+     */
+    fieldGroups: [
+      'clinical.flags',
+      'customer.contact',
+      'customer.spend_history',
+      'employee.bank',
+      'employee.identity_documents',
+    ],
     requiresTotp: true,
   },
   accountant: {
@@ -300,6 +328,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<Role, RoleDefinition>> = Object.f
 })
 
 const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS)
+const FIELD_GROUP_SET: ReadonlySet<string> = new Set(FIELD_GROUPS)
 
 /** Deny by default: an unknown permission string is refused, not treated as ungated. */
 export function can(role: Role, permission: Permission): boolean {
@@ -308,7 +337,19 @@ export function can(role: Role, permission: Permission): boolean {
   return def.permissions === 'all' ? true : def.permissions.includes(permission)
 }
 
+/**
+ * Deny by default, including for an unknown GROUP — which this did not do until P-HR-01.
+ *
+ * `can()` has refused an unrecognised permission string since F07; this function had no equivalent
+ * check, so the two halves of one policy disagreed in the direction that matters. A role with
+ * `fieldGroups: 'all'` returned `true` for any string at all, so `owner` was granted a group nobody had
+ * declared — and the group nobody has declared is a field somebody has just added. The type system does
+ * not close it: every caller that reaches this with a value from a record, a URL or a JSON body has a
+ * `string` widened to `FieldGroup` somewhere behind it, which is precisely the case a runtime check is
+ * for. Asserted by the deny-by-default case in `permissions.test.ts`, with the wildcard role.
+ */
 export function canReadFieldGroup(role: Role, group: FieldGroup): boolean {
+  if (!FIELD_GROUP_SET.has(group)) return false
   const def = ROLE_DEFINITIONS[role]
   return def.fieldGroups === 'all' ? true : def.fieldGroups.includes(group)
 }
@@ -339,6 +380,15 @@ export function assertCanReadFieldGroup(role: Role, group: FieldGroup): void {
  *
  * Used at the boundary where a record leaves the data layer, so a forgotten check cannot leak a
  * salary or a clinical note into a JSON response.
+ *
+ * **An unmapped field is KEPT**, and that is deliberate for the records this was written for — an
+ * appointment or a customer, where most fields are innocuous and `fieldMap` names the exceptions. It is
+ * the wrong default for a record whose fields are mostly sensitive, because there the field somebody
+ * forgets to map is the one most likely to be a wage or an identity number. The employment record is
+ * therefore CLOSED instead: `packages/core/src/hr/employee.ts` classifies every field and refuses one it
+ * does not classify. Do not change the rule here to match it — the two records want opposite defaults,
+ * and a single default would either leak an unmapped salary or strip every ordinary column off every
+ * other record in the system.
  */
 export function redactForRole<T extends Record<string, unknown>>(
   role: Role,

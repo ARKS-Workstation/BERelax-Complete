@@ -26,6 +26,7 @@ import {
   unconfirmedAssumptionRows,
   withUnitOfWork,
 } from '@berelax/db'
+import { testPort } from '@berelax/harness/ports'
 import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from './facts/build.ts'
@@ -53,9 +54,10 @@ import { treatmentSitemapEntries } from './treatments/sitemap.ts'
  *
  * ## The port, and the server that answers it
  *
- * `5500 + random(300)`, a range no other suite uses (`kitchen-sink.itest.ts` records why a fixed port is a
- * false pass: another worktree's application answers and every assertion is about code this tree lacks). The
- * child is asserted alive after the port answers, for the same reason.
+ * `testPort('treatments')`, a band `@berelax/harness/ports` owns and proves disjoint from every other
+ * suite's (`kitchen-sink.itest.ts` records why a fixed port is a false pass: another worktree's application
+ * answers and every assertion is about code this tree lacks). The child is asserted alive after the port
+ * answers, for the same reason.
  *
  * ## Why the rows are seeded here
  *
@@ -63,7 +65,7 @@ import { treatmentSitemapEntries } from './treatments/sitemap.ts'
  * `seedPremises`, `ensureLegalEntity` and `seedCatalogue` are the same three calls `facts.itest.ts` and
  * `structured-data.itest.ts` make, with the values the migrations seed — never an invented address.
  */
-const PORT = 5500 + Math.floor(Math.random() * 300)
+const PORT = testPort('treatments')
 const BASE = `http://127.0.0.1:${PORT}`
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 if (!DATABASE_URL) {

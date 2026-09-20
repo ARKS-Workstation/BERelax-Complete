@@ -1,9 +1,15 @@
-import { CONTENT_COLLECTIONS, type ContentCollection, SERVICE_NARRATIVE } from '@berelax/cms'
+import {
+  CONTENT_COLLECTIONS,
+  type ContentCollection,
+  JOURNAL_POSTS,
+  SERVICE_NARRATIVE,
+} from '@berelax/cms'
 import type { CollectionConfig } from 'payload'
 import { assertMayChangeStatus, collectionAccess } from '../payload/access.ts'
 import { auditCollectionChange, auditCollectionDelete } from '../payload/audit.ts'
 import { toPayloadField } from '../payload/fields.ts'
 import { CMS_USERS } from './cms-users.ts'
+import { guardJournalPostPublication } from './journal-posts.ts'
 import { MEDIA } from './media.ts'
 import { guardServiceNarrativeDelete, guardServiceNarrativeUnpublish } from './service-narrative.ts'
 
@@ -37,11 +43,24 @@ function hooksFor(collection: ContentCollection): NonNullable<CollectionConfig['
     },
   ]
 
+  /**
+   * The per-collection publication guards, attached by slug.
+   *
+   * `service_narrative` may not be unpublished while a guest has a future booking against the treatment it
+   * describes (W-SYS-08); `journal_posts` may not be *published* without an author byline, a reviewer byline
+   * and a date, or with copy the banned-claims lexicon refuses (W-SITE-07). Both run after the status gate,
+   * which can refuse the whole save on authorisation grounds — an editor told "you may not publish" and then
+   * told which field is missing has been told two things, and the first is the one that matters.
+   */
+  const publicationGuards: NonNullable<CollectionConfig['hooks']>['beforeChange'] =
+    collection.slug === SERVICE_NARRATIVE.slug
+      ? [guardServiceNarrativeUnpublish]
+      : collection.slug === JOURNAL_POSTS.slug
+        ? [guardJournalPostPublication]
+        : []
+
   return {
-    beforeChange:
-      collection.slug === SERVICE_NARRATIVE.slug
-        ? [...statusGate, guardServiceNarrativeUnpublish]
-        : statusGate,
+    beforeChange: [...statusGate, ...(publicationGuards ?? [])],
     ...(collection.slug === SERVICE_NARRATIVE.slug
       ? { beforeDelete: [guardServiceNarrativeDelete] }
       : {}),

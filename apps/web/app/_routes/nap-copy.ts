@@ -14,6 +14,11 @@ import type { NapBlockCopy } from '@berelax/ui/patterns'
  *
  * `dayNames` is index 0 = Sunday, matching `premises_hours.day_of_week`. Not the reader's week start: a list
  * beginning on Monday shifts the whole schedule by a day, and the symptom looks like a data problem.
+ *
+ * It was `app/_dev/nap-copy.ts` until W-SITE-07 and moved here unchanged. The kitchen sink was the only
+ * surface rendering the block, which made `_dev` the right home for one unit; `/contact` and `/spa` are the
+ * two routes docs/09 §4 actually names for it, and a public page importing its labels out of a folder called
+ * `_dev` reads as a development shortcut rather than as the shared copy it is.
  */
 export const NAP_COPY_EN: NapBlockCopy = {
   addressHeading: 'Where we are',

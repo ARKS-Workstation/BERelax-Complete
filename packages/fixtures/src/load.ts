@@ -34,6 +34,7 @@ import {
   seedCatalogue,
   seedPremises,
   seedSettingDefaults,
+  seedTherapistRoster,
 } from '@berelax/db'
 import {
   FIXTURE_CLOSE,
@@ -189,13 +190,43 @@ const businessDayLoader: Loader = {
   },
 }
 
+/**
+ * The nineteen therapist employment records — the real roster's headcount, from docs/13 §5.
+ *
+ * Here rather than in migration 0050, and that is B-AVAIL-04's decision kept rather than reversed: an
+ * employee row is an employment record, and nineteen of them in every database that has ever had the
+ * migration applied is a fabricated person who can be rostered, paid and reported on. A seed is opt-in
+ * and a migration is not. B-AVAIL-04 deferred the roster to P-HR for exactly this reason — "P-HR's
+ * import would then be the second source for the same nineteen people" — and P-HR-01 is the unit that
+ * owns the employment record, so this is where it lands.
+ *
+ * After `premises` for the ordering `pnpm seed` prints, and because every date comparison against these
+ * rows is against a trading date. Nothing here depends on the fixture salon: `salon` is unused, as it is
+ * in three of the four loaders above.
+ */
+const therapistRosterLoader: Loader = {
+  name: 'therapists',
+  after: ['premises'],
+  async load(sql, salon) {
+    void salon
+    const result = await seedTherapistRoster(sql)
+    return result.employeesWritten + result.skillsWritten
+  },
+}
+
 function shift(date: string, offsetDays: number) {
   const value = new Date(`${date}T00:00:00Z`)
   value.setUTCDate(value.getUTCDate() + offsetDays)
   return localDate(value.toISOString().slice(0, 10))
 }
 
-const LOADERS: Loader[] = [premisesLoader, catalogueLoader, settingsLoader, businessDayLoader]
+const LOADERS: Loader[] = [
+  premisesLoader,
+  catalogueLoader,
+  settingsLoader,
+  businessDayLoader,
+  therapistRosterLoader,
+]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */
 export function registerLoader(loader: Loader): void {

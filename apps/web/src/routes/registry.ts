@@ -123,6 +123,25 @@ export const ROUTES = [
       'does not change teaches a crawler to ignore the hint.',
   },
   {
+    id: 'about',
+    path: '/about',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'yearly',
+    why:
+      'docs/09 §1s "trust, and the pages an acquirer requires". The one question it answers that no other ' +
+      'page does is the entity question docs/09 §"The brand collision" raises: an international ' +
+      'airport-spa chain trades under a similar short name and has an outlet in this city, so a reader ' +
+      'and an assistant both need somewhere that says which business this is, by full name and address. ' +
+      'ISR rather than static, which is what docs/09 §1 lists it as: the answers are composed from the ' +
+      'premises row, the legal entity and the size of the catalogue, and an editorial body from the CMS ' +
+      '`pages` collection renders above them when one is published. Yearly: an about page changes when ' +
+      'the business does.',
+  },
+  {
     id: 'facts',
     path: '/api/facts',
     kind: 'handler',
@@ -184,6 +203,82 @@ export const ROUTES = [
     why:
       'B-LIFE-02s code request. Locale-neutral on purpose — the locale of the message is a field in ' +
       'the request body — and exempt from the proxy, because a 301 turns its POST into a GET.',
+  },
+  {
+    id: 'contact',
+    path: '/contact',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
+    why:
+      'The second of the three visible surfaces docs/09 §4 says the premises row drives ("Footer NAP ' +
+      'block, /contact, /spa, map embed, directions link"), and W-SITE-02 deferred it here by name. Every ' +
+      'number, address line and opening time is the rows; no WhatsApp number appears at all, because ' +
+      'Y1-nap has not said which of two candidates is the business (factsSchema types the unconfirmed ' +
+      'branch with no digits). ISR because it reads that row: a corrected telephone number reaches it by ' +
+      'revalidation rather than by a deploy, which is the whole reason W-SITE-02 left this route for the ' +
+      'first ISR page that renders NAP.',
+  },
+  {
+    id: 'faq',
+    path: '/faq',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
+    why:
+      'docs/09 §1: "Feeds both FAQPage schema and the on-page accordion." The page and the schema block ' +
+      'are built from ONE read of `faq_entries` — the same array to the body and to `pageGraph({ faq })` — ' +
+      'which is what makes "the page and the schema derive from the same rows" a property rather than a ' +
+      'comparison. W-SITE-03 built the FAQPage node and deferred it to "the unit that adds /faq" because ' +
+      'there was no Payload read path on a rendered route; src/cms/read.ts is that path. ISR: the entries ' +
+      'are CMS rows, so publishing one revalidates this page.',
+  },
+  {
+    id: 'hero-demo',
+    path: '/hero-demo',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-07s hero: the LCP-safe poster and the attach island. A development surface like the ' +
+      'kitchen sink, so noindex and in no sitemap \u2014 and in the registry anyway, because it is a route ' +
+      'and a route the registry does not know about is the failure this file exists to prevent. In both ' +
+      'locales because two of the units criteria are "in both themes and both directions", and the ' +
+      'direction axis is the locale: the pause control sits at the bottom INLINE-END, which is a claim ' +
+      'that is only false in one direction, and a mirrored English document would have passed it. A ' +
+      'route of its own rather than a section of the kitchen sink because the ban on entrance animation ' +
+      'is a claim about everything above the fold at first paint, and the kitchen sinks condensing ' +
+      'header is a scroll-driven animation on an above-the-fold element. Dynamic because the page reads ' +
+      'the committed photographs bytes to compute its content address, and a prerendered copy would bake ' +
+      'the address of whichever photograph was there at build time.',
+  },
+  {
+    id: 'journal',
+    path: '/journal',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'weekly',
+    why:
+      'The informational half of docs/09 §1s topic clusters. It holds no posts: a post publishes only with ' +
+      'an author byline, a reviewer byline and a date, and this build invents none of the three, so the ' +
+      'index states that rather than listing copy nobody signed. Indexable and in the sitemap all the ' +
+      'same, for the reason /treatments is: the flag is a policy about the route, not a count of todays ' +
+      'rows, and a noindex hub is one somebody has to remember to flip. `/journal/[slug]` is deliberately ' +
+      'absent — a dynamic document needs sampleParams that resolve to a 200, and no post can resolve to ' +
+      'one yet; the manifest NOTE records what would unblock it. Weekly, because that is what a journal ' +
+      'claims when it has posts, and claiming less would have to be corrected the day one lands.',
   },
   {
     id: 'kitchen-sink',
@@ -303,6 +398,25 @@ export const ROUTES = [
       'site caches on every visit.',
   },
   {
+    id: 'content-revalidate',
+    path: '/settings/content/revalidate',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-07s publish loop, and the sibling of /settings/catalogue/revalidate: the POST that ' +
+      'invalidates the cached copies of the CMS-and-premises routes after an FAQ entry, a page, a post or ' +
+      'the premises row changes. It exists for the same reason that one does — those pages are prerendered ' +
+      'from the database and `revalidatePath` only works inside the Next process — and it is separate ' +
+      'rather than merged because the two answer different questions: a price change moves the catalogue ' +
+      'pages and an FAQ entry moves this set, and one endpoint that invalidated both on every call would ' +
+      'rebuild eighteen documents to publish one answer. POST only, so a crawler cannot fire it; inside ' +
+      'the (admin) group, so the /settings noindex prefix covers it.',
+  },
+  {
     id: 'google-connect',
     path: '/settings/integrations/google/connect',
     kind: 'handler',
@@ -385,6 +499,23 @@ export const ROUTES = [
       'route. This surface is English-only on purpose and is screenshotted at 3 viewports x 2 themes by ' +
       'apps/web/src/messages-inbox.itest.ts. Covered by the /settings noindex prefix, like the two ' +
       'Google routes beside it; dynamic because it reads the message rows on every request.',
+  },
+  {
+    id: 'spa',
+    path: '/spa',
+    kind: 'document',
+    rendering: 'isr',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'monthly',
+    why:
+      'docs/09 §1: "The place: rooms, arrival, facilities, address, hours, parking." The third visible ' +
+      'surface of the premises row (docs/09 §4) and the one W-SITE-02 named when it deferred /spa to this ' +
+      'unit. Everything on it is the row or a stated absence: there is no column for public transport or ' +
+      'landmarks although docs/09 §4 lists both, and the room inventory on record is the provisional ' +
+      'five-room stub (Y8-rooms), so neither is published as fact. ISR for the same reason /contact is — ' +
+      'it reads the row, and a corrected opening time reaches it by revalidation.',
   },
   {
     id: 'treatments',

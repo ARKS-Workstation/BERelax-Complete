@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { testPort } from '@berelax/harness/ports'
 import { DARK_PALETTE, LIGHT_PALETTE } from '@berelax/ui'
 import { type Browser, chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -23,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * them saw a server that was not its own and the other could not bind. The range avoids the ephemeral
  * range Linux allocates from, so nothing else is handing this port out while the test holds it.
  */
-const PORT = 3200 + Math.floor(Math.random() * 600)
+const PORT = testPort('shell')
 const BASE = `http://127.0.0.1:${PORT}`
 const APP_DIR = new URL('..', import.meta.url).pathname
 

@@ -1751,7 +1751,7 @@ units:
       appointment. Cancellation split by actor, no-show reachable only after start, and the cancellation
       window as a provisional setting that flags rather than charges.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-07
@@ -1776,11 +1776,160 @@ units:
       business_day_id'
     - 'Cancelling a multi-appointment booking cancels every appointment in it or none: a forced failure
       on the second appointment leaves both in their original state (couples booking fixture)'
+    - 'NOTE: migration 0049_reschedule.sql and SCHEMA_VERSION is 49 (41 and 47 stay unused; renumbering
+      to close a gap is how two branches apply the same number to different SQL). It adds three columns to
+      `appointment` and nothing else. `rescheduled_from_id` is on the SUCCESSOR, not the predecessor,
+      because B-LIFE-01 already decided the shape of a reschedule: `rescheduled` is TERMINAL and its repeat
+      is refused, "the appointment that still exists is the SUCCESSOR" - so a reschedule is not an UPDATE of
+      `period` but the old row moving to `rescheduled` (which makes the GENERATED `holds_resources` false
+      and releases the therapist and the room in that one statement) and a new row acquiring the new period.
+      On the successor it is part of the INSERT, so no superseded row is ever momentarily pointing at
+      nothing, and a partial UNIQUE index on it is the DATABASE''s half of `repeat: refused` - one
+      predecessor, at most one successor, refused by name even if a caller reached past the transition
+      table. ON DELETE is NO ACTION deliberately: CASCADE would delete the LIVE appointment when a
+      superseded one is removed and SET NULL would erase the link, while NO ACTION is checked at end of
+      statement so `delete from booking` (which cascades to both rows at once) still works. The other two
+      are `late_cancellation` and `late_cancellation_window_hours`, constrained WHOLE-OR-NOTHING in 0046''s
+      `attribution_is_whole` shape: the setting is PROVISIONAL and changeable, so a bare boolean would be a
+      flag nobody can account for ("late by whose figure?") on precisely the rows a future fee policy will
+      read. There is deliberately NO fee column - see the next NOTE.'
+    - 'NOTE: "creates zero payment, invoice or fee rows" is satisfied and the assertion is stronger than
+      the wording, because there is no `payment` table and no `fee` table in this schema at all. The pair
+      suite asserts DELTAS of zero across `invoice`, `invoice_line`, `journal_entry` and `journal_line`
+      (counted in SQL, never totals - the suite is sequential against one database) AND asserts that
+      `information_schema.tables` holds no table whose name matches payment or fee. `cancellationCharge` in
+      packages/core/src/lifecycle/cancellation-policy.ts answers zero fils for every input and a core test
+      sweeps thirty notice/window combinations to say so, with gate 56u changing the zero to 5000 and
+      watching that sweep fail. The amount is carried into the audit row and the outbox payload as
+      `charge_fils: 0` rather than omitted, because an absent amount reads as "not considered" and
+      Y9-windows is exactly the question somebody will later ask. A fee that charged anything today would be
+      inventing a capability the business does not have (brief rule 15): it takes no card payments.'
+    - 'NOTE: two files in packages/core rather than the one this list names, and five files in all beyond
+      it. cancellation-policy.ts holds the rules that need an INSTANT - the window classification, the
+      charge that is zero, and the NO_SHOW clock guard B-LIFE-01 deferred here - and reschedule-policy.ts
+      holds the two that are about the SUCCESSOR: the trading-date re-resolution and the status a successor
+      is born in. Both are pure and take the instant as an ARGUMENT, which is what makes the frozen-clock
+      pair ("refused one minute before the start, accepted one minute after") a test that reads the same at
+      03:00 as at noon; `pnpm purity` forbids core from reading a clock. The other three files are
+      packages/db/src/settings/cancellation.ts (the reader, which returns the stored value UNNORMALISED -
+      `Number(null)` is 0 and 0 is a LEGAL window meaning "flag nothing", so coercing on the way across
+      would make corruption indistinguishable from a deliberate zero),
+      packages/db/src/repositories/cancel.test.ts (the fail-closed half that needs no database) and
+      packages/fixtures/src/appointment-reschedule.itest.ts, the 26-case pair suite - the only place the
+      five injected seams can be proved to fit, which they are with `satisfies` and not a cast.'
+    - 'NOTE: three rules are INJECTED into the reschedule and two into the cancellation, for the reason
+      createBooking takes its slot re-check: packages/db may never import packages/core. `decide`
+      (decideAppointmentTransition), `recheck` (recheckShapeAssignment - B-AVAIL-06''s own, so the rule that
+      decided the slot was offerable is the rule that decides it still is) and `resolveTradingDate`
+      (rescheduleTradingDate), plus `classify` (cancellationVerdictFor) and `clock` (noShowVerdictFor). Each
+      missing dependency is a NAMED refusal and not a permissive default - slot_not_revalidated,
+      trading_date_not_resolved, cancellation_not_classified, no_show_clock_not_checked - and gates 56n-56q
+      flip each guard to false and watch the unit suites fail. The write path is B-LIFE-01''s
+      transitionAppointment, called once per appointment row and never forked: there is no second transition
+      table and no second decision function here. It gained ONE optional field, `extra`, merged into the
+      audit row''s `after` and the outbox payload with the canonical keys spread LAST so a caller cannot
+      overwrite `toStatus`. Without it the reschedule would have had to publish a SECOND
+      appointment.rescheduled event to carry old_period, new_period and the step keys - two rows for one
+      business fact, with a key that collides with the one transitionAppointment derives.'
+    - 'NOTE: the reschedule moves the DELIVERY, not the row. A Four Hands is two appointment rows over one
+      client sharing a delivery_id (0038) and `appointment_delivery_is_coherent` exists because "a
+      reschedule that moved one row of a Four Hands would silently split it into two deliveries". Gate 56k
+      does exactly that and found something worth recording: the constraint CANNOT catch it. Moving one row
+      into a NEW delivery id leaves one resource-holding row on each side and each side is individually
+      coherent, so the split is invisible to the database and the pair suite''s four-hands case is the only
+      thing standing there. Rows of the delivery that hold NOTHING - a half-cancelled Four Hands - are left
+      exactly as they are, which is the same reading the trigger itself takes ("only the rows that still
+      hold their resources"). The room locks are B-AVAIL-06''s `lockRooms`, imported rather than copied and
+      now exported for that: the lock set is the union of the room the delivery LEAVES and the room it
+      ARRIVES in, sorted at the call site, and gate 56h removes the `.sort()` and watches twenty iterations
+      of an A-to-B against a B-to-A swap raise "deadlock detected".'
+    - 'NOTE: the midnight criterion is satisfied, and the mutant that proves it had to be chosen carefully.
+      Trading runs 11:00-02:00 Dubai, which is 07:00-22:00 UTC - so every instant of a trading day currently
+      shares its UTC date with its trading date, and `toISOString().slice(0, 10)` is ACCIDENTALLY correct. It
+      is correct by coincidence of the configured hours and would break silently on an override closing at
+      04:00, which is why the date is resolved through resolveTradingDate and never truncated. Gate 56l
+      therefore mutates to arithmetic on the LOCAL calendar date (the version somebody writes when the
+      resolver looks like ceremony), under which 00:30 files itself under the next trading date; the pair
+      suite asserts the stored `appointment.trading_date`, which IS the foreign key into `business_day`
+      (0024) that the rota, the cash-up and the commission are all cut on. The candidate `business_day` rows
+      are read inside the transaction and bracketed by calendar date plus or minus one - a SUPERSET, because
+      choosing the right row is the rule and the rule is core''s.'
+    - 'NOTE: DEFERRED, to B-MSG-03. "a test asserts the key list is non-empty and matches the steps actually
+      in the table" cannot be satisfied as written, because `scheduled_step` DOES NOT EXIST: B-MSG-03 owns
+      it, is `status: todo`, and depends on this unit. What is built instead is the seam and the honest
+      assertion. `readScheduledStepKeys` checks for the table AND for the two columns it needs before it
+      selects anything - a statement naming a missing relation fails at PARSE time and would abort the
+      transaction it arrived in, turning "the reminders unit is not built" into "the reschedule is broken" -
+      and the event carries `scheduled_step_invalidation_keys: []` beside `scheduled_step_table: absent`, so
+      a reader can tell "no reminders were attached" from "nothing in this build schedules reminders yet".
+      The pair suite asserts the key list against the rows actually present (none), asserts
+      `to_regclass(''public.scheduled_step'') is null` so the empty list is EXPLAINED rather than assumed,
+      and then proves the payload carries what the reader FOUND by injecting a reader that returns two keys -
+      which is the assertion that stays meaningful the day B-MSG-03 lands. No step row was faked to make the
+      criterion pass. The reader is an injectable dep whose default is the real one, which is what makes
+      that control possible.'
+    - 'NOTE: satisfied differently in two places. (1) The outbox payload carries `old_period` and
+      `new_period` as OBJECTS - {starts_at, ends_at} in ISO - rather than as the `[a,b)` range literal a
+      `tstzrange` renders to, because a caller reading a period out of a payload must not have to parse a
+      range (B-AVAIL-07''s "no field is a pre-rendered string"). Their KEYS are snake_case where the
+      transition''s own keys are camelCase, and that is deliberate: the same object is written into
+      `audit_event.after`, which has spelled its facts in snake_case since 0005, so a payload carrying both
+      reads as two contributors - which is what it is. (2) "under the same exclusion and capacity
+      constraints" is satisfied by `set constraints all immediate` after the last insert, exactly as
+      createBooking does it: the two DEFERRED triggers fire inside the transaction so a capacity or
+      coherence refusal arrives as a named error where the context is, and `bookingError` - B-AVAIL-06''s
+      translator, reused rather than rewritten - turns 23P01, ZB001, ZB004 and the trading-date foreign key
+      into the same refusal names a booking uses, because they are the same facts.'
+    - 'NOTE: the all-or-none claim is proved with TWO real forced failures and no mock. (1) The second
+      appointment of a couples booking is driven to `completed` by real transitions, and `completed` is
+      terminal - so the decider refuses the second cancellation after the first has already been written
+      inside the same transaction. (2) The outbox key the second cancellation must claim is inserted first,
+      so `publishEvent` answers null and transitionAppointment refuses with `event_not_enqueued`. Both assert
+      BOTH rows are byte-identical afterwards via `to_jsonb(appointment.*)::text`, which is the comparison
+      that catches `updated_at`: the first row really was moved and its timestamp rewritten inside the
+      transaction, so anything short of a rollback shows up. The second case has a control - with the key
+      released the same call commits - so the snapshots are about the key and not about a booking that could
+      never be cancelled. There is no compensating code anywhere in cancelBooking: the transaction is the
+      mechanism, which is the only version of all-or-none that survives a failure nobody predicted. A
+      booking holding a `completed` appointment therefore cannot be cancelled with one call at all, and that
+      is the conservative reading on purpose - the delivered half has been paid for.'
+    - 'NOTE: one defect found in this unit''s own first draft, recorded because the test that catches it is
+      now the reason it cannot come back. `cancelBooking` took EVERY appointment row of the booking, and a
+      reschedule leaves the SUPERSEDED row in the same booking (the successor copies `booking_id`, because
+      the booking is the commercial record and a move is not a second sale). `rescheduled` is terminal, so
+      the superseded row refused the cancellation with `illegal_transition` - and the customer''s LIVE
+      appointment was then permanently uncancellable, refused for ever by an earlier version of itself. The
+      rows taken are now the ones that still HOLD their resources plus any already in the status being asked
+      for: the first half skips superseded, cancelled and no-show rows, and the second keeps a double-tapped
+      Cancel an idempotent no-op instead of "nothing to cancel". A booking with nothing cancellable left is
+      refused as `booking_has_nothing_to_cancel`, which is a different fact from `booking_not_found` and
+      sends the reader to a different place. Gate 56r turns the predicate into `true or ...` and watches the
+      pair suite fail.'
+    - 'NOTE: three things found wrong or worth recording in existing code, none of them changed here beyond
+      one two-line export. (1) `appointment_delivery_is_coherent` cannot detect a delivery split into two
+      delivery ids - see the four-hands NOTE above. It is not a defect in the constraint (each side really
+      is coherent) but its comment claims it stops "a reschedule that moved one row of a Four Hands
+      splitting it into two deliveries", and it stops only the half that keeps the id. (2)
+      `readCommittedAppointments` narrows on `trading_date`, so the re-check inside a reschedule cannot see
+      an appointment on the PREVIOUS trading date whose room interval reaches past midnight into the new
+      period. B-AVAIL-07 hit the same thing from the read side and solved it with a period-keyed query
+      padded by four hours; the booking transaction has the same gap, and the backstops are the same two
+      constraints, both period-keyed, so the outcome is a named `slot_taken` from the INSERT rather than a
+      double booking. Left alone because narrowing it is B-AVAIL-04''s reader and a change there moves the
+      booking transaction too. (3) `recheckShapeAssignment` checks room PLACES only - `assignShape` never
+      looks at therapist overlap - so "the slot is still deliverable" is half an answer and the exclusion
+      constraint is the other half. That is sound and it was written down nowhere: this unit''s pair suite
+      now asserts both halves separately, with a case per layer.'
     files:
     - packages/db/src/repositories/reschedule.ts
     - packages/db/src/repositories/cancel.ts
     - packages/db/src/repositories/reschedule.test.ts
+    - packages/db/src/repositories/cancel.test.ts
     - packages/core/src/lifecycle/cancellation-policy.ts
+    - packages/core/src/lifecycle/reschedule-policy.ts
+    - packages/db/src/settings/cancellation.ts
+    - packages/fixtures/src/appointment-reschedule.itest.ts
+    - packages/db/migrations/0049_reschedule.sql
   - id: B-MSG-01
     order: 32
     title: Channel-shaped template model, encoding, segment count and cost
@@ -4661,7 +4810,7 @@ units:
       and identity-document numbers under field-level envelope encryption with every read audited and a
       field-level RBAC policy.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-AVAIL-01
@@ -4694,13 +4843,167 @@ units:
       is rejected by the database in an integration test
     - 19 therapists seed with gender, languages and a style skill (Asian/Arabic split evenly), and the Unconfirmed
       Assumptions query lists the unnamed-therapist assumption as provisional
+    - 'NOTE: the concrete names this list left open. The migration is
+      packages/db/migrations/0050_employee.sql and SCHEMA_VERSION is 50 (49 is held by a unit in flight;
+      41 and 47 stay unused, because renumbering to close a gap is how two branches apply one number to
+      different SQL). It is expand-only over 0030: ALTERs on employee and employee_document, two new
+      tables (employee_bank_detail, employee_language), two new enums (employee_contract_type,
+      staff_language), three new triggers and no drop, rename or retype. `pnpm pii`
+      (scripts/check-staff-pii.mjs) is a new gate in verify, in CI and in case 29''s required list.'
+    - 'NOTE: this unit does NOT seed a gender or a language for the nineteen therapists, which is a
+      departure from this entry''s own acceptance line and is the position OPEN-QUESTIONS Y8-staff
+      already records ("19 unnamed therapists, style skills split evenly" - genders and languages are in
+      the QUESTION, not in the current answer). 0030 left employee.gender nullable in so many words
+      because "a NOT NULL here would have this migration invent nineteen people''s genders", and seeding
+      nineteen genders does exactly what that migration refused to do. It is also not inert: gender is a
+      hard constraint on assignment (B-AVAIL-05, strict by default), so an invented one would have the
+      booking engine decide who may treat whom from a fact the build made up. A language is the same
+      class of claim with nothing to derive it from. The style SKILLS are seeded, provisionally, because
+      the published menu carries both styles so the roster must collectively hold both, and because
+      employee_skill carries the provenance pair 0030 built for exactly this - so every seeded skill
+      appears in the Unconfirmed Assumptions panel naming Y8-staff, which employee.gender has no
+      per-column way to do. Deferred to Y8-staff, and to whichever unit imports the HR file.'
+    - 'NOTE: the roster is seeded by `pnpm seed` (packages/db/src/seed/therapists.ts, registered as a
+      loader in packages/fixtures/src/load.ts) and NOT by the migration. B-AVAIL-04 refused to put
+      nineteen employment records in every database that has the schema, and that decision is kept
+      rather than reversed: a fabricated person who can be rostered, paid and reported on is brief rule
+      15 in its worst form, and a seed is opt-in where a migration is not. What it writes is the
+      headcount and nothing else - display_name NULL, photo_consent false, gender NULL, contract_type
+      NULL, every wage column NULL, is_provisional true against Y8-staff.'
+    - 'NOTE: the AAD criterion was already satisfied by F08''s binding, so this unit adds the DATABASE
+      half rather than a second scheme. employee_bank_detail gets 0043''s ZK002 technique verbatim -
+      to_jsonb(new) against to_jsonb(old), so a column a later migration adds is covered the day it
+      appears - as StaffSealedRowImmutable (ZS002) and StaffRewrapDidNotRewrap (ZS003), in their own
+      SQLSTATE class so an operator reading a log knows which key and which runbook section they are
+      looking at. employee_document gets a NARROWER rule (ZS004 StaffSealedRowRebound, ZS005
+      StaffSealedNumberCannotBeCleared): the blanket comparison cannot be used there, because 0030 gave
+      that table updated_at and a set_updated_at trigger, so every ordinary UPDATE changes a column
+      outside any sensible mutable set. That difference is why the row-swap test runs against
+      employee_document - the database permits the swap and the AAD refuses the READ, which is the
+      property the criterion asks for - while the bank table refuses the swap outright. Both are
+      asserted, with the pre-swap read as the control.'
+    - 'NOTE: rotation. These columns CANNOT be rotated by scripts/rotate-kek.mjs, and the reason is a
+      decision H-HARD-03 already took rather than an omission. Three mechanical facts: its table list is
+      a literal union of the two clinical tables, every query in
+      packages/clinical/src/crypto/postgres-key-store.ts names customer_id, and its registry is
+      clinical.kek_version, which lives in the clinical schema precisely so it relocates with the store
+      (ADR 0010). And one design fact: widening one command to reach this estate would put two of the
+      three most sensitive keys in this system in one process, which that unit declined to do for the
+      Google key ("one function reaching both would put the two most sensitive keys in the system in the
+      same process for no reason"). So STAFF_PII_KEK is a third key with its own inventory entry, its own
+      runbook section, and rewrapStaffSecret as the per-row primitive - exactly the position
+      packages/google/src/rewrap.ts is in. What IS guaranteed is that the estate is rotatable: the five
+      sealed columns have the shape a rotation reads, the primitive returns only the two columns an
+      UPDATE may change, and ZS002/ZS003 hold that at the database. Deferred: a rotation command and a
+      staff_pii_kek_version registry (the ZS001 analogue), which belong together because retirement is
+      not a reachable state until a rotation creates it.'
+    - 'NOTE: three findings in existing code. (1) canReadFieldGroup in
+      packages/core/src/access/permissions.ts had no catalogue check, so a role with fieldGroups: ''all''
+      - the owner - answered TRUE for a field group nobody had declared, while can() has refused an
+      unrecognised permission string since F07. One policy, two halves, disagreeing exactly where it
+      matters, because the group nobody has declared is a field somebody has just added. Fixed, with the
+      wildcard role as the assertion and a gate that puts the hole back and requires the test to fail.
+      (2) redactForRole KEEPS an unmapped field. That is correct for the records it was written for and
+      wrong for this one, so the employment record is a CLOSED map in packages/core/src/hr/employee.ts
+      instead and the comment on redactForRole now states both defaults - changing it to match would
+      strip every ordinary column off every other record in the system. (3) A column-level REVOKE does
+      not subtract from a table-level grant: 0050 first carried `revoke select (number_ct, ...) on
+      employee_document from berelax_readonly` and it is a no-op, because 0009 grants that role select on
+      the whole table by default privileges. The statement is gone, the reason is written where it was,
+      and the itest asserts the privilege IS still there rather than claiming a protection nothing
+      applied.'
+    - 'NOTE: what the fils_nonneg criterion does and does not prove. Through the application driver a
+      decimal or float wage is refused by the DOMAIN''s base type - postgres.js sends a JS number as
+      text, and bigint''s input function raises 22P02 "invalid input syntax for type bigint" - and a
+      negative one by the domain''s own fils_nonneg_check (23514). Both are asserted by name. But an
+      UNQUOTED numeric literal typed straight into psql (`set basic_wage_fils = 1250.50`) is ROUNDED to
+      1251 by PostgreSQL''s numeric-to-bigint assignment cast before any constraint sees it, and nothing
+      in the database can refuse it: the cast happens first. The gate probe is therefore written the way
+      the driver writes it. The residual hole is a unit error, not a type error - 1250 AED entered as
+      1250 fils is accepted by every layer - and only a UI that states the unit can close it.'
+    - 'NOTE: deviations from this entry''s files list, both forced. (1) The repository is
+      packages/hr/src/employee-repository.ts and not packages/db/src/repositories/employee.ts, because
+      packages/db may not import @berelax/clinical: clinical already imports @berelax/db (its Postgres
+      key store writes an audit row), so the import closes a cycle that `pnpm boundaries` refuses by
+      name - checked with a probe module, not assumed. The alternative was a second AES-GCM
+      implementation inside packages/db, which is two chances to get the AAD wrong. packages/hr has
+      exactly the shape packages/google has: an estate with its own KEK, its own binding and its own
+      re-wrap, over SQL that never holds a key. The Drizzle mirrors stay in packages/db/src/schema (hr.ts
+      for the two new tables, staff.ts for the columns added to existing ones), because pnpm db:drift and
+      pnpm db:conventions read those directories and a mirror hidden elsewhere is a mirror neither gate
+      checks. (2) apps/web/app/(admin)/hr/employees/page.tsx is NOT built: an admin screen for this data
+      needs the session and role plumbing an authenticated admin route has, and none of this unit''s
+      acceptance criteria is about a page. Deferred to the unit that builds the HR section.'
+    - 'NOTE: the manager''s field groups were widened to employee.bank and employee.identity_documents
+      and deliberately NOT to employee.salary, although the acceptance line says only "owner/manager
+      allowed". The line is about bank and identity fields and both are granted. Pay stays with the owner
+      and the accountant, for two reasons: a wage is a term of employment the proprietor sets, and it
+      leaves manager as the one role holding employee:read WITHOUT employee.salary - so the field-level
+      projection drops a column for somebody rather than for nobody, and employee.itest.ts asserts it on
+      a real row. A field-level READ is authorised by the field GROUP alone and not by employee:read as
+      well, because the accountant holds employee.bank and no employee:read (F07: "Salary and bank are
+      needed to run payroll"), so a coarse route check on that path would refuse the role that runs
+      payroll the account it is paying into.'
+    - 'NOTE: what `pnpm verify` said, and the one failure that is not this unit''s. Every step passes
+      except `pnpm test:integration`, which fails on ONE test in the repeat-capture determinism family —
+      the "photographed twice is byte-identical" assertions. Run 1 failed
+      apps/web/src/messages-inbox.itest.ts at cell light-390; run 2 passed that file and failed
+      apps/web/src/breakpoint-preview.itest.ts at light-768. Both reproduce with NONE of this unit''s
+      changes present: a control database (berelax_phr01ctl) was built from every migration EXCEPT 0050,
+      with no therapist roster seeded, and each file fails there too — breakpoint-preview at light-390,
+      messages-inbox at light-390. Neither page reads `employee`, and a difference between two
+      consecutive captures of one page cannot come from a schema. The class is already known: the
+      comment on DETERMINISTIC_LAUNCH_ARGS in packages/harness/src/determinism.ts records that
+      `--disable-lcd-text` and `--disable-skia-runtime-opts` were added because these captures were not
+      byte-identical before them, and breakpoint-preview.itest.ts took 236s for 16 tests in run 2, which
+      is a heavily loaded machine. Reported rather than worked around, per brief rule 1. Everything else
+      in the run: lint, typecheck (both projects), boundaries, boundaries:test, purity, invisibles,
+      secrets, rotation, pii, deps, licences, container, palette, tokens, colours, cms, documents,
+      structured-data, chokepoint, layout, jobs, adr, progress:check, media, fixtures, fonts, critique,
+      a11y, touch-targets, coverage (155 files, 2996 tests, statements 93.65% against a floor of 88 and
+      core above its 95), and after the integration step db:migrate:dry, db:drift, db:conventions,
+      budgets and gates:test were not reached because the chain stops at the first failure — each was
+      run individually afterwards and passes: db:migrate:dry reports 0050_employee.sql ok and "all
+      applied", db:drift, db:conventions and budgets are clean, and the whole gates suite was run to
+      completion on its own — 795 PASS, 0 FAIL, exit 0, "All gates fire", including all 32 assertions of
+      the new 57 block and case 29 now requiring `pnpm pii`.'
+    - 'NOTE: one test in another unit''s file had to change, and it is the one this unit was always going
+      to break. apps/web/src/seo/structured-data.itest.ts asserted "no Person node, because no therapist
+      can pass the publishing guard" by checking that `employee` HAD NO `display_name` COLUMN, and said
+      so: "If the column ever appears, this fails and the therapist list in graph-input.ts has to stop
+      being empty." 0050 adds the column, the test failed, and the check worked exactly as written. The
+      conclusion did not change — the served HTML still contains no Person node — so what changed is the
+      REASON: the assertion is now that the guard exists (display_name, photo_consent, the GENERATED
+      is_publishable) and that no row passes it, with the employee row count as the control so an empty
+      table cannot satisfy it. The handover the old comment wrote down is preserved: the day a therapist
+      becomes publishable, that test fails and somebody has to wire the SEO layer''s read, which nothing
+      does today. graph-input.ts''s comment was corrected in the same change.'
     files:
-    - packages/db/migrations/*_hr_employee.sql
+    - packages/db/migrations/0050_employee.sql
     - packages/db/src/schema/hr.ts
-    - packages/db/src/repositories/employee.ts
+    - packages/db/src/schema/staff.ts
+    - packages/db/src/seed/therapists.ts
+    - packages/db/src/settings-store.ts
     - packages/core/src/hr/employee.ts
-    - apps/web/app/(admin)/hr/employees/page.tsx
-    - docs/adr/*-staff-field-level-encryption.md
+    - packages/core/src/hr/employee.test.ts
+    - packages/core/src/access/permissions.ts
+    - packages/hr/src/staff-secret.ts
+    - packages/hr/src/staff-secret.test.ts
+    - packages/hr/src/employee-repository.ts
+    - packages/hr/src/employee.itest.ts
+    - packages/hr/src/index.ts
+    - packages/hr/package.json
+    - packages/fixtures/src/load.ts
+    - scripts/check-staff-pii.mjs
+    - scripts/test-gates.mjs
+    - build/secret-inventory.json
+    - docs/runbooks/key-rotation.md
+    - docs/adr/0025-staff-field-level-encryption.md
+    - packages/config/src/env.ts
+    - packages/db/src/index.ts
+    - vitest.config.ts
+    - .github/workflows/ci.yml
+    - .env.example
   - id: P-HR-02
     order: 91
     title: Credential registry and the pure eligibility evaluator
@@ -7558,7 +7861,7 @@ units:
       <picture>, a <video> with no src and no poster, and a ~1.4KB island that attaches the source after
       LCP with the slow-connection gate, autoplay-refusal path and WCAG 2.2.2 pause control.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - W-SYS-04
@@ -7586,6 +7889,163 @@ units:
       blur exceeds 8px anywhere (computed-style assertions)
     - On the hero demo route no element above the fold has a running animation or computed opacity <1 at
       first paint, in both themes and both directions (entrance-animation ban)
+    - 'NOTE: files — three of the five paths in the list below could not be written as named, and each reason
+      is worth keeping. (1) packages/ui/src/media/hero-media.tsx: the hero composes `SlotPicture`, which
+      W-SYS-10 placed in apps/web/src/components/media/ as "the one component that is genuinely production
+      React", and packages/ui may not import an app. The alternatives were a second `<picture>` renderer —
+      which is exactly what W-SYS-10''s note forbids, because a second builder is a second answer — or moving
+      another unit''s component. So the composition lives beside the component it composes, at
+      apps/web/src/components/media/hero-media.tsx, and everything that is design-system rather than
+      application stays in packages/ui/src/media/. (2) attach-video.island.ts is a `.tsx`: an island is a
+      React client reference, which is what makes Next code-split it and what makes `build/budgets.json` able
+      to measure it at all — a plain `.ts` module would be bundled into whatever imported it and the budget
+      would measure nothing. Its pure half is attach-video.ts, DOM-free and in the root typecheck project,
+      which is what keeps the decision testable without a browser. (3) apps/web/app/(dev)/hero-demo/page.tsx
+      is two documents, apps/web/app/(en)/(dev)/hero-demo/page.tsx and apps/web/app/(ar)/ar/hero-demo/page.tsx
+      over a shared app/_dev/hero-demo.tsx: W-SITE-01''s registry requires a document in both locales, and the
+      capture matrix''s RTL cells call `samplePathFor(route, ''ar'')`, which THROWS for a route that declares
+      only English. Two of this unit''s criteria are "in both themes and both directions" anyway. (4)
+      tests/perf/hero-lcp.spec.ts: this repository has no tests/ directory (W-SYS-09 and W-SYS-10 both
+      recorded it); the file is apps/web/src/hero-lcp.itest.ts, port range 5800, 21 assertions.
+      pause-control.tsx is as declared.'
+    - 'NOTE: the hero demo is a route of its own, and W-SYS-04 deliberately did not take one. The difference
+      is what each unit has to prove. The motion system needed a page long enough to scroll and a reveal below
+      the fold, which the kitchen sink already had. This unit needs the opposite: an above-the-fold region
+      containing nothing but the hero, because two criteria are about what is above the fold at first paint
+      and one is about which element wins LCP — and the kitchen sink''s condensing header is a scroll-driven
+      animation on an above-the-fold element, so putting the hero there would have made the entrance-animation
+      ban a test of the header. The cost is paid deliberately and is real: one registry entry, two documents,
+      twelve more cells in route-spine.itest.ts''s capture matrix (84 rather than 72).'
+    - 'NOTE: the reduced-motion criterion is satisfied without a second `prefers-reduced-motion` anywhere, and
+      the mechanism is better than the obvious one rather than merely equal to it. The island reads the
+      COMPUTED value of `--dur-ambient` — 12s normally, 0s under the one authored override in
+      packages/ui/src/tokens/scale.ts — and treats zero as "ambient motion is not wanted here", which a
+      looping hero is by definition. `matchMedia(''(prefers-reduced-motion: reduce)'')` would have been a
+      second authored copy (`pnpm layout` fails on it, and gate 58g proves that with this unit''s own file as
+      the fixture), and it would also have been WRONG: the override is written
+      `:root:not([data-motion="full"])`, so a reader who has opted into full motion has the media query
+      matching and the tokens at full value — `matchMedia` would refuse that reader''s video while every other
+      duration on the page ran at full length. An unreadable token reads as reduced, which is the fail-safe
+      direction. The prefers-reduced-transparency half is this component''s own one-line media query,
+      declaring `--hero-video: 0`; the 8px blur maximum is NOT re-declared, because `--hero-control-blur:
+      var(--header-blur)` reads the number and the override motion/tokens.css already states once.'
+    - 'NOTE: W-SYS-04''s finding about MOTION_STORAGE_KEY is half discharged, and the other half is stated
+      rather than guessed. `berelax:motion` is no longer declared-and-never-read: the pause control writes
+      `paused` or `playing` to it and the island reads it before deciding, which is the criterion''s "its
+      state persists across reload". What is NOT done is applying it in the document bootstrap beside the
+      theme''s, and the reason is that the two values mean different things. `data-motion="full"` is the
+      docs/08 §9 Motion SETTING — an opt-in that un-zeroes every duration, distance and stagger on the site
+      for a reader whose operating system asks for less — and a reader who tapped play on one hero has not
+      asked for that. Writing the pause choice into that attribute would make one tap re-enable the whole
+      motion system. Deferred, with its meaning, to the unit that ships the Motion setting.'
+    - 'NOTE: measured — the island is 1,799 bytes gzip (4,160 raw) against the 2,048-byte budget, on the one
+      chunk Turbopack writes for it alone — static/chunks/1eiri_e1iogkm.js, the SAME defining chunk for both
+      locale routes, which is why the measurement is not doubled (the shared chunk beside it holds the theme
+      and direction providers). docs/08 §6 budgets "a ~1.4KB island"; 249 bytes of headroom is tight on purpose, because the thing being prevented
+      is a library arriving in an island whose whole justification is that the hero costs ~0ms LCP and a
+      kilobyte or two. The entry is `hero-attach-island` in build/budgets.json, `kind: client-js`, `scope:
+      modules` — the same narrow reading as the motion islands — and its both-directions half is
+      `[missing-client-module]`: a budget over a module the build does not contain measures zero bytes and
+      passes for ever, which matters here because this island is a static import from a server component and
+      "it stopped being a client module" is a one-word change away. Gate 58h lowers the budget and asserts the
+      failure carries the measured bytes; 58i proves the vacuity guard; 58j asserts the number is the
+      acceptance''s 2048 and that the budget is measured rather than skipped.'
+    - 'NOTE: SCOPED — one thing in criterion 4 is not proved here, and the three reasons are measured rather
+      than assumed. (a) There is no footage: `Y12-hero-video`, twenty-five committed files and not one frame
+      of video, so no master has been uploaded and no rendition exists in any bucket. (b) There is no ffmpeg
+      in this container, which W-SYS-06 recorded. (c) Playwright''s Chromium is built without proprietary
+      codecs: `canPlayType(''video/mp4; codecs="avc1.640028"'')` and the `hvc1` equivalent both return the
+      empty string, so BOTH of the pipeline''s codecs are unplayable in the browser this suite runs in. What
+      is therefore driven end to end is the island, not the codec: the test rewrites the hero''s INPUT — the
+      `data-hero-sources` attribute — to one source this browser can decode, a VP8 WebM the browser itself
+      records from a canvas (no committed binary, no encoder), served at the pipeline''s own rendition URL.
+      Everything after that is real: the island''s timing, its `matchMedia` crop choice, a real request, a
+      real decode, a real `playing` event, the real 320ms transition, the real control and the real stored
+      choice. The four sources the page really declares are asserted separately against `heroVideoSources()`.
+      What is deferred is one real rendition decoding in a browser, which needs footage, an encoder and a
+      build of Chromium with the codec — and which probe.ts already checks at the byte level on the writing
+      side.'
+    - 'NOTE: the demo''s video reference is derived and marked, and nothing about it is invented. The
+      poster''s half is real — `assets/media/photos/hero-team.jpg`, content-addressed on its own bytes by the
+      same function the job uses, so the URLs the page renders are the URLs the pipeline produces. The
+      video''s half cannot be real, because there is no master to hash; a plausible sixteen-hex address would
+      be exactly what CONTRIBUTING-AGENT-BRIEF §15 forbids. So both fields are computed from the photograph''s
+      own address under a domain separator naming `Y12-hero-video`, the route PRINTS a paragraph saying the
+      four URLs are what the pipeline will serve and that they answer 404 today, and a test asserts that
+      paragraph is still on the page. The visible consequence is the honest one: the island attaches, the
+      requests 404, and the still remains — which is what a deploy with an unbuilt rendition does.'
+    - 'NOTE: added beyond the list — two rules in `pnpm media`, each with a known-bad fixture and a control.
+      `[hero-video-must-not-declare-a-poster]` refuses a `poster` attribute on any `<video>` and a
+      `video.poster =` assignment, because that one attribute undoes the whole technique: the browser fetches
+      the photograph a second time, through the element that was supposed to have no resource, and the page
+      looks identical while LCP moves. `[video-source-type-must-come-from-the-ladder]` refuses a literal
+      `codecs="avc1…"` anywhere but packages/media/src/video/ladder.ts, which is the module the encoder''s
+      argv comes from — a second copy drifts by one character into a hero that silently stays a photograph
+      on one browser, and nothing else in this repository checks that string. Its second half, the
+      hand-spelled `…-video-desktop-h264.mp4`, is scoped to apps/ and the scoping was forced by a gate:
+      case 46i''s control asserts that `pnpm media` ACCEPTS a content-addressed rendition URL, because that
+      URL is what a page is supposed to hold and it is what proves [no-private-origin-url] is not refusing
+      every media URL. A repository-wide ban contradicted it. Inside packages/media the shape is already
+      guarded from the other side, by videoRenditionPath() refusing anything off
+      VIDEO_RENDITION_PATH_PATTERN. Two shipped files
+      of other units were touched, both additively: `.be-hero__control` joins the `:where(...)` list in
+      packages/ui/src/layout/styles.tsx, which is the system''s one focus ring and its documented extension
+      point, and `pause`/`play` join the closed glyph set in packages/ui/src/icon.tsx, which is the only
+      module allowed to import Lucide.'
+    - 'NOTE: five things found by a failing assertion rather than by reasoning, all of them in this unit''s
+      own code or its test, and each one silent. (1) Two JSX `<link rel="preload">` elements produce FOUR
+      links in the head: React 19 hoists the element AND registers a float resource, keyed differently, one
+      pair per crop. Nothing downloads twice and nothing looks wrong — the criterion "exactly two" is simply
+      false. `preload()` from react-dom emits one per call, and writes a responsive preload with no `href`
+      attribute, which is the form the HTML specification allows when `imagesrcset` is present. (2)
+      `naturalWidth` is NOT the rung''s width: a candidate chosen from a `w` descriptor carries a current
+      pixel density of candidate/used-size and the intrinsic dimensions are corrected by it, so the 414 rung
+      at 390 CSS px reports 390. Both dimensions are corrected by the same factor, which is why the
+      criterion''s RATIO is the assertable thing. (3) The cross-fade did not run: a transition needs two
+      computed values, so an `attaching` state and a `playing` state landing in one task never produce one — a
+      cached rendition on a fast connection is exactly that case. The island now forces the transparent frame
+      to be computed before it attaches. (4) The fade is declared on the `playing`/`paused` states rather than
+      on the element, because fading an empty video OUT over 320ms means the first frame arrives mid-fade and
+      rises from 0.8 rather than from 0 — measured at 0.948 before the fix. (5) A `MutationObserver` on
+      `document.documentElement` throws in an init script, because the document element does not exist yet —
+      and the throw took the rest of the observer script with it, leaving the poster watch registered nowhere
+      while its flag stayed `false` and read as a pass. The watch now observes `document`, and the test proves
+      it is live by showing it a poster. (6) The first version of
+      [video-source-type-must-come-from-the-ladder] banned the rendition filename everywhere, and
+      `pnpm gates:test` reported ONE gate that did not fire — W-SYS-06''s case 46i control, which asserts
+      that a content-addressed rendition URL is accepted. Two rules had come to disagree about the same
+      string, and the control is what said so rather than a review; the filename half is now scoped to
+      apps/, where the failure it is about lives. (7) In my own test: the LCP case asserted
+      `expect(last.className).toContain('')`, which cannot fail — `toContain('')` is true of every string,
+      and this `<img>` carries no class at all, so the line read like a second identity check and was one
+      character of evidence. It now asserts the entry''s `currentSrc` pathname is the poster rung this
+      viewport is served, which is what distinguishes the hero''s photograph from any other IMG on the
+      page. Brief rule 3 is about the test that passes because it asks nothing, and a vacuous line inside
+      a file whose whole purpose is evidence is the worst place for one. (8) `pnpm verify` does not reach a
+      green run here, and the one failure is not this unit''s:
+      apps/web/src/breakpoint-preview.itest.ts''s "byte-identical on a repeat run" compares two screenshots
+      of one URL taken back to back, and it fails on a DIFFERENT cell each time — `light-1440: expected -1 to
+      be +0` under a full verify, `dark-390` when the file was re-run on its own. A cell that moves is a race,
+      not a rendered difference: both captures run the same code in the same browser, so anything static
+      cancels out. W-SYS-07 cannot be the cause either way — the preview page''s HTML is built by
+      apps/web/src/components/admin/breakpoint-preview.ts, which imports exactly one thing from @berelax/ui
+      (`tokensCss`) and contains no reference to FOCUS_CSS, Icon or be-hero, the three places this unit
+      touched shared code. The assertion''s own comments record it failing twice before with this signature
+      and record the fix (`data-preview-settled`) that narrowed it; it is narrower now and still open, and on
+      a machine running three agents'' suites at load average 8 it is open often. It belongs to W-SYS-10.'
+    - 'NOTE: two browser facts this unit depends on, both measured here. `media` on a `<source>` inside a
+      `<video>` does NOTHING — it is honoured for `<picture>` and was removed from the video element''s
+      resource-selection algorithm — so an art-directed video has to choose its crop in script, and the island
+      does it with `matchMedia` over the query the ladder itself declares (`CROPS[crop].media`, carried beside
+      each source). That is the mirror image of W-SYS-10''s finding that a `<source media>` in the admin
+      preview is evaluated against the viewport rather than the element. And serving bytes that do not match
+      the declared content type HANGS the renderer: fulfilling the `.mp4` request with WebM bytes under
+      `content-type: video/mp4` was tried first and Playwright reported the target closed, because Chromium
+      selects its demuxer from the type. The fixture is served as what it is.'
+    - 'NOTE: no migration, and no number taken. SCHEMA_VERSION stays at 48 and 0051 is unused. Nothing here is
+      a row: the poster is content-addressed on bytes, the renditions are paths the job writes, the reader''s
+      pause choice is `localStorage` on their own device, and the island''s budget is a chunk in a build. The
+      media row itself is Payload''s own, in the `payload` schema, which `pnpm db:drift` never sees.'
     files:
     - packages/ui/src/media/hero-media.tsx
     - packages/ui/src/media/attach-video.island.ts
@@ -7758,7 +8218,7 @@ units:
     summary: /spa, /faq, /journal(+slug), /contact, /about and the legal pages rendered from Payload, plus
       the hub-and-spoke link graph asserted as an invariant rather than an intention.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SITE-03
@@ -7783,12 +8243,244 @@ units:
       error; health-adjacent posts are asserted to render the medical-disclaimer pattern
     - Every CMS route's rendered copy passes the banned-claims lint in CI, and a fixture post containing
       'cures sciatica' fails the build by rule name
+    - 'NOTE: the concrete files. Ten route files, not four: W-SYS-01 landed two root layouts and W-SITE-01''s
+      registry test requires every DOCUMENT to be served in BOTH locales (an hreflang set with one locale
+      pointing at a 404 invalidates the whole set), so every route here is
+      apps/web/app/(en)/(public)/{spa,contact,about,faq,journal}/page.tsx plus the (ar)/ar mirror. There is no
+      apps/web/app/(public)/ group and there never was — W-SITE-01''s own NOTE records why. The five bodies are
+      rendered once in apps/web/app/_content/pages.tsx with the per-locale copy in
+      apps/web/src/cms/copy-{en,ar}.ts, exactly as W-SITE-05 does it, and every <h2> comes from the one
+      <h2>-emitting component W-SITE-05 built (app/_treatments/sections.tsx) so that "immediately followed by a
+      <p>" stays a property of the DOM rather than a convention six files agree to follow.'
+    - 'NOTE: how the Payload-read-at-build-time problem was resolved, since W-SITE-05 recorded it as the reason
+      /faq could not exist. Both halves of its statement are true: `push` is off under NODE_ENV=production,
+      `next build` forces that, so in a fresh environment the `payload` schema is EMPTY when the build runs —
+      measured rather than assumed (`getPayload` itself initialises in 45ms under build conditions; the first
+      `find` fails with `relation "payload.faq_entries" does not exist`). The resolution is in
+      apps/web/src/cms/read.ts: **existence is checked before the read, and an absent table is an answer rather
+      than an exception.** `collectionAvailability` asks information_schema for the table in the adapter''s own
+      schema; when it is missing the page renders its stated empty state and on-demand revalidation replaces it
+      the moment content exists. So the build never fails for want of a CMS schema and never bakes a page
+      claiming the business has no FAQ either. The existence check is a SEPARATE query from the read, following
+      apps/web/src/payload/future-bookings.ts: matching "does not exist" on an error message would also swallow
+      a deadlock, a permission error and a syntax mistake and report all of them as "no content". What
+      materialises the schema is Payload initialising outside a production build — the admin in development,
+      `pnpm test:integration`, or `payload migrate` as a deploy step — and content.itest.ts''s own beforeAll is
+      that call in CI.'
+    - 'NOTE: no new build-time DATABASE dependency beyond W-SITE-05''s, and CI''s step order is unchanged.
+      These routes read the premises row and the catalogue at build time, which `pnpm db:apply` + `pnpm seed`
+      before the build already provide (gates 52k-52l assert that order). The CMS read is the only new one and
+      it is fail-soft by the NOTE above, so the `payload` schema is deliberately NOT a build dependency: adding
+      one would make `next build` in a fresh environment depend on a schema only the admin or the integration
+      suite creates.'
+    - 'NOTE: SCOPED — /journal/[slug] is NOT a route, and this is the unit''s largest deferral. A post publishes
+      only with an author byline, a reviewer byline and a date (the criterion''s own named errors), and a byline
+      is the name of a real person: JOURNAL_POSTS.byline''s help text says "leave empty until there is a real
+      one to put here", brief rule 6 forbids inventing one, and a false credential on health-adjacent copy is
+      worse than a visibly missing one. So no post can be published, and a dynamic DOCUMENT cannot be added
+      without one: registry.test.ts requires `sampleParams` for a parameterised document, route-spine.itest.ts
+      fetches that sample path and requires 200, and the capture matrix photographs it — a route with no
+      publishable row would put a 404 into all three. `/journal` exists, says so in the answer to "Who writes
+      it?", and is where the link goes the day a real author and a real reviewer exist. Blocked on the owner
+      (the same class as Y12-consent-photo for therapist names); the guard, its four named refusals and the
+      Payload hook that enforces them are complete and proven in packages/cms/src/publication.test.ts and
+      apps/web/src/content.itest.ts.'
+    - 'NOTE: SCOPED — the legal pages. Nothing is served for them and nothing was invented. A legal page is a
+      `pages` document whose body is terms, a privacy statement or a complaints procedure, and every one of
+      those has a legal consequence: docs/09 §5 says the consumer-protection position is a question for the
+      lawyer, `compliance_notices.licence_statement` is owner-only and unwritten, and H-HARD-09 GENERATES the
+      privacy page from the processor register rather than from prose. Inventing the wording would be the
+      plausible-value failure of brief rule 15 applied to a document an acquirer reads. `/about` is the one page
+      of that set that can be written from the business''s own records, and it is served. The route shape is
+      ready: `readEditorialPages` reads the collection and `editorialPageFor` addresses a document by slug, so a
+      legal page is one row plus one registry entry. Deferred to H-HARD-09 (privacy) and to the owner for the
+      rest.'
+    - 'NOTE: SCOPED — two of the link graph''s six rules cannot be satisfied by any site this build can produce,
+      and they are asserted FIRING rather than suppressed. `treatment_without_therapist_link` and
+      `treatment_without_journal_link` report all eight treatment pages, because there is no therapist page
+      (W-SITE-06 is todo, `employee` has no display_name column at all — 0030, ADR 0020, Y12-consent-photo) and
+      no publishable journal post (above). content.itest.ts asserts exactly that — eight subjects, eight
+      findings, by rule name — so the day either page type lands the assertion fails and is deleted rather than
+      the invariant being weakened. The three rules the site CAN satisfy (zero orphans, everything within three
+      clicks of /, zero internal links answering anything but 200) are asserted empty over the real crawl in
+      both locales, with the subject counts stated (15 orphan subjects, 16 depth subjects, 40+ links per locale)
+      so a crawl that found nothing cannot pass. The rules themselves are pure and each fires on a fixture in
+      packages/core/src/seo/link-graph.test.ts, which is what makes the deferral a gap in the SITE rather than
+      in the check.'
+    - 'NOTE: a defect found in existing code, and fixing it was a precondition for this unit''s own acceptance
+      criterion. The site was not reachable: app/(en)/(public)/page.tsx rendered a heading and a paragraph, and
+      RouteNav contributes a link home and a link to the other locale — so nothing linked to /treatments or
+      /pricing, and both were ORPHANS, reachable only from a sitemap W-SITE-08 has not built and from
+      /llms.txt. app/_routes/site-nav.tsx is the fix: one list of links derived from the route registry,
+      rendered on both home pages and on all ten new pages, needing no database (which is what lets it sit on a
+      `rendering: static` page). NAV_ROUTE_IDS is declared in src/routes/nav.ts and asserted EQUAL to the
+      registry''s own indexable non-parameterised documents, so a route added by another unit fails
+      registry.test.ts naming it rather than quietly becoming the next orphan. W-SITE-04''s header replaces
+      this; the invariant is what will say so if that header carries a shorter list.'
+    - 'NOTE: the word this unit''s copy may not use, and why that is a finding rather than a style choice.
+      `treatment` is on regulatory_profile.banned_claim_terms under the seeded profile (0004,
+      licence_class=unconfirmed), and this unit''s acceptance criterion is that every CMS route''s rendered copy
+      passes that lint — so the copy says *menu*, *session* and *massage* where W-SITE-05''s pages (which are
+      not linted) say *treatment*. `medical` is on the same list, which is why the medical-disclaimer pattern''s
+      visible heading is "Health note" rather than the name of the field it renders. apps/web/src/facts/llms.ts
+      took the same decision for /llms.txt and for the same reason. Both are consequences of Y1-licence being
+      open: the day a lawyer confirms the class, medical_claims_permitted flips in a row and the vocabulary
+      widens with no code change. The lint runs on the RENDERED strings — sections, ledes, the CMS rows and
+      every value interpolated out of the premises row — and throws rather than warning, which is what makes
+      the "fails the build" half true.'
+    - 'NOTE: SCOPED — two of /spa''s four subjects have no row to read. `premises` has NO column for public
+      transport or for the nearest landmarks, although docs/09 §4 lists both among the fields it holds (0003
+      has neither), and the room inventory on record is the provisional five-room stub — Y8-rooms is open and
+      docs/13 §8 lists the room count among the unknowns. So /spa states both absences, with the reason, in the
+      answer itself: a bus route written from memory puts a reader at the wrong stop and a room count the desk
+      cannot keep is a promise rather than a fact. Arrival and parking ARE the row (`directions_notes`, which is
+      NULL, and `parking_notes`, which is not), and content.itest.ts asserts the parking answer equals the
+      row''s value with the two absences as its controls. Adding the two columns is a migration plus a change to
+      the /api/facts contract (FACTS_SCHEMA_VERSION), which belongs with whoever gets the answers from the
+      owner; 0053 was allocated to this unit and is NOT used, and SCHEMA_VERSION stays 48.'
+    - 'NOTE: the Arabic CMS routes render the SAME rows as the English ones, because the content model has no
+      locale: faq_entries has one `question` column, journal_posts one `title`, pages one `body`, and Payload
+      localisation is not enabled. So an entry an editor writes appears on both documents in the language it was
+      written in, inside Arabic chrome — which is W-SITE-05''s decision about the treatment name applied to
+      prose, and for the same reason: a translation invented here would be a second, unlinted version of the
+      same answer disagreeing with the FAQPage block beside it. The chrome, the questions, the ledes and the
+      absences are all translated. Deferred to W-SITE-10, which owns the Arabic narrative. The related gap is
+      stated rather than hidden: `lexiconTokens` splits on /[^a-z0-9]+/, so Arabic script contributes no tokens
+      and the banned-claims lint judges only the Latin values interpolated into an Arabic sentence — an Arabic
+      health claim written by an editor would pass. Closing that needs an Arabic claim lexicon, which is a
+      vocabulary decision rather than code.'
+    - 'NOTE: a second defect found in existing code, and the one that cost this unit a debugging cycle.
+      `payloadSecret()` in apps/web/payload.config.ts THREW during module evaluation whenever NODE_ENV was
+      production outside a build. That was right while the only importers were the admin and its REST API; the
+      moment a public page imported the config to read CMS content, every one of those pages answered **500** in
+      any environment without PAYLOAD_SECRET — and the failure was hidden by the ISR cache, because the
+      prerendered copy was served happily and only the first on-demand revalidation turned the page into an
+      error. Coupling a public content page to the admin''s session-signing key is the wrong dependency in any
+      case: what the secret protects is a token, and the only requests that can mint one are Payload''s admin
+      document and `/cms-api` (which is where the login is). The refusal moved to
+      `assertPayloadSecretConfigured()` called at module scope in exactly those two files, which is STRONGER
+      than before — a production server with no secret now serves the site and refuses the admin, rather than
+      refusing both. payload-routes.test.ts asserts both call sites with a public page as the control, and gates
+      60o-60p fixture each direction.'
+    - 'NOTE: a third defect found in existing code. `apps/web/payload.config.ts` wrote Payload''s generated
+      types to `.next/types/payload-types.ts`, and its comment said "`.next` is gitignored and no gate scans
+      it" — but `apps/web/tsconfig.json` includes `.next/types/**/*.ts`, for Next''s own generated route types.
+      So `tsc` DID scan it, and Payload writes it whenever it initialises outside a production build, which the
+      integration suite does on every run: `pnpm typecheck` passed on a clean worktree and then failed with
+      twenty errors in three itests nobody had touched. Because `pnpm verify` runs typecheck BEFORE the
+      integration suite, the first run of verify passed and the second did not. The file now goes to
+      `.next/payload-types.ts`, one directory up and outside the glob, which makes that comment true rather
+      than nearly true.'
+    - 'NOTE: a fourth finding, in a gate rather than in code, worth recording because it constrains every future
+      collection hook: `scripts/check-cms-boundary.mjs` loads `payload.config.ts` with Node''s STRIP-ONLY
+      TypeScript loader so it can examine the config `buildConfig` actually generates. A collection hook is
+      reachable from that config, and a static `import { readCompliancePolicy } from ''@berelax/db''` in one
+      drags `packages/db/src/audit.ts` into that loader, which refuses its TypeScript parameter property with
+      ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX — `pnpm cms` then fails with a SyntaxError two packages away from
+      anything the unit changed. `apps/web/src/collections/journal-posts.ts` therefore reads the policy through
+      a dynamic `import()` inside the hook body, with the reason written next to it.'
+    - 'NOTE: two shared components moved, both to app/_routes/. The breadcrumb was a private function inside
+      app/_treatments/pages.tsx and is now app/_routes/breadcrumb.tsx: the acceptance criterion is that every
+      one of these routes carries a BreadcrumbList matching its path segments, and matching a trail against a
+      path is only a property of the site if there is ONE trail component feeding both the visible `<ol>` and
+      the JSON-LD. app/_dev/nap-copy.ts became app/_routes/nap-copy.ts unchanged: the kitchen sink was the only
+      surface rendering the NAP block, which made `_dev` the right home for one unit, and /contact and /spa are
+      the two routes docs/09 §4 actually names for it.'
+    - 'NOTE: the FAQ heading id is the ONE anchor on the site derived from copy rather than from a key, and the
+      trade is stated rather than hidden. A treatment page''s ids come from TREATMENT_QUESTIONS because there is
+      a key; an FAQ entry has none — the question IS the content, written by an editor — so `faqAnchorId`
+      slugifies the question and falls back to the row''s position when it does not reduce to a usable fragment
+      (an Arabic-script question slugifies to the empty string, which no browser resolves). The cost is that
+      rewording a question moves its anchor. The alternative was an opaque document id in a public URL.'
+    - 'NOTE: the tests are apps/web/src/content.itest.ts (the ten routes, the breadcrumbs, the FAQ/schema
+      equality over the served bytes, the five publication refusals through Payload''s own hook pipeline, the
+      premises-field round trip and the link-graph crawl), packages/core/src/seo/link-graph.test.ts (every rule
+      firing on a fixture, with a satisfying graph as the control), packages/cms/src/publication.test.ts,
+      apps/web/src/cms/content.test.ts and apps/web/src/revalidate/content.test.ts — not
+      tests/seo/link-graph.spec.ts. This repository has no tests/ directory: tests sit beside their source as
+      *.test.ts and *.itest.ts, as W-SITE-03 and W-SITE-05 both recorded. Three existing files were updated
+      rather than duplicated: structured-data.itest.ts''s GRAPH_ROUTES and its exhaustive indexable list gained
+      the five routes (each with includeCatalogue:false, because their subject is the premises or the editorial
+      content and eleven Service nodes on a contact page is the reconciliation problem that flag exists to
+      prevent), registry.test.ts''s isr and sitemap lists gained them, and route-spine.itest.ts''s capture
+      budget went from 420s to 780s because the matrix is 132 cells rather than 72.'
+    - 'NOTE: the publish loop is apps/web/app/(admin)/settings/content/revalidate/route.ts and
+      apps/web/src/revalidate/content.ts, the sibling of W-SITE-05''s catalogue pair and separate from it on
+      purpose: a price change moves the catalogue pages and an FAQ entry moves this set, and one endpoint
+      invalidating both on every call would rebuild eighteen documents to publish one answer. It also closes
+      W-SITE-02''s own deferral — "cache-tag revalidation belongs to the first ISR route that renders NAP" —
+      because /spa and /contact are those routes: the `premises` kind revalidates both locales of /spa, /contact
+      and /about, and content.itest.ts changes one field, revalidates, asserts the new value on the page and the
+      old value gone, rolls back and asserts the page came back.'
+    - 'NOTE: a fifth finding, and the one that failed a build. The copy lint refused
+      `compliance_notices.medical_disclaimer` — W-SYS-08''s wording is "Massage is not a medical treatment.",
+      which is a CORRECT disclaimer and contains two of `regulatory_profile.banned_claim_terms` (`medical`,
+      `treatment`). So `/journal` and `/ar/journal` failed `next build` with `banned_claim_term` over the one
+      sentence on the site whose job is to protect the business. It is not a fixture accident: the
+      medical-disclaimer pattern docs/09 §"E-E-A-T" asks for works by NEGATING a claim, and a lexicon built to
+      stop the business asserting those words will always refuse the sentence denying them. The disclaimer is
+      therefore rendered verbatim and never linted, and the exemption is narrow: `compliance_notices` is the
+      one compliance-locked global, its write permission is `settings:write_compliance` — the OWNER alone in
+      the F07 matrix, the licensee, the person an inspector holds responsible for that wording — while every
+      other CMS field on these routes is editor content and is linted. The same shape as W-SITE-03''s
+      `legalName` exemption from the bare-brand rule. `publication.test.ts` asserts the other half: those exact
+      words in a journal post''s body are still refused, by name, with both terms reported, so the exemption
+      cannot be read as the lexicon having gone quiet. The same fix corrected a second mistake found with it —
+      the page linted the disclaimer and the empty-state sentence whether or not it rendered them, and a lint
+      over an unrendered branch refuses pages for copy nobody can read.'
+    - 'NOTE: two of this unit''s own tests had to be rewritten against brief rule 12, and both are worth
+      recording because they passed twice before failing. (1) `content.itest.ts` asserted that health-adjacent
+      copy is refused "while the disclaimer global is unwritten" — true until `payload.itest.ts` writes that
+      global, which it does, in the same shared database in a file order this unit does not choose. The case
+      now reads the row through the same read path the page uses and asserts whichever direction of the rule
+      that row selects, with the refusal direction asserted where the global''s state is an argument instead of
+      a shared row (`publication.test.ts`). (2) Gate 60e reported PASS over a test it had broken: neutering
+      `withoutLocators` failed the assertion on the mechanism first, whose message names no rule, so
+      `checkRejectedBy` found nothing to match. The test now asserts the LINT before the mechanism, which is
+      the assertion whose failure prints the finding — ADR 0003 is about the gate being seen to fail, and a
+      gate that cannot see its own fixture fail is the same defect one level up.'
     files:
-    - apps/web/app/(public)/spa/page.tsx
-    - apps/web/app/(public)/faq/page.tsx
-    - apps/web/app/(public)/journal/[slug]/page.tsx
-    - apps/web/app/(public)/(legal)/*/page.tsx
-    - tests/seo/link-graph.spec.ts
+    - apps/web/app/(en)/(public)/spa/page.tsx
+    - apps/web/app/(en)/(public)/contact/page.tsx
+    - apps/web/app/(en)/(public)/about/page.tsx
+    - apps/web/app/(en)/(public)/faq/page.tsx
+    - apps/web/app/(en)/(public)/journal/page.tsx
+    - apps/web/app/(ar)/ar/spa/page.tsx
+    - apps/web/app/(ar)/ar/contact/page.tsx
+    - apps/web/app/(ar)/ar/about/page.tsx
+    - apps/web/app/(ar)/ar/faq/page.tsx
+    - apps/web/app/(ar)/ar/journal/page.tsx
+    - apps/web/app/_content/pages.tsx
+    - apps/web/app/_routes/breadcrumb.tsx
+    - apps/web/app/_routes/site-nav.tsx
+    - apps/web/app/_routes/nap-copy.ts
+    - apps/web/app/(admin)/settings/content/revalidate/route.ts
+    - apps/web/src/cms/read.ts
+    - apps/web/src/cms/page-data.ts
+    - apps/web/src/cms/content.ts
+    - apps/web/src/cms/rich-text.ts
+    - apps/web/src/cms/copy-en.ts
+    - apps/web/src/cms/copy-ar.ts
+    - apps/web/src/cms/content.test.ts
+    - apps/web/src/collections/journal-posts.ts
+    - apps/web/src/content.itest.ts
+    - apps/web/src/revalidate/content.ts
+    - apps/web/src/revalidate/content.test.ts
+    - apps/web/src/routes/nav.ts
+    - apps/web/src/routes/registry.ts
+    - apps/web/src/routes/registry.test.ts
+    - apps/web/src/payload-routes.test.ts
+    - apps/web/src/seo/structured-data.itest.ts
+    - apps/web/src/route-spine.itest.ts
+    - apps/web/payload.config.ts
+    - apps/web/app/(payload)/layout.tsx
+    - apps/web/app/(payload)/cms-api/[...slug]/route.ts
+    - packages/core/src/seo/link-graph.ts
+    - packages/core/src/seo/link-graph.test.ts
+    - packages/cms/src/publication.ts
+    - packages/cms/src/publication.test.ts
+    - packages/cms/src/collections/journal-posts.ts
+    - scripts/test-gates.mjs
   - id: W-SITE-10
     order: 143
     title: 'Publication control plane: banned-claims lint, named approval, immutable record'
@@ -10059,7 +10751,7 @@ units:
       outliers at positions 5 to 20 as title and meta rewrite candidates, queries with impressions but no
       dedicated page as content-gap briefs, and two URLs competing for one query as cannibalisation.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-SEO-01
@@ -10079,11 +10771,109 @@ units:
       the route fixture'
     - 'Determinism: re-running all three over the same seeded warehouse yields byte-identical findings across
       three runs, including ordering, so the weekly report diffs cleanly'
+    - 'NOTE: no migration, and SCHEMA_VERSION stays at 48. This unit only READS G-SEO-01''s tables, and 0042
+      already carries the index for it (seo_gsc_daily_site_date_idx, whose comment names ''the read pattern of
+      every analysis in G-SEO-03''). The 0052 reserved for this unit is therefore unused, and the gap at 0041,
+      0047 and 0052 is left rather than closed, for 0042''s own reason: renumbering applies one number to two
+      different migrations on two branches.'
+    - 'NOTE: seven files, not the four this entry''s list guessed at, and each addition is a decision rather
+      than a split. (1) packages/core/src/seo/query-rows.ts holds the row shape the three analyses read and the
+      two derivations all of them need — the (query, page) aggregate and the basis-point CTR. The aggregate is
+      not a convenience: the warehouse''s grain is (date, page, query, device, country), so one query on one
+      page over a seven-day window is up to twenty-one rows, and an analysis reading the raw grain would report
+      the same page three times for one query and compare a mobile CTR against a desktop one. (2) The
+      hand-computed expectation is its own file, analyses.worked-examples.fixture.ts, deliberately NOT exported
+      from the barrel: it is the review target, and a gate asserts it calls none of the functions it is the
+      expectation for. (3) Four per-module unit test files, because packages/core carries a 95% coverage floor
+      and a worked example does not reach a config refusal or an impressionless row.'
+    - 'NOTE: the CTR baseline is the site''s OWN data, leave-one-out, and not an industry CTR-by-position curve.
+      This repository has no such curve, and writing a plausible one into the source would put invented
+      measurements into every finding of a report the owner reads as measured (the brief''s rule 15) — which is
+      worse here than an invented address, because a wrong address is visibly wrong. So a (page, query) pair is
+      compared against the other pairs of the SAME property in the same whole-position band, with the pair
+      itself SUBTRACTED from the band''s totals. Both halves are load-bearing. Banding, because position 5 and
+      position 19 have genuinely different click rates and one baseline across 5-20 would condemn everything
+      deep in the window; the worked example shows it, with three of band 19''s four pairs sitting at 113 bp and
+      only the pair at zero reported. Leave-one-out, because a pair holding most of its band''s impressions
+      would otherwise drag the baseline onto its own CTR and could never be flagged however badly it performed
+      — gate 59m mutates that subtraction away and the named test fails.'
+    - 'NOTE: the hand-computed figures, so a reviewer can check them without running anything. Config: window
+      500-2000, impression floor 200, shortfall floor 100 bp, two peers. Four findings from the twenty rows, in
+      the declared order: b05-c 12/800 = 150 bp against peers 145/2,600 = 557.69 -> 558, shortfall 408; b20-a
+      0/1,000 = 0 bp against peers 40/2,000 = 200, shortfall 200; b12-d 1/800 = 12.5 -> 13 bp against peers
+      29/1,400 = 207.14 -> 207, shortfall 194; b19-a 0/1,000 = 0 bp against peers 27/2,400 = 112.5 -> 113,
+      shortfall 113. Sixteen of the twenty rows are admitted: two are outside the window at 20.10 and 20.50 and
+      two are below the impression floor, and all four are placed where a wrongful admission would CHANGE a
+      figure above rather than merely add one — the two out-of-window rows are in band 20 by floor, beside the
+      three pairs at exactly 20.00. The implementation agreed with all four findings on its first run.'
+    - 'NOTE: how the rare-query gap is handled, because it decides what the content-gap list is allowed to
+      claim. Search Console withholds a query too rare to be anonymous by REMOVING it, not by shrinking it, so
+      a withheld query cannot produce a finding here — nothing in these rows can see it. That is a limit of the
+      data and not something to correct: scaling the visible rows up to close the gap would put clicks on
+      queries that did not earn them and every finding would be an artefact of the scaling, which is the second
+      of the three failures rare-query-gap.ts enumerates. So contentGaps takes the snapshot''s two pairs of
+      totals, runs them through G-SEO-01''s own rareQueryGap, and returns the withheld figures beside the
+      findings. queriesAreComplete is THREE-valued — true, false, or null when no snapshot was supplied —
+      because "we know nothing is missing" and "we do not know whether anything is missing" are different
+      claims and a boolean collapses them into the weaker one silently. A test asserts the findings are
+      byte-identical whatever the withheld figures say: the gap is reported, never used to adjust the list.'
+    - 'NOTE: "a dedicated page exists" is answered from W-SITE-05''s route paths and not from a third
+      expression of the page set. The match is one rule in one direction: a route is dedicated to a query when
+      every term of the route''s own last path segment appears in the query. The direction is the substance —
+      the reverse ("every query term appears in the slug") is defeated by any locality, qualifier or
+      misspelling and would report a gap for pages that exist, which gate 59o mutates in and the named test
+      refuses. Two consequences are asserted rather than assumed: the homepage has no slug terms and is
+      therefore dedicated to NOTHING (an empty subset matches every query, and "the homepage ranks for it" is
+      the symptom of a content gap rather than the refutation of one), and /treatments/[slug] is a pattern
+      rather than a page, which is the registry''s own fillParams argument. The toggle withdraws BOTH locales''
+      paths for one slug, because W-SITE-01 requires every document in both and archiving a service removes
+      both at once — a fixture withdrawing only the English path would toggle something the site cannot do.'
+    - 'NOTE: determinism is three declared orderings, not one sort. CTR outliers by shortfall then impressions
+      then (query, page); content gaps by impressions then clicks then query; cannibalisation by impressions
+      then competing-page count then query. Each ends in a key that is unique after aggregation, so the order
+      is TOTAL — a comparator that leaves two findings equal leaves their order to the sort''s internals and to
+      the order the rows arrived in. Comparison is by codepoint and deliberately never localeCompare, which
+      reads ICU collation data: the same two Arabic queries can order differently between two Node builds, so a
+      report built in CI would diff against one built on a laptop with no row having changed. The fixture
+      warehouse carries an Arabic query for exactly that reason, and the two ordering fixtures are in the
+      OPPOSITE alphabetical order to their declared one, because the aggregate they read is already sorted by
+      query and without that an ordering test passes with the comparator deleted.'
+    - 'NOTE deferred, and to which unit. (1) Nothing consumes these three yet: the weekly report and the five
+      prioritised actions are G-SEO-05, and the LLM judgement layer that would rank a finding is G-SEO-05''s
+      too. The functions take rows and configuration and return findings; no caller, no cron and no console
+      screen is wired here. (2) The route set is an ARGUMENT, built by the caller from
+      apps/web/src/routes/registry.ts plus publishedTreatmentSlugs(); packages/core may not import apps/web, so
+      the wiring belongs to whichever unit runs the analysis. (3) queryTermAliases, the one-hop bilingual term
+      map, is EMPTY today and its authoring belongs to G-SEO-05. Until it is written every Arabic query is
+      reported as a content gap, because an Arabic query shares no term with an ASCII slug — the map turns a
+      structural defect into a visible configuration gap, and the behaviour is asserted in both states rather
+      than hidden. (4) No thresholds are defaulted anywhere: the impression floors, the shortfall and the
+      position gap have no default value, so the unit that runs these has to state them and the report can say
+      what they were. The position WINDOW does have a named constant, CTR_OUTLIER_POSITION_WINDOW, because
+      5-20 is docs/03 §9''s specification rather than a preference.'
+    - 'NOTE: a gap in EXISTING code, found by this unit and NOT fixed here because it is G-SEO-01''s line.
+      rareQueryGap refuses an inverted window and builds its refusal from two problems — clicks and
+      impressions — but its AppError details carry only queryClicks and pageClicks. So an inversion that is
+      purely in the impressions produces the message "Query-level impressions exceed the page-level total" with
+      details naming a clicks pair that is fine and no impression figures at all, which is a diagnostic
+      pointing at the wrong two numbers. Narrow but real: the throw is what a nightly pass logs, and the log is
+      the only place those figures appear. Separately, that module spells the basis-point scale as a literal
+      10_000 while this unit exports BASIS_POINTS from query-rows.ts beside it; one directory now has the same
+      constant twice, which is a drift waiting to happen rather than a defect today.'
     files:
+    - packages/core/src/seo/query-rows.ts
     - packages/core/src/seo/ctr-outliers.ts
     - packages/core/src/seo/content-gaps.ts
     - packages/core/src/seo/cannibalisation.ts
+    - packages/core/src/seo/analyses.worked-examples.fixture.ts
     - packages/core/src/seo/analyses.worked-examples.test.ts
+    - packages/core/src/seo/query-rows.test.ts
+    - packages/core/src/seo/ctr-outliers.test.ts
+    - packages/core/src/seo/content-gaps.test.ts
+    - packages/core/src/seo/cannibalisation.test.ts
+    - packages/core/src/seo/index.ts
+    - packages/fixtures/src/seo-query-analyses.test.ts
+    - scripts/test-gates.mjs
   - id: G-SEO-04
     order: 171
     title: 'Site-side deterministic analyses: coverage anomalies, internal links, structured data'

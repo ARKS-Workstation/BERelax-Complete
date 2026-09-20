@@ -19,6 +19,7 @@ import {
   seedCatalogue,
   seedPremises,
 } from '@berelax/db'
+import { testPort } from '@berelax/harness/ports'
 import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from '../facts/build.ts'
@@ -52,10 +53,11 @@ import { graphInputFor } from './graph-input.ts'
  *
  * No browser. The question is what bytes the server sent, and `fetch` answers it exactly; a headless
  * Chromium would answer it through a DOM serialiser that normalises the very escaping `serialiseGraph`
- * performs. The four suites that do need a browser take ports 3200, 3800, 4100, 4400 and 4700 (see
- * `kitchen-sink.itest.ts` on why a fixed port is a false pass); this one takes 5100.
+ * performs. The port band is `@berelax/harness/ports`' rather than this file's own (see
+ * `kitchen-sink.itest.ts` on why a fixed port is a false pass, and `ports.ts` on why a self-chosen band is
+ * the next mistake).
  */
-const PORT = 5100 + Math.floor(Math.random() * 300)
+const PORT = testPort('structured-data')
 const BASE = `http://127.0.0.1:${PORT}`
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 
@@ -175,12 +177,25 @@ afterAll(async () => {
 const SAMPLE_SLUG = sampleParamsOf(routeById('treatment'))['slug'] ?? ''
 
 /**
+ * What a page whose subject is not the menu passes.
+ *
+ * Named rather than repeated ten times, and spelled as an override of the expectation's default rather than
+ * as its own object so that the `...route.options` spread below stays one line. `includeCatalogue: false` is
+ * the page's own decision (W-SITE-07's five routes), not a simplification here.
+ */
+const NO_CATALOGUE = { includeCatalogue: false } as const
+
+/**
  * The registry documents that render a graph, with the locale each is served in and the options the page
  * built its graph with.
  *
- * W-SITE-05 added six of these. The options are part of the expectation because they are what the page
- * decided: a treatment page publishes **one** `Service` — its own, scoped by `serviceSlugs` — and the index
- * and `/pricing` publish the whole menu, because the menu is their subject.
+ * W-SITE-05 added six of these and W-SITE-07 ten more. The options are part of the expectation because they
+ * are what the page decided: a treatment page publishes **one** `Service` — its own, scoped by `serviceSlugs`
+ * — the index and `/pricing` publish the whole menu because the menu is their subject, and the five
+ * CMS-and-premises routes publish **no** catalogue at all, because their subject is the premises or the
+ * editorial content. `includeCatalogue` is therefore per route rather than a constant in the expectation:
+ * eleven `Service` nodes on a contact page is the same information a consumer has to reconcile on every
+ * document, which is what that flag exists to prevent.
  */
 const GRAPH_ROUTES = [
   { id: 'kitchen-sink' as const, locale: 'en' as const, path: '/kitchen-sink', options: {} },
@@ -189,6 +204,19 @@ const GRAPH_ROUTES = [
   { id: 'treatments' as const, locale: 'ar' as const, path: '/ar/treatments', options: {} },
   { id: 'pricing' as const, locale: 'en' as const, path: '/pricing', options: {} },
   { id: 'pricing' as const, locale: 'ar' as const, path: '/ar/pricing', options: {} },
+  { id: 'spa' as const, locale: 'en' as const, path: '/spa', options: NO_CATALOGUE },
+  { id: 'spa' as const, locale: 'ar' as const, path: '/ar/spa', options: NO_CATALOGUE },
+  { id: 'contact' as const, locale: 'en' as const, path: '/contact', options: NO_CATALOGUE },
+  { id: 'contact' as const, locale: 'ar' as const, path: '/ar/contact', options: NO_CATALOGUE },
+  { id: 'about' as const, locale: 'en' as const, path: '/about', options: NO_CATALOGUE },
+  { id: 'about' as const, locale: 'ar' as const, path: '/ar/about', options: NO_CATALOGUE },
+  { id: 'journal' as const, locale: 'en' as const, path: '/journal', options: NO_CATALOGUE },
+  { id: 'journal' as const, locale: 'ar' as const, path: '/ar/journal', options: NO_CATALOGUE },
+  // `/faq` carries whatever `faq_entries` holds, which is nothing until an editor writes one — and an empty
+  // list emits no `FAQPage` node at all, because an empty one is invalid. `content.itest.ts` is where the
+  // node's equality with the rows is asserted, against rows it writes itself.
+  { id: 'faq' as const, locale: 'en' as const, path: '/faq', options: NO_CATALOGUE },
+  { id: 'faq' as const, locale: 'ar' as const, path: '/ar/faq', options: NO_CATALOGUE },
   {
     id: 'treatment' as const,
     locale: 'en' as const,
@@ -485,27 +513,50 @@ describe('the licence class is read from the database, and it is what bounds the
 })
 
 describe('no Person node, because no therapist can pass the publishing guard', () => {
-  it('emits none, and the reason is a column that does not exist', async () => {
+  it('emits none, and the reason is that no row passes the guard', async () => {
     const html = await fetchDocument('/kitchen-sink')
     expect(html).not.toContain('"Person"')
-    // The claim under the claim: ADR 0020 needs a display name AND a recorded photography consent, and 0030
-    // states the reason `employee` has no `display_name` column — "a nullable one is what an admin screen
-    // fills in without a consent row, and the guard would be invisible". If the column ever appears, this
-    // fails and the therapist list in `graph-input.ts` has to stop being empty.
+    /*
+      The claim under the claim, restated by P-HR-01 because the reason changed and the conclusion did not.
+
+      This test used to assert that `employee` had **no `display_name` column at all** — 0030's position,
+      and 0030 said why: "a nullable one is what an admin screen fills in without a consent row, and the
+      guard would be invisible". It also said what should happen if the column ever appeared: "this fails
+      and the therapist list in `graph-input.ts` has to stop being empty". It appeared, in migration 0050,
+      and this test failed, which is the check working.
+
+      What arrived with it is the guard 0030 wanted and would not ship without: `employee.is_publishable`
+      is GENERATED as `display_name is not null and photo_consent`, so it cannot be set, cannot be
+      forgotten, and cannot be computed differently by a caller. The absence of a Person node is therefore
+      no longer a fact about the SCHEMA — it is a fact about the ROWS, and this asserts that instead: the
+      guard exists, nineteen employment records exist, and not one of them passes it (Y12-names,
+      Y12-consent-photo — 19 photographs and 0 names).
+
+      The control is the row count. Without it, "no row is publishable" would be satisfied by an empty
+      table, which is what a truncated database looks like and proves nothing about the guard.
+    */
     const columns = await sql<{ column_name: string }[]>`
       select column_name from information_schema.columns
        where table_schema = 'public' and table_name = 'employee'
     `
     const names = columns.map((column) => column.column_name)
     expect(names.length).toBeGreaterThan(0)
-    expect(names).not.toContain('display_name')
     expect(names).toContain('staff_reference')
-    // And no consent register exists either, which is the second half of the guard.
-    const [consent] = await sql<{ count: string }[]>`
-      select count(*)::text as count from information_schema.tables
-       where table_schema = 'public' and table_name like '%photography_consent%'
+    expect(names).toContain('display_name')
+    expect(names).toContain('photo_consent')
+    expect(names).toContain('is_publishable')
+
+    const [employees] = await sql<{ total: string; named: string; publishable: string }[]>`
+      select count(*)::text                                  as total,
+             count(display_name)::text                       as named,
+             count(*) filter (where is_publishable)::text    as publishable
+        from employee
     `
-    expect(consent?.count).toBe('0')
+    expect(Number(employees?.total ?? '0')).toBeGreaterThan(0)
+    expect(employees?.named).toBe('0')
+    expect(employees?.publishable).toBe('0')
+    // The day one of them becomes publishable this fails, and the therapist list in `graph-input.ts` has
+    // to stop being empty — which is exactly the handover the previous version of this test wrote down.
   })
 })
 
@@ -514,9 +565,17 @@ describe('the registry is the list of routes this unit had to consider', () => {
     // Every indexable document either renders a graph or is a stated deferral. The registry is in exact
     // bijection with the filesystem (W-SITE-01), so this enumerates the whole site rather than a sample.
     const indexable = ROUTES.filter((route) => route.kind === 'document' && route.indexable)
+    // In the registry's own order, which is PATH order — so `home` is first, because `/` sorts before
+    // `/about`. Spelled that way rather than sorted by id: the registry is asserted to be in path order by
+    // `registry.test.ts`, and a list sorted by something else here would be a second ordering to maintain.
     expect(indexable.map((route) => route.id)).toEqual([
       'home',
+      'about',
+      'contact',
+      'faq',
+      'journal',
       'pricing',
+      'spa',
       'treatments',
       'treatment',
     ])

@@ -30,6 +30,7 @@ import {
   PROXY_EXEMPT_PREFIXES,
 } from './canonical.ts'
 import { type FilesystemRoute, sortedFilesystemRoutes } from './discover.ts'
+import { NAV_ROUTE_IDS, navigableRouteIds } from './nav.ts'
 import {
   ADMIN_GROUP_PREFIXES,
   documentRoutes,
@@ -216,10 +217,20 @@ describe('the registry is internally consistent', () => {
     // it is a pattern, and `treatmentSitemapEntries` expands it over the catalogue (8 routes, 16 entries).
     expect([...inSitemap].sort()).toEqual([
       '/',
+      '/about',
       '/ar',
+      '/ar/about',
+      '/ar/contact',
+      '/ar/faq',
+      '/ar/journal',
       '/ar/pricing',
+      '/ar/spa',
       '/ar/treatments',
+      '/contact',
+      '/faq',
+      '/journal',
       '/pricing',
+      '/spa',
       '/treatments',
     ])
     expect(sitemapEntries().every((entry) => entry.changefreq !== null)).toBe(true)
@@ -245,15 +256,41 @@ describe('the registry is internally consistent', () => {
     expect(ROUTES.filter((route) => route.rendering === 'static').map((route) => route.id)).toEqual(
       ['home'],
     )
-    // The catalogue-derived routes, added by W-SITE-05. `isr` rather than `static` because they read the
-    // database during `next build` and are replaced by on-demand revalidation when a row changes — a
-    // distinction with two consequences the itest checks against the build's own manifests: the database is
-    // a build dependency, and a route with a dynamic segment prerenders its params rather than its pattern.
+    // The catalogue-derived routes, added by W-SITE-05, and the five CMS-and-premises routes W-SITE-07 added
+    // to them. `isr` rather than `static` because they read the database during `next build` and are replaced
+    // by on-demand revalidation when a row changes — a distinction with two consequences the itest checks
+    // against the build's own manifests: the database is a build dependency, and a route with a dynamic
+    // segment prerenders its params rather than its pattern.
+    //
+    // docs/09 §1 lists `/contact`, `/about` and the legal pages as `static`. They are `isr` here and the
+    // reason is the rest of that document: §4 makes the `premises` row the only source of NAP and names
+    // `/contact` and `/spa` as two of its three visible surfaces, and a statically prerendered page bakes the
+    // address into the build — the staleness W-SITE-02 exists to remove. A page that reads a row is `isr`.
     expect(ROUTES.filter((route) => route.rendering === 'isr').map((route) => route.id)).toEqual([
+      'about',
+      'contact',
+      'faq',
+      'journal',
       'pricing',
+      'spa',
       'treatments',
       'treatment',
     ])
+  })
+
+  it('offers every indexable page in the site navigation, and nothing else', () => {
+    // The reachability half of W-SITE-07's link-graph invariant, checked without a server. `SiteNav` renders
+    // `NAV_ROUTE_IDS`, and a route that is indexable and absent from it is an orphan: reachable only from a
+    // sitemap W-SITE-08 has not built and from /llms.txt. The invariant catches it over the built site; this
+    // catches it on the commit, in two seconds, and names the route.
+    expect([...NAV_ROUTE_IDS].sort()).toEqual([...navigableRouteIds()].sort())
+    // The controls. A parameterised route is a pattern and cannot be a nav entry — `fillParams` would throw
+    // rather than publish `/treatments/[slug]` — and its pages are reached from the index, which is what a hub
+    // is. A non-indexable route must not be offered at all: it carries `noindex, nofollow`.
+    expect([...NAV_ROUTE_IDS]).not.toContain('treatment')
+    expect([...NAV_ROUTE_IDS]).not.toContain('kitchen-sink')
+    // And the list is not empty, or every assertion above passes on nothing.
+    expect(NAV_ROUTE_IDS.length).toBeGreaterThan(5)
   })
 
   it('declares sample params exactly for the documents that have a dynamic segment', () => {

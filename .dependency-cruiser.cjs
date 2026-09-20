@@ -51,7 +51,7 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/core/' },
       to: {
-        path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers|fixtures|harness|google)/',
+        path: '^packages/(config|messaging|auth|db|clinical|pdf|ui|providers|fixtures|harness|google|hr)/',
       },
     },
     {
@@ -67,7 +67,7 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/shared/' },
       to: {
-        path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers|fixtures|harness|google)|apps)/',
+        path: '^(packages/(core|db|ui|config|messaging|auth|clinical|pdf|providers|fixtures|harness|google|hr)|apps)/',
       },
     },
     {

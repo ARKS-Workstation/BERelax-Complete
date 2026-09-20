@@ -102,6 +102,27 @@ export {
   SERVICE_NARRATIVE_HAS_FUTURE_BOOKINGS,
 } from './lifecycle.ts'
 export {
+  assertCmsCopyCompliant,
+  assertJournalPostPublishable,
+  type CmsCopy,
+  type CmsCopyFinding,
+  CmsCopyRefused,
+  HEALTH_ADJACENT_CATEGORIES,
+  type HealthAdjacency,
+  healthAdjacencyOf,
+  type JournalPostForPublication,
+  JournalPostRefused,
+  journalPostFindings,
+  journalPostProse,
+  journalRefusalRulesOf,
+  lintCmsCopy,
+  PUBLICATION_RULES,
+  type PublicationContext,
+  type PublicationFinding,
+  type PublicationRule,
+  withoutLocators,
+} from './publication.ts'
+export {
   CMS_ROBOTS_TAG,
   CMS_ROUTE_PREFIXES,
   type CmsRoutePrefix,

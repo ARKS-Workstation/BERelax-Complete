@@ -32,6 +32,8 @@ import {
   type TreatmentCopy,
   treatmentSections,
 } from '../../src/treatments/content.ts'
+// One breadcrumb component for the site, in `app/_routes/` since W-SITE-07 put a trail on five more routes.
+import { Breadcrumb } from '../_routes/breadcrumb.tsx'
 import { QuestionSections } from './sections.tsx'
 
 /*
@@ -46,40 +48,6 @@ const indexPath = (locale: Locale): string => localisedPath('/treatments', local
 const pricingPath = (locale: Locale): string => localisedPath('/pricing', locale)
 const treatmentPath = (locale: Locale, slug: string): string =>
   localisedPath(`/treatments/${slug}`, locale)
-
-/**
- * The visible trail, matching the `BreadcrumbList` in the JSON-LD.
- *
- * Both are built from the same labels, because a trail a reader can click and a trail a crawler reads that
- * disagree is worse than either alone: the schema block would claim a hierarchy the page does not have.
- */
-function Breadcrumb({
-  locale,
-  label,
-  trail,
-  currentLabel,
-}: {
-  readonly locale: Locale
-  /** The accessible name of the nav, in this locale. */
-  readonly label: string
-  readonly trail: readonly { readonly label: string; readonly href: string }[]
-  readonly currentLabel: string
-}) {
-  return (
-    <nav aria-label={label}>
-      <ol className="be-actions">
-        {trail.map((step) => (
-          <li key={step.href}>
-            <a href={step.href} lang={locale}>
-              {step.label}
-            </a>
-          </li>
-        ))}
-        <li aria-current="page">{currentLabel}</li>
-      </ol>
-    </nav>
-  )
-}
 
 export interface TreatmentBodyProps {
   readonly facts: Facts

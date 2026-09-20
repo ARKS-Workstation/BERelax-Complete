@@ -55,6 +55,9 @@ export default defineConfig({
         // binding and the KEK rotation was absent from this list, so the most sensitive code in the
         // repository had no coverage requirement at all. Found while adding H-HARD-03.
         'packages/clinical/src/**/*.ts',
+        // The staff PII estate, for the same reason the clinical one is here: the envelope and the AAD
+        // binding for bank accounts and identity-document numbers must be counted by a floor.
+        'packages/hr/src/**/*.ts',
         'packages/media/src/**/*.ts',
         'packages/fixtures/src/**/*.ts',
         'packages/ui/src/**/*.ts',
@@ -79,6 +82,11 @@ export default defineConfig({
         // packages/db are excluded by that package's absence from the list above.
         'packages/clinical/src/crypto/postgres-key-store.ts',
         'packages/clinical/src/schema/**',
+        // The same exclusion for the same reason a third time. Every statement in the employee repository
+        // is a query, a transaction or an audit row, and its behaviour — including that a decrypt writes
+        // exactly one audit row and that a refused read writes a `denied` one — is proved against a real
+        // PostgreSQL by packages/hr/src/employee.itest.ts. The envelope beside it IS counted.
+        'packages/hr/src/employee-repository.ts',
         // The sharp pipeline. Twenty-four encodes is half a minute of libvips, which is the integration
         // suite's job — packages/media/src/derivatives.itest.ts drives it, and packages/fixtures's does it
         // again against the real photography. The pure halves it sits on, the ladders and the URL builder,

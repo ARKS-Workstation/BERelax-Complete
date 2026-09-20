@@ -231,6 +231,25 @@ export async function unconfirmedAssumptionRows(
       union all
       select 'price_on_request', menu_label, open_question_id, provisional_note
         from price_on_request where is_provisional
+      -- The nineteen therapist employment records (0050). Keyed by staff_reference, which is the
+      -- internal handle and never a person's name: the panel says "Therapist 07 is an assumption", and
+      -- the assumption IS that nothing but the headcount is known. P-HR-01 added the provenance trio to
+      -- the employee table rather than reading the seed, so a row an admin confirms leaves the panel by
+      -- having its flag cleared - the same way a confirmed setting does.
+      union all
+      select 'employee', staff_reference, open_question_id, provisional_note
+        from employee where is_provisional
+      -- The provisional style-skill split. A separate source from the employee row on purpose: an admin
+      -- may confirm the person and not yet the skills, and one flag covering both would clear the panel
+      -- for an answer nobody gave.
+      union all
+      select 'employee_skill', e.staff_reference || ' -> ' || s.skill::text,
+             s.open_question_id, null
+        from employee_skill s join employee e on e.id = s.employee_id where s.is_provisional
+      union all
+      select 'employee_language', e.staff_reference || ' -> ' || l.language::text,
+             l.open_question_id, null
+        from employee_language l join employee e on e.id = l.employee_id where l.is_provisional
       union all
       select source, column_name, question,
              -- The value itself is the note: 'WHATSAPP-PENDING-Y1-NAP' says what it is, and a NULL

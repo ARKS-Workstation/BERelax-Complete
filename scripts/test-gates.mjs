@@ -13578,6 +13578,2054 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   })
 }
 
+// 56a-56x. (B-LIFE-03) Reschedule, cancellation, the no-show clock guard and the cancellation window:
+//          the rules 0049 added, and the properties of the two transactions that stop being true when one
+//          line is removed.
+//
+// Two kinds of fixture, because this unit has two kinds of claim.
+//
+// **The schema half** is a set of psql probes, each a statement the database must refuse by the NAME of the
+// rule written for it. A bare non-zero exit is also what a typo in a column name produces, and the rule
+// under test would then be dead while this file reported PASS for ever (ADR 0003). Every probe runs inside
+// `begin; … ; rollback;` against its own fixture rows, and each one violates exactly ONE constraint, so the
+// name in the output is the rule and not whichever check happened to run first. 56g is the control: the same
+// UPDATE on a row that IS cancelled commits, so the six refusals are about the values they changed.
+//
+// **The code half** is mutants, each removing one line the unit depends on, run against the suite that is
+// supposed to notice. A room lock, a lock ORDER, a release that has to precede an acquisition and a trading
+// date that must be resolved rather than truncated are not expressible as constraints, so the only way to
+// know the tests are testing them is to remove each one and watch the right suite fail.
+//
+// Two of the mutants are worth reading twice.
+//
+// 56l replaces the injected resolver with arithmetic on the LOCAL calendar date, not the UTC one, and the
+// difference is the whole reason the mutant is written that way: trading runs 11:00-02:00 Dubai, which is
+// 07:00-22:00 UTC, so every instant of a trading day currently shares its UTC date with its trading date and
+// `toISOString().slice(0, 10)` is accidentally right. It is right by coincidence of the configured hours —
+// an override closing at 04:00 would break it silently — which is exactly why the date is resolved through
+// `resolveTradingDate` and not truncated at all.
+//
+// 56k narrows the reschedule to the ONE row it was asked about instead of the whole delivery, and the four
+// hands case fails. What it demonstrates is that `appointment_delivery_is_coherent` cannot catch this:
+// moving one row into a NEW delivery leaves one coherent row on each side, so the split is invisible to the
+// database and the code rule is the only thing standing there.
+{
+  const reschedDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const RESCHED_MARKER = 'gate fixture reschedule'
+  const RESCHED_DATE = "'2099-12-07'"
+  const RESCHED_ROOM = 'gate-fixture-resch-room'
+  const RESCHED_PHONE = '+971500000198'
+  const RESCHED_BOOKING = "'50000000-0000-4000-8000-00000000c201'"
+  const RESCHED_APPOINTMENT = "'50000000-0000-4000-8000-00000000c202'"
+  const RESCHED_THERAPIST = "'50000000-0000-4000-8000-00000000c203'::uuid"
+  const RESCHED_DELIVERY = "'50000000-0000-4000-8000-00000000c204'::uuid"
+
+  /** Cancels the fixture appointment, which is what makes the flag legal at all. */
+  const RESCHED_CANCEL = `update appointment set status = 'cancelled_by_customer' where id = ${RESCHED_APPOINTMENT};`
+
+  const reschedSetup = [
+    `insert into customer (phone_e164, created_via) values ('${RESCHED_PHONE}', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${RESCHED_DATE}, '2099-12-07 07:00:00+00', '2099-12-07 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    // 120 minutes, because `service_variant_duration_allowed` accepts only 45, 60, 90 and 120 — and 90 is
+    // the B-LIFE-01 gate's variant on the same seeded service.
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 120, 30000, '${RESCHED_MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes)
+       values ('${RESCHED_ROOM}', 'Gate reschedule room', 'standard', 1, 89, '${RESCHED_MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${RESCHED_BOOKING},
+               (select id from customer where phone_e164 = '${RESCHED_PHONE}'),
+               'front_desk', '${RESCHED_MARKER}')`,
+    'insert into appointment (id, booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+      'room_id, period, status, delivery_id, room_places, turnaround_minutes, ' +
+      'therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils) values (' +
+      `${RESCHED_APPOINTMENT}, ${RESCHED_BOOKING}, ${RESCHED_DATE}, ` +
+      '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+      "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1), 'solo', " +
+      `${RESCHED_THERAPIST}, (select id from rooms where code = '${RESCHED_ROOM}'), ` +
+      "tstzrange('2099-12-07 19:00:00+00','2099-12-07 20:00:00+00','[)'), 'requested', " +
+      `${RESCHED_DELIVERY}, 1, 20, 10, 30000, 28572, 1428)`,
+  ].join('; ')
+
+  const reschedProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      reschedDbUrl ?? '',
+      '-c',
+      `begin; ${reschedSetup}; ${statement}; rollback;`,
+    ])
+
+  if (!reschedDbUrl) {
+    check(
+      'the reschedule and late-cancellation rules hold',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 56a. Only a cancellation can be a late cancellation. A completed treatment carrying the flag is the
+    //      shape of a sweep that updated the wrong rows, and the fee policy that later reads the flag would
+    //      charge for a massage that was delivered.
+    checkRejectedBy(
+      'reschedule gate rejects the late-cancellation flag on an appointment that is not cancelled',
+      reschedProbe(
+        `update appointment set late_cancellation = true, late_cancellation_window_hours = 24
+          where id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_late_cancellation_needs_a_cancellation',
+    )
+
+    // 56b-56c. Half the record is always a defect, in both directions. A flag with no figure cannot be
+    //          accounted for once the provisional window changes, and a figure with no flag is a window
+    //          recorded against a cancellation that was inside nothing.
+    checkRejectedBy(
+      'reschedule gate rejects a late-cancellation flag with no window figure beside it',
+      reschedProbe(
+        `${RESCHED_CANCEL} update appointment set late_cancellation = true
+          where id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_late_cancellation_is_whole',
+    )
+    checkRejectedBy(
+      'reschedule gate rejects a window figure with no late-cancellation flag beside it',
+      reschedProbe(
+        `${RESCHED_CANCEL} update appointment set late_cancellation_window_hours = 24
+          where id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_late_cancellation_is_whole',
+    )
+
+    // 56d. The bounds the F09 registry puts on the setting, restated in SQL because the database cannot
+    //      import the registry. A stored window of 10,000 hours would flag every cancellation the salon
+    //      ever takes.
+    checkRejectedBy(
+      'reschedule gate rejects a cancellation window outside the range the registry declares',
+      reschedProbe(
+        `${RESCHED_CANCEL} update appointment set late_cancellation = true,
+                 late_cancellation_window_hours = 169 where id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_late_cancellation_window_bounded',
+    )
+
+    // 56e. A row cannot supersede itself: the chain would be a cycle no reader terminates on.
+    checkRejectedBy(
+      'reschedule gate rejects an appointment that supersedes itself',
+      reschedProbe(
+        `update appointment set rescheduled_from_id = id where id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_reschedule_is_not_self',
+    )
+
+    // 56f. One predecessor, at most one successor. This is the database's half of `repeat: 'refused'` on
+    //      `rescheduled`: a second reschedule of an already-superseded row would move a period it no longer
+    //      holds, and the index refuses it even if a caller reached past the transition table.
+    checkRejectedBy(
+      'reschedule gate rejects a second successor for one superseded appointment',
+      reschedProbe(
+        'insert into appointment (booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+          'room_id, period, status, delivery_id, room_places, turnaround_minutes, ' +
+          'therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils, rescheduled_from_id) ' +
+          'select a.booking_id, a.trading_date, a.service_variant_id, a.shape, ' +
+          "('50000000-0000-4000-8000-00000000c21' || n::text)::uuid, a.room_id, " +
+          "tstzrange(('2099-12-07 2' || n::text || ':00:00+00')::timestamptz, " +
+          "('2099-12-07 2' || n::text || ':30:00+00')::timestamptz, '[)'), 'confirmed', " +
+          'gen_random_uuid(), 1, 20, 10, 30000, 28572, 1428, a.id ' +
+          `from appointment a, generate_series(0, 1) as n where a.id = ${RESCHED_APPOINTMENT}`,
+      ),
+      'appointment_one_successor_per_predecessor',
+    )
+
+    // 56g. The control for all six. A row that IS cancelled takes the flag and its figure, so each refusal
+    //      above is about the value it changed and not about a column list that stopped matching the table.
+    const reschedFlagged = reschedProbe(
+      `${RESCHED_CANCEL} update appointment set late_cancellation = true,
+             late_cancellation_window_hours = 24 where id = ${RESCHED_APPOINTMENT}`,
+    )
+    check(
+      'reschedule gate accepts the flag and its window figure on a cancelled appointment',
+      !reschedFlagged.failed,
+      `the six refusals above are not about the values they changed:\n${reschedFlagged.output}`,
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case a
+    // probe is wrongly accepted, and because a room or a booking left behind fails a later gate with an
+    // error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      reschedDbUrl,
+      '-c',
+      `delete from appointment where booking_id = ${RESCHED_BOOKING}; ` +
+        `delete from booking where notes = '${RESCHED_MARKER}'; ` +
+        `delete from rooms where notes = '${RESCHED_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${RESCHED_MARKER}'; ` +
+        `delete from business_day where trading_date = ${RESCHED_DATE}; ` +
+        `delete from customer where phone_e164 = '${RESCHED_PHONE}';`,
+    ])
+  }
+
+  // 56h-56x. The code half.
+  const RESCHED_REPO = 'packages/db/src/repositories/reschedule.ts'
+  const RESCHED_CANCEL_REPO = 'packages/db/src/repositories/cancel.ts'
+  const RESCHED_BOOK_REPO = 'packages/db/src/repositories/create-booking.ts'
+  const RESCHED_POLICY = 'packages/core/src/lifecycle/cancellation-policy.ts'
+  const RESCHED_PAIR = 'packages/fixtures/src/appointment-reschedule.itest.ts'
+  const RESCHED_UNIT = 'packages/db/src/repositories/reschedule.test.ts'
+  const RESCHED_CANCEL_UNIT = 'packages/db/src/repositories/cancel.test.ts'
+  const RESCHED_CORE_SUITE = 'packages/core/src/lifecycle'
+
+  /** Applies one anchored edit to a shipped file, asserting the anchor is still there. */
+  const reschedMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes the assertion below vacuous, so it is an error rather than a
+        // no-op replace: `String.replace` with a missing needle returns the text unchanged, and the mutant
+        // would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the B-LIFE-03 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const reschedPairSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', RESCHED_PAIR])
+  const reschedUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RESCHED_UNIT])
+  const reschedCancelUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RESCHED_CANCEL_UNIT])
+  const reschedCoreSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RESCHED_CORE_SUITE])
+
+  // 56h. The lock ORDER. A reschedule writes the room it leaves AND the room it arrives in, so two moves
+  //      in opposite directions between the same two rooms deadlock unless every writer takes the rows in
+  //      one order. The mutant is the seven characters that produce request order instead, and the pair
+  //      suite's 20 iterations of an A-to-B against a B-to-A swap are what find it.
+  checkRejectedBy(
+    'reschedule gate: locking the two rooms in request order instead of id order deadlocks',
+    reschedMutant(
+      RESCHED_REPO,
+      'const roomIds = [...new Set([target.room_id, newRoomId])].sort()',
+      'const roomIds = [...new Set([target.room_id, newRoomId])]',
+      reschedPairSuite,
+    ),
+    'deadlock detected',
+  )
+
+  // 56i. The room row lock itself, which this unit takes through B-AVAIL-06's own `lockRooms` rather than
+  //      a second copy of it. Removing `for update` there leaves the reschedule counting places nobody
+  //      holds, and the pair suite's competing `for share nowait` stops receiving 55P03. Each probe names a
+  //      TEST TITLE rather than a file path — a path appears in the output whichever case failed.
+  checkRejectedBy(
+    'reschedule gate: dropping SELECT ... FOR UPDATE on the room row is caught by this unit too',
+    reschedMutant(RESCHED_BOOK_REPO, '\n         for update\n', '\n', reschedPairSuite),
+    'holds the room row under FOR UPDATE',
+  )
+
+  // 56j. The release. The predecessor must reach `rescheduled` — and so stop holding its period, because
+  //      `holds_resources` is generated from the status — before the successor is inserted, or
+  //      `appointment_therapist_no_overlap` refuses every move that overlaps itself. A transition to
+  //      anything else is a no-op or a refusal, and the guard that says so is what fails.
+  checkRejectedBy(
+    'reschedule gate: a transition that does not release the old period is caught',
+    reschedMutant(
+      RESCHED_REPO,
+      "        to: 'rescheduled',",
+      "        to: 'confirmed',",
+      reschedPairSuite,
+    ),
+    'successor_not_written',
+  )
+
+  // 56k. The delivery moves whole. Narrowing it to the row the caller named splits a Four Hands into two
+  //      deliveries — and the database CANNOT see that, because each side is individually coherent, so this
+  //      case is the only thing standing there.
+  checkRejectedBy(
+    'reschedule gate: moving one row of a four-hands delivery instead of the whole delivery is caught',
+    reschedMutant(
+      RESCHED_REPO,
+      'return rows.filter((row) => row.holds_resources || row.id === appointmentId)',
+      'return rows.filter((row) => row.id === appointmentId)',
+      reschedPairSuite,
+    ),
+    'moves every row of a four-hands delivery together',
+  )
+
+  // 56l. The trading date is RESOLVED, never derived. The mutant is arithmetic on the local calendar date,
+  //      which is the version somebody writes when the resolver looks like ceremony; 00:30 then files
+  //      itself under the next trading date, on tomorrow's rota, tomorrow's cash-up and tomorrow's
+  //      commission. See the header for why the UTC-truncating version would have passed.
+  checkRejectedBy(
+    'reschedule gate: deriving the new trading date from the calendar date is caught',
+    reschedMutant(
+      RESCHED_REPO,
+      `  const resolution = deps.resolveTradingDate({
+    startsAtMs: input.treatment.startsAt,
+    days: await readCandidateDays(uow, input.treatment.startsAt),
+  })`,
+      `  const resolution = {
+    kind: 'trading',
+    tradingDate: new Date(input.treatment.startsAt + 4 * 3_600_000).toISOString().slice(0, 10),
+    reason: 'the gate replaced the resolver with arithmetic on the local calendar date',
+    calendarDate: '',
+  }`,
+      reschedPairSuite,
+    ),
+    'keeps the trading date when 23:50 moves to 00:30',
+  )
+
+  // 56m. The eligibility read model, re-applied against the date the appointment is moving TO. A roster, an
+  //      approved leave request and a licence expiry all differ by date, and `appointment.therapist_id` has
+  //      no foreign key precisely because `references employee (id)` could not make this claim.
+  checkRejectedBy(
+    'reschedule gate: dropping the eligibility re-check lets a move land on a date the therapist cannot work',
+    reschedMutant(
+      RESCHED_REPO,
+      '  await assertTherapistsAreEligible(uow, {',
+      '  await Promise.resolve({',
+      reschedPairSuite,
+    ),
+    're-applies the eligibility read model',
+  )
+
+  // 56n-56o. Fail closed, twice. A reschedule written with no re-check is a reschedule nobody checked, and
+  //          one written with no resolver files itself under a date nobody resolved.
+  checkRejectedBy(
+    'reschedule gate: defaulting the missing slot re-check to "assume it is fine" is caught',
+    reschedMutant(
+      RESCHED_REPO,
+      "  if (typeof deps?.recheck !== 'function') {",
+      '  if ((false as boolean)) {',
+      reschedUnitSuite,
+    ),
+    'refuses when no slot re-check was injected',
+  )
+  checkRejectedBy(
+    'reschedule gate: defaulting the missing trading-date resolver is caught',
+    reschedMutant(
+      RESCHED_REPO,
+      "  if (typeof deps?.resolveTradingDate !== 'function') {",
+      '  if ((false as boolean)) {',
+      reschedUnitSuite,
+    ),
+    'refuses when no trading-date resolver was injected',
+  )
+
+  // 56p-56q. The same two, on the cancellation side. Without the policy the flag is never set, and a flag
+  //          that is never set is indistinguishable from a salon with no late cancellations; without the
+  //          clock guard a no-show is markable against tomorrow's appointment.
+  checkRejectedBy(
+    'reschedule gate: defaulting the missing cancellation policy to "not late" is caught',
+    reschedMutant(
+      RESCHED_CANCEL_REPO,
+      "  if (typeof deps?.classify !== 'function') {",
+      '  if ((false as boolean)) {',
+      reschedCancelUnitSuite,
+    ),
+    'refuses a cancellation with no policy injected',
+  )
+  checkRejectedBy(
+    'reschedule gate: defaulting the missing no-show clock guard is caught',
+    reschedMutant(
+      RESCHED_CANCEL_REPO,
+      "  if (typeof deps?.clock !== 'function') {",
+      '  if ((false as boolean)) {',
+      reschedCancelUnitSuite,
+    ),
+    'refuses a no-show with no clock guard injected',
+  )
+
+  // 56r. The rows `cancelBooking` takes. A reschedule leaves the SUPERSEDED row in the same booking and
+  //       `rescheduled` is terminal, so taking every row of the booking makes the customer's live
+  //       appointment permanently uncancellable — refused for ever by an earlier version of itself. This is
+  //       the defect the predicate was written for, so the predicate is what the gate removes.
+  checkRejectedBy(
+    'reschedule gate: cancelling every row of a booking instead of the live ones is caught',
+    reschedMutant(
+      RESCHED_CANCEL_REPO,
+      // `true or …` rather than deleting the predicate, so the mutant is the SEMANTICS and not a SQL
+      // fragment that no longer parses: every row of the booking is taken, which is the defect.
+      '       and (holds_resources or status =',
+      '       and (true or status =',
+      reschedPairSuite,
+    ),
+    'cancels the live successor of a rescheduled appointment',
+  )
+
+  // 56s. The clock guard's own comparison. Without it a no-show is markable against an appointment that has
+  //      not happened, and the judgement lands on the customer.
+  checkRejectedBy(
+    'reschedule gate: a no-show guard that permits a future appointment is caught',
+    reschedMutant(
+      RESCHED_POLICY,
+      '  if (request.at < request.startsAt) {',
+      '  if ((false as boolean)) {',
+      reschedCoreSuite,
+    ),
+    'refuses one minute before the start',
+  )
+
+  // 56t. The window boundary belongs to the customer: 24 hours to the minute is compliance, not lateness.
+  //      One character the other way flags the person who did exactly what was asked of them.
+  checkRejectedBy(
+    'reschedule gate: flagging a cancellation made exactly at the window boundary is caught',
+    reschedMutant(
+      RESCHED_POLICY,
+      '    late: noticeMinutes < windowHours * 60,',
+      '    late: noticeMinutes <= windowHours * 60,',
+      reschedCoreSuite,
+    ),
+    'is on time at exactly the window boundary',
+  )
+
+  // 56u. The fee is zero for every input, and that is the acceptance criterion rather than an omission: no
+  //      fee policy is agreed (Y9-windows) and the business takes no card payments, so an amount here would
+  //      be a capability it does not have.
+  checkRejectedBy(
+    'reschedule gate: a cancellation charge of anything but zero is caught',
+    reschedMutant(RESCHED_POLICY, '    fils: 0,', '    fils: 5_000,', reschedCoreSuite),
+    'charges nothing, whatever the notice',
+  )
+
+  // 56v-56x. The controls. The committed files pass all four suites, so every probe above is the line it
+  //          removed and not a suite that fails for its own reasons.
+  const reschedCoreClean = reschedCoreSuite()
+  check(
+    'reschedule gate: the committed cancellation policy passes its own suite',
+    !reschedCoreClean.failed,
+    `the committed cancellation policy failed its own suite:\n${reschedCoreClean.output}`,
+  )
+  const reschedUnitClean = reschedUnitSuite()
+  const reschedCancelClean = reschedCancelUnitSuite()
+  check(
+    'reschedule gate: the committed reschedule and cancel paths pass their unit suites',
+    !reschedUnitClean.failed && !reschedCancelClean.failed,
+    `a committed write path failed its own unit suite:\n${reschedUnitClean.output}${reschedCancelClean.output}`,
+  )
+  const reschedPairClean = reschedPairSuite()
+  check(
+    'reschedule gate: the committed reschedule passes its pair suite',
+    !reschedPairClean.failed,
+    `the committed reschedule failed its own pair suite:\n${reschedPairClean.output}`,
+  )
+}
+
+// 57a-57z. (P-HR-01) The employment record and staff PII: the rules migration 0050 refuses, the two
+// check-digit rules of `pnpm pii`, and the suites that must be able to fail.
+//
+// Four groups. The first is 0050's constraints and triggers against real PostgreSQL, because the point
+// of putting a rule in the database is that it survives a mistake in the code above it — and a rule
+// nothing has bounced off is not a rule (ADR 0003). Each probe names the error it must trip, so a
+// fixture rejected by an unrelated constraint fails rather than passing.
+//
+// The second is the controls: a re-wrap, a supersede, an expiry correction on a sealed document and an
+// integer wage all have to be ACCEPTED, or the rules above are "refuse everything" wearing five names.
+//
+// The third is `pnpm pii`'s own known-bad fixtures. Its rule is that a committed IBAN or Emirates ID
+// which passes its own check digit is refused and one that fails is allowed, so both directions are
+// fixtures — a gate that refused every shaped value would be switched off the first time a test needed
+// one. **The passing values are COMPUTED here and never written as literals**: a fixture file holding a
+// valid Emirates ID would be scanned by this same gate, and by the time the fixture had proved the rule
+// it would have committed the thing the rule exists to prevent.
+//
+// The fourth breaks shipped code and requires the test that claims to cover it to fail, by name.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  // One zero byte in every sealed column. A ciphertext that could not be a ciphertext and a wrapped key
+  // that could not be a wrapped key: nothing in these probes is ever decrypted, and a fixture that
+  // looked like key material would be key material as far as a leak scanner is concerned.
+  const BYTES = "'\\x00'::bytea"
+  const OTHER_BYTES = "'\\x01'::bytea"
+  // `GATE` rather than a word `is_placeholder_text()` matches: 'pending', 'unknown' and 'placeholder'
+  // are all markers 0026 refuses in a staff reference, and naming a fixture employee after one of them
+  // is a probe rejected by the wrong constraint. That cost one run to find.
+  const EMP = "'0dec0de5-0000-7000-8000-000000000001'::uuid"
+  const EMP2 = "'0dec0de5-0000-7000-8000-000000000002'::uuid"
+  const DOC = "'0dec0de5-0000-7000-8000-000000000011'::uuid"
+  const BANK = "'0dec0de5-0000-7000-8000-000000000021'::uuid"
+
+  const employee = (id, reference) =>
+    'insert into employee (id, staff_reference, employed_from) values ' +
+    `(${id}, '${reference}', date '2026-01-01')`
+  const bankRow = (kid) =>
+    'insert into employee_bank_detail (id, employee_id, detail_ct, detail_nonce, ' +
+    'detail_wrapped_key, detail_kid, detail_aad_fp, created_by) values (' +
+    `${BANK}, ${EMP}, ${BYTES}, ${BYTES}, ${BYTES}, '${kid}', 'gate-fingerprint', 'gate')`
+  const sealedDocument =
+    'insert into employee_document (id, employee_id, document_type, expires_on, number_ct, ' +
+    'number_nonce, number_wrapped_key, number_kid, number_aad_fp) values (' +
+    `${DOC}, ${EMP}, 'passport', date '2030-01-01', ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'gate-fp')`
+
+  const probes = [
+    {
+      name: 'a photography consent with no record of who took it is refused',
+      rule: 'employee_photo_consent_has_a_record',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        `update employee set photo_consent = true where id = ${EMP}`,
+    },
+    {
+      name: 'a placeholder display name is refused, because it would publish as a name',
+      rule: 'employee_display_name_not_placeholder',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        `update employee set display_name = 'Name TBC' where id = ${EMP}`,
+    },
+    {
+      name: 'is_publishable cannot be written, because it is the guard and not a flag',
+      rule: 'can only be updated to DEFAULT',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        `update employee set is_publishable = true where id = ${EMP}`,
+    },
+    {
+      name: 'a provisional employment record must name the question it is provisional against',
+      rule: 'employee_provisional_names_a_question',
+      sql:
+        'insert into employee (id, staff_reference, employed_from, is_provisional) values ' +
+        `(${EMP}, 'GATE 01', date '2026-01-01', true)`,
+    },
+    {
+      name: 'an Emirates ID in the plaintext reference column is refused',
+      rule: 'employee_document_identity_number_is_encrypted',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        'insert into employee_document (employee_id, document_type, reference, expires_on) values ' +
+        `(${EMP}, 'emirates_id', 'anything at all', date '2030-01-01')`,
+    },
+    {
+      name: 'four of the five sealed number columns is refused',
+      rule: 'employee_document_sealed_number_is_complete',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        'insert into employee_document (employee_id, document_type, expires_on, number_ct, ' +
+        'number_nonce, number_wrapped_key, number_kid) values ' +
+        `(${EMP}, 'passport', date '2030-01-01', ${BYTES}, ${BYTES}, ${BYTES}, 'v1')`,
+    },
+    {
+      name: 'an UPDATE cannot rewrite a staff bank ciphertext',
+      rule: 'StaffSealedRowImmutable',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+        `update employee_bank_detail set detail_ct = ${OTHER_BYTES} where id = ${BANK}`,
+    },
+    {
+      name: 'an UPDATE cannot rewrite a staff bank AAD fingerprint',
+      rule: 'StaffSealedRowImmutable',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+        `update employee_bank_detail set detail_aad_fp = 'moved' where id = ${BANK}`,
+    },
+    {
+      name: 'a key-version change with an unchanged wrapped key is refused',
+      rule: 'StaffRewrapDidNotRewrap',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+        `update employee_bank_detail set detail_kid = 'v2' where id = ${BANK}`,
+    },
+    {
+      name: 'a sealed document row cannot be moved to another employee',
+      rule: 'StaffSealedRowRebound',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${employee(EMP2, 'GATE 02')}; ${sealedDocument}; ` +
+        `update employee_document set employee_id = ${EMP2} where id = ${DOC}`,
+    },
+    {
+      name: 'a sealed document number cannot be cleared by an UPDATE',
+      rule: 'StaffSealedNumberCannotBeCleared',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${sealedDocument}; ` +
+        'update employee_document set number_ct = null, number_nonce = null, ' +
+        `number_wrapped_key = null, number_kid = null, number_aad_fp = null where id = ${DOC}`,
+    },
+    {
+      name: 'two current bank accounts for one employee are refused',
+      rule: 'employee_bank_detail_one_current',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+        'insert into employee_bank_detail (employee_id, detail_ct, detail_nonce, ' +
+        'detail_wrapped_key, detail_kid, detail_aad_fp, created_by) values (' +
+        `${EMP}, ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'gate-fingerprint-2', 'gate')`,
+    },
+    {
+      name: 'a negative wage is refused by the fils_nonneg domain’s own constraint',
+      rule: 'fils_nonneg_check',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        `update employee set basic_wage_fils = -1 where id = ${EMP}`,
+    },
+    {
+      name: 'a decimal AED wage is refused by the bigint domain’s input function',
+      rule: 'invalid input syntax for type bigint',
+      // Quoted, which is the form that arrives: postgres.js sends a JS number as text and lets the
+      // target type parse it. An UNQUOTED 1250.50 is a numeric literal that PostgreSQL's assignment cast
+      // ROUNDS to 1251 before any constraint sees it — a real hole, recorded in this unit's NOTE, and the
+      // reason this probe is written the way the driver writes it rather than the way psql allows.
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        `update employee set basic_wage_fils = '1250.50' where id = ${EMP}`,
+    },
+    {
+      name: 'a blank sealed column is refused, because a blank ciphertext decrypts to nothing',
+      rule: 'employee_bank_detail_sealed_columns_nonempty',
+      sql:
+        `${employee(EMP, 'GATE 01')}; ` +
+        'insert into employee_bank_detail (employee_id, detail_ct, detail_nonce, ' +
+        'detail_wrapped_key, detail_kid, detail_aad_fp, created_by) values (' +
+        `${EMP}, ''::bytea, ${BYTES}, ${BYTES}, 'v1', 'gate-fingerprint', 'gate')`,
+    },
+  ]
+
+  if (dbUrl === undefined) {
+    check(
+      '0050 probes ran against a database',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required; the 0050 rules cannot be proved without one',
+    )
+  } else {
+    for (const probe of probes) {
+      checkRejectedBy(`0050 refuses: ${probe.name}`, psqlProbe(probe.sql), probe.rule)
+    }
+
+    // --- the controls -----------------------------------------------------------------------------
+    // Every rule above must permit the operation it is shaped around. Without these, five constraints
+    // and four triggers are indistinguishable from a table nothing may write to.
+    const accepted = [
+      {
+        name: 'a genuine re-wrap changes the wrapped key and the version together',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+          `update employee_bank_detail set detail_wrapped_key = ${OTHER_BYTES}, ` +
+          `detail_kid = 'v2' where id = ${BANK}`,
+      },
+      {
+        name: 'a bank account is superseded, and a second current row may then be filed',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ${bankRow('v1')}; ` +
+          `update employee_bank_detail set superseded_at = now() where id = ${BANK}; ` +
+          'insert into employee_bank_detail (employee_id, detail_ct, detail_nonce, ' +
+          'detail_wrapped_key, detail_kid, detail_aad_fp, created_by) values (' +
+          `${EMP}, ${BYTES}, ${BYTES}, ${BYTES}, 'v1', 'gate-fingerprint-2', 'gate')`,
+      },
+      {
+        name: 'an expiry date on a SEALED document may still be corrected',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ${sealedDocument}; ` +
+          `update employee_document set expires_on = date '2031-02-02' where id = ${DOC}`,
+      },
+      {
+        name: 'a licence number may still be typed into the plaintext reference column',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ` +
+          'insert into employee_document (employee_id, document_type, reference, expires_on) ' +
+          `values (${EMP}, 'professional_licence', 'LIC-GATE-0001', date '2030-01-01')`,
+      },
+      {
+        name: 'an integer wage in fils is accepted and the generated total follows it',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ` +
+          'update employee set basic_wage_fils = 300000, housing_allowance_fils = 120000 ' +
+          `where id = ${EMP}; ` +
+          `do $$ begin if (select total_wage_fils from employee where id = ${EMP}) <> 420000 then ` +
+          "raise exception 'GeneratedTotalWrong: total_wage_fils did not follow its components'; " +
+          'end if; end $$',
+      },
+      {
+        name: 'a display name plus a recorded consent makes the row publishable',
+        sql:
+          `${employee(EMP, 'GATE 01')}; ` +
+          "update employee set display_name = 'GATE Display Name', photo_consent = true, " +
+          'photo_consent_recorded_at = now(), photo_consent_recorded_by = ' +
+          `'gate' where id = ${EMP}; ` +
+          `do $$ begin if not (select is_publishable from employee where id = ${EMP}) then ` +
+          "raise exception 'PublishableGuardWrong: a named and consented row is not publishable'; " +
+          'end if; end $$',
+      },
+      {
+        name: 'the application role can insert an audit row and still cannot update one',
+        sql:
+          'set local role berelax_app; ' +
+          'insert into audit_event (actor_kind, action, entity_type, entity_id, operation) values ' +
+          "('staff', 'employee.gate.read', 'employee', 'gate', 'read'); " +
+          "update audit_event set operation = 'denied' where action = 'employee.gate.read'; " +
+          "do $$ begin if not exists (select 1 from audit_event where action = 'employee.gate.read' " +
+          "and operation = 'read') then raise exception 'AuditInsertRefused: the application role " +
+          "could not write an audited read'; end if; " +
+          "if exists (select 1 from audit_event where action = 'employee.gate.read' " +
+          "and operation = 'denied') then raise exception 'AppendOnlyRuleFailed: an UPDATE changed an " +
+          "audit row'; end if; end $$",
+      },
+    ]
+    for (const control of accepted) {
+      const result = psqlProbe(control.sql)
+      check(`0050 control: ${control.name}`, !result.failed, result.output)
+    }
+  }
+
+  // --- pnpm pii's own known-bad fixtures ----------------------------------------------------------
+  const pii = () => run('node', ['scripts/check-staff-pii.mjs'])
+  const FIXTURE = 'packages/hr/src/__gate_fixture_pii__.ts'
+
+  /**
+   * An Emirates ID with a VALID Luhn check digit, computed rather than written.
+   *
+   * The reason it is computed is the gate itself: it scans every tracked and untracked file, so a literal
+   * here would be a committed identity-number-shaped value that passes its own check — exactly what the
+   * rule refuses. The fixture exists for a few milliseconds inside `withFixture` and is removed in its
+   * `finally`.
+   */
+  const validEmiratesId = (body) => {
+    const digits = `784${body}`
+    let sum = 0
+    for (const [offset, character] of [...digits].reverse().entries()) {
+      const digit = Number(character)
+      // The check digit will occupy position 0, so the doubling parity here matches a 15-digit number
+      // whose last digit is the check: every second digit from the right of the FINAL string.
+      if (offset % 2 === 1) {
+        sum += digit
+        continue
+      }
+      const doubled = digit * 2
+      sum += doubled > 9 ? doubled - 9 : doubled
+    }
+    return `${digits}${(10 - (sum % 10)) % 10}`
+  }
+
+  /** A UAE IBAN whose mod-97 check digits are correct, computed for the same reason. */
+  const validAeIban = (body) => {
+    const remainderOf = (value) => {
+      let remainder = 0
+      for (const character of value) {
+        const mapped = /[0-9]/.test(character)
+          ? character
+          : String(character.charCodeAt(0) - 'A'.charCodeAt(0) + 10)
+        for (const digit of mapped) remainder = (remainder * 10 + Number(digit)) % 97
+      }
+      return remainder
+    }
+    // ISO 13616: the check digits are 98 minus the mod-97 residue of the body followed by `AE00`.
+    const check = 98 - remainderOf(`${body}AE00`)
+    return `AE${String(check).padStart(2, '0')}${body}`
+  }
+
+  const fixtureSource = (value, label) =>
+    [
+      '// A gate fixture. Removed by withFixture the moment the assertion has run.',
+      `export const ${label} = '${value}'`,
+      '',
+    ].join('\n')
+
+  checkRejectedBy(
+    'pii gate rejects a committed IBAN whose mod-97 check digits are valid',
+    withFixture(FIXTURE, fixtureSource(validAeIban('0'.repeat(19)), 'account'), () => pii()),
+    'plaintext-iban',
+  )
+
+  checkRejectedBy(
+    'pii gate rejects a committed Emirates ID whose Luhn check digit is valid',
+    withFixture(FIXTURE, fixtureSource(validEmiratesId('19900000001'), 'identity'), () => pii()),
+    'plaintext-emirates-id',
+  )
+
+  // The other direction, and it matters as much. A gate that refused every IBAN-shaped string would be
+  // switched off the first time a test needed one — and this unit's own fixtures are exactly such
+  // values, so this control is what says they are permitted BY RULE rather than by luck.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        '// Both values FAIL their own check digit and therefore cannot be anybody’s: AE00 is not a',
+        '// producible mod-97 residue, and the Emirates ID below fails Luhn.',
+        "export const account = 'AE000000000000000000000'",
+        "export const identity = '784-0000-0000000-0'",
+        '',
+      ].join('\n'),
+      () => pii(),
+    )
+    check(
+      'pii gate accepts values that fail their own check digit, which is the rule fixtures follow',
+      !result.failed,
+      result.output,
+    )
+  }
+
+  // And the committed tree passes, which is the control that keeps the two rejections above from being a
+  // gate that rejects everything.
+  {
+    const clean = pii()
+    check('pii gate accepts the committed repository', !clean.failed, clean.output)
+    check(
+      'pii gate examined some shaped values rather than finding nothing to check',
+      clean.output.includes('shaped value(s) examined'),
+      clean.output,
+    )
+  }
+
+  // --- the suites must be able to fail ------------------------------------------------------------
+  const PERMISSIONS = 'packages/core/src/access/permissions.ts'
+  const POLICY = 'packages/core/src/hr/employee.ts'
+  const REPOSITORY = 'packages/hr/src/employee-repository.ts'
+  const SEED = 'packages/db/src/seed/therapists.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // The hole this unit found in shipped code: `canReadFieldGroup` answered TRUE for a group nobody had
+  // declared, for any role holding `'all'`. Put it back and the deny-by-default case must fail.
+  checkRejectedBy(
+    'the permissions suite fails when an undeclared field group is permitted again',
+    withEditedFile(
+      PERMISSIONS,
+      (src) => src.replace('if (!FIELD_GROUP_SET.has(group)) return false', ''),
+      () => runExpectingFailure('pnpm', unit('packages/core/src/access/permissions.test.ts')),
+    ),
+    'refuses a field group that is not in the catalogue',
+  )
+
+  // The criterion's own defect: a policy that allow-lists reads and defaults to permit. Flip the
+  // unclassified branch to permit and the field-policy suite must fail.
+  checkRejectedBy(
+    'the field-policy suite fails when an unclassified field is returned instead of refused',
+    withEditedFile(
+      POLICY,
+      (src) =>
+        src.replace(
+          '  if (sensitivity === undefined) return false\n  return sensitivity',
+          '  if (sensitivity === undefined) return true\n  return sensitivity',
+        ),
+      () => runExpectingFailure('pnpm', unit('packages/core/src/hr/employee.test.ts')),
+    ),
+    'refuses an unclassified field for every role',
+  )
+
+  /**
+   * Deletes the nineteen seeded therapists and seeds them again.
+   *
+   * Both halves matter. `seedTherapistRoster` is `on conflict (staff_reference) do nothing`, so seeding
+   * over an existing roster writes nothing at all — which is the idempotence `load.itest.ts` asserts and
+   * exactly what makes a plain re-seed useless for putting a rewritten roster back.
+   */
+  const reseedRoster = () => {
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      "delete from employee where staff_reference like 'Therapist %'",
+    ])
+    run('pnpm', ['seed'])
+  }
+
+  // The seed must not invent what nobody has supplied. Give the nineteen a gender and the integration
+  // suite must fail: brief rule 15, and 0030 refused to do exactly this.
+  checkRejectedBy(
+    'the employment suite fails when the seed invents a gender for the nineteen therapists',
+    withEditedFile(
+      SEED,
+      // Adds the column AND a value for it, so the fixture seeds a gender rather than breaking the
+      // statement: a fixture that fails for a syntax reason proves nothing about the assertion.
+      (src) =>
+        src.replace(
+          'insert into employee (staff_reference, employed_from, is_provisional, provisional_note,\n                          open_question_id)\n    select reference,',
+          "insert into employee (staff_reference, gender, employed_from, is_provisional, provisional_note,\n                          open_question_id)\n    select reference, 'female'::employee_gender,",
+        ),
+      () => {
+        // The seed has to run for the row to exist, and it is idempotent, so the fixture has to clear the
+        // nineteen first. `pnpm seed` writes nothing over an existing roster — which is the property
+        // load.itest.ts asserts — so without this the edited seed would be a no-op and the gate vacuous.
+        reseedRoster()
+        return runExpectingFailure('pnpm', integration('packages/hr/src/employee.itest.ts'))
+      },
+    ),
+    'invents no gender, contract or wage for any of them',
+  )
+
+  /*
+    Put the roster back, and note that restoring the FILE is not enough.
+
+    `withEditedFile` restores the source bytes; it cannot undo what the edited source WROTE. The nineteen
+    gendered rows survive in the shared database, the seed is idempotent, and so a plain `pnpm seed` here
+    leaves them — which makes "invents no gender" fail for every later run and for the next branch, on
+    somebody else's change. Brief rule 12, arriving through a gate rather than through a test. The delete
+    is the load-bearing half.
+  */
+  reseedRoster()
+
+  // The audit row is the whole control docs/04 §7 asks for. Remove it and the delta assertion must fail.
+  checkRejectedBy(
+    'the employment suite fails when a decrypt stops writing its audit row',
+    withEditedFile(
+      REPOSITORY,
+      (src) =>
+        src.replace(
+          'await recordSensitiveRead(access, {',
+          'if (false) await recordSensitiveRead(access, {',
+        ),
+      () => runExpectingFailure('pnpm', integration('packages/hr/src/employee.itest.ts')),
+    ),
+    'writes one read event per decrypt call',
+  )
+
+  // And the AAD. Bind to a constant instead of the row and a payload moves between employees cleanly,
+  // which is the single failure the binding exists to prevent.
+  checkRejectedBy(
+    'the employment suite fails when the AAD stops binding a ciphertext to its row',
+    withEditedFile(
+      'packages/hr/src/staff-secret.ts',
+      (src) =>
+        src.replace('    customerId: binding.employeeId,', "    customerId: 'not-bound-to-a-row',"),
+      () => runExpectingFailure('pnpm', unit('packages/hr/src/staff-secret.test.ts')),
+    ),
+    'opens under the same binding and refuses another employee',
+  )
+}
+
+// 58a-58j. (W-SYS-07) The hero: the poster that must stay unset, the rendition declaration that must stay
+//           single, the reduced-motion override that must stay in the token layer, and the island's
+//           byte budget.
+//
+//      Every rule here guards a change that leaves the page looking exactly the same. A `poster`
+//      attribute on the `<video>` renders an identical hero and moves LCP by several hundred
+//      milliseconds, because the browser fetches the photograph twice and the second copy is not the
+//      element the preload was written for. A hand-written `codecs="avc1…"` is a second copy of the
+//      encoder's own declaration, and it drifts by one character into a hero that stays a photograph on
+//      one browser. A `matchMedia('(prefers-reduced-motion: reduce)')` inside the island is the
+//      per-component branch docs/08 §5 exists to prevent, and it would also ignore the `[data-motion]`
+//      escape hatch that the token override honours. And an island that grew a library would still
+//      attach, still play, still pass every behavioural assertion in `hero-lcp.itest.ts`, and cost what
+//      the technique was supposed to save.
+{
+  const MEDIA = ['scripts/check-media.mjs']
+  const BUDGETS = ['exec', 'tsx', 'scripts/check-budgets.mjs']
+  const budgetsPath = 'build/budgets.json'
+  const editBudget = (id, change) => (text) => {
+    const config = JSON.parse(text)
+    change(config.budgets.find((budget) => budget.id === id))
+    return `${JSON.stringify(config, null, 2)}\n`
+  }
+
+  // 58a. The attribute that undoes the technique, in the shape it actually arrives: somebody adding a
+  //      "fallback image" to the element that already has one behind it.
+  {
+    const result = withFixture(
+      'apps/web/src/components/media/__gate_fixture__.tsx',
+      [
+        'export function Fixture() {',
+        '  return <video poster="/m/x/y/hero-desktop-1024.jpg" muted loop playsInline />',
+        '}',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a poster attribute on a video',
+      result,
+      '[hero-video-must-not-declare-a-poster]',
+    )
+  }
+
+  // 58b. The same attribute set from script, which is how it would arrive in an island rather than in
+  //      markup — and the shape a JSX-only rule would miss entirely.
+  {
+    const result = withFixture(
+      'packages/ui/src/media/__gate_fixture__.ts',
+      [
+        'export function fixture(video: HTMLVideoElement): void {',
+        "  video.poster = '/m/x/y/hero-desktop-1024.jpg'",
+        '}',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a poster assigned in script',
+      result,
+      '[hero-video-must-not-declare-a-poster]',
+    )
+  }
+
+  // 58c. The control for 58a and 58b: the element this unit actually ships. A rule that refused every
+  //      `<video>` would fail the build for the component it was written to protect.
+  {
+    const result = withFixture(
+      'apps/web/src/components/media/__gate_fixture__.tsx',
+      [
+        'export function Fixture() {',
+        '  return <video className="be-hero__video" preload="none" muted loop playsInline />',
+        '}',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate allows a video with no poster',
+      !result.failed,
+      `rejected the element the hero actually ships:\n${result.output}`,
+    )
+  }
+
+  // 58d. A `<source type>` written by hand. The four renditions and their codecs parameters are declared
+  //      in one module because that module is also where the encoder's argv comes from.
+  {
+    const result = withFixture(
+      'apps/web/src/components/media/__gate_fixture__.ts',
+      ['export const TYPE = \'video/mp4; codecs="avc1.640028"\''].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a hand-written codecs parameter',
+      result,
+      '[video-source-type-must-come-from-the-ladder]',
+    )
+  }
+
+  // 58e. The same rule on the other spelling: the rendition's filename, typed rather than built. This is
+  //      the one that produces a 404 behind a `<video>`, which the browser resolves by showing the poster
+  //      for ever and reporting nothing.
+  //
+  //      Scoped to `apps/`, and case 46i is why — its control asserts that `pnpm media` ACCEPTS a
+  //      content-addressed rendition URL, because that URL is what a page is supposed to hold and it is
+  //      what proves `[no-private-origin-url]` is not refusing every media URL. A repository-wide ban
+  //      contradicted it. The fixture therefore lives where the failure does: an application component
+  //      spelling a rendition URL rather than calling `heroVideoSources()`.
+  {
+    const result = withFixture(
+      'apps/web/src/components/media/__gate_fixture__.ts',
+      ["export const SRC = '/m/x/y/hero-video-desktop-h264.mp4'"].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects a hand-spelled rendition path',
+      result,
+      '[video-source-type-must-come-from-the-ladder]',
+    )
+  }
+
+  // 58f. The control for 58d and 58e: the way through is the ladder's own function, and it must not be
+  //      refused.
+  {
+    const result = withFixture(
+      'apps/web/src/components/media/__gate_fixture__.ts',
+      [
+        "import { heroVideoSources } from '@berelax/media/video'",
+        'export const SOURCES = heroVideoSources',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate allows the ladder’s own source builder',
+      !result.failed,
+      `rejected the one declaration it points at:\n${result.output}`,
+    )
+  }
+
+  // 58g. The reduced-motion override, from this unit's side. The island reads `--dur-ambient` precisely
+  //      so that the media query stays authored in one file; a `matchMedia` here would be the second
+  //      copy, and it would also ignore `[data-motion="full"]` — the escape hatch the token override
+  //      honours and a media query cannot see.
+  {
+    const result = withEditedFile(
+      'packages/ui/src/media/attach-video.ts',
+      (text) =>
+        text.replace(
+          'export function motionIsReduced(',
+          "export const QUERY = '(prefers-reduced-motion: reduce)'\n\nexport function motionIsReduced(",
+        ),
+      () => run('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'layout gate rejects the hero island spelling the reduced-motion query itself',
+      result,
+      '[reduced-motion-belongs-to-the-token-layer]',
+    )
+  }
+
+  // The two budget cases need a build, for the reason case 38's block states: `.next` is gitignored, CI
+  // builds before it measures and case 38q asserts that ordering. A skipped fixture is a rule nobody has
+  // seen fire, so this fails loudly instead.
+  const heroBuilt = existsSync('apps/web/.next/server/app')
+  if (!heroBuilt) {
+    check(
+      'the hero island budget fixture has a build to measure',
+      false,
+      'apps/web/.next is absent. Run `pnpm --filter @berelax/web build` — the island budget is read out ' +
+        'of the real build, so without one these cases would pass by measuring nothing.',
+    )
+  }
+
+  // 58h. The island's measurement is a real, non-zero number, and the failure carries it. docs/08 §6
+  //      budgets "a ~1.4KB island" and the acceptance caps it at 2KB gzip; what makes that checkable is
+  //      that a budget lowered under the measurement fails **with the bytes**.
+  if (heroBuilt) {
+    const result = withEditedFile(
+      budgetsPath,
+      editBudget('hero-attach-island', (budget) => {
+        budget.maxBytes = 512
+      }),
+      () => run('pnpm', BUDGETS),
+    )
+    checkRejectedBy(
+      'budget gate rejects an oversized hero island',
+      result,
+      '[over-budget] hero-attach-island',
+    )
+    check(
+      'budget gate reports the measured island bytes',
+      /\[over-budget] hero-attach-island: measured \d{3,} bytes against a budget of 512 bytes/.test(
+        result.output,
+      ),
+      result.output,
+    )
+  }
+
+  // 58i. The vacuity guard. A budget over a module the build does not contain measures zero bytes and
+  //      passes for ever — and this island is a static import from a server component, so "it stopped
+  //      being a client module" is a one-word change away.
+  if (heroBuilt) {
+    const result = withEditedFile(
+      budgetsPath,
+      editBudget('hero-attach-island', (budget) => {
+        budget.modules = ['packages/ui/src/media/nothing-renders-this.tsx']
+      }),
+      () => run('pnpm', BUDGETS),
+    )
+    checkRejectedBy(
+      'budget gate rejects a hero island the build does not contain',
+      result,
+      '[missing-client-module] packages/ui/src/media/nothing-renders-this.tsx',
+    )
+  }
+
+  // 58j. The control for 58h and 58i: the budget is measured rather than skipped, and it passes on the
+  //      build as it stands. Without it, a gate that had stopped finding the manifest would satisfy both
+  //      rejections above by failing everything.
+  if (heroBuilt) {
+    const clean = run('pnpm', BUDGETS)
+    check(
+      'the hero island budget is measured on this build',
+      clean.output.includes('PASS  The hero video attach island'),
+      clean.output,
+    )
+    const declared = JSON.parse(readFileSync(budgetsPath, 'utf8')).budgets.find(
+      (budget) => budget.id === 'hero-attach-island',
+    )
+    check(
+      'the hero island budget is the acceptance number',
+      declared?.maxBytes === 2048,
+      `build/budgets.json says ${String(declared?.maxBytes)} and W-SYS-07's acceptance says 2048 bytes ` +
+        'gzip. Raising it is a decision with a reason, and the reason belongs beside the number.',
+    )
+  }
+}
+
+// 59a-59t. (G-SEO-03) The three query-side analyses: the purity of the modules the criterion names, and
+//           the behaviours whose tests must be able to fail.
+//
+// The whole unit is four pure functions over warehouse rows, so there is no database row to refuse
+// anything here and no constraint to assert by name. Every defect in it is a number that is merely wrong:
+// a CTR rounded the other way, a window that quietly excludes the pair sitting exactly on its edge, a
+// baseline that includes the pair it is judging, a finding list whose order depends on the order a
+// `select` happened to return rows in. None of those raises anything, and each of them produces a weekly
+// report the owner would read and act on.
+//
+// So there are three kinds of probe:
+//
+//   59a-59i   the purity of `packages/core/src/seo/{ctr-outliers,content-gaps,cannibalisation,query-rows}.ts`
+//             SPECIFICALLY — a clock read, an environment read, a network call and an infrastructure
+//             import are each injected into a shipped file and the gate must name that file, plus the two
+//             controls that prove the committed tree passes and that the mechanism the unit actually uses
+//             (thresholds as arguments) is not what the gate is rejecting.
+//   59j-59r   the arithmetic and the ordering, probed by breaking the shipped code and requiring the test
+//             that claims to cover it to fail BY NAME. Every mutation is checked for being a no-op first,
+//             because a mutation that changed nothing would make this gate report a pass for a defect it
+//             never introduced.
+//   59s-59t   that the hand-computed expectation is a REVIEWED FIXTURE and not a recording of a run. This
+//             is the one criterion a mutation cannot prove: a fixture generated from the implementation
+//             agrees with it for ever, including after the arithmetic goes wrong, so the proof has to be
+//             that the fixture file contains literals and calls nothing.
+{
+  const SEO = 'packages/core/src/seo'
+  const ANALYSIS_FILES = [
+    `${SEO}/ctr-outliers.ts`,
+    `${SEO}/content-gaps.ts`,
+    `${SEO}/cannibalisation.ts`,
+    `${SEO}/query-rows.ts`,
+  ]
+  const WORKED_EXAMPLES = `${SEO}/analyses.worked-examples.test.ts`
+  const FIXTURE = `${SEO}/analyses.worked-examples.fixture.ts`
+  const SEO_SUITES = [
+    WORKED_EXAMPLES,
+    `${SEO}/ctr-outliers.test.ts`,
+    `${SEO}/content-gaps.test.ts`,
+    `${SEO}/cannibalisation.test.ts`,
+    `${SEO}/query-rows.test.ts`,
+  ]
+
+  const purity = () => run('node', ['scripts/check-core-purity.mjs'])
+  const cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+  const seoUnits = () =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...SEO_SUITES])
+
+  /*
+    Asserts the purity gate rejected a file BY ITS PATH and by the reason written for the rule.
+
+    A bare non-zero exit is not enough and neither is the reason on its own: the gate walks the whole of
+    `packages/core/src`, so a violation somebody else left behind would satisfy both. The path is what
+    makes this a probe of THESE files, which is what the acceptance criterion asks for.
+  */
+  const checkPurityNamed = (name, result, path, reason) => {
+    check(
+      name,
+      result.failed && result.output.includes(path) && result.output.includes(reason),
+      result.failed
+        ? `exited non-zero but did not name both ${path} and "${reason}":\n${result.output}`
+        : `exited zero; nothing was rejected:\n${result.output}`,
+    )
+  }
+
+  /*
+    Breaks one shipped line and runs something, having first proved the line is still there.
+
+    The no-op check is the point, and 49j's comment explains why: a mutation whose anchor has drifted
+    changes nothing, the suite passes, and this gate reports a pass for a defect it never introduced.
+  */
+  const seoMutant = (path, anchor, replacement, body) => {
+    check(
+      `G-SEO-03 anchor: ${path} still carries the line this gate replaces`,
+      readFileSync(path, 'utf8').includes(anchor),
+      `${anchor}\n      is no longer in ${path}, so the mutation below would be a no-op`,
+    )
+    return withEditedFile(path, (text) => text.replace(anchor, replacement), body)
+  }
+
+  // --- 59a-59d. A clock read in each of the four modules, named file by file ---------------------
+  //
+  // The criterion asks for a `Date.now` fixture proving the gate fires on THESE files, and the reason is
+  // specific to this unit rather than general hygiene: every finding these functions produce is written
+  // into a weekly report the owner compares week to week. A clock read would make a finding depend on the
+  // minute the job ran, so two runs over an unchanged warehouse would differ and nobody could tell a real
+  // movement from the reading of a clock. Appended rather than substituted, so no anchor can drift.
+  for (const path of ANALYSIS_FILES) {
+    checkPurityNamed(
+      `G-SEO-03 gate: the purity gate rejects a clock read in ${path}`,
+      withEditedFile(
+        path,
+        (text) => `${text}\nexport const gateStamp = (): number => Date.now()\n`,
+        purity,
+      ),
+      path,
+      'inject a Clock and pass the instant in',
+    )
+  }
+
+  // --- 59e. An environment read, which is the likelier mistake in this unit ----------------------
+  //
+  // Every threshold here is an argument with no default — a position window, an impression floor, a
+  // shortfall, a position gap. `process.env` is exactly what somebody reaches for to override one without
+  // touching a caller, and the cost is a report whose figures cannot be explained from its inputs.
+  checkPurityNamed(
+    'G-SEO-03 gate: the purity gate rejects an environment read in the CTR-outlier module',
+    withEditedFile(
+      `${SEO}/ctr-outliers.ts`,
+      (text) =>
+        `${text}\nexport const override = (): string => process.env['SEO_MIN_SHORTFALL_BP'] ?? ''\n`,
+      purity,
+    ),
+    `${SEO}/ctr-outliers.ts`,
+    'pass configuration in as an argument',
+  )
+
+  // --- 59f. A network call. "No LLM import" starts here: a model call is an HTTP call -------------
+  checkPurityNamed(
+    'G-SEO-03 gate: the purity gate rejects network I/O in the content-gap module',
+    withEditedFile(
+      `${SEO}/content-gaps.ts`,
+      (text) => `${text}\nexport const ask = (url: string): Promise<Response> => fetch(url)\n`,
+      purity,
+    ),
+    `${SEO}/content-gaps.ts`,
+    'network I/O has no place in core',
+  )
+
+  // --- 59g. The import half of "no LLM import", by rule name -------------------------------------
+  //
+  // There is no model SDK in this repository yet, and that is precisely why the rule has to be proved on
+  // the package that will hold the call when there is one: `packages/google` is where every outbound call
+  // to a Google or model API lives, and G-SEO-05's drafting will live beside it. The fixture is in the
+  // `seo` directory so the rejection is about these modules' neighbourhood rather than about core in
+  // general, and the assertion is on the rule's NAME because `core-must-be-pure` would also fire on some
+  // of what that package pulls in — a non-zero exit would not say which rule did the work.
+  checkRejectedBy(
+    'G-SEO-03 gate: an analysis module importing packages/google is rejected by name',
+    withFixture(
+      `${SEO}/__gate_fixture__.ts`,
+      [
+        "import { withGoogle } from '../../../google/src/index.ts'",
+        '',
+        'export const wrong = withGoogle',
+      ].join('\n'),
+      cruise,
+    ),
+    'core-must-not-import-infrastructure',
+  )
+
+  // --- 59h-59i. The two controls, and neither is a formality -------------------------------------
+  //
+  // 49j's lesson one level up: a rule that fires on a fixture and never on the tree is half proved, and a
+  // gate that also rejected the mechanism the unit is built on would make the unit unwritable.
+  {
+    const clean = purity()
+    check(
+      'G-SEO-03 control: the committed analyses pass the purity gate, so 59a-59f mean something',
+      !clean.failed,
+      clean.output,
+    )
+    const cruised = cruise()
+    check(
+      'G-SEO-03 control: the committed tree cruises clean, so 59g means something',
+      !cruised.failed,
+      cruised.output,
+    )
+  }
+  {
+    const allowed = withFixture(
+      `${SEO}/__gate_fixture__.ts`,
+      [
+        'export const shortfallBp = (ctrBp: number, peerCtrBp: number): number => peerCtrBp - ctrBp',
+        'export const inWindow = (centi: number, min: number, max: number): boolean =>',
+        '  centi >= min && centi <= max',
+      ].join('\n'),
+      purity,
+    )
+    check(
+      'G-SEO-03 control: the purity gate allows an analysis whose thresholds are arguments',
+      !allowed.failed,
+      `rejected the mechanism G-SEO-03 is built on:\n${allowed.output}`,
+    )
+  }
+
+  // --- 59j. THE criterion: the hand-computed CTRs, to the basis point ----------------------------
+  //
+  // Half-up rounding turned into truncation. It is the smallest wrong answer this unit can give — one
+  // basis point — and it is invisible in every figure except the two the fixture pins deliberately
+  // (1 click in 800 impressions is exactly 12.5 bp, and a peer baseline of 27 in 2,400 is exactly 112.5).
+  // Nothing about a truncated report looks wrong: every rate in it is merely a little lower, for ever.
+  checkRejectedBy(
+    'the worked-example suite fails when the basis-point rounding is truncated',
+    seoMutant(
+      `${SEO}/query-rows.ts`,
+      'return Math.round((clicks / impressions) * BASIS_POINTS)',
+      'return Math.trunc((clicks / impressions) * BASIS_POINTS)',
+      seoUnits,
+    ),
+    'matches the hand-computed CTR outliers to the basis point',
+  )
+
+  // --- 59k-59l. The inclusive window, at each edge separately ------------------------------------
+  //
+  // Two mutations rather than one, because an off-by-one at an inclusive boundary happens at one end at a
+  // time: a `>` where `>=` was meant drops every pair sitting exactly on position 5.00, and a `<` where
+  // `<=` was meant drops position 20.00 — and a stored centi-position lands on a whole position more often
+  // than anywhere else. Neither produces an error; each silently shrinks the candidate set.
+  checkRejectedBy(
+    'the edge suite fails when the low edge of the position window becomes exclusive',
+    seoMutant(
+      `${SEO}/ctr-outliers.ts`,
+      'pair.avgPositionCenti >= config.minPositionCenti &&',
+      'pair.avgPositionCenti > config.minPositionCenti &&',
+      seoUnits,
+    ),
+    'admits position 5.00 and 20.00 and refuses 4.90 and 20.10',
+  )
+  checkRejectedBy(
+    'the edge suite fails when the high edge of the position window becomes exclusive',
+    seoMutant(
+      `${SEO}/ctr-outliers.ts`,
+      'pair.avgPositionCenti <= config.maxPositionCenti,',
+      'pair.avgPositionCenti < config.maxPositionCenti,',
+      seoUnits,
+    ),
+    'admits position 5.00 and 20.00 and refuses 4.90 and 20.10',
+  )
+
+  // --- 59m. The leave-one-out baseline ------------------------------------------------------------
+  //
+  // The mutation is the obvious spelling, and it is wrong in one direction only: a pair holding most of
+  // its band's impressions drags a self-inclusive baseline onto its own CTR and can never be flagged,
+  // however badly it performs. The finding it hides is the biggest opportunity on the site, and nothing
+  // anywhere says a finding is missing.
+  checkRejectedBy(
+    'the CTR-outlier suite fails when a pair is left inside its own baseline',
+    seoMutant(
+      `${SEO}/ctr-outliers.ts`,
+      'const peerCtrBp = ctrBasisPoints(bandClicks - pair.clicks, peerImpressions)',
+      'const peerCtrBp = ctrBasisPoints(bandClicks, bandImpressions)',
+      seoUnits,
+    ),
+    'excludes the pair being judged, so a pair holding the band cannot hide behind itself',
+  )
+
+  // --- 59n. Cannibalisation must discriminate -----------------------------------------------------
+  //
+  // One competing page is not cannibalisation, and the mutation turns every query on the site into a
+  // finding — including the query variants a single page is supposed to rank for, which is the shape
+  // W-SITE-05 deliberately built (docs/09 §1: 32 priced durations are rows on 8 pages, not 32 routes). An
+  // analysis that reported that would advise consolidating away the structure the site is designed around.
+  checkRejectedBy(
+    'the cannibalisation suite fails when one page counts as competing',
+    seoMutant(
+      `${SEO}/cannibalisation.ts`,
+      'if (competing.length < 2) continue',
+      'if (competing.length < 1) continue',
+      seoUnits,
+    ),
+    'reports nothing for one page ranking for many query variants',
+  )
+
+  // --- 59o. The content-gap match runs in one direction ------------------------------------------
+  //
+  // Reversed, the test becomes "every term of the query appears in the route slug", which every locality,
+  // qualifier and misspelling then defeats — and the analysis reports a content gap for pages that exist.
+  // It is the same mutation in reverse for a matcher that is too generous, so the suite has to fail on it.
+  checkRejectedBy(
+    'the content-gap suite fails when the term match is reversed',
+    seoMutant(
+      `${SEO}/content-gaps.ts`,
+      'if (subject.every((term) => terms.has(term))) return path',
+      'if ([...terms].every((term) => subject.includes(term))) return path',
+      seoUnits,
+    ),
+    'does not match when a route slug term is missing from the query',
+  )
+
+  // --- 59p-59r. Determinism: each declared ordering, dropped in turn ------------------------------
+  //
+  // Three mutations, because there are three orderings and each is a separate promise. Dropping one leaves
+  // the findings in the order they were built in, which is the order the rows arrived in — and rows arrive
+  // from a `select` with no `order by`. The report then diffs week to week with no row having changed,
+  // which is the failure that makes a weekly diff worthless rather than wrong.
+  checkRejectedBy(
+    'the worked-example suite fails when the CTR-outlier ordering is dropped',
+    seoMutant(
+      `${SEO}/ctr-outliers.ts`,
+      'return findings.sort(compareCtrOutlier)',
+      'return findings',
+      seoUnits,
+    ),
+    'matches the hand-computed CTR outliers to the basis point',
+  )
+  checkRejectedBy(
+    'the content-gap suite fails when its ordering is dropped',
+    seoMutant(
+      `${SEO}/content-gaps.ts`,
+      'findings: findings.sort(compareContentGap),',
+      'findings,',
+      seoUnits,
+    ),
+    'is ordered by impressions and then clicks, whatever order the rows arrived in',
+  )
+  checkRejectedBy(
+    'the cannibalisation suite fails when its ordering is dropped',
+    seoMutant(
+      `${SEO}/cannibalisation.ts`,
+      'return findings.sort(compareCannibalisation)',
+      'return findings',
+      seoUnits,
+    ),
+    'is ordered by impressions and then by how many pages are competing',
+  )
+
+  // --- 59s-59t. The fixture is REVIEWED, not recorded ---------------------------------------------
+  //
+  // The criterion that no mutation can prove. An expectation captured from a run of the code agrees with
+  // the code for ever — including after the arithmetic goes wrong — so the only evidence that the numbers
+  // were computed by a human is that the file computes nothing: it imports the three analyses as TYPES
+  // and never calls one, and the figures in it are literals a reviewer can check with a calculator.
+  {
+    const fixture = readFileSync(FIXTURE, 'utf8')
+    const calls = ['ctrOutliers(', 'contentGaps(', 'cannibalisation(', 'aggregateQueryPages(']
+    const found = calls.filter((call) => fixture.includes(call))
+    check(
+      'G-SEO-03 gate: the worked-example fixture calls none of the functions it is the expectation for',
+      found.length === 0,
+      `${FIXTURE} calls ${found.join(', ')} — an expectation produced by the code under test asserts ` +
+        'only that the code is itself, and it goes on passing after the arithmetic is wrong',
+    )
+    // And the figures really are in the fixture rather than in the test, so the review target is the file
+    // named above. 408 is band 5's shortfall and 113 is band 19's, which is the 112.5 rounding case.
+    const literals = ['shortfallBp: 408', 'peerCtrBp: 113', 'ctrBp: 13']
+    const missing = literals.filter((literal) => !fixture.includes(literal))
+    check(
+      'G-SEO-03 gate: the hand-computed figures are committed literals in the fixture',
+      missing.length === 0,
+      `${FIXTURE} no longer carries ${missing.join(', ')}; if the expectations moved into the test or ` +
+        'into a generator, the reviewed-fixture criterion is no longer satisfied by this file',
+    )
+  }
+}
+
+// 60a-60p. (W-SITE-07) The CMS-driven routes: the publication lint, the banned claim that fails the build,
+// the link-graph invariant, the site navigation that makes the site reachable at all, the rich-text
+// flattener the lint reads, and the secret the public site must not need.
+//
+// Six rules, each failing in a way the others cannot see.
+//
+// The **publication lint**. docs/09 §"E-E-A-T" asks for author and reviewer bylines with dates and a
+// medical-disclaimer pattern, "enforced by the publication lint, not by good intentions". Four mutations, one
+// per rule, because each is a separate refusal an editor meets separately — and the health-adjacency one is
+// mutated at the DETECTION rather than at the rule, because the failure that matters is not "the rule was
+// deleted" but "the checkbox became the only input", which is the state in which the post that most needs a
+// disclaimer is the one that publishes without it.
+//
+// The **banned claim that fails the build**. The acceptance criterion is *"a fixture post containing 'cures
+// sciatica' fails the build by rule name"*. A post is linted when it is published — the Payload hook refuses
+// it — so the only way such a row reaches the site is a path that bypassed the hook: a psql session, a
+// restored dump, a migration. The fixture is exactly that, inserted with SQL into Payload's own schema, and
+// the probe is the read every CMS page performs. `next build` is not invoked (a minute per case for the same
+// assertion), and the control proves the read accepts the collection once the row is gone.
+//
+// The **link-graph invariant**. Three rules the built site satisfies today, so three mutations: an orphan
+// that stops being reported, a click budget that stops being compared, and a broken link that stops being
+// followed. Each is a rule that would otherwise pass forever on a site nobody had linked together.
+//
+// The **site navigation**. It is the reason the invariant holds at all: before it, `/treatments` and
+// `/pricing` were orphans, reachable only from a sitemap W-SITE-08 has not built. A route dropped from the
+// nav is the defect returning, and it has to fail on the commit rather than in a crawl.
+//
+// The **rich-text flattener**. The single most load-bearing function on these routes, because the banned-claims
+// lint reads its output: a flattener that returned an empty string would pass every document ever published.
+// The mutation is exactly that.
+//
+// The **secret**. `payloadSecret()` used to throw during module evaluation, so the moment a public page
+// imported the config to read CMS content every one of those pages answered 500 wherever `PAYLOAD_SECRET` was
+// unset — the prerendered copy served happily and the first revalidation turned the page into an error. The
+// refusal now sits at the two entry points that can mint a session token, and removing it from either has to
+// fail.
+{
+  const RELAX_DB = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? ''
+  const PUBLICATION = 'packages/cms/src/publication.ts'
+  const LINK_GRAPH = 'packages/core/src/seo/link-graph.ts'
+  const NAV = 'apps/web/src/routes/nav.ts'
+  const CMS_CONTENT = 'apps/web/src/cms/content.ts'
+  const RICH_TEXT = 'apps/web/src/cms/rich-text.ts'
+  const CONTENT_REVALIDATE = 'apps/web/src/revalidate/content.ts'
+  const CMS_API_ROUTE = 'apps/web/app/(payload)/cms-api/[...slug]/route.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const PUBLICATION_TEST = 'packages/cms/src/publication.test.ts'
+  const LINK_GRAPH_TEST = 'packages/core/src/seo/link-graph.test.ts'
+  const CONTENT_TEST = 'apps/web/src/cms/content.test.ts'
+
+  // 60a. The author byline. An unattributed post is correct; a published one is not, and docs/09 asks for the
+  //      byline on editorial copy in a health-adjacent category.
+  {
+    const result = withEditedFile(
+      PUBLICATION,
+      (text) => text.replace('  if (blank(post.byline)) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(PUBLICATION_TEST)),
+    )
+    checkRejectedBy(
+      'a published post with no author byline is refused',
+      result,
+      'journal_post_without_author_byline',
+    )
+  }
+
+  // 60b. The reviewer byline: the second name, and what makes "somebody checked this against the licence" a
+  //      checkable claim rather than a hope.
+  {
+    const result = withEditedFile(
+      PUBLICATION,
+      (text) => text.replace('  if (blank(post.reviewedBy)) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(PUBLICATION_TEST)),
+    )
+    checkRejectedBy(
+      'a published post with no reviewer byline is refused',
+      result,
+      'journal_post_without_reviewer_byline',
+    )
+  }
+
+  // 60c. The date. An undated post cannot be assessed for freshness by a reader, a crawler or an assistant.
+  {
+    const result = withEditedFile(
+      PUBLICATION,
+      (text) => text.replace('  if (blank(post.publishedOn)) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(PUBLICATION_TEST)),
+    )
+    checkRejectedBy('a published post with no date is refused', result, 'journal_post_without_date')
+  }
+
+  // 60d. Health adjacency, mutated at the detection rather than at the rule: with the editor's checkbox as the
+  //      only input, a post about pain or injury publishes with no disclaimer because nobody classified it.
+  {
+    const result = withEditedFile(
+      PUBLICATION,
+      (text) =>
+        text.replace('    adjacent: declared || categories.length > 0,', '    adjacent: declared,'),
+      () => runExpectingFailure('pnpm', unit(PUBLICATION_TEST)),
+    )
+    checkRejectedBy(
+      'health-adjacent copy detected only by the checkbox is rejected',
+      result,
+      'journal_post_health_adjacent_without_disclaimer',
+    )
+  }
+
+  // 60e. The URL exclusion, removed. A locator is not a claim: `lexiconTokens` splits on every non-alphanumeric
+  //      character, so a link to the catalogue index contributes the token `treatments` — and `treatment` is a
+  //      banned claim term. Without the exclusion the lint refuses a page for linking to the most valuable
+  //      pages on the site, which is a lint somebody switches off.
+  {
+    const result = withEditedFile(
+      PUBLICATION,
+      (text) =>
+        text.replace(
+          "  return text.replace(/https?:\\/\\/\\S+/g, ' ').replace(/\\]\\([^)]*\\)/g, '] ')",
+          '  return text',
+        ),
+      () => runExpectingFailure('pnpm', unit(PUBLICATION_TEST)),
+    )
+    checkRejectedBy('a URL read as a claim is rejected', result, 'banned_claim_term')
+  }
+
+  // 60f. The acceptance criterion's own fixture: a PUBLISHED post containing "cures sciatica", inserted the way
+  //      a dump or a psql session would, and refused by the read every CMS page performs — which is what makes
+  //      it fail the build rather than warn.
+  const CLAIM_ID = '00000000-0000-7000-8000-0000000f0607'
+  const CLAIM_SLUG = 'wsite07-gate-claim'
+  const CLAIM_BODY =
+    '{"root":{"type":"root","children":[{"type":"paragraph","children":' +
+    '[{"type":"text","text":"How massage cures sciatica, which this business does not say."}]}]}}'
+  const psql = (statement) =>
+    run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', RELAX_DB, '-c', statement])
+  const removeClaimPost = () => psql(`delete from payload.journal_posts where id = '${CLAIM_ID}';`)
+  const CMS_READ_PROBE = 'scripts/__gate_fixture__-wsite07-cms-read.mts'
+  const cmsReadProbe = [
+    "import { contentPageData } from '../apps/web/src/cms/page-data.ts'",
+    '',
+    'try {',
+    '  await contentPageData()',
+    "  console.log('CMS_READ_ACCEPTED')",
+    '  process.exit(0)',
+    '} catch (err) {',
+    '  console.error(err instanceof Error ? err.message : String(err))',
+    '  process.exit(1)',
+    '}',
+  ].join('\n')
+
+  if (RELAX_DB === '') {
+    check(
+      'W-SITE-07 gates have a database to run against',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL must be set: the banned-claim fixture is a row in the payload ' +
+        'schema and the probe is the read every CMS page performs.',
+    )
+  } else {
+    // The `payload` schema is created by drizzle-kit push, which runs whenever Payload initialises outside a
+    // production build — the integration suite does it. A gate run against a database that has never done
+    // that has no table to insert into, and saying so is better than reporting a rule that did not fire.
+    const hasTable = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-tAq',
+      RELAX_DB,
+      '-c',
+      "select count(*) from information_schema.tables where table_schema = 'payload' and table_name = 'journal_posts'",
+    ])
+    const tableExists = !hasTable.failed && hasTable.output.trim() === '1'
+    check(
+      'the payload schema exists for the CMS fixture',
+      tableExists,
+      'payload.journal_posts is absent. Payload creates its tables with drizzle-kit push, which runs when ' +
+        'it initialises outside a production build — run `pnpm test:integration` once, or the admin, first.',
+    )
+    if (tableExists) {
+      removeClaimPost()
+      const inserted = psql(
+        `insert into payload.journal_posts
+           (id, slug, title, body, published_on, byline, reviewed_by, health_topic, _status)
+         values ('${CLAIM_ID}', '${CLAIM_SLUG}', 'Gate probe', '${CLAIM_BODY}'::jsonb, now(),
+                 'Author 01', 'Reviewer 01', false, 'published');`,
+      )
+      check(
+        'the banned-claim fixture post was inserted',
+        !inserted.failed,
+        inserted.output.split('\n').slice(0, 6).join('\n'),
+      )
+      try {
+        const refused = withFixture(CMS_READ_PROBE, cmsReadProbe, () =>
+          runExpectingFailure('pnpm', ['exec', 'tsx', CMS_READ_PROBE]),
+        )
+        checkRejectedBy(
+          'a CMS page refuses to render a post containing a banned claim',
+          refused,
+          'banned_claim_term',
+        )
+        // And it names the term and the document, so the message says what to change and where.
+        check(
+          'the refusal names the term and the post it came from',
+          refused.output.includes('cure') && refused.output.includes(CLAIM_SLUG),
+          refused.output.split('\n').slice(0, 6).join('\n'),
+        )
+      } finally {
+        removeClaimPost()
+      }
+
+      // 60g. The control. Without the fixture row the same probe accepts the CMS — so 60f is the lint firing
+      //      and not the probe failing for a reason of its own (an unseeded premises row, an unset APP_ENV).
+      const accepted = withFixture(CMS_READ_PROBE, cmsReadProbe, () =>
+        run('pnpm', ['exec', 'tsx', CMS_READ_PROBE]),
+      )
+      check(
+        'control: the same read accepts the CMS with no claim in it',
+        !accepted.failed && accepted.output.includes('CMS_READ_ACCEPTED'),
+        accepted.output.split('\n').slice(0, 8).join('\n'),
+      )
+    }
+  }
+
+  // 60h. An orphan that stops being reported. An indexable page with no inbound link is one a crawler finds
+  //      only through a sitemap, and W-SITE-08 has not built one.
+  {
+    const result = withEditedFile(
+      LINK_GRAPH,
+      (text) => text.replace('    if (!context.linked.has(path)) {', '    if (false) {'),
+      () => runExpectingFailure('pnpm', unit(LINK_GRAPH_TEST)),
+    )
+    checkRejectedBy('an orphan page that is not reported is rejected', result, 'orphan_route')
+  }
+
+  // 60i. The click budget that stops being compared. `>=` instead of `>` would be a rewording; not comparing
+  //      at all is the mutation, because a page nine clicks deep is one a crawler never reaches.
+  {
+    const result = withEditedFile(
+      LINK_GRAPH,
+      (text) => text.replace('  if (depth > graph.maxClickDepth) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(LINK_GRAPH_TEST)),
+    )
+    checkRejectedBy(
+      'a page beyond the click budget that is not reported is rejected',
+      result,
+      'route_beyond_click_depth',
+    )
+  }
+
+  // 60j. A broken link that stops being followed. The rule's subject is a LINK, and a page linking to a 404
+  //      spends a crawler's budget on nothing and loses the signal the link was worth.
+  {
+    const result = withEditedFile(
+      LINK_GRAPH,
+      (text) => text.replace('      if (found.status !== 200) {', '      if (false) {'),
+      () => runExpectingFailure('pnpm', unit(LINK_GRAPH_TEST)),
+    )
+    checkRejectedBy(
+      'an internal link answering something other than 200 is rejected',
+      result,
+      'internal_link_not_200',
+    )
+  }
+
+  // 60k. A route dropped from the site navigation. This is the orphan defect at its source: before the nav
+  //      existed, nothing on the home page linked to `/treatments` at all.
+  {
+    const result = withEditedFile(
+      NAV,
+      (text) => text.replace("  'spa',\n", ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/routes/registry.test.ts')),
+    )
+    checkRejectedBy('an indexable route missing from the navigation is rejected', result, 'spa')
+  }
+
+  // 60l. A locale dropped from the CMS publish loop. `/faq` revalidated and `/ar/faq` left serving yesterday's
+  //      answer is invisible to anybody reading English, which is why this is a unit test and not a fetch.
+  {
+    const result = withEditedFile(
+      CONTENT_REVALIDATE,
+      (text) =>
+        text.replace(
+          '    for (const locale of LOCALES) paths.add(pathFor(routeById(id), locale))',
+          "    paths.add(pathFor(routeById(id), 'en'))",
+        ),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/revalidate/content.test.ts')),
+    )
+    checkRejectedBy('a locale dropped from the revalidation set is rejected', result, '/ar/faq')
+  }
+
+  // 60m. The flattener that finds nothing. A lint handed an empty string passes every document ever published,
+  //      which is the quietest failure available in this unit.
+  {
+    const result = withEditedFile(
+      RICH_TEXT,
+      (text) => text.replace("  return richTextParagraphs(value).join('\\n\\n')", "  return ''"),
+      () => runExpectingFailure('pnpm', unit(CONTENT_TEST)),
+    )
+    checkRejectedBy(
+      'a rich-text flattener that finds no text is rejected',
+      result,
+      'takes your booking',
+    )
+  }
+
+  // 60n. The FAQ page and its schema block drifting apart. `faqPageNode` drops an entry with a blank answer —
+  //      an `Answer` with no text is the one a consumer quotes — so a page that kept it would render a heading
+  //      the schema does not carry, and the counts the criterion compares would differ.
+  {
+    const result = withEditedFile(
+      CMS_CONTENT,
+      (text) =>
+        text.replace(
+          "    .filter((entry) => entry.question.trim() !== '' && entry.answer.trim() !== '')\n    .map((entry, index) => ({",
+          '    .map((entry, index) => ({',
+        ),
+      () => runExpectingFailure('pnpm', unit(CONTENT_TEST)),
+    )
+    checkRejectedBy(
+      'an FAQ entry the schema drops but the page keeps is rejected',
+      result,
+      'Unfinished',
+    )
+  }
+
+  // 60o. The secret guard removed from the REST API. `/cms-api/users/login` can mint a session token, so a
+  //      guard on the admin document alone would leave a login signing tokens with the placeholder.
+  {
+    const result = withEditedFile(
+      CMS_API_ROUTE,
+      (text) => text.replace('assertPayloadSecretConfigured()\n', ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/payload-routes.test.ts')),
+    )
+    checkRejectedBy(
+      'a CMS entry point that does not assert the secret is rejected',
+      result,
+      'assertPayloadSecretConfigured',
+    )
+  }
+
+  // 60p. And the control on that pair: the guard must NOT be on a public page, because the public site does
+  //      not sign anything and a module-evaluation throw there is a 500 on every content page.
+  {
+    const result = withEditedFile(
+      'apps/web/src/cms/read.ts',
+      (text) =>
+        text.replace(
+          "import { richTextParagraphs, richTextToPlainText } from './rich-text.ts'",
+          "import { richTextParagraphs, richTextToPlainText } from './rich-text.ts'\n// assertPayloadSecretConfigured",
+        ),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/payload-routes.test.ts')),
+    )
+    checkRejectedBy(
+      'the secret guard appearing on a public read path is rejected',
+      result,
+      'assertPayloadSecretConfigured',
+    )
+  }
+}
+
+// 61. The port-band registry, and the scan that stops a suite going back to choosing its own.
+//
+//     Three pairs of suites shared a port band before this existed — `kitchen-sink` with
+//     `breakpoint-preview`, `primitives` with `messages-inbox`, `hero-lcp` with `content` — and the scheme
+//     that allowed it was each suite naming its own band and listing the neighbours' in a comment.
+//     `hero-lcp.itest.ts` had written two of the three overlaps down as if they were the arrangement.
+//
+//     A shared band does not read as a port bug. The second `next start` cannot bind, exits, and the
+//     suite's own wait-for-server loop answers from the FIRST one's server: the assertions then run against
+//     another worktree's build of the application, in either direction, and the run reports on code the
+//     file under test does not contain. Green means nothing and red means nothing.
+//
+//     So: the bands live in one module, its unit test proves they are disjoint, and a source scan proves
+//     no suite computes a port for itself. Both need known-bad fixtures, because a band table nobody
+//     checks is the comment scheme with extra steps.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const BANDS = 'packages/harness/src/ports.ts'
+  const BANDS_TEST = 'packages/harness/src/ports.test.ts'
+  const SCAN_TEST = 'apps/web/src/test-ports.test.ts'
+  const A_SUITE = 'apps/web/src/motion.itest.ts'
+
+  // 61a. Two bands made to overlap. This is the defect the module exists for, so it is the first case: if
+  //      `overlappingBands` can be fed an overlap and still return empty, nothing below means anything.
+  {
+    const result = withEditedFile(
+      BANDS,
+      (text) =>
+        text.replace('motion: { start: 4700, width: 300 }', 'motion: { start: 4300, width: 300 }'),
+      () => runExpectingFailure('pnpm', unit(BANDS_TEST)),
+    )
+    checkRejectedBy('two overlapping port bands are rejected', result, 'overlaps')
+  }
+
+  // 61b. A band pushed into the kernel's ephemeral range. A port up there is not ours to reserve — the
+  //      kernel can hand it to an unrelated socket between the check and the bind, which is a flake no
+  //      amount of retrying explains.
+  {
+    const result = withEditedFile(
+      BANDS,
+      (text) =>
+        text.replace('motion: { start: 4700, width: 300 }', 'motion: { start: 40000, width: 300 }'),
+      () => runExpectingFailure('pnpm', unit(BANDS_TEST)),
+    )
+    checkRejectedBy('a port band inside the ephemeral range is rejected', result, 'at or above')
+  }
+
+  // 61c. A band narrowed until two worktrees collide often. 300 wide is a sub-percent chance; 4 wide is a
+  //      one-in-four chance dressed as randomisation.
+  {
+    const result = withEditedFile(
+      BANDS,
+      (text) =>
+        text.replace('motion: { start: 4700, width: 300 }', 'motion: { start: 4700, width: 4 }'),
+      () => runExpectingFailure('pnpm', unit(BANDS_TEST)),
+    )
+    checkRejectedBy('a port band too narrow to separate two worktrees is rejected', result, 'wide')
+  }
+
+  // 61d. A band of width zero: `testPort` then returns the same number every call. That is a fixed port
+  //      wearing the registry's clothes, and it is exactly the state the whole module exists to end.
+  {
+    const result = withEditedFile(
+      BANDS,
+      (text) =>
+        text.replace('motion: { start: 4700, width: 300 }', 'motion: { start: 4700, width: 0 }'),
+      () => runExpectingFailure('pnpm', unit(BANDS_TEST)),
+    )
+    checkRejectedBy(
+      'a band that draws one port forever is rejected',
+      result,
+      'distinct ports in 500 calls',
+    )
+  }
+
+  // 61e. A suite that computes its own port again. The scan is a text scan for exactly this shape, because
+  //      the claim is about what the file says: a self-chosen port is wrong on a machine where nothing else
+  //      happens to be listening.
+  {
+    const result = withEditedFile(
+      A_SUITE,
+      (text) =>
+        text.replace(
+          "const PORT = testPort('motion')",
+          'const PORT = 4700 + Math.floor(Math.random() * 300)',
+        ),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy('a suite computing its own port is rejected', result, 'compute their own port')
+  }
+
+  // 61f. The other way to pin a port: write it into the URL and leave `PORT` unused.
+  {
+    const result = withEditedFile(
+      A_SUITE,
+      // A regex and not a string literal: the text being matched contains a template placeholder, and
+      // writing it as a string trips `noTemplateCurlyInString` in this very file.
+      (text) =>
+        text.replace(
+          /const BASE = `http:\/\/127\.0\.0\.1:\$\{PORT\}`/,
+          "const BASE = 'http://127.0.0.1:4711'",
+        ),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy('a literal loopback port is rejected', result, 'answers from another worktree')
+  }
+
+  // 61g. Two suites drawing the same band. This is the original defect, expressed through the registry
+  //      rather than around it, and the bands being disjoint does not prevent it.
+  {
+    const result = withEditedFile(
+      A_SUITE,
+      (text) =>
+        text.replace("const PORT = testPort('motion')", "const PORT = testPort('treatments')"),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy('two suites drawing one band are rejected', result, 'share a port')
+  }
+
+  // 61h. A band claimed by nobody. Harmless-looking, and not harmless: it is usually a renamed file, and
+  //      the next suite added takes the name that looks free rather than the band that is free.
+  {
+    const result = withEditedFile(
+      BANDS,
+      (text) =>
+        text.replace(
+          '  motion: { start: 4700, width: 300 },',
+          "  motion: { start: 4700, width: 300 },\n  'nothing-claims-this': { start: 7300, width: 300 },",
+        ),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy(
+      'a declared band no suite draws from is rejected',
+      result,
+      'declared and unused',
+    )
+  }
+
+  // 61i. A suite that spawns a server and asks for no band at all — the gap 61e and 61f leave open, since
+  //      a file with no port expression of any kind trips neither.
+  {
+    const result = withEditedFile(
+      A_SUITE,
+      (text) =>
+        text
+          .replace("import { testPort } from '@berelax/harness/ports'\n", '')
+          .replace(
+            "const PORT = testPort('motion')",
+            'const PORT = Number(process.env["MOTION_PORT"])',
+          ),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy(
+      'a server-starting suite with no band is rejected',
+      result,
+      'without drawing a port from the registry',
+    )
+  }
+
+  // 61j. And the control on the scan itself. Every assertion in that file is over a list of offenders, and
+  //      a list built from no files is empty — so the scan would report PASS on a directory it never read.
+  //      This breaks the walk and asserts the count assertion is what catches it.
+  {
+    const result = withEditedFile(
+      SCAN_TEST,
+      (text) => text.replace(".endsWith('.itest.ts')", ".endsWith('.no-such-suffix.ts')"),
+      () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
+    )
+    checkRejectedBy(
+      'a port scan that reads no files is rejected',
+      result,
+      'finds the suites to scan',
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -13596,6 +15644,9 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // H-HARD-03's secret-rotation inventory. Registered here for the same reason as the four above:
     // the completeness property in that unit's block reads THIS array.
     'pnpm rotation',
+    // P-HR-01's staff PII scan. A third question, and the one whose answer cannot be a rotation: an
+    // Emirates ID belongs to a person for life, so a committed one is permanent.
+    'pnpm pii',
     'pnpm deps',
     'pnpm licences',
     'pnpm container',

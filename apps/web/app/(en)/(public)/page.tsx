@@ -23,8 +23,11 @@
  */
 import { DesignSystemStyles, Grid, Section } from '@berelax/ui/layout'
 import type { Metadata } from 'next'
+import { navLabels } from '../../../src/cms/content.ts'
+import { CONTENT_COPY_EN } from '../../../src/cms/copy-en.ts'
 import { routeMetadata } from '../../../src/routes/alternates.ts'
 import { RouteNav } from '../../_routes/route-nav.tsx'
+import { SiteNav } from '../../_routes/site-nav.tsx'
 
 export const metadata: Metadata = routeMetadata('home', 'en')
 
@@ -40,6 +43,19 @@ export default function HomePage() {
           <p>Massage Center and Spa.</p>
         </Grid>
       </Section>
+
+      {/* W-SITE-07. Until this landed the home page linked to nothing, so `/treatments` and `/pricing` were
+          orphans — reachable only from a sitemap W-SITE-08 has not built and from `/llms.txt`. That is what
+          the link-graph invariant catches and a convention does not. It is a list of links derived from the
+          route registry and needs no database, which is what lets it sit on a `rendering: 'static'` page:
+          the copy is per-locale and the paths are the registry's. W-SITE-04's header replaces it, and the
+          invariant is what will say so if that header carries a shorter list. */}
+      <SiteNav
+        current="home"
+        locale="en"
+        label={CONTENT_COPY_EN.labels.nav}
+        labels={navLabels(CONTENT_COPY_EN)}
+      />
     </main>
   )
 }

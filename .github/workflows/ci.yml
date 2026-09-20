@@ -90,6 +90,13 @@ jobs:
       - name: Secret rotation inventory
         run: pnpm rotation
 
+      # P-HR-01. A different question from the two above, and the difference is that an Emirates ID
+      # cannot be rotated: a committed identity number is permanent, so the control has to run before
+      # it lands. Refuses an IBAN or an Emirates ID that passes its own check digit anywhere in the
+      # repository, and permits one that fails it - which is the rule a fixture follows.
+      - name: Staff PII scan
+        run: pnpm pii
+
       - name: Dependency advisories (offline snapshot)
         run: pnpm deps
 
@@ -205,9 +212,16 @@ jobs:
       - name: Seed the catalogue and the premises row
         run: pnpm seed
 
-      # The integration suite drives the *built* application: shell.itest.ts, kitchen-sink.itest.ts and
-      # treatments.itest.ts all spawn `next start`, which needs a build to start at all. Without this step
-      # those files fail in CI on a missing `.next` while passing for anybody who had built locally.
+      # The integration suite drives the *built* application: shell.itest.ts, kitchen-sink.itest.ts,
+      # treatments.itest.ts and content.itest.ts all spawn `next start`, which needs a build to start at all.
+      # Without this step those files fail in CI on a missing `.next` while passing for anybody who had built
+      # locally.
+      #
+      # W-SITE-07's five CMS routes prerender here too, and they add no new dependency to this step: they read
+      # the premises row and the catalogue, which the two steps above provide, and their CMS read is fail-soft
+      # by design — Payload's tables are created by drizzle-kit `push`, which is off under NODE_ENV=production,
+      # so the `payload` schema is deliberately NOT a build dependency and an absent one renders the pages'
+      # stated empty state. `apps/web/src/cms/read.ts` is where that is worked out.
       - name: Build the web application
         run: pnpm --filter @berelax/web build
 

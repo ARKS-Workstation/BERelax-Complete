@@ -347,6 +347,95 @@ export function videoRenditionPaths(input: {
   )
 }
 
+/** The `profile_idc` of each H.264 profile this pipeline encodes. High is 100, which is 0x64. */
+export const H264_PROFILE_IDC: Readonly<Record<string, number>> = { high: 100 }
+
+/**
+ * The `codecs` parameter each codec's `<source type>` carries, derived from the rendition.
+ *
+ * **H.264 is stated exactly.** `avc1.PPCCLL` is three bytes of hex: the profile_idc, the constraint set
+ * flags and the level_idc. High is 100 (0x64) and level 4.0 is 40 (0x28), so the desktop rendition is
+ * `avc1.640028` and the mobile one, at level 3.1, is `avc1.64001f`. Every digit is a number this module
+ * already declares, so the string is computed from `profile` and `level` rather than written down: a
+ * `codecs` parameter that disagrees with the file is worse than none, because the browser believes it.
+ *
+ * **HEVC is the 4CC alone**, and that is the decision rather than an omission. A full HEVC codecs string is
+ * `hvc1.A.B.LX.C…` — general profile space, profile compatibility flags, tier, level and up to six
+ * constraint bytes — and four of those are chosen by x265 at encode time and readable only out of the
+ * written file's `hvcC` box. Declaring them here would mean declaring what they are *likely* to be, and an
+ * over-specific string that is wrong makes Safari skip the track silently: the element reports no error,
+ * fires no `playing`, and the poster simply stays. That is the same failure the `hev1`/`hvc1` tag confusion
+ * causes, and docs/08 §6 marks it "mandatory or Safari ignores it". `hvc1` on its own is a valid codecs
+ * parameter, is what Safari matches on, and is exactly as much as this declaration actually knows.
+ * `probe.ts` reads the real sample-entry 4cc back out of the stored bytes and refuses a mismatch.
+ */
+export function videoSourceType(rendition: VideoRendition): string {
+  if (rendition.codec !== 'h264') {
+    return `${VIDEO_CONTENT_TYPE}; codecs="${REQUIRED_CODEC_TAG[rendition.codec]}"`
+  }
+  const profileIdc = H264_PROFILE_IDC[rendition.profile]
+  if (profileIdc === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      `[h264-profile-has-no-idc] '${rendition.profile}' is not a profile this module can write a codecs ` +
+        'parameter for. A `<source type>` that names the wrong profile is believed by the browser.',
+      { details: { profile: rendition.profile, known: Object.keys(H264_PROFILE_IDC) } },
+    )
+  }
+  const levelIdc = Math.round(Number.parseFloat(rendition.level) * 10)
+  const hex = (value: number): string => value.toString(16).padStart(2, '0')
+  return `${VIDEO_CONTENT_TYPE}; codecs="avc1.${hex(profileIdc)}00${hex(levelIdc)}"`
+}
+
+/** One `<source>` the hero's `<video>` may be given. */
+export interface HeroVideoSource {
+  readonly crop: CropName
+  readonly codec: VideoCodec
+  readonly src: string
+  readonly type: string
+  /**
+   * The crop's media query, from `CROPS`.
+   *
+   * It is **not** the `media` attribute of a `<source>`: that attribute does nothing inside a `<video>` —
+   * it is honoured for `<picture>` and was removed from the video element's resource selection algorithm.
+   * So an art-directed video has to evaluate the query itself, and W-SYS-07's island does, with
+   * `matchMedia`. Carrying the ladder's own string is what stops the breakpoint being written twice.
+   */
+  readonly media: string
+}
+
+/**
+ * The `<source>` list for one master, in the order a `<video>` should list them.
+ *
+ * HEVC before H.264 within each crop, which is what gets a Mac the smaller file: Safari takes the first
+ * source it can play and every other browser falls through, because it reports `hvc1` unplayable. The order
+ * is `VIDEO_RENDITIONS`' own, so the element cannot list them in an order this pipeline did not declare.
+ *
+ * Both crops are returned. Which one a viewport is served is a question only the browser can answer, and
+ * answering it here would mean the server guessing a viewport — the mistake that makes a prerendered page
+ * serve the phone's crop to a laptop.
+ */
+export function heroVideoSources(input: {
+  readonly mediaId: string
+  readonly contentHash: string
+  readonly slot?: MediaSlotName
+}): readonly HeroVideoSource[] {
+  const slot = input.slot ?? HERO_VIDEO_SLOT
+  return VIDEO_RENDITIONS.map((rendition) => ({
+    crop: rendition.crop,
+    codec: rendition.codec,
+    src: videoRenditionPath({
+      mediaId: input.mediaId,
+      contentHash: input.contentHash,
+      slot,
+      crop: rendition.crop,
+      codec: rendition.codec,
+    }),
+    type: videoSourceType(rendition),
+    media: CROPS[rendition.crop].media,
+  }))
+}
+
 /**
  * Whether the declared geometries fit inside their declared levels.
  *

@@ -85,11 +85,17 @@ export interface PageGraphOptions {
   /**
    * Therapists to consider for a `Person` node.
    *
-   * Empty today, and the emptiness is a fact about the schema rather than a shortcut: `employee` has no
-   * `display_name` column at all (0030) and there is no photography consent register, so no candidate can
-   * pass ADR 0020's guard. `personNodesFor` filters on both, so the day the columns exist the nodes appear
-   * without this call site changing. `structured-data.itest.ts` asserts the column really is absent, so
-   * this cannot quietly stay empty after somebody adds it.
+   * Empty today, and the emptiness is a fact about the DATA rather than a shortcut. It used to be a fact
+   * about the schema — `employee` had no `display_name` column at all — and P-HR-01's migration 0050 added
+   * one, together with the guard 0030 refused to ship without: `employee.is_publishable` is GENERATED as
+   * `display_name is not null and photo_consent`, so it cannot be set or forgotten. All nineteen seeded
+   * therapists are unnamed and unconsented (Y12-names, Y12-consent-photo), so not one of them passes it.
+   *
+   * `personNodesFor` filters on the same two facts through `mayPublishTherapist`, so the day a therapist
+   * becomes publishable the nodes appear without this contract changing — but somebody has to WIRE the
+   * read, because nothing in the SEO layer queries `employee`. `structured-data.itest.ts` asserts that no
+   * row passes the guard, with the row count as its control, so this cannot quietly stay empty after an
+   * admin sets a name and records a consent.
    */
   readonly therapists?: readonly TherapistCandidate[]
   /** `faq_entries` rows, answers flattened to text. Empty until a route renders the FAQ. */

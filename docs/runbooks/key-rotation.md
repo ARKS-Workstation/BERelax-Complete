@@ -128,6 +128,54 @@ the key permanent.
 
 ---
 
+## Rotating the staff PII KEK
+
+Same shape again, a third boundary and a **third key** — `STAFF_PII_KEK`. It seals the staff bank
+accounts (`public.employee_bank_detail.detail_ct`) and the identity-document numbers
+(`public.employee_document.number_ct`) of migration 0050. Three keys rather than two for the reason
+there are two: an **employment record does not relocate with the clinical store**, so sealing it under
+`CLINICAL_KEK` would either strand `employee_bank_detail` the day the clinical schema moves to a
+UAE-hosted database (ADR 0010, `Y5-residency`) or require the clinical key to exist in two places.
+
+Move `STAFF_PII_KEK` to `STAFF_PII_KEK_PREVIOUS` and its version label with it, exactly as for the
+clinical key, then re-wrap every sealed staff row with `rewrapStaffSecret` from
+`packages/hr/src/staff-secret.ts`. It returns **only** the wrapped key and the version label, because
+those are the only two columns migration 0050 lets an `UPDATE` touch:
+
+```sql
+-- what a re-wrap writes, and all it may write
+update employee_bank_detail
+   set detail_wrapped_key = :new_wrapped_key, detail_kid = :new_version
+ where id = :id and detail_kid = :old_version;
+```
+
+The `detail_kid = :old_version` predicate is the optimistic lock: if another run has already moved the
+row, the `UPDATE` matches nothing and says so rather than overwriting a key this process does not hold.
+
+Two refusals come from the database and not from the code driving it, so they hold even if that code is
+wrong (migration 0050):
+
+- `StaffSealedRowImmutable` (SQLSTATE **ZS002**) — the `UPDATE` touched a column outside
+  {`detail_wrapped_key`, `detail_kid`, `superseded_at`}. A re-wrap never rewrites a ciphertext.
+- `StaffRewrapDidNotRewrap` (SQLSTATE **ZS003**) — the version label changed and the wrapped key did
+  not. That is the bug that labels a row with a key which cannot open it.
+
+**There is no CLI for this yet**, and the estate has **no `kek_version` registry** either, so nothing
+refuses a retired key for a new `INSERT` the way `clinical.kek_version` does. Both are recorded as
+NOTEs on P-HR-01 in `build/manifest.yaml`. Until they exist this rotation is a script somebody writes
+on the day — a worse position than the clinical one, and the same position the Google token KEK is in.
+Verify it by reading every row back through `openBankDetail` and `openDocumentNumber` under the new
+key before the old one leaves the secret store; a row that will not open names itself
+(`StaffSecretOpenFailed`, with the table, the row id and the version and never any part of the payload).
+
+An `Emirates ID cannot be rotated.` If this key is believed to be compromised together with a database
+dump, the numbers are disclosed permanently: the people they belong to cannot be issued new ones
+because a key leaked. That is why the read path audits every decrypt with a declared purpose and why
+there is no plaintext column anywhere in either table — the controls that matter here are the ones
+that run before a leak, not the rotation after it.
+
+---
+
 ## Rotating a Google refresh token
 
 Not a re-wrap. The token itself is a durable bearer credential for control of the business Google
@@ -214,6 +262,12 @@ written, and an UPDATE to a live table is a much smaller act than it looks:
   overwriting it. The old wrapped key is recoverable from the raw device for an unbounded period.
 - **Anything that was decrypted.** A rotation re-wraps keys. It says nothing about a payload that has
   already been read — a `--verify` run, a support export, a screenshot.
+- **Anything that cannot be reissued.** For `STAFF_PII_KEK` the asymmetry is worse than for the other
+  two. A Google refresh token can be revoked and a database password changed, so for those a rotation
+  ends the exposure once the backups age out. An Emirates ID, a passport number and an IBAN cannot be
+  reissued because a key leaked, so a disclosure of that estate is permanent no matter how promptly the
+  key is rotated. The controls that matter for it are the ones that run before a leak: no plaintext
+  column, an audited decrypt with a declared purpose, and field-level authorisation.
 
 What rotation **does** give you: after it completes and the old key is destroyed, a *future* dump of
 the live database is useless to anybody holding only the old key. That is a real and worthwhile

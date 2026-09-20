@@ -126,6 +126,25 @@ caught a real defect in this repository.
     `.next/types/**` exists only after a build, so the generated route types are checked only when one
     has happened. If your unit adds a route, build the app once before believing a clean typecheck.
 
+18. **A server-starting suite draws its port from `@berelax/harness/ports`, never from arithmetic.**
+    `testPort('your-suite')`, with a band added to `TEST_PORT_BANDS` in that module. Do not write
+    `4700 + Math.floor(Math.random() * 300)`, and do not put a literal port in an `http://127.0.0.1:`
+    URL.
+
+    The scheme this replaced was each suite choosing a band and listing its neighbours' in a comment.
+    By the eleventh suite three pairs were sharing one — `kitchen-sink` with `breakpoint-preview`,
+    `primitives` with `messages-inbox`, `hero-lcp` with `content` — and `hero-lcp.itest.ts` had written
+    two of the three overlaps into its comment as if they were the arrangement. A shared band does not
+    present as a port bug: the second `next start` cannot bind, exits, and the suite's own
+    wait-for-server loop then answers from the **first** one's server, so the assertions run against
+    another worktree's build and the run reports on code the file under test does not contain. Green
+    means nothing and red means nothing, in either direction.
+
+    `packages/harness/src/ports.test.ts` proves the bands are disjoint, below the ephemeral range and
+    wide enough; `apps/web/src/test-ports.test.ts` proves no suite picks a port for itself and that
+    every band has exactly one claimant — so a band you declare and do not use fails, as does a band
+    you use and do not declare.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy

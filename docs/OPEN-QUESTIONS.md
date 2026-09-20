@@ -86,7 +86,7 @@ is flagged `provisional: true` in settings so it appears in the Unconfirmed Assu
 |---|---|---|---|---|
 | Y8-menu | Real service menu: names, durations, prices, which are online-bookable | Synthetic 12-service fixture | open | `B-CAT` seeding |
 | Y8-rooms | Room inventory: count, types, couples-capable, service compatibility | Synthetic 5-room fixture | open | `B-CAT` seeding |
-| Y8-staff | Staff list for the **19 therapists**: names, skills (Asian/Arabic style), languages, gender, certification expiries | 19 unnamed therapists, style skills split evenly | open | `P-HR` seeding, therapist pages |
+| Y8-staff | Staff list for the **19 therapists**: names, skills (Asian/Arabic style), languages, gender, certification expiries | **Seeded by `pnpm seed` (P-HR-01) as the headcount and nothing else**: 19 employment records, `display_name` NULL and `photo_consent` false so every one is unpublishable, style skills split 10 Asian / 9 Arabic and flagged provisional. **No gender and no language is invented** — 0030 refused to have a migration "invent nineteen people's genders" and gender is a hard constraint on assignment (B-AVAIL-05), so a made-up one would decide who may treat whom. No credentials either, so none of the nineteen is bookable: availability offering nothing until the HR file exists is the loud failure | open | `P-HR` credentials, therapist pages |
 | Y8-hours | Opening hours including Ramadan variation | Synthetic hours | open | `B-AVAIL` |
 | Y8-packages | **Outstanding packages already sold** — holder, price, sessions remaining, validity. Reconciled to cash received and signed off | Synthetic balances | open | `H-MIG` |
 | Y8-leave | Current leave balance per employee | Zero balances | open | `P-HR` accrual opening |

@@ -60,7 +60,13 @@ const schema = z
     GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
 
     /**
-     * The two key-encrypting keys, and the retired slot each rotation needs.
+     * The key-encrypting keys, and the retired slot each rotation needs.
+     *
+     * **Three, since P-HR-01.** `STAFF_PII_KEK` seals the staff bank accounts and identity-document
+     * numbers of migration 0050, and it is a third key for the same reason there are two: an
+     * employment record does not relocate with the clinical store, so sealing it under `CLINICAL_KEK`
+     * would either strand `employee_bank_detail` at relocation or put the clinical key in two places.
+     * A rotation of either key must also not force a re-wrap of the other's estate.
      *
      * G-CONN-04 deferred the naming to H-HARD-03's secret inventory, and the answer is **two keys,
      * not one**: the clinical store is designed to relocate to a UAE-hosted database
@@ -88,6 +94,10 @@ const schema = z
     GOOGLE_TOKEN_KEK_VERSION: z.string().optional(),
     GOOGLE_TOKEN_KEK_PREVIOUS: z.string().optional(),
     GOOGLE_TOKEN_KEK_PREVIOUS_VERSION: z.string().optional(),
+    STAFF_PII_KEK: z.string().optional(),
+    STAFF_PII_KEK_VERSION: z.string().optional(),
+    STAFF_PII_KEK_PREVIOUS: z.string().optional(),
+    STAFF_PII_KEK_PREVIOUS_VERSION: z.string().optional(),
 
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),

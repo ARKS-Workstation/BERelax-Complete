@@ -12,6 +12,7 @@ import {
   THEMES,
   VIEWPORTS,
 } from '@berelax/harness/matrix'
+import { testPort } from '@berelax/harness/ports'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -61,11 +62,11 @@ import {
 /**
  * A port from its own range, chosen at random.
  *
- * `shell.itest.ts` takes 3200–3800 and `primitives.itest.ts` 3800–4000, both for the same reason: a
- * hard-coded port collides when two agents run `pnpm verify` at once, and one of them then drives a
- * server that is not its own.
+ * A hard-coded port collides when two agents run `pnpm verify` at once, and one of them then drives a
+ * server that is not its own. `@berelax/harness/ports` owns the range and proves it does not overlap any
+ * other suite's.
  */
-const PORT = 4100 + Math.floor(Math.random() * 300)
+const PORT = testPort('route-spine')
 const BASE = `http://127.0.0.1:${PORT}`
 const APP_DIR = new URL('..', import.meta.url).pathname
 const SCREENS = join(APP_DIR, '..', '..', 'artifacts', 'screens', 'routes')
@@ -766,8 +767,12 @@ describe('acceptance — the screenshot harness reads the registry', () => {
     // Named, not counted: `missingCaptures` reports which cell is absent, and a route added to the
     // registry without a capture fails here rather than quietly never being looked at.
     expect(missingCaptures(plan, written)).toEqual([])
+    // 780s rather than 420s since W-SITE-07: the registry gained five more documents, so the matrix is 132
+    // cells rather than 72 — eleven documents at twelve cells each. The budget is for the matrix, not for one
+    // page, and it is raised in proportion rather than by guesswork.
+    //
     // 420s rather than 300s since W-SITE-05: the registry gained three documents, so the matrix is 72 cells
     // rather than 24 — six documents at twelve cells each, about two seconds per cell on a loaded box where
     // several worktrees run this suite at once. The budget is for the matrix, not for one page.
-  }, 420_000)
+  }, 780_000)
 })

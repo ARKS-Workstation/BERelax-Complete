@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { testPort } from '@berelax/harness/ports'
 import { auditTouchTargetsInPage, touchTargetInputFor } from '@berelax/harness/touch-targets'
 import { MEASURE, TOUCH_TARGET } from '@berelax/ui'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
@@ -47,10 +48,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * exits, and `waitForServer` then **succeeds against the first worktree's server**: the assertions below run
  * against a different build of the application and report on code this checkout does not contain. A flake
  * would have been the good outcome; this passes or fails for reasons that have nothing to do with the tree
- * under test. The other three server-starting suites already randomise, in disjoint ranges — shell 3200,
- * primitives 3800, route spine 4100 — so this one takes 4400.
+ * under test. The band comes from `@berelax/harness/ports`, which owns every suite's range and proves they
+ * are disjoint; this file naming its own range, and recording its neighbours' in a comment, is what let
+ * three pairs of suites end up sharing one.
  */
-const PORT = 4400 + Math.floor(Math.random() * 300)
+const PORT = testPort('kitchen-sink')
 const BASE = `http://127.0.0.1:${PORT}`
 const ROUTE = `${BASE}/kitchen-sink`
 

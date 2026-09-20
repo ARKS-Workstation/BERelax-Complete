@@ -11,8 +11,10 @@ import {
   ffmpegArgv,
   filterGraphFor,
   fitsItsLevel,
+  H264_PROFILE_IDC,
   HERO_VIDEO_SLOT,
   heroVideoRelation,
+  heroVideoSources,
   isVideoMasterKey,
   isWithinBudget,
   MASTER_EXTENSIONS,
@@ -35,6 +37,7 @@ import {
   videoMasterKey,
   videoRenditionPath,
   videoRenditionPaths,
+  videoSourceType,
 } from './ladder.ts'
 
 const MEDIA_ID = '0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f'
@@ -400,5 +403,104 @@ describe('how a video relates to the hero image slot', () => {
     for (const rendition of VIDEO_RENDITIONS) {
       expect(rendition.width / rendition.height).toBeCloseTo(relation.ratios[rendition.crop], 2)
     }
+  })
+})
+
+/**
+ * W-SYS-07 — the `<source>` list the attach island is handed.
+ *
+ * The island builds nothing: it reads this list out of a data attribute and appends the entries whose media
+ * query matches. So everything that could be wrong about a `<source>` is wrong here, where it can be
+ * asserted without a browser — and every assertion below has the control that must fail beside it, because
+ * an over-specific `codecs` parameter is believed by the browser and produces a hero that silently stays a
+ * photograph.
+ */
+describe('the hero video source list', () => {
+  const REF = { mediaId: MEDIA_ID, contentHash: HASH }
+
+  it('states the H.264 codecs parameter exactly, computed from the profile and the level', () => {
+    const desktop = VIDEO_RENDITIONS.find(
+      (rendition) => rendition.crop === 'desktop' && rendition.codec === 'h264',
+    )
+    const mobile = VIDEO_RENDITIONS.find(
+      (rendition) => rendition.crop === 'mobile' && rendition.codec === 'h264',
+    )
+    expect(desktop).toBeDefined()
+    expect(mobile).toBeDefined()
+    if (desktop === undefined || mobile === undefined) return
+    // High profile is 100 (0x64), no constraint flags, level 4.0 is 40 (0x28) and 3.1 is 31 (0x1f).
+    expect(videoSourceType(desktop)).toBe('video/mp4; codecs="avc1.640028"')
+    expect(videoSourceType(mobile)).toBe('video/mp4; codecs="avc1.64001f"')
+    // The control: the two levels really do produce different strings, so a mobile source cannot be
+    // declared with the desktop rendition's level and pass this.
+    expect(videoSourceType(desktop)).not.toBe(videoSourceType(mobile))
+  })
+
+  it('states HEVC as the 4CC alone, and refuses a profile it cannot write', () => {
+    for (const rendition of VIDEO_RENDITIONS.filter((entry) => entry.codec === 'hevc')) {
+      expect(videoSourceType(rendition)).toBe('video/mp4; codecs="hvc1"')
+      // The tag comes from the same declaration `probe.ts` checks the written bytes against, so a `hev1`
+      // here would be a `hev1` there.
+      expect(videoSourceType(rendition)).toContain(REQUIRED_CODEC_TAG.hevc)
+    }
+    // The control on the H.264 path: an unknown profile has no profile_idc, and a codecs parameter naming
+    // the wrong profile is worse than none.
+    expect(() =>
+      videoSourceType({
+        crop: 'desktop',
+        codec: 'h264',
+        width: 1920,
+        height: 1080,
+        level: '4.0',
+        profile: 'baseline',
+        crf: 26,
+      }),
+    ).toThrow(/\[h264-profile-has-no-idc\]/)
+    expect(H264_PROFILE_IDC['high']).toBe(100)
+  })
+
+  it('offers all four renditions, in the renditions’ own order, at the pipeline’s own paths', () => {
+    const sources = heroVideoSources(REF)
+    expect(sources).toHaveLength(VIDEO_RENDITIONS.length)
+    expect(sources.map((source) => `${source.crop}/${source.codec}`)).toEqual(
+      VIDEO_RENDITIONS.map((rendition) => `${rendition.crop}/${rendition.codec}`),
+    )
+    // HEVC before H.264 inside each crop: Safari takes the first source it can play, so the order is what
+    // gets a Mac the smaller file.
+    for (const crop of ['desktop', 'mobile'] as const) {
+      const codecs = sources.filter((source) => source.crop === crop).map((source) => source.codec)
+      expect(codecs).toEqual(['hevc', 'h264'])
+    }
+    // The paths are the job's, not a second spelling of them.
+    expect(sources.map((source) => source.src)).toEqual(
+      videoRenditionPaths({ ...REF, slot: HERO_VIDEO_SLOT }),
+    )
+    for (const source of sources) {
+      expect(VIDEO_RENDITION_PATH_PATTERN.test(source.src)).toBe(true)
+      // The control: a video path must never satisfy the image loader's pattern, because the loader parses
+      // one of them to pick a rung and would be handed an `.mp4`.
+      expect(DERIVATIVE_PATH_PATTERN.test(source.src)).toBe(false)
+    }
+  })
+
+  it('carries each crop’s media query from the ladder rather than restating the breakpoint', () => {
+    for (const source of heroVideoSources(REF)) {
+      expect(source.media).toBe(CROPS[source.crop].media)
+    }
+    // The control, and the reason the island evaluates the query itself: the two queries are mutually
+    // exclusive, so exactly one crop's sources may ever be attached at a given viewport. A `media`
+    // attribute on a `<source>` inside a `<video>` does nothing at all.
+    const media = new Set(heroVideoSources(REF).map((source) => source.media))
+    expect(media.size).toBe(2)
+    expect([...media]).toEqual([CROPS.desktop.media, CROPS.mobile.media])
+  })
+
+  it('refuses a media id or a content address that is not one', () => {
+    expect(() => heroVideoSources({ mediaId: 'not-a-uuid', contentHash: HASH })).toThrow(
+      /\[invalid-media-id\]/,
+    )
+    expect(() => heroVideoSources({ mediaId: MEDIA_ID, contentHash: 'short' })).toThrow(
+      /\[invalid-content-hash\]/,
+    )
   })
 })

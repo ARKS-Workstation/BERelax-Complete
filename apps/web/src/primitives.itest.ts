@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { testPort } from '@berelax/harness/ports'
 import { RADIUS } from '@berelax/ui'
 import {
   ICON_SIZE,
@@ -46,7 +47,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * port collides when two agents run `pnpm verify` at once, and one of them then drives a server that is
  * not its own.
  */
-const PORT = 3800 + Math.floor(Math.random() * 200)
+const PORT = testPort('primitives')
 const BASE = `http://127.0.0.1:${PORT}`
 const EN = '/kitchen-sink'
 const AR = '/ar/kitchen-sink'

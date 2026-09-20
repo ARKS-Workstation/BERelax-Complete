@@ -232,6 +232,53 @@ const BLURHASH = /\bblurhash\b/i
 const RATIO_SOURCE = new Set(['packages/media/src/slots/registry.ts'])
 
 /**
+ * `[hero-video-must-not-declare-a-poster]` and `[video-source-type-must-come-from-the-ladder]`.
+ *
+ * W-SYS-07. Two fences around the one technique that makes a video hero affordable at all (docs/08 §6),
+ * and each of them guards a change that is invisible in review and silent at runtime.
+ *
+ * **A `poster` attribute undoes the whole thing.** The poster frame is supposed to be a real `<img>` that
+ * the browser can preload, art-direct and count as the largest contentful paint; a `poster` on the
+ * `<video>` is a *second* copy of the same photograph, fetched by the video element, competing with the
+ * `<img>` for the same paint. The page looks identical and LCP moves by several hundred milliseconds on a
+ * mid-tier connection, which is exactly the regression nobody attributes to one attribute. So the element
+ * may not carry one, in markup or by assignment.
+ *
+ * **A `<source type>` written by hand is the second copy of the rendition declaration.** The four hero
+ * renditions, their paths and their codecs parameters come from `packages/media/src/video/ladder.ts` —
+ * the same module the encoder's argv comes from — so that the file the island asks for is the file the
+ * worker produced. A literal `codecs="avc1…"` can drift from the encoder by one character, and the
+ * symptom is a hero that silently stays a photograph on whichever browser was told the wrong thing:
+ * nothing else in this repository checks that string, and the browser believes it.
+ *
+ * The rendition FILENAME is a separate rule and a narrower one, and the difference was found by a gate
+ * rather than reasoned out. Case 46i's control asserts that `pnpm media` ACCEPTS a content-addressed
+ * rendition URL — that URL is the thing a page is supposed to hold, and it is the control that proves
+ * `[no-private-origin-url]` is not simply refusing every media URL. A repository-wide ban on the filename
+ * contradicted it. So the filename rule is scoped to `apps/`, where the failure it is about actually
+ * lives: an application component or island spelling a rendition URL instead of calling
+ * `heroVideoSources()`. Inside `packages/media` the shape is already guarded from the other side —
+ * `videoRenditionPath()` refuses anything off `VIDEO_RENDITION_PATH_PATTERN`.
+ *
+ * Tests are exempt for the usual reason: `ladder.test.ts` has to write the exact expected string in order
+ * to check that the ladder produces it, and a test ships nowhere.
+ */
+const VIDEO_POSTER_FORMS = [
+  /<video\b[^>]*\bposter\b/i,
+  /\bvideo\s*\.\s*poster\s*=/i,
+  /\bposter\s*:\s*['"`][^'"`]*\.(jpe?g|png|avif|webp)/i,
+]
+
+/** The codecs parameter, in the shapes somebody would type it. Everywhere but the ladder. */
+const VIDEO_CODEC_LITERAL = /codecs\s*=\s*\\?["']?(avc1|hvc1|hev1|vp09|av01)/i
+
+/** The rendition filename, built by hand. In `apps/` only — see the note above. */
+const VIDEO_RENDITION_PATH_LITERAL = /-video-(mobile|desktop)-(h264|hevc)\.mp4/i
+
+/** The one file that may state the codecs parameter: the ladder, which is what the encoder reads. */
+const VIDEO_SOURCE_DECLARATION = new Set(['packages/media/src/video/ladder.ts'])
+
+/**
  * `[aspect-ratio-must-come-from-the-slot-registry]`.
  *
  * Every slot's aspect ratio is declared once, in `packages/media/src/slots/registry.ts`, and a component
@@ -321,6 +368,35 @@ for (const root of SOURCE_ROOTS) {
           referenceProblems.push(`${at}  [no-private-origin-url] '${match[0]}' — ${why}`)
         }
       }
+      for (const form of VIDEO_POSTER_FORMS) {
+        const match = form.exec(line)
+        if (match !== null) {
+          referenceProblems.push(
+            `${at}  [hero-video-must-not-declare-a-poster] '${match[0].trim()}' — docs/08 §6 leaves the ` +
+              'poster attribute UNSET on purpose: the still is a real <img> inside a <picture>, which is ' +
+              'what the browser preloads, art-directs and records as the largest contentful paint. A ' +
+              'poster is a second copy of the same photograph, fetched by the video element, competing ' +
+              'with that img for the same paint — the page looks identical and LCP moves',
+          )
+        }
+      }
+      if (!VIDEO_SOURCE_DECLARATION.has(relative)) {
+        const forms = relative.startsWith('apps/')
+          ? [VIDEO_CODEC_LITERAL, VIDEO_RENDITION_PATH_LITERAL]
+          : [VIDEO_CODEC_LITERAL]
+        for (const form of forms) {
+          const match = form.exec(line)
+          if (match !== null) {
+            referenceProblems.push(
+              `${at}  [video-source-type-must-come-from-the-ladder] '${match[0].trim()}' — the four hero ` +
+                'renditions, their paths and their codecs parameters are declared once, in ' +
+                'packages/media/src/video/ladder.ts, which is the module the encoder argv comes from. ' +
+                'Call heroVideoSources() or videoSourceType(): a second copy drifts from the encoder by ' +
+                'one character, and the symptom is a hero that silently stays a photograph',
+            )
+          }
+        }
+      }
       if (!RATIO_SOURCE.has(relative)) {
         for (const form of ASPECT_RATIO_FORMS) {
           form.lastIndex = 0
@@ -359,5 +435,6 @@ console.log(
 )
 console.log(
   `No blurhash and no private-origin URL across ${scanned} source files: the placeholder is one flat ` +
-    'OKLCH colour, and every media URL is same-origin and content-addressed.',
+    'OKLCH colour, and every media URL is same-origin and content-addressed. No <video> declares a ' +
+    'poster, and every hero rendition type comes from the ladder.',
 )

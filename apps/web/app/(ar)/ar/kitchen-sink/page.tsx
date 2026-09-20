@@ -34,8 +34,8 @@ import {
   type MotionGalleryCopy,
   MotionHeader,
 } from '../../../_dev/motion-gallery.tsx'
-import { NAP_COPY_AR } from '../../../_dev/nap-copy.ts'
 import { PrimitiveGallery, type PrimitiveGalleryCopy } from '../../../_dev/primitive-gallery.tsx'
+import { NAP_COPY_AR } from '../../../_routes/nap-copy.ts'
 import { RouteNav } from '../../../_routes/route-nav.tsx'
 import { portraits } from '../../../(en)/(dev)/kitchen-sink/portraits.ts'
 

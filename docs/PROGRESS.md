@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**72 / 207 units complete.**
+**77 / 207 units complete.**
 
 ## Next up
 
-1. **B-LIFE-03 — Reschedule, cancellation, no-show and the cancellation policy**  — **needs owner input:** Y9-windows
+1. **B-MSG-03 — Scheduled steps with invalidation keys, and reminder rebuilds**
 1. **B-UI-01 — Public booking flow: service, therapist and slot selection**
-1. **M-VAT-10 — Compliance calendar engine and blocking obligations**
+1. **M-TILL-05 — Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines**
 
 ## All units
 
@@ -45,7 +45,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 28 | `B-CAT-06` | Catalogue, premises and room seed from the real business profile | `B-CAT-05`, `H03` | — | Y8-rooms, Y9-poa-prices, Y1-nap, Y1-trn |
 | [x] | 29 | `B-AVAIL-07` | Availability query service, brief cache with write invalidation, alternatives and waitlist | `B-AVAIL-06`, `B-CAT-06` | — | — |
 | [x] | 30 | `B-LIFE-01` | Appointment lifecycle state machine with actor permissions and declared side effects | `B-AVAIL-06`, `F06`, `F07` | — | — |
-| [ ] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
+| [x] | 31 | `B-LIFE-03` | Reschedule, cancellation, no-show and the cancellation policy | `B-AVAIL-07`, `B-LIFE-01` | — | Y9-windows |
 | [x] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
 | [x] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
 | [x] | 34 | `B-LIFE-02` | Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP | `B-MSG-02`, `F04`, `F06` | — | — |
@@ -104,7 +104,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
 | [ ] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
 | [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
-| [ ] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
+| [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
 | [ ] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
 | [ ] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
 | [ ] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
@@ -153,10 +153,10 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 136 | `W-SYS-04` | Motion system: token overrides, distance-duration and the island budget | `W-SYS-02` | — | — |
 | [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
 | [x] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
-| [ ] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
+| [x] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
 | [ ] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |
 | [x] | 141 | `W-SYS-08` | Payload CMS v3 embedded, content model and the catalogue boundary | `F07`, `F09`, `W-SYS-01` | — | — |
-| [ ] | 142 | `W-SITE-07` | CMS-driven routes, internal linking and breadcrumbs | `W-SITE-03`, `W-SITE-05`, `W-SYS-08` | — | Y1-licence |
+| [x] | 142 | `W-SITE-07` | CMS-driven routes, internal linking and breadcrumbs | `W-SITE-03`, `W-SITE-05`, `W-SYS-08` | — | Y1-licence |
 | [ ] | 143 | `W-SITE-10` | Publication control plane: banned-claims lint, named approval, immutable record | `F06`, `F09`, `W-SITE-07`, `W-SYS-08` | — | Y1-licence |
 | [x] | 144 | `W-SYS-09` | Media slots: declared constraints, required alt and the junk-alt filter | `W-SYS-05`, `W-SYS-08` | — | Y12-photos |
 | [ ] | 145 | `W-SITE-06` | Therapist routes and the publishing guard | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `W-SITE-03`, `W-SYS-09` | — | Y12-consent-photo, Y8-staff |
@@ -184,7 +184,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 167 | `G-REV-07` | API delivery mode: the legacy v4 reviews adapter, isolated, flipped by a row | `G-CONN-05`, `G-REV-06`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y3-gbp-api, Y2-gbp-status, Y2-listing-owner |
 | [x] | 168 | `G-SEO-01` | GSC warehouse: nightly snapshots, startRow paging, the rare-query gap | `G-AGT-01`, `G-CONN-05` | — | — |
 | [ ] | 169 | `G-SEO-02` | The seo_agent principal: publish denied at the permission layer, target allowlist | `F07`, `G-SEO-01` | — | — |
-| [ ] | 170 | `G-SEO-03` | Query-side deterministic analyses: CTR outliers, content gaps, cannibalisation | `G-SEO-01` | — | — |
+| [x] | 170 | `G-SEO-03` | Query-side deterministic analyses: CTR outliers, content gaps, cannibalisation | `G-SEO-01` | — | — |
 | [ ] | 171 | `G-SEO-04` | Site-side deterministic analyses: coverage anomalies, internal links, structured data | `G-SEO-01`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 172 | `G-SEO-05` | Suggestion store with before/after and rollback, LLM drafting, red-team gate | `G-AGT-01`, `G-SEO-02`, `G-SEO-03`, `G-SEO-04` | — | — |
 | [ ] | 173 | `G-SEO-06` | GBP-versus-website consistency check, degrading to a manual snapshot | `G-CONN-05`, `G-SEO-04` | — | Y3-gbp-api, Y1-nap |

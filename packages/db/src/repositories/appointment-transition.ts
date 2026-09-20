@@ -150,6 +150,23 @@ export interface TransitionInput {
   readonly actor: TransitionActor
   /** Why. Mandatory for the transitions the table declares, and never stored as `''`. */
   readonly reason?: string
+  /**
+   * Facts only the caller knows, merged into the audit row's `after` and into the outbox payload.
+   *
+   * Added for B-LIFE-03, which composes this function into a larger transaction: a reschedule knows the
+   * old and new periods and the invalidation key of every scheduled step, and a late cancellation knows
+   * the window it was judged against. None of those are readable from `appointment.status`, so the
+   * alternative was a SECOND event of the same type carrying them — two rows for one business fact, with
+   * a key that collides with the one this function derives.
+   *
+   * The canonical keys always win: this object is spread FIRST in both places, so a caller cannot
+   * overwrite `toStatus` or `actor_role` with something the transition did not do.
+   *
+   * Keys are `snake_case`, because the same object is written into `audit_event.after` and that table has
+   * spelled its facts that way since 0005. The transition's own payload keys stay `camelCase`, so a
+   * payload that carries both reads as two contributors — which is exactly what it is.
+   */
+  readonly extra?: Readonly<Record<string, unknown>>
 }
 
 /** The appended history row, as it was stored. Read back rather than reconstructed. */
@@ -472,6 +489,9 @@ export async function transitionAppointment(
     operation: 'update',
     before: { status: transition.from },
     after: {
+      // Spread FIRST so the canonical facts below win: a caller contributing what only it knows must not
+      // be able to record a status the transition did not make.
+      ...(input.extra ?? {}),
       status: transition.to,
       actor_role: input.actor.role,
       reason,
@@ -488,6 +508,8 @@ export async function transitionAppointment(
     // is entered at most once per appointment and a retry cannot enqueue a second copy.
     idempotencyKey: `${transition.eventType}:${input.appointmentId}`,
     payload: {
+      // Spread FIRST, for the reason the audit row above gives.
+      ...(input.extra ?? {}),
       appointmentId: input.appointmentId,
       bookingId: appointment.booking_id,
       tradingDate: appointment.trading_date,
