@@ -14,16 +14,16 @@
   --color-surface-clay: #E6D8C4;
   --color-ink: #26241F;
   --color-ink-2: #6E675D;
-  --color-ink-3: #90877B;
-  --color-accent-gold: #946A32;
-  --color-accent-gold-strong: #6E4E25;
+  --color-ink-3: #857D71;
+  --color-accent-gold: #89612E;
+  --color-accent-gold-strong: #624621;
   --color-accent-green: #4E7048;
   --color-accent-teal: #2A6E66;
   --color-decor-gold: #C08A43;
   --color-decor-tan: #C9AE8B;
   --color-hairline: #E6D8C4;
   --color-border: #C9AE8B;
-  --color-border-strong: #B18A57;
+  --color-border-strong: #A67F4D;
   --color-focus: #2A6E66;
   --color-danger: #C0392B;
   --color-success: #4E7048;
@@ -40,19 +40,19 @@
     --color-surface-clay: #2F2A24;
     --color-ink: #F0EBE3;
     --color-ink-2: #B5AEA4;
-    --color-ink-3: #746F66;
+    --color-ink-3: #837D73;
     --color-accent-gold: #C08A43;
-    --color-accent-gold-strong: #C69656;
-    --color-accent-green: #5F8958;
-    --color-accent-teal: #358C81;
+    --color-accent-gold-strong: #D2AB78;
+    --color-accent-green: #6A9862;
+    --color-accent-teal: #3C9E92;
     --color-decor-gold: #C08A43;
     --color-decor-tan: #C9AE8B;
     --color-hairline: #2A2621;
     --color-border: #3A352E;
     --color-border-strong: #8B857B;
     --color-focus: #5FB8AC;
-    --color-danger: #D55144;
-    --color-success: #5F8958;
+    --color-danger: #DC6D61;
+    --color-success: #6A9862;
   }
 }
 
@@ -65,19 +65,19 @@
   --color-surface-clay: #2F2A24;
   --color-ink: #F0EBE3;
   --color-ink-2: #B5AEA4;
-  --color-ink-3: #746F66;
+  --color-ink-3: #837D73;
   --color-accent-gold: #C08A43;
-  --color-accent-gold-strong: #C69656;
-  --color-accent-green: #5F8958;
-  --color-accent-teal: #358C81;
+  --color-accent-gold-strong: #D2AB78;
+  --color-accent-green: #6A9862;
+  --color-accent-teal: #3C9E92;
   --color-decor-gold: #C08A43;
   --color-decor-tan: #C9AE8B;
   --color-hairline: #2A2621;
   --color-border: #3A352E;
   --color-border-strong: #8B857B;
   --color-focus: #5FB8AC;
-  --color-danger: #D55144;
-  --color-success: #5F8958;
+  --color-danger: #DC6D61;
+  --color-success: #6A9862;
 }
 
 :root {

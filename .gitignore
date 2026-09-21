@@ -16,3 +16,8 @@ playwright-report/
 test-results/
 .turbo/
 .claude/worktrees/
+
+# Python bytecode. `scripts/palette.py` is imported as a module by a docs-table regenerator, which
+# leaves a __pycache__ beside it; committing it would put a build artefact in a scripts directory.
+__pycache__/
+*.pyc

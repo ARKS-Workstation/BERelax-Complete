@@ -39,8 +39,9 @@ where it matters.
 Three artifacts are generated and committed: the token module, `tokens.css`, and the Tailwind theme.
 Committing build output is usually wrong. Here it buys two things worth more than the tidiness:
 
-- **A colour change shows up in a diff.** A reviewer sees `--color-ink-3` move from `#90877B` to
-  `#948A7D` without running a build to find out what happened.
+- **A colour change shows up in a diff.** A reviewer saw `--color-ink-3` move from `#90877B` to
+  `#857D71` when decision 5 below changed what the derivation measures against — nine tokens moved in that
+  one commit, and the diff said so without anybody running a build to find out what happened.
 - **The PDF renderer and the web read the same bytes.** `@berelax/pdf` inlines `tokensCss()` into
   every invoice. Without one committed source, an invoice would be a slightly different grey from the
   page that produced it, and nobody could say which was right.
@@ -60,8 +61,8 @@ claim rather than a fact.
 **The brand gold never carries text.** `#C08A43` measures **2.90:1** against the light ground. It
 fails the 4.5:1 body threshold *and* the 3:1 threshold for user-interface components, so it cannot be
 a text colour, a meaningful icon, or a border that conveys state. It stays as `--color-decor-gold`
-because it is the brand, and the darkened `--color-accent-gold` at 4.62:1 is what text uses — still
-recognisably gold. The classification lives in `packages/ui/src/tokens/palette.ts`, where a unit test
+because it is the brand, and the darkened `--color-accent-gold` — `#89612E`, 4.58:1 on the darkest surface
+text may sit on — is what text uses, still recognisably gold. The classification lives in `packages/ui/src/tokens/palette.ts`, where a unit test
 asserts it is total: every token is exactly one of text-bearing or decorative.
 
 Note the inversion, which is the reason theme-aware tokens are worth the trouble: **the same
@@ -81,6 +82,59 @@ its first run it found the dark table had silently omitted `--hairline` and `--b
 
 This is the same discipline as schema drift. A document that describes the system is only useful
 while it is true, and the way to keep it true is to fail the build when it is not.
+
+## Decision 5 — every ratio is measured against the worst surface text may sit on
+
+Amended 2026-09-21, after the original derivation was found to be measuring the wrong thing.
+
+Decisions 1 to 4 keep the palette's *claims* true. This one is about the claim itself being the right claim.
+Every token was derived and re-measured against `--color-ground` alone — and the ground is the lightest
+thing a dark foreground sits on in light mode, and the darkest thing a light foreground sits on in dark
+mode. So the ground ratio is the flattering one, always, and it is not the ratio that has to hold.
+
+Measured across the real matrix of text tokens against surfaces:
+
+| Token | On the ground | On `--color-surface-raised` | Required |
+|---|---|---|---|
+| dark `--color-danger` | 4.53:1 | **3.69:1** | 4.5:1 |
+| dark `--color-success` | 4.63:1 | **3.77:1** | 4.5:1 |
+| dark `--color-accent-green` | 4.63:1 | **3.77:1** | 4.5:1 |
+| dark `--color-accent-teal` | 4.64:1 | **3.78:1** | 4.5:1 |
+
+and in light mode `--color-accent-gold` fell to 4.00:1 on `--color-surface-sand`, with
+`--color-border-strong` at 2.63:1 against its 3:1 floor. `pnpm palette` printed PASS for all of it, and
+F11's acceptance line — "every text pair meets its stated ratio in both themes" — was not what was being
+checked. There was never a *pair* in the check at all.
+
+Latent rather than live: `pnpm a11y` runs axe against real pages and passed, because no page had yet put one
+of those tokens on a raised surface. The next unit to do it would have shipped the defect, and the palette
+gate would have gone on reporting PASS.
+
+So `derive_all` walks until the target is met against **every** surface text is allowed on, and the report's
+PASS/FAIL column is the worst of them. Nine hexes moved, all by small steps along their own hue — the
+palette did not need redesigning, it needed measuring against the right thing.
+
+Two consequences worth stating, because both are places this could have gone wrong:
+
+**`--color-surface-clay` is excluded.** Its own row in docs/08 §3 reads "large shapes, **never text**", so
+including it would darken half the palette to serve a pairing the design system forbids. The exclusion is
+not a convenience: `packages/ui/src/tokens/contrast.test.ts` asserts that something *would* fail on clay, so
+an exclusion that stopped doing any work would be deleted rather than explained.
+
+**`--color-border-strong` and `--color-focus` are not text and take the same worst case anyway**, at their
+own 3:1 target. WCAG 2.2 1.4.11 measures non-text contrast against the *adjacent* colour, and for a
+control's edge or its focus ring that is whatever surface the control sits on. A focus ring visible on the
+page and invisible on a card is the same defect as illegible body text, and considerably harder to notice.
+
+What this does *not* fix: `--color-hairline` and `--color-border` state no minimum, so nothing derives them
+against anything stricter. In dark mode `--color-hairline` measures 1.01:1 against `--color-surface-raised`
+— a rule that does not render. Darkening a separator no rule asks to be darker is a design decision rather
+than a correctness fix, so it is recorded as `Y12-separator` in docs/OPEN-QUESTIONS.md, and the shortfall is
+printed by `pnpm palette` for every token, separators included, rather than hidden.
+
+The check is doubled on purpose. `scripts/palette.py` measures in Python; `contrast.test.ts` recomputes the
+whole matrix in TypeScript from the emitted hexes with its own implementation of the WCAG formula. One
+implementation asserting is how this survived as long as it did; two agreeing is the check.
 
 ## What this does not decide
 

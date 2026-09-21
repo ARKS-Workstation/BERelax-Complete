@@ -169,6 +169,16 @@ units:
     - scripts/palette.py exits zero; every text pair meets its stated ratio in both themes
     - 'the brand gold #C08A43 is rejected by lint if used on a text-bearing element'
     - Tailwind default palette removed; an un-tokened colour fails lint
+    notes:
+    - 'NOTE (2026-09-21): the third acceptance line was satisfied in letter and not in substance until this
+      date. scripts/palette.py measured every token against --color-ground alone, so there was no *pair* in
+      the check: dark --color-danger read 4.53:1 on the ground and 3.69:1 on --color-surface-raised, and
+      success, accent-green and accent-teal did the same, while the gate reported PASS. Latent rather than
+      live, because pnpm a11y passed — no page had yet put one of those tokens on a raised surface. Now
+      derived against every surface text may sit on (surface-clay excluded by docs/08 §3), doubled by
+      packages/ui/src/tokens/contrast.test.ts recomputing the matrix in TypeScript, and proved to fire by
+      gate 62. Nine hexes moved. ADR 0012 decision 5 records it; --color-hairline and --color-border state
+      no minimum and are left alone as Y12-separator.'
   - id: F12
     order: 11.5
     title: The worker app — pg-boss on the primary Postgres, the job registry and transactional enqueue

@@ -47,64 +47,74 @@ CI. The tables below are its output, not aspiration.
 
 ### Light — ground `#FDFAF5`
 
-| Token | Hex | Ratio | Role |
-|---|---|---|---|
-| `--ground` | `#FDFAF5` | — | page |
-| `--surface` | `#FFFFFF` | — | cards |
-| `--surface-raised` | `#FFFFFF` | — | elevated surfaces; in light the cue is `--shadow-overlay`, in dark it is lightness |
-| `--ground-sunk` | `#F7F0E5` | — | recessed bands |
-| `--surface-sand` | `#F2E9DC` | — | section fills |
-| `--surface-clay` | `#E6D8C4` | 1.35:1 | large shapes, **never text** |
-| `--ink` | `#26241F` | **14.89:1** | body and headings |
-| `--ink-2` | `#6E675D` | **5.36:1** | secondary text |
-| `--ink-3` | `#90877B` | **3.40:1** | large text and meta only |
-| `--accent-gold` | `#946A32` | **4.62:1** | links, icons, text accents |
-| `--accent-gold-strong` | `#6E4E25` | **7.26:1** | emphasis, small text on sand |
-| `--accent-green` | `#4E7048` | **5.40:1** | accent text, success |
-| `--accent-teal` | `#2A6E66` | **5.73:1** | accent text, focus |
-| `--decor-gold` | `#C08A43` | 2.90:1 | **decorative only — carries no information** |
-| `--decor-tan` | `#C9AE8B` | 2.04:1 | decorative only |
-| `--hairline` | `#E6D8C4` | 1.35:1 | 1px rules |
-| `--border` | `#C9AE8B` | 2.04:1 | non-semantic borders |
-| `--border-strong` | `#B18A57` | **3.04:1** | input and control boundaries |
-| `--focus` | `#2A6E66` | **5.73:1** | focus ring |
-| `--danger` | `#C0392B` | **5.22:1** | errors |
-| `--success` | `#4E7048` | **5.40:1** | success |
+| Token | Hex | On ground | Worst text surface | Role |
+|---|---|---|---|---|
+| `--ground` | `#FDFAF5` | — | — | page |
+| `--surface` | `#FFFFFF` | — | — | cards |
+| `--surface-raised` | `#FFFFFF` | — | — | elevated surfaces; in light the cue is `--shadow-overlay`, in dark it is lightness |
+| `--ground-sunk` | `#F7F0E5` | — | — | recessed bands |
+| `--surface-sand` | `#F2E9DC` | — | — | section fills |
+| `--surface-clay` | `#E6D8C4` | 1.35:1 | 1.17:1 | large shapes, **never text** |
+| `--ink` | `#26241F` | 14.89:1 | **12.89:1** | body and headings |
+| `--ink-2` | `#6E675D` | 5.36:1 | **4.64:1** | secondary text |
+| `--ink-3` | `#857D71` | 3.90:1 | **3.38:1** | large text and meta only |
+| `--accent-gold` | `#89612E` | 5.29:1 | **4.58:1** | links, icons, text accents |
+| `--accent-gold-strong` | `#624621` | 8.34:1 | **7.22:1** | emphasis, small text on sand |
+| `--accent-green` | `#4E7048` | 5.40:1 | **4.68:1** | accent text, success |
+| `--accent-teal` | `#2A6E66` | 5.73:1 | **4.96:1** | accent text, focus |
+| `--decor-gold` | `#C08A43` | 2.90:1 | 2.51:1 | **decorative only — carries no information** |
+| `--decor-tan` | `#C9AE8B` | 2.04:1 | 1.76:1 | decorative only |
+| `--hairline` | `#E6D8C4` | 1.35:1 | 1.17:1 | 1px rules |
+| `--border` | `#C9AE8B` | 2.04:1 | 1.76:1 | non-semantic borders |
+| `--border-strong` | `#A67F4D` | 3.50:1 | **3.03:1** | input and control boundaries |
+| `--focus` | `#2A6E66` | 5.73:1 | **4.96:1** | focus ring |
+| `--danger` | `#C0392B` | 5.22:1 | **4.52:1** | errors |
+| `--success` | `#4E7048` | 5.40:1 | **4.68:1** | success |
 
 **The prototype's signature gold `#C08A43` measures 2.90:1** — it fails the 4.5:1 body threshold *and*
 the 3:1 threshold for UI elements. So it cannot carry text, links, icons or any border that conveys
-meaning. Darkened along its own hue and saturation, **`#946A32` reaches 4.62:1** and still reads as gold.
-The bright original is retained as `--decor-gold` for large shapes and dividers where it carries no
-information. The prototype's teal `#5FB8AC` (2.26:1) is handled the same way, with `#2A6E66` for text.
+meaning. Darkened along its own hue and saturation, **`#89612E` reaches 4.58:1 on `--surface-sand`**, the
+darkest surface text is allowed on, and still reads as gold. The bright original is retained as
+`--decor-gold` for large shapes and dividers where it carries no information. The prototype's teal
+`#5FB8AC` (2.26:1) is handled the same way, with `#2A6E66` for text.
+
+**Why two ratio columns.** Every threshold above is met against the *worst* surface text may sit on, not
+against the page background. Deriving against the ground alone is how `--danger` came to measure 4.53:1 in
+dark mode and 3.69:1 on `--surface-raised` while the gate reported PASS: the number that has to hold is the
+one on the card, not the one on the page. `--surface-clay` is excluded from that set by its own row — "large
+shapes, **never text**" — so no token is darkened to serve a pairing this document forbids. `--border-strong`
+and `--focus` are not text and are held to the same worst case at 3:1, because WCAG 2.2 1.4.11 measures
+non-text contrast against the adjacent colour, and a focus ring visible on the page and invisible on a card
+is the same defect as illegible body text and harder to notice.
 
 ### Dark — ground `#141210`, warm not inverted
 
 The prototype has no dark mode. Warm darks derived from the ink hue; accents re-derived at higher
 lightness rather than dimmed.
 
-| Token | Hex | Ratio |
-|---|---|---|
-| `--ground` | `#141210` | — |
-| `--ground-sunk` | `#0F0D0B` | — |
-| `--surface` | `#1F1C18` | — |
-| `--surface-raised` | `#292520` | — |
-| `--ink` | `#F0EBE3` | **15.75:1** |
-| `--ink-2` | `#B5AEA4` | **8.50:1** |
-| `--ink-3` | `#746F66` | **3.74:1** |
-| `--accent-gold` | `#C08A43` | **6.19:1** |
-| `--accent-green` | `#5F8958` | **4.63:1** |
-| `--accent-teal` | `#358C81` | **4.64:1** |
-| `--surface-sand` | `#231F1A` | — |
-| `--surface-clay` | `#2F2A24` | — |
-| `--accent-gold-strong` | `#C69656` | **7.03:1** |
-| `--decor-gold` | `#C08A43` | — |
-| `--decor-tan` | `#C9AE8B` | — |
-| `--success` | `#5F8958` | **4.63:1** |
-| `--hairline` | `#2A2621` | — |
-| `--border` | `#3A352E` | — |
-| `--border-strong` | `#8B857B` | **5.11:1** |
-| `--focus` | `#5FB8AC` | **7.95:1** |
-| `--danger` | `#D55144` | **4.53:1** |
+| Token | Hex | On ground | Worst text surface |
+|---|---|---|---|
+| `--ground` | `#141210` | — | — |
+| `--ground-sunk` | `#0F0D0B` | — | — |
+| `--surface` | `#1F1C18` | — | — |
+| `--surface-raised` | `#292520` | — | — |
+| `--ink` | `#F0EBE3` | 15.75:1 | **12.83:1** |
+| `--ink-2` | `#B5AEA4` | 8.50:1 | **6.93:1** |
+| `--ink-3` | `#837D73` | 4.58:1 | **3.73:1** |
+| `--accent-gold` | `#C08A43` | 6.19:1 | **5.04:1** |
+| `--accent-green` | `#6A9862` | 5.59:1 | **4.55:1** |
+| `--accent-teal` | `#3C9E92` | 5.78:1 | **4.71:1** |
+| `--surface-sand` | `#231F1A` | — | — |
+| `--surface-clay` | `#2F2A24` | — | — |
+| `--accent-gold-strong` | `#D2AB78` | 8.75:1 | **7.13:1** |
+| `--decor-gold` | `#C08A43` | — | — |
+| `--decor-tan` | `#C9AE8B` | — | — |
+| `--success` | `#6A9862` | 5.59:1 | **4.55:1** |
+| `--hairline` | `#2A2621` | — | — |
+| `--border` | `#3A352E` | — | — |
+| `--border-strong` | `#8B857B` | 5.11:1 | **4.16:1** |
+| `--focus` | `#5FB8AC` | 7.95:1 | **6.48:1** |
+| `--danger` | `#DC6D61` | 5.70:1 | **4.64:1** |
 
 Note the inversion: **the bright brand gold `#C08A43`, unusable for text in light mode, reaches 6.19:1 in
 dark mode** and becomes the primary accent there. Accent polarity flips with the theme.
@@ -115,8 +125,9 @@ value, because the custom property is simply never redefined. The self-critique 
 that on its first run: the sand band rendered at `#F2E9DC` under `#F0EBE3` ink, measuring **1.01:1**,
 with the whole section invisible. The parity check is what stops it recurring.
 
-**Accent fills:** light `--accent-gold` `#946A32` with `#FDFAF5` text (4.62:1); dark `#C08A43` fill with
-`#141210` text (6.19:1).
+**Accent fills:** light `--accent-gold` `#89612E` with `#FDFAF5` text (5.29:1); dark `#C08A43` fill with
+`#141210` text (6.19:1). A fill states its ratio against the text ON it, so the ground figure is the right
+one here — the fill is the background.
 
 **Shadow.** Exactly one token, overlays only:
 `--shadow-overlay: 0 1px 2px oklch(20% .01 60 / .05), 0 12px 32px -8px oklch(20% .01 60 / .12)`.

@@ -10,9 +10,25 @@
  * stylesheet. Both come from here, so an email, a PDF and a page cannot disagree about what
  * `--color-ink` is.
  */
-import { DARK_PALETTE, LIGHT_PALETTE, PALETTE_RATIOS } from './palette.generated.ts'
+import {
+  DARK_PALETTE,
+  LIGHT_PALETTE,
+  NON_TEXT_SURFACE_TOKENS,
+  PALETTE_MINIMUMS,
+  PALETTE_RATIOS,
+  PALETTE_WORST_SURFACE_RATIOS,
+  TEXT_SURFACE_TOKENS,
+} from './palette.generated.ts'
 
-export { DARK_PALETTE, LIGHT_PALETTE, PALETTE_RATIOS }
+export {
+  DARK_PALETTE,
+  LIGHT_PALETTE,
+  NON_TEXT_SURFACE_TOKENS,
+  PALETTE_MINIMUMS,
+  PALETTE_RATIOS,
+  PALETTE_WORST_SURFACE_RATIOS,
+  TEXT_SURFACE_TOKENS,
+}
 
 export type LightToken = keyof typeof LIGHT_PALETTE
 export type DarkToken = keyof typeof DARK_PALETTE
@@ -64,6 +80,56 @@ export function mayCarryText(token: string): boolean {
 export function contrastOf(theme: Theme, token: string): number | undefined {
   const table: Record<string, number> = PALETTE_RATIOS[theme]
   return table[token]
+}
+
+/**
+ * Measured contrast of a token against the WORST surface text is allowed on.
+ *
+ * This is the number a token is held to, and `contrastOf` is not. The ground is the lightest thing a dark
+ * foreground sits on in light mode and the darkest thing a light foreground sits on in dark mode, so the
+ * ground ratio is the flattering one — `--color-danger` in dark mode reads 4.53:1 there and 3.69:1 on
+ * `--color-surface-raised`, and it was derived against the ground for months while the gate said PASS.
+ */
+export function worstSurfaceContrastOf(theme: Theme, token: string): number | undefined {
+  const table: Record<string, number> = PALETTE_WORST_SURFACE_RATIOS[theme]
+  return table[token]
+}
+
+/** The ratio a token must meet, or null for a surface or decoration that states none. */
+export function minimumFor(theme: Theme, token: string): number | null | undefined {
+  const table: Record<string, number | null> = PALETTE_MINIMUMS[theme]
+  return table[token]
+}
+
+/** The palette for a theme, by token. */
+export function paletteFor(theme: Theme): Record<string, string> {
+  return theme === 'light' ? LIGHT_PALETTE : DARK_PALETTE
+}
+
+/**
+ * sRGB relative luminance, as WCAG 2.2 defines it.
+ *
+ * Written here rather than imported so the palette has one implementation the whole product shares — the
+ * PDF renderer, the web and the tests. `scripts/palette.py` has its own; the two agreeing on every pairing
+ * is the check, and a single shared implementation could be confidently wrong in both places at once.
+ */
+function relativeLuminance(hex: string): number {
+  const raw = hex.replace('#', '')
+  if (!/^[0-9A-Fa-f]{6}$/.test(raw)) {
+    throw new Error(`[not-a-six-digit-hex] ${hex}`)
+  }
+  const channel = (offset: number): number => {
+    const value = Number.parseInt(raw.slice(offset, offset + 2), 16) / 255
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+}
+
+/** WCAG 2.2 contrast ratio between two hex colours, order-independent. */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a)
+  const lb = relativeLuminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
 }
 
 function declarations(palette: Record<string, string>, indent: string): string {

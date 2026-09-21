@@ -15626,6 +15626,188 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 62. The palette's contrast contract: every stated ratio holds on the WORST surface text may sit on.
+//
+//     `scripts/palette.py` derived and measured every token against `--color-ground` alone, which is the
+//     lightest thing a dark foreground sits on in light mode and the darkest thing a light foreground sits
+//     on in dark mode — so the ground ratio is the flattering one. Measured over the real matrix, dark
+//     `danger` read 4.53:1 on the ground and 3.69:1 on `--color-surface-raised`; `success`, `accent-green`
+//     and `accent-teal` did the same, and light `accent-gold` fell to 4.00:1 on `--color-surface-sand`.
+//     `pnpm palette` printed PASS throughout, and F11's acceptance line — "every text pair meets its
+//     stated ratio in both themes" — was not what was being checked.
+//
+//     Latent rather than live: `pnpm a11y` runs axe against real pages and passed, because no page had yet
+//     put one of those tokens on a raised surface. The next unit to do it would have shipped the defect.
+//
+//     So the derivation now walks until the target is met against every surface text is allowed on,
+//     `surface-clay` is excluded by docs/08 §3's own "large shapes, never text", and
+//     `packages/ui/src/tokens/contrast.test.ts` recomputes the whole matrix in TypeScript with a second
+//     implementation of the WCAG formula. Two implementations agreeing is the check; one asserting is not.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const PALETTE = 'scripts/palette.py'
+  const GENERATED = 'packages/ui/src/tokens/palette.generated.ts'
+  const PALETTE_TS = 'packages/ui/src/tokens/palette.ts'
+  const CONTRAST_TEST = 'packages/ui/src/tokens/contrast.test.ts'
+  const DESIGN_DOC = 'docs/08-frontend-design.md'
+
+  // 62a. The original defect, put back: derive a token against the ground instead of every text surface.
+  //      This is the exact state the palette was in, so if this case cannot fail, nothing below matters.
+  {
+    const result = withEditedFile(
+      PALETTE,
+      (text) =>
+        text.replace(
+          '"danger":                   (derive_all("#C0392B", DARK_TEXT_SURFACES, 4.5, lighten=True), 4.5),',
+          '"danger":                   (derive("#C0392B", DARK_GROUND, 4.5, lighten=True), 4.5),',
+        ),
+      () => runExpectingFailure('pnpm', ['palette']),
+    )
+    checkRejectedBy(
+      'a token derived against the ground alone is rejected',
+      result,
+      '[worst-surface-contrast] --color-danger',
+    )
+  }
+
+  // 62b. The clay exclusion, removed. `surface-clay` is out of the text set because docs/08 §3 says text
+  //      never sits on it; this proves the exclusion is load-bearing rather than decorative — with clay in,
+  //      tokens miss their target, which is why deriving against it would have flattened the palette to
+  //      serve a pairing the design system forbids.
+  {
+    const result = withEditedFile(
+      PALETTE,
+      (text) => text.replace('NON_TEXT_SURFACES = ("surface-clay",)', 'NON_TEXT_SURFACES = ()'),
+      () => runExpectingFailure('pnpm', ['palette']),
+    )
+    checkRejectedBy(
+      'treating the never-text surface as a text surface is rejected',
+      result,
+      '[worst-surface-contrast]',
+    )
+  }
+
+  // 62c. The ground dropped from the set the worst case is taken over. Every other assertion in the
+  //      TypeScript suite would still pass while the page background stopped being measured at all.
+  {
+    const result = withEditedFile(
+      GENERATED,
+      (text) => text.replace("TEXT_SURFACE_TOKENS = ['ground', ", 'TEXT_SURFACE_TOKENS = ['),
+      () => runExpectingFailure('pnpm', unit(CONTRAST_TEST)),
+    )
+    checkRejectedBy(
+      'a worst-case set without the ground is rejected',
+      result,
+      'takes the worst case over a set that includes the ground',
+    )
+  }
+
+  // 62d. A hand-edited worst-surface ratio. The two implementations must agree: the Python side decides the
+  //      hexes, so a disagreement means the palette was derived against a rule TypeScript does not hold it
+  //      to — and the emitted number is what a component or a test would read.
+  {
+    const result = withEditedFile(
+      GENERATED,
+      (text) => text.replace("    'danger': 4.64,", "    'danger': 9.99,"),
+      () => runExpectingFailure('pnpm', unit(CONTRAST_TEST)),
+    )
+    checkRejectedBy(
+      'an emitted worst-surface ratio the hexes do not support is rejected',
+      result,
+      'agrees with the derivation about the worst surface ratio',
+    )
+  }
+
+  // 62e. A hex hand-edited to one that fails its own threshold. `pnpm palette` catches this as mirror drift;
+  //      this asserts the TypeScript recomputation catches it as what it actually is — an illegible pairing.
+  {
+    const result = withEditedFile(
+      GENERATED,
+      (text) => text.replace("  'danger': '#C0392B',", "  'danger': '#E8A79E',"),
+      () => runExpectingFailure('pnpm', unit(CONTRAST_TEST)),
+    )
+    checkRejectedBy('a token hex that fails its own minimum is rejected', result, 'needs 4.5:1')
+  }
+
+  // 62f. The formula itself broken. Every number in this file comes out of `contrastRatio`, so a wrong
+  //      implementation makes every other case here agree on the wrong answer. The endpoints are what pin
+  //      it: white on white is 1:1 and black on white is 21:1, and no other formula gives both.
+  {
+    const result = withEditedFile(
+      PALETTE_TS,
+      (text) =>
+        text.replace(
+          'return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)',
+          'return (Math.max(la, lb) + 0.5) / (Math.min(la, lb) + 0.5)',
+        ),
+      () => runExpectingFailure('pnpm', unit(CONTRAST_TEST)),
+    )
+    checkRejectedBy(
+      'a wrong contrast formula is rejected',
+      result,
+      'anchors on the two fixed points of the formula',
+    )
+  }
+
+  // 62g. And the control on the TypeScript suite: every assertion in it loops over pairs, and a loop over an
+  //      empty list passes. Emptying the text-token list must fail rather than report green (ADR 0003).
+  //
+  //      Emptied entirely, not shortened. Dropping one entry keeps the pair count self-consistent — the
+  //      count assertion compares against `TEXT_BEARING_TOKENS.length`, so it agrees with whatever the list
+  //      says — and it is the `toBeGreaterThan` floor beside it that refuses a list this small.
+  {
+    const result = withEditedFile(
+      PALETTE_TS,
+      (text) =>
+        text.replace(
+          /export const TEXT_BEARING_TOKENS: readonly LightToken\[\] = \[[^\]]*\]/,
+          'export const TEXT_BEARING_TOKENS: readonly LightToken[] = []',
+        ),
+      () => runExpectingFailure('pnpm', unit(CONTRAST_TEST)),
+    )
+    checkRejectedBy(
+      'a contrast scan with no pairs to measure is rejected',
+      result,
+      'has pairs to measure',
+    )
+  }
+
+  // 62h. docs/08 stating a hex the script does not produce. The document claims the tables are the script's
+  //      output rather than aspiration, and this is what keeps that true.
+  {
+    const result = withEditedFile(
+      DESIGN_DOC,
+      (text) => text.replace('| `--danger` | `#C0392B` |', '| `--danger` | `#C03A2B` |'),
+      () => runExpectingFailure('pnpm', ['palette']),
+    )
+    checkRejectedBy(
+      'docs/08 stating a hex the script does not produce is rejected',
+      result,
+      'script produces',
+    )
+  }
+
+  // 62i. docs/08 stating the right hex and the wrong worst-surface ratio. The second column is the number
+  //      the threshold is about, so a table that carries it and is not checked on it is worse than one that
+  //      never had the column — a reader would trust it.
+  {
+    const result = withEditedFile(
+      DESIGN_DOC,
+      (text) =>
+        text.replace(
+          '| `--danger` | `#C0392B` | 5.22:1 | **4.52:1** |',
+          '| `--danger` | `#C0392B` | 5.22:1 | **4.99:1** |',
+        ),
+      () => runExpectingFailure('pnpm', ['palette']),
+    )
+    checkRejectedBy(
+      'docs/08 stating a worst-surface ratio the script does not measure is rejected',
+      result,
+      'worst-surface',
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

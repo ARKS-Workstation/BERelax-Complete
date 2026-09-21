@@ -15,47 +15,47 @@
  * Ground is `#FDFAF5`.
  */
 export const LIGHT_PALETTE = {
-  /** 1.0:1 against the ground — surface or decorative only. */
+  /** 1.0:1 on the ground, 1.0:1 on ground — surface or decorative only. */
   'ground': '#FDFAF5',
-  /** 1.04:1 against the ground — surface or decorative only. */
+  /** 1.04:1 on the ground, 1.0:1 on surface — surface or decorative only. */
   'surface': '#FFFFFF',
-  /** 1.04:1 against the ground — surface or decorative only. */
+  /** 1.04:1 on the ground, 1.0:1 on surface — surface or decorative only. */
   'surface-raised': '#FFFFFF',
-  /** 1.09:1 against the ground — surface or decorative only. */
+  /** 1.09:1 on the ground, 1.0:1 on ground-sunk — surface or decorative only. */
   'ground-sunk': '#F7F0E5',
-  /** 1.15:1 against the ground — surface or decorative only. */
+  /** 1.15:1 on the ground, 1.0:1 on surface-sand — surface or decorative only. */
   'surface-sand': '#F2E9DC',
-  /** 1.35:1 against the ground — surface or decorative only. */
+  /** 1.35:1 on the ground, 1.17:1 on surface-sand — surface or decorative only. */
   'surface-clay': '#E6D8C4',
-  /** 14.89:1 against the ground — requires 4.5:1. */
+  /** 14.89:1 on the ground, 12.89:1 on surface-sand — requires 4.5:1. */
   'ink': '#26241F',
-  /** 5.36:1 against the ground — requires 4.5:1. */
+  /** 5.36:1 on the ground, 4.64:1 on surface-sand — requires 4.5:1. */
   'ink-2': '#6E675D',
-  /** 3.4:1 against the ground — requires 3.0:1. */
-  'ink-3': '#90877B',
-  /** 4.62:1 against the ground — requires 4.5:1. */
-  'accent-gold': '#946A32',
-  /** 7.26:1 against the ground — requires 7.0:1. */
-  'accent-gold-strong': '#6E4E25',
-  /** 5.4:1 against the ground — requires 4.5:1. */
+  /** 3.9:1 on the ground, 3.38:1 on surface-sand — requires 3.0:1. */
+  'ink-3': '#857D71',
+  /** 5.29:1 on the ground, 4.58:1 on surface-sand — requires 4.5:1. */
+  'accent-gold': '#89612E',
+  /** 8.34:1 on the ground, 7.22:1 on surface-sand — requires 7.0:1. */
+  'accent-gold-strong': '#624621',
+  /** 5.4:1 on the ground, 4.68:1 on surface-sand — requires 4.5:1. */
   'accent-green': '#4E7048',
-  /** 5.73:1 against the ground — requires 4.5:1. */
+  /** 5.73:1 on the ground, 4.96:1 on surface-sand — requires 4.5:1. */
   'accent-teal': '#2A6E66',
-  /** 2.9:1 against the ground — surface or decorative only. */
+  /** 2.9:1 on the ground, 2.51:1 on surface-sand — surface or decorative only. */
   'decor-gold': '#C08A43',
-  /** 2.04:1 against the ground — surface or decorative only. */
+  /** 2.04:1 on the ground, 1.76:1 on surface-sand — surface or decorative only. */
   'decor-tan': '#C9AE8B',
-  /** 1.35:1 against the ground — surface or decorative only. */
+  /** 1.35:1 on the ground, 1.17:1 on surface-sand — surface or decorative only. */
   'hairline': '#E6D8C4',
-  /** 2.04:1 against the ground — surface or decorative only. */
+  /** 2.04:1 on the ground, 1.76:1 on surface-sand — surface or decorative only. */
   'border': '#C9AE8B',
-  /** 3.04:1 against the ground — requires 3.0:1. */
-  'border-strong': '#B18A57',
-  /** 5.73:1 against the ground — requires 3.0:1. */
+  /** 3.5:1 on the ground, 3.03:1 on surface-sand — requires 3.0:1. */
+  'border-strong': '#A67F4D',
+  /** 5.73:1 on the ground, 4.96:1 on surface-sand — requires 3.0:1. */
   'focus': '#2A6E66',
-  /** 5.22:1 against the ground — requires 4.5:1. */
+  /** 5.22:1 on the ground, 4.52:1 on surface-sand — requires 4.5:1. */
   'danger': '#C0392B',
-  /** 5.4:1 against the ground — requires 4.5:1. */
+  /** 5.4:1 on the ground, 4.68:1 on surface-sand — requires 4.5:1. */
   'success': '#4E7048',
 } as const
 
@@ -65,48 +65,48 @@ export const LIGHT_PALETTE = {
  * Ground is `#141210`.
  */
 export const DARK_PALETTE = {
-  /** 1.0:1 against the ground — surface or decorative only. */
+  /** 1.0:1 on the ground, 1.0:1 on ground — surface or decorative only. */
   'ground': '#141210',
-  /** 1.04:1 against the ground — surface or decorative only. */
+  /** 1.04:1 on the ground, 1.0:1 on ground-sunk — surface or decorative only. */
   'ground-sunk': '#0F0D0B',
-  /** 1.1:1 against the ground — surface or decorative only. */
+  /** 1.1:1 on the ground, 1.0:1 on surface — surface or decorative only. */
   'surface': '#1F1C18',
-  /** 1.23:1 against the ground — surface or decorative only. */
+  /** 1.23:1 on the ground, 1.0:1 on surface-raised — surface or decorative only. */
   'surface-raised': '#292520',
-  /** 1.14:1 against the ground — surface or decorative only. */
+  /** 1.14:1 on the ground, 1.0:1 on surface-sand — surface or decorative only. */
   'surface-sand': '#231F1A',
-  /** 1.31:1 against the ground — surface or decorative only. */
+  /** 1.31:1 on the ground, 1.07:1 on surface-raised — surface or decorative only. */
   'surface-clay': '#2F2A24',
-  /** 15.75:1 against the ground — requires 4.5:1. */
+  /** 15.75:1 on the ground, 12.83:1 on surface-raised — requires 4.5:1. */
   'ink': '#F0EBE3',
-  /** 8.5:1 against the ground — requires 4.5:1. */
+  /** 8.5:1 on the ground, 6.93:1 on surface-raised — requires 4.5:1. */
   'ink-2': '#B5AEA4',
-  /** 3.74:1 against the ground — requires 3.0:1. */
-  'ink-3': '#746F66',
-  /** 6.19:1 against the ground — requires 4.5:1. */
+  /** 4.58:1 on the ground, 3.73:1 on surface-raised — requires 3.0:1. */
+  'ink-3': '#837D73',
+  /** 6.19:1 on the ground, 5.04:1 on surface-raised — requires 4.5:1. */
   'accent-gold': '#C08A43',
-  /** 7.03:1 against the ground — requires 7.0:1. */
-  'accent-gold-strong': '#C69656',
-  /** 4.63:1 against the ground — requires 4.5:1. */
-  'accent-green': '#5F8958',
-  /** 4.64:1 against the ground — requires 4.5:1. */
-  'accent-teal': '#358C81',
-  /** 6.19:1 against the ground — surface or decorative only. */
+  /** 8.75:1 on the ground, 7.13:1 on surface-raised — requires 7.0:1. */
+  'accent-gold-strong': '#D2AB78',
+  /** 5.59:1 on the ground, 4.55:1 on surface-raised — requires 4.5:1. */
+  'accent-green': '#6A9862',
+  /** 5.78:1 on the ground, 4.71:1 on surface-raised — requires 4.5:1. */
+  'accent-teal': '#3C9E92',
+  /** 6.19:1 on the ground, 5.04:1 on surface-raised — surface or decorative only. */
   'decor-gold': '#C08A43',
-  /** 8.82:1 against the ground — surface or decorative only. */
+  /** 8.82:1 on the ground, 7.18:1 on surface-raised — surface or decorative only. */
   'decor-tan': '#C9AE8B',
-  /** 1.24:1 against the ground — surface or decorative only. */
+  /** 1.24:1 on the ground, 1.01:1 on surface-raised — surface or decorative only. */
   'hairline': '#2A2621',
-  /** 1.54:1 against the ground — surface or decorative only. */
+  /** 1.54:1 on the ground, 1.25:1 on surface-raised — surface or decorative only. */
   'border': '#3A352E',
-  /** 5.11:1 against the ground — requires 3.0:1. */
+  /** 5.11:1 on the ground, 4.16:1 on surface-raised — requires 3.0:1. */
   'border-strong': '#8B857B',
-  /** 7.95:1 against the ground — requires 3.0:1. */
+  /** 7.95:1 on the ground, 6.48:1 on surface-raised — requires 3.0:1. */
   'focus': '#5FB8AC',
-  /** 4.53:1 against the ground — requires 4.5:1. */
-  'danger': '#D55144',
-  /** 4.63:1 against the ground — requires 4.5:1. */
-  'success': '#5F8958',
+  /** 5.7:1 on the ground, 4.64:1 on surface-raised — requires 4.5:1. */
+  'danger': '#DC6D61',
+  /** 5.59:1 on the ground, 4.55:1 on surface-raised — requires 4.5:1. */
+  'success': '#6A9862',
 } as const
 
 /** Measured contrast against each theme's ground, for the tests and the docs gate. */
@@ -120,16 +120,16 @@ export const PALETTE_RATIOS = {
     'surface-clay': 1.35,
     'ink': 14.89,
     'ink-2': 5.36,
-    'ink-3': 3.4,
-    'accent-gold': 4.62,
-    'accent-gold-strong': 7.26,
+    'ink-3': 3.9,
+    'accent-gold': 5.29,
+    'accent-gold-strong': 8.34,
     'accent-green': 5.4,
     'accent-teal': 5.73,
     'decor-gold': 2.9,
     'decor-tan': 2.04,
     'hairline': 1.35,
     'border': 2.04,
-    'border-strong': 3.04,
+    'border-strong': 3.5,
     'focus': 5.73,
     'danger': 5.22,
     'success': 5.4,
@@ -143,18 +143,144 @@ export const PALETTE_RATIOS = {
     'surface-clay': 1.31,
     'ink': 15.75,
     'ink-2': 8.5,
-    'ink-3': 3.74,
+    'ink-3': 4.58,
     'accent-gold': 6.19,
-    'accent-gold-strong': 7.03,
-    'accent-green': 4.63,
-    'accent-teal': 4.64,
+    'accent-gold-strong': 8.75,
+    'accent-green': 5.59,
+    'accent-teal': 5.78,
     'decor-gold': 6.19,
     'decor-tan': 8.82,
     'hairline': 1.24,
     'border': 1.54,
     'border-strong': 5.11,
     'focus': 7.95,
-    'danger': 4.53,
-    'success': 4.63,
+    'danger': 5.7,
+    'success': 5.59,
   },
 } as const
+
+/**
+ * Measured contrast against the WORST surface text is allowed on — the number each token is held
+ * to.
+ *
+ * `PALETTE_RATIOS` above is the ratio against the page background, which is the one docs/08 has
+ * always printed and the one that reads highest. It is not the one that has to hold: a token is
+ * legible on a card or it is not, and dark-mode `danger` once measured 4.53:1 on the ground and
+ * 3.69:1 on `--color-surface-raised` while the palette gate reported PASS. `surface-clay` is
+ * excluded, because docs/08 section 3 gives it as 'large shapes, never text'.
+ */
+export const PALETTE_WORST_SURFACE_RATIOS = {
+  light: {
+    'ground': 1.0,
+    'surface': 1.0,
+    'surface-raised': 1.0,
+    'ground-sunk': 1.0,
+    'surface-sand': 1.0,
+    'surface-clay': 1.17,
+    'ink': 12.89,
+    'ink-2': 4.64,
+    'ink-3': 3.38,
+    'accent-gold': 4.58,
+    'accent-gold-strong': 7.22,
+    'accent-green': 4.68,
+    'accent-teal': 4.96,
+    'decor-gold': 2.51,
+    'decor-tan': 1.76,
+    'hairline': 1.17,
+    'border': 1.76,
+    'border-strong': 3.03,
+    'focus': 4.96,
+    'danger': 4.52,
+    'success': 4.68,
+  },
+  dark: {
+    'ground': 1.0,
+    'ground-sunk': 1.0,
+    'surface': 1.0,
+    'surface-raised': 1.0,
+    'surface-sand': 1.0,
+    'surface-clay': 1.07,
+    'ink': 12.83,
+    'ink-2': 6.93,
+    'ink-3': 3.73,
+    'accent-gold': 5.04,
+    'accent-gold-strong': 7.13,
+    'accent-green': 4.55,
+    'accent-teal': 4.71,
+    'decor-gold': 5.04,
+    'decor-tan': 7.18,
+    'hairline': 1.01,
+    'border': 1.25,
+    'border-strong': 4.16,
+    'focus': 6.48,
+    'danger': 4.64,
+    'success': 4.55,
+  },
+} as const
+
+/**
+ * The ratio each token must meet, or `null` for a surface or decoration that states none.
+ *
+ * Emitted rather than restated in TypeScript so a test can recompute every pairing from the hexes
+ * with its own implementation of the WCAG formula and check the answer against the threshold the
+ * derivation actually used. Two implementations agreeing is worth more than one asserting.
+ */
+export const PALETTE_MINIMUMS = {
+  light: {
+    'ground': null,
+    'surface': null,
+    'surface-raised': null,
+    'ground-sunk': null,
+    'surface-sand': null,
+    'surface-clay': null,
+    'ink': 4.5,
+    'ink-2': 4.5,
+    'ink-3': 3.0,
+    'accent-gold': 4.5,
+    'accent-gold-strong': 7.0,
+    'accent-green': 4.5,
+    'accent-teal': 4.5,
+    'decor-gold': null,
+    'decor-tan': null,
+    'hairline': null,
+    'border': null,
+    'border-strong': 3.0,
+    'focus': 3.0,
+    'danger': 4.5,
+    'success': 4.5,
+  },
+  dark: {
+    'ground': null,
+    'ground-sunk': null,
+    'surface': null,
+    'surface-raised': null,
+    'surface-sand': null,
+    'surface-clay': null,
+    'ink': 4.5,
+    'ink-2': 4.5,
+    'ink-3': 3.0,
+    'accent-gold': 4.5,
+    'accent-gold-strong': 7.0,
+    'accent-green': 4.5,
+    'accent-teal': 4.5,
+    'decor-gold': null,
+    'decor-tan': null,
+    'hairline': null,
+    'border': null,
+    'border-strong': 3.0,
+    'focus': 3.0,
+    'danger': 4.5,
+    'success': 4.5,
+  },
+} as const
+
+/**
+ * The surface tokens text is allowed to sit on, and the ones it is not.
+ *
+ * `surface-clay` is excluded by docs/08 section 3 — "large shapes, **never text**". The exclusion
+ * is load-bearing: several tokens would miss their threshold on clay, and darkening them to serve a
+ * pairing the design system forbids would flatten the palette for nothing.
+ */
+export const TEXT_SURFACE_TOKENS = ['ground', 'surface', 'surface-raised', 'ground-sunk', 'surface-sand'] as const
+
+export const NON_TEXT_SURFACE_TOKENS = ['surface-clay'] as const
