@@ -7,7 +7,7 @@
  * a gate ends up passing because of an unrelated rule while the one under test has quietly stopped
  * matching anything — the ADR 0003 failure mode.
  *
- * **1. No un-tokened colour.** A raw `#946A32`, `rgb(...)` or `oklch(...)` anywhere outside the token
+ * **1. No un-tokened colour.** A raw `#89612E`, `rgb(...)` or `oklch(...)` anywhere outside the token
  * layer is a colour nobody derived and nobody measured. The palette's whole value is that every
  * shade meets a stated contrast ratio; one hand-typed hex in a component and that guarantee is a
  * claim rather than a fact.
@@ -49,6 +49,11 @@ const EXEMPT = [
   'packages/ui/src/tokens/palette.generated.ts',
   'packages/ui/src/tokens/tokens.css',
   'packages/ui/src/tokens/palette.test.ts',
+  // The contrast test needs pure white and pure black as literals, and neither is a palette token — they
+  // are the two fixed points of the WCAG formula (1:1 and 21:1), which is exactly what that assertion
+  // pins. Tokenising them to satisfy this rule would put two colours in the palette that no design ever
+  // uses, so the exemption is the honest answer.
+  'packages/ui/src/tokens/contrast.test.ts',
   // The one shadow token. A shadow carries no contrast requirement, so there is nothing for
   // palette.py to derive or measure; see the file's own note on why the exception is scoped to it.
   'packages/ui/src/tokens/shadow.ts',

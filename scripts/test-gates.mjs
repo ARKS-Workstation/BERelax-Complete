@@ -99,10 +99,34 @@ const withFixture = (path, contents, body) => {
  *
  * `edit` receives the original text and returns the broken version. The original **bytes** are written
  * back — not a re-serialisation — so a restore cannot quietly reformat a file the next gate then reads.
+ *
+ * ## Why it refuses an edit that changes nothing
+ *
+ * Almost every case in this file breaks a fixture with `text.replace('<some exact source line>', …)`, and
+ * that search string is a copy of somebody else's code. When the real line changes — a rename, a
+ * reformat, a re-derived constant — the search stops matching, the replace silently returns the original,
+ * and the gate runs against an **unedited** file. What happens next depends on which helper is used, and
+ * both outcomes are bad: `runExpectingFailure` sees success and reports FAIL on a rule that is fine, or
+ * `run` sees success and the case reports PASS having tested nothing.
+ *
+ * It has happened. Case 9 searched for `'accent-gold': '#946A32'`; ADR 0012 decision 5 re-derived the
+ * palette and accent-gold became `#89612E`. The fixture became a no-op in a commit that had nothing to do
+ * with it.
+ *
+ * So a no-op edit is a defect in the case, not a state to run in — and it is raised here rather than in
+ * 900 places, which is the only way the guard could be complete.
  */
 const withEditedFile = (path, edit, body) => {
   const original = readFileSync(path)
-  writeFileSync(path, edit(original.toString()))
+  const edited = edit(original.toString())
+  if (edited === original.toString()) {
+    throw new Error(
+      `withEditedFile was asked to break ${path} and the edit changed nothing, so whatever runs next ` +
+        'proves nothing about it. The search string has almost certainly gone stale against the real ' +
+        'source — fix the pattern, not the expectation.',
+    )
+  }
+  writeFileSync(path, edited)
   try {
     return body()
   } finally {
@@ -232,12 +256,28 @@ const checkRejectedBy = (name, result, rule) => {
 }
 
 // 9. A hand-edited palette token must fail the palette gate.
+//
+//    Matched on the token NAME, not on its old value. This case spent one commit passing nothing at all:
+//    it searched for `'accent-gold': '#946A32'`, and when ADR 0012 decision 5 re-derived the palette
+//    against the worst text surface, accent-gold became `#89612E`. The search found nothing, the replace
+//    was a no-op, `palette.py` was handed an unedited file and reported success, and the case failed —
+//    loudly, which is the one good thing about it. A known-bad fixture pinned to a value the build is
+//    allowed to change is a fixture with an expiry date on it.
 {
   const f = 'packages/ui/src/tokens/palette.generated.ts'
   const original = readFileSync(f, 'utf8')
-  // The failure this guards is a designer nudging a hex by eye. The value still looks like gold; it
-  // no longer meets 4.62:1, and nothing else in the system would notice.
-  writeFileSync(f, original.replace("'accent-gold': '#946A32'", "'accent-gold': '#C08A43'"))
+  // The failure this guards is a designer nudging a hex by eye. The value still looks like gold; it no
+  // longer meets its stated ratio, and nothing else in the system would notice.
+  const edited = original.replace(/'accent-gold': '#[0-9A-Fa-f]{6}'/, "'accent-gold': '#C08A43'")
+  // And the guard that stops this case rotting again: if the edit changed nothing, the run below proves
+  // nothing, and a green tick on an unedited file is worse than a red one (ADR 0003).
+  if (edited === original) {
+    throw new Error(
+      `${f} no longer contains an 'accent-gold' hex for case 9 to break, so the case would pass without ` +
+        'testing anything. Fix the pattern rather than the expectation.',
+    )
+  }
+  writeFileSync(f, edited)
   const { failed } = runExpectingFailure('python3', ['scripts/palette.py'])
   writeFileSync(f, original)
   check('palette gate rejects a hand-edited token', failed)
@@ -15804,6 +15844,28 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'docs/08 stating a worst-surface ratio the script does not measure is rejected',
       result,
       'worst-surface',
+    )
+  }
+  // 62j. And the guard on the harness itself. `withEditedFile` now refuses an edit that changes nothing,
+  //      because case 9 spent a commit searching for a hex the palette no longer had: the replace was a
+  //      no-op, the gate ran on an unedited file, and depending on the helper that is either a false FAIL
+  //      or — worse — a PASS that tested nothing. The guard is the reason every other case in this file can
+  //      be trusted not to have rotted the same way, so it needs its own known-bad fixture (ADR 0003).
+  {
+    let threw = ''
+    try {
+      withEditedFile(
+        PALETTE,
+        (text) => text,
+        () => undefined,
+      )
+    } catch (err) {
+      threw = err instanceof Error ? err.message : String(err)
+    }
+    check(
+      'withEditedFile refuses a fixture edit that changes nothing',
+      threw.includes('changed nothing'),
+      threw === '' ? 'it accepted an identity edit and ran the body anyway' : threw,
     )
   }
 }
