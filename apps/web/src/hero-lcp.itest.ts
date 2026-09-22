@@ -332,9 +332,19 @@ const OBSERVERS = `
     }
     w.__firstPaint = { animations, faded }
   }
+  // Synchronously in the callback, NOT after a requestAnimationFrame.
+  //
+  // FCP has by definition already happened when the entry is delivered, and getComputedStyle reads current
+  // style at any time, so the rAF bought nothing — while costing the one thing this sample is about. That
+  // deferred frame is exactly the frame the hero island uses to set data-hero-state="attaching", under
+  // which the video is deliberately transparent (see packages/ui/src/media/styles.ts on why fading it out
+  // would break the cross-fade). So on a loaded machine the island won the race and the sample reported
+  // "video.be-hero__video @ 0" as an element invisible at first paint. It was not: it was invisible one
+  // frame later, which is a different claim and the one this file spent a comment insisting it was not
+  // making — "'at first paint' is one frame long".
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
-      if (entry.name === 'first-contentful-paint') requestAnimationFrame(snapshot)
+      if (entry.name === 'first-contentful-paint') snapshot()
     }
   }).observe({ type: 'paint', buffered: true })
 

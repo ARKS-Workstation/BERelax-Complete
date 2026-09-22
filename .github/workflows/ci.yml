@@ -240,6 +240,11 @@ jobs:
       - name: Byte budgets
         run: pnpm budgets
 
+      # Before the gate suite, not after: if a gate is missing from this workflow, saying so is cheaper than
+      # discovering it 40 minutes later, and the check itself is a single file read.
+      - name: Every verify gate is registered
+        run: pnpm gate-registry
+
       - name: Gates fire
         run: pnpm gates:test
 

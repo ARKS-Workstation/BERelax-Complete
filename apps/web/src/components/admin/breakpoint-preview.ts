@@ -335,19 +335,58 @@ const PREVIEW_SCRIPT = `
     the page's scrollbar, which changes every box's \`clientWidth\`, which changes the scale that was just
     written — a feedback loop whose visible symptom is a frame scaled to the wrong width. The
     \`scrollbar-gutter: stable\` above removes the loop in a browser that honours it; this makes the page
-    correct in one that does not, and it is bounded because each pass either writes nothing or converges.
+    correct in one that does not.
 
-    The second is that \`data-preview-settled\` gives a caller an OBSERVABLE FACT to wait for. The
+    It is NOT true, as this comment claimed until it cost three agents a verify run each, that "each pass
+    either writes nothing or converges". A pass can write and not converge: the loop capped at four passes
+    and then set the flag anyway, so a page mid-oscillation announced itself settled. Two fixed points,
+    alternating per load — \`settle\` also runs again on \`load\`, so which one you got depended on parity —
+    and a full-page screenshot that differed by a strip. It presented as
+    \`[screenshot-never-stabilised] light-390\`, the narrowest cell with the most frames to fit and so the
+    likeliest to toggle. A cycle is now DETECTED, by recognising a height set we have already written, and
+    reported on \`data-preview-unsettled\` rather than hidden behind a claim of success.
+
+    The second is that \`data-preview-settled\` gives a caller an observable fact to wait for — and it is a
+    fact only because it is now absent when the fit did not converge. The
     integration test's byte-identical assertion previously waited two animation frames, which is a guess
     about how long layout takes: it held when the file ran alone and failed under the load of a full
     \`pnpm verify\`, photographing a layout mid-settle on one pass and settled on the next. A flag that is
     absent until no layout write is pending cannot be raced.
   */
+  // Every box's written height, as one string, so a repeat can be recognised.
+  function heights() {
+    var boxes = document.querySelectorAll('.viewportbox');
+    var out = [];
+    for (var i = 0; i < boxes.length; i += 1) out.push(boxes[i].style.height || 'auto');
+    return out.join(',');
+  }
+
   function settle() {
     root.removeAttribute('data-preview-settled');
-    var passes = 0;
-    while (fit() && passes < 4) passes += 1;
-    root.setAttribute('data-preview-settled', '1');
+    root.removeAttribute('data-preview-unsettled');
+    var seen = [];
+    // 12 rather than 4. The cap is now only a backstop: what distinguishes a page that needs a few passes
+    // from one that never converges is a REPEATED state, not a pass count, and the old cap was low enough
+    // that the two looked identical.
+    while (seen.length < 12) {
+      if (!fit()) {
+        root.setAttribute('data-preview-settled', '1');
+        root.setAttribute('data-preview-passes', String(seen.length));
+        return;
+      }
+      var state = heights();
+      if (seen.indexOf(state) !== -1) {
+        // A state we have already written means a cycle, and a cycle never ends. Say so instead of
+        // claiming to have settled: the whole value of the flag is that a caller can trust it.
+        root.setAttribute(
+          'data-preview-unsettled',
+          'oscillating after ' + seen.length + ' passes: ' + seen.concat([state]).join(' -> '),
+        );
+        return;
+      }
+      seen.push(state);
+    }
+    root.setAttribute('data-preview-unsettled', 'no convergence in 12 passes: ' + seen.join(' -> '));
   }
 
   slider.addEventListener('input', paint);

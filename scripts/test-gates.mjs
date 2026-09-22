@@ -15870,6 +15870,121 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 70. The gate registry itself: every `pnpm verify` step is named in case 29's list.
+//
+//     Case 29 asserts every entry in that hand-maintained list appears in the CI workflow, and the
+//     H-HARD-02 block asserts every `run:` step in the workflow is named in the list. Neither consults
+//     `package.json`. So a gate added to the verify chain and to CI but never registered sat OUTSIDE the
+//     protection while looking like it was inside it — and could then be dropped from CI later with nothing
+//     failing, which is the exact outcome case 29 exists to prevent.
+//
+//     There was no live gap when this was written: 36 verify steps, all registered. That is the point. The
+//     hole was that there could be one tomorrow and nothing would say so.
+//
+//     It is a script rather than another case in this file because its fixtures have to edit
+//     `package.json`, and a case here cannot recursively run the file it lives in. A gate whose fixture
+//     cannot be written is a gate nobody has seen fail (ADR 0003).
+{
+  const REGISTRY = ['scripts/check-gate-registry.mjs']
+
+  // 70a. A gate in the verify chain that nobody registered. This is the defect the script exists for.
+  {
+    const result = withEditedFile(
+      'package.json',
+      (text) =>
+        text.replace('"verify": "pnpm lint', '"verify": "pnpm unregistered-gate && pnpm lint'),
+      () => runExpectingFailure('node', REGISTRY),
+    )
+    checkRejectedBy(
+      'a verify step registered nowhere is rejected',
+      result,
+      'is in pnpm verify and is not registered',
+    )
+  }
+
+  // 70b. The other direction: an entry left in the list after its gate was taken out of verify. Dead
+  //      registration is not harmless — it is a line that looks like protection and protects nothing.
+  {
+    const result = withEditedFile(
+      'scripts/test-gates.mjs',
+      (text) =>
+        text.replace("    'pnpm budgets',\n", "    'pnpm budgets',\n    'pnpm long-gone',\n"),
+      () => runExpectingFailure('node', REGISTRY),
+    )
+    checkRejectedBy(
+      'a registered step that is no longer in verify is rejected',
+      result,
+      'is neither a pnpm verify step nor a declared CI-only step',
+    )
+  }
+
+  // 70c. The control that matters most, because every assertion in the script is a difference of two lists
+  //      and a difference against an empty list is empty. A parser that silently read nothing would report
+  //      success — which the first version of this script did, in both directions at once: it cut the array
+  //      off at the first `]` inside a comment and matched the apostrophe in "H-HARD-02's" as an entry.
+  {
+    const result = withEditedFile(
+      'scripts/test-gates.mjs',
+      // Anchored on the array's first ENTRY as well as its declaration. `const required = [` also appears
+      // at case 52's local extractor, and a bare replace took that one instead — so the fixture edited a
+      // file, satisfied the unchanged-edit guard, and left case 29's array perfectly intact. The script
+      // then passed and the case reported a gate that had tested nothing. Exactly the rot this whole
+      // exercise is about, committed while writing the check for it.
+      (text) =>
+        text.replace(
+          "  const required = [\n    'pnpm lint',",
+          "  const required_renamed = [\n    'pnpm lint',",
+        ),
+      () => runExpectingFailure('node', REGISTRY),
+    )
+    checkRejectedBy(
+      'a registry the script cannot parse is rejected rather than passed',
+      result,
+      'has no "const required = [...]" array',
+    )
+  }
+
+  // 70d. And the same control on the other input.
+  {
+    const result = withEditedFile(
+      'package.json',
+      (text) => text.replace('"verify":', '"verify_renamed":'),
+      () => runExpectingFailure('node', REGISTRY),
+    )
+    checkRejectedBy(
+      'a package.json with no verify chain is rejected rather than passed',
+      result,
+      'has no "verify" script',
+    )
+  }
+
+  // 70e. A CI-only step must be declared as one WITH a reason, not merely absent from verify — because
+  //      "not in verify" is exactly the condition an unregistered gate also satisfies, so an allowance that
+  //      inferred it would let the defect through as an exception.
+  {
+    const result = withEditedFile(
+      'scripts/check-gate-registry.mjs',
+      (text) => text.replace("  ['pnpm audit:online',", "  ['pnpm audit-online-renamed',"),
+      () => runExpectingFailure('node', REGISTRY),
+    )
+    checkRejectedBy(
+      'a CI-only step missing from the declared allowance is rejected',
+      result,
+      'pnpm audit:online',
+    )
+  }
+
+  // 70f. The control on all five above: unedited, the registry holds.
+  {
+    const clean = run('node', REGISTRY)
+    check(
+      'the gate registry holds on the committed tree',
+      !clean.failed && String(clean.output).includes('Gate registry holds'),
+      String(clean.output),
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -15924,6 +16039,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm db:drift',
     'pnpm db:conventions',
     'pnpm budgets',
+    // The registry check registers itself. Not a cute trick: it is the one entry whose absence this array
+    // could not otherwise reveal, since the check exists precisely to notice a verify step nobody listed
+    // here, and a check that skipped itself would be the first thing to go missing unnoticed.
+    'pnpm gate-registry',
     'pnpm gates:test',
     'postgres:16',
   ]

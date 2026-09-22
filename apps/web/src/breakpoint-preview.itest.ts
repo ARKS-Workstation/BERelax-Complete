@@ -432,13 +432,30 @@ async function open(
    * the page states rather than for a duration. `readyState` is part of it because `settle` runs again on
    * `load`: without it this could observe the flag from the pass before the images decoded.
    */
+  /*
+   * Wait for the page to reach a verdict, then insist it was the good one.
+   *
+   * Either attribute, not just the good one: `settle` sets `data-preview-unsettled` when its fit oscillates
+   * rather than claiming to have settled, and waiting only for the flag would turn that into a bare 30s
+   * Playwright timeout with nothing to read. This way the failure carries the cycle the page detected.
+   */
   await page.waitForFunction(
     () =>
       document.readyState === 'complete' &&
-      document.documentElement.dataset['previewSettled'] === '1',
+      (document.documentElement.dataset['previewSettled'] === '1' ||
+        document.documentElement.dataset['previewUnsettled'] !== undefined),
     undefined,
     { timeout: 30_000 },
   )
+  const unsettled = await page.evaluate(
+    () => document.documentElement.dataset['previewUnsettled'] ?? null,
+  )
+  if (unsettled !== null) {
+    throw new Error(
+      `[preview-never-settled] ${path}: the page's own fit loop did not converge, so no capture of it ` +
+        `means anything. The page says: ${unsettled}`,
+    )
+  }
   /*
    * And finally: which images did NOT load.
    *
