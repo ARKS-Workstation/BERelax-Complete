@@ -119,6 +119,43 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // packages/core/src/checkout is the till's arithmetic: what a customer is charged, what is
+  // discounted and what tax is due on the difference. M-TILL-05's acceptance asks dependency-cruiser to
+  // prove it reaches no database, no I/O and no framework, and the reason is the same one the ledger
+  // has: the basket's figures end up on a tax invoice that cannot be edited afterwards, so every one of
+  // them must be reproducible from the arguments the basket was given. A basket that read
+  // `service_variant` would re-price a treatment already delivered, which is precisely what the
+  // snapshot exists to prevent — and the import would be the shortest way to do it. Each forbidden
+  // shape is a separate case, because the pure rule's `to.path` is one alternation and a typo in one
+  // branch is invisible while the others still fire.
+  {
+    rule: 'core-must-not-import-db',
+    file: 'packages/core/src/checkout/__boundary_fixture__.ts',
+    source: [
+      "import { issueInvoice } from '@berelax/db'",
+      'export const illegal = issueInvoice',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/checkout/__boundary_fixture__.ts',
+    // The installed driver, not a bare uninstalled name: resolving into node_modules is the branch the
+    // ledger fixture caught as dead. A till that read the price list itself would answer a disputed
+    // figure with today's menu.
+    source: ["import postgres from 'postgres'", 'export const illegal = postgres', ''].join('\n'),
+  },
+  {
+    rule: 'core-must-be-pure',
+    file: 'packages/core/src/checkout/__boundary_fixture__.ts',
+    // The framework half of the criterion. A basket that could reach `next/server` could read a request
+    // — and then the same basket would total differently depending on who asked.
+    source: [
+      "import { NextResponse } from 'next/server'",
+      'export const illegal = NextResponse',
+      '',
+    ].join('\n'),
+  },
   {
     rule: 'messaging-providers-only-inside-a-transport',
     // A feature reaching SMSala directly bypasses the sender-ID class rule, the promotional gate and
@@ -205,7 +242,7 @@ for (const { rule, file, source } of CASES) {
   // The directory is part of the case identity: four cases share `core-must-be-pure`, and without the
   // scope in the line the output cannot say which of them ran.
   const scope =
-    /packages\/core\/src\/(ledger|pricing|availability)\//.exec(file)?.[1] ??
+    /packages\/core\/src\/(ledger|pricing|availability|checkout)\//.exec(file)?.[1] ??
     /packages\/db\/src\/(repositories)\//.exec(file)?.[1]
   console.log(
     `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${scope === undefined ? '' : `${scope}: `}` +

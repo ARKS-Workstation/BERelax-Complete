@@ -64,10 +64,16 @@ export const THERAPIST_CARD_CSS = `
    ratios from 0.461 to 0.799, and a centre crop takes the torso and leaves the face out of frame.
    object-position comes from assets/media/manifest.json, per image.
 
-   The ratio is read from the therapist-portrait slot rather than written here. The media gate refuses a
-   literal one (aspect-ratio-must-come-from-the-slot-registry): the box this card reserves and the crop
-   the derivative job takes have to be the same number, and a card reserving the wrong box reflows when
-   the photograph lands. */
+   The ratio is read from the therapist-portrait slot rather than written here, because the media gate
+   refuses a literal one (aspect-ratio-must-come-from-the-slot-registry) and because a card reserving the
+   wrong box reflows when the photograph lands.
+
+   The slot's ratio is the right box HERE and only because of what this element is: one <img> whose src the
+   caller chooses, at every viewport. The derivative job takes BOTH ladder crops for every slot, so the
+   art-directed <picture> is served 4:5 on a phone and 16:9 on a laptop and reserves its box per crop
+   instead (apps/web/src/components/media/slot-picture.tsx). What must match this box is the src: hand this
+   card the desktop 16:9 derivative and object-fit: cover centre-crops it against an object-position
+   computed for the 4:5 crop, which takes the face back out of frame. */
 .be-card__portrait {
   display: block;
   inline-size: 100%;
@@ -121,6 +127,12 @@ export interface TherapistCardProps {
   readonly unnamedLabel: string
   readonly href: string
   readonly portrait: {
+    /**
+     * One image, served at every viewport, in the 4:5 box above.
+     *
+     * An original or the slot's **mobile** (4:5) derivative — not the desktop 16:9 one, which this box
+     * would centre-crop against a focal point computed for the other shape. A slot's ladder has both.
+     */
     readonly src: string
     /** From the asset's focal point, so the crop keeps the face in frame. */
     readonly objectPosition: string

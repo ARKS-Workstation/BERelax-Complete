@@ -1,6 +1,7 @@
 import { isAppError } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
-import { CROPS, FORMATS, heightFor, nearestRung } from './ladders.ts'
+import { CROP_NAMES, CROPS, FORMATS, heightFor, nearestRung, renditionSpecs } from './ladders.ts'
+import { CROPPED_SLOT_NAMES, slotAspectRatio, slotRatio } from './slots/registry.ts'
 import {
   cropForViewportWidth,
   DEFAULT_SIZES,
@@ -236,5 +237,71 @@ describe('slotOf', () => {
   it('answers the declared slot and refuses anything else', () => {
     expect(slotOf(REF)).toBe('hero')
     expect(() => slotOf({ ...REF, slot: 'carousel' })).toThrow(/\[unknown-slot]/)
+  })
+})
+
+/**
+ * The slot's ratio and the served ratio are different numbers, and this is where that is pinned.
+ *
+ * It looks like a tautology from `pictureSourcesFor`'s own tests above and it is not, because the sentence
+ * it fixes is one nobody can read off a single file: `SLOT_REGISTRY` declares `therapist-portrait` as
+ * `[4, 5]` and the ladders are global, so that slot is also built and offered at 16:9 and is served 16:9 on
+ * every laptop. Two components already depend on knowing which of those two numbers they want —
+ * `TherapistCard` renders one image and reserves the declared 4:5, `SlotPicture` renders the two-crop
+ * `<picture>` and reserves per crop — and before this block nothing failed if the two questions were
+ * confused. `[art-directed-picture-must-reserve-a-box-per-crop]` in `scripts/check-media.mjs` is the gate
+ * that catches the confusion in a component; this is the property that gate is protecting.
+ */
+describe('a slot declares the shape of its source, not the shape it is served at', () => {
+  const PORTRAIT = { ...REF, slot: 'therapist-portrait' } as const
+
+  it('offers both ladder crops for a 4:5 slot, so a laptop is served 16:9', () => {
+    expect(new Set(pictureSourcesFor(PORTRAIT).map((source) => source.crop))).toEqual(
+      new Set(CROP_NAMES),
+    )
+    // What the registry declares, which is the shape the upload rule measures and the box a single image
+    // of that source reserves.
+    expect(slotAspectRatio('therapist-portrait')).toBe('4 / 5')
+    expect(slotRatio('therapist-portrait')).toBeCloseTo(4 / 5, 10)
+    // What a 1024px laptop selects out of that same `<picture>`.
+    const served = selectedRungFor(1024)
+    expect(served.crop).toBe('desktop')
+    expect(served.width / served.height).toBeCloseTo(16 / 9, 5)
+    // The control, and the whole point: those are not the same number, so one `aspect-ratio` from the
+    // registry is the right box below 768px and the wrong one above it.
+    expect(served.width / served.height).not.toBeCloseTo(slotRatio('therapist-portrait') ?? 0, 1)
+  })
+
+  it('builds the same twenty-four renditions whatever slot the source is in', () => {
+    // `renditionSpecs()` takes no slot argument at all, `buildDerivatives` refuses a result that is not
+    // every one of them, and `resolveDerivativeSet` reports either crop's absence as a missing rung. So
+    // there is nothing upstream that could restrict a slot to the crop matching its declared ratio, and a
+    // component cannot assume one.
+    const specs = renditionSpecs()
+    expect(specs).toHaveLength(CROP_NAMES.length * 4 * FORMATS.length)
+    for (const spec of specs) {
+      // The height of a rung comes from the crop it belongs to and never from the slot it is built for.
+      expect(spec.height, `${spec.crop}@${spec.width}`).toBe(heightFor(spec.crop, spec.width))
+    }
+    for (const slot of CROPPED_SLOT_NAMES) {
+      const crops = new Set(pictureSourcesFor({ ...REF, slot }).map((source) => source.crop))
+      expect(crops, slot).toEqual(new Set(CROP_NAMES))
+    }
+  })
+
+  it('leaves every cropped slot agreeing with exactly one of the two served shapes', () => {
+    // Not "the portrait is the odd one out": every cropped slot declares one of the two ladder ratios, so
+    // for every one of them a single box from the registry is right on one side of 768px and wrong on the
+    // other. The hero is 16:9 and is served 4:5 on a phone, which is the same defect the other way up.
+    const served = CROP_NAMES.map((crop) => CROPS[crop].ratio.join(' / '))
+    expect(new Set(served).size).toBe(2)
+    for (const slot of CROPPED_SLOT_NAMES) {
+      const declared = slotAspectRatio(slot)
+      expect(served, slot).toContain(declared)
+      expect(
+        served.filter((ratio) => ratio !== declared),
+        slot,
+      ).toHaveLength(1)
+    }
   })
 })

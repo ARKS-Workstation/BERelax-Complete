@@ -29,8 +29,14 @@
  *
  * `[aspect-ratio-must-come-from-the-slot-registry]` is the third source rule, and the reason the registry
  * can be called single: a component that writes `aspect-ratio: 4 / 5` has made a second copy of a number
- * the crop also depends on, and the symptom is a card reserving the wrong box and reflowing when the
+ * the upload rule also depends on, and the symptom is a card reserving the wrong box and reflowing when the
  * photograph lands. See the rule's own note below.
+ *
+ * `[art-directed-picture-must-reserve-a-box-per-crop]` is its sibling, and it exists because reading the
+ * registry is necessary and not sufficient. The registry gives a slot ONE ratio — the shape of the source —
+ * while the ladders serve every cropped slot at TWO, 4:5 below 768px and 16:9 above it. So a component that
+ * builds the art-directed `<picture>` and reserves a single `slotAspectRatio()` box has the same CLS defect
+ * as a literal, arriving on phones only: the box says 16:9 and the phone is handed the 4:5 crop.
  *
  * Two further rules, added by W-SYS-05, are about how the library is *referenced* rather than what is in
  * it. Both are reported with their rule name first, so `scripts/test-gates.mjs` can assert a known-bad
@@ -55,6 +61,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { CROP_NAMES, CROPS } from '../packages/media/src/ladders.ts'
 import { validateUpload } from '../packages/media/src/slots/validate.ts'
 import { manifestSlotSpecs } from './lib/media-slot-specs.mjs'
 import { stripNonCode } from './lib/strip-non-code.mjs'
@@ -302,6 +309,41 @@ const ASPECT_RATIO_FORMS = [
   /\baspect-(square|video|\[[^\]]*\])/g,
 ]
 
+/**
+ * `[art-directed-picture-must-reserve-a-box-per-crop]`.
+ *
+ * The registry answers "what shape is this slot's source?" — one number, which is what an upload is
+ * measured against and what a component reserves when it renders that source as one image. It does not
+ * answer "what shape is this slot served at?", and for an art-directed element those are different
+ * questions: `renditionSpecs()` takes no slot, so every cropped slot is built and offered at BOTH ladder
+ * crops, and `<picture>` hands the phone the 4:5 one under `(max-width: 767px)` and the laptop the 16:9 one.
+ *
+ * A component doing that with a single `aspect-ratio: ${slotAspectRatio(slot)}` reserves one of the two
+ * shapes for both, and the other one reflows on arrival — the CLS regression the literal-ratio rule is
+ * about, reintroduced by a component that obeyed it. It is invisible in review because every number in the
+ * file came from the registry, and invisible on a laptop because the desktop crop is the one that fits.
+ *
+ * The forms below are what actually building the two-crop `<picture>` looks like: the shared builder, or
+ * `<source>` elements carrying their own `media`. Comments are blanked before this runs, which is what
+ * keeps `slot-picture.tsx` — whose doc explains at length why it does NOT call `slotAspectRatio` — from
+ * being reported for the sentence that says so.
+ */
+const ART_DIRECTED_FORMS = [/\b(pictureSourcesFor|srcsetFor)\s*\(/, /<source\b[^>]*\bmedia\b/]
+
+/** The single-ratio box, in the one spelling the rule above permits. */
+const SLOT_ASPECT_RATIO_CALL = /slotAspectRatio\s*\(/
+
+/**
+ * The shapes a cropped slot is served at, read out of the ladders for the refusal message.
+ *
+ * Read rather than written, for the reason the rule itself is about: a message that spelled `4:5 below
+ * 768px` would be one more copy of the numbers, and a re-cut ladder would leave the gate telling everybody
+ * the wrong thing with total confidence.
+ */
+const LADDER_SHAPES = CROP_NAMES.map(
+  (crop) => `${CROPS[crop].ratio.join(':')} under ${CROPS[crop].media}`,
+).join(', ')
+
 /** A ratio nobody derived: digits, and no way for them to have come from the registry. */
 function isLiteralRatio(value) {
   const text = value.trim()
@@ -354,6 +396,10 @@ for (const root of SOURCE_ROOTS) {
     })
     if (TEST_FILE.test(relative)) continue
 
+    // Asked of the whole file, because the two halves of this mistake are never on one line: the box is
+    // declared in the component's stylesheet and the crops are chosen in its markup.
+    const artDirected = ART_DIRECTED_FORMS.some((form) => form.test(text))
+
     for (const [index, line] of text.split('\n').entries()) {
       const at = `${relative}:${index + 1}`
       if (BLURHASH.test(line)) {
@@ -405,14 +451,28 @@ for (const root of SOURCE_ROOTS) {
             if (isLiteralRatio(match[1] ?? '')) {
               referenceProblems.push(
                 `${at}  [aspect-ratio-must-come-from-the-slot-registry] '${match[0].trim()}' — a slot's ` +
-                  'aspect ratio is declared once, in packages/media/src/slots/registry.ts. Interpolate ' +
-                  "slotAspectRatio('<slot>') instead: a second copy of the number reserves the wrong box " +
-                  'and reflows when the photograph lands, which is a CLS regression nobody traces back to ' +
-                  'a stylesheet',
+                  'aspect ratio is declared once, in packages/media/src/slots/registry.ts. For an element ' +
+                  "that renders one image of the source, interpolate slotAspectRatio('<slot>'); for the " +
+                  "art-directed <picture>, which is served the ladder's two shapes, reserve a box per crop " +
+                  'from CROPS the way apps/web/src/components/media/slot-picture.tsx does. A second copy of ' +
+                  'the number reserves the wrong box and reflows when the photograph lands, which is a CLS ' +
+                  'regression nobody traces back to a stylesheet',
               )
             }
             match = form.exec(line)
           }
+        }
+        if (artDirected && SLOT_ASPECT_RATIO_CALL.test(line)) {
+          referenceProblems.push(
+            `${at}  [art-directed-picture-must-reserve-a-box-per-crop] this file builds the ` +
+              'art-directed <picture> and reserves its box from slotAspectRatio(), which is one ratio. ' +
+              `Every cropped slot is served at ${CROP_NAMES.length} shapes — ${LADDER_SHAPES} — so one ` +
+              'box is right on one screen size and reflows on the other, with every number in the file ' +
+              'read from the registry and nothing wrong on the machine it was written on. Reserve per ' +
+              'crop from CROPS, as apps/web/src/components/media/slot-picture.tsx does; ' +
+              'slotAspectRatio() is the box for an element that renders one image of the source, such as ' +
+              'packages/ui/src/patterns/therapist-card.tsx',
+          )
         }
       }
     }

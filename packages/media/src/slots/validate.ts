@@ -116,11 +116,14 @@ export function ratioDeviation(width: number, height: number, target: number): n
 }
 
 /**
- * The crop window the derivative job will take, at the slot's declared ratio around the focal point.
+ * The crop window at the slot's **declared** ratio, around the focal point.
  *
- * The same `cropRectFor` the job uses, deliberately: a validator that computed the window its own way
- * would approve uploads the pipeline then crops differently, which is the class of bug where the check and
- * the thing checked have drifted and both look right.
+ * One of the two windows the job takes, not the only one: the ladders are global, so every cropped slot is
+ * also built at the other crop (see the note on `ratio` in `registry.ts`). This is the one whose shape the
+ * slot declares, which is the shape an upload is measured against and the shape a single-image component
+ * reserves — and the same `cropRectFor` the job calls, deliberately: a validator that computed the window
+ * its own way would approve uploads the pipeline then crops differently, which is the class of bug where
+ * the check and the thing checked have drifted and both look right.
  */
 export function declaredCropRect(measurement: UploadMeasurement, slot: MediaSlot): CropRect {
   const ratio = slot.ratio

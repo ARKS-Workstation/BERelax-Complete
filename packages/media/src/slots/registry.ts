@@ -3,20 +3,36 @@
  *
  * docs/08 §6 names five — hero, therapist portrait, service card, gallery, testimonial background —
  * "each declaring aspect ratio, minimum dimensions, maximum file size and **required alt text**". This
- * is that declaration, and it is the only one: the derivative ladders, the upload validator, the
- * alt-text filter, the placeholder, the `aspect-ratio` in every component's stylesheet and the slot
- * segment of every derivative URL all read it.
+ * is that declaration, and it is the only one: the upload validator, the alt-text filter, the
+ * placeholder, the manifest the library is measured against and the slot segment of every derivative URL
+ * all read it.
+ *
+ * ## What `ratio` is, and what it is not
+ *
+ * It is the **source's** declared shape. Three things read it and all three are about the original: the
+ * ratio an upload is measured against (`slot-ratio-out-of-tolerance` in `validate.ts`), the `minHeight`
+ * that is `minWidth` scaled by it, and — through `slotAspectRatio` — the box a component reserves when it
+ * renders that source as **one** image.
+ *
+ * It is **not** the shape the ladder serves, and the difference is not pedantry. `renditionSpecs()` in
+ * `../ladders.ts` takes no slot: every cropped slot is built at *both* declared crops, 4:5 below 768px and
+ * 16:9 above it, `buildDerivatives` refuses a result that is not all 24 of them, `resolveDerivativeSet`
+ * reports either crop's absence as a missing rung, and `pictureSourcesFor` offers both under the ladders'
+ * own media queries. So a `therapist-portrait` served through a `<picture>` is 16:9 on a laptop however
+ * plainly `[4, 5]` is written below — which is why the production component reserves its box **per crop**
+ * from `CROPS` (`apps/web/src/components/media/slot-picture.tsx`) and does not call `slotAspectRatio` at
+ * all. `packages/media/src/srcset.test.ts` pins that, with the slot's own ratio as the control.
  *
  * ## Why one list rather than five agreeing lists
  *
- * A slot's ratio appears in at least four places that are not next to each other: the crop the worker
- * takes, the `aspect-ratio` the card reserves, the placeholder the page paints before the photograph
- * lands, and the manifest the media library is measured against. Four copies of `4 / 5` is three copies
- * that can be wrong, and the symptom of any one of them being wrong is not an error — it is a card that
- * reserves the wrong box and reflows when the image arrives, which is a CLS regression nobody attributes
- * to a number in a stylesheet. `scripts/check-media.mjs` therefore refuses a literal aspect ratio in any
- * component (`[aspect-ratio-must-come-from-the-slot-registry]`), and that rule only has somewhere to
- * send you because this file exists.
+ * A slot's ratio appears in at least four places that are not next to each other: the shape an upload is
+ * measured against, the `aspect-ratio` a card reserves around one image, the placeholder the page paints
+ * before the photograph lands, and the manifest the media library is measured against. Four copies of
+ * `4 / 5` is three copies that can be wrong, and the symptom of any one of them being wrong is not an
+ * error — it is a card that reserves the wrong box and reflows when the image arrives, which is a CLS
+ * regression nobody attributes to a number in a stylesheet. `scripts/check-media.mjs` therefore refuses a
+ * literal aspect ratio in any component (`[aspect-ratio-must-come-from-the-slot-registry]`), and that rule
+ * only has somewhere to send you because this file exists.
  *
  * ## Pure data
  *
@@ -359,7 +375,24 @@ export function slotRatio(name: MediaSlotName): number | null {
  *
  * This function is why `[aspect-ratio-must-come-from-the-slot-registry]` can be a rule at all: a
  * component interpolates it instead of writing the number, so there is exactly one place the number
- * lives and changing it moves the crop, the card and the placeholder together.
+ * lives and changing it moves the upload rule, the card and the placeholder together.
+ *
+ * ## One image, one ratio — and the element this is wrong for
+ *
+ * This answers the slot's ratio: one number, the shape of the source. It is the right box for an element
+ * that renders **one** image of that source at every viewport — `TherapistCard`'s `<img>` and the
+ * specimen's two — and the wrong box for the art-directed `<picture>`, which is served the ladder's *two*
+ * shapes (see the note at the top of this file). A single `aspect-ratio` there reserves 16:9 on a phone and
+ * is then handed the 4:5 crop: the reflow the box exists to prevent, on phones only.
+ *
+ * So why refuse the wordmark and not this? Because the wordmark has no ratio to give, while an art-directed
+ * element's slot does — the caller is asking the wrong question of a real answer, and a string cannot see
+ * which element it is for. Refusing for everybody would take the box away from the three call sites that
+ * are right and leave the gate's rule pointing at a function that always throws. So the distinction is
+ * enforced where it *is* visible, in the file that holds both halves: `scripts/check-media.mjs` refuses one
+ * that reserves a box from here and also builds the two-crop `<picture>`
+ * (`[art-directed-picture-must-reserve-a-box-per-crop]`), with known-bad fixtures in case 69 of
+ * `scripts/test-gates.mjs`.
  */
 export function slotAspectRatio(name: MediaSlotName): string {
   const ratio = SLOT_REGISTRY[name].ratio

@@ -13591,6 +13591,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     '} catch (err) {\n' +
     '  console.log(err.message)\n' +
     '}\n' +
+    '// A page with TWO stable renderings: A B A B A, which no consecutive-match rule can ever satisfy.\n' +
+    'let flip = 0\n' +
+    'try {\n' +
+    '  await captureUntilStable(() => Promise.resolve(bytes((flip += 1) % 2)), {\n' +
+    "    label: 'two-fixed-points',\n" +
+    '    attempts: 5,\n' +
+    '  })\n' +
+    "  console.log('NO_THROW_ALTERNATING')\n" +
+    '} catch (err) {\n' +
+    '  console.log(err.message)\n' +
+    '}\n' +
     '// And a deterministic page settles on the second capture.\n' +
     'const stable = await captureUntilStable(() => Promise.resolve(bytes(7)), {\n' +
     "  label: 'deterministic',\n" +
@@ -13605,10 +13616,53 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       output.includes('[screenshot-never-stabilised]') && output.includes('clock-in-the-render'),
       `a changing capture did not exhaust the attempts:\n${output.split('\n').slice(0, 6).join('\n')}`,
     )
+    /*
+     * The branch, not a phrase.
+     *
+     * This asserted `output.includes('this is not load')` and broke the moment the message learned to
+     * distinguish its three failure modes — the capital in "This one is not load" was enough. A gate pinned
+     * to prose is a gate that fails on an improvement, so it now asserts what the message MEANS: that an
+     * all-different sequence is attributed to something reaching the render, and is not called alternation.
+     */
+    /*
+     * Each assertion reads ITS OWN label's line, not the whole output.
+     *
+     * The probe prints two failure messages, so a `!output.includes('ALTERNATE')` written against the
+     * combined output is false for the wrong reason — the other probe's message contains it. That is the
+     * same mistake as asserting a total where a delta was meant (brief rule 12), arriving through a string
+     * search instead of a row count.
+     */
+    const messageFor = (label) =>
+      output.split('\n').find((line) => line.includes(`[screenshot-never-stabilised] ${label}:`)) ??
+      ''
+
     check(
-      'captureUntilStable reports the failure as nondeterminism rather than load',
-      output.includes('this is not load'),
-      'the message would send the next reader to look at the machine instead of at the page',
+      'captureUntilStable attributes an all-different render to the render, not to load',
+      messageFor('clock-in-the-render').includes('every capture differed') &&
+        messageFor('clock-in-the-render').includes('not load') &&
+        !messageFor('clock-in-the-render').includes('ALTERNATE'),
+      `the message would send the next reader to the machine instead of the page:\n${output
+        .split('\n')
+        .slice(0, 8)
+        .join('\n')}`,
+    )
+    /*
+     * And the branch that cost three agents a verify run each.
+     *
+     * A B A B A can never satisfy a consecutive-match rule, so more attempts is not the answer and a clock
+     * is not the cause. Until this was separated out, the helper blamed a clock and explicitly ruled out
+     * load — while load was the condition that exposed it. `settle()` in the breakpoint preview was setting
+     * `data-preview-settled` on its give-up path; the page really did have two stable renderings.
+     */
+    check(
+      'captureUntilStable names two alternating renderings as two stable states',
+      messageFor('two-fixed-points').includes('ALTERNATE between exactly two renderings') &&
+        !messageFor('two-fixed-points').includes('every capture differed') &&
+        !output.includes('NO_THROW_ALTERNATING'),
+      `an alternating capture was not recognised as bistable:\n${output
+        .split('\n')
+        .slice(0, 8)
+        .join('\n')}`,
     )
     check(
       'captureUntilStable settles a deterministic render on the second capture',
@@ -15866,6 +15920,360 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'withEditedFile refuses a fixture edit that changes nothing',
       threw.includes('changed nothing'),
       threw === '' ? 'it accepted an identity edit and ran the body anyway' : threw,
+    )
+  }
+}
+
+// 67a-67i. (M-TILL-05) The checkout basket: the reason code the type system refuses, the scoped purity
+// rule, and the five shipped-file edits that must make the basket's own tests go red. Every case here
+// breaks something real — fixtures that must not compile or must not pass purity, and five edits to files
+// under packages/core/src/checkout that are restored in a `finally` — because a property test nobody has
+// watched fail is a property nobody has proved (ADR 0003). 67h is the control: the same suite, unedited,
+// must pass.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const CHECKOUT = 'packages/core/src/checkout'
+  const BASKET = `${CHECKOUT}/basket.ts`
+  const DISCOUNT = `${CHECKOUT}/discount.ts`
+  const TIP = `${CHECKOUT}/tip.ts`
+  const FIXTURE = `${CHECKOUT}/__gate_fixture__.ts`
+
+  // 67a. A discount line with no reason code must not compile. The runtime half of the same criterion
+  //      (DiscountReasonRequired, for the request body that arrives as `unknown`) is asserted in
+  //      basket.test.ts; this is the half a test cannot make.
+  //
+  //      Both fixtures assert on the *message* rather than on a non-zero exit, because a fixture that
+  //      stopped compiling for an unrelated reason would otherwise keep this gate green for ever. The
+  //      control that a legitimate discount DOES compile is the shipped code itself: basket.test.ts
+  //      calls `discountLine` with every reason in the enum, and `pnpm typecheck` covers it.
+  {
+    const { failed, output } = withFixture(
+      FIXTURE,
+      [
+        "import { discountLine } from './discount.ts'",
+        'export const noReason = discountLine({',
+        "  lineId: 'disc-1',",
+        "  targetLineId: 'line-1',",
+        "  kind: 'percentage_bp',",
+        '  value: 1000,',
+        '})',
+      ].join('\n'),
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'tsc rejects a discount line with no reason code',
+      failed && output.includes("Property 'reason' is missing"),
+      output,
+    )
+  }
+
+  // 67b. And a reason outside the closed enum. Distinct from 67a: a `reason?: string` would pass 67a
+  //      while accepting "mgr ok", which is the free-text field the enum exists to prevent.
+  {
+    const { failed, output } = withFixture(
+      FIXTURE,
+      [
+        "import { discountLine } from './discount.ts'",
+        'export const invented = discountLine({',
+        "  lineId: 'disc-1',",
+        "  targetLineId: 'line-1',",
+        "  reason: 'friend_of_the_owner',",
+        "  kind: 'percentage_bp',",
+        '  value: 1000,',
+        '})',
+      ].join('\n'),
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'tsc rejects a discount reason outside the closed enum',
+      failed &&
+        output.includes(
+          'Type \'"friend_of_the_owner"\' is not assignable to type \'"manager_goodwill"',
+        ),
+      output,
+    )
+  }
+
+  // 67c. A tip credited to revenue. The property is "no line on a revenue account is a tip", and this is
+  //      the edit that makes it false: one account code, changed in the module that owns it. Without this
+  //      case the property could be true because tips were never generated, or because the check read the
+  //      line's `kind` back out of the same constructor that set it.
+  {
+    const result = withEditedFile(
+      TIP,
+      (text) =>
+        text.replace(
+          'export const TIP_ACCOUNT: AccountCode = ACCOUNTS.tipsPayable',
+          'export const TIP_ACCOUNT: AccountCode = ACCOUNTS.treatmentRevenue',
+        ),
+      () => runExpectingFailure('pnpm', unit(CHECKOUT)),
+    )
+    check('a tip credited to treatment revenue fails the basket tests', result.failed)
+  }
+
+  // 67d. The discount taxed on its own gross instead of as the difference. This is the one-line change
+  //      the whole arithmetic is arranged to prevent: it leaves output VAT on an amount the customer
+  //      never paid — 1 fils on the 11-fils probe, where the 6 fils actually charged carries 0.
+  {
+    const result = withEditedFile(
+      BASKET,
+      (text) =>
+        text.replace(
+          [
+            '          net: money(filsFrom(next.net.fils - runningNet.fils), runningGross.currency),',
+            '          vat: money(filsFrom(next.vat.fils - runningVat.fils), runningGross.currency),',
+          ].join('\n'),
+          [
+            '          net: splitGross(money(filsFrom(-amount), runningGross.currency), rateBp).net,',
+            '          vat: splitGross(money(filsFrom(-amount), runningGross.currency), rateBp).vat,',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', unit(CHECKOUT)),
+    )
+    check('a discount taxed on its own gross fails the basket tests', result.failed)
+  }
+
+  // 67e. A package redemption that carries a price. Its zero gross is what makes the document's VAT
+  //      total independent of how many redemptions it holds, so a price here is a treatment charged
+  //      twice — once when the package was sold and once at the till.
+  {
+    const result = withEditedFile(
+      BASKET,
+      (text) => text.replace('    gross: ZERO_AED,', '    gross: money(filsFrom(100)),'),
+      () => runExpectingFailure('pnpm', unit(CHECKOUT)),
+    )
+    check('a package redemption line carrying a price fails the basket tests', result.failed)
+  }
+
+  // 67f. The runtime reason check removed. 67a and 67b prove the type refuses a missing reason; this
+  //      proves the refusal that catches the caller the type cannot see — a till request body, which is
+  //      `unknown` however well typed the client was.
+  {
+    const result = withEditedFile(
+      DISCOUNT,
+      (text) =>
+        text.replace(
+          [
+            '  if (!isDiscountReason(given)) throw new DiscountReasonRequired(given)',
+            '  return given',
+          ].join('\n'),
+          '  return given as DiscountReason',
+        ),
+      () => runExpectingFailure('pnpm', unit(CHECKOUT)),
+    )
+    check('a discount reason accepted without checking fails the basket tests', result.failed)
+  }
+
+  // 67g. The snapshot re-derived instead of copied. `splitGross` is the right derivation and the wrong
+  //      thing to do here: the appointment's split was taken when the booking was made, and re-deriving
+  //      it restates a figure that has already been quoted, invoiced and filed. The integration test
+  //      proves the same rule against a real price rise; this proves the unit assertion can fail.
+  {
+    const result = withEditedFile(
+      BASKET,
+      (text) =>
+        text.replace(
+          ['      net: snapshot.net,', '      vat: snapshot.vat,'].join('\n'),
+          [
+            '      net: splitGross(snapshot.gross, snapshot.vatRateBp).net,',
+            '      vat: splitGross(snapshot.gross, snapshot.vatRateBp).vat,',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', unit(CHECKOUT)),
+    )
+    check('a snapshot re-derived rather than copied fails the basket tests', result.failed)
+  }
+
+  // 67i. The checkout-scoped purity rule must fire. `packages/core/src/checkout` needs no date at all —
+  //      the tax point is resolved on `business_day` by its caller — so `Date` and `Intl` are banned
+  //      outright here, as they are under the ledger, rather than only the clock reads the core-wide rule
+  //      catches. Case 24 is the control: it asserts the same two calls are still ALLOWED elsewhere in
+  //      core, which is what makes this a scoped rule doing real work rather than a duplicate of case 4.
+  for (const [call, label] of [
+    ["new Date('2026-10-02T00:00:00Z').getUTCDay()", 'a Date built from a string'],
+    [
+      "new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(0)",
+      'an Intl zone lookup',
+    ],
+  ]) {
+    const scoped = withFixture(FIXTURE, `export const derived = ${call}`, () =>
+      run('node', ['scripts/check-core-purity.mjs']),
+    )
+    check(`purity gate rejects ${label} under packages/core/src/checkout`, scoped.failed)
+  }
+
+  // 67h. The control for 67c-67g: the same runner, on the same directory, with nothing edited, must
+  //      pass. Five cases above assert that a broken basket fails; if the suite failed for an unrelated
+  //      reason — a missing dependency, a renamed path — all five would report PASS and none of them
+  //      would be about the basket.
+  {
+    const result = run('pnpm', unit(CHECKOUT))
+    check('the basket tests pass with nothing edited', !result.failed, result.output)
+  }
+}
+
+// 69a-69e. A slot's declared ratio is the shape of its SOURCE; the ladders decide the shape it is SERVED
+//       at, and those are different numbers. `SLOT_REGISTRY['therapist-portrait'].ratio` is `[4, 5]` — what
+//       an upload is measured against, what `minHeight` scales from, and the box an element that renders
+//       one image reserves — while `renditionSpecs()` takes no slot argument at all, so every cropped slot
+//       is built at both crops, `pictureSourcesFor` offers both, and a portrait in a `<picture>` is served
+//       16:9 on every laptop.
+//
+//       Nothing was broken when this block was written, and that is the point of it. The three callers of
+//       `slotAspectRatio()` each render ONE image — `TherapistCard`'s `<img>`, the specimen's portrait and
+//       hero — so the declared ratio is their box; `SlotPicture` renders the two-crop `<picture>` and
+//       already reserves per crop from `CROPS`. What did not exist was anything that fails when the two
+//       questions are confused, and the confusion is invisible in review: every number in the offending
+//       component came out of the registry, the gate that refuses a literal ratio passes it, and the page
+//       is correct on the laptop it was written on and reflows on phones.
+{
+  const MEDIA = ['scripts/check-media.mjs']
+  const FIXTURE = 'packages/ui/src/patterns/__gate_fixture__.tsx'
+  const SRCSET = 'packages/media/src/srcset.ts'
+  const SRCSET_TEST = 'packages/media/src/srcset.test.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const REF = [
+    'export const GATE_FIXTURE_REF = {',
+    "  mediaId: '0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f',",
+    "  contentHash: '8dad757b10eadb9b',",
+    "  slot: 'hero',",
+    '}',
+  ]
+
+  // 69a. The mistake in the form it would actually arrive: sources from the shared builder — both crops,
+  //      each under its own media query — and a single box from the slot registry.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import { slotAspectRatio } from '@berelax/media/slots'",
+        "import { pictureSourcesFor } from '@berelax/media/srcset'",
+        '',
+        ...REF,
+        'export const GATE_FIXTURE_SOURCES = pictureSourcesFor(GATE_FIXTURE_REF)',
+        '',
+        // A real `${…}` hole, which is the form the literal-ratio rule allows — so this fixture is
+        // rejected by the rule under test and not by that one.
+        `export const GATE_FIXTURE_CSS = \`.gate-fixture {`,
+        `  aspect-ratio: \${slotAspectRatio('hero')};`,
+        '}`',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects an art-directed picture that reserves one box from the slot registry',
+      result,
+      '[art-directed-picture-must-reserve-a-box-per-crop]',
+    )
+  }
+
+  // 69b. The same mistake written by hand. A component that never calls the builder but emits `<source>`
+  //      elements with their own `media` is just as art-directed, and a rule that only knew the builder's
+  //      name would miss the version somebody typed.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import { CROPS } from '@berelax/media/ladders'",
+        "import { slotAspectRatio } from '@berelax/media/slots'",
+        '',
+        'export function GateFixture() {',
+        '  return (',
+        `    <picture style={{ aspectRatio: slotAspectRatio('hero') }}>`,
+        '      <source media={CROPS.mobile.media} srcSet="/m/x/y/hero-mobile-414.avif 414w" />',
+        '      <source media={CROPS.desktop.media} srcSet="/m/x/y/hero-desktop-1024.avif 1024w" />',
+        '      <img src="/m/x/y/hero-desktop-1024.jpg" alt="" />',
+        '    </picture>',
+        '  )',
+        '}',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    checkRejectedBy(
+      'media gate rejects hand-written art-directed sources over a single-ratio box',
+      result,
+      '[art-directed-picture-must-reserve-a-box-per-crop]',
+    )
+  }
+
+  // 69c. The first control, and the one that matters most: the production form must pass. A rule that
+  //      refused every component holding both a `<picture>` and a ratio would make `SlotPicture`
+  //      unwritable, and a rule nobody can satisfy is a rule somebody deletes.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import { CROPS } from '@berelax/media/ladders'",
+        "import { pictureSourcesFor } from '@berelax/media/srcset'",
+        '',
+        ...REF,
+        'export const GATE_FIXTURE_SOURCES = pictureSourcesFor(GATE_FIXTURE_REF)',
+        '',
+        `export const GATE_FIXTURE_CSS = \`.gate-fixture {`,
+        `  aspect-ratio: \${CROPS.mobile.ratio.join(' / ')};`,
+        '}',
+        `@media \${CROPS.desktop.media} {`,
+        `  .gate-fixture { aspect-ratio: \${CROPS.desktop.ratio.join(' / ')}; }`,
+        '}`',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate allows a picture that reserves a box per crop, which is the honest form',
+      !result.failed,
+      `rejected the arrangement the production component uses:\n${result.output}`,
+    )
+  }
+
+  // 69d. The second control: the card's form. One `<img>` whose src the caller chooses, no `<source>` and
+  //      no ladder, so the slot's declared ratio is exactly the box — and `slotAspectRatio()` must stay
+  //      usable there, or the fix for this defect is "nobody may read the registry".
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import { slotAspectRatio } from '@berelax/media/slots'",
+        '',
+        `export const GATE_FIXTURE_CSS = \`.gate-fixture {`,
+        `  aspect-ratio: \${slotAspectRatio('therapist-portrait')};`,
+        '  object-fit: cover;',
+        '}`',
+        '',
+        'export function GateFixture({ src }: { src: string }) {',
+        '  return <img className="gate-fixture" src={src} alt="" />',
+        '}',
+      ].join('\n'),
+      () => run('node', MEDIA),
+    )
+    check(
+      'media gate still allows a single image to reserve the slot ratio',
+      !result.failed,
+      `rejected the box a component rendering one image is supposed to reserve:\n${result.output}`,
+    )
+  }
+
+  // 69e. And the property the rule protects, broken in the shipped file. If `pictureSourcesFor` offered
+  //      only the crop a slot's ratio names, the registry really would be the served shape, the rule above
+  //      would be wrong and the comments in `registry.ts` would be right. The suite has to be what says
+  //      otherwise — asserted by test name, because a run that failed for any other reason would leave the
+  //      claim unproved.
+  {
+    const oneCrop = withEditedFile(
+      SRCSET,
+      (text) => {
+        const mutated = text.replace(
+          'const sources: PictureSource[] = []\n  for (const crop of CROP_NAMES) {',
+          "const sources: PictureSource[] = []\n  for (const crop of ['mobile'] as const) {",
+        )
+        if (mutated === text) throw new Error(`the anchor lines are no longer in ${SRCSET}`)
+        return mutated
+      },
+      () => runExpectingFailure('pnpm', unit(SRCSET_TEST)),
+    )
+    checkRejectedBy(
+      'the srcset suite fails when a picture offers only the crop its slot declares',
+      oneCrop,
+      'offers both ladder crops for a 4:5 slot, so a laptop is served 16:9',
     )
   }
 }

@@ -2756,7 +2756,7 @@ units:
       tips as a non-revenue tender-side line, and package redemption as a zero-gross line carrying the balance
       id. No I/O, no clock.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -2778,6 +2778,38 @@ units:
       VAT total is unaffected by the number of redemption lines
     - packages/core/src/checkout imports no db, clock or framework module; boundaries:test proves the rule
       fires on a deliberately illegal fixture import
+    - 'NOTE: a discount reaches the *document* as a reduced line price, not as a negative invoice line.
+      invoice_line.unit_gross_fils is the fils_nonneg domain (0026), so a negative line cannot be stored
+      at all. The basket therefore keeps the discount as its own line — negative gross, contra-revenue
+      account 4095, reason code — for the ledger and the discount report, and Basket.charges is the
+      invoice-ready shape: one entry per chargeable line at the gross actually charged, with the tax on
+      exactly that. M-TILL-06 posts the pair, and the two paths are asserted equal to the fils over
+      generated baskets'
+    - 'NOTE: the discount line carries the *difference* the discount makes to its target''s tax, not the
+      tax on its own gross. That is what makes sum(line vat) === vat of the discounted gross exactly
+      rather than nearly: the obvious alternative leaves 1 fils of output VAT on the 11-fils probe, where
+      the 6 fils actually charged carries 0. vatIfDiscountTaxedSeparately names that wrong figure so a
+      test can assert it appears nowhere, and gate 67d makes the change and watches the suite go red'
+    - 'NOTE: scoped out — a whole-basket discount is expressed as one discount line per chargeable line,
+      each with its own reason. A single figure apportioned across the lines is deliberately not
+      supported: the apportionment has to round somewhere, the rounding lands in the VAT, and a basket
+      can hold two rates at once (a zero-rated line beside a standard-rated one), which leaves no single
+      rate to apportion at. Whichever unit builds the till UI should spread the percentage, not the fils'
+    - 'NOTE: the no-clock criterion is met by a checkout-scoped rule added to
+      scripts/check-core-purity.mjs, as M-TILL-01 did for the ledger: Date and Intl are banned outright
+      under packages/core/src/checkout, because the basket takes no date at all — the tax point is
+      resolved on business_day by resolveTaxPoint before a document is written, and any Date here could
+      only be a second opinion about the trading day the caller already resolved. Gate 67i proves the
+      scoped rule fires; gate case 24 remains the control that the same two calls are still allowed
+      elsewhere in core'
+    - 'NOTE: packages/core/src/checkout/line.ts is a fourth file beyond the three listed here, holding
+      the line ids, the LineTax shape and the MalformedBasket refusal vocabulary. discount.ts and tip.ts
+      both need BasketLineId and basket.ts needs both of them, so declaring the ids beside the basket
+      would be an import cycle inside a pure package'
+    - 'NOTE: deferred — a redemption line names the balance it consumed and carries no value. The
+      entitlement''s worth and the deferred-revenue release (2050 -> 4020) stay M-TILL-09''s, on the
+      balance, because a value copied onto the checkout line would be a second opinion about what the
+      package was sold for. Paying tips out of 2040 is Y-PAY''s. Gate labels used: 67a-67i'
     files:
     - packages/core/src/checkout/basket.ts
     - packages/core/src/checkout/discount.ts

@@ -41,8 +41,29 @@ const FORBIDDEN = [
  * re-deriving that date from a calendar date, which silently disagrees with the caller for the nine
  * hours either side of midnight, and puts the takings on the wrong day. There is no legitimate use to
  * balance against, so the whole surface is banned here rather than only the clock reads.
+ *
+ * The checkout basket is the second such directory, for a narrower version of the same reason stated on
+ * its entry below: it takes no date at all.
  */
 const SCOPED = [
+  {
+    // The checkout basket takes no date at all: every figure on it was snapshotted by somebody else,
+    // and the one date a checkout needs — the tax point — is resolved from `business_day` by
+    // `resolveTaxPoint` before it ever reaches a document. A `Date` here could only be a second
+    // opinion about the trading day the caller already resolved, and trading runs 11:00-02:00, so the
+    // two disagree for the nine hours either side of midnight and the takings land on the wrong day.
+    root: join(ROOT, 'checkout'),
+    forbidden: [
+      {
+        re: /\bDate\b/g,
+        why: 'the basket needs no date; the tax point is resolved on business_day by its caller',
+      },
+      {
+        re: /\bIntl\b/g,
+        why: 'no timezone or locale lookup in the till; money is formatted at the edge, not here',
+      },
+    ],
+  },
   {
     root: join(ROOT, 'ledger'),
     forbidden: [
@@ -89,8 +110,9 @@ if (violations > 0) {
   console.error(`\n${violations} purity violation(s) in packages/core. See docs/adr/0001.`)
   process.exit(1)
 }
-const ledgerFiles = walk(ROOT).filter((f) => f.startsWith(`${join(ROOT, 'ledger')}/`))
+const scopedFiles = walk(ROOT).filter((f) => SCOPED.some((scope) => f.startsWith(`${scope.root}/`)))
 console.log(
   `packages/core is pure (${walk(ROOT).length} files checked, ` +
-    `${ledgerFiles.length} of them under the no-Date/no-Intl ledger rule).`,
+    `${scopedFiles.length} of them under the no-Date/no-Intl rule for ` +
+    `${SCOPED.map((scope) => scope.root).join(' and ')}).`,
 )
