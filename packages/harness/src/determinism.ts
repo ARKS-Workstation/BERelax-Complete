@@ -8,6 +8,7 @@
  * So each of these closes a specific source of variation, and the acceptance criterion is the blunt
  * one: two consecutive runs on unchanged input produce **byte-identical** PNGs.
  */
+import { createHash } from 'node:crypto'
 import type { PageGlobalsForHarness } from './page-globals.ts'
 
 /**
@@ -99,8 +100,39 @@ video { visibility: hidden !important; }
  * It cannot hide a real defect, and that is asserted rather than argued: the gate for this helper renders
  * a clock into the page and requires it to exhaust and throw.
  */
+/**
+ * What one capture produced: the bytes, and anything about the page the pixels cannot say.
+ *
+ * `note` exists because "the bytes differ" is not a diagnosis. When two captures of one page disagree, the
+ * useful question is what differed about the *page*, and the thing a harness can see and a PNG cannot is
+ * which requests failed. A caller that knows its page has images should put the set that failed to load in
+ * here; see `captureUntilStable` for what is then said when that set changes between attempts.
+ */
+export interface Capture {
+  readonly png: Uint8Array
+  readonly note?: string
+}
+
+function pngOf(result: Uint8Array | Capture): Capture {
+  return result instanceof Uint8Array ? { png: result } : result
+}
+
+/**
+ * Whether a sequence of capture digests alternates between exactly two values: A B A B …
+ *
+ * Worth naming, because it is the signature of a page with two stable renderings rather than one that had
+ * not finished painting — and no number of attempts can ever satisfy a consecutive-match rule against it,
+ * so "try harder" is not the answer and neither is "this is load".
+ */
+function alternates(digests: readonly string[]): boolean {
+  if (digests.length < 4) return false
+  const distinct = new Set(digests)
+  if (distinct.size !== 2) return false
+  return digests.every((digest, index) => index < 2 || digest === digests[index - 2])
+}
+
 export async function captureUntilStable(
-  take: () => Promise<Uint8Array>,
+  take: () => Promise<Uint8Array | Capture>,
   options: { readonly label: string; readonly attempts?: number },
 ): Promise<{ readonly png: Uint8Array; readonly attemptsUsed: number }> {
   const attempts = options.attempts ?? 5
@@ -110,19 +142,53 @@ export async function captureUntilStable(
     )
   }
   const sizes: number[] = []
+  const digests: string[] = []
+  const notes: string[] = []
   let previous: Uint8Array | null = null
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const png = await take()
+    const capture = pngOf(await take())
+    const png = capture.png
     sizes.push(png.byteLength)
+    digests.push(createHash('sha256').update(png).digest('hex').slice(0, 12))
+    notes.push(capture.note ?? '')
     if (previous !== null && Buffer.compare(Buffer.from(previous), Buffer.from(png)) === 0) {
       return { png, attemptsUsed: attempt }
     }
     previous = png
   }
+
+  /*
+   * The failure message has to say WHICH failure this is, because the three have different causes and only
+   * one of them is the page's own rendering.
+   *
+   * The first version of this asserted "a clock, a random id or an unsettled animation is reaching the
+   * render — this is not load" for every case. That was wrong twice over. It is right for captures that all
+   * differ, and it is actively misleading for a page that alternates between exactly two renderings: that
+   * is not a clock, it is two states, and it appeared only under seven-way load — so the one thing the
+   * message ruled out was the thing that exposed it.
+   *
+   * And when the notes differ between attempts, neither explanation applies: something outside the render
+   * changed, and the note says what. An image that loads in one capture and fails in the next is the case
+   * this was built for, because the settle step deliberately swallows a decode rejection (a broken frame is
+   * a legitimate fixture) and so cannot tell "broken on purpose" from "broken this time".
+   */
+  const distinctNotes = [...new Set(notes.filter((note) => note !== ''))]
+  const noteChanged = distinctNotes.length > 1
+  const diagnosis = noteChanged
+    ? `the page itself changed between captures, not just its pixels: ${distinctNotes
+        .map((note, index) => `(${index + 1}) ${note}`)
+        .join(' vs ')}. Fix that first — the render may well be deterministic given a stable page.`
+    : alternates(digests)
+      ? 'the captures ALTERNATE between exactly two renderings, so this page has two stable states rather ' +
+        'than unfinished paint. No number of attempts can satisfy a consecutive-match rule against that. ' +
+        'Look for a request that intermittently fails, a query returning rows in either order, or state ' +
+        'that flips per load — and note that load can be what exposes it.'
+      : 'every capture differed, which is what a clock, a fresh identifier or an unsettled animation ' +
+        'reaching the render produces. This one is not load.'
+
   throw new Error(
     `[screenshot-never-stabilised] ${options.label}: ${attempts} captures and no two consecutive ones ` +
-      `matched, so this page does not render deterministically. Byte lengths: ${sizes.join(', ')}. ` +
-      'A clock, a random id or an unsettled animation is reaching the render — this is not load.',
+      `matched. Byte lengths: ${sizes.join(', ')}. Digests: ${digests.join(', ')}. ${diagnosis}`,
   )
 }
 

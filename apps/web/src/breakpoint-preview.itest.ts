@@ -330,6 +330,14 @@ interface Visit {
   readonly requested: string[]
   /** Requests whose origin is not this application's. Asserted empty. */
   readonly foreign: string[]
+  /**
+   * Images that did not load, by basename, read after the page declared itself settled.
+   *
+   * Not asserted empty here, because a broken frame is a legitimate subject on this page. It is recorded so
+   * that a capture comparison can tell a fixture's own broken frame — the same set every time — from an
+   * image that failed on one attempt and not the next, which is a different defect entirely.
+   */
+  readonly brokenImages: readonly string[]
 }
 
 async function open(
@@ -431,7 +439,35 @@ async function open(
     undefined,
     { timeout: 30_000 },
   )
-  return { page, context, requested, foreign }
+  /*
+   * And finally: which images did NOT load.
+   *
+   * The decode step above swallows `decode()` rejections on purpose — a broken frame is a legitimate
+   * fixture on this page, since the alt-failure and over-budget cases render one deliberately. That is
+   * right, and it means the settle step cannot tell "broken by design" from "broken on this run". The
+   * second kind is what made `light-390` alternate between two renderings under a full seven-worktree
+   * load: one derivative request failed, the rejection was swallowed, and the capture photographed six
+   * frames where the previous had seven.
+   *
+   * So the set is recorded and handed to `captureUntilStable` as its note. A set that is the same every
+   * attempt is the fixture's own broken frame and says nothing; a set that CHANGES between attempts is the
+   * cause, and the failure then names the image instead of blaming the render.
+   *
+   * `naturalWidth === 0` after settle rather than an `error` listener: it is the state, not the event, and
+   * it is still true for an image whose failure arrived before this ran.
+   */
+  const brokenImages = await page.evaluate(() =>
+    [...document.images]
+      .filter((image) => image.naturalWidth === 0)
+      .map((image) => {
+        const source = image.currentSrc || image.src
+        // The basename is enough to identify a derivative and keeps the note readable; the full URL carries
+        // a content hash and a port that change between runs for reasons that are not this.
+        return source.slice(source.lastIndexOf('/') + 1)
+      })
+      .sort(),
+  )
+  return { page, context, requested, foreign, brokenImages }
 }
 
 /** One cell photographed, with the two facts that prove the render really was that cell. */
@@ -439,6 +475,8 @@ interface Shot {
   readonly png: Uint8Array
   readonly innerWidth: number
   readonly backgroundLuminance: number
+  /** Images that did not load, by basename. Stable between attempts is a fixture; changing is a defect. */
+  readonly brokenImages: readonly string[]
 }
 
 /**
@@ -459,6 +497,7 @@ async function shoot(path: string, cell: Cell): Promise<Shot> {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b
       }),
       png: await visit.page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
+      brokenImages: visit.brokenImages,
     }
   } finally {
     await visit.context.close()
@@ -1040,7 +1079,14 @@ describe('acceptance — the screenshot harness captures 3 viewports x 2 themes'
       // `[screenshot-never-stabilised]` if no two CONSECUTIVE captures ever agree, which is what a clock
       // in the render actually produces, so the determinism claim is intact and the timing one is gone.
       const stable = await captureUntilStable(
-        () => shoot(previewPath(heroFixture), cell).then((s) => s.png),
+        () =>
+          shoot(previewPath(heroFixture), cell).then((s) => ({
+            png: s.png,
+            // The note is what turns "the bytes differ" into a diagnosis. See `open`'s closing comment:
+            // a set that changes between attempts means an image failed on one of them, which is a
+            // different defect from a clock in the render and needs a different fix.
+            note: `images that failed to load: ${s.brokenImages.length === 0 ? 'none' : s.brokenImages.join(', ')}`,
+          })),
         {
           label,
         },
