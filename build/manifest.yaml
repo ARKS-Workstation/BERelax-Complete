@@ -4516,7 +4516,7 @@ units:
       is deterministic, committed as a golden fixture, and separates an auto-merge threshold from a human-review
       threshold.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-01
@@ -4537,6 +4537,45 @@ units:
       ADR 0003 proves the purity gate fires on this package
     - 'Integration test: the candidate query against a seeded 5,000-customer table returns in under 200ms
       and EXPLAIN output is asserted to contain a trigram index scan, not a sequential scan'
+    - 'NOTE: (1) The phone key is NOT a second normaliser. packages/core/src/crm/phone.ts delegates every
+      UAE decision to B-LIFE-02''s normalisePhoneResult (brief rule 12) and adds exactly one thing: a
+      number whose country code is not 971 keeps the country code it was typed with. That needed one
+      export from normalise-phone.ts - the digit tokeniser, renamed phoneTokens - because the alternative
+      was a second copy of the Arabic-keyboard digit map in the CRM. The verdict is never duplicated: a
+      UAE landline still comes back as landline_not_an_sms_target, so a contact whose only number is a
+      landline has no phone key and scores on its label alone, under the `unknown` phone class that can
+      never reach the auto-merge band. A foreign key deliberately does NOT name a country: identifying one
+      needs the ITU calling-code table, nothing here reads it, and a country inferred from a prefix is a
+      fact about a person nobody supplied (rule 15). (2) The scorer is a TABLE of (phone class x label
+      class) in integer per-mille, not a weighted sum. The owner is being asked to accept unattended
+      merges, which is only acceptable if the rule can be read off a page; and integers divided by 1000
+      round-trip through the committed golden file unchanged, where a float product would make the pinned
+      scores machine-dependent. The auto band is reachable only with an identical phone number. (3) The
+      thresholds 0.95/0.70 are constants in core with a new OPEN-QUESTIONS row, Y9-dedup-thresholds, and
+      NOT settings-registry keys: nothing reads a setting for them yet, and duplicateVerdict takes the
+      pair as an argument so C-CRM-05 can inject the owner''s figures. A settings key no code consults is
+      a knob that lies about what it controls. (4) Migration 0055 adds two GiST trigram indexes and
+      nothing else - no table, no column, no foreign key. GIN is the usual recommendation and is wrong at
+      this size: measured on the 5,000-row probe table, a nine-digit probe costs 186 as a sequential scan,
+      583 as a GIN bitmap scan and 8 as a GiST index scan, so the planner picks the sequential scan and
+      the GIN index is never read. A duplicate_candidate table is deliberately absent - it would be a
+      second source of truth for a question the scorer answers from the rows, and C-CRM-05 owns the review
+      queue. (5) DEFERRED, and the one real gap: the candidate scan cannot guarantee it finds every
+      single-character typo. A trigram floor low enough to catch the worst case (0.20, a transposition of
+      the two leading digits of a FOREIGN number whose remaining digits repeat) admits 81 candidates per
+      probe, past the per-signal cap, so the guarantee would be nominal. The floor is 0.30, which clears
+      every near miss a UAE mobile can reach (worst 0.333, asserted against a real PostgreSQL) and leaves
+      the foreign cases between 0.20 and 0.30 unfound. The right instrument is a deterministic block
+      rather than a floor - any single edit to a nine-digit key leaves either its first four or its last
+      five digits untouched, so two expression btrees on left(key,4) and right(key,5) find all of them at
+      no measurable cost. Deferred to C-CRM-05, which owns the queue those candidates feed;
+      packages/fixtures/src/crm-duplicates.itest.ts pins the boundary from both sides so it cannot
+      quietly change. (6) The candidate cap is PER SIGNAL. It was one cap over the union first and it
+      dropped a real duplicate: every label in this system is `Customer NNNN` (ADR 0020), so they all
+      share one word and measure 0.647 against each other - higher than the 0.5 a transposed number
+      measures - and 250 label matches ranked the transposed twin out of a cap of 50 while every headline
+      assertion still passed. Case 71i is that mutant. (7) No port band was taken: nothing here starts a
+      server (rule 18).'
     files:
     - packages/core/src/crm/phone.ts
     - packages/core/src/crm/duplicate-score.ts
@@ -8587,7 +8626,7 @@ units:
       links out to a real indexable route; the hero is the LCP img, no entrance animation runs above the
       fold, and the home budget fails the build.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SITE-03
@@ -8612,12 +8651,206 @@ units:
       an oversized fixture proves the budget fires'
     - The sticky book bar sits in the lower third with a >=48px target, respects env(safe-area-inset-bottom),
       and a grep test asserts zero occurrences of `100vh` anywhere in apps/web or packages/ui (dvh only)
+    - 'NOTE: files — four of the five paths below could not be written as named, and each reason is worth
+      keeping. (1) apps/web/app/(public)/page.tsx is two documents, apps/web/app/(en)/(public)/page.tsx and
+      apps/web/app/(ar)/ar/page.tsx over one body component at apps/web/app/_home/home-page.tsx: W-SITE-01''s
+      registry declares `/` and `/ar` as ONE entry, so a home page in one locale is not a home page, and
+      W-SYS-07 recorded the same split for its own route. The body is shared for the reason
+      app/_treatments/pages.tsx gives — two copies would be two places the section order, the anchor ids and
+      the card shapes could drift, and the RTL half of every assertion would then be testing a different
+      component from the LTR half. (2) apps/web/src/sections/*.tsx does not exist: the sections are one
+      component each in that shared body, and everything that had to be reachable from a `.ts` unit test is in
+      apps/web/src/home/ — content.ts, budget.ts, read.ts and the two copy modules. `apps/web/tsconfig.json`
+      sets `jsx: "preserve"`, so vitest cannot parse a `.tsx` from this application at all, which is the
+      constraint src/cms/content.ts and src/treatments/content.ts both record. (3)
+      tests/perf/home-budget.spec.ts: this repository has no tests/ directory (W-SYS-09, W-SYS-10 and W-SYS-07
+      each recorded it). The budget is apps/web/src/home/budget.ts — the five numbers and the pure judgement —
+      measured against a real `next start` by apps/web/src/home.itest.ts. (4) lighthouse/budget.json: there is
+      no Lighthouse CI in this repository and adding one for this unit would be a second budget mechanism
+      beside build/budgets.json. See the budget NOTE below for where the five numbers live and why.
+      packages/ui/src/patterns/sticky-book-bar.tsx is as declared.'
+    - 'NOTE: the route is now `rendering: ''isr''`, which is what docs/09 §1 lists it as, and that single field
+      is what discharged two deferrals other units had written down by name. app/(en)/(public)/page.tsx said
+      the locality could not be paired with the trading name because a `static` route is evaluated during
+      `next build` and the build has no database — docs/09 §"The brand collision" wants both on this page,
+      because berelax.com is an international airport-spa chain with an outlet in this city. And
+      apps/web/src/seo/structured-data.itest.ts asserted, in an `if (route.id === ''home'')` branch, that this
+      route carried no JSON-LD *because* it was static, and named this unit as the one that would put one on
+      it. Both are done: the page renders the sentence from the premises row and the legal entity, and carries
+      a LocalBusiness/DaySpa, Organization and WebSite graph. Four of other units'' tests were edited to say
+      so rather than to keep passing — that branch in structured-data.itest.ts (now `home` is in GRAPH_ROUTES
+      with NO_CATALOGUE), the `static` list in routes/registry.test.ts (now empty, with a widening helper so
+      the assertion survives the union narrowing rather than being deleted), the two-way disjunction in
+      route-spine.itest.ts (now "not dynamic", because `rendering === ''static''` had become a comparison the
+      compiler can prove false), and the exact path list in revalidate/catalogue.test.ts (now ten paths, with
+      `/` and `/ar`). The cost is the one W-SITE-05 already paid and CI already handles: `next build` needs a
+      migrated and seeded database.'
+    - 'NOTE: `includeCatalogue` is FALSE on this page, which is the opposite of what "treatments overview"
+      suggests and is deliberate. The overview is eight LINKS to the eight pages that each publish their own
+      `Service` and four `Offer`s; republishing all forty nodes here would put the reconciliation problem that
+      flag exists to prevent on the one document every crawler fetches first, and would add about 10KB to a
+      page budgeted at 250KB above the fold. The same reading /spa, /contact and /about take.'
+    - 'NOTE: the home budget, and a finding about the application that is larger than this unit. The five
+      numbers are declared once in apps/web/src/home/budget.ts and measured in a browser against a real
+      `next start`, rather than half of them in `pnpm budgets`: requests-before-LCP is an ordering of network
+      events against a largest-contentful-paint entry, DOM nodes is a count of a document rendered from the
+      database, and critical-above-fold is the bytes a stated viewport downloaded — none of the three exists in
+      a build directory, and splitting a five-number budget across two mechanisms means one half failing in
+      one gate while the other fails in another. Both steps are in `pnpm verify` and in CI. Measured at 390px
+      on this build: first-party JS 6,315 bytes, CSS 12,059 (5,212 linked, gzipped by the server, plus 6,847
+      for the hoisted inline stylesheet at gzip level 9), critical above-fold 132,691, requests before LCP 6,
+      DOM nodes 369 — every one inside docs/08 §8.
+
+      Two of the five are measured in a way the acceptance line does not spell out, and both are stated in the
+      module. **requests-before-lcp** is derived from the DOCUMENT — the render-blocking resources, the ones
+      the head preloads, and the LCP element''s own — and not from timings, because the framework''s async
+      chunks finish within twenty milliseconds of the LCP entry on this page: "requests that started before
+      it" counts 15 and "requests that finished before it" counts 7 on the same page, and which a run reported
+      would depend on how loaded the machine was. **css** compresses the hoisted `<style>` elements at gzip
+      level 9 on the Node side, the same basis every entry in build/budgets.json uses; measuring them raw
+      counted 22KB of design-system CSS against a 25KB *gzip* budget and reported the page over.
+
+      **The finding.** `first-party-js` is this application''s own client JavaScript — every script the
+      document loads that `.next/build-manifest.json` does not declare in `rootMainFiles` or `polyfillFiles`.
+      The excluded half is Next''s own baseline: five chunks and **131,044 bytes gzip**, which is on its own
+      over docs/08 §8''s 110KB for the whole home route, and which **nothing in this repository measured
+      before** — the `client-js` budgets in build/budgets.json read the RSC client-reference manifests, which
+      do not contain those chunks, so `Client JS every route ships` reports 0.8KB while every route ships
+      128KB. So docs/08 §8''s figure cannot be met by any route of this application as it stands, and the
+      exclusion is stated rather than quiet: home.itest.ts measures the baseline separately, asserts that the
+      two halves add up to every script byte the document loads, and asserts the baseline is still ABOVE 110KB
+      so that the day it is not, the test fails and the metric can become the honest total. The cause is not
+      this page — it is the two client components in app/_document/shell.tsx, which every route needs (a stored
+      theme cannot be read on the server; Radix portals into document.body) and which pull React''s client
+      runtime and Next''s router onto every document. Either docs/08 §8''s number or the shell is wrong, and
+      neither is W-SITE-04''s to change.'
+    - 'NOTE: SCOPED — the therapist half of "every card has an href to /treatments/[slug] or
+      /therapists/[slug]". /therapists/[slug] is W-SITE-06''s route and does not exist, and the registry is in
+      exact bijection with the filesystem, so an entry for it fails a test — while a hand-built path would be
+      an internal link that is not a 200, the first rule the link-graph invariant refuses. There is also no
+      slug to build one from: `employee` has `staff_reference` and a nullable `display_name` and no public slug
+      column. It costs this unit nothing, because the criterion''s exception is the state the business is in:
+      ADR 0020 and migration 0050 need a display name AND a recorded photography consent, `is_publishable` is
+      GENERATED from both, and all nineteen therapists have neither (Y12-names, Y12-consent-photo) — so every
+      therapist card is an unconsented one and carries no anchor, which docs/13 §8 states as the launch state
+      in so many words. The guard is proved in both directions rather than only the passing one: a publishable
+      row with a resolver that returns a path DOES get an href (the control, without which the ban is
+      indistinguishable from a function that can never link anybody), and the live page is asserted to have
+      zero anchors inside a therapist card while the treatment cards on the same document have one each.'
+    - 'NOTE: SCOPED — the sticky bar''s destination. docs/09 §1 puts the booking flow at /book and that route
+      is another unit''s; a link to it from here would be an internal link that is not a 200. So the bar dials,
+      from the premises row (`tel:` on `contact.landline`, falling back to the mobile), and that is not a
+      placeholder for the flow: docs/13 §6 records that booking on the live site is WhatsApp and telephone
+      only, so it is the channel this business takes bookings on today. Everything the criterion measures is
+      unaffected and asserted — the lower third, a >=48px target, `env(safe-area-inset-bottom)` in the bar''s
+      padding AND in the spacer that stops a fixed bar covering the end of the document, and the bar in both
+      locales with its own copy. `bookActionFor` is the one place the destination is decided, so the unit that
+      lands /book changes one function.'
+    - 'NOTE: SCOPED — "the placeholder strings from the prototype appear zero times in the built output". The
+      prototype is not in this repository: assets/media/README.md records that its twenty-five IMAGES were
+      extracted and nothing else was, so its review section''s copy is not available to grep for. The one
+      string this repository holds verbatim is the note docs/13 §6 quotes — "swap in your real Google reviews
+      before publishing" — and it is the only entry in PLACEHOLDER_TESTIMONIAL_MARKERS marked `kind:
+      ''prototype''`. The rest are marked `placeholder-shape` and are NOT a guess at what the prototype said:
+      they are the forms a placeholder takes when somebody writes one (lorem ipsum, the two stand-in names
+      every template ships with, a bracketed instruction to whoever fills the section in), and the kind is a
+      field rather than a comment so the list cannot later be read as a transcription of the prototype — which
+      is brief rule 15 read the other way round. The real guarantee is the structural half of the same
+      criterion and it is stronger: `reviewSection` maps over review RECORDS, so a testimonial with no record
+      behind it has no route onto the page, and the live page''s rendered quotes are asserted equal to the rows
+      `readPublicReviews` returns. A gate fixture (74j) appends one unsourced card to the mapped rows and
+      proves the suite fails.'
+    - 'NOTE: the `100vh` check is a GATE and not a test, and the gate is the stronger form. `pnpm layout` rule
+      12 of 13, `[viewport-height-must-be-dynamic]`, already scans exactly the two roots the criterion names — CSS
+      and TS/TSX under packages/ui and apps/web, with comments blanked so a rule explained in prose is not a
+      violation of itself — and it reports by rule name, which is what lets scripts/test-gates.mjs assert a
+      known-bad fixture was rejected by THIS rule rather than by an unrelated one (cases 74a-74d, one fixture
+      per root, plus the control that `100dvh`, `100svh` and `100vw` are all accepted and the control that the
+      committed tree passes with the new rule named in its output). A unit test would have had to re-implement
+      the walk and would not have had a fixture. `100dvh`, `100svh` and `100lvh` contain no `100vh` substring,
+      so they need no exception; `calc(-100vh)` is deliberately caught, because a negative static viewport
+      height is the same unit.'
+    - 'NOTE: three defects found by a failing assertion rather than by reasoning, and each was silent. (1)
+      **The body rendered no `DesignSystemStyles`.** Every class name was on the page and every assertion about
+      text content passed — and the sticky bar computed `position: static`, so the one element whose whole
+      purpose is to sit in the thumb zone sat at the end of the document. It is this unit''s own defect and it
+      is why the suite reads computed styles rather than markup. (2) **`data-theme` is written only for a
+      STORED preference.** packages/ui/src/theme/theme.ts is right to do that — `system` must render no
+      attribute, or a system preference would pin a dark device to light — but it means Playwright''s
+      `colorScheme` alone does not establish a theme cell, and the four-cell first-paint sweep read
+      `data-theme: null` in all four. hero-lcp.itest.ts had already solved it by storing the preference in an
+      init script; this suite does the same, and the "the cell is the cell it claims to be" assertion is what
+      caught it. (3) **The framework baseline nothing measures**, in the budget NOTE above. (4) One in another
+      unit''s code that is not a defect but is worth recording: `revalidationPathsFor` and
+      `CONTENT_ROUTES_BY_KIND` both had to gain `home`, and the ISR page would otherwise have been correct on
+      the day it was built and wrong from the first price change or corrected telephone number, with nothing to
+      notice — so both are now asserted in this unit''s own test file and both have a gate fixture (74s).'
+    - 'NOTE: two shipped files of other units were touched, both additively, and one had no way to express what
+      this page needs. packages/ui/src/patterns/therapist-card.tsx: `href` and `portrait` became optional. The
+      first IS the publication guard — absent means no anchor element at all, not a disabled one, because an
+      `<a>` with no href is still announced as a link by some screen readers and `href="#"` scrolls the page —
+      and the two are separate props on purpose, since a therapist may be named and consented and still have no
+      BUILT derivative. With no portrait the card reserves the same box and paints the slot''s placeholder
+      colour, so the photograph arrives later with no layout shift; the linked and unlinked cards share one
+      `:where()` rule so the guard is not a visual difference. packages/ui/src/layout/section.tsx gained
+      `tabIndex?: -1`, which is the difference between a link that moves the page and a link that moves the
+      READER: a `<section id="about">` is a fragment target a browser scrolls to and will not focus, so without
+      it a keyboard user follows an in-page link and their focus stays on the link they just left. The 2px
+      landing assertion asserts both — the scroll position and `document.activeElement`.'
+    - 'NOTE: the gallery renders the three committed interiors (photos/spa-01..03) through SlotPicture, which
+      is the first route to render that component at all — its own header said W-SITE-04 would be. Their
+      derivative URLs are computed with `contentAddress`, the function the job addresses its output with, so
+      they are the URLs the pipeline produces; until the job has run they answer 404 and the page shows the
+      reserved box in the slot''s placeholder colour, which is the same visible consequence W-SYS-07 recorded
+      for the hero poster and is what the reserved box exists for. The media id is derived from the file''s own
+      path rather than invented, because a `mediaId` is a row id in a collection that has no rows. They are
+      `loading="lazy"` and never `priority`: exactly one element on a page may be the LCP candidate and it is
+      the hero, which is what keeps them out of the requests-before-LCP count.'
+    - 'NOTE: no migration, and no number taken. 0058 is unused and SCHEMA_VERSION is unchanged. Nothing on this
+      page is a row of its own: the copy is a module, the catalogue and the premises row are read through
+      `readPageFacts`, and the two reads this unit added — `readPublicTherapists` and `readPublicReviews` in
+      packages/db/src/queries/public-roster.ts — are SELECTs over tables 0030, 0050 and 0020 already created.
+      Neither duplicates an existing read, and the module says why: the availability read answers "who may take
+      this appointment", which excludes all nineteen therapists today because none has a credential row, and
+      the review queue answers "what needs a reply", which is the opposite selection from "what may be shown".'
+    - 'NOTE: a fourth defect, found by a brace count and worth a gate of its own. `biome check --write` on
+      packages/ui/src/patterns/therapist-card.tsx **silently destroyed three of its CSS rules.** The cause was
+      this unit''s own first mistake: the comment added above `.be-card__link` quoted `:where()` and
+      `grid-template-columns` in BACKTICKS, inside a file whose whole stylesheet is one template literal — so
+      the first backtick ended the literal and the rest of the file was parsed as JavaScript. Biome reported
+      the parse error, and then its error-recovery formatter reprinted the CSS it had read as JavaScript labels
+      **without the braces**: three `@container` rules became declarations belonging to nothing.
+
+      What makes it worth recording is that nothing failed. The stylesheet still shipped, every class name was
+      still in it, `pnpm colours` had nothing to say, `pnpm layout`''s container-component rule only looks for
+      `@media (min-width`, and the card simply stopped changing shape at 260, 340 and 420px — a layout nobody
+      inspects in three container sizes. So `pnpm layout` gained rule 13,
+      `[css-rule-must-have-a-block]`: a selector followed by a declaration with no `{` between them, which is
+      not a typo a person makes and is exactly what that reformat leaves behind. Cases 74u and 74v are the
+      fixture and the control. A brace-balance count was the obvious alternative and is worse here, because
+      this project assembles CSS from several template literals per file — slot-picture.tsx opens an `@media`
+      in one and closes it in another — so per-literal balance has false positives and whole-file balance lets
+      a missing pair cancel out. The rule found no other occurrence across 221 files.'
+    - 'NOTE: allocations. Gate block 74a-74v in scripts/test-gates.mjs, immediately before case 29. Port band
+      `home: { start: 8500, width: 300 }` in packages/harness/src/ports.ts, drawn by apps/web/src/home.itest.ts
+      and by nothing else — apps/web/src/test-ports.test.ts asserts both directions, so a band declared and
+      unused would have failed.'
     files:
-    - apps/web/app/(public)/page.tsx
-    - apps/web/src/sections/*.tsx
+    - apps/web/app/(en)/(public)/page.tsx
+    - apps/web/app/(ar)/ar/page.tsx
+    - apps/web/app/_home/home-page.tsx
+    - apps/web/src/home/content.ts
+    - apps/web/src/home/budget.ts
+    - apps/web/src/home/read.ts
+    - apps/web/src/home/copy-en.ts
+    - apps/web/src/home/copy-ar.ts
+    - apps/web/src/home/content.test.ts
+    - apps/web/src/home.itest.ts
+    - apps/web/src/media/home-gallery.ts
     - packages/ui/src/patterns/sticky-book-bar.tsx
-    - tests/perf/home-budget.spec.ts
-    - lighthouse/budget.json
+    - packages/db/src/queries/public-roster.ts
+    - scripts/check-layout-rules.mjs
+    - scripts/test-gates.mjs
   - id: W-SYS-08
     order: 141
     title: Payload CMS v3 embedded, content model and the catalogue boundary

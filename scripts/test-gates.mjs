@@ -17996,6 +17996,272 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 71a-71n. (C-CRM-02) E.164 normalisation and deterministic duplicate scoring.
+//
+//     Two of these cases are the known-bad fixtures the unit's acceptance list names by hand: a clock
+//     read and a database import inside packages/core/src/crm, proving that `pnpm purity` and
+//     dependency-cruiser's core-must-be-pure both fire on THIS package rather than on some other one.
+//     ADR 0003: a rule nobody has watched fail is not known to be a rule.
+//
+//     The rest are mutants, and they are chosen for one property: every one of them leaves a system that
+//     looks like it works. A duplicate detector cannot be judged by whether it returns something — it
+//     always does — so each case breaks one decision and names the assertion that must notice.
+//
+//     Three are worth reading before the code:
+//
+//     71e lowers the label `near` boundary below 750, which is what `Customer 0042` against
+//     `Customer 0043` measures. Those are two DIFFERENT records, and `near` crossed with an identical
+//     phone number is 0.98 — so the mutant silently auto-merges two siblings who share a family handset.
+//     Nothing about it looks like a bug; it looks like a slightly more generous matcher.
+//
+//     71h changes the trigram padding from two leading spaces to one. Every unit test still passes,
+//     because the scorer is then self-consistent — it is only WRONG relative to `pg_trgm`, which is what
+//     the candidate scan searches with. A scorer that disagrees with the index dismisses the pairs the
+//     index found and, worse, never sees the pairs it withheld. Only the integration suite can see it.
+//
+//     71i cuts the phone signal's own allowance, which is what a cap over the union amounts to: in this
+//     system every label is `Customer NNNN` and they all share one word, so label matches measure 0.647
+//     and outrank a transposed number at 0.5. The exact twin still comes back first and every headline
+//     assertion still passes; the near misses just quietly stop being candidates.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const PHONE = 'packages/core/src/crm/phone.ts'
+  const SCORE = 'packages/core/src/crm/duplicate-score.ts'
+  const CANDIDATES = 'packages/db/src/repositories/duplicate-candidates.ts'
+  const GOLDEN_FIXTURE = 'packages/core/test/fixtures/duplicate-pairs.json'
+
+  const CORE_SUITE = 'packages/core/src/crm'
+  const DUPLICATES_ITEST = 'packages/fixtures/src/crm-duplicates.itest.ts'
+
+  /** One anchored edit to a shipped file, asserting the anchor is still there AND that it moved. */
+  const ccrm02Mutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes the case vacuous rather than failing it: `String.replace` with
+        // a missing needle returns the text unchanged, and the mutant would be the shipped code passing
+        // its own tests. So it is an error, twice over — once for the missing anchor and once for an
+        // edit that happened to change nothing.
+        if (!text.includes(anchor)) {
+          throw new Error(`the C-CRM-02 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        const mutated = text.replace(anchor, replacement)
+        if (mutated === text) {
+          throw new Error(`the C-CRM-02 gate's edit to ${path} changed nothing: ${anchor}`)
+        }
+        return mutated
+      },
+      body,
+    )
+
+  // 71a. The clock read, in this package. The acceptance line asks for it by name: "the Date.now
+  //      known-bad fixture from ADR 0003 proves the purity gate fires on this package".
+  {
+    const fixture = 'packages/core/src/crm/__gate_fixture__.ts'
+    const result = withFixture(fixture, 'export const scoredAt = () => Date.now()', () =>
+      run('node', ['scripts/check-core-purity.mjs']),
+    )
+    checkRejectedBy(
+      'ccrm02 gate: a clock read in packages/core/src/crm is caught by the purity gate',
+      result,
+      'reading the clock',
+    )
+  }
+
+  // 71b. The other half of the same acceptance line: dependency-cruiser's core-must-be-pure, fired by a
+  //      database import in the scorer's own directory. `pnpm purity` scans for ambient globals and would
+  //      not notice an import at all, which is why both fixtures exist rather than one.
+  {
+    const fixture = 'packages/core/src/crm/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      [
+        "import postgres from 'postgres'",
+        'export const scanned = (url: string) => postgres(url)`select 1`',
+      ].join('\n'),
+      () =>
+        run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages/core']),
+    )
+    checkRejectedBy(
+      'ccrm02 gate: a database import in packages/core/src/crm is caught by core-must-be-pure',
+      result,
+      'core-must-be-pure',
+    )
+  }
+
+  // 71c. A foreign number rewritten onto the UAE country code. This is the tempting mutation: it makes
+  //      every number in the table look uniform, and it keys a British tourist as an Abu Dhabi customer —
+  //      onto a national number that belongs to somebody else.
+  checkRejectedBy(
+    'ccrm02 gate: a foreign number pasted onto the UAE country code is caught',
+    ccrm02Mutant(
+      PHONE,
+      "  return { ok: true, e164, matchKey: phoneMatchKey(e164), origin: 'foreign' }",
+      '  const local = `+971${digits.slice(-9)}` as E164\n' +
+        "  return { ok: true, e164: local, matchKey: phoneMatchKey(local), origin: 'foreign' }",
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'never rewrites a foreign number onto the UAE country code',
+  )
+
+  // 71d. The delegation removed, so B-LIFE-02's named refusals stop being forwarded and every UAE
+  //      landline falls through into the foreign branch. The number is then keyed — as a contact whose
+  //      "country code" is 02 — and the front desk is told nothing about why no code ever arrives.
+  checkRejectedBy(
+    'ccrm02 gate: a CRM key that stops forwarding B-LIFE-02 refusals is caught',
+    ccrm02Mutant(
+      PHONE,
+      "  if (uae.reason !== 'unsupported_country') return { ok: false, reason: uae.reason }",
+      '  // mutant: every refusal falls through to the foreign branch',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'landline_not_an_sms_target',
+  )
+
+  // 71e. The label `near` boundary lowered under the 750 that two DIFFERENT record serials measure. The
+  //      golden fixture holds that pair — one handset, `Customer 2014` and `Customer 2015` — and the
+  //      mutant merges them automatically. See the note above the block.
+  checkRejectedBy(
+    'ccrm02 gate: a label near-boundary that admits two different serials is caught',
+    ccrm02Mutant(
+      SCORE,
+      'export const LABEL_NEAR_THRESHOLD = 800',
+      'export const LABEL_NEAR_THRESHOLD = 700',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'zero false positives',
+  )
+
+  // 71f. A cell raised into the auto-merge band for a number that is NOT identical. One keystroke apart
+  //      plus an identical label then merges without a human — and in a country where families buy
+  //      numbers in a block, that is two siblings joined into one record.
+  checkRejectedBy(
+    'ccrm02 gate: an auto-merge reachable without an identical number is caught',
+    ccrm02Mutant(
+      SCORE,
+      '  one_digit_apart: Object.freeze({\n    identical: 900,',
+      '  one_digit_apart: Object.freeze({\n    identical: 960,',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'reaches the auto-merge band only where the number is identical',
+  )
+
+  // 71g. Symmetry broken in the one branch where argument order can matter. The candidate query returns
+  //      rows in whatever order the planner chose, so an asymmetric scorer gives a review queue whose
+  //      contents change when an index does.
+  checkRejectedBy(
+    'ccrm02 gate: an asymmetric phone classifier is caught',
+    ccrm02Mutant(
+      SCORE,
+      '  const [longer, shorter] =\n    left164.length > right164.length ? [left164, right164] : [right164, left164]',
+      '  const [longer, shorter] = [left164, right164]',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'symmetric',
+  )
+
+  // 71h. The trigram padding changed to one leading space. Self-consistent, so the whole unit suite goes
+  //      on passing; wrong relative to `pg_trgm`, which is what the candidate scan searches with.
+  checkRejectedBy(
+    'ccrm02 gate: trigram padding that disagrees with pg_trgm is caught',
+    ccrm02Mutant(SCORE, '    const padded = `  ${word} `', '    const padded = ` ${word} `', () =>
+      runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'agree about what "similar" means',
+  )
+
+  // 71i. The phone signal's allowance cut, which is what a cap over the union amounts to here. The exact
+  //      twin still ranks first and still comes back; the near misses stop being candidates.
+  checkRejectedBy(
+    'ccrm02 gate: a phone signal starved of its own candidate allowance is caught',
+    ccrm02Mutant(
+      CANDIDATES,
+      '      order by similarity(phone_match_key, ${probe.phoneMatchKey}) desc, id asc\n      limit ${probe.limit}',
+      '      order by similarity(phone_match_key, ${probe.phoneMatchKey}) desc, id asc\n      limit 1',
+      () => runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'every near miss',
+  )
+
+  // 71j. The `%` dropped from the label branch, leaving the similarity comparison alone. It selects
+  //      exactly the same rows and no trigram index can answer it, so the scan starts reading the whole
+  //      customer table — which is invisible until the table is large and then it is a timeout.
+  checkRejectedBy(
+    'ccrm02 gate: a candidate branch that cannot use the trigram index is caught',
+    ccrm02Mutant(
+      CANDIDATES,
+      "        and split_part(name_match_key, ':', 1) % ${probe.labelKey}",
+      '        and true',
+      () => runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'customer_name_fold_trgm_idx',
+  )
+
+  // 71k. The phone floor raised to the label floor's value, which is the shape a tidy-up takes: two
+  //      constants that look like they should be equal. 0.45 is above the 0.333 that the worst keyable
+  //      mistyped UAE number measures, so the scan stops finding a whole class of typo — and every
+  //      assertion about the exact twin, the plan and the budget goes on passing.
+  checkRejectedBy(
+    'ccrm02 gate: a phone floor raised above a real near miss is caught',
+    ccrm02Mutant(
+      CANDIDATES,
+      'export const DUPLICATE_PHONE_SIMILARITY_FLOOR = 0.3',
+      'export const DUPLICATE_PHONE_SIMILARITY_FLOOR = 0.45',
+      () => runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'keeps the phone floor below every near miss',
+  )
+
+  // 71l. The self-exclusion dropped, so every record is its own most similar candidate — at 1.0, in the
+  //      auto-merge band, for every row in the table. A merge queue whose first suggestion is always
+  //      "merge this record with itself" is one a human learns to dismiss.
+  checkRejectedBy(
+    'ccrm02 gate: a scan that returns the record being checked is caught',
+    ccrm02Mutant(
+      CANDIDATES,
+      '    where ${probe.excludeCustomerId}::uuid is null or c.id <> ${probe.excludeCustomerId}::uuid',
+      '    where true',
+      () => runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'never returns the record being checked',
+  )
+
+  // 71m. The empty-probe refusal removed. `similarity('', anything)` is 0 for every row, so the scan
+  //      returns an empty list — indistinguishable from a record that genuinely has no duplicates, which
+  //      is the one answer a duplicate detector must never give by accident.
+  checkRejectedBy(
+    'ccrm02 gate: an empty probe answered with "no duplicates" is caught',
+    ccrm02Mutant(
+      CANDIDATES,
+      '  if (phoneMatchKey.length === 0 && labelKey.length === 0) {',
+      '  if (false) {',
+      () => runExpectingFailure('pnpm', integration(DUPLICATES_ITEST)),
+    ),
+    'refuses a probe with no keys',
+  )
+
+  // 71n. A committed score edited in the golden fixture. This is the acceptance line "any change to a
+  //      committed score fails the test" turned round: the fixture is the thing under test here, and a
+  //      score edited in it — by a merge, by an editor, by somebody regenerating it to make a red test
+  //      green — must fail rather than redefine the policy.
+  checkRejectedBy(
+    'ccrm02 gate: an edited score in the golden fixture is caught',
+    ccrm02Mutant(GOLDEN_FIXTURE, '      "scorePerMille": 720,', '      "scorePerMille": 960,', () =>
+      runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'score',
+  )
+}
+
 // 72a-72x. (C-CRM-03) Consent: the resolver that must fail closed, the append-only tables, and the hash
 //          that makes a tampered wording detectable.
 //
@@ -18860,6 +19126,416 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       !clean.failed && modules > 100,
       `modules=${modules}\n${String(clean.output)}`,
     )
+  }
+}
+
+// 74a-74v. (W-SITE-04) The home page: the static viewport height that must be a red build, the CSS rule
+//           that lost its braces to a formatter, the anchor contract, the publication guard on a therapist
+//           card, the testimonial that must have a record behind it, and the five budget numbers.
+//
+//     Everything below is a known-bad fixture for something that is silent when it breaks. That is the
+//     property the whole block is chosen for: a page with `100vh` on it looks right on a desk and pushes its
+//     primary action under the toolbar on a phone; a therapist card that gained a link looks like a working
+//     link and publishes a photograph nobody consented to; a budget whose number was raised still passes.
+//
+//     Two things this block deliberately does NOT gate, and both are stated rather than left as a gap. The
+//     sticky bar's geometry and the LCP element are claims about a rendered document — the lower third, a
+//     48px target, `env(safe-area-inset-bottom)`, a `largest-contentful-paint` entry — so their fixtures
+//     would have to start a `next start` and drive Chromium, which is what `apps/web/src/home.itest.ts` does
+//     and what `pnpm gates:test` must not grow into. The suite's own vacuity guards carry that half: the LCP
+//     case fails on an empty entry list, and the therapist case asserts the treatment cards on the same
+//     document DO have anchors, so "no anchors" cannot pass because the scanner found nothing.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const LAYOUT = ['scripts/check-layout-rules.mjs']
+  const CONTENT = 'apps/web/src/home/content.ts'
+  const BUDGET = 'apps/web/src/home/budget.ts'
+  const COPY = 'apps/web/src/home/copy-en.ts'
+  const HOME_TEST = 'apps/web/src/home/content.test.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const CONTENT_REVALIDATE = 'apps/web/src/revalidate/content.ts'
+  const CATALOGUE_REVALIDATE = 'apps/web/src/revalidate/catalogue.ts'
+
+  // 74a. The rule this unit added to `pnpm layout`. docs/09 §3: "100dvh never 100vh" — and `vh` is the LARGE
+  //      viewport height, so an element sized with it is taller than the visible area for as long as the
+  //      browser's own toolbar is showing. The fixture is in `apps/web`, one of the two scanned roots.
+  {
+    const fixture = 'apps/web/src/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      'export const SHEET = `.pane { block-size: 100vh; }`\n',
+      () => runExpectingFailure('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'a static viewport height in apps/web is rejected',
+      result,
+      '[viewport-height-must-be-dynamic]',
+    )
+  }
+
+  // 74b. The other root. The design system is where a `100vh` would be written once and inherited everywhere,
+  //      so a rule that only scanned the application would miss the copy that matters most.
+  {
+    const fixture = 'packages/ui/src/__gate_fixture__.css'
+    const result = withFixture(fixture, '.sheet { max-block-size: 100vh; }\n', () =>
+      runExpectingFailure('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'a static viewport height in packages/ui is rejected',
+      result,
+      '[viewport-height-must-be-dynamic]',
+    )
+  }
+
+  // 74c. The control, and it is the one that stops the rule being a ban on viewport units. `dvh` is the whole
+  //      point — an element that has to be as tall as the window still needs a unit — so a rule that refused
+  //      `100dvh` would be refused by every author and deleted.
+  {
+    const fixture = 'packages/ui/src/__gate_fixture__.css'
+    const clean = withFixture(
+      fixture,
+      '.sheet { max-block-size: 100dvh; block-size: 100svh; inline-size: 100vw; }\n',
+      () => run('node', LAYOUT),
+    )
+    check(
+      'the dynamic viewport height, the small one and the width are all accepted',
+      !clean.failed,
+      String(clean.output),
+    )
+  }
+
+  // 74d. And the committed tree passes, with the new rule named in what it prints — so a rule that had
+  //      silently stopped running would not be reported as a pass by the two cases above.
+  {
+    const clean = run('node', LAYOUT)
+    check(
+      'the layout gate holds on the committed tree and names the new rule',
+      !clean.failed && String(clean.output).includes('no static viewport height'),
+      String(clean.output),
+    )
+  }
+
+  // 74u. Rule 13, and it is the one case in this block written because the defect HAPPENED rather than
+  //      because it could. `biome check --write` was run on therapist-card.tsx while a backtick inside a CSS
+  //      comment was ending its template literal early; Biome's error-recovery parse read the CSS as
+  //      JavaScript and reprinted three `@container` rules without their braces. Nothing failed — the
+  //      stylesheet still shipped, every class name was still there, and the card simply stopped changing
+  //      shape at 260, 340 and 420px.
+  {
+    const fixture = 'packages/ui/src/patterns/__gate_fixture__.tsx'
+    const result = withFixture(
+      fixture,
+      'export const CSS = `\n@container card (min-width: 260px) {\n  .be-thing --card-layout: compact;\n}\n`\n',
+      () => runExpectingFailure('node', LAYOUT),
+    )
+    checkRejectedBy(
+      'a CSS rule that lost its braces to a formatter is rejected',
+      result,
+      '[css-rule-must-have-a-block]',
+    )
+  }
+
+  // 74v. The control, and it is what keeps the rule from being a ban on declarations: the same fixture WITH
+  //      its braces is accepted. A pattern that refused a well-formed rule would be deleted within a week,
+  //      and one that refused nothing would never be noticed.
+  {
+    const fixture = 'packages/ui/src/patterns/__gate_fixture__.tsx'
+    const clean = withFixture(
+      fixture,
+      'export const CSS = `\n@container card (min-width: 260px) {\n  .be-thing { --card-layout: compact; }\n}\n.be-thing__body { display: flex; gap: var(--space-3); }\n`\n',
+      () => run('node', LAYOUT),
+    )
+    check(
+      'a well-formed CSS rule in a container component is accepted',
+      !clean.failed,
+      String(clean.output),
+    )
+  }
+
+  // 74e. The anchor contract, first half: the six ids. `/#services` is a URL a reader may have bookmarked and
+  //      a Google Business Profile link may point at, so a dropped section is a broken inbound link and not a
+  //      layout change.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          "export const HOME_SECTIONS = ['about', 'services', 'team', 'gallery', 'reviews', 'contact'] as const",
+          "export const HOME_SECTIONS = ['about', 'services', 'team', 'reviews', 'contact'] as const",
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('dropping an anchor id fails the home suite', result, 'gallery')
+  }
+
+  // 74f. The second half: the ORDER. docs/09 §"Routes versus anchors" keeps the prototype's anchored
+  //      single-page feel, and the order is part of what a reader recognises — a reordered page with the same
+  //      six ids is a different page and no id would be missing to say so.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          "export const HOME_SECTIONS = ['about', 'services', 'team', 'gallery', 'reviews', 'contact'] as const",
+          "export const HOME_SECTIONS = ['services', 'about', 'team', 'gallery', 'reviews', 'contact'] as const",
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('reordering the anchor ids fails the home suite', result, 'services')
+  }
+
+  // 74g. The publication guard, in the direction that does harm. ADR 0020 needs a display name AND a recorded
+  //      photography consent before a therapist has a page; a card that links anyway publishes a page for a
+  //      person who has not agreed to be named, and it looks like a working link.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '  const target = row.isPublishable ? href(row) : null',
+          '  const target = href(row)',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a card that links an unconsented therapist fails the home suite',
+      result,
+      'unconsented therapist card carries no link',
+    )
+  }
+
+  // 74h. The other direction, which is the control the guard cannot do without: a function that never returns
+  //      an href satisfies "no anchor on an unconsented card" for every input, so the assertion above would
+  //      pass on a card component that could not link anybody.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '  const target = row.isPublishable ? href(row) : null',
+          '  const target = null as string | null',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('a card that can never link anybody fails the control', result, 'the control')
+  }
+
+  // 74i. The resolver. `/therapists/[slug]` is W-SITE-06's route and does not exist, so a resolver that
+  //      returned a path would put a link to a 404 on the home page — which is the first rule the link-graph
+  //      invariant refuses, and it would take a built site and a crawl to find out.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          'export const NO_THERAPIST_ROUTE: TherapistHref = () => null',
+          'export const NO_THERAPIST_ROUTE: TherapistHref = (row) => `/therapists/${row.staffReference}`',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a therapist route that does not exist cannot be linked',
+      result,
+      'no therapist route exists',
+    )
+  }
+
+  // 74j. The testimonial that has no record behind it — the exact shape the criterion is about. A card
+  //      appended to the mapped rows is what a "featured quote" hard-coded into a section looks like from the
+  //      outside, and the page would render it beside the real ones.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '  return { cards, isEmpty: cards.length === 0 }',
+          "  const featured = { id: 'featured', googleReviewId: 'featured', rating: 5, quote: 'Lorem ipsum', attribution: 'John Doe' }\n" +
+            '  return { cards: [...cards, featured], isEmpty: false }',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a testimonial with no review record behind it fails the home suite',
+      result,
+      'no testimonial without a review record',
+    )
+  }
+
+  // 74k. The placeholder scan, blinded. A scanner that finds nothing reports zero occurrences on every page
+  //      ever written, which is ADR 0002's whole subject with a grep attached.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '  return PLACEHOLDER_TESTIMONIAL_MARKERS.filter((marker) =>',
+          '  return [].filter((marker) =>',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('a placeholder scan that finds nothing fails', result, 'placeholder marker')
+  }
+
+  // 74l. The provenance. Exactly one entry claims to be prototype copy and it is the one docs/13 §6 quotes
+  //      verbatim; the rest are labelled as shapes a placeholder takes. Losing that distinction is how a list
+  //      of invented strings comes to be read as a transcription of the prototype (brief rule 15).
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) => text.replace("    kind: 'prototype',", "    kind: 'placeholder-shape',"),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a marker list with no prototype quotation fails',
+      result,
+      'which kind each marker is',
+    )
+  }
+
+  // 74m. The rating markers, blinded the same way. docs/09 §"Schema types": Google's rules on self-serving
+  //      review markup are strict, and an `AggregateRating` with nothing behind it is the violation that
+  //      earns a manual action rather than a warning.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '  return AGGREGATE_RATING_MARKERS.filter((marker) => text.includes(marker))',
+          '  return AGGREGATE_RATING_MARKERS.filter(() => false)',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('a rating scan that finds nothing fails', result, 'rating spelling')
+  }
+
+  // 74n. A budget number raised. This is the failure `scripts/check-budgets.mjs` names in its own header —
+  //      "a budget with no stated reason gets raised the first time it fails, which makes it decoration" —
+  //      and the unit test pins all five against docs/08 §8 for exactly that reason.
+  {
+    const result = withEditedFile(
+      BUDGET,
+      (text) => text.replace('    limit: 110 * KIB,', '    limit: 220 * KIB,'),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('a raised home budget fails the home suite', result, 'first-party-js')
+  }
+
+  // 74o. The comparison itself. `<=` is what makes a page exactly at the budget pass, which is what docs/08
+  //      §8's "≤" says — and a gate that fired one byte early would be raised rather than obeyed.
+  {
+    const result = withEditedFile(
+      BUDGET,
+      (text) =>
+        text.replace(
+          '    if (value <= limit.limit) continue',
+          '    if (value < limit.limit) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a budget that fires at the limit rather than over it fails',
+      result,
+      'exactly at the limit',
+    )
+  }
+
+  // 74p. The measured value in the message. The acceptance says the budget fails "with the measured value",
+  //      and it is not decoration: the first question anybody asks of a breached budget is by how much, and a
+  //      failure that does not say costs a second build to find out.
+  {
+    const result = withEditedFile(
+      BUDGET,
+      (text) =>
+        text.replace(
+          '  return `[home-budget-over] ${limit.metric}: measured ${shown}. ${limit.why}`',
+          '  return `[home-budget-over] ${limit.metric}: over budget`',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a budget failure with no measured value in it fails',
+      result,
+      'oversized fixture',
+    )
+  }
+
+  // 74q. The vocabulary. `treatment`, `therapy` and `medical` are on `regulatory_profile.banned_claim_terms`
+  //      under the seeded profile, and this page's rendered copy goes through that lint — so a heading that
+  //      used the ordinary English word would fail `next build` rather than publish a claim the licence does
+  //      not support. The unit test is what names the word instead of naming the page.
+  {
+    const result = withEditedFile(
+      COPY,
+      (text) => text.replace("      heading: 'The menu',", "      heading: 'Our treatments',"),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('a banned claim term in the home copy fails', result, 'treatment')
+  }
+
+  // 74r. The locality. docs/09 §"The brand collision": an international airport-spa chain trades under a
+  //      similar short name and has an outlet in this city, and this district has three names in use — so an
+  //      assistant that only knows one of them cannot match a query using another to this business. Dropping
+  //      the aliases is the version that looks finished.
+  {
+    const result = withEditedFile(
+      CONTENT,
+      (text) =>
+        text.replace(
+          '      : `${facts.address.area} (${aliases.join(` ${and} `)})`',
+          '      : facts.address.area',
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy('dropping the district aliases fails the home suite', result, 'Alias')
+  }
+
+  // 74s. The two publish loops. An ISR page that nothing revalidates is a page that is correct on the day it
+  //      is built and wrong from the first edit — and there is no failure to notice, which is what makes it
+  //      worth a gate rather than a convention.
+  {
+    const premises = withEditedFile(
+      CONTENT_REVALIDATE,
+      (text) =>
+        text.replace(
+          "  premises: ['home', 'spa', 'contact', 'about'],",
+          "  premises: ['spa', 'contact', 'about'],",
+        ),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a home page absent from the premises publish loop fails',
+      premises,
+      'premises row changes',
+    )
+
+    const catalogue = withEditedFile(
+      CATALOGUE_REVALIDATE,
+      (text) => text.replace("    paths.add(pathFor(routeById('home'), locale))", ''),
+      () => runExpectingFailure('pnpm', unit(HOME_TEST)),
+    )
+    checkRejectedBy(
+      'a home page absent from the catalogue publish loop fails',
+      catalogue,
+      'catalogue changes',
+    )
+  }
+
+  // 74t. The rendering mode. `static` is evaluated during `next build` with no database, so a home page
+  //      declared static cannot read the premises row, the catalogue or the roster — and the page would then
+  //      throw at build rather than render silently, which is the good failure. The registry suite is what
+  //      says so in two seconds and names the route.
+  {
+    const result = withEditedFile(
+      REGISTRY,
+      (text) =>
+        text.replace(
+          "    id: 'home',\n    path: '/',\n    kind: 'document',\n    rendering: 'isr',",
+          "    id: 'home',\n    path: '/',\n    kind: 'document',\n    rendering: 'static',",
+        ),
+      () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
+    )
+    checkRejectedBy('a home route declared static fails the registry suite', result, 'home')
   }
 }
 

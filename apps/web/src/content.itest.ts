@@ -828,9 +828,15 @@ describe('acceptance — the link graph over the built site', () => {
       expect(report.coverage.internal_link_not_200, locale).toBeGreaterThan(40)
       // And every page really is inside the budget, reported rather than implied.
       expect(Math.max(...report.depths.values()), locale).toBeLessThanOrEqual(3)
-      // The treatment pages are two clicks away — home, index, page — which is what a hub and its spokes is.
+      // The treatment pages are ONE click away, and they were two until W-SITE-04. That unit put a card per
+      // published service on the home page, each linking to its own page — which is docs/09 §"Routes versus
+      // anchors" in one sentence: "anchors serve homepage navigation; routes earn the rankings". The index is
+      // still there and is still the hub every archived treatment 301s to; the spokes are now also reachable
+      // from the page every reader arrives on, which is a shorter path to the most valuable pages on the site
+      // and not a change to the hub. Asserted as an exact depth rather than `<= 2`, so a card that stopped
+      // linking out fails here as well as in the home suite.
       const treatment = localisedPath(`/treatments/${facts.catalogue.services[0]?.slug}`, locale)
-      expect(report.depths.get(treatment), treatment).toBe(2)
+      expect(report.depths.get(treatment), treatment).toBe(1)
     }
   }, 300_000)
 

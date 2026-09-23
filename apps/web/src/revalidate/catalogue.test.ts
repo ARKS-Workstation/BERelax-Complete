@@ -22,9 +22,16 @@ describe('acceptance — one catalogue change invalidates every page that render
 
   it('covers the treatment page, the index and /pricing, in both locales', () => {
     const paths = revalidationPathsFor(change)
-    // Six paths: three pages, two locales. Enumerated rather than counted, because the mistake to catch is a
+    // Eight paths: four pages, two locales. Enumerated rather than counted, because the mistake to catch is a
     // missing member and a count would pass on a duplicate.
+    //
+    // `/` and `/ar` joined the set with W-SITE-04, which put a treatments overview on the home page — one card
+    // per published service, carrying the service's own name. A rename that reached the treatment page and the
+    // index and left `/` naming the old treatment would be the rename not having happened on the one document
+    // every crawler fetches first.
     expect([...paths].sort()).toEqual([
+      '/',
+      '/ar',
       '/ar/pricing',
       '/ar/treatments',
       '/ar/treatments/asian-normal-massage',
@@ -55,7 +62,7 @@ describe('acceptance — one catalogue change invalidates every page that render
     // anybody who had that link, which is exactly the traffic the redirect exists for.
     expect(renamed).toContain('/treatments/asian-normal')
     expect(renamed).toContain('/ar/treatments/asian-normal')
-    expect(renamed).toHaveLength(8)
+    expect(renamed).toHaveLength(10)
     // A "rename" to the same slug adds nothing, rather than a path equal to one already in the set.
     expect(
       revalidationPathsFor({
@@ -63,7 +70,7 @@ describe('acceptance — one catalogue change invalidates every page that render
         slug: 'asian-normal-massage',
         previousSlug: 'asian-normal-massage',
       }),
-    ).toHaveLength(6)
+    ).toHaveLength(8)
   })
 
   it('names all five artefacts on every kind of change', async () => {

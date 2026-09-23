@@ -17,5 +17,13 @@ export type { ServiceRowLayout, ServiceRowProps } from './service-row.tsx'
 export { SERVICE_ROW_CSS, SERVICE_ROW_LAYOUTS, ServiceRow } from './service-row.tsx'
 export type { Slot, SlotGridProps, SlotSelection } from './slot-grid.tsx'
 export { SLOT_GRID_COLUMNS, SLOT_GRID_CSS, SlotGrid } from './slot-grid.tsx'
+export type { BookBarLayout, StickyBookBarProps } from './sticky-book-bar.tsx'
+export {
+  BOOK_BAR_CSS,
+  BOOK_BAR_LAYOUTS,
+  BOOK_BAR_SPACER_CLASS,
+  BookBarSpacer,
+  StickyBookBar,
+} from './sticky-book-bar.tsx'
 export type { TherapistCardLayout, TherapistCardProps } from './therapist-card.tsx'
 export { THERAPIST_CARD_CSS, THERAPIST_CARD_LAYOUTS, TherapistCard } from './therapist-card.tsx'

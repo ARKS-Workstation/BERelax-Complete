@@ -112,7 +112,7 @@ export const ROUTES = [
     id: 'home',
     path: '/',
     kind: 'document',
-    rendering: 'static',
+    rendering: 'isr',
     locales: LOCALES,
     indexable: true,
     sitemap: true,
@@ -120,7 +120,12 @@ export const ROUTES = [
     why:
       'The home page, in both locales. Weekly rather than daily: the hero, the proof and the ' +
       'treatments overview change when the catalogue does, and claiming daily change on a page that ' +
-      'does not change teaches a crawler to ignore the hint.',
+      'does not change teaches a crawler to ignore the hint. ISR since W-SITE-04, which is what docs/09 ' +
+      '§1 lists it as: the page is composed from the premises row, the catalogue and the roster, and ' +
+      'while it was `static` it could carry neither the locality beside the trading name nor a JSON-LD ' +
+      'block, because a static route is evaluated during `next build` and the build has no database. ' +
+      'Both were deferred here by name — by the page itself and by structured-data.itest.ts — and a ' +
+      'correction now reaches it by revalidation rather than by a deploy.',
   },
   {
     id: 'about',

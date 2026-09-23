@@ -198,6 +198,13 @@ const NO_CATALOGUE = { includeCatalogue: false } as const
  * document, which is what that flag exists to prevent.
  */
 const GRAPH_ROUTES = [
+  // `/` and `/ar` carry a block since W-SITE-04. They take `NO_CATALOGUE` for the reason `/spa` and
+  // `/contact` do and one more of their own: the home page's treatments overview is eight LINKS to the eight
+  // pages that each publish their own `Service` and four `Offer`s, so republishing all forty nodes here would
+  // put the reconciliation problem `includeCatalogue` exists to prevent on the one document every crawler
+  // fetches first.
+  { id: 'home' as const, locale: 'en' as const, path: '/', options: NO_CATALOGUE },
+  { id: 'home' as const, locale: 'ar' as const, path: '/ar', options: NO_CATALOGUE },
   { id: 'kitchen-sink' as const, locale: 'en' as const, path: '/kitchen-sink', options: {} },
   { id: 'kitchen-sink' as const, locale: 'ar' as const, path: '/ar/kitchen-sink', options: {} },
   { id: 'treatments' as const, locale: 'en' as const, path: '/treatments', options: {} },
@@ -282,9 +289,11 @@ describe('every JSON-LD block on every registry document came out of a builder',
           expect(blocks, `${path} should carry one block`).toHaveLength(1)
           continue
         }
-        // `/` and `/ar` are statically prerendered, so `next build` would have to read the database to
-        // produce a block and CI applies the migrations after the build. W-SITE-04 renders the home page
-        // under ISR and puts the block there. Until then the honest state is no block at all.
+        // Nothing else may carry one. This branch used to hold `/` and `/ar` — they were statically
+        // prerendered, so `next build` would have had to read a database CI seeds after the build — and
+        // W-SITE-04 made the route ISR and put the block on it, which is what the deferral above said it
+        // would. The branch is kept because it is the half that catches a hand-written block on a page
+        // nobody thought about, which is the property this case is for.
         expect(blocks, `${path} carries a JSON-LD block nothing in this unit builds`).toEqual([])
       }
     }
@@ -580,19 +589,14 @@ describe('the registry is the list of routes this unit had to consider', () => {
       'treatments',
       'treatment',
     ])
-    // `string` rather than the id union: the set is asked about `home`, which renders no graph and is
-    // therefore not one of `GRAPH_ROUTES`' ids — the whole point of the question.
+    // `string` rather than the id union, so a route id that leaves the registry is a failure here rather than
+    // a type error in a test that was asking about it.
     const decided = new Set<string>(GRAPH_ROUTES.map((route) => route.id))
     for (const route of indexable) {
-      if (route.id === 'home') {
-        // The one deferral left, and the reason is its rendering mode: `home` is `rendering: 'static'`, so its
-        // markup is evaluated during `next build` with no read of its own. W-SITE-04 renders it under ISR and
-        // puts the block on it. Asserted rather than commented, so the day the registry says `isr` this test
-        // says so too — and the three W-SITE-05 routes are `isr` precisely because they do read.
-        expect(route.rendering, route.id).toBe('static')
-        expect(decided.has(route.id), 'home renders a graph now').toBe(false)
-        continue
-      }
+      // One deferral left, and it is B-UI-01's rather than this route's. `home` was the other, and its
+      // reason was its rendering mode — a `rendering: 'static'` route is evaluated during `next build` with
+      // no read of its own, so it could produce no graph. W-SITE-04 made it `isr` and put the block on it,
+      // which is what the previous version of this loop said would happen.
       if (route.id === 'book') {
         /*
           B-UI-01's booking flow, and the second stated deferral. Its rendering mode is the reason, and it

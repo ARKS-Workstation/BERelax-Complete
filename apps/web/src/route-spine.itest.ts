@@ -661,9 +661,12 @@ describe('acceptance — the registry agrees with what the build produced', () =
         continue
       }
       // `isr` is prerendered exactly as `static` is — the difference is that it was built from the database
-      // and is replaced by on-demand revalidation, not that it is built later.
+      // and is replaced by on-demand revalidation, not that it is built later. Written as "not dynamic"
+      // rather than as the two-way disjunction it used to be: W-SITE-04 made `home` the last `static` route
+      // `isr`, so `rendering === 'static'` became a comparison the compiler can prove is never true, and a
+      // condition that can never hold is a condition that has stopped saying anything.
       expect(prerendered.has(path), `${path} is declared ${route.rendering}`).toBe(
-        route.rendering === 'static' || route.rendering === 'isr',
+        route.rendering !== 'dynamic',
       )
     }
   })

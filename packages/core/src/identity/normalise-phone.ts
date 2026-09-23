@@ -123,8 +123,15 @@ function transliterateDigits(input: string): string {
  * `00` and `+` mean the same thing and both mean "what follows is a country code", which matters:
  * without that flag, `00971...` and `0971...` are indistinguishable and one of them is a Dubai
  * landline with an extra digit.
+ *
+ * Exported for `crm/phone.ts` (C-CRM-02), which keys a contact whose number is NOT in the UAE — a
+ * number this module refuses by design, because it cannot send an SMS to it. That module needs the
+ * same digits this one parsed, and the alternative was a second copy of {@link DIGIT_TRANSLITERATIONS}
+ * and {@link SEPARATORS} in the CRM: two definitions of what an Arabic-keyboard `٠٥٠` is, drifting
+ * apart the first time either is extended. It is the folding that is shared, never the verdict —
+ * `normalisePhoneResult` remains the only thing that decides whether a number is an SMS target.
  */
-function tokenise(raw: string): { digits: string; international: boolean } {
+export function phoneTokens(raw: string): { digits: string; international: boolean } {
   const compact = transliterateDigits(raw).replace(SEPARATORS, '')
   if (compact.startsWith('+')) return { digits: compact.slice(1), international: true }
   if (compact.startsWith('00')) return { digits: compact.slice(2), international: true }
@@ -153,7 +160,7 @@ function classifyNsn(nsn: string): PhoneNormalisation {
  * body. {@link normalisePhone} is the throwing form for call sites where a bad number is a bug.
  */
 export function normalisePhoneResult(raw: string): PhoneNormalisation {
-  const { digits, international } = tokenise(raw)
+  const { digits, international } = phoneTokens(raw)
   if (digits.length === 0) return { ok: false, reason: 'empty' }
   if (!/^\d+$/.test(digits)) return { ok: false, reason: 'not_digits' }
 

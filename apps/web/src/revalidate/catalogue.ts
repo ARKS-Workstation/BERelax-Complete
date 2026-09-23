@@ -77,6 +77,12 @@ export function revalidationPathsFor(change: CatalogueChange): readonly string[]
     }
     paths.add(pathFor(routeById('treatments'), locale))
     paths.add(pathFor(routeById('pricing'), locale))
+    // The home page, added by W-SITE-04. Its treatments overview is one card per published service with the
+    // service's own name on it, so a rename or an archival changes what `/` says — and `/` is the page a
+    // crawler fetches first. It is not in `CATALOGUE_ARTEFACTS`, because that list is the five artefacts the
+    // criterion names and this is a sixth surface rather than a sixth artefact: what changes on it is the
+    // treatment page's own name, already asserted.
+    paths.add(pathFor(routeById('home'), locale))
   }
   return [...paths]
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Eleven rules about layout, motion and elevation that a design document cannot enforce on its own.
+ * Thirteen rules about layout, motion and elevation that a design document cannot enforce on its own.
  *
  * Each violation is reported with its **rule name** first, so `scripts/test-gates.mjs` can assert that a
  * known-bad fixture was rejected by the rule written for it. A bare non-zero exit is how a gate ends up
@@ -61,6 +61,34 @@
  * imported only by an island, so that the fence above applies to it too — and a component that reaches
  * for it directly gets a build failure rather than a page that now carries an animation runtime.
  *
+ * **12. `viewport-height-must-be-dynamic`.** docs/09 §3, in the list of booking-flow mechanics: *"`100dvh`
+ * never `100vh`"*. `vh` is the **large** viewport height, which on a phone is the height the window has when
+ * the browser's own toolbars are hidden — so an element sized `100vh` is taller than the visible area for as
+ * long as the toolbar is showing, and the bottom of it, which on a booking flow is the primary action, is
+ * underneath the toolbar. `dvh` is the height that is actually there right now. The unit reads as a
+ * reasonable default and is wrong on the devices most of this site's traffic arrives on, which is exactly the
+ * kind of mistake a grep can catch and a review does not: nobody looks at `100vh` twice.
+ *
+ * Counted in every scanned file, tests included, because a test that asserted a layout against `100vh` would
+ * be asserting the defect. `100dvh`, `100svh` and `100lvh` are all left alone — the ban is on the static
+ * unit, not on viewport units.
+ *
+ * **13. `css-rule-must-have-a-block`.** A selector followed by a declaration with no `{` between them.
+ * That is not a typo anybody makes by hand — it is what a **destructive reformat of a template literal**
+ * leaves behind, and this rule exists because it happened. `biome check --write` was run on
+ * `packages/ui/src/patterns/therapist-card.tsx` while the file had a parse error elsewhere in it (a backtick
+ * inside a CSS comment, which ends the template literal early); Biome's error-recovery parse read the CSS as
+ * JavaScript labels and reprinted it without its braces, and three `@container` rules became declarations
+ * belonging to nothing. Nothing failed. The stylesheet still shipped, the class names were all still there,
+ * `pnpm colours` and rules 1-12 had nothing to say, and the card simply stopped changing shape at 260, 340
+ * and 420px — which is a layout nobody looks at in three container sizes.
+ *
+ * The signature is narrow on purpose: a line whose first non-space character begins a selector (`.`, `#`,
+ * `:` or `@`), which then contains `property: value;`, and which has no `{` on it at all. A brace-balance
+ * count would be the obvious alternative and is worse here, because this project's CSS is assembled from
+ * several template literals per file — `slot-picture.tsx` opens an `@media` in one and closes it in
+ * another — so per-literal balance has false positives and whole-file balance lets a missing pair cancel out.
+ *
  * Scanned: CSS and TS/TSX under `packages/ui` and `apps/web` — the design system and the app that
  * renders it. Component CSS in this project is authored in template literals (see
  * `packages/ui/src/layout/styles.tsx`), so the scanner reads the whole file with comments blanked rather
@@ -115,6 +143,23 @@ const RTL_SELECTOR = /\[dir\s*=\s*['"]?rtl['"]?\]|:dir\(\s*rtl\s*\)/i
 const DARK_SCOPE = /\[data-theme\s*=\s*['"]?dark['"]?\]|prefers-color-scheme\s*:\s*dark/i
 const ANIMATION_DECLARATION = /(^|[;{\s])animation(-name)?\s*:/i
 const MEDIA_WIDTH_QUERY = /@media[^{;]*\(\s*(min|max)-width/i
+/**
+ * The static viewport height, and nothing else.
+ *
+ * Global, so every occurrence in a file is reported rather than the first — a stylesheet that used the unit
+ * once used it three times. `100dvh`, `100svh` and `100lvh` do not contain the substring at all, so they need
+ * no exception. The lookbehind keeps `1100vh` and `x.100vh` out and deliberately lets `calc(-100vh)` in: a
+ * negative static viewport height is the same unit and the same defect.
+ */
+const STATIC_VIEWPORT_HEIGHT = /(?<![\w.])100vh\b/gi
+/**
+ * A selector and a declaration on one line with no block between them. Rule 13.
+ *
+ * Anchored at the start of a line and requiring the whole line to be selector-then-declaration, so a
+ * declaration inside a block (which begins with a property name, not with `.`, `#`, `:` or `@`) cannot match,
+ * and neither can any line carrying a `{`.
+ */
+const CSS_RULE_WITHOUT_BLOCK = /^[ \t]*[.#:@][^{};\n]*?[ \t]+[-\w]+[ \t]*:[ \t]*[^;{}\n]+;[ \t]*$/gm
 const BOX_SHADOW_DECLARATION = /(^|[;{\s])box-shadow\s*:\s*([^;}\n]+)/gi
 /** Global, because rule 2 has to see every keyframes name in the file, not just the first. */
 const KEYFRAMES_NAMES = /@keyframes\s+([A-Za-z_][\w-]*)/g
@@ -339,6 +384,27 @@ for (const root of ROOTS) {
       )
     }
 
+    // Rule 12 — the static viewport height, anywhere in either root.
+    for (const match of text.matchAll(STATIC_VIEWPORT_HEIGHT)) {
+      violations.push(
+        `${file}:${lineAt(text, match.index)}  [viewport-height-must-be-dynamic] '${match[0]}' — ` +
+          'docs/09 §3: "100dvh never 100vh". vh is the LARGE viewport height, so on a phone this is ' +
+          "taller than the visible area for as long as the browser's own toolbar is showing, and " +
+          'whatever is at the bottom of the element — on a booking flow, the primary action — is ' +
+          'underneath it. Use dvh.',
+      )
+    }
+
+    // Rule 13 — a selector and a declaration with no block between them.
+    for (const match of text.matchAll(CSS_RULE_WITHOUT_BLOCK)) {
+      violations.push(
+        `${file}:${lineAt(text, match.index)}  [css-rule-must-have-a-block] '${match[0].trim()}' — a ` +
+          'selector followed by a declaration with no braces. This is what a destructive reformat of a ' +
+          'template literal leaves behind, and it is silent: the stylesheet still ships and the rule ' +
+          'simply does nothing. See rule 13.',
+      )
+    }
+
     // Rule 3 — a page breakpoint inside a component that answers to its container.
     if (file.replaceAll('\\', '/').includes(CONTAINER_COMPONENT_DIRECTORY)) {
       const match = MEDIA_WIDTH_QUERY.exec(text)
@@ -459,7 +525,8 @@ if (violations.length > 0) {
 
 console.log(
   `Layout rules hold across ${scanned} source files: one animation per direction pair, no page ` +
-    'breakpoint in a container component, one shadow and none in the dark, one reduced-motion override, ' +
+    'breakpoint in a container component, no static viewport height, every CSS rule has a block, ' +
+    'one shadow and none in the dark, one reduced-motion override, ' +
     `${scrollDrivenEffects.length} scroll-driven effects (${scrollDrivenEffects
       .map((effect) => effect.selector)
       .join(', ')}) and ${islands.size} dynamically imported motion island(s).`,

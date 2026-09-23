@@ -141,6 +141,12 @@ export {
   type TradingHoursRow,
 } from './queries/premises-facts.ts'
 export {
+  type PublicReviewRow,
+  type PublicTherapistRow,
+  readPublicReviews,
+  readPublicTherapists,
+} from './queries/public-roster.ts'
+export {
   type ForecastFilter,
   type ForecastPeriod,
   type ForecastRow,
@@ -358,6 +364,18 @@ export {
   findCustomerByPhone,
   markPhoneVerified,
 } from './repositories/customer.ts'
+export {
+  DUPLICATE_CANDIDATE_LIMIT,
+  DUPLICATE_CANDIDATE_REFUSALS,
+  DUPLICATE_LABEL_SIMILARITY_FLOOR,
+  DUPLICATE_PHONE_SIMILARITY_FLOOR,
+  type DuplicateCandidateOptions,
+  type DuplicateCandidateProbe,
+  type DuplicateCandidateRefusal,
+  type DuplicateCandidateRow,
+  explainDuplicateCandidates,
+  findDuplicateCandidates,
+} from './repositories/duplicate-candidates.ts'
 export {
   type EligibilityQueryInput,
   type EligibleTherapistRow,
@@ -828,6 +846,23 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // NOT NULL. The mandatory-set DEFAULT is revised to decision 20's six; the row in force is deliberately
 // left as 0030 wrote it, and that migration's header says why.
 //
+// 55 is 0055_duplicate_candidates.sql: two GiST trigram indexes on `customer` and nothing else — no
+// table, no column and deliberately no foreign key, since a new FK to `customer` or `appointment` makes
+// PostgreSQL refuse a TRUNCATE that does not name the referencing table and four integration suites
+// truncate `appointment`. GiST and not GIN, measured rather than assumed: on the 5,000-row probe the
+// planner costs GIN at ~583 against GiST at ~8 for an eleven-trigram probe, because `gincostestimate`
+// charges a large startup an index this size never earns back — and GiST is a third of the size. An
+// index the planner will not use at the size the table actually is is not an index.
+// `customer_phone_match_key_trgm_idx` finds the MISTYPED neighbours of a number (one digit wrong, two
+// transposed, one dropped); the btree beside it answers exact equality, which normalisation has already
+// collapsed. `customer_name_fold_trgm_idx` is on `split_part(name_match_key, ':', 1)` — the folded name
+// without its last-4 tail — because the folding itself cannot happen in SQL: `unaccent` is STABLE so it
+// cannot appear in an index expression, and it folds no Arabic orthography in any case, which is half
+// this customer base. `split_part` is IMMUTABLE, which is what makes the expression indexable, and
+// dropping the tail stops the phone signal being counted a second time as a name signal. The review
+// queue and the merge that act on the scores are C-CRM-05's, so this migration writes nothing a later
+// unit would have to migrate.
+//
 // 56 is 0056_consent.sql: consent per (contact, channel, purpose, instant) carrying the exact wording
 // version shown, both append-only. `consent_purpose` is the vocabulary TABLE (Y9-consent-purpose, four
 // labels, every one provisional) and `is_send_gating` on it is what stops a photography grant reading as
@@ -857,6 +892,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // outlive the run that produced it.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 55 is held by C-CRM-02, still in flight, so
-// SCHEMA_VERSION counts to 57 across a gap at 55 rather than waiting for it.
+// come to apply the same number to different SQL. 55, 56 and 57 landed out of order and within an hour
+// of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
+// count, and no gap was closed to tidy the sequence.
 export const SCHEMA_VERSION = 57 as const

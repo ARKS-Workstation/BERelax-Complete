@@ -1,0 +1,1149 @@
+{
+  "note": "C-CRM-02 golden fixture: 60 labelled pairs, 30 duplicate and 30 distinct. Hand authored and reviewed pair by pair; the scores are committed so that any change to them fails packages/core/src/crm/duplicate-score.golden.test.ts. `label` is a record LABEL, not a person's name: this system invents no names (ADR 0020) and a customer with no display name is labelled by record number. Phone numbers are on the unallocated +971 59 prefix (undialable, packages/fixtures/src/synthetic.ts), Ofcom's reserved 07700 900xxx drama block for the UK, or are deliberately unkeyable.",
+  "thresholds": {
+    "autoMerge": 0.95,
+    "review": 0.7
+  },
+  "pairs": [
+    {
+      "id": "dup-01",
+      "truth": "duplicate",
+      "why": "the trunk prefix as written on every shop sign, against canonical E.164",
+      "a": {
+        "phone": "0590000042",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-02",
+      "truth": "duplicate",
+      "why": "00 as the international prefix, and the label with its words the other way round",
+      "a": {
+        "phone": "00971590000042",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "+971 59 000 00 42",
+        "label": "0042 Customer"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-03",
+      "truth": "duplicate",
+      "why": "a country code with no plus, against parentheses and hyphens from a paper diary",
+      "a": {
+        "phone": "971 59 000 0042",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "(059) 000-0042",
+        "label": "CUSTOMER-0042"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-04",
+      "truth": "duplicate",
+      "why": "Arabic-Indic digits, which is what an Arabic keyboard produces on the booking form",
+      "a": {
+        "phone": "٠٥٩٠٠٠٠٠٤٢",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-05",
+      "truth": "duplicate",
+      "why": "extended Arabic-Indic digits, which is what a Persian or Urdu keyboard produces",
+      "a": {
+        "phone": "۰۵۹۰۰۰۰۰۴۲",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "  customer   0042  "
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-06",
+      "truth": "duplicate",
+      "why": "pasted out of WhatsApp, so every space is a non-breaking one and the string differs",
+      "a": {
+        "phone": "\u00a0+971\u00a059\u00a0000\u00a00042\u00a0",
+        "label": "Customer 0042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-07",
+      "truth": "duplicate",
+      "why": "dots as separators, against canonical, with the label mistyped at the desk",
+      "a": {
+        "phone": "059.000.0042",
+        "label": "Custumer 0042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "partial",
+      "labelSimilarityPerMille": 647,
+      "scorePerMille": 940,
+      "score": 0.94,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-08",
+      "truth": "duplicate",
+      "why": "the serial typed with an extra zero, which is the commonest label slip on a record number",
+      "a": {
+        "phone": "0590000042",
+        "label": "Customer 00042"
+      },
+      "b": {
+        "phone": "+971590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "near",
+      "labelSimilarityPerMille": 933,
+      "scorePerMille": 980,
+      "score": 0.98,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-09",
+      "truth": "duplicate",
+      "why": "one row was never named, which is the ordinary state of a guest booking (ADR 0020)",
+      "a": {
+        "phone": "+971590000042",
+        "label": null
+      },
+      "b": {
+        "phone": "0590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 960,
+      "score": 0.96,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-10",
+      "truth": "duplicate",
+      "why": "neither row was ever named: the number is the whole of the evidence, and it is enough",
+      "a": {
+        "phone": "+971590000042",
+        "label": null
+      },
+      "b": {
+        "phone": "0590000042",
+        "label": null
+      },
+      "phone": "identical",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 960,
+      "score": 0.96,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-11",
+      "truth": "duplicate",
+      "why": "the label typed in Arabic on one row and English on the other — the number carries the pair",
+      "a": {
+        "phone": "+971590000042",
+        "label": "عميل 0042"
+      },
+      "b": {
+        "phone": "0590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "different",
+      "labelSimilarityPerMille": 263,
+      "scorePerMille": 720,
+      "score": 0.72,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-12",
+      "truth": "duplicate",
+      "why": "the same Arabic label with and without harakat, which unaccent cannot fold and core does",
+      "a": {
+        "phone": "+971590000042",
+        "label": "عميل 0042"
+      },
+      "b": {
+        "phone": "0590000042",
+        "label": "عمِيل 0042"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-13",
+      "truth": "duplicate",
+      "why": "the serial dropped from one label, leaving the bare word",
+      "a": {
+        "phone": "+971590000042",
+        "label": "Customer"
+      },
+      "b": {
+        "phone": "0590000042",
+        "label": "Customer 0042"
+      },
+      "phone": "identical",
+      "label": "partial",
+      "labelSimilarityPerMille": 643,
+      "scorePerMille": 940,
+      "score": 0.94,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-14",
+      "truth": "duplicate",
+      "why": "a second serial, to prove the fixture is not one number in fourteen spellings",
+      "a": {
+        "phone": "0590000117",
+        "label": "Customer 0117"
+      },
+      "b": {
+        "phone": "+971590000117",
+        "label": "0117 CUSTOMER"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-15",
+      "truth": "duplicate",
+      "why": "the same second serial with an extra zero in the label",
+      "a": {
+        "phone": "00971590000117",
+        "label": "Customer 00117"
+      },
+      "b": {
+        "phone": "+971590000117",
+        "label": "Customer 0117"
+      },
+      "phone": "identical",
+      "label": "near",
+      "labelSimilarityPerMille": 813,
+      "scorePerMille": 980,
+      "score": 0.98,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-16",
+      "truth": "duplicate",
+      "why": "a tourist's UK number, one row with 00 and one with +: the country code is kept, not replaced",
+      "a": {
+        "phone": "00447700900123",
+        "label": "Customer 0210"
+      },
+      "b": {
+        "phone": "+447700900123",
+        "label": "Customer 0210"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-17",
+      "truth": "duplicate",
+      "why": "the same UK number spaced as a human writes it, and one row never named",
+      "a": {
+        "phone": "+44 7700 900 123",
+        "label": null
+      },
+      "b": {
+        "phone": "+447700900123",
+        "label": "Customer 0210"
+      },
+      "phone": "identical",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 960,
+      "score": 0.96,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-18",
+      "truth": "duplicate",
+      "why": "a Saudi number in two spellings — the CRM keys it, the OTP path still refuses to send to it",
+      "a": {
+        "phone": "+966 50 000 0042",
+        "label": "Customer 0311"
+      },
+      "b": {
+        "phone": "00966500000042",
+        "label": "0311 Customer"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-19",
+      "truth": "duplicate",
+      "why": "one handset, two records, one of them named with the serial only",
+      "a": {
+        "phone": "0590000308",
+        "label": "Customer 0308"
+      },
+      "b": {
+        "phone": "+971590000308",
+        "label": "customer 0308 "
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-20",
+      "truth": "duplicate",
+      "why": "the label carries the channel it came in on, which is an extra token and not a second person",
+      "a": {
+        "phone": "0590000308",
+        "label": "Customer 0308 (WhatsApp)"
+      },
+      "b": {
+        "phone": "+971590000308",
+        "label": "Customer 0308"
+      },
+      "phone": "identical",
+      "label": "partial",
+      "labelSimilarityPerMille": 609,
+      "scorePerMille": 940,
+      "score": 0.94,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-21",
+      "truth": "duplicate",
+      "why": "alef maksura written as ya, the other Arabic ending people spell either way",
+      "a": {
+        "phone": "0590000402",
+        "label": "ليلى 0402"
+      },
+      "b": {
+        "phone": "+971590000402",
+        "label": "ليلي 0402"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-22",
+      "truth": "duplicate",
+      "why": "a Latin label with the accent decomposed on one side and precomposed on the other",
+      "a": {
+        "phone": "0590000503",
+        "label": "Renée 0503"
+      },
+      "b": {
+        "phone": "+971590000503",
+        "label": "Renée 0503"
+      },
+      "phone": "identical",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 1000,
+      "score": 1,
+      "verdict": "auto_merge"
+    },
+    {
+      "id": "dup-23",
+      "truth": "duplicate",
+      "why": "one digit mistyped at the desk and the label typed identically both times",
+      "a": {
+        "phone": "+971590000601",
+        "label": "Customer 0601"
+      },
+      "b": {
+        "phone": "+971590000602",
+        "label": "Customer 0601"
+      },
+      "phone": "one_digit_apart",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 900,
+      "score": 0.9,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-24",
+      "truth": "duplicate",
+      "why": "the last two digits swapped, the label identical: the classic transposition",
+      "a": {
+        "phone": "+971590000712",
+        "label": "Customer 0712"
+      },
+      "b": {
+        "phone": "+971590000721",
+        "label": "Customer 0712"
+      },
+      "phone": "digits_transposed",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 900,
+      "score": 0.9,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-25",
+      "truth": "duplicate",
+      "why": "one digit mistyped and the label one character out as well",
+      "a": {
+        "phone": "+971590000803",
+        "label": "Customer 00803"
+      },
+      "b": {
+        "phone": "+971590000804",
+        "label": "Customer 0803"
+      },
+      "phone": "one_digit_apart",
+      "label": "near",
+      "labelSimilarityPerMille": 813,
+      "scorePerMille": 840,
+      "score": 0.84,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-26",
+      "truth": "duplicate",
+      "why": "a digit dropped from a foreign number, which UAE numbers cannot survive at all",
+      "a": {
+        "phone": "+44770090012",
+        "label": "Customer 0904"
+      },
+      "b": {
+        "phone": "+447700900123",
+        "label": "Customer 0904"
+      },
+      "phone": "one_digit_shifted",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 880,
+      "score": 0.88,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-27",
+      "truth": "duplicate",
+      "why": "the same person on a new SIM, the label unchanged — a human decides, nothing merges",
+      "a": {
+        "phone": "+971590001005",
+        "label": "Customer 1005"
+      },
+      "b": {
+        "phone": "+971597651005",
+        "label": "Customer 1005"
+      },
+      "phone": "different",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 710,
+      "score": 0.71,
+      "verdict": "review"
+    },
+    {
+      "id": "dup-28",
+      "truth": "duplicate",
+      "why": "one digit mistyped AND the label mistyped: the miss this fixture exists to measure",
+      "a": {
+        "phone": "+971590001106",
+        "label": "Custumer 1106"
+      },
+      "b": {
+        "phone": "+971590001107",
+        "label": "Customer 1106"
+      },
+      "phone": "one_digit_apart",
+      "label": "partial",
+      "labelSimilarityPerMille": 647,
+      "scorePerMille": 640,
+      "score": 0.64,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dup-29",
+      "truth": "duplicate",
+      "why": "the only number on one row is a landline, which no phone key can be built from",
+      "a": {
+        "phone": "02 123 4567",
+        "label": "Customer 1207"
+      },
+      "b": {
+        "phone": "+971590001207",
+        "label": "Customer 1207"
+      },
+      "phone": "unknown",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 680,
+      "score": 0.68,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dup-30",
+      "truth": "duplicate",
+      "why": "one handset, the label typed as a serial on one row and a bare word on the other",
+      "a": {
+        "phone": "0590001308",
+        "label": "1308"
+      },
+      "b": {
+        "phone": "+971590001308",
+        "label": "Customer 1308"
+      },
+      "phone": "identical",
+      "label": "different",
+      "labelSimilarityPerMille": 357,
+      "scorePerMille": 720,
+      "score": 0.72,
+      "verdict": "review"
+    },
+    {
+      "id": "dis-01",
+      "truth": "distinct",
+      "why": "two unrelated numbers and two unrelated labels",
+      "a": {
+        "phone": "+971590002001",
+        "label": "Customer 2001"
+      },
+      "b": {
+        "phone": "+971597652001",
+        "label": "عميل 3001"
+      },
+      "phone": "different",
+      "label": "different",
+      "labelSimilarityPerMille": 91,
+      "scorePerMille": 0,
+      "score": 0,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-02",
+      "truth": "distinct",
+      "why": "two unrelated numbers, one row never named",
+      "a": {
+        "phone": "+971590002002",
+        "label": null
+      },
+      "b": {
+        "phone": "+971597652002",
+        "label": "Customer 3002"
+      },
+      "phone": "different",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 40,
+      "score": 0.04,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-03",
+      "truth": "distinct",
+      "why": "two unrelated numbers, neither ever named — the emptiest pair there is",
+      "a": {
+        "phone": "+971590002003",
+        "label": null
+      },
+      "b": {
+        "phone": "+971597652003",
+        "label": null
+      },
+      "phone": "different",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 40,
+      "score": 0.04,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-04",
+      "truth": "distinct",
+      "why": "consecutive numbers bought as a block, labelled in different scripts: two siblings",
+      "a": {
+        "phone": "+971590002004",
+        "label": "Customer 2004"
+      },
+      "b": {
+        "phone": "+971590002005",
+        "label": "عميل 2005"
+      },
+      "phone": "one_digit_apart",
+      "label": "different",
+      "labelSimilarityPerMille": 143,
+      "scorePerMille": 180,
+      "score": 0.18,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-05",
+      "truth": "distinct",
+      "why": "consecutive numbers and consecutive serials: the two-siblings case in its purest form",
+      "a": {
+        "phone": "+971590002006",
+        "label": "Customer 2006"
+      },
+      "b": {
+        "phone": "+971590002007",
+        "label": "Customer 2007"
+      },
+      "phone": "one_digit_apart",
+      "label": "partial",
+      "labelSimilarityPerMille": 750,
+      "scorePerMille": 640,
+      "score": 0.64,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-06",
+      "truth": "distinct",
+      "why": "a transposition away from each other, with serials a transposition apart too",
+      "a": {
+        "phone": "+971590002089",
+        "label": "Customer 2089"
+      },
+      "b": {
+        "phone": "+971590002098",
+        "label": "Customer 2098"
+      },
+      "phone": "digits_transposed",
+      "label": "partial",
+      "labelSimilarityPerMille": 647,
+      "scorePerMille": 640,
+      "score": 0.64,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-07",
+      "truth": "distinct",
+      "why": "consecutive numbers and neither row named: nothing here says these are one person",
+      "a": {
+        "phone": "+971590002010",
+        "label": null
+      },
+      "b": {
+        "phone": "+971590002011",
+        "label": null
+      },
+      "phone": "one_digit_apart",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 420,
+      "score": 0.42,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-08",
+      "truth": "distinct",
+      "why": "one handset, two names: a couple who book on one phone. Reviewed, never merged",
+      "a": {
+        "phone": "+971590002012",
+        "label": "Customer 2012"
+      },
+      "b": {
+        "phone": "+971590002012",
+        "label": "عميل 3012"
+      },
+      "phone": "identical",
+      "label": "different",
+      "labelSimilarityPerMille": 91,
+      "scorePerMille": 720,
+      "score": 0.72,
+      "verdict": "review"
+    },
+    {
+      "id": "dis-09",
+      "truth": "distinct",
+      "why": "one handset, a mother booking for her daughter, labels in the same script",
+      "a": {
+        "phone": "0590002013",
+        "label": "Customer 2013"
+      },
+      "b": {
+        "phone": "+971590002013",
+        "label": "Client 3013"
+      },
+      "phone": "identical",
+      "label": "different",
+      "labelSimilarityPerMille": 130,
+      "scorePerMille": 720,
+      "score": 0.72,
+      "verdict": "review"
+    },
+    {
+      "id": "dis-10",
+      "truth": "distinct",
+      "why": "one handset, two consecutive serials: siblings sharing a phone. 0.94 is under the auto band",
+      "a": {
+        "phone": "+971590002014",
+        "label": "Customer 2014"
+      },
+      "b": {
+        "phone": "+971590002014",
+        "label": "Customer 2015"
+      },
+      "phone": "identical",
+      "label": "partial",
+      "labelSimilarityPerMille": 750,
+      "scorePerMille": 940,
+      "score": 0.94,
+      "verdict": "review"
+    },
+    {
+      "id": "dis-11",
+      "truth": "distinct",
+      "why": "the last two digits transposed and the labels written in different scripts",
+      "a": {
+        "phone": "+971590002016",
+        "label": "Customer 2016"
+      },
+      "b": {
+        "phone": "+971590002061",
+        "label": "عميل 2061"
+      },
+      "phone": "digits_transposed",
+      "label": "different",
+      "labelSimilarityPerMille": 91,
+      "scorePerMille": 180,
+      "score": 0.18,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-12",
+      "truth": "distinct",
+      "why": "a landline-only row against a mobile, labels a character apart: no phone key to compare",
+      "a": {
+        "phone": "02 123 4567",
+        "label": "Customer 2017"
+      },
+      "b": {
+        "phone": "+971590002017",
+        "label": "Customer 20017"
+      },
+      "phone": "unknown",
+      "label": "near",
+      "labelSimilarityPerMille": 813,
+      "scorePerMille": 520,
+      "score": 0.52,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-13",
+      "truth": "distinct",
+      "why": "two landline-only rows with the same label: no phone key on either side",
+      "a": {
+        "phone": "02 123 4567",
+        "label": "Customer 2018"
+      },
+      "b": {
+        "phone": "02 123 4569",
+        "label": "Customer 2018"
+      },
+      "phone": "unknown",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 680,
+      "score": 0.68,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-14",
+      "truth": "distinct",
+      "why": "two rows with nothing keyable and nothing named: the zero of this scale",
+      "a": {
+        "phone": "walk-in, no number given",
+        "label": null
+      },
+      "b": {
+        "phone": "",
+        "label": null
+      },
+      "phone": "unknown",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 0,
+      "score": 0,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-15",
+      "truth": "distinct",
+      "why": "a UK number and a UAE number, labels a word apart",
+      "a": {
+        "phone": "+447700900321",
+        "label": "Customer 2019"
+      },
+      "b": {
+        "phone": "+971590002019",
+        "label": "Client 2019"
+      },
+      "phone": "different",
+      "label": "different",
+      "labelSimilarityPerMille": 300,
+      "scorePerMille": 0,
+      "score": 0,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-16",
+      "truth": "distinct",
+      "why": "two UK numbers a long way apart, labels one character apart",
+      "a": {
+        "phone": "+447700900456",
+        "label": "Customer 2020"
+      },
+      "b": {
+        "phone": "+447700900654",
+        "label": "Customer 2021"
+      },
+      "phone": "different",
+      "label": "partial",
+      "labelSimilarityPerMille": 750,
+      "scorePerMille": 300,
+      "score": 0.3,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-17",
+      "truth": "distinct",
+      "why": "a Saudi and a UAE number, one row never named",
+      "a": {
+        "phone": "+966500000042",
+        "label": null
+      },
+      "b": {
+        "phone": "+971590002022",
+        "label": "Customer 2022"
+      },
+      "phone": "different",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 40,
+      "score": 0.04,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-18",
+      "truth": "distinct",
+      "why": "a number that cannot be keyed against one that can, with unrelated labels",
+      "a": {
+        "phone": "0800 4567",
+        "label": "Customer 2023"
+      },
+      "b": {
+        "phone": "+971590002023",
+        "label": "عميل 2024"
+      },
+      "phone": "unknown",
+      "label": "different",
+      "labelSimilarityPerMille": 143,
+      "scorePerMille": 20,
+      "score": 0.02,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-19",
+      "truth": "distinct",
+      "why": "a truncated paste against a real number: refused rather than keyed to a neighbour",
+      "a": {
+        "phone": "+4412",
+        "label": "Customer 2025"
+      },
+      "b": {
+        "phone": "+447700900123",
+        "label": "Customer 2026"
+      },
+      "phone": "unknown",
+      "label": "partial",
+      "labelSimilarityPerMille": 750,
+      "scorePerMille": 260,
+      "score": 0.26,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-20",
+      "truth": "distinct",
+      "why": "two unrelated numbers whose labels are one keystroke apart",
+      "a": {
+        "phone": "+971590002027",
+        "label": "Customer 2027"
+      },
+      "b": {
+        "phone": "+971597652027",
+        "label": "Customer 20027"
+      },
+      "phone": "different",
+      "label": "near",
+      "labelSimilarityPerMille": 813,
+      "scorePerMille": 560,
+      "score": 0.56,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-21",
+      "truth": "distinct",
+      "why": "two unrelated numbers whose labels are both the bare word",
+      "a": {
+        "phone": "+971590002028",
+        "label": "Customer"
+      },
+      "b": {
+        "phone": "+971597652028",
+        "label": "Customer 2028"
+      },
+      "phone": "different",
+      "label": "partial",
+      "labelSimilarityPerMille": 643,
+      "scorePerMille": 300,
+      "score": 0.3,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-22",
+      "truth": "distinct",
+      "why": "the last two digits transposed and the second row never named",
+      "a": {
+        "phone": "+971590002029",
+        "label": "Customer 2029"
+      },
+      "b": {
+        "phone": "+971590002092",
+        "label": null
+      },
+      "phone": "digits_transposed",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 420,
+      "score": 0.42,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-23",
+      "truth": "distinct",
+      "why": "a landline-only row against an unrelated mobile, labels a word apart",
+      "a": {
+        "phone": "04 123 4567",
+        "label": "Customer 2031"
+      },
+      "b": {
+        "phone": "+971590002031",
+        "label": "Client 2032"
+      },
+      "phone": "unknown",
+      "label": "different",
+      "labelSimilarityPerMille": 182,
+      "scorePerMille": 20,
+      "score": 0.02,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-24",
+      "truth": "distinct",
+      "why": "two unrelated numbers with Arabic labels two serials apart",
+      "a": {
+        "phone": "+971590002033",
+        "label": "عميل 2033"
+      },
+      "b": {
+        "phone": "+971597652033",
+        "label": "عميل 3033"
+      },
+      "phone": "different",
+      "label": "partial",
+      "labelSimilarityPerMille": 538,
+      "scorePerMille": 300,
+      "score": 0.3,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-25",
+      "truth": "distinct",
+      "why": "one digit apart, labels in Latin and Arabic for two different serials",
+      "a": {
+        "phone": "+971590002034",
+        "label": "Customer 2034"
+      },
+      "b": {
+        "phone": "+971590002035",
+        "label": "عميل 2035"
+      },
+      "phone": "one_digit_apart",
+      "label": "different",
+      "labelSimilarityPerMille": 143,
+      "scorePerMille": 180,
+      "score": 0.18,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-26",
+      "truth": "distinct",
+      "why": "a transposition apart with one row never named",
+      "a": {
+        "phone": "+971590002036",
+        "label": null
+      },
+      "b": {
+        "phone": "+971590002063",
+        "label": "Customer 2063"
+      },
+      "phone": "digits_transposed",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 420,
+      "score": 0.42,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-27",
+      "truth": "distinct",
+      "why": "a UK number a digit shorter than another UK number, labels unrelated",
+      "a": {
+        "phone": "+44770090078",
+        "label": "Customer 2037"
+      },
+      "b": {
+        "phone": "+447700900789",
+        "label": "عميل 3037"
+      },
+      "phone": "one_digit_shifted",
+      "label": "different",
+      "labelSimilarityPerMille": 91,
+      "scorePerMille": 160,
+      "score": 0.16,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-28",
+      "truth": "distinct",
+      "why": "two rows whose labels are punctuation only: no label key on either side",
+      "a": {
+        "phone": "+971590002038",
+        "label": "--"
+      },
+      "b": {
+        "phone": "+971597652038",
+        "label": "..."
+      },
+      "phone": "different",
+      "label": "unknown",
+      "labelSimilarityPerMille": 0,
+      "scorePerMille": 40,
+      "score": 0.04,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-29",
+      "truth": "distinct",
+      "why": "a Saudi and a UK number, labels a serial apart",
+      "a": {
+        "phone": "+966500000043",
+        "label": "Customer 2039"
+      },
+      "b": {
+        "phone": "+447700900987",
+        "label": "Customer 2040"
+      },
+      "phone": "different",
+      "label": "partial",
+      "labelSimilarityPerMille": 647,
+      "scorePerMille": 300,
+      "score": 0.3,
+      "verdict": "distinct"
+    },
+    {
+      "id": "dis-30",
+      "truth": "distinct",
+      "why": "two unrelated UAE numbers with identical labels: two records nobody named properly",
+      "a": {
+        "phone": "+971590002041",
+        "label": "Customer"
+      },
+      "b": {
+        "phone": "+971597652041",
+        "label": "Customer"
+      },
+      "phone": "different",
+      "label": "identical",
+      "labelSimilarityPerMille": 1000,
+      "scorePerMille": 710,
+      "score": 0.71,
+      "verdict": "review"
+    }
+  ]
+}

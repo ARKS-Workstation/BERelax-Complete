@@ -40,7 +40,12 @@ export const CONTENT_ROUTES_BY_KIND: Readonly<Record<ContentChangeKind, readonly
   page: ['about'],
   // Everything that renders the premises row. `/about` is here because its answers name the address and the
   // district; `/faq` and `/journal` are not, because nothing on them comes from that row.
-  premises: ['spa', 'contact', 'about'],
+  //
+  // `home` joined the list with W-SITE-04. It is the one entry that was *predicted*: W-SITE-02 wrote that
+  // cache-tag revalidation "belongs to the first ISR route that renders NAP", this file answered that with
+  // `/spa` and `/contact`, and the home page is now the third and the most visited — it renders the NAP block,
+  // the trading name beside the district, and the `LocalBusiness` JSON-LD, all from that row.
+  premises: ['home', 'spa', 'contact', 'about'],
 }
 
 /** Every path one change invalidates, in both locales, deduplicated and in a stable order. */

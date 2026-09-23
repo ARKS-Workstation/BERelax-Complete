@@ -71,6 +71,12 @@ export const customer = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
+  // The three btree indexes only. `customer` also carries three GIN trigram indexes — 0019's
+  // `customer_display_name_trgm_idx` and 0055's two, which the duplicate-candidate scan runs through —
+  // and none of them is mirrored here, deliberately and consistently with how 0019's has always been
+  // treated. Drizzle cannot express an operator class or an IMMUTABLE expression in an index definition,
+  // so a mirror of them would be a name and a column list that omitted the two things that make them
+  // work; `pnpm db:drift` compares columns rather than indexes, so the omission hides nothing.
   (t) => [
     index('customer_phone_match_key_idx').on(t.phoneMatchKey),
     index('customer_name_match_key_idx').on(t.nameMatchKey),

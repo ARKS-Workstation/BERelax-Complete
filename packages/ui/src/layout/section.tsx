@@ -55,6 +55,20 @@ export interface SectionProps {
   readonly ariaLabel?: string
   /** An anchor target, so a link can send the reader to this band. */
   readonly id?: string
+  /**
+   * `-1` makes the band focusable without putting it in the tab order.
+   *
+   * Added by W-SITE-04, and it is not decoration: a `<section id="about">` is an anchor target that a
+   * browser will *scroll* to and will not *focus*, so a reader using a keyboard or a screen reader follows
+   * an in-page link and their focus stays where it was — on the link they just left. The next Tab then goes
+   * to the link after it rather than into the section they asked for. `tabindex="-1"` is what WCAG 2.4.1's
+   * bypass-blocks technique relies on and it is the whole difference between a link that moves the page and
+   * a link that moves the reader.
+   *
+   * Optional and never defaulted: a band with no id is not a target, and making every band focusable would
+   * put a focus ring around a whole section for a click that landed inside it.
+   */
+  readonly tabIndex?: -1
   readonly className?: string
 }
 
@@ -64,6 +78,7 @@ export function Section({
   as = 'section',
   ariaLabel,
   id,
+  tabIndex,
   className,
 }: SectionProps) {
   const Element = as as ElementType
@@ -73,6 +88,7 @@ export function Section({
       data-surface={surface}
       aria-label={ariaLabel}
       id={id}
+      tabIndex={tabIndex}
     >
       {children}
     </Element>

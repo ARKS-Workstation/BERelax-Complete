@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**85 / 207 units complete.**
+**87 / 207 units complete.**
 
 ## Next up
 
@@ -88,7 +88,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 71 | `C-CRM-01` | Client record: preferences, tags, lifecycle, source, VIP and a blocklist that actually blocks | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F09` | — | — |
 | [ ] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
 | [ ] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
-| [ ] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
+| [x] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
 | [x] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
 | [ ] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
 | [ ] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
@@ -154,7 +154,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 137 | `W-SYS-05` | Image derivative pipeline, immutable media URLs and the storage fake | `F06`, `H02`, `W-SYS-01` | — | Y12-photos |
 | [x] | 138 | `W-SYS-06` | Hero video rendition job | `W-SYS-05` | — | Y12-photos |
 | [x] | 139 | `W-SYS-07` | HeroMedia: the LCP-safe poster and the attach island | `W-SYS-04`, `W-SYS-06` | — | — |
-| [ ] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |
+| [x] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |
 | [x] | 141 | `W-SYS-08` | Payload CMS v3 embedded, content model and the catalogue boundary | `F07`, `F09`, `W-SYS-01` | — | — |
 | [x] | 142 | `W-SITE-07` | CMS-driven routes, internal linking and breadcrumbs | `W-SITE-03`, `W-SITE-05`, `W-SYS-08` | — | Y1-licence |
 | [ ] | 143 | `W-SITE-10` | Publication control plane: banned-claims lint, named approval, immutable record | `F06`, `F09`, `W-SITE-07`, `W-SYS-08` | — | Y1-licence |

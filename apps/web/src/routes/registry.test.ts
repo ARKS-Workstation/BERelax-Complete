@@ -40,6 +40,7 @@ import {
   NOINDEX_ROBOTS_TAG,
   parameterisedSitemapRoutes,
   pathFor,
+  type RenderingMode,
   ROUTES,
   registryPaths,
   robotsTagFor,
@@ -252,11 +253,21 @@ describe('the registry is internally consistent', () => {
     // Asserted against `.next/prerender-manifest.json` — what the build produced — in the itest. Here it
     // is only the shape, so the itest's comparison has something to compare.
     //
-    // One entry, and the list is here rather than derived so that a route becoming dynamic is a decision
-    // somebody made rather than a diff nobody read. `kitchen-sink` left it in W-SITE-02: it renders the
-    // NAP block from the premises row, and a prerendered copy would bake the address into the build.
-    expect(ROUTES.filter((route) => route.rendering === 'static').map((route) => route.id)).toEqual(
-      ['home'],
+    // **No route is `static` any more.** `home` was the last one and W-SITE-04 made it `isr`, for the reason
+    // every other route on this list gives: the home page is composed from the premises row, the catalogue and
+    // the roster, and a statically prerendered page bakes what it read into the build with nothing able to
+    // correct it. The mode stays in the union rather than being deleted, because a page with nothing to read
+    // is a real thing and the legal pages docs/09 §1 lists are the next candidates — and an empty list here
+    // is the assertion that says so the day one arrives.
+    //
+    // `modeOf` widens the literal type before the comparison, and it is not a workaround for the compiler
+    // being difficult — it is what lets the assertion go on existing. `ROUTES` is `as const`, so with no
+    // `static` entry left the union narrows to `'isr' | 'dynamic'` and `route.rendering === 'static'` becomes
+    // an error rather than a false comparison. Deleting the case to satisfy that would remove the one thing
+    // that will notice the next `static` route.
+    const modeOf = (route: (typeof ROUTES)[number]): RenderingMode => route.rendering
+    expect(ROUTES.filter((route) => modeOf(route) === 'static').map((route) => route.id)).toEqual(
+      [],
     )
     // The catalogue-derived routes, added by W-SITE-05, and the five CMS-and-premises routes W-SITE-07 added
     // to them. `isr` rather than `static` because they read the database during `next build` and are replaced
@@ -269,6 +280,7 @@ describe('the registry is internally consistent', () => {
     // `/contact` and `/spa` as two of its three visible surfaces, and a statically prerendered page bakes the
     // address into the build — the staleness W-SITE-02 exists to remove. A page that reads a row is `isr`.
     expect(ROUTES.filter((route) => route.rendering === 'isr').map((route) => route.id)).toEqual([
+      'home',
       'about',
       'contact',
       'faq',
