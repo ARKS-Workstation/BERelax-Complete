@@ -774,5 +774,8 @@ describe('acceptance — the screenshot harness reads the registry', () => {
     // 420s rather than 300s since W-SITE-05: the registry gained three documents, so the matrix is 72 cells
     // rather than 24 — six documents at twelve cells each, about two seconds per cell on a loaded box where
     // several worktrees run this suite at once. The budget is for the matrix, not for one page.
-  }, 780_000)
+    //
+    // 850s rather than 780s since B-UI-01: the registry gained `/book`, so the matrix is 144 cells rather
+    // than 132. Raised in proportion to the twelve cells added rather than by guesswork.
+  }, 850_000)
 })

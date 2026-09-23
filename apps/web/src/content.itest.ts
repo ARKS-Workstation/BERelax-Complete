@@ -820,10 +820,11 @@ describe('acceptance — the link graph over the built site', () => {
       const findings = report.findings.filter((finding) => SATISFIED.includes(finding.rule))
       expect(formatLinkGraphFindings(findings), locale).toBe('')
       // Non-vacuous, and this is the half that matters: a crawl that found nothing would report no findings.
-      // 16 indexable documents per locale — 8 fixed pages and 8 treatment pages — of which 15 are subjects of
-      // the orphan rule, because the home page is exempt from it by definition.
-      expect(report.coverage.orphan_route, locale).toBe(15)
-      expect(report.coverage.route_beyond_click_depth, locale).toBe(16)
+      // 17 indexable documents per locale — 9 fixed pages and 8 treatment pages — of which 16 are subjects of
+      // the orphan rule, because the home page is exempt from it by definition. The ninth fixed page is
+      // B-UI-01's `/book`, which the site navigation links from every page that renders it.
+      expect(report.coverage.orphan_route, locale).toBe(16)
+      expect(report.coverage.route_beyond_click_depth, locale).toBe(17)
       expect(report.coverage.internal_link_not_200, locale).toBeGreaterThan(40)
       // And every page really is inside the budget, reported rather than implied.
       expect(Math.max(...report.depths.values()), locale).toBeLessThanOrEqual(3)

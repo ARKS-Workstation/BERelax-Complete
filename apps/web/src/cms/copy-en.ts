@@ -187,6 +187,7 @@ export const CONTENT_COPY_EN: ContentCopy = {
   labels: {
     menu: 'The menu',
     prices: 'Prices',
+    book: 'Book a treatment',
     faq: 'Questions and answers',
     spa: 'The spa',
     contact: 'Contact',

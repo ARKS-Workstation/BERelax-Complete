@@ -205,6 +205,28 @@ export const ROUTES = [
       'the request body — and exempt from the proxy, because a 301 turns its POST into a GET.',
   },
   {
+    id: 'book',
+    path: '/book',
+    kind: 'document',
+    rendering: 'dynamic',
+    locales: LOCALES,
+    indexable: true,
+    sitemap: true,
+    changefreq: 'daily',
+    why:
+      'B-UI-01s booking flow, and the first **document** on this site that is dynamic. Everything else ' +
+      'reads rows that change a few times a year and is prerendered from them; this one reads ' +
+      'availability, which changes on every booking, every shift change and every walk-in, so a ' +
+      'prerendered copy would offer times that are already gone. It is also dynamic in Next own terms ' +
+      'because it reads `searchParams`: every step of the flow is a query field submitted by a GET ' +
+      'form, which is what makes steps 1-3 work with JavaScript off (docs/09 §3) and what keeps one ' +
+      'page from becoming five documents in the hreflang set. Indexable and in the sitemap: it is the ' +
+      'page the Google Business Profile link, the hero CTA and the sticky book bar all point at, and ' +
+      'the one page on the site that exists to convert. `daily` rather than `always`, which is a ' +
+      'hint about the DOCUMENT and not about the slot list inside it — the form, the menu and the ' +
+      'copy change when the catalogue does.',
+  },
+  {
     id: 'contact',
     path: '/contact',
     kind: 'document',

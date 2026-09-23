@@ -21,6 +21,9 @@ export const NAV_ROUTE_IDS = [
   'home',
   'treatments',
   'pricing',
+  // B-UI-01. Second only to the menu on purpose: the site exists to take a booking, and docs/09 §3
+  // lists the nav among the flow's entry points beside the hero CTA and the sticky book bar.
+  'book',
   'spa',
   'faq',
   'journal',

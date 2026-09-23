@@ -2441,7 +2441,7 @@ units:
       morning/afternoon/evening with container queries, an accessible date/time picker, and the no-availability
       state as a designed state carrying nearest days, alternative therapists and a waitlist CTA.
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M1
     depends_on:
@@ -2464,11 +2464,57 @@ units:
       assertion over every text node on the route fails if one does (docs/14 §5 most-likely defect)
     - Screenshots at 3 viewports x 2 themes x 2 directions with zero pixel diff on a repeat run, and RTL
       asserted as mirrored layout rather than translated text
+    - 'NOTE: the slot list appears once a treatment AND a client gender are stated, not on a bare /book.
+      booking.same_gender_matching is strict (B-AVAIL-05, Y9-gender), so queryAvailability answers
+      requires_client_gender until the page knows who the treatment is for — a bare /book therefore carries
+      the day strip and a named state, and the slot list arrives on /book?variant=..&gender=.., all of it
+      server-rendered with no JavaScript at either step. Inventing a gender to make the first render show
+      times would offer times the reader cannot book. The acceptance assertion is over the served bytes of
+      that URL, and the bare-/book control asserts the strip plus a named state and NO slot list.'
+    - 'NOTE: the therapist selector offers "any available therapist" plus only therapists an admin has
+      PUBLISHED (employee.is_publishable). None of the nineteen is publishable (ADR 0020, Y12-names), so the
+      list is that one option and a designed note saying why — nineteen options all reading "name not yet
+      published" is a control nobody can use. A therapist a reader arrives with is honoured by id
+      (/book?therapist=<uuid>), which is what the no-availability state''s therapist region is asserted
+      against, and is rendered with the unnamed label plus the internal reference as clipped
+      assistive-technology text — never as a display name.'
+    - 'NOTE: deferred to B-UI-02 — the waitlist JOIN and the continue-to-details step. joinWaitlist needs a
+      customer id, which needs the phone/OTP step B-UI-02 owns. This unit renders the waitlist CTA and the
+      step it leads to as a named designed state carrying the desk telephone number from the premises row,
+      and the chosen-slot summary says in so many words that nothing has been reserved. Neither is a dead
+      button.'
+    - 'NOTE: SlotGrid in @berelax/ui/patterns gained a listbox mode (role=option, aria-selected, a roving
+      tabindex and a submit value) rather than a second route-local slot grid, so the 3/4/6 container
+      queries stay declared once. The manifest''s files list named apps/web/app/(public)/book/*; the route
+      group on disk is (en)/(public) and (ar)/ar, because lang and dir belong to a per-locale root layout
+      (app/_document/shell.tsx), so the shared body lives in app/_book/ and is rendered by both.'
+    - 'NOTE: /book carries no JSON-LD, and the deferral is stated and asserted in
+      apps/web/src/seo/structured-data.itest.ts beside the home page''s. The reason is its rendering mode
+      plus docs/09 §4: the route is dynamic because it reads availability, and a second LocalBusiness node
+      on a page whose subject is a form is one more block a consumer has to reconcile with the eight pages
+      that already describe the business. What the page earns is a potentialAction on the business node
+      pointing at it, which belongs to whichever page carries that node. The assertion fails the day a
+      graph lands here, which is the handover.'
+    - 'NOTE: the one-client-island claim is asserted against the build''s own
+      page_client-reference-manifest.js rather than against source, with /treatments as the control that
+      names none. The e2e spec the files list names is not added: this unit''s Playwright assertions run
+      inside apps/web/src/book.itest.ts, beside the fetch-level and database-level ones, so a claim about a
+      rendered pixel and the availability answer behind it come from one fixture.'
     files:
-    - apps/web/app/(public)/book/page.tsx
-    - apps/web/app/(public)/book/slot-picker.client.tsx
-    - apps/web/app/(public)/book/slot-grid.tsx
-    - apps/web/tests/e2e/book-select.spec.ts
+    - apps/web/app/(en)/(public)/book/page.tsx
+    - apps/web/app/(ar)/ar/book/page.tsx
+    - apps/web/app/_book/booking-page.tsx
+    - apps/web/app/_book/slot-picker.client.tsx
+    - apps/web/app/_book/styles.tsx
+    - apps/web/src/book/state.ts
+    - apps/web/src/book/read.ts
+    - apps/web/src/book/copy.ts
+    - apps/web/src/book/copy-en.ts
+    - apps/web/src/book/copy-ar.ts
+    - apps/web/src/book/state.test.ts
+    - apps/web/src/book.itest.ts
+    - packages/db/src/queries/booking-page.ts
+    - packages/ui/src/patterns/slot-grid.tsx
   - id: B-UI-02
     order: 38
     title: 'Public booking flow: details, OTP, confirm and the nine enumerated edge states'

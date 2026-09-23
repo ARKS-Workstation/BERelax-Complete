@@ -42,6 +42,7 @@ export const TEST_PORT_BANDS = {
   content: { start: 6100, width: 300 },
   'breakpoint-preview': { start: 6400, width: 300 },
   'messages-inbox': { start: 6700, width: 300 },
+  book: { start: 7000, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

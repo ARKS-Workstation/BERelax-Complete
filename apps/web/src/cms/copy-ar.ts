@@ -184,6 +184,7 @@ export const CONTENT_COPY_AR: ContentCopy = {
   labels: {
     menu: 'القائمة',
     prices: 'الأسعار',
+    book: 'احجز جلستك',
     faq: 'أسئلة وأجوبة',
     spa: 'السبا',
     contact: 'اتصل بنا',

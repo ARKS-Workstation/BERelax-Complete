@@ -15,7 +15,7 @@ export type { PriceTableGroup, PriceTableProps, PriceTableRow } from './price-ta
 export { PRICE_TABLE_CSS, PRICE_TABLE_LAYOUTS, PriceTable } from './price-table.tsx'
 export type { ServiceRowLayout, ServiceRowProps } from './service-row.tsx'
 export { SERVICE_ROW_CSS, SERVICE_ROW_LAYOUTS, ServiceRow } from './service-row.tsx'
-export type { Slot, SlotGridProps } from './slot-grid.tsx'
+export type { Slot, SlotGridProps, SlotSelection } from './slot-grid.tsx'
 export { SLOT_GRID_COLUMNS, SLOT_GRID_CSS, SlotGrid } from './slot-grid.tsx'
 export type { TherapistCardLayout, TherapistCardProps } from './therapist-card.tsx'
 export { THERAPIST_CARD_CSS, THERAPIST_CARD_LAYOUTS, TherapistCard } from './therapist-card.tsx'

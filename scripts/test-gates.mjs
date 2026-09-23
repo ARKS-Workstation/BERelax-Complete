@@ -17593,6 +17593,128 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 68. The booking page's URL is its state, and every decision that turns it into a rendered day.
+//
+//     `/book` is a public URL anything may link to, and the whole flow is carried in its query string,
+//     so that steps 1-3 work with JavaScript off (docs/09 §3). That makes four pure functions
+//     load-bearing in ways a screenshot cannot show: a field accepted that should have been dropped
+//     reaches a `::date` cast; a start filed by its wall-clock hour puts 00:30 above the 19:45 it
+//     follows; a day strip that answers about a different day from the one asked for reads like a
+//     caching bug; and an Arabic date formatted without `-u-nu-latn` puts two numbering systems on
+//     one page.
+//
+//     Each case below breaks the shipped rule and asserts `apps/web/src/book/state.test.ts` — or, for
+//     the last one, `apps/web/src/routes/registry.test.ts` — fails **by the name of the test written
+//     for it**. A bare non-zero exit would also pass for a file that stopped compiling (ADR 0003).
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const STATE = 'apps/web/src/book/state.ts'
+  const STATE_TEST = 'apps/web/src/book/state.test.ts'
+  const NAV = 'apps/web/src/routes/nav.ts'
+  const REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  // The three shipped spellings these cases replace, named rather than inlined: a regex written inside
+  // a string in this file is easy to get wrong twice, and a replacement that matched nothing would leave
+  // the file intact and report the gate as firing.
+  const SLOT_GUARD =
+    '      slot !== null && /^\\d{1,15}$/.test(slot) && Number.isSafeInteger(Number(slot))'
+  const ARABIC_LOCALE = "ar: 'ar-AE-u-nu-latn'"
+  const ARABIC_LOCALE_IN_ARABIC_INDIC_DIGITS = "ar: 'ar-EG-u-nu-arab'"
+
+  // 68a. The after-midnight rule removed, so a start is grouped by its wall-clock hour. Trading runs
+  //      11:00-02:00, so 00:30 belongs to the previous trading date's evening (ADR 0007) — without the
+  //      rule it is filed under "morning" and printed at the top of a page whose whole subject is the
+  //      order of an evening. This is the case the function exists for.
+  {
+    const result = withEditedFile(
+      STATE,
+      (text) => text.replace("  if (minutes < 3 * 60) return 'evening'\n", ''),
+      () => runExpectingFailure('pnpm', unit(STATE_TEST)),
+    )
+    checkRejectedBy(
+      'a start after midnight grouped as morning is rejected',
+      result,
+      'files an after-midnight start under the evening',
+    )
+  }
+
+  // 68b. The slot field parsed with Number.parseInt instead of matched against digits. parseInt of
+  //      "19:45" is 19: a valid-looking instant in January 1970, which renders a slot list nobody
+  //      asked for and throws nothing. The digit match is the whole guard.
+  {
+    const result = withEditedFile(
+      STATE,
+      (text) =>
+        text.replace(
+          SLOT_GUARD,
+          '      slot !== null && Number.isFinite(Number.parseInt(slot, 10))',
+        ),
+      () => runExpectingFailure('pnpm', unit(STATE_TEST)),
+    )
+    checkRejectedBy(
+      'a wall-clock string read as an epoch instant is rejected',
+      result,
+      'drops every malformed field',
+    )
+  }
+
+  // 68c. The day strip made to trust the date it was asked about. A bookmark from last week, or a date
+  //      the premises does not trade, would then select a day the strip does not offer — so the heading
+  //      names one day and the times belong to another, which is the defect that reads like a cache.
+  {
+    const result = withEditedFile(
+      STATE,
+      (text) =>
+        text.replace(
+          '    requested !== null && offered.includes(requested) ? requested : (offered[0] ?? null)',
+          '    requested !== null ? requested : (offered[0] ?? null)',
+        ),
+      () => runExpectingFailure('pnpm', unit(STATE_TEST)),
+    )
+    checkRejectedBy(
+      'a day strip selecting a day it does not offer is rejected',
+      result,
+      'falls back to the first day',
+    )
+  }
+
+  // 68d. The Arabic date locale switched to one whose numbering system is Arabic-Indic. docs/08 §7 chose
+  //      Latin numerals for Arabic, which is what formatAmount already produces — two numbering systems
+  //      on one page is the defect, and neither half looks wrong on its own.
+  //
+  //      A different locale and not the extension removed, which is the honest fixture: CLDR's default
+  //      numbering for `ar-AE` is already `latn`, so dropping `-u-nu-latn` changes nothing and a gate
+  //      built on it would report PASS while asserting nothing. The extension is stated for the reason
+  //      `formatMoney` in @berelax/core states it — so the decision is in the source rather than in a
+  //      CLDR default that a future ICU may revise — and THIS is what the assertion actually catches.
+  {
+    const result = withEditedFile(
+      STATE,
+      (text) => text.replace(ARABIC_LOCALE, ARABIC_LOCALE_IN_ARABIC_INDIC_DIGITS),
+      () => runExpectingFailure('pnpm', unit(STATE_TEST)),
+    )
+    checkRejectedBy(
+      'an Arabic date in Arabic-Indic digits is rejected',
+      result,
+      'with Latin digits in Arabic too',
+    )
+  }
+
+  // 68e. /book dropped from the site navigation while it stays an indexable document. The page is then
+  //      an orphan — reachable only from a sitemap and from /llms.txt — and nothing about the route
+  //      itself is wrong, which is why the invariant is over the registry rather than over the page.
+  {
+    const result = withEditedFile(
+      NAV,
+      (text) => text.replace("  'book',\n", ''),
+      () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
+    )
+    checkRejectedBy(
+      'an indexable booking page absent from the navigation is rejected',
+      result,
+      'offers every indexable page in the site navigation',
+    )
+  }
+}
 // 69a-69e. A slot's declared ratio is the shape of its SOURCE; the ladders decide the shape it is SERVED
 //       at, and those are different numbers. `SLOT_REGISTRY['therapist-portrait'].ratio` is `[4, 5]` — what
 //       an upload is measured against, what `minHeight` scales from, and the box an element that renders

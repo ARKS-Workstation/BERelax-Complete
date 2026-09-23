@@ -94,6 +94,15 @@ export {
   type WaitlistRow,
 } from './queries/availability.ts'
 export {
+  type BookableVariantRow,
+  readBookableVariants,
+  readOpenTradingDays,
+  readPublishableTherapists,
+  readTherapistLabels,
+  type TherapistLabelRow,
+  type TradingDayRow,
+} from './queries/booking-page.ts'
+export {
   readArchivedTreatmentSlugs,
   readTreatmentPages,
   type TreatmentPageRow,

@@ -571,6 +571,7 @@ describe('the registry is the list of routes this unit had to consider', () => {
     expect(indexable.map((route) => route.id)).toEqual([
       'home',
       'about',
+      'book',
       'contact',
       'faq',
       'journal',
@@ -590,6 +591,25 @@ describe('the registry is the list of routes this unit had to consider', () => {
         // says so too — and the three W-SITE-05 routes are `isr` precisely because they do read.
         expect(route.rendering, route.id).toBe('static')
         expect(decided.has(route.id), 'home renders a graph now').toBe(false)
+        continue
+      }
+      if (route.id === 'book') {
+        /*
+          B-UI-01's booking flow, and the second stated deferral. Its rendering mode is the reason, and it
+          is asserted rather than described: `/book` is `dynamic` because it reads availability on every
+          request, so a graph there would be reassembled per request for a page whose subject is a form.
+
+          And the node it would carry is not a new subject. docs/09 §4 makes the premises row the one
+          source of NAP and warns that a hand-written second block is how an assistant ends up stating
+          wrong hours — a second `LocalBusiness` on the booking page is exactly that, one more node a
+          consumer has to reconcile with the eight pages that already describe the business. What this
+          page earns instead is a `potentialAction` on the business node pointing AT it, which belongs to
+          whichever page carries that node rather than to this one.
+
+          The day a graph does land here this assertion fails, which is the handover working.
+        */
+        expect(route.rendering, route.id).toBe('dynamic')
+        expect(decided.has(route.id), 'book renders a graph now').toBe(false)
         continue
       }
       expect(route.rendering, route.id).toBe('isr')
