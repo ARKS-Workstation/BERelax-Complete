@@ -9,6 +9,7 @@
     "./determinism": "./src/determinism.ts",
     "./matrix": "./src/matrix.ts",
     "./ports": "./src/ports.ts",
+    "./server": "./src/server.ts",
     "./touch-targets": "./src/touch-targets.ts"
   },
   "dependencies": {

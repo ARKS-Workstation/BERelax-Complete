@@ -1,7 +1,6 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { encodeRendition } from '@berelax/media'
 import { CROPS, type CropName, type DerivativeFormat } from '@berelax/media/ladders'
 import { cropForViewportWidth, selectedRungFor, srcsetFor } from '@berelax/media/srcset'
@@ -65,8 +64,13 @@ import { appMediaStorage, repositoryRoot } from './media/storage.ts'
  * "primitives and messages 3800, kitchen sink and breakpoint preview 4400". Two worktrees running at once
  * must not have one suite's `next start` answer for another.
  */
-const PORT = testPort('hero-lcp')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 const ROUTE = '/hero-demo'
 const ROUTE_AR = '/ar/hero-demo'
 
@@ -74,7 +78,7 @@ const ROUTE_AR = '/ar/hero-demo'
 const PHONE = 390
 const DESKTOP = 1440
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 /** A VP8 WebM recorded by the browser, standing in for a rendition this browser could decode. */
 let fixtureVideo: Buffer
@@ -117,20 +121,6 @@ async function ensureRung(crop: CropName, width: number, format: DerivativeForma
     contentType: headers['content-type'],
     cacheControl: headers['cache-control'],
   })
-}
-
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${BASE}${ROUTE}`)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE}${ROUTE} within ${timeoutMs}ms`)
 }
 
 /** Records a second of VP8 from a canvas. No committed binary, no encoder, no footage claimed. */
@@ -189,34 +179,20 @@ beforeAll(async () => {
   // The desktop preload's `href` fallback, which is the narrowest desktop rung.
   await ensureRung('desktop', CROPS.desktop.widths[0] ?? 1024, 'avif')
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'hero-lcp',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/hero-demo',
+    readyWithinMs: 120_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  await waitForServer()
-  // The server that answered must be OURS: a reachable port plus a dead child is another checkout's
-  // application answering for this one, and every assertion below would then be about its build.
-  if (server.exitCode !== null) {
-    throw new Error(
-      `next start exited with ${server.exitCode} yet ${BASE} answered — something else is serving that ` +
-        `port and these assertions would run against it:\n${output}`,
-    )
-  }
+  BASE = server.origin
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
   fixtureVideo = await recordFixtureVideo()
 }, 180_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 interface PageOptions {

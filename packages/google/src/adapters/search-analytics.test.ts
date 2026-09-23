@@ -101,7 +101,18 @@ describe('paging: 60,000 rows, 25,000 at a time', () => {
       result.rows.map((row) => [row.date, row.page, row.query, row.device, row.country].join('|')),
     )
     expect(keys.size).toBe(60_000)
-  })
+    // 30 seconds, not vitest's default 5.
+    //
+    // This is a CORRECTNESS test that happens to do real work: 60,000 generated rows through the paging
+    // loop, three fake transport round trips, and a 60,000-member Set of joined dimension tuples. None of
+    // that is fast, and none of it is being measured — the assertions are about cursors and duplicates. On
+    // an idle box it finishes in about five seconds, which is to say it was already at the default limit,
+    // and under four concurrent verify runs it timed out at 5,000ms and reported a paging defect that did
+    // not exist. A correctness test with an implicit performance budget fails for reasons its own name does
+    // not mention, which is the defect class this repository keeps finding: what it measures is not what it
+    // claims. The row count stays at 60,000 because the criterion names it (three pages, the last one
+    // short), so the timeout moves rather than the fixture.
+  }, 30_000)
 
   it('advances by the page size rather than by what the last page returned', async () => {
     // The control that distinguishes the two implementations. With a page size that does not divide the

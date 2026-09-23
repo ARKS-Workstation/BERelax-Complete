@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import {
   assertPublicDisplayNameCompliant,
   type CompliancePolicy,
@@ -26,7 +25,7 @@ import {
   unconfirmedAssumptionRows,
   withUnitOfWork,
 } from '@berelax/db'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from './facts/build.ts'
@@ -54,10 +53,10 @@ import { treatmentSitemapEntries } from './treatments/sitemap.ts'
  *
  * ## The port, and the server that answers it
  *
- * `testPort('treatments')`, a band `@berelax/harness/ports` owns and proves disjoint from every other
- * suite's (`kitchen-sink.itest.ts` records why a fixed port is a false pass: another worktree's application
- * answers and every assertion is about code this tree lacks). The child is asserted alive after the port
- * answers, for the same reason.
+ * `startWebServer({ suite: 'treatments' })`, which draws from a band `@berelax/harness/ports` owns and
+ * proves disjoint from every other suite's, then ACQUIRES it (`kitchen-sink.itest.ts` records why a fixed
+ * port is a false pass: another worktree's application answers and every assertion is about code this tree
+ * lacks). It asserts the child is alive after the port answers, for the same reason.
  *
  * ## Why the rows are seeded here
  *
@@ -65,8 +64,13 @@ import { treatmentSitemapEntries } from './treatments/sitemap.ts'
  * `seedPremises`, `ensureLegalEntity` and `seedCatalogue` are the same three calls `facts.itest.ts` and
  * `structured-data.itest.ts` make, with the values the migrations seed — never an invented address.
  */
-const PORT = testPort('treatments')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 if (!DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
@@ -74,7 +78,7 @@ if (!DATABASE_URL) {
 
 const ACTOR = { kind: 'system', label: 'W-SITE-05 itest' } as const
 
-let server: ChildProcess
+let server: WebServer
 let sql: Sql
 let facts: Facts
 let licenceClass: string
@@ -217,33 +221,13 @@ beforeAll(async () => {
   facts = buildFacts(read, { generatedAt: '2026-01-01T00:00:00.000Z', origin: siteOrigin() })
   licenceClass = seeded.licenceClass
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'treatments',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/treatments',
+    readyWithinMs: 90_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  const deadline = Date.now() + 90_000
-  for (;;) {
-    try {
-      if ((await fetch(`${BASE}/treatments`)).ok) break
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() > deadline) throw new Error(`the app did not start on ${BASE}:\n${output}`)
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  // The server that answered must be OURS: a reachable port plus a dead child is another worktree's
-  // application answering for this one.
-  if (server.exitCode !== null) {
-    throw new Error(`next start exited with ${server.exitCode} yet ${BASE} answered:\n${output}`)
-  }
+  BASE = server.origin
 
   /*
     The menu pages are revalidated before anything is asserted, and the reason is a trap worth recording.
@@ -261,7 +245,7 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  server?.kill('SIGTERM')
+  await server?.stop()
   await sql?.end({ timeout: 5 })
 })
 

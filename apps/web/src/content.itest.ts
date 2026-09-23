@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { FAQ_ENTRIES, JOURNAL_POSTS, PUBLICATION_RULES } from '@berelax/cms'
 import {
   assertPublicDisplayNameCompliant,
@@ -20,7 +19,7 @@ import {
   seedCatalogue,
   seedPremises,
 } from '@berelax/db'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import type { Facts } from '@berelax/shared'
 import { getPayload, type Payload } from 'payload'
 import { createElement } from 'react'
@@ -56,9 +55,11 @@ import { documentRoutes, isParameterised, samplePathFor } from './routes/registr
  *
  * ## The port, the server, and the ISR cache
  *
- * `testPort('content')`, a band `@berelax/harness/ports` owns and proves disjoint: `kitchen-sink.itest.ts`
- * records why a fixed port is a false pass, and the child is asserted alive after the port answers for the
- * same reason. This suite's old self-chosen `5900 + random(300)` ran into `hero-lcp`'s 5800.
+ * `startWebServer({ suite: 'content' })`, which draws from a band `@berelax/harness/ports` owns and proves
+ * disjoint, then ACQUIRES it — binding a candidate and drawing again if another worktree holds it. It also
+ * asserts the child is alive after the port answers, which this file used to do by hand: a reachable port
+ * plus a dead child is another worktree's application answering for this one. This suite's old self-chosen
+ * `5900 + random(300)` ran into `hero-lcp`'s 5800.
  *
  * `.next` holds the ISR cache **on disk**, so a page this suite revalidates in one run is served from that
  * cache by the next run's server — with the rows as they were then, including rows this file created. That
@@ -66,8 +67,13 @@ import { documentRoutes, isParameterised, samplePathFor } from './routes/registr
  * marker, it is deleted in `afterAll`, and the pages are revalidated **and fetched twice** afterwards, because
  * `revalidatePath` marks an entry stale rather than deleting it.
  */
-const PORT = testPort('content')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 if (!DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
@@ -82,7 +88,7 @@ if (!DATABASE_URL) {
  */
 const RUN = Math.random().toString(36).slice(2, 8)
 
-let server: ChildProcess
+let server: WebServer
 let sql: Sql
 let payload: Payload
 let facts: Facts
@@ -272,33 +278,13 @@ beforeAll(async () => {
    */
   payload = await getPayload({ config })
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'content',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/spa',
+    readyWithinMs: 90_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  const deadline = Date.now() + 90_000
-  for (;;) {
-    try {
-      if ((await fetch(`${BASE}/spa`)).ok) break
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() > deadline) throw new Error(`the app did not start on ${BASE}:\n${output}`)
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  // The server that answered must be OURS: a reachable port plus a dead child is another worktree's
-  // application answering for this one.
-  if (server.exitCode !== null) {
-    throw new Error(`next start exited with ${server.exitCode} yet ${BASE} answered:\n${output}`)
-  }
+  BASE = server.origin
 
   // The CMS pages are regenerated from the rows as they are NOW, before anything is asserted, for the reason
   // the header gives: the ISR cache is on disk and an earlier run's copy is what this server would serve.
@@ -312,11 +298,11 @@ afterAll(async () => {
   for (const doc of created) {
     await payload.delete({ collection: doc.collection as never, id: doc.id }).catch(() => undefined)
   }
-  if (server?.exitCode === null) {
+  if (server?.alive() === true) {
     await republish('faq', FAQ_PATHS).catch(() => undefined)
     await republish('journal', JOURNAL_PATHS).catch(() => undefined)
   }
-  server?.kill('SIGTERM')
+  await server?.stop()
   await sql?.end({ timeout: 5 })
 })
 

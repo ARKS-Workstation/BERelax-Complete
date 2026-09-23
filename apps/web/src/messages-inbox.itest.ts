@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, createPostgresMessageStore, type Sql } from '@berelax/db'
@@ -9,7 +8,7 @@ import {
   DETERMINISM_CSS,
   DETERMINISTIC_LAUNCH_ARGS,
 } from '@berelax/harness/determinism'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -41,8 +40,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  */
 
 /** A port from the same range as the other web itests, chosen at random for the same reason. */
-const PORT = testPort('messages-inbox')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn — see
+ * `packages/harness/src/server.ts`. This file used `stdio: 'ignore'`, so a collision here threw the
+ * child's own explanation away and reported only that it had exited.
+ */
+let BASE = ''
 const SCREENS = new URL('../../../artifacts/screens', import.meta.url).pathname
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
@@ -52,7 +55,7 @@ if (!url) {
 
 const RUN = `${process.pid}${Math.floor(Math.random() * 1e6)}`
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 let sql: Sql
 let fixture: SeededMessagingFixture
@@ -66,20 +69,6 @@ let path: string
  * rather than below four SMS rows where a 390px screenshot would not reach it.
  */
 let emailPath: string
-
-async function waitForServer(timeoutMs = 90_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${BASE}/settings/messages`)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
-}
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 4 })
@@ -108,12 +97,12 @@ beforeAll(async () => {
   path = `/settings/messages?template=${encodeURIComponent(fixture.smsTemplateKey)}`
   emailPath = `/settings/messages?template=${encodeURIComponent(fixture.emailTemplateKey)}`
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'messages-inbox',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: 'ignore',
+    probePath: '/settings/messages',
+    readyWithinMs: 90_000,
     env: {
-      ...process.env,
-      NODE_ENV: 'production',
       // This route calls `loadConfig()`, which is the first web itest to drive one that does — the OTP
       // route's tests build their handler in process with `parseConfig`. So the two values it needs are
       // declared here rather than assumed: CI exports both, and a local run that exported only
@@ -123,7 +112,7 @@ beforeAll(async () => {
       DATABASE_URL: url,
     },
   })
-  await waitForServer()
+  BASE = server.origin
   // The shared list, not a hand-written one: `--disable-skia-runtime-opts` and `--disable-lcd-text` are
   // what make the repeat capture below byte-identical, and this file used to launch without them. See
   // `packages/harness/src/determinism.ts`.
@@ -132,7 +121,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
   await sql?.end({ timeout: 5 })
 })
 

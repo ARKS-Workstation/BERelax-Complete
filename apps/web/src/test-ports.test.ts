@@ -31,8 +31,17 @@ const INLINE_PORT = /\b\d{4}\s*\+\s*Math\.floor\(\s*Math\.random\(\)/
  */
 const LITERAL_URL_PORT = /http:\/\/127\.0\.0\.1:\d{4}\b/
 
-/** `testPort('name')` — the only sanctioned source of a port. */
-const TEST_PORT_CALL = /\btestPort\(\s*'([^']+)'\s*\)/g
+/**
+ * How a suite claims its band: `startWebServer({ suite: 'name' })`, or a bare `testPort('name')` for a
+ * suite that needs the number without the server.
+ *
+ * It was only the second form until `packages/harness/src/server.ts` took ownership of the child process,
+ * the temp root and the port ACQUISITION. A pattern that still matched only `testPort` would have read every
+ * converted suite as claiming nothing, and then reported all eleven bands as declared-and-unused — the
+ * assertion below would have failed loudly, which is the good case, but it would have been failing about the
+ * wrong thing.
+ */
+const BAND_CLAIM = /\btestPort\(\s*'([^']+)'\s*\)|\bsuite:\s*'([^']+)'/g
 
 /**
  * The same pattern without `g`, for presence.
@@ -41,10 +50,20 @@ const TEST_PORT_CALL = /\btestPort\(\s*'([^']+)'\s*\)/g
  * false, true for identical inputs. `matchAll` is safe — it works on a clone — but `.test()` is not,
  * and a filter over a dozen files would silently skip every other one.
  */
-const HAS_TEST_PORT_CALL = /\btestPort\(\s*'[^']+'\s*\)/
+const HAS_BAND_CLAIM = /\btestPort\(\s*'[^']+'\s*\)|\bsuite:\s*'[^']+'/
 
-/** A suite starts a server when it spawns one; only those need a port. */
-const STARTS_SERVER = /\b(?:spawn|execFile)\(/
+/** A suite starts a server when it asks the harness for one, or — no longer permitted — spawns its own. */
+const STARTS_SERVER = /\bstartWebServer\(|\b(?:spawn|execFile)\(/
+
+/**
+ * A suite spawning `next start` for itself, which is now a defect rather than the norm.
+ *
+ * Eleven files each did this and drifted: three discarded the child's output entirely, so a port collision
+ * arrived as `next start exited with 1` with the reason thrown away; none removed the temp root Next leaves
+ * under `os.tmpdir()`, which reached 10,539 directories and 25 GB in one session. `startWebServer` owns all
+ * of it, and this pattern is what stops the twelfth file going back to a private copy.
+ */
+const PRIVATE_NEXT_SPAWN = /\bspawn(?:Sync)?\(\s*'pnpm'[\s\S]{0,120}?'next'[\s\S]{0,40}?'start'/
 
 function itestFiles(dir: string): readonly string[] {
   const found: string[] = []
@@ -72,7 +91,9 @@ describe('integration suite ports', () => {
 
   it('never computes a port inline', () => {
     const offenders = FILES.filter((file) => INLINE_PORT.test(file.text)).map((file) => file.path)
-    expect(offenders, 'these compute their own port; call testPort() instead').toEqual([])
+    expect(offenders, 'these compute their own port; take one from startWebServer instead').toEqual(
+      [],
+    )
   })
 
   it('never writes a loopback port as a literal', () => {
@@ -81,14 +102,15 @@ describe('integration suite ports', () => {
     )
     expect(
       offenders,
-      'a fixed port answers from another worktree; call testPort() instead',
+      'a fixed port answers from another worktree; take one from startWebServer instead',
     ).toEqual([])
   })
 
   it('draws every port from a band the registry declares', () => {
     const unknown: string[] = []
     for (const file of FILES) {
-      for (const [, suite] of file.text.matchAll(TEST_PORT_CALL)) {
+      for (const [, viaCall, viaOption] of file.text.matchAll(BAND_CLAIM)) {
+        const suite = viaCall ?? viaOption
         if (suite !== undefined && !(suite in TEST_PORT_BANDS))
           unknown.push(`${file.path} -> ${suite}`)
       }
@@ -102,7 +124,8 @@ describe('integration suite ports', () => {
     // itself — which is what the first version of this test did.
     const claimants = new Map<string, Set<string>>()
     for (const file of FILES) {
-      for (const [, suite] of file.text.matchAll(TEST_PORT_CALL)) {
+      for (const [, viaCall, viaOption] of file.text.matchAll(BAND_CLAIM)) {
+        const suite = viaCall ?? viaOption
         if (suite === undefined) continue
         const files = claimants.get(suite) ?? new Set<string>()
         files.add(file.path)
@@ -122,9 +145,19 @@ describe('integration suite ports', () => {
     expect(orphans, 'these bands are declared and unused').toEqual([])
   })
 
+  it('starts the application through the harness and never with its own spawn', () => {
+    const offenders = FILES.filter((file) => PRIVATE_NEXT_SPAWN.test(file.text)).map(
+      (file) => file.path,
+    )
+    expect(
+      offenders,
+      'these spawn `next start` themselves; startWebServer owns the port, the temp root and the teardown',
+    ).toEqual([])
+  })
+
   it('gives a band to every suite that starts a server', () => {
     const unbanded = FILES.filter(
-      (file) => STARTS_SERVER.test(file.text) && !HAS_TEST_PORT_CALL.test(file.text),
+      (file) => STARTS_SERVER.test(file.text) && !HAS_BAND_CLAIM.test(file.text),
     ).map((file) => file.path)
     expect(unbanded, 'these spawn a server without drawing a port from the registry').toEqual([])
   })

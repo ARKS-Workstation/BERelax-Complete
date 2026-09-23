@@ -1,6 +1,5 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { RADIUS } from '@berelax/ui'
 import {
   ICON_SIZE,
@@ -47,35 +46,26 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * port collides when two agents run `pnpm verify` at once, and one of them then drives a server that is
  * not its own.
  */
-const PORT = testPort('primitives')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. Computing an
+ * origin at module scope is what made a collision present as a bare `next start exited with 1`.
+ */
+let BASE = ''
 const EN = '/kitchen-sink'
 const AR = '/ar/kitchen-sink'
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${BASE}${EN}`)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE}${EN} within ${timeoutMs}ms`)
-}
-
 beforeAll(async () => {
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'primitives',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: 'ignore',
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: `${EN}`,
+    readyWithinMs: 60_000,
   })
-  await waitForServer()
+  BASE = server.origin
   // Pinned to the pre-installed Chromium at /opt/pw-browsers, with the same flags as every other
   // browser in this repository.
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
@@ -83,7 +73,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 interface Cell {

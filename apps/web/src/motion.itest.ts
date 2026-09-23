@@ -1,5 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import {
   MOTION_FALLBACK_ATTRIBUTE,
   MOTION_READY_ATTRIBUTE,
@@ -40,55 +39,31 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * listing its neighbours here: two worktrees running at once must not have one suite's `next start` answer
  * for another's build.
  */
-const PORT = testPort('motion')
-const BASE = `http://127.0.0.1:${PORT}`
-const ROUTE = `${BASE}/kitchen-sink`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(ROUTE)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${ROUTE} within ${timeoutMs}ms`)
-}
-
 beforeAll(async () => {
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'motion',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/kitchen-sink',
+    readyWithinMs: 120_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  await waitForServer()
-  // The server that answered must be OURS. A reachable port plus a dead child is another checkout's
-  // application answering for this one, and every assertion below would then be about its build.
-  if (server.exitCode !== null) {
-    throw new Error(
-      `next start exited with ${server.exitCode} yet ${BASE} answered — something else is serving that ` +
-        `port and these assertions would run against it:\n${output}`,
-    )
-  }
+  BASE = server.origin
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 180_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 interface PageOptions {

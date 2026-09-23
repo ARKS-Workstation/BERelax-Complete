@@ -1,6 +1,5 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { auditTouchTargetsInPage, touchTargetInputFor } from '@berelax/harness/touch-targets'
 import { MEASURE, TOUCH_TARGET } from '@berelax/ui'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
@@ -52,58 +51,33 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * are disjoint; this file naming its own range, and recording its neighbours' in a comment, is what let
  * three pairs of suites end up sharing one.
  */
-const PORT = testPort('kitchen-sink')
-const BASE = `http://127.0.0.1:${PORT}`
-const ROUTE = `${BASE}/kitchen-sink`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
-
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(ROUTE)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${ROUTE} within ${timeoutMs}ms`)
-}
 
 beforeAll(async () => {
   // `pipe`, not `ignore`: a server that cannot bind says so on stderr, and with the output discarded the
   // only symptom was `ERR_CONNECTION_REFUSED` from Playwright several assertions later.
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'kitchen-sink',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/kitchen-sink',
+    readyWithinMs: 120_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  await waitForServer()
-  // The server that answered must be OURS. `waitForServer` only proves something is listening, and a
-  // reachable port plus a dead child is exactly the case above: another checkout's application answering
-  // for this one.
-  if (server.exitCode !== null) {
-    throw new Error(
-      `next start exited with ${server.exitCode} yet ${BASE} answered — something else is serving that ` +
-        `port and these assertions would run against it:\n${output}`,
-    )
-  }
+  BASE = server.origin
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 180_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 /**

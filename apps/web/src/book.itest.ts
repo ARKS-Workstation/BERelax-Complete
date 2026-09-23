@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,7 +28,7 @@ import {
   freezePageEnvironment,
 } from '@berelax/harness/determinism'
 import { DIRECTIONS, THEMES, VIEWPORTS } from '@berelax/harness/matrix'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { auditTouchTargetsInPage, touchTargetInputFor } from '@berelax/harness/touch-targets'
 import { DECORATIVE_ONLY_TOKENS, TEXT_BEARING_TOKENS } from '@berelax/ui'
 import { SLOT_GRID_COLUMNS } from '@berelax/ui/patterns'
@@ -73,8 +72,11 @@ import { BOOK_FIELDS, bookHref, wallClock } from './book/state.ts'
  * `maxAdvanceDays` is 36_500 or their solver is a stub); this one drives the real page with the real
  * settings, so its dates have to be dates a customer could actually book.
  */
-const PORT = testPort('book')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn — see
+ * `packages/harness/src/server.ts` for why a module-scope origin made a collision undiagnosable.
+ */
+let BASE = ''
 const APP_DIR = new URL('..', import.meta.url).pathname
 
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
@@ -106,7 +108,7 @@ const SPAN_TO = 40
 const CAPTURE_LABEL = 'book'
 
 let sql: Sql
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 let variantId = ''
 let variantName = ''
@@ -265,24 +267,6 @@ async function commitAppointment(args: {
             'confirmed', uuid_generate_v7(), 1, 20, 10,
             ${gross.fils}, ${split.net.fils}, ${split.vat.fils})
   `
-}
-
-async function waitForServer(timeoutMs = 120_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    // A child that has exited is not a server that is slow to start, and waiting the full timeout on one
-    // turns a crash into a timeout nobody can read.
-    if (server.exitCode !== null) {
-      throw new Error(`next start exited with ${server.exitCode} before answering on ${BASE}`)
-    }
-    try {
-      if ((await fetch(`${BASE}/robots.txt`)).ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
 }
 
 interface Cell {
@@ -463,23 +447,19 @@ beforeAll(async () => {
     })
   }
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'book',
     cwd: APP_DIR,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/book',
+    readyWithinMs: 120_000,
   })
-  await waitForServer()
-  // The server that answered must be OURS: a reachable port plus a dead child is another worktree's
-  // application answering for this one, and then every assertion is about code this tree does not contain.
-  if (server.exitCode !== null) {
-    throw new Error(`next start exited with ${server.exitCode} yet ${BASE} answered`)
-  }
+  BASE = server.origin
   browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 300_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
   if (sql !== undefined) {
     await sql`delete from booking where notes = ${MARKER}`
     await sql`delete from shift_assignment where employee_id = any(${[...staff.values()]}::uuid[])`

@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
@@ -8,7 +7,7 @@ import {
   DETERMINISTIC_LAUNCH_ARGS,
 } from '@berelax/harness/determinism'
 import { captureFilename, THEMES, VIEWPORTS } from '@berelax/harness/matrix'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { buildDerivatives, storeOriginal } from '@berelax/media'
 import { CROPS, cropRectFor } from '@berelax/media/ladders'
 import { sharp } from '@berelax/media/sharp'
@@ -58,8 +57,13 @@ import { appMediaStorage, mediaOutboxRoot } from './media/storage.ts'
  * would depend on which ran first, and the first version of this file did exactly that and reported 200
  * where 422 was expected.
  */
-const PORT = testPort('breakpoint-preview')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * The origin is assigned in `beforeAll` rather than computed here, because the port is ACQUIRED rather than
+ * drawn: `startWebServer` binds a candidate from this suite's band and draws again if another worktree
+ * already holds it. Computing it at module scope is what made a collision present as `next start exited
+ * with 1` with the reason discarded.
+ */
+let BASE = ''
 const SCREENS = new URL('../../../artifacts/screens', import.meta.url).pathname
 const REPO = new URL('../../../', import.meta.url).pathname
 
@@ -127,7 +131,7 @@ interface Fixture {
   readonly focal: { readonly x: number; readonly y: number }
 }
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 let payload: Payload
 let heroFixture: Fixture
@@ -137,25 +141,6 @@ let junkFixture: Fixture
 const cookies = new Map<string, string>()
 
 const storage = () => appMediaStorage()
-
-async function waitForServer(timeoutMs = 120_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    // A child that has exited is not a server that is slow to start, and waiting the full timeout on one
-    // turns a crash into a timeout nobody can read.
-    if (server.exitCode !== null) {
-      throw new Error(`next start exited with ${server.exitCode} before answering on ${BASE}`)
-    }
-    try {
-      const response = await fetch(`${BASE}/robots.txt`)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
-}
 
 async function ensureStaff(role: string): Promise<string> {
   const email = `wsys10-${role}@berelax.test`
@@ -247,12 +232,11 @@ beforeAll(async () => {
   // A third row whose alt is broken in the database rather than through Payload — see the test that uses it.
   junkFixture = await seedFixture(heroBytes, 'hero-team.jpg', HERO_ALT)
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'breakpoint-preview',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: 'ignore',
+    readyWithinMs: 120_000,
     env: {
-      ...process.env,
-      NODE_ENV: 'production',
       APP_ENV: process.env['APP_ENV'] ?? 'test',
       DATABASE_URL: url,
       // The preview reads objects out of the bucket, so the adapter has to be the one the ladder was built
@@ -264,7 +248,7 @@ beforeAll(async () => {
         process.env['PAYLOAD_SECRET'] ?? 'berelax-placeholder-payload-secret-not-for-serving',
     },
   })
-  await waitForServer()
+  BASE = server.origin
 
   cookies.set('owner', await signIn(owner))
   cookies.set('manager', await signIn(manager))
@@ -278,7 +262,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 async function get(path: string, role = 'owner'): Promise<Response> {

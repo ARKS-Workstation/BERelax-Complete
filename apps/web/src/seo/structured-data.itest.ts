@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import {
   assertPublicDisplayNameCompliant,
   buildStructuredDataGraph,
@@ -19,7 +18,7 @@ import {
   seedCatalogue,
   seedPremises,
 } from '@berelax/db'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildFacts } from '../facts/build.ts'
@@ -57,11 +56,15 @@ import { graphInputFor } from './graph-input.ts'
  * `kitchen-sink.itest.ts` on why a fixed port is a false pass, and `ports.ts` on why a self-chosen band is
  * the next mistake).
  */
-const PORT = testPort('structured-data')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn — see
+ * `packages/harness/src/server.ts`. This file lives one directory down, which is why the first sweep of
+ * the conversion missed it and the new `PRIVATE_NEXT_SPAWN` check in `test-ports.test.ts` found it.
+ */
+let BASE = ''
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 
-let server: ChildProcess
+let server: WebServer
 let sql: Sql
 let facts: Facts
 let licenceClass: string
@@ -122,38 +125,17 @@ beforeAll(async () => {
   facts = buildFacts(read, { generatedAt: '2026-01-01T00:00:00.000Z', origin: siteOrigin() })
   licenceClass = policy.licenceClass
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'structured-data',
     cwd: new URL('../..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/kitchen-sink',
+    readyWithinMs: 60_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  const deadline = Date.now() + 60_000
-  for (;;) {
-    try {
-      const response = await fetch(`${BASE}/kitchen-sink`)
-      if (response.ok) break
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() > deadline) throw new Error(`the app did not start on ${BASE}:\n${output}`)
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  // The server that answered must be OURS: a reachable port plus a dead child is another worktree's
-  // application answering for this one, and every assertion below would be about code this tree lacks.
-  if (server.exitCode !== null) {
-    throw new Error(`next start exited with ${server.exitCode} yet ${BASE} answered:\n${output}`)
-  }
+  BASE = server.origin
 }, 180_000)
 
 afterAll(async () => {
-  server?.kill('SIGTERM')
+  await server?.stop()
   await sql?.end()
 })
 

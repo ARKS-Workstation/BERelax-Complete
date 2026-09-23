@@ -135,6 +135,43 @@ const withEditedFile = (path, edit, body) => {
 }
 
 /**
+ * `String.replace`, refusing an anchor that does not match EXACTLY once.
+ *
+ * The third instance of one failure, and the first two both looked like a passing gate. A case meant to
+ * break one construct edited an identical earlier one — `const required = [` in case 52 rather than the one
+ * in case 29, and `'canonical',` in the first of two adjacent exported lists — and then tested a file that
+ * still contained the thing it was supposed to have removed. `withEditedFile` cannot catch it: the edit DOES
+ * change something, so the no-op guard is satisfied, and the case reports PASS about nothing.
+ *
+ * `String.replace` with a string argument silently takes the first match, which is the whole mechanism. So
+ * a case that needs certainty asks for it here, and gets a named failure at authoring time instead of a
+ * green run that measures nothing. Two matches is a defect in the case; zero is the stale pattern the
+ * `withEditedFile` guard already reports one step later, named earlier and more precisely.
+ *
+ * Not yet used by every case — there are hundreds, and converting them blind would be its own risk. New
+ * cases use it, and a case whose anchor could plausibly repeat is converted when it is next touched.
+ */
+const replaceOnce = (source, find, into) => {
+  const first = source.indexOf(find)
+  if (first === -1) {
+    throw new Error(
+      `replaceOnce found no occurrence of ${JSON.stringify(find)}. The anchor has gone stale against the ` +
+        'real source, so whatever runs next would prove nothing — fix the pattern, not the expectation.',
+    )
+  }
+  const second = source.indexOf(find, first + find.length)
+  if (second !== -1) {
+    throw new Error(
+      `replaceOnce found ${JSON.stringify(find)} more than once, at ${first} and ${second}. ` +
+        'String.replace would take the first, which may not be the one this case is about — that mistake ' +
+        'has shipped twice as a gate that edited the wrong construct and then tested nothing. Extend the ' +
+        'anchor until it is unique.',
+    )
+  }
+  return source.slice(0, first) + into + source.slice(first + find.length)
+}
+
+/**
  * Asserts a gate rejected a fixture **by the rule written for it**.
  *
  * A bare non-zero exit is not enough: a fixture can be rejected by an unrelated rule while the one
@@ -15622,30 +15659,33 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // 61e. A suite that computes its own port again. The scan is a text scan for exactly this shape, because
   //      the claim is about what the file says: a self-chosen port is wrong on a machine where nothing else
   //      happens to be listening.
+  //
+  //      The anchor moved when `startWebServer` took over the child process: a suite no longer writes
+  //      `const PORT = testPort('motion')` at all, so this case now injects the arithmetic beside the call
+  //      that replaced it. The stale version did not quietly pass — `withEditedFile`'s no-op guard stopped
+  //      the whole run and named the file, which is the guard doing the job it was added for.
   {
     const result = withEditedFile(
       A_SUITE,
       (text) =>
-        text.replace(
-          "const PORT = testPort('motion')",
-          'const PORT = 4700 + Math.floor(Math.random() * 300)',
+        replaceOnce(
+          text,
+          '  server = await startWebServer({',
+          '  const PORT = 4700 + Math.floor(Math.random() * 300)\n  void PORT\n  server = await startWebServer({',
         ),
       () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
     )
     checkRejectedBy('a suite computing its own port is rejected', result, 'compute their own port')
   }
 
-  // 61f. The other way to pin a port: write it into the URL and leave `PORT` unused.
+  // 61f. The other way to pin a port: write it into the URL. The suite now declares `let BASE = ''` and
+  //      fills it from `server.origin`, so the literal goes there — and the scan still catches it, which is
+  //      the point: the shape it looks for is an `http://127.0.0.1:<port>` in the source, however the file
+  //      arrives at one.
   {
     const result = withEditedFile(
       A_SUITE,
-      // A regex and not a string literal: the text being matched contains a template placeholder, and
-      // writing it as a string trips `noTemplateCurlyInString` in this very file.
-      (text) =>
-        text.replace(
-          /const BASE = `http:\/\/127\.0\.0\.1:\$\{PORT\}`/,
-          "const BASE = 'http://127.0.0.1:4711'",
-        ),
+      (text) => replaceOnce(text, "let BASE = ''", "let BASE = 'http://127.0.0.1:4711'"),
       () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
     )
     checkRejectedBy('a literal loopback port is rejected', result, 'answers from another worktree')
@@ -15656,8 +15696,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   {
     const result = withEditedFile(
       A_SUITE,
-      (text) =>
-        text.replace("const PORT = testPort('motion')", "const PORT = testPort('treatments')"),
+      (text) => replaceOnce(text, "    suite: 'motion',", "    suite: 'treatments',"),
       () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
     )
     checkRejectedBy('two suites drawing one band are rejected', result, 'share a port')
@@ -15682,18 +15721,18 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 
-  // 61i. A suite that spawns a server and asks for no band at all — the gap 61e and 61f leave open, since
+  // 61i. A suite that starts a server and asks for no band at all — the gap 61e and 61f leave open, since
   //      a file with no port expression of any kind trips neither.
+  //
+  //      The band is claimed through `startWebServer`'s `suite` option now, so removing that option is what
+  //      makes the file start a server while naming no band. Leaving the `startWebServer` call in place is
+  //      the point: the scan must still see a file that STARTS one, or it would be rejecting the wrong
+  //      thing. This was the fourth case in this block whose anchor the harness conversion moved, and it
+  //      was the one the first pass missed — the no-op guard named it rather than letting it pass.
   {
     const result = withEditedFile(
       A_SUITE,
-      (text) =>
-        text
-          .replace("import { testPort } from '@berelax/harness/ports'\n", '')
-          .replace(
-            "const PORT = testPort('motion')",
-            'const PORT = Number(process.env["MOTION_PORT"])',
-          ),
+      (text) => replaceOnce(text, "    suite: 'motion',\n", ''),
       () => runExpectingFailure('pnpm', unit(SCAN_TEST)),
     )
     checkRejectedBy(
@@ -19536,6 +19575,197 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       () => runExpectingFailure('pnpm', unit(REGISTRY_TEST)),
     )
     checkRejectedBy('a home route declared static fails the registry suite', result, 'home')
+  }
+}
+
+// 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
+//
+// Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
+//
+// `packages/harness/src/server.ts` took over what eleven — twelve, once the one in `src/seo/` was found —
+// integration suites each did for themselves: spawning `next start`, choosing a port, waiting for it, and
+// leaving Next's module cache under `os.tmpdir()` for ever. The leak reached 10,539 directories and 25 GB in
+// one session and presented as `ENOSPC` in unrelated commands and twice as a container that stopped, which
+// is why nobody traced it to a test harness. The port was drawn at random inside the suite's band, which the
+// band comment defended as "under a percent" — true for one pair of runs, and not for several worktrees each
+// running all twelve, where the collision arrives often enough to be filed as a flake. Three of the twelve
+// used `stdio: 'ignore'`, so the child's own `EADDRINUSE` was thrown away and the failure said only that it
+// had exited.
+//
+// `replaceOnce` is the other. Three gate cases have now edited the wrong construct because
+// `String.replace` takes the first match — `const required = [` and `'canonical',` both appear twice in
+// their files — and every one of them then reported PASS about a file that still contained what the case
+// meant to remove. The `withEditedFile` no-op guard cannot see it, because the edit does change something.
+{
+  const SERVER = 'packages/harness/src/server.ts'
+  const SERVER_SUITE = 'packages/harness/src/server.test.ts'
+  const PORTS_SUITE = 'apps/web/src/test-ports.test.ts'
+  const runUnit = (file) => run('pnpm', ['vitest', 'run', '-c', 'vitest.config.ts', file])
+
+  // 79a. The temp root is the whole cleanup, and it is the LAST spread for a reason.
+  withEditedFile(
+    SERVER,
+    (source) =>
+      replaceOnce(
+        source,
+        "return { ...process.env, NODE_ENV: 'production', ...extra, TMPDIR: temp, TMP: temp, TEMP: temp }",
+        "return { ...process.env, NODE_ENV: 'production', TMPDIR: temp, TMP: temp, TEMP: temp, ...extra }",
+      ),
+    () => {
+      checkRejectedBy(
+        'server gate: a caller able to redirect TMPDIR fails the env suite',
+        runUnit(SERVER_SUITE),
+        'refuses to let a caller redirect the temp root',
+      )
+    },
+  )
+
+  // 79b. And the control, because 79a is satisfied by a builder that ignores `extra` altogether.
+  withEditedFile(
+    SERVER,
+    (source) =>
+      replaceOnce(
+        source,
+        "return { ...process.env, NODE_ENV: 'production', ...extra, TMPDIR: temp, TMP: temp, TEMP: temp }",
+        "return { ...process.env, NODE_ENV: 'production', TMPDIR: temp, TMP: temp, TEMP: temp }",
+      ),
+    () => {
+      checkRejectedBy(
+        'server gate: dropping the caller additions fails the pass-through suite',
+        runUnit(SERVER_SUITE),
+        'passes a suite',
+      )
+    },
+  )
+
+  // 79c. Remove the temp root entirely and the leak is back. The suite must say so by name.
+  withEditedFile(
+    SERVER,
+    (source) =>
+      replaceOnce(source, '...extra, TMPDIR: temp, TMP: temp, TEMP: temp }', '...extra }'),
+    () => {
+      checkRejectedBy(
+        'server gate: no TMPDIR at all fails the env suite',
+        runUnit(SERVER_SUITE),
+        'points every temp variable',
+      )
+    },
+  )
+
+  // 79d. A probe that does not release the port poisons every port it approves.
+  withEditedFile(
+    SERVER,
+    (source) =>
+      replaceOnce(
+        source,
+        "    probe.listen(port, '127.0.0.1', () => {\n      probe.close(() => resolve(true))\n    })",
+        "    probe.listen(port, '127.0.0.1', () => {\n      resolve(true)\n    })",
+      ),
+    () => {
+      checkRejectedBy(
+        'server gate: a probe that keeps the port fails its own release assertion',
+        runUnit(SERVER_SUITE),
+        'releases the port it probed',
+      )
+    },
+  )
+
+  // 79e. A pattern loose enough to read a ready server's own address as a collision retries a live server.
+  withEditedFile(
+    SERVER,
+    (source) =>
+      replaceOnce(
+        source,
+        'export const ADDRESS_IN_USE = /EADDRINUSE|address already in use|Port \\d+ is in use/i',
+        'export const ADDRESS_IN_USE = /EADDRINUSE|address already in use|in use|127\\.0\\.0\\.1/i',
+      ),
+    () => {
+      checkRejectedBy(
+        'server gate: an address-in-use pattern that matches a ready server fails its controls',
+        runUnit(SERVER_SUITE),
+        'does not match',
+      )
+    },
+  )
+
+  // 79f. A global regex carries lastIndex, so half the checks in a loop pass without being made.
+  withEditedFile(
+    SERVER,
+    (source) => replaceOnce(source, 'is in use/i\n', 'is in use/gi\n'),
+    () => {
+      checkRejectedBy(
+        'server gate: a global address-in-use pattern is rejected',
+        runUnit(SERVER_SUITE),
+        'not a global regex',
+      )
+    },
+  )
+
+  // 79g. Nobody starts the application privately again. This is the check that found the twelfth suite.
+  withEditedFile(
+    'apps/web/src/motion.itest.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        '  server = await startWebServer({',
+        "  spawn('pnpm', ['exec', 'next', 'start', '--port', '4799'])\n  server = await startWebServer({",
+      ),
+    () => {
+      checkRejectedBy(
+        'server gate: a suite spawning next start for itself is rejected',
+        runUnit(PORTS_SUITE),
+        'startWebServer owns the port, the temp root and the teardown',
+      )
+    },
+  )
+
+  // 79h was removed rather than kept. It broke `suite: 'motion',` and asserted only that the port-discipline
+  // suite failed — which is what case 61i now does with the rule NAMED ("without drawing a port from the
+  // registry"), because the harness conversion moved 61i's anchor onto exactly that line. Two cases making
+  // one edit is a maintenance trap, and the weaker of the two is the one to drop: a case that asserts only
+  // "something failed" is the vacuity ADR 0003 is about, and it would have gone on passing if the scan
+  // started rejecting that file for an unrelated reason.
+
+  // 79i. `replaceOnce` refuses an anchor that matches twice — the defect that shipped three times.
+  {
+    let message = ''
+    try {
+      replaceOnce('const required = [\n]\nconst required = [\n]\n', 'const required = [', 'X')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    check(
+      'server gate: replaceOnce refuses an anchor that matches twice',
+      message.includes('more than once') && message.includes('edited the wrong construct'),
+      `replaceOnce accepted an ambiguous anchor, or said something else:\n${message}`,
+    )
+  }
+
+  // 79j. And an anchor that matches nothing, which is the stale-pattern case named one step earlier.
+  {
+    let message = ''
+    try {
+      replaceOnce('nothing like it here', 'const required = [', 'X')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    check(
+      'server gate: replaceOnce refuses an anchor that matches nothing',
+      message.includes('no occurrence') && message.includes('gone stale'),
+      `replaceOnce accepted a stale anchor, or said something else:\n${message}`,
+    )
+  }
+
+  // 79k. The committed tree passes both suites, so the ten cases above are about the fixtures and not
+  // about a harness that was already red.
+  {
+    const serverClean = runUnit(SERVER_SUITE)
+    const portsClean = runUnit(PORTS_SUITE)
+    check(
+      'server gate: the committed harness and port discipline both pass',
+      !serverClean.failed && !portsClean.failed,
+      `a committed suite failed:\n${serverClean.output}${portsClean.output}`,
+    )
   }
 }
 

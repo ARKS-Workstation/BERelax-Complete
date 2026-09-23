@@ -1,7 +1,7 @@
-import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { DARK_PALETTE, LIGHT_PALETTE } from '@berelax/ui'
 import { type Browser, chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -24,26 +24,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * them saw a server that was not its own and the other could not bind. The range avoids the ephemeral
  * range Linux allocates from, so nothing else is handing this port out while the test holds it.
  */
-const PORT = testPort('shell')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. Computing an
+ * origin at module scope is what made a collision present as a bare `next start exited with 1`.
+ */
+let BASE = ''
 const APP_DIR = new URL('..', import.meta.url).pathname
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
-
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(BASE)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
-}
 
 /**
  * Builds the app if it has not been built.
@@ -70,18 +60,19 @@ function buildIfNeeded(): void {
 
 beforeAll(async () => {
   buildIfNeeded()
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'shell',
     cwd: APP_DIR,
-    stdio: 'ignore',
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/',
+    readyWithinMs: 60_000,
   })
-  await waitForServer()
+  BASE = server.origin
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 120_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 /**

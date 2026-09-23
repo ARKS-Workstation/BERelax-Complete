@@ -127,9 +127,10 @@ caught a real defect in this repository.
     has happened. If your unit adds a route, build the app once before believing a clean typecheck.
 
 18. **A server-starting suite draws its port from `@berelax/harness/ports`, never from arithmetic.**
-    `testPort('your-suite')`, with a band added to `TEST_PORT_BANDS` in that module. Do not write
-    `4700 + Math.floor(Math.random() * 300)`, and do not put a literal port in an `http://127.0.0.1:`
-    URL.
+    A band added to `TEST_PORT_BANDS` in that module, and claimed by `startWebServer({ suite: 'your-suite' })`
+    — see rule 19 — or by a bare `testPort('your-suite')` if you need the number without a server. Do not
+    write `4700 + Math.floor(Math.random() * 300)`, and do not put a literal port in an
+    `http://127.0.0.1:` URL.
 
     The scheme this replaced was each suite choosing a band and listing its neighbours' in a comment.
     By the eleventh suite three pairs were sharing one — `kitchen-sink` with `breakpoint-preview`,
@@ -144,6 +145,36 @@ caught a real defect in this repository.
     wide enough; `apps/web/src/test-ports.test.ts` proves no suite picks a port for itself and that
     every band has exactly one claimant — so a band you declare and do not use fails, as does a band
     you use and do not declare.
+
+19. **A suite starts the application with `startWebServer` from `@berelax/harness/server`, never with
+    its own `spawn`.** It owns three things a suite kept getting wrong separately, and each one cost a
+    real run:
+
+    - **The temp root.** Next writes its server-side module cache under `os.tmpdir()` and removes
+      nothing. Neither did any suite. One `pnpm verify` left twelve directories of about 5.7 MB behind,
+      and a session of agents each running verify repeatedly left **10,539** of them — 25 GB. That does
+      not present as a test-harness bug: it presents as `ENOSPC` in whatever unrelated command runs next,
+      and twice as a container that stopped. `startWebServer` creates the root, points `TMPDIR` at it, and
+      `stop()` removes it once the child has exited.
+    - **The port.** `testPort` *draws* at random inside the band; `startWebServer` *acquires* — it binds a
+      candidate and releases it before `next start` gets it, and draws again if the child still dies with
+      `EADDRINUSE`. The band comment's "under a percent" is true for one pair of runs and false for four
+      worktrees each running all twelve suites, where a collision arrives often enough to be filed as a
+      flake.
+    - **The failure message.** Three of the twelve used `stdio: 'ignore'`, so a collision arrived as
+      `next start exited with 1` with the child's own explanation discarded. Every throw now carries the
+      captured output, and the ownership check — a reachable port plus a dead child is another worktree's
+      application answering for this one — is made for all twelve rather than for the six that remembered.
+
+    `apps/web/src/test-ports.test.ts` refuses a suite that spawns `next start` itself, and that check found
+    a twelfth suite one directory down the moment it was written. `packages/harness/src/server.test.ts`
+    covers the parts whose being wrong would make the retry silently do nothing.
+
+20. **A gate case that edits a shipped file anchors on something unique.** Use `replaceOnce` in
+    `scripts/test-gates.mjs` rather than `String.replace`, which takes the first match silently. Three
+    cases have now edited the wrong construct — `const required = [` and `'canonical',` each appear twice
+    in their files — and every one then reported PASS about a file that still contained what the case meant
+    to remove. `withEditedFile`'s no-op guard cannot catch it, because the edit does change something.
 
 ## Working
 

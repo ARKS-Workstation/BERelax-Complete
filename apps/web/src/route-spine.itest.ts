@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CMS_ROBOTS_TAG, isCmsRoute } from '@berelax/cms'
@@ -12,7 +12,7 @@ import {
   THEMES,
   VIEWPORTS,
 } from '@berelax/harness/matrix'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -66,27 +66,17 @@ import {
  * server that is not its own. `@berelax/harness/ports` owns the range and proves it does not overlap any
  * other suite's.
  */
-const PORT = testPort('route-spine')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. Computing an
+ * origin at module scope is what made a collision present as a bare `next start exited with 1`.
+ */
+let BASE = ''
 const APP_DIR = new URL('..', import.meta.url).pathname
 const SCREENS = join(APP_DIR, '..', '..', 'artifacts', 'screens', 'routes')
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
-
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(BASE)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE} within ${timeoutMs}ms`)
-}
 
 /** Builds the app if it has not been built. `next start` serves `.next`, which is gitignored. */
 /**
@@ -136,18 +126,19 @@ function buildIfNeeded(): void {
 beforeAll(async () => {
   buildIfNeeded()
   assertOriginMatchesBuild()
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'route-spine',
     cwd: APP_DIR,
-    stdio: 'ignore',
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/',
+    readyWithinMs: 60_000,
   })
-  await waitForServer()
+  BASE = server.origin
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 180_000)
 
 afterAll(async () => {
   await browser?.close()
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 interface Hop {

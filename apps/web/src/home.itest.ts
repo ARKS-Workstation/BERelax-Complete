@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -10,7 +9,7 @@ import {
   readPublicTherapists,
   type Sql,
 } from '@berelax/db'
-import { testPort } from '@berelax/harness/ports'
+import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { encodeRendition } from '@berelax/media'
 import type { CropName, DerivativeFormat } from '@berelax/media/ladders'
 import { cropForViewportWidth, selectedRungFor } from '@berelax/media/srcset'
@@ -59,10 +58,11 @@ import { appMediaStorage, repositoryRoot } from './media/storage.ts'
  *
  * ## The port, the server, and the ISR cache
  *
- * `testPort('home')`, a band `@berelax/harness/ports` owns and proves disjoint. The child is asserted alive
- * after the port answers, for the reason `hero-lcp.itest.ts` records: a reachable port plus a dead child is
- * another checkout's application answering for this one, and every assertion below would then be about its
- * build.
+ * `startWebServer({ suite: 'home' })`, which draws from a band `@berelax/harness/ports` owns and proves
+ * disjoint, then ACQUIRES it rather than assuming the draw was free. It asserts the child is alive after the
+ * port answers — a reachable port plus a dead child is another checkout's application answering for this
+ * one, and every assertion below would then be about its build — and it removes the temp root Next would
+ * otherwise leave behind.
  *
  * **The page is revalidated before it is read, and that is load-bearing.** `/` is ISR, so the HTML this server
  * serves was prerendered during `next build` — from the database as it was then. Brief rule 12: the
@@ -74,8 +74,13 @@ import { appMediaStorage, repositoryRoot } from './media/storage.ts'
  * twice, because `revalidatePath` marks an entry stale rather than deleting it, and only then reads the rows.
  * The page and the snapshot are adjacent in time by construction rather than by luck.
  */
-const PORT = testPort('home')
-const BASE = `http://127.0.0.1:${PORT}`
+/**
+ * Assigned in `beforeAll`, because the port is ACQUIRED rather than drawn: `startWebServer` binds a
+ * candidate from this suite's band and draws again if another worktree already holds it. The ownership
+ * check this file used to make by hand — a reachable port plus a dead child is another worktree's
+ * application answering for this one — is made there now, for all eleven suites rather than for six.
+ */
+let BASE = ''
 const ROUTE = '/'
 const ROUTE_AR = '/ar'
 
@@ -90,7 +95,7 @@ if (!DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
 }
 
-let server: ChildProcess
+let server: WebServer
 let browser: Browser
 let sql: Sql
 /** The rows the served page was rendered from, read immediately after it was revalidated. */
@@ -143,20 +148,6 @@ async function ensureRung(crop: CropName, width: number, format: DerivativeForma
     contentType: headers['content-type'],
     cacheControl: headers['cache-control'],
   })
-}
-
-async function waitForServer(timeoutMs = 60_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${BASE}${ROUTE}`)
-      if (response.ok) return
-    } catch {
-      // Not up yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  throw new Error(`The app did not start on ${BASE}${ROUTE} within ${timeoutMs}ms`)
 }
 
 async function fetchHtml(path: string): Promise<string> {
@@ -294,25 +285,13 @@ beforeAll(async () => {
     await ensureRung(rung.crop, rung.width, 'avif')
   }
 
-  server = spawn('pnpm', ['exec', 'next', 'start', '--port', String(PORT)], {
+  server = await startWebServer({
+    suite: 'home',
     cwd: new URL('..', import.meta.url).pathname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' },
+    probePath: '/',
+    readyWithinMs: 120_000,
   })
-  let output = ''
-  server.stdout?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  server.stderr?.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  await waitForServer()
-  if (server.exitCode !== null) {
-    throw new Error(
-      `next start exited with ${server.exitCode} yet ${BASE} answered — something else is serving that ` +
-        `port and these assertions would run against it:\n${output}`,
-    )
-  }
+  BASE = server.origin
 
   // Revalidate, then read. See this file's header: the prerendered HTML was built from the database as it was
   // during `next build`, and two suites that run before this one write rows this page reads.
@@ -341,7 +320,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close()
   await sql?.end({ timeout: 5 })
-  server?.kill('SIGTERM')
+  await server?.stop()
 })
 
 describe('acceptance — the sections, the anchors, and where an in-page link lands', () => {
