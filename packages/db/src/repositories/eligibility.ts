@@ -37,9 +37,15 @@ import type { Sql } from '../connection.ts'
  *
  * {@link TherapistExclusion} is the seam for a unit that has to take a therapist out of availability
  * for a reason the port cannot compute — M-VAT-10's overdue blocking credential obligation, C-CRM-01's
- * do-not-pair flag. They arrive as a LIST of named predicates and are spliced into the `case` ahead of
- * the gender arm, so two of them apply at once and neither is an edit to this SQL. Two units inlining a
- * condition into one expression is the merge that silently keeps one of the two.
+ * do-not-pair flag. They arrive as a LIST of named predicates, so two of them apply at once and neither
+ * is an edit to this SQL. Two units inlining a condition into one expression is the merge that silently
+ * keeps one of the two.
+ *
+ * One list, two fates, decided by `reason`. An exclusion that reports a reason becomes a `case` arm
+ * ahead of the gender arm and its reason reaches `AvailabilityFacts.excluded[]`. An exclusion whose
+ * reason is `null` removes the candidate outright, so there is no row to report and nothing downstream
+ * has to remember to hide — which is what C-CRM-01's do-not-pair flag needs and M-VAT-10's obligation
+ * must not have. {@link composedExclusions} is where that fork is written down.
  *
  * ## Same-gender matching is the seventh, and it is the last arm of the `case`
  *
@@ -282,11 +288,21 @@ export interface TherapistExclusion {
   /** For the error message when two exclusions collide, and for the test that names one. */
   readonly name: string
   /**
-   * The reason reported for an excluded therapist. NOT one of {@link EXCLUSION_REASONS}: a composed
-   * reason is deliberately outside the port's closed union — see the type's header.
+   * The reason reported for an excluded therapist, or **null to exclude without reporting one**.
+   *
+   * A non-null reason is NOT one of {@link EXCLUSION_REASONS}: a composed reason is deliberately outside
+   * the port's closed union — see the type's header.
+   *
+   * Nullable rather than optional, and that is the whole point of the field being written out. An
+   * omitted field lets a contributor forget to decide; `reason: null` is the decision recorded in the
+   * type and visible in review. The two units that meet here need opposite answers. M-VAT-10's overdue
+   * blocking obligation is a legitimate operational fact and reports one. C-CRM-01's do-not-pair flag
+   * must report NOTHING: a reason travels to `AvailabilityFacts.excluded[].reason` and from there to
+   * whoever asked, so naming it tells a customer which therapist declined them — the enumeration signal
+   * the blocklist refusal is shaped to avoid, arriving somewhere no acceptance line asked about.
    */
-  readonly reason: string
-  /** A boolean expression over `c.id`, the candidate's employee id. */
+  readonly reason: string | null
+  /** A boolean expression over `c`, whose `id` is the candidate's employee id. */
   readonly when: SqlFragment
 }
 
@@ -308,23 +324,59 @@ export type TherapistPoolCtesQuery = Omit<EligibilityQueryInput, 'requiredSkill'
   readonly exclusions?: readonly TherapistExclusion[]
 }
 
+/** The two SQL halves one list of exclusions turns into. See {@link composedExclusions}. */
+interface ComposedExclusions {
+  /** `case` arms, in list order, for the exclusions that report a reason. */
+  readonly arms: SqlFragment
+  /** `and not (...)` terms for the exclusions that report none. */
+  readonly unreported: SqlFragment
+}
+
 /**
- * The composed exclusions as `case` arms, or an empty fragment when there are none.
+ * The composed exclusions as SQL: `case` arms for the ones that report a reason, and a candidate-set
+ * filter for the ones that do not. Both halves, from one call.
  *
  * Two names that are the same are refused rather than deduplicated. Two contributors that both call
  * their exclusion `overdue` have not written one rule twice: they have written two, and the permissive
  * reading applies whichever the array happens to hold first — which is the silent loss this whole
  * mechanism exists to prevent, reintroduced by a copy-paste. The reason strings are refused as
  * duplicates for the same reason, and refused if one collides with the port's seven, because a composed
- * exclusion reporting `credential_expired` would send a caller to a renewal screen for a CRM flag.
+ * exclusion reporting `credential_expired` would send a caller to a renewal screen for a CRM flag. A
+ * null reason is not a reason and collides with nothing, so any number of exclusions may report none.
+ *
+ * ## Why an unreported exclusion is a filter and not a `case` arm
+ *
+ * `tp_pool.reason` null MEANS eligible, and every reader downstream is written that way — `excluded` is
+ * the rows where `reason !== null`. So `when ... then null` would exclude nobody: the arm would match
+ * and report "no reason to exclude", which is the opposite of what `reason: null` asks for, and the
+ * therapist would be offered. The other candidate design — a sentinel reason filtered out downstream —
+ * puts a string into the row and trusts every present and future reader to drop it, which is one
+ * forgotten `filter` away from being the disclosure the null was chosen to prevent.
+ *
+ * Removing the candidate instead means there is no row to leak and nothing to remember. It is also why
+ * `when` is documented against `c` rather than against a table name: the alias is `c` in the candidate
+ * CTE and in the `case`, so one predicate serves both splice points without being rewritten.
+ *
+ * `not (when)` rather than `not coalesce(when, false)`: a predicate that evaluates to NULL removes the
+ * candidate, so an exclusion whose SQL is wrong empties availability loudly instead of quietly
+ * excluding nobody. Both are bugs in the contributed exclusion; only one of them is visible.
  */
-function composedExclusionArms(sql: Sql, exclusions: readonly TherapistExclusion[]): SqlFragment {
+function composedExclusions(
+  sql: Sql,
+  exclusions: readonly TherapistExclusion[],
+): ComposedExclusions {
   const seen = new Set<string>()
   for (const exclusion of exclusions) {
-    for (const [what, value] of [
-      ['name', exclusion.name],
-      ['reason', exclusion.reason],
-    ] as const) {
+    // The name is checked for every exclusion, the reason only when there is one. Two exclusions that
+    // both report nothing share no reason: they are two silent rules, and both still apply.
+    const pairs: readonly (readonly [string, string])[] =
+      exclusion.reason === null
+        ? [['name', exclusion.name]]
+        : [
+            ['name', exclusion.name],
+            ['reason', exclusion.reason],
+          ]
+    for (const [what, value] of pairs) {
       if (seen.has(`${what}:${value}`)) {
         throw new AppError(
           'invariant_violated',
@@ -335,24 +387,31 @@ function composedExclusionArms(sql: Sql, exclusions: readonly TherapistExclusion
       }
       seen.add(`${what}:${value}`)
     }
-    if ((EXCLUSION_REASONS as readonly string[]).includes(exclusion.reason)) {
+    const reason = exclusion.reason
+    if (reason !== null && (EXCLUSION_REASONS as readonly string[]).includes(reason)) {
       throw new AppError(
         'invariant_violated',
-        `Composed exclusion "${exclusion.name}" reports "${exclusion.reason}", which is one of the ` +
+        `Composed exclusion "${exclusion.name}" reports "${reason}", which is one of the ` +
           'seven port reasons. A composed reason must be its own, or a caller is told to renew a ' +
           'credential that is not the problem.',
-        { details: { name: exclusion.name, reason: exclusion.reason } },
+        { details: { name: exclusion.name, reason } },
       )
     }
   }
   // An empty template is a fragment that contributes nothing, so the `case` below has one shape whether
   // or not anything was composed in — a conditional `case` would be two statements for a plan test to
-  // measure.
+  // measure. The same is true of the candidate filter.
   let arms: SqlFragment = sql``
+  let unreported: SqlFragment = sql``
   for (const exclusion of exclusions) {
+    if (exclusion.reason === null) {
+      unreported = sql`${unreported}
+         and not (${exclusion.when})`
+      continue
+    }
     arms = sql`${arms} when ${exclusion.when} then ${exclusion.reason}`
   }
-  return arms
+  return { arms, unreported }
 }
 
 /**
@@ -387,16 +446,19 @@ export function therapistPoolCtes(sql: Sql, query: TherapistPoolCtesQuery) {
   // Normalised here rather than passed through, so the SQL cannot be handed a mode this build does not
   // know how to be strict about. `genderMatchingMode` is the same function core applies.
   const strictGender = genderMatchingMode(query.genderMatching) === 'strict'
-  const composedArms = composedExclusionArms(sql, query.exclusions ?? [])
+  const composed = composedExclusions(sql, query.exclusions ?? [])
 
   return sql`
     tp_profile as (
       select mandatory_therapist_document_types as mandatory from regulatory_profile_current
     ),
     tp_candidate as (
-      select e.id, e.gender, e.employed_from, e.employed_until
-        from employee e
-       where ${narrowed} :: uuid[] is null or e.id = any(${narrowed} :: uuid[])
+      -- Aliased c, not e, so a composed exclusion's predicate reads the same here as it does in the
+      -- case below: one expression, two splice points, no rewriting. See TherapistExclusion.
+      select c.id, c.gender, c.employed_from, c.employed_until
+        from employee c
+       where (${narrowed} :: uuid[] is null or c.id = any(${narrowed} :: uuid[]))
+         ${composed.unreported}
     ),
     tp_skill as (
       select es.employee_id, array_agg(es.skill::text order by es.skill::text) as skills
@@ -479,7 +541,7 @@ export function therapistPoolCtes(sql: Sql, query: TherapistPoolCtesQuery) {
                -- cannot book them anyway discloses it for nothing. An overdue blocking obligation is the
                -- more actionable answer and it is a fact about the therapist's file, so it belongs with
                -- the credential arms and ahead of the question about who is asking.
-               ${composedArms}
+               ${composed.arms}
                -- Same-gender matching (B-AVAIL-05), LAST. "is distinct from" and not "<>": a therapist
                -- whose gender nobody has recorded (Y8-staff leaves employee.gender nullable) is a
                -- MISMATCH and not a wildcard, and "<>" against NULL is NULL, which a case treats as

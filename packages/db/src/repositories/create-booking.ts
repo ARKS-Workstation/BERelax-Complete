@@ -9,6 +9,7 @@ import {
 } from '@berelax/shared'
 import type { Actor, RequestContext } from '../audit.ts'
 import type { Sql } from '../connection.ts'
+import { doNotPairExclusion, therapistsExcludedBy } from '../queries/therapist-exclusions.ts'
 import type { UnitOfWork } from '../tx.ts'
 import { withUnitOfWork } from '../tx.ts'
 import {
@@ -652,7 +653,20 @@ async function assertTherapistsAreEligible(
     ...(input.genderMatching === undefined ? {} : { genderMatching: input.genderMatching }),
   })
   const eligible = new Set(pool.therapists.map((therapist) => therapist.therapistId))
-  const ineligible = delivery.therapistIds.filter((id) => !eligible.has(id))
+  // C-CRM-01, and the reason it is here as well as in the availability read: the read is a memo and this
+  // is the write. A tuple assembled from a page rendered before the flag was recorded would otherwise
+  // commit the pairing a manager refused, and the customer would learn about it from the therapist.
+  //
+  // Asked of the exclusions rather than of `readEligibleTherapists`, because that function is the PORT
+  // and `EligibilityQueryInput` carries no exclusions by design. The value is the same
+  // `doNotPairExclusion` the availability read composes, so the rule has one definition and this path
+  // cannot drift from that one. The refusal is `therapist_not_eligible` and names no reason — the
+  // exclusion reports none, precisely so there is none to name.
+  const composed = await therapistsExcludedBy(uow.sql, {
+    therapistIds: delivery.therapistIds,
+    exclusions: [doNotPairExclusion(uow.sql, { customerId: input.customerId })],
+  })
+  const ineligible = delivery.therapistIds.filter((id) => !eligible.has(id) || composed.has(id))
   if (ineligible.length === 0) return
   throw refusal(
     'conflict',

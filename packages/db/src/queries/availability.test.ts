@@ -102,6 +102,21 @@ describe('availabilityCacheTag', () => {
     expect(availabilityCacheTag({ ...REQUEST, stepMinutes: 30 })).not.toBe(base)
   })
 
+  it('separates the customer the answer is FOR (C-CRM-01)', () => {
+    // Two customers differing only in this field would otherwise share a memo, and the second one would
+    // be served the first one's therapist list — which for this field means being offered the therapist a
+    // manager excluded for them. `*` is "not about a customer", which is a third question and not either
+    // customer's answer.
+    const base = availabilityCacheTag(REQUEST)
+    const forOne = availabilityCacheTag({ ...REQUEST, customerId: 'customer-a' })
+    const forTwo = availabilityCacheTag({ ...REQUEST, customerId: 'customer-b' })
+    expect(forOne).not.toBe(base)
+    expect(forTwo).not.toBe(base)
+    expect(forOne).not.toBe(forTwo)
+    // And it is stable: the same customer twice is one tag, or the memo never hits.
+    expect(availabilityCacheTag({ ...REQUEST, customerId: 'customer-a' })).toBe(forOne)
+  })
+
   it('normalises the matching mode rather than keying on the raw value', () => {
     // A stale `'off'` from a build before B-AVAIL-05 READS as strict everywhere else, so it must not be
     // its own cache tag — two tags for one mode is two memos of one answer.

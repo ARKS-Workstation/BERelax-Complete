@@ -4162,7 +4162,7 @@ units:
       and the therapist-side do-not-pair flag is honoured by the scheduler without ever being exposed to
       the client.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -4188,6 +4188,31 @@ units:
     - 'Audit-coverage test: a query enumerates every mutable table in the CRM area and asserts each is either
       covered by an audited repository method or carries an audit trigger; a fixture table added without
       either fails the test'
+    - 'NOTE: (1) apps/web/app/(admin)/clients/ is NOT built. An admin screen for this data needs the
+      session and role plumbing an authenticated admin route has, and none of this unit''s acceptance
+      criteria is about a page - the role checks it would enforce are asserted at the repository
+      (packages/db/src/repositories/crm.ts) through the injected authoriser, which is where they belong.
+      Deferred to the unit that builds the CRM section; C-AUTO-08 already owns apps/web/app/(admin)/crm/
+      and C-CRM-05 owns (admin)/clients/duplicates/. (2) Both provisional vocabularies are TABLES rather
+      than Postgres enums (customer_lifecycle_state, customer_acquisition_source) because an enum label
+      cannot carry is_placeholder-style provenance - is_provisional, an OPEN-QUESTIONS id and a note - and
+      brief rule 15 requires one. Y9-crm-lifecycle and Y9-crm-source are new rows in
+      docs/OPEN-QUESTIONS.md and both vocabularies reach the Unconfirmed Assumptions panel through
+      unconfirmedAssumptionRows. (3) The customer record still has NO email column: nothing in the build
+      collects one, and C-CRM-04 hashes addresses under a pepper for the suppression list. The blocklist
+      therefore matches an email against what the booking request carries, and the endpoint accepts an
+      optional `email` field it does not store. (4) The do-not-pair exclusion is composed into the
+      availability path as doNotPairExclusion(sql, {customerId}) - a TherapistExclusion, M-VAT-10''s
+      shape, in the LIST that availabilityExclusions() returns - and reports reason: null, which removes
+      the candidate instead of labelling it. It is deliberately NOT a new EXCLUSION_REASONS member and
+      not a reported reason of any kind: a reason travels to AvailabilityFacts.excluded[].reason and
+      would tell the customer which therapist refused them. reason is nullable rather than optional so
+      that the decision is recorded in the type; M-VAT-10''s overdue-credential exclusion fills it in and
+      sits in the same list without either masking the other, and
+      packages/fixtures/src/crm-do-not-pair.itest.ts asserts exactly that, in both orders, with one
+      reporting exclusion and one silent one in the same answer. (5) The lifecycle reducer''s
+      two inactivity events are named for the THRESHOLD crossed, not for a duration: no lapse window has
+      been agreed, and the sweep that would supply the durations is C-AUTO''s.'
     files:
     - packages/db/src/schema/crm.ts
     - packages/db/migrations/

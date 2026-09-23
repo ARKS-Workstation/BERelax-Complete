@@ -14,6 +14,7 @@ import {
   therapistPoolCtes,
 } from '../repositories/eligibility.ts'
 import { overdueBlockingObligationExclusion } from '../services/obligation.ts'
+import { doNotPairExclusion } from './therapist-exclusions.ts'
 
 /**
  * The availability **read** path (B-AVAIL-07). One indexed statement per request, memoised for seconds,
@@ -211,6 +212,18 @@ export interface AvailabilityRequest {
   readonly clientGender?: 'female' | 'male'
   /** `booking.same_gender_matching`, from `readGenderMatching`. **Absent is strict.** */
   readonly genderMatching?: GenderMatchingMode
+  /**
+   * The customer the answer is FOR, when there is one (C-CRM-01).
+   *
+   * Absent means the query is not about a customer — the admin calendar asking who is working on
+   * Thursday — and no per-customer exclusion is applied. Present means the do-not-pair flags recorded
+   * against that customer remove those therapists from the pool silently: see `doNotPairExclusion`.
+   *
+   * It is part of the cache tag, and that is not optional. Two customers differing only in this field
+   * would otherwise share a memo, and the second one would be served the first one's therapist list —
+   * which for this field means being offered the therapist a manager excluded for them.
+   */
+  readonly customerId?: string
   /** `booking.min_lead_minutes`, from {@link readAvailabilityLimits}. */
   readonly minLeadMinutes: number
   /** `booking.max_advance_days`, from {@link readAvailabilityLimits}. */
@@ -255,6 +268,9 @@ export function availabilityCacheTag(request: AvailabilityRequest): string {
     String(request.minLeadMinutes),
     String(request.maxAdvanceDays),
     String(request.stepMinutes ?? 'default'),
+    // C-CRM-01. `*` for "not about a customer", which is a different question from any customer id and
+    // must not share a tag with one.
+    request.customerId ?? '*',
   ].join('|')
 }
 
@@ -416,15 +432,19 @@ function dubaiCalendarDate(now: number): string {
  * The exclusions composed into this read, in one list.
  *
  * **Add to the list; do not inline a condition.** Every unit that has to take a therapist out of
- * availability for a reason `resolveTherapistPool` cannot compute contributes a named
- * {@link TherapistExclusion} here, and `therapistPoolCtes` splices each one into its `case` ahead of the
- * gender arm. The alternative — each unit adding a condition to the pool's SQL — is the merge that keeps
- * one of two filters and loses the other silently, because the query still compiles and still returns
- * therapists.
+ * availability for a reason `therapistPoolCtes` cannot compute contributes a named
+ * {@link TherapistExclusion} here. An entry that reports a reason becomes a `case` arm ahead of the
+ * gender arm; an entry whose reason is `null` removes the candidate silently. The alternative — each
+ * unit adding a condition to the pool's SQL — is the merge that keeps one of two filters and loses the
+ * other without a sound, because the query still compiles and still returns therapists.
  *
- * Every entry is unconditional. There is no flag, no setting and no request field that removes one:
- * M-VAT-10's whole value is that an overdue blocking obligation cannot be switched off from settings, and
- * an `if (options.applyObligations)` here would be that switch with a different name.
+ * Every entry is unconditional. There is no flag, no setting and no request field that removes one: a
+ * do-not-pair flag a manager recorded cannot be switched off from settings, and an
+ * `if (options.applyExclusions)` here would be that switch with a different name. The same holds from the
+ * other side: M-VAT-10's whole value is that an overdue blocking obligation cannot be switched off from
+ * settings, so neither entry is conditional. A request with no customer still contributes the do-not-pair
+ * exclusion — it simply matches nobody — so the composition has one shape and there is no branch to get
+ * backwards.
  */
 function availabilityExclusions(
   sql: Sql,
@@ -433,8 +453,14 @@ function availabilityExclusions(
   return [
     // M-VAT-10. An overdue blocking obligation of class credential — a lapsed practice licence, an
     // unrenewed occupational health card — takes that therapist out of the bookable pool until the
-    // occurrence is completed with its evidence.
+    // occurrence is completed with its evidence. Reports its reason: a therapist withheld for a lapsed
+    // licence is an operational fact the desk needs, and `AvailabilityFacts.excluded[].reason` is where
+    // it belongs.
     overdueBlockingObligationExclusion(sql, { tradingDate: request.tradingDate }),
+    // C-CRM-01. A therapist a manager recorded as not to be paired with this customer, removed for that
+    // customer only and with NO reason reported: naming it would tell the customer which therapist
+    // declined them.
+    doNotPairExclusion(sql, { customerId: request.customerId ?? null }),
   ]
 }
 
@@ -469,10 +495,10 @@ function availabilityFactsStatement(sql: Sql, request: AvailabilityRequest, now:
     // which is why a scalar subquery over it is legal here and why the pool and the variant cannot
     // disagree about which skill was required.
     requiredSkill: sql`(select v.required_skill from av_variant v)`,
-    exclusions: availabilityExclusions(sql, request),
     ...(request.therapistIds === undefined ? {} : { employeeIds: request.therapistIds }),
     ...(request.clientGender === undefined ? {} : { clientGender: request.clientGender }),
     ...(request.genderMatching === undefined ? {} : { genderMatching: request.genderMatching }),
+    exclusions: availabilityExclusions(sql, request),
   }
 
   return sql<FactsRow[]>`

@@ -147,6 +147,7 @@ export {
   type ReverseChargePeriod,
   reverseChargeExceptions,
 } from './queries/reverse-charge-exceptions.ts'
+export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-exclusions.ts'
 export {
   isBalanced,
   type TrialBalance,
@@ -266,6 +267,43 @@ export {
   type SlotRecheckRoom,
   type SlotRecheckShape,
 } from './repositories/create-booking.ts'
+export {
+  addBlocklistEntry,
+  addCustomerTag,
+  applyCustomerLifecycleEvent,
+  type BlocklistAddInput,
+  type BlocklistAuthoriser,
+  type BlocklistEntryRow,
+  type BlocklistEvaluation,
+  type BlocklistMatcher,
+  type ClientRecordRead,
+  type ContactKey,
+  CRM_AUDIT_ACTIONS,
+  CRM_AUDIT_COVERAGE,
+  CRM_REFUSALS,
+  CRM_TABLE_PATTERN,
+  type CrmAuditCoverageRow,
+  type CrmRefusal,
+  type CustomerPreferenceInput,
+  type CustomerPreferenceRecord,
+  crmAuditCoverage,
+  crmRefusalOf,
+  evaluateBlocklist,
+  type LifecycleDecider,
+  type LifecycleResult,
+  liftBlocklistEntry,
+  liftDoNotPair,
+  readActiveBlocklistEntries,
+  readClientRecord,
+  readCustomerPreferences,
+  readCustomerTags,
+  readDoNotPairFor,
+  removeCustomerTag,
+  setAcquisitionSource,
+  setCustomerPreferences,
+  setCustomerVip,
+  setDoNotPair,
+} from './repositories/crm.ts'
 export {
   CUSTOMER_ORIGINS,
   type CustomerIdentityInput,
@@ -667,6 +705,17 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // carries a renewal date: the build has seen no licence, permit or certificate, and a plausible date
 // would be indistinguishable from a configured one.
 //
-// 41, 47 and 51 are unused and will stay unused: renumbering to close a gap is how two branches come to
-// apply the same number to different SQL.
-export const SCHEMA_VERSION = 52 as const
+// 53 is 0053_crm_client_record.sql: the client record layered expand-only over 0019 — the CRM columns on
+// `customer` (lifecycle state, acquisition source, the VIP flag fenced to its date by
+// `customer_vip_since_matches_flag`), `customer_preference`, `customer_tag`, `customer_blocklist` keyed on
+// a NORMALISED contact detail rather than on a customer id, and `customer_therapist_do_not_pair`. The two
+// vocabularies are TABLES and not enums because every label in them is provisional (Y9-crm-lifecycle,
+// Y9-crm-source) and an enum label cannot carry `is_provisional`, an OPEN-QUESTIONS id or a note; they are
+// audited by a trigger rather than by a repository because they have no repository. Removing a blocklist
+// entry or a do-not-pair flag is a LIFT and `delete` is revoked on both: the record of who blocked
+// in flight.
+//
+// 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
+// come to apply the same number to different SQL. 51 is reserved for B-MSG-03, still in flight — it is
+// a gap on disk today and must not be taken by anything else.
+export const SCHEMA_VERSION = 53 as const

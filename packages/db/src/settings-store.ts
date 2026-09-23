@@ -250,6 +250,17 @@ export async function unconfirmedAssumptionRows(
       select 'employee_language', e.staff_reference || ' -> ' || l.language::text,
              l.open_question_id, null
         from employee_language l join employee e on e.id = l.employee_id where l.is_provisional
+      -- The two CRM vocabularies (0053). They are TABLES rather than Postgres enums precisely so that
+      -- each label can carry the provenance trio and reach this panel: an enum label has nowhere to put
+      -- is_provisional, an OPEN-QUESTIONS id or a note, and a provisional value that cannot be marked
+      -- provisional is indistinguishable from a configured one. Per LABEL and not per table, because the
+      -- business can confirm one state or one channel without confirming the rest.
+      union all
+      select 'customer_lifecycle_state', state, open_question_id, provisional_note
+        from customer_lifecycle_state where is_provisional
+      union all
+      select 'customer_acquisition_source', source, open_question_id, provisional_note
+        from customer_acquisition_source where is_provisional
       union all
       select source, column_name, question,
              -- The value itself is the note: 'WHATSAPP-PENDING-Y1-NAP' says what it is, and a NULL

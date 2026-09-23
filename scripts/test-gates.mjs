@@ -16069,18 +16069,24 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'the availability query returns them before, and does not after',
   )
 
-  // 64h. The composed arms reduced to the LAST exclusion — which is exactly what a merge does when two
+  // 64h. The composed list reduced to the LAST exclusion — which is exactly what a merge does when two
   //      units inline a condition into one expression and one of the two edits wins. The query still
   //      compiles, still returns therapists, and one unit's compliance rule has silently stopped
   //      applying. This case is the reason the mechanism is a list of named predicates at all.
+  //
+  //      Re-anchored when C-CRM-01 merged. Its fork by `reason` replaced the single `arms` loop this used
+  //      to match, so the old anchor stopped matching anything — and the `withEditedFile` guard refused
+  //      the no-op rather than letting the case run against an unedited file and report on nothing. The
+  //      anchor is now the loop head, which both halves of the fork run inside, so reducing it still
+  //      drops one exclusion whichever kind it is.
   checkRejectedBy(
     'the blocking suite fails when only one composed exclusion survives',
     withEditedFile(
       ELIGIBILITY,
       (src) =>
         src.replace(
-          'for (const exclusion of exclusions) {\n    arms = sql',
-          'for (const exclusion of exclusions.slice(-1)) {\n    arms = sql',
+          '  for (const exclusion of exclusions) {\n    if (exclusion.reason === null) {',
+          '  for (const exclusion of exclusions.slice(-1)) {\n    if (exclusion.reason === null) {',
         ),
       () => runExpectingFailure('pnpm', integration(BLOCKING_ITEST)),
     ),
@@ -16102,6 +16108,302 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       () => runExpectingFailure('pnpm', integration(CALENDAR_ITEST)),
     ),
     'two runs under the frozen clock produce identical rows',
+  )
+}
+
+// 65. C-CRM-01 — the client record, the blocklist that actually blocks, and the do-not-pair exclusion.
+//
+//     Five of these cases are about a leak rather than a bug, and a leak has the property that nothing
+//     fails when it opens. The blocklist refusal is byte-identical to a no-availability answer, the
+//     do-not-pair exclusion is silent, and the flag is absent from every outward DTO — three claims whose
+//     broken versions all return a perfectly good response. So each one is broken here deliberately and
+//     the suite that must notice is named.
+//
+//     The sixth is the merge this unit was warned about: M-VAT-10 added a second, independent exclusion
+//     to the same availability path, and two conditions inlined into one `where` is the conflict that
+//     resolves cleanly while dropping one of them. 65j drops an element of the composed list and watches
+//     the composability case fail, which is the only assertion that can tell the difference.
+//
+//     The seventh is the other half of that shared seam. The two units need OPPOSITE reporting: an
+//     overdue obligation is a fact worth naming, a do-not-pair flag must never be named, and
+//     `TherapistExclusion.reason` is `string | null` to carry both. 65k implements the null case the
+//     obvious way — a `case` arm reporting `null` — which the pool reads as "eligible", and watches the
+//     therapist be offered. Nothing about the reported half moves, which is why it is its own case.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const CRM_BLOCKLIST = 'packages/core/src/crm/blocklist.ts'
+  const CRM_LIFECYCLE = 'packages/core/src/crm/lifecycle.ts'
+  const CRM_RECORD = 'packages/core/src/crm/client-record.ts'
+  const CRM_REPO = 'packages/db/src/repositories/crm.ts'
+  const ELIGIBILITY = 'packages/db/src/repositories/eligibility.ts'
+  const EXCLUSIONS = 'packages/db/src/queries/therapist-exclusions.ts'
+  const AVAILABILITY = 'packages/db/src/queries/availability.ts'
+  const BOOKING_REPO = 'packages/db/src/repositories/create-booking.ts'
+  const HANDLER = 'apps/web/app/api/v1/bookings/handler.ts'
+
+  const ENDPOINT_ITEST = 'apps/web/src/bookings-blocklist.itest.ts'
+  const RECORD_ITEST = 'packages/fixtures/src/crm-client-record.itest.ts'
+  const PAIR_ITEST = 'packages/fixtures/src/crm-do-not-pair.itest.ts'
+  const CORE_SUITE = 'packages/core/src/crm'
+  const TAG_UNIT = 'packages/db/src/queries/availability.test.ts'
+
+  /** One anchored edit to a shipped file, asserting the anchor is still there AND that it moved. */
+  const crmMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes the assertion vacuous, so it is an error rather than a no-op
+        // replace: `String.replace` with a missing needle returns the text unchanged, and the mutant
+        // would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the C-CRM-01 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        const mutated = text.replace(anchor, replacement)
+        // Stated a second way, because the first way is not enough on its own: an anchor that is present
+        // and a replacement that happens to equal it also produces an unedited file, and a case that runs
+        // against unedited source proves nothing while reporting PASS.
+        if (mutated === text) {
+          throw new Error(`the C-CRM-01 gate's edit to ${path} changed nothing: ${anchor}`)
+        }
+        return mutated
+      },
+      body,
+    )
+
+  // 65a. The email key dropped from the pair a booking offers. The phone would still block, every
+  //      phone-shaped assertion would still pass, and a blocklisted address would book.
+  checkRejectedBy(
+    'crm gate: a blocklist that stops collecting the email key is caught',
+    crmMutant(
+      CRM_BLOCKLIST,
+      `  const email = contact.email ?? null
+  if (email !== null) {
+    const result = normaliseEmail(email)
+    if (result.ok) keys.push(result.key)
+  }`,
+      '  // mutant: the email key is no longer offered for matching',
+      () => runExpectingFailure('pnpm', integration(ENDPOINT_ITEST)),
+    ),
+    'records the EMAIL key kind when that is what matched',
+  )
+
+  // 65b. Case folding removed from the address key. `A@x` then walks past a block on `a@x`, which is one
+  //      keystroke and leaves the list looking like it works.
+  checkRejectedBy(
+    'crm gate: an address key that stops folding case is caught',
+    crmMutant(
+      CRM_BLOCKLIST,
+      '  const lowered = trimmed.toLowerCase()',
+      '  const lowered = trimmed',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'folds case in an address',
+  )
+
+  // 65c. The unknown-role arm removed, so `can()` is reached with a string outside `ROLES` — which throws
+  //      a TypeError rather than refusing. Deny-by-default that presents as a 500 is not deny-by-default.
+  checkRejectedBy(
+    'crm gate: a blocklist authoriser that does not refuse an unlisted role is caught',
+    crmMutant(
+      CRM_BLOCKLIST,
+      `  if (!(ROLES as readonly string[]).includes(role)) {
+    return { allowed: false, refusal: 'unknown_role' }
+  }`,
+      '  // mutant: an unlisted role falls through to can(), which throws',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'refuses an unlisted role',
+  )
+
+  // 65d. The endpoint's blocked refusal given a body of its own. This is the enumeration signal written
+  //      out in full, and it is the most tempting mutation in the whole unit because the body is HONEST.
+  checkRejectedBy(
+    'crm gate: a blocked caller told they are blocked is caught',
+    crmMutant(
+      HANDLER,
+      '  if (blocklist.blocked) return noAvailability()',
+      "  if (blocklist.blocked) return json(403, { error: 'blocked' })",
+      () => runExpectingFailure('pnpm', integration(ENDPOINT_ITEST)),
+    ),
+    'refuses a blocklisted PHONE with the identical response',
+  )
+
+  // 65e. The other end of the same claim: the LEGITIMATE refusal made variable again. A `reason` carrying
+  //      the room, the therapist or the period differs from a blocked caller's by exactly the amount an
+  //      attacker needs, and this is the shape the endpoint shipped with before this unit.
+  checkRejectedBy(
+    'crm gate: a no-availability body carrying the error message is caught',
+    crmMutant(
+      HANDLER,
+      "    if (refusal === 'slot_taken') return noAvailability()",
+      `    if (refusal === 'slot_taken') {
+      return json(409, {
+        error: 'slot_unavailable',
+        refusal,
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    }`,
+      () => runExpectingFailure('pnpm', integration(ENDPOINT_ITEST)),
+    ),
+    'refuses a blocklisted PHONE with the identical response',
+  )
+
+  // 65f. The do-not-pair flag reclassified as customer-facing. The DTO then tells a customer which
+  //      therapist will not work with them — and the serialiser, the types and every other test are happy.
+  checkRejectedBy(
+    'crm gate: the do-not-pair flag reaching a customer-facing DTO is caught',
+    crmMutant(
+      CRM_RECORD,
+      "  doNotPairTherapistIds: 'staff',",
+      "  doNotPairTherapistIds: 'customer',",
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'is exactly these keys for the customer-facing audience',
+  )
+
+  // 65g. A blocked record allowed to lapse. The sweep would then un-block somebody at 03:00 with nobody
+  //      deciding it should, and the only sign of it is a booking that goes through months later.
+  checkRejectedBy(
+    'crm gate: a blocked record that lapses on a timer is caught',
+    crmMutant(
+      CRM_LIFECYCLE,
+      `    inactivity_threshold_reached: {
+      refuse: 'customer_is_blocked',`,
+      `    inactivity_threshold_reached: {
+      to: 'lapsed',`,
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'leaves blocked only by an explicit lift',
+  )
+
+  // 65h. The membership guard removed from the reducer, so an unknown label indexes the table directly.
+  //      `TABLE[state]` is then `undefined` and the read off it throws — inside the nightly sweep, half
+  //      way through the customer table.
+  checkRejectedBy(
+    'crm gate: a lifecycle reducer that throws on an unknown label is caught',
+    crmMutant(
+      CRM_LIFECYCLE,
+      '  const outcome = known ? TABLE[state][event as CustomerLifecycleEvent] : undefined',
+      '  const outcome = TABLE[state][event as CustomerLifecycleEvent]',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'never throws, for any string pair at all',
+  )
+
+  // 65i. The repository proceeding when no authoriser was injected. Fail-closed becomes fail-open, and the
+  //      only caller that notices is the one that forgot to bring the policy — which is the caller that
+  //      most needs to be stopped.
+  checkRejectedBy(
+    'crm gate: a blocklist change with no authoriser injected is caught',
+    crmMutant(CRM_REPO, '  if (deps.authorise === undefined) {', '  if (false) {', () =>
+      runExpectingFailure('pnpm', integration(RECORD_ITEST)),
+    ),
+    'refuses a caller that brought no authoriser at all',
+  )
+
+  // 65j. THE merge. One element dropped from the composed exclusion list — which is what a conflict
+  //      resolved in a hurry between this unit and M-VAT-10 looks like in the diff. Every single-exclusion
+  //      case still passes; only the composability assertion can see it. The anchor is the one place the
+  //      list becomes SQL, which is where both units' exclusions now arrive.
+  checkRejectedBy(
+    'crm gate: a composed exclusion silently dropped from the list is caught',
+    crmMutant(
+      ELIGIBILITY,
+      '  const composed = composedExclusions(sql, query.exclusions ?? [])',
+      '  const composed = composedExclusions(sql, (query.exclusions ?? []).slice(1))',
+      () => runExpectingFailure('pnpm', integration(PAIR_ITEST)),
+    ),
+    'holds when a second, independent exclusion is also in play',
+  )
+
+  // 65k. The silent half of the list handled as a `case` arm after all, which is `then null` — and
+  //      `tp_pool.reason` null MEANS eligible, so the therapist is offered. Every exclusion that reports
+  //      a reason goes on working, which is why this one needs its own case rather than a shared one.
+  checkRejectedBy(
+    'crm gate: an unreported exclusion turned into a reason-less case arm is caught',
+    crmMutant(
+      ELIGIBILITY,
+      `    if (exclusion.reason === null) {
+      unreported = sql\`\${unreported}
+         and not (\${exclusion.when})\`
+      continue
+    }`,
+      '',
+      () => runExpectingFailure('pnpm', integration(PAIR_ITEST)),
+    ),
+    'removes the therapist for that customer once a manager records the flag',
+  )
+
+  // 65l. A lifted flag that goes on excluding. The wrong direction to fail in — a therapist a manager
+  //      un-excluded stays unbookable for that customer forever, and nothing reports it.
+  checkRejectedBy(
+    'crm gate: a do-not-pair exclusion that ignores the lift is caught',
+    crmMutant(EXCLUSIONS, '         where dnp.lifted_at is null', '         where true', () =>
+      runExpectingFailure('pnpm', integration(PAIR_ITEST)),
+    ),
+    'offers the therapist again once the flag is lifted',
+  )
+
+  // 65m. The exclusion dropped from the booking TRANSACTION, leaving it in the availability read only. The
+  //      page stops offering the therapist and the POST still books them, which is the version of this
+  //      feature that looks finished.
+  checkRejectedBy(
+    'crm gate: a do-not-pair flag honoured only by the read and not by the write is caught',
+    crmMutant(
+      BOOKING_REPO,
+      '  const ineligible = delivery.therapistIds.filter((id) => !eligible.has(id) || composed.has(id))',
+      '  const ineligible = delivery.therapistIds.filter((id) => !eligible.has(id))',
+      () => runExpectingFailure('pnpm', integration(PAIR_ITEST)),
+    ),
+    'refuses a flagged pairing with therapist_not_eligible',
+  )
+
+  // 65n. The customer dropped from the availability cache key. Two customers then share a memo, and the
+  //      second is served the first one's therapist list — including the therapist a manager excluded for
+  //      them. It is a cache bug that presents as a scheduling one, weeks later.
+  checkRejectedBy(
+    'crm gate: an availability cache tag that ignores the customer is caught',
+    crmMutant(AVAILABILITY, "    request.customerId ?? '*',", '', () =>
+      runExpectingFailure('pnpm', unit(TAG_UNIT)),
+    ),
+    'separates the customer the answer is FOR',
+  )
+
+  // 65o. A CRM table unregistered. The coverage query enumerates the area from `information_schema`, so
+  //      this is the fixture-table case of the acceptance line expressed against a real table rather than
+  //      a temporary one.
+  checkRejectedBy(
+    'crm gate: an unregistered mutable CRM table is caught',
+    crmMutant(
+      CRM_REPO,
+      "  customer_tag: { by: 'repository', action: CRM_AUDIT_ACTIONS.tagAdded },",
+      '',
+      () => runExpectingFailure('pnpm', integration(RECORD_ITEST)),
+    ),
+    'enumerates the area from the database and finds every table covered',
+  )
+
+  // 65p. The audit row dropped from the evaluation. Every refusal still works and the trail can no longer
+  //      answer "was this number checked at all" — which is the only question anybody asks of it after an
+  //      incident.
+  checkRejectedBy(
+    'crm gate: a blocklist evaluation that writes no audit row is caught',
+    crmMutant(
+      CRM_REPO,
+      '    action: CRM_AUDIT_ACTIONS.blocklistEvaluated,',
+      "    action: 'customer.blocklist_seen',",
+      () => runExpectingFailure('pnpm', integration(ENDPOINT_ITEST)),
+    ),
+    'writes a denied evaluation naming the matched key kind and the reason',
   )
 }
 

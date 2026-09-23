@@ -1,5 +1,8 @@
 import {
   ASIA_DUBAI,
+  blocklistKeysFor,
+  decideBlocklist,
+  decideCustomerLifecycle,
   type Fils,
   type Instant,
   type LocalDate,
@@ -20,12 +23,17 @@ import {
 } from '@berelax/core'
 import {
   type Actor,
+  applyCustomerLifecycleEvent,
+  type BlocklistMatcher,
   type BookingDeliveryInput,
   type BookingRefusal,
   bookingRefusalOf,
   bookSlot,
   type CreatedBooking,
+  crmRefusalOf,
   ensureCustomer,
+  evaluateBlocklist,
+  type LifecycleDecider,
   readGenderMatching,
   type SlotRecheck,
   type Sql,
@@ -73,6 +81,8 @@ import type { ServiceShape } from '@berelax/shared'
 /** The body this endpoint accepts. Anything else is a 400, before any work is done. */
 export interface BookingRequestBody {
   readonly phone?: unknown
+  /** Optional. Collected only so the blocklist can be matched on it; nothing stores it (C-CRM-01). */
+  readonly email?: unknown
   readonly source?: unknown
   readonly clientGender?: unknown
   readonly notes?: unknown
@@ -132,6 +142,7 @@ interface ParsedDelivery {
 
 interface ParsedRequest {
   readonly phone: string
+  readonly email?: string
   readonly source: 'online' | 'phone' | 'front_desk' | 'walk_in'
   readonly clientGender?: 'female' | 'male'
   readonly notes?: string
@@ -179,8 +190,13 @@ function readDelivery(raw: unknown): ParsedDelivery | null {
  */
 export function readBookingBody(body: unknown): ParsedRequest | null {
   if (typeof body !== 'object' || body === null) return null
-  const { phone, source, clientGender, notes, deliveries } = body as BookingRequestBody
+  const { phone, email, source, clientGender, notes, deliveries } = body as BookingRequestBody
   if (typeof phone !== 'string' || phone.length === 0 || phone.length > 32) return null
+  // 254 is the RFC 5321 forward-path limit, the same bound `normaliseEmail` applies. A malformed
+  // address is NOT a 400: the field is optional and the only thing this endpoint does with it is check
+  // the blocklist, so refusing the booking over a typo in a field nobody has to fill in would make the
+  // blocklist visible by its side effects.
+  if (email !== undefined && (typeof email !== 'string' || email.length > 254)) return null
   if (source !== undefined && !SOURCES.includes(String(source))) return null
   if (clientGender !== undefined && clientGender !== 'female' && clientGender !== 'male')
     return null
@@ -197,6 +213,7 @@ export function readBookingBody(body: unknown): ParsedRequest | null {
     phone,
     source: source === undefined ? 'online' : (source as ParsedRequest['source']),
     deliveries: parsed,
+    ...(email === undefined ? {} : { email }),
     ...(clientGender === undefined ? {} : { clientGender }),
     ...(notes === undefined ? {} : { notes }),
   }
@@ -392,6 +409,50 @@ const ENDPOINT_ERROR_FOR: Partial<Record<BookingRefusal, BookingEndpointError>> 
   requires_client_gender: 'requires_client_gender',
 }
 
+/** The status a legitimate no-availability answer carries, and therefore the one a block carries. */
+export const NO_AVAILABILITY_STATUS = 409
+
+/**
+ * The ONE body served both for a slot that is gone and for a blocklisted contact (C-CRM-01).
+ *
+ * The acceptance line is that a blocklist refusal "has the same status code and body snapshot as a
+ * legitimate no-availability response, so the endpoint leaks no enumeration signal", and that is only
+ * achievable if the legitimate response is a CONSTANT. It did not used to be: the `slot_taken` branch
+ * put `err.message` into `reason`, and a message that mentions the room, the therapist or the period
+ * would differ from a blocked caller's by exactly the amount an attacker needs. So the free text is
+ * gone, this object is frozen, and both paths return it byte for byte.
+ *
+ * `refusal: 'slot_taken'` is therefore stated for a blocked caller too, and that is deliberate rather
+ * than sloppy: the field has to be there, it has to be the same value, and the alternative — a
+ * `refusal: 'blocked'` nobody else sends — would be the enumeration signal written out in full. The
+ * truth is recorded where it belongs, in the `audit_event` row `evaluateBlocklist` writes, which names
+ * the matched key kind and the stated reason and never reaches the caller.
+ *
+ * Exported so a test can snapshot it, and so `apps/web/src/bookings-blocklist.itest.ts` can assert the
+ * two responses are equal without restating the expected bytes in the test — a restated expectation is
+ * satisfied by editing the test.
+ */
+export const NO_AVAILABILITY_BODY: Readonly<Record<string, string>> = Object.freeze({
+  error: 'slot_unavailable' satisfies BookingEndpointError,
+  refusal: 'slot_taken' satisfies BookingRefusal,
+  reason:
+    'that time is not available. Choose another time, or ask us to let you know when one frees up.',
+})
+
+/** The refusal a blocked contact and a taken slot both receive. One function, so they cannot diverge. */
+const noAvailability = (): Response => json(NO_AVAILABILITY_STATUS, NO_AVAILABILITY_BODY)
+
+/**
+ * `decideBlocklist` and `decideCustomerLifecycle` from `@berelax/core`, as the ports `packages/db`
+ * declares.
+ *
+ * `satisfies` and not casts: `packages/db` may not import `packages/core`, so each of these is two
+ * declarations of one shape, and these two lines are what make a field added to one and not the other a
+ * `pnpm typecheck` failure rather than a blocklist that evaluated nothing.
+ */
+export const coreBlocklistMatcher = decideBlocklist satisfies BlocklistMatcher
+export const coreLifecycleDecider = decideCustomerLifecycle satisfies LifecycleDecider
+
 export async function handleBookingRequest(
   deps: BookingEndpointDeps,
   request: Request,
@@ -426,6 +487,7 @@ export async function handleBookingRequest(
     })
   }
 
+  const requestId = request.headers.get('x-request-id')
   const deliveries: BookingDeliveryInput[] = []
   for (const delivery of parsed.deliveries) {
     const resolved = await resolveDelivery(deps.sql, delivery)
@@ -435,6 +497,42 @@ export async function handleBookingRequest(
     if (resolved instanceof Response) return resolved
     deliveries.push(resolved)
   }
+
+  // The blocklist, evaluated HERE and not one line earlier (C-CRM-01).
+  //
+  // Every refusal a malformed request can produce — an unknown variant, a date the premises does not
+  // trade, a variant with no price — has already been returned above, and that ordering is the whole
+  // point. A blocklisted caller and an ordinary one must receive identical answers to every question
+  // except the one a booking answers, so the check cannot run before the validation: a blocked caller
+  // who posted a nonsense variant id and got `409 slot_unavailable` where everybody else gets
+  // `404 unknown_service_variant` would have learned they are on the list, which is the same leak from
+  // the other end.
+  //
+  // It runs before `ensureCustomer`, so a blocked contact creates no customer row and leaves no trace
+  // but the audit row, which is the record that the check happened at all.
+  const blocklist = await withUnitOfWork(
+    deps.sql,
+    CALLER,
+    (uow) =>
+      evaluateBlocklist(
+        uow,
+        {
+          // Both keys, normalised by core. An email that does not parse is dropped rather than
+          // compared raw: an unnormalisable value cannot equal a stored key, and comparing the raw
+          // string is the one path on which a match could happen by accident.
+          keys: [
+            ...blocklistKeysFor({
+              phone: normalised.e164,
+              ...(parsed.email === undefined ? {} : { email: parsed.email }),
+            }),
+          ],
+          context: 'public_booking',
+        },
+        { match: coreBlocklistMatcher },
+      ),
+    requestId === null ? {} : { requestId },
+  )
+  if (blocklist.blocked) return noAvailability()
 
   // The guest customer. `ensureCustomer` is the chokepoint (0019, ADR 0014): a guest booking has a
   // customer row with no credential and no account, and the phone is the identity.
@@ -451,7 +549,6 @@ export async function handleBookingRequest(
   // Read once and passed through, never re-decided here. Absent or unreadable is strict.
   const genderMatching = await readGenderMatching(deps.sql)
 
-  const requestId = request.headers.get('x-request-id')
   let created: CreatedBooking
   try {
     created = await bookSlot(
@@ -474,11 +571,50 @@ export async function handleBookingRequest(
   } catch (err) {
     const refusal = bookingRefusalOf(err)
     if (refusal === null) throw err
+    // The one refusal that must be a constant. See NO_AVAILABILITY_BODY: a blocked contact receives
+    // exactly this, so anything varying here — a room id, a therapist count, the period — would be the
+    // enumeration signal the blocklist is arranged to avoid.
+    if (refusal === 'slot_taken') return noAvailability()
     return json(REFUSAL_STATUS[refusal], {
       error: ENDPOINT_ERROR_FOR[refusal] ?? ('conflict' satisfies BookingEndpointError),
       refusal,
       reason: err instanceof Error ? err.message : String(err),
     })
+  }
+
+  // The lifecycle, advanced once the booking is durable (C-CRM-01).
+  //
+  // A SEPARATE transaction from the booking, deliberately, and in this direction: the booking is the
+  // fact the customer is waiting for and the lifecycle stamp is a segmentation, so rolling a committed
+  // booking back because a segmentation column could not be updated would be the wrong way round. A
+  // crash between the two leaves the record one event behind and the next booking moves it, which is
+  // the failure this ordering chooses.
+  //
+  // Only on a FRESH booking. A replay is the same booking arriving twice and must move nothing; and the
+  // reducer answers `unchanged` for an already-active client, which writes neither the column nor an
+  // audit row. `lifecycle_refused` is swallowed for one pair only — a blocked record cannot take a
+  // booking — and that pair cannot be reached here, because the blocklist refused above. It is caught
+  // rather than propagated so a reducer widened later cannot turn a committed booking into a 500.
+  if (!created.replayed) {
+    try {
+      await withUnitOfWork(
+        deps.sql,
+        CALLER,
+        (uow) =>
+          applyCustomerLifecycleEvent(
+            uow,
+            {
+              customerId: customer.customer.id,
+              event: 'booking_taken',
+              atIso: new Date(deps.now()).toISOString(),
+            },
+            { decide: coreLifecycleDecider },
+          ),
+        requestId === null ? {} : { requestId },
+      )
+    } catch (err) {
+      if (crmRefusalOf(err) !== 'lifecycle_refused') throw err
+    }
   }
 
   // 200 on a replay and 201 on a fresh booking, with the same body. The status is the only thing that

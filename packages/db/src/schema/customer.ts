@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  boolean,
   customType,
   index,
   inet,
@@ -52,12 +53,28 @@ export const customer = pgTable(
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     createdVia: text('created_via').notNull(),
     notes: text('notes'),
+    /**
+     * The CRM columns, added expand-only by 0053 (C-CRM-01).
+     *
+     * `lifecycleState` and `acquisitionSource` are `text` with a foreign key into a vocabulary TABLE
+     * rather than a `pgEnum`, because both vocabularies are provisional and an enum label cannot carry
+     * `is_provisional`, an OPEN-QUESTIONS id or a note. `./crm.ts` holds those two tables.
+     *
+     * `isVip` and `vipSince` are one fact said twice and the database refuses a disagreement
+     * (`customer_vip_since_matches_flag`), so an insert that sets the flag and not the date raises.
+     */
+    lifecycleState: text('lifecycle_state').notNull(),
+    lifecycleChangedAt: timestamp('lifecycle_state_changed_at', { withTimezone: true }).notNull(),
+    acquisitionSource: text('acquisition_source').notNull(),
+    isVip: boolean('is_vip').notNull(),
+    vipSince: timestamp('vip_since', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     index('customer_phone_match_key_idx').on(t.phoneMatchKey),
     index('customer_name_match_key_idx').on(t.nameMatchKey),
+    index('customer_lifecycle_state_idx').on(t.lifecycleState, t.lifecycleChangedAt),
   ],
 )
 
