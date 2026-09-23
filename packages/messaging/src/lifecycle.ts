@@ -50,6 +50,7 @@ import {
   type SendResult,
   sendMessage,
 } from './send.ts'
+import { resolveSenderIdentity } from './sender-identity.ts'
 
 /**
  * The vendors, as a closed set.
@@ -260,6 +261,19 @@ export async function deliverMessage(
   const message = outboundMessageFor(request)
   const vendor = vendorFor(message.channel)
   const cost = costOf(message.channel, message.body)
+  // Resolved BEFORE the first attempt, and written onto every attempt's row including a failed one.
+  //
+  // It used to be `null` here and filled in only on the `sent` branch, and that left a real hole:
+  // `recordAttempt` updates by id and is never handed the message, so a message that was rate-limited on
+  // attempt 1 and accepted on attempt 2 was stored as `sent` with NO record of the registered identity it
+  // left from — which is exactly the evidence a sender-ID suspension investigation asks for, and the
+  // column an audit reads back. `message_sender_id_is_sms_only` (migration 0061) is the biconditional
+  // that makes leaving it null unstorable for an SMS row.
+  //
+  // The same total table `sendMessage` reads, called a second time rather than threaded through the
+  // result: it is a pure lookup over (class, channel), so two calls cannot disagree, and a refusal here
+  // needs no handling because `sendMessage` will refuse the send for the same reason a moment later.
+  const identity = resolveSenderIdentity(deps.send.senderIds, message)
   const recorded: RecordedMessage = {
     templateId: request.templateId,
     channel: message.channel,
@@ -267,7 +281,7 @@ export async function deliverMessage(
     locale: message.locale,
     vendor,
     recipient: message.recipient,
-    senderId: null,
+    senderId: identity.kind === 'identity' ? identity.identity.value : null,
     subject: message.subject ?? null,
     body: message.body,
     bodyHtml: message.channel === 'email' ? renderEmailHtml(message) : null,

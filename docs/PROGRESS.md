@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**89 / 207 units complete.**
+**91 / 207 units complete.**
 
 ## Next up
 
@@ -83,7 +83,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 66 | `M-VAT-11` | Compliance calendar reminders, escalation, evidence and the unverified dashboard | `H02`, `M-VAT-10` | — | — |
 | [ ] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
-| [ ] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
+| [x] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
 | [ ] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
 | [x] | 71 | `C-CRM-01` | Client record: preferences, tags, lifecycle, source, VIP and a blocklist that actually blocks | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F09` | — | — |
 | [ ] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
@@ -106,7 +106,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
 | [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
 | [x] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
-| [ ] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
+| [x] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
 | [ ] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
 | [x] | 94 | `P-HR-05` | Shift model and midnight-crossing working-hours maths | `P-HR-01` | — | Y9-overtime |
 | [ ] | 95 | `P-HR-06` | Rota publishing, coverage and fatigue validator, labour-cost forecast | `P-HR-02`, `P-HR-05` | — | Y9-coverage |

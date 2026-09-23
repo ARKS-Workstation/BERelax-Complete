@@ -82,6 +82,8 @@ if (!url)
 
 const TRADING_DATE = '2099-08-21'
 const NEXT_DAY = '2099-08-22'
+/** Every mandatory credential a fixture therapist holds expires here unless the case is about an expiry. */
+const FAR_FUTURE = '2099-12-31'
 const MARKER = 'bavail04 pair itest'
 const PROBE_PHONE = '+971590000421'
 /** 11:00–02:00, the real hours, which is what makes a treatment able to cross midnight. */
@@ -170,6 +172,24 @@ const REASON_UNIONS_AGREE: readonly [DbReasonsAreCoreReasons, CoreReasonsAreDbRe
   true,
 ]
 
+/**
+ * The mandatory credential set IN FORCE, far in the future, with `lapsed` overriding one type's expiry.
+ *
+ * Read from `regulatory_profile_current` rather than naming `professional_licence` and
+ * `health_certificate`, which is what this file did until migration 0058 reconciled the row in force with
+ * the column DEFAULT — docs/01 decision 20's six. A fixture naming two types stops meaning "holds every
+ * mandatory document" the moment that answer changes, and the failure is `credential_missing` in cases
+ * about the roster (0054's header, brief rule 12).
+ */
+async function mandatoryDocuments(
+  lapsed: Readonly<Record<string, string>> = {},
+): Promise<readonly { readonly type: string; readonly expiresOn: string }[]> {
+  return (await readMandatoryDocumentTypes(sql)).map((type) => ({
+    type,
+    expiresOn: lapsed[type] ?? FAR_FUTURE,
+  }))
+}
+
 async function addEmployee(args: {
   readonly reference: string
   readonly gender?: TherapistGender
@@ -193,10 +213,7 @@ async function addEmployee(args: {
       insert into employee_skill (employee_id, skill) values (${id}, ${skill}::therapist_skill)
     `
   }
-  for (const document of args.documents ?? [
-    { type: 'professional_licence', expiresOn: '2099-12-31' },
-    { type: 'health_certificate', expiresOn: '2099-12-31' },
-  ]) {
+  for (const document of args.documents ?? (await mandatoryDocuments())) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${id}, ${document.type}::employee_document_type, ${document.expiresOn})
@@ -387,6 +404,32 @@ async function supersedeMandatory(snapshot: ProfileSnapshot): Promise<number> {
   return Number((row as { version: number }).version)
 }
 
+/**
+ * Puts the SEEDED profile back, by inserting a version that names only `source_note`.
+ *
+ * Every other column then takes its DEFAULT, which is character for character what 0004's own seed does
+ * and what 0058 does when it reconciles the row — so "the seeded profile" and "every column at its
+ * DEFAULT" are one sentence, and this restore cannot restate a value wrongly.
+ *
+ * It replaces a restore that re-inserted *whatever this file found in force* at `beforeAll`. That version
+ * was the source of a real pollution: a run stopped between the supersede and the restore left
+ * `{work_permit}` in force, the next run captured THAT as the seeded value, and every run after it
+ * re-asserted the corruption — a restore that re-asserts what it found cannot repair pollution, it
+ * propagates it. The history in `regulatory_profile` shows it happening, and `hr-credentials.itest.ts`
+ * and gates 66w-66y were both changed for the same reason (P-HR-03). The assertion that the restore
+ * worked has to compare against the seeded VALUES rather than against a snapshot taken earlier in the
+ * same run, because comparing a snapshot with itself is true of the broken version too.
+ */
+async function restoreSeededProfile(note: string): Promise<void> {
+  await sql`
+    with retired as (
+      update regulatory_profile set superseded_at = now() where superseded_at is null returning version
+    )
+    insert into regulatory_profile (source_note)
+    select ${note} from retired
+  `
+}
+
 async function profileRowCount(): Promise<number> {
   const [row] = await sql<{ n: string }[]>`select count(*)::text as n from regulatory_profile`
   return Number((row as { n: string }).n)
@@ -418,6 +461,12 @@ const solverRequest = (
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 2 })
+  // Restore FIRST, then read. Reading first captured whatever was in force — including the `{work_permit}`
+  // a previous interrupted run left — and every assertion below then compared the profile against the
+  // corruption instead of against the seeded answer.
+  await restoreSeededProfile(
+    'B-AVAIL-04 pair itest: seeded profile at setup, every column at its DEFAULT',
+  )
   seededMandatory = await readMandatoryDocumentTypes(sql)
   await sql`
     insert into business_day (trading_date, opens_at, closes_at, source)
@@ -451,16 +500,18 @@ beforeAll(async () => {
   })
   await addEmployee({ reference: 'bavail04p-ended', employedUntil: '2099-08-20' })
   await addEmployee({ reference: 'bavail04p-noskill', skills: ['arabic_style'] })
+  // Holds ONE document and it is not one the profile in force demands, so every mandatory type is
+  // absent: `credential_missing`. `health_certificate` was mandatory before 0058 and is not now, which
+  // makes it exactly the right value — the reason is unchanged and the case no longer leans on it.
   await addEmployee({
     reference: 'bavail04p-nolicence',
-    documents: [{ type: 'health_certificate', expiresOn: '2099-12-31' }],
+    documents: [{ type: 'health_certificate', expiresOn: FAR_FUTURE }],
   })
+  // Holds them all, with one MANDATORY type lapsed the day before the trading date. It has to be a
+  // mandatory type or nobody is excluded and `credential_expired` is never reported.
   await addEmployee({
     reference: 'bavail04p-lapsed',
-    documents: [
-      { type: 'professional_licence', expiresOn: '2099-08-20' },
-      { type: 'health_certificate', expiresOn: '2099-12-31' },
-    ],
+    documents: await mandatoryDocuments({ labour_card: '2099-08-20' }),
   })
   await addEmployee({ reference: 'bavail04p-unrostered' })
   await addEmployee({ reference: 'bavail04p-onleave' })
@@ -469,7 +520,7 @@ beforeAll(async () => {
   // credential that counts, at which point this therapist is the only one who keeps it.
   await addEmployee({
     reference: 'bavail04p-permit',
-    documents: [{ type: 'work_permit', expiresOn: '2099-12-31' }],
+    documents: [{ type: 'work_permit', expiresOn: FAR_FUTURE }],
   })
 
   await roster({
@@ -690,12 +741,13 @@ describe('acceptance — the mandatory document types are read from regulatory_p
       expect(reasonOf(ungated.database, 'bavail04p-nolicence')).toBeUndefined()
       expect(comparable(ungated.database)).toEqual(comparable(ungated.pure))
     } finally {
-      // Restored by INSERTING the seeded list again, never by deleting a row: the table is append-only
-      // (ADR 0008), so the profile in force on any past date stays recoverable.
-      await supersedeMandatory({
-        mandatory: seededMandatory,
-        note: 'B-AVAIL-04 pair itest: restoring the seeded mandatory credentials',
-      })
+      // Restored by INSERTING a version that names only `source_note`, never by deleting a row: the table
+      // is append-only (ADR 0008), so the profile in force on any past date stays recoverable — and every
+      // column taking its DEFAULT is what makes this the seeded profile rather than a replay of a snapshot
+      // that may itself have captured a corruption.
+      await restoreSeededProfile(
+        'B-AVAIL-04 pair itest: restoring the seeded mandatory credentials',
+      )
     }
     // A delta, never a total: three rows added, nothing deleted, and the version moved forward.
     expect(await profileRowCount()).toBe(before + 3)

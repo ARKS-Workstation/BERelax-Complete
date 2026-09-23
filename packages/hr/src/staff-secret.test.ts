@@ -82,7 +82,28 @@ describe('the AAD binds a ciphertext to its row', () => {
   it('refuses a tampered ciphertext', () => {
     const kek = generateKek('v1')
     const sealed = sealBankDetail(kek, BINDING, DETAIL)
-    const tampered = { ...sealed, ct: Buffer.concat([sealed.ct.subarray(0, -1), Buffer.from([0])]) }
+    /*
+     * XOR the last byte, rather than SETTING it to zero.
+     *
+     * Setting it to zero was this case for as long as it existed, and roughly one seal in 256 already ends
+     * in `0x00` — so the "tampered" payload was byte-identical, AES-GCM verified it correctly, and the
+     * assertion failed with `expected [Function] to throw an error`, which says nothing about why.
+     * Measured at 19 no-ops in 5,120 seals: 0.37%, and `pnpm verify` therefore failed about once every 256
+     * runs on a test that had not tampered with anything. The claim was "a tampered ciphertext is refused";
+     * what it did was "change one byte to zero, which is sometimes not a change".
+     *
+     * XOR with 1 always flips a bit, whatever the byte held. The assertion below it is the control that
+     * keeps this honest: if a future edit makes the mutation conditional again, the payload-differs check
+     * fails loudly instead of the throw quietly not happening.
+     */
+    const last = sealed.ct.length - 1
+    const flipped = Buffer.from(sealed.ct)
+    // biome-ignore lint/style/noNonNullAssertion: `last` indexes a buffer whose length the seal guarantees.
+    flipped[last] = sealed.ct[last]! ^ 1
+    const tampered = { ...sealed, ct: flipped }
+    expect(tampered.ct.equals(sealed.ct), 'the mutation must actually change the payload').toBe(
+      false,
+    )
     expect(() => openBankDetail(kek, BINDING, tampered)).toThrow(
       new RegExp(STAFF_SECRET_ERRORS.openFailed),
     )

@@ -38,7 +38,11 @@ export {
   advanceMessageStatus,
   type Channel,
   DELIVERY_REPORTED_FAILED,
+  isSendableApproval,
+  isTemplateApprovalTransition,
   isTerminalMessageStatus,
+  MESSAGE_CHANNELS,
+  MESSAGE_CLASSES,
   MESSAGE_FAILURE_REASONS,
   MESSAGE_ROW_FAILURE_REASONS,
   MESSAGE_STATUS_RANK,
@@ -49,6 +53,9 @@ export {
   type MessageStatus,
   type ReceiptIgnoredReason,
   type StatusAdvance,
+  TEMPLATE_APPROVAL_STATES,
+  TEMPLATE_APPROVAL_TRANSITIONS,
+  type TemplateApprovalState,
 } from './messaging.ts'
 export {
   DEFAULT_REMINDER_OFFSETS_HOURS,

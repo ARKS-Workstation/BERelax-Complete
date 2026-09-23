@@ -4471,7 +4471,7 @@ units:
       and the send API cannot accept a class argument at all, so an automation cannot route promotional
       content down a transactional path. The class-to-sender-identity routing table is total.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -4500,6 +4500,170 @@ units:
     - A whatsapp send outside the 24-hour care window with no approved template returns typed 'outside_care_window';
       inside the window the free-form path is permitted - both asserted with a frozen clock
     - A template in 'draft' or 'rejected' cannot be sent, asserted for both message classes
+    - 'NOTE: migration 0061_template_approval_and_sender_identity.sql and SCHEMA_VERSION is 61. 58, 59
+      and 60 are HELD rather than free - three units were in flight with those numbers allocated when
+      this was written - so the gap below 61 is a reservation and not an invitation to renumber, and the
+      ledger paragraph in packages/db/src/index.ts says so. The migration adds NO table and NO column: it
+      is four rules over tables 0014, 0015 and 0035 already shipped. `refuse_message_class_change` keeps
+      0014''s words and gains a private SQLSTATE, ZM001, because 0014 raised `restrict_violation` - which
+      seven other triggers and every ON DELETE RESTRICT foreign key in this schema also raise, so a probe
+      asserting 23001 passes when the statement bounced off something else entirely.
+      `template_approval_transition_allowed` declares the seven edges of the approval state machine and
+      `refuse_template_variant_change` enforces them (ZM002) plus a freeze on an APPROVED variant''s
+      words, channel, locale and care-window flag (ZM003). The two together are what make `approved`
+      reachable only from `pending` AND make the only way to change approved words be approved -> draft ->
+      pending -> approved, every step of it visible - a body edited in place under a live approval is the
+      editable-message_class defect wearing different clothes.'
+    - 'NOTE: what B-MSG-01 had already built, and the one thing this unit CHANGED rather than added.
+      0014 already made `message_class` immutable, already carried `approval_state` and
+      `customer_care_window` on the variant with `draft` and `false` as their defaults, and 0015 already
+      made a reclassification a NEW VERSION rather than an edit. So this unit''s first acceptance line was
+      half-satisfied before it started, and what was missing was everything that turns those columns into
+      rules. The CHANGE: 0015 reset the carried-over variants to `pending`, and 0061 resets them to
+      `draft`, because `pending` means "these words are finished, decide about them" and the words of a
+      template that has just become promotional are not finished - a promotional SMS needs an opt-out
+      route and leaves from a different registered identity, and a booking confirmation''s body says
+      neither. Landing in `pending` shows a reviewer transactional copy under a promotional label and asks
+      yes or no, and the likely answer, because the words look fine, is yes: the laundering the
+      immutability rule exists to prevent, one screen later. `reclassify_template` also now writes a
+      `message_template.reclassified` audit_event naming the transaction-local actor, which is the
+      acceptance line''s third clause and the only record of who superseded a version. One assertion in
+      B-MSG-01''s packages/db/src/schema/messaging.itest.ts moved from `pending` to `draft`, with the
+      reason written beside it.'
+    - 'NOTE: the (message_class x channel) table is TOTAL in the sense that every one of the six pairs has
+      exactly one answer, and three of those answers are not identities. `sms` is `registered` (the two
+      TDRA registrations, Y6-sender-ids); `email` is `delegated`, because docs/05 §2 asks for separate
+      transactional and marketing sending subdomains, NEITHER exists (Y6-email-sender) and
+      `createResendTransport` therefore takes its `from` as a required argument with no default - so the
+      row stores null and nothing is invented; `whatsapp` is `unregistered` and REFUSES, because no vendor
+      is contracted for the channel at all (`vendorFor` refuses it too, ADR 0016). `delegated` is a
+      declared answer about a channel and not a fallback: no identity is borrowed and none is guessed, and
+      the suite asserts the resolution mentions no SMS registration. `satisfies Record<MessageClass,
+      Record<Channel, SenderIdentityRoute>>` is what makes a fourth channel or a third class fail to
+      compile rather than fall into a default.'
+    - 'NOTE: the send call''s fence is `?: never` and not merely an absent field, and that distinction is
+      the whole of the acceptance line. An absent field is refused for an object LITERAL by TypeScript''s
+      excess-property check and is NOT refused for a variable - assignability permits extra keys - so
+      `sendMessage(ctx, { ...base, messageClass: ''promotional'' })` was already a compile error while
+      `const r = { ...base, messageClass: ''promotional'' }; sendMessage(ctx, r)` compiled, and a
+      drag-and-drop flow builder assembles its request the second way (docs/03 §5). `messageClass`,
+      `senderId` and `channel` are all fenced, on `SendRequest` and therefore on `RecordedSendRequest`,
+      and packages/messaging/src/send-api-shape.test.ts derives the list of send entry points from the
+      BARREL rather than writing it down - so a third send function added to the package fails that test
+      until somebody probes it, which is what makes "no exported send API" a claim about all of them.'
+    - 'NOTE: message_class and the consent model are reconciled WITHOUT a new column, deliberately. The
+      obvious move was `message_template.consent_purpose` with a foreign key into 0056''s
+      `consent_purpose (purpose, is_send_gating)`, and it was not taken: it would need a fourth argument
+      on `reclassify_template`, a second immutable column, and it would be a SECOND place where "is this
+      promotional" is written down - which is the two-readings hazard the brief warns about arriving in the
+      repair. What the two readings already share is `evaluateGate`, which returns `allow` on its first
+      line for a transactional message and reads consent for a promotional one, so
+      packages/messaging/src/template-corpus.test.ts asserts that agreement over the whole corpus with an
+      UNREACHABLE consent store: every promotional template comes back `blocked_unevaluable` naming
+      `consent`, every transactional one is still sent, and both branches are counted so neither half can
+      go vacuous. Beside it, a lexical guard that no `consent_purpose` label reads like transactional
+      traffic - the failure being somebody adding `service_updates` in good faith, which looks harmless in
+      the table and is a value a future gate can be built on. Choosing the purpose PER TEMPLATE rather than
+      per campaign is C-CRM-04''s and C-AUTO-03''s: `consentGateEvaluator` takes one purpose for a whole
+      run today and says in its own header why.'
+    - 'NOTE: the corpus gained a PROMOTIONAL template, and that is a prerequisite rather than a flourish.
+      "No promotional template can resolve to the transactional identity" and C-AUTO-05''s "every
+      promotional send across the entire template corpus is refused with reason marketing_kill_switch" are
+      both satisfied perfectly by an all-transactional corpus, and the corpus was all-transactional - so
+      both assertions were vacuous (brief rule 3). `review.request` is the template: asking a satisfied
+      customer for a review is a real thing this business will do, it is unambiguously promotional under
+      TDRA rather than a service update, and `review_request` is already one of the two send-gating
+      consent purposes 0056 declares. It ships with `approvalState: ''draft''` - the only shipped template
+      that does - and that is the honest statement rather than a marker in the body: `draft` is a state the
+      send path REFUSES, so words nobody with the authority to approve marketing copy has seen cannot
+      reach a customer, where a body carrying a `[DRAFT]` marker would be sendable and embarrassing.
+      `seedMessageTemplates` now writes the approval state the definition declares instead of the literal
+      `''approved''` it used for every row.'
+    - 'NOTE: DEFERRED, with the dependency each one waits on. (1) The admin surface this unit''s files
+      list names, apps/web/app/(admin)/messaging/templates/, is NOT built. No acceptance line asks for a
+      screen - every one of the seven is about a rule - and the editor that would live at that path is
+      C-AUTO-02''s own acceptance ("Playwright: the template editor reports UCS-2, 3 segments and a
+      non-zero fils cost ... updating on input"), with the approve/reject controls belonging beside the
+      settings surface W-SYS-01 owns. `setTemplateApproval` and `reclassifyTemplate` in
+      packages/db/src/repositories/message-template.ts are the write paths that screen will call, and they
+      map every SQLSTATE 0061 raises onto a named refusal so the screen never has to read a PostgreSQL
+      message. No port band was declared, because no server-starting suite was added (brief rule 18: a
+      band declared and not used fails apps/web/src/test-ports.test.ts). (2) The whatsapp free-form send
+      cannot be driven end to end, because there is no contracted WhatsApp vendor and therefore no
+      registered identity for either whatsapp pair. The care-window RULE is asserted both ways under a
+      frozen clock - `free_form` inside the window, `outside_care_window` outside it, with the boundary
+      exact at the 24-hour mark - and through `sendMessage` the inside-the-window case is asserted to be
+      refused with `sender_identity_not_registered` and NOT with `outside_care_window`, which is the claim
+      that the window is not what stops it. The ORDER is asserted too: the template''s own refusal is
+      returned before the identity''s, because "get it approved, or wait for the customer" is work an
+      operator can do today and "no vendor is contracted" is not. (3) Nothing supplies a real
+      `lastInboundAt`: no inbound WhatsApp webhook exists, so `CareWindowState` is an injected seam whose
+      shipped answer is `null` (window shut, free-form refused) - the same shape B-MSG-03 used for the
+      magic link, and honest rather than convenient, since null IS the truth for every contact today.'
+    - 'NOTE: four defects found in code this unit does not own, all four in the messaging estate, and all
+      four FIXED because the rules this unit adds would otherwise have failed another unit''s suite rather
+      than reported them. (1) `deliverMessage` resolved the sender identity only on the `sent` branch, and
+      `recordAttempt` updates a message row by id and is never handed the message - so an SMS that was
+      rate-limited on attempt 1 and accepted on attempt 2 was stored as `sent` with NO record of the
+      identity it left from, which is exactly the evidence a sender-ID suspension investigation asks for.
+      Resolved before the first attempt now; `message_sender_id_is_sms_only` is the biconditional that
+      makes the old behaviour unstorable, and gate 78s reverts the line and watches B-MSG-04''s own retry
+      case bounce off it. (2) The same call wrote the SMS alphanumeric `BERELAX` onto EVERY email row''s
+      `sender_id`, a column whose own comment in 0035 reads "null for email, which has a from-address
+      rather than a TDRA registration" - because `senderIdFor` was keyed on the class alone and answered
+      for any channel. `TransportRequest.senderId` is now nullable and the SMSala transport refuses a null
+      rather than letting the vendor choose. (3) apps/worker/src/jobs/send-scheduled-step.ts built its
+      send request with the literal `messageClass: ''transactional''`, which is true of `booking.reminder`
+      TODAY and is a hole all the same: `reclassify_template` can make any template promotional, and a
+      restated class sends promotional content from the transactional identity with every gate skipped,
+      because `evaluateGate` returns `allow` on its first line for a message that SAYS it is
+      transactional. It now calls `classifyTemplateRow`, one pure function that narrows the row''s own
+      columns and REFUSES a label this build cannot read rather than falling back to a strict default - a
+      strict fallback being the more restricted reading and still the wrong answer, because it is silent.
+      (4) packages/fixtures/src/message-lifecycle.ts created every template as `transactional` while the
+      itest beside it recorded PROMOTIONAL messages against one of them, so `message.message_class` - which
+      the frequency cap, the kill switch and the cost report all read - disagreed with the template it was
+      copied from. `message_class_matches_its_template` (ZM004) refuses that row now, and
+      `ensureMessageTemplate` takes the class as a required argument. The fourth was found by running the
+      whole integration suite rather than only this unit''s files, which is the only way it could have
+      been.'
+    - 'NOTE: `readCurrentTemplate` no longer filters on `approval_state = ''approved''`, and that is a
+      behaviour change in B-MSG-03''s reader made on purpose. The filter collapsed "nobody has approved
+      these words" into "there is no template", and the worker recorded the difference as
+      `content_unavailable` - which sends whoever reads the report to look for a rendering fault. The row
+      comes back now, carrying its approval state, and the choke point refuses it with
+      `template_not_approved`, so the step records `send_refused`. That is also what makes this unit''s
+      last acceptance line provable the way the brief asks: the proof of "a draft template cannot be sent"
+      is an attempted send that came back `blocked` with a named reason, never the absence of a call - a
+      zero-call assertion alone is satisfied by a test that never built a request, by a harness whose
+      transport was not wired, and by a template key that does not exist.'
+    - 'NOTE: the Drizzle mirror stayed in packages/db/src/schema/messaging.ts rather than moving to the
+      packages/db/src/schema/message-template.ts this unit''s files list names. 0061 adds no column, so
+      the mirror needs no change at all, and a second mirror of `message_template` would be exactly the
+      drift `pnpm db:drift` exists to catch - two declarations of one table, one of which somebody edits.
+      Files added: packages/db/migrations/0061_template_approval_and_sender_identity.sql,
+      packages/db/src/repositories/message-template.ts, packages/messaging/src/sender-identity.ts,
+      packages/messaging/src/template.ts and four suites (sender-identity.test.ts, template.test.ts,
+      template-corpus.test.ts, send-api-shape.test.ts) plus packages/shared/src/template-approval.test.ts
+      and packages/fixtures/src/message-template.itest.ts. Changed: packages/shared/src/messaging.ts (the
+      approval vocabulary, its edges and `isSendableApproval`) and its barrel, packages/messaging/src/
+      send.ts (the fences, the six-step order, the new refusals), lifecycle.ts, templates.ts,
+      transports/smsala.ts and the barrel, packages/db/src/seed/templates.ts and
+      packages/db/src/index.ts (SCHEMA_VERSION and the ledger), apps/worker/src/jobs/
+      send-scheduled-step.ts, five suites whose `ClassifiedTemplate` literals needed an approval state,
+      packages/fixtures/src/message-lifecycle.ts and its itest, packages/db/src/schema/messaging.itest.ts
+      (the one `pending` -> `draft` assertion), scripts/test-gates.mjs (gate 78a-78z) and this manifest.'
+    - 'NOTE: one residual gap, stated rather than closed, and it is C-AUTO-02''s to act on because
+      C-AUTO-02 builds the screen that creates variants. The state machine governs TRANSITIONS and not the
+      initial state: `refuse_template_variant_change` is a BEFORE UPDATE trigger, so an INSERT that
+      explicitly names `approval_state = ''approved''` starts there without passing through `pending`. That
+      is not closed with a BEFORE INSERT rule because `seedMessageTemplates` has to be able to do exactly
+      that - the shipped transactional defaults ship approved, and a salon whose booking confirmations
+      needed approving before they worked would be a worse failure. What makes the gap narrow rather than
+      open is 0014''s column DEFAULT of `draft`: an INSERT that says nothing gets `draft`, so reaching
+      `approved` on creation takes a writer who named it, which is a decision somebody made rather than an
+      accident. The editor C-AUTO-02 builds should create at `draft` and reach `approved` through
+      `setTemplateApproval`, which is the path 0061 fences.'
     files:
     - packages/db/src/schema/message-template.ts
     - packages/messaging/src/template.ts
@@ -5790,7 +5954,7 @@ units:
       and add a pg-boss sweep that flags every future appointment of a newly-ineligible therapist as `needs_reassignment`
       — never cancelling, never silently unassigning — emitting audit and staff-notification events.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -5817,11 +5981,147 @@ units:
       the document type that expired
     - renewing the document before the appointment unflags it on the next sweep, proven end to end without
       manual intervention
+    - 'NOTE: the concrete files and allocations. The migration is
+      packages/db/migrations/0058_appointment_reassignment_flag.sql and SCHEMA_VERSION is 58 (59, 60 and
+      61 are held by units in flight; 22, 41, 44 and 47 stay unused). The gate block is cases 75a-75x in
+      scripts/test-gates.mjs, immediately before case 29, which stays last. No new `pnpm` gate script was
+      added, so case 29''s required list is unchanged, and NO port band was declared in
+      packages/harness/src/ports.ts because nothing here starts a server (brief rule 18: a band declared
+      and not used fails apps/web/src/test-ports.test.ts). The files are NOT the ones this entry
+      originally listed: the predicate lives in packages/core/src/availability/eligibility-port.ts, which
+      is B-AVAIL-04''s existing port, and there is no eligibility.ts beside it to create — see the next
+      NOTE for why adding one would have been the defect rather than the unit.'
+    - 'NOTE: the credential predicate was already in the availability list, and adding a second one was
+      the trap. `therapistPoolCtes` in packages/db/src/repositories/eligibility.ts has computed
+      `any_missing` and `any_expired` since B-AVAIL-04 and reports `credential_missing` /
+      `credential_expired` as two of the port''s seven reasons, and the comparison is already against
+      `trading_date` rather than a calendar date. So the brief''s suggestion to add to the
+      `TherapistExclusion` seam is the thing NOT to do, and `composedExclusions` says so in code rather
+      than in prose: it THROWS on a composed exclusion whose reason is one of the seven, precisely so a
+      second answer to "is this therapist''s file current" cannot be spliced in beside the first. What
+      the unit actually wired is the JUDGEMENT: `credentialVerdict` carried its own copy of "latest
+      expiry per mandatory type against the trading date", P-HR-02 built the same rule again as
+      `evaluateCredentials`, and this unit''s sweep would have been the third. `credentialVerdict` now
+      delegates to a new `evaluateCredentialsOn` in packages/core/src/hr/credentials.ts — the same
+      judgement at a wall-clock DATE the caller has already resolved — and keeps only the mapping from
+      the four statuses to the port''s two reasons. `evaluateCredentialsOn` exists beside
+      `evaluateCredentials` rather than the callers manufacturing "noon on the trading date": a trading
+      date is not the calendar date of any particular instant during it, and converting a date to an
+      instant so the evaluator can convert it back is two conversions whose only possible contribution
+      is a disagreement at 02:00. Gate 75c is the fixture: it makes the delegation stop excluding
+      anybody and requires the B-AVAIL-04 agreement suite to fail by name.'
+    - 'NOTE: the reconciliation 0054 deferred, and the count in its NOTE was low. 0058 supersedes
+      `regulatory_profile` and inserts a version naming ONLY `source_note`, which is character for
+      character what 0004''s own seed does, so every column takes its DEFAULT — decision 20''s six for
+      the mandatory set and the empty set for the non-expiring one. Writing it that way rather than
+      spelling the six out is load-bearing three times over: it cannot restate a value and get it wrong
+      (the failure opening-balances and catalogue-compliance record from opposite ends), it makes "the
+      seeded profile" and "every column at its DEFAULT" one sentence — which is what lets a test or a
+      gate restore the seeded profile without knowing the values — and it repairs a database whose
+      in-force row was left changed by a suite stopped mid-probe rather than carrying that forward.
+      0054''s NOTE named NINE integration files that seed a therapist with a professional licence and a
+      health certificate and then assert that therapist is offered a slot. There are FOURTEEN. The five
+      it did not name are packages/fixtures/src/crm-do-not-pair.itest.ts,
+      packages/fixtures/src/obligation-calendar.itest.ts,
+      packages/db/src/services/obligation-blocking.itest.ts, apps/web/src/book.itest.ts,
+      apps/web/src/bookings-blocklist.itest.ts and apps/worker/src/jobs/send-scheduled-step.itest.ts —
+      six files, so the nine were twelve of fourteen even counting the literal assertion separately.
+      Every one of them now files the mandatory set IN FORCE, read from `regulatory_profile_current`,
+      instead of a hard-coded pair, so the next revision of this answer needs no edit to any of them;
+      the four that deliberately lapse a credential name `labour_card`, because a lapsed document that is
+      merely ON FILE excludes nobody and those cases would have gone vacuous rather than red.
+      packages/db/src/repositories/eligibility.itest.ts''s literal assertion about the set in force is
+      updated to the six and kept as a LITERAL on purpose: it is the one place in the estate that pins
+      what every availability query gates on to a value written down in a test.'
+    - 'NOTE: the defect fix, which is this unit''s and which the reconciliation made cheap.
+      packages/fixtures/src/hr-credentials.itest.ts restored "the profile this file found in force",
+      read in its own beforeAll. A restore that re-asserts what it FOUND cannot repair pollution — it
+      writes it back, and every later run finds what the previous one wrote. The history holds the whole
+      chain: version 22 carries `B-AVAIL-04 pair itest: work permit is the only mandatory credential
+      (probe)`, left in force by a suite stopped between its supersede and its `finally`, and from there
+      on every run re-inserted {work_permit} and called it the original. It surfaced as gate 66y''s
+      control failing with `seeded={work_permit}` on a reused database while passing on every fresh one,
+      which is why it never failed a merge verify. `restoreSeededProfile` now INSERTS a version naming
+      only `source_note`, exactly as 0058 does, so the restore is the seeded profile by construction and
+      cannot be polluted; the file''s end-of-test assertions compare against the seeded values rather
+      than against a snapshot of what it found, because asserting the restore against the snapshot is
+      asserting that the restore wrote back what it was told to write back — true of the broken version
+      too. Gate 66w-66y is fixed in the same place and for the same reason: its own
+      `restoreSeededProfile` spelled out `array[''professional_licence'',''health_certificate'']`, which
+      after 0058 would have been quietly writing the OLD answer back after every gate run, and its
+      `seeded` is now captured AFTER that restore rather than read out of whatever the database happened
+      to hold. Cases 75j-75l are the known-bad fixture: the profile in force is corrupted under the
+      historical note, the file is run, and the set in force afterwards must be the seeded six — with
+      the found-value restore put back as the control, under which the suite goes red AND the corruption
+      survives it. Both halves were driven against a live database before the gate was written.'
+    - 'NOTE: the reconciliation made gate 66w VACUOUS, which the first full verify caught and which is
+      repaired here. 66w removed the carry-forward from catalogue-compliance.itest.ts, ran the file for
+      real, and required booking-concurrency.itest.ts to fail by `therapist_not_eligible`. It went GREEN
+      after 0058 — reported as "exited zero; nothing was rejected" — because the observable depended on
+      the ROW and the DEFAULT disagreeing: the row held 0030''s two, the default 0054''s six, so dropping
+      the column replaced the two with the six and made four therapists credential_missing. 0058
+      reconciled the row WITH the default and this unit made the availability fixtures file the set IN
+      FORCE, so dropping the column now writes back what was already there and the downstream suites are
+      immune by construction. That is the hazard''s PRECONDITION removed and not the hazard: an INSERT
+      that does not name a column still writes the DEFAULT, and it still bites the moment anybody
+      supersedes the profile to something the default does not equal — which is what every credential
+      probe in the estate does while it runs. A green case testing nothing is ADR 0002''s failure, so the
+      fixture now CREATES the precondition, spelled as the history holds it (version 22''s
+      `work permit is the only mandatory credential (probe)`), runs the real lexicon file on top of it,
+      and asserts on the ROW: the value in force is lost and replaced by the default. 66y is the control
+      and is no longer trivially true — with the carry-forward in place the same run carries
+      {work_permit} forward untouched, which is a claim about the helper rather than about the row
+      happening to equal the default — and a fourth case restores the seeded profile and asserts it is
+      back, because a probe that outlived this block would be the very defect it tests for arriving by
+      way of the test. The now-unused CONCURRENCY constant was removed. All four cases were driven
+      against a live database before the block was rewritten.'
+    - 'NOTE: what the sweep deliberately does not do, and where the rest goes.
+      appointment_reassignment_flag has NO foreign key to `appointment`, which is 0055''s decision, 0021''s
+      for agent_run.job_id and 0024''s for appointment.therapist_id: PostgreSQL refuses
+      `truncate appointment` while a referencing table is absent from the statement, and three files
+      truncate it by an explicit list they inherited from one another. A live flag is therefore NOT
+      cascaded away with its appointment and the itest deletes flags before appointments; an orphan is
+      invisible to every reader, all of which join. The flag''s reason and document type are the evidence
+      AT THE MOMENT IT WAS RAISED and are not rewritten by a later pass, so the audit row beside it stays
+      verifiable against the row it describes — the flag stays live for exactly as long as the therapist
+      is ineligible whichever document is responsible by then, and the clearance is where the change of
+      state is. DEFERRED: the outbox event `appointment.needs_reassignment` is published and nothing
+      consumes it yet; the template, the transactional class and the send belong to P-HR-14, which owns
+      the staff notification set and credential-expiry notices. Acting on the queue — the candidate
+      finder, the reassign transaction and the screen — is P-HR-04''s, which depends on this unit. There
+      is no HR screen for the queue in this unit for the reason P-HR-02 records for its own page: the
+      admin shell W-SYS-01 does not exist and apps/web/src/routes/registry.ts requires every DOCUMENT in
+      both locales.'
+    - 'NOTE: one finding in code this unit does not own, reported rather than repaired.
+      packages/fixtures/src/therapist-eligibility.itest.ts (B-AVAIL-04) has the SAME defect the fix above
+      removes: `seededMandatory` is read from the database in beforeAll and the probe''s `finally`
+      re-inserts it, so a run of that file stopped between its supersede and its restore leaves
+      {work_permit} in force and every later run re-asserts it. It is the original source of the pollution
+      the history records. It is not repaired here because it is another unit''s fixture and the repair
+      needs a decision about its `before + 3` delta assertions and about which of its assertions are
+      comparing the snapshot to itself (`expect(await readMandatoryDocumentTypes(sql)).toEqual(
+      seededMandatory)` is vacuous for the same reason). The pollution it can create is now HEALED rather
+      than propagated, because hr-credentials.itest.ts restores the seeded profile and 0058 does too —
+      but the source is still there. Whoever next touches that file should restore by inserting a version
+      that names only `source_note`, as 0004, 0058, hr-credentials.itest.ts and gate 66w/75 all now do.'
+    - 'NOTE: one divergence between the SQL predicate and the pure rule that is unreachable today and is
+      deliberately not closed here. `evaluateCredentialsOn` reads `non_expiring_document_types`, so a
+      type NOT declared non-expiring whose row carries a NULL expiry is MISSING (fail-closed); the
+      availability SQL computes `any_expired` as `expires_on is not null and expires_on < trading_date`
+      and reads the same row as held-and-not-expired. 0054''s ZS006 trigger makes that state unreachable
+      on INSERT and UPDATE, so the two agree for every row the database will accept — but it becomes
+      reachable if a profile version WITHDRAWS a non-expiring declaration while such a row is on file,
+      which hr-credentials.itest.ts already treats as invalid (it deletes the NULL row before restoring).
+      Closing it means teaching the SQL about the second array, which is an edit to B-AVAIL-04''s pool for
+      a state nothing can currently produce. DEFERRED to whichever unit builds the HR write path, which
+      is the same unit P-HR-02 defers `employee_document.issuing_authority` to.'
     files:
-    - packages/core/src/availability/eligibility.ts
-    - packages/core/src/availability/eligibility.test.ts
+    - packages/core/src/hr/credentials.ts
+    - packages/core/src/availability/eligibility-port.ts
+    - packages/db/migrations/0058_appointment_reassignment_flag.sql
+    - packages/db/src/repositories/reassignment.ts
     - apps/worker/src/jobs/credential-sweep.ts
-    - packages/db/migrations/*_appointment_reassignment_flag.sql
+    - apps/worker/src/jobs/credential-sweep.itest.ts
     - scripts/test-gates.mjs
   - id: P-HR-04
     order: 93

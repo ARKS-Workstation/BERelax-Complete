@@ -41,6 +41,17 @@ if (!url)
 const TRADING_DATE = '2099-08-11'
 /** The next trading date, so "a shift on the wrong date covers nothing" has somewhere to point. */
 const NEXT_DATE = '2099-08-12'
+/** Every mandatory credential a fixture therapist holds expires here unless the case is about an expiry. */
+const FAR_FUTURE = '2099-12-31'
+/**
+ * The mandatory type the expiry cases move about.
+ *
+ * Named once, because three cases below UPDATE and re-INSERT rows of exactly this type and a mismatch
+ * between them would leave the therapist holding two different documents instead of one renewed. It must
+ * be in the set the profile in force carries or the exclusion cases assert nothing; `labour_card` is the
+ * first of the six 0058 put in force.
+ */
+const LAPSING_TYPE = 'labour_card'
 const MARKER = 'bavail04 eligibility itest'
 /** Dubai wall clock, written as an offset so the assertions read as the rota does. */
 const dubai = (day: string, hhmm: string): string => `${day} ${hhmm}:00+04`
@@ -57,6 +68,27 @@ const idOf = (reference: string): string => {
 }
 
 const allIds = (): string[] => [...staff.values()]
+
+/**
+ * The mandatory credential set IN FORCE, far in the future, with `lapsed` overriding one type's expiry.
+ *
+ * Read from `regulatory_profile_current` rather than naming `professional_licence` and
+ * `health_certificate`, which is what this file did until migration 0058 reconciled the row in force with
+ * the column DEFAULT — docs/01 decision 20's six. A fixture naming two types stops meaning "holds every
+ * mandatory document" the moment that answer changes, and the failure is `credential_missing` in cases
+ * that are about the roster (0054's header, brief rule 12).
+ *
+ * `lapsed` has to name a type that is actually mandatory, or nobody is excluded and the case proves
+ * nothing — which is why it is an override on THIS list rather than a separate array a caller assembles.
+ */
+async function mandatoryDocuments(
+  lapsed: Readonly<Record<string, string>> = {},
+): Promise<readonly { readonly type: string; readonly expiresOn: string }[]> {
+  return (await readMandatoryDocumentTypes(sql)).map((type) => ({
+    type,
+    expiresOn: lapsed[type] ?? FAR_FUTURE,
+  }))
+}
 
 async function addEmployee(args: {
   readonly reference: string
@@ -79,10 +111,7 @@ async function addEmployee(args: {
   for (const skill of args.skills ?? ['asian_style']) {
     await sql`insert into employee_skill (employee_id, skill) values (${id}, ${skill}::therapist_skill)`
   }
-  const documents = args.documents ?? [
-    { type: 'professional_licence', expiresOn: '2099-12-31' },
-    { type: 'health_certificate', expiresOn: '2099-12-31' },
-  ]
+  const documents = args.documents ?? (await mandatoryDocuments())
   for (const document of documents) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
@@ -177,16 +206,17 @@ beforeAll(async () => {
   await addEmployee({ reference: 'bavail04-b', gender: 'male' })
   await addEmployee({ reference: 'bavail04-ended', employedUntil: '2099-08-10' })
   await addEmployee({ reference: 'bavail04-noskill', skills: ['arabic_style'] })
+  // Holds ONE document, and it is not one the profile in force demands, so every mandatory type is
+  // absent: `credential_missing`. `health_certificate` was mandatory before 0058 and is not now, which
+  // makes it exactly the right value here — the reason is unchanged and the case is no longer relying on
+  // it being in the set.
   await addEmployee({
     reference: 'bavail04-nolicence',
-    documents: [{ type: 'health_certificate', expiresOn: '2099-12-31' }],
+    documents: [{ type: 'health_certificate', expiresOn: FAR_FUTURE }],
   })
   await addEmployee({
     reference: 'bavail04-lapsed',
-    documents: [
-      { type: 'professional_licence', expiresOn: '2099-08-10' },
-      { type: 'health_certificate', expiresOn: '2099-12-31' },
-    ],
+    documents: await mandatoryDocuments({ [LAPSING_TYPE]: '2099-08-10' }),
   })
   await addEmployee({ reference: 'bavail04-unrostered' })
   await addEmployee({ reference: 'bavail04-onleave' })
@@ -460,7 +490,7 @@ describe('acceptance — a credential expiring either side of the TRADING date',
     const id = idOf('bavail04-lapsed')
     await sql`
       update employee_document set expires_on = ${expiresOn}
-       where employee_id = ${id} and document_type = 'professional_licence'
+       where employee_id = ${id} and document_type = ${LAPSING_TYPE}::employee_document_type
     `
     return reasonFor('bavail04-lapsed')
   }
@@ -480,17 +510,17 @@ describe('acceptance — a credential expiring either side of the TRADING date',
     // expired on the strength of a licence they have already replaced.
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
-      values (${id}, 'professional_licence', '2100-08-31')
+      values (${id}, ${LAPSING_TYPE}::employee_document_type, '2100-08-31')
     `
     expect(await reasonFor('bavail04-lapsed')).toBeNull()
     const [count] = await sql<{ n: string }[]>`
       select count(*)::text as n from employee_document
-       where employee_id = ${id} and document_type = 'professional_licence'
+       where employee_id = ${id} and document_type = ${LAPSING_TYPE}::employee_document_type
     `
     expect(Number(count?.n)).toBe(2)
     await sql`
       delete from employee_document
-       where employee_id = ${id} and document_type = 'professional_licence'
+       where employee_id = ${id} and document_type = ${LAPSING_TYPE}::employee_document_type
          and expires_on = '2100-08-31'
     `
     expect(await reasonFor('bavail04-lapsed')).toBe('credential_expired')
@@ -638,11 +668,28 @@ describe('narrowing is what isolates this read, and it answers for every id it i
 })
 
 describe('the mandatory list comes from regulatory_profile, not from this module', () => {
-  it('reads the profile in force, which 0030 seeds with the stricter pair', async () => {
+  it('reads the profile in force, which 0058 reconciles with the column DEFAULT', async () => {
+    // The literal is decision 20's stricter healthcare reading, in the order the migration writes it.
+    // It was 0030's `{professional_licence, health_certificate}` until P-HR-03: 0054 revised the column
+    // DEFAULT to these six and deliberately left the ROW carrying the old pair, and 0058 is the
+    // reconciliation that migration's header hands to that unit.
+    //
+    // Asserted as a LITERAL and not against the column default, deliberately. This is the one place in
+    // the estate that pins the set actually in force to a value written down in a test, so a migration
+    // or a suite that changes what every availability query gates on has to change this line too and be
+    // read while doing it. `packages/fixtures/src/hr-credentials.itest.ts` asserts the other half — that
+    // the DEFAULT and the row agree — by inserting a version that names no set at all.
     expect(await readMandatoryDocumentTypes(sql)).toEqual([
-      'professional_licence',
-      'health_certificate',
+      'labour_card',
+      'emirates_id',
+      'residence_visa',
+      'occupational_health_card',
+      'medical_fitness_certificate',
+      'good_conduct_certificate',
     ])
+    // And the type the expiry cases above move about is in it, which is what stops those cases passing
+    // vacuously against a document nothing demands.
+    expect(await readMandatoryDocumentTypes(sql)).toContain(LAPSING_TYPE)
   })
 })
 

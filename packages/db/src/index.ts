@@ -28,7 +28,9 @@ export {
   PGBOSS_SCHEMA,
 } from './jobs/boss.ts'
 export {
+  type BusinessDayAt,
   type BusinessDayInput,
+  businessDayAt,
   businessDayFingerprint,
   type GenerationResult,
   generateBusinessDays,
@@ -459,6 +461,17 @@ export {
   readMessageRow,
 } from './repositories/message.ts'
 export {
+  type ApprovalChange,
+  type Reclassification,
+  reclassifyTemplate,
+  setTemplateApproval,
+  TEMPLATE_REFUSALS,
+  TEMPLATE_SQLSTATE,
+  type TemplateRefusal,
+  type TemplateSqlstate,
+  templateRefusalOf,
+} from './repositories/message-template.ts'
+export {
   type AllocatedDocumentNumber,
   allocateDocumentNumber,
   DOCUMENT_SERIES_CODES,
@@ -493,6 +506,18 @@ export {
   type OtpVerifyResult,
   verifyOtpCode,
 } from './repositories/otp.ts'
+export {
+  type ClearedReassignmentFlag,
+  clearReassignmentFlags,
+  flagAppointmentsForReassignment,
+  type LiveReassignmentFlagRow,
+  type RaisedReassignmentFlag,
+  type ReassignmentCandidateRow,
+  type ReassignmentFlagInput,
+  type ReassignmentWindow,
+  readLiveReassignmentFlags,
+  readReassignmentCandidates,
+} from './repositories/reassignment.ts'
 export {
   RESCHEDULE_REFUSALS,
   type RescheduleDeps,
@@ -940,6 +965,24 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `agent_run.job_id` in 0021, because three integration suites delete from that table and a candidate must
 // outlive the run that produced it.
 //
+// 58 is 0058_appointment_reassignment_flag.sql: `appointment_reassignment_flag` plus the reconciliation
+// 0054 deferred. The flag says "this appointment's therapist may no longer take it" WITHOUT touching
+// `appointment.status`, because `holds_resources` is GENERATED from the status (0024) so any new
+// terminal label would release the therapist and the room and hand the slot away mid-decision — and
+// because `cancelled_by_salon` tells a customer their booking is gone when the intention is to keep it.
+// One LIVE row per appointment is a PARTIAL unique index, which is what makes the nightly sweep
+// idempotent in the database rather than in the job's memory (0031's argument for
+// `recurring_cost_alert_once_per_period_and_kind`), and partial so a credential that lapses again after
+// a renewal can raise a second flag while the first stays on file. `appointment_id` deliberately
+// references nothing: PostgreSQL refuses `truncate appointment` while a referencing table is absent from
+// the statement and three files truncate it by an explicit list, which is 0055's decision, 0021's for
+// `agent_run.job_id` and 0024's for `appointment.therapist_id`. The reconciliation supersedes
+// `regulatory_profile` and inserts a version naming ONLY `source_note` — character for character what
+// 0004's own seed did — so every column takes its DEFAULT and "the seeded profile" and "every column at
+// its DEFAULT" become one sentence. The row in force therefore now carries decision 20's six mandatory
+// credentials that 0054 put in the DEFAULT and deliberately left the row without; the integration files
+// that made a therapist bookable with a hard-coded pair read the set in force instead.
+//
 // 59 is 0059_hr_shift.sql: the working-hours rate table, and nothing else. `working_hours_rule` holds one
 // row per VERSION of the rules — ordinary minutes per day and per week, the day a working week starts on,
 // the daily overtime cap, the minimum rest gap, the night window as two wall-clock times and the four
@@ -960,7 +1003,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // because every other candidate would be a claim about when the figures took effect — with every figure
 // flagged provisional against Y9-overtime and listed by the Unconfirmed Assumptions panel.
 //
-// 58 and 61 are allocated to units in flight; 60 landed alongside this one and is described below.
+// 58, 60 and 61 landed alongside this one and are described below; nothing is held any more.
 //
 // 60 is 0060_obligation_notice.sql: the compliance calendar's notices (M-VAT-11, docs/04 §9).
 // `obligation_notice` is 0051's mechanism restated rather than a second one — a reminder about a deadline
@@ -980,9 +1023,27 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // sha256 alone is kept, rather than an HMAC over a URL, so no fourth signing secret enters the rotation
 // inventory for a link that lives fifteen minutes.
 //
+// 61 is 0061_template_approval_and_sender_identity.sql: no table and no column — four rules over tables
+// 0014, 0015 and 0035 already shipped. `refuse_message_class_change` keeps 0014's words and gains a
+// PRIVATE SQLSTATE (ZM001) so a probe can assert it was THAT rule that fired rather than any of the seven
+// other `restrict_violation`s in this schema. `template_approval_transition_allowed` declares the seven
+// edges of the approval state machine and `refuse_template_variant_change` enforces them (ZM002) plus a
+// freeze on an APPROVED variant's words, channel, locale and care-window flag (ZM003) — the two together
+// mean the only way to change approved words is approved -> draft -> pending -> approved, every step of
+// it visible, which is the same defect as an editable `message_class` wearing different clothes.
+// `reclassify_template` is replaced rather than re-created: the carried-over variants now land in
+// `draft` and not `pending` (promotional words are not transactional words relabelled, and `pending`
+// puts unwritten copy in front of a reviewer whose only question is yes or no), and it writes a
+// `message_template.reclassified` audit_event naming the transaction-local actor. On `message`, two
+// CHECKs make the sender identity a fact the database keeps — `sender_id` is present for sms and absent
+// for everything else, and a promotional SMS carries the `AD-` prefix while a transactional one does not
+// — and `message_class_matches_its_template` (ZM004) holds the class copied onto the row to the class of
+// the template version it points at, checked at INSERT and on an UPDATE of either column rather than
+// continuously, because a reclassification makes a NEW version the existing rows do not follow.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 58 and 61 are HELD by units still in flight, so the
-// gap below 60 is an allocation rather than an omission. 55, 56 and 57 landed out of order and within an hour
+// come to apply the same number to different SQL. Every number allocated during that stretch has now
+// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 60 as const
+export const SCHEMA_VERSION = 61 as const

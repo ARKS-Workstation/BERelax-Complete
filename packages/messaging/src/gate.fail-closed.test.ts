@@ -21,12 +21,12 @@ import type { MessageId } from './port.ts'
 import {
   type ClassifiedTemplate,
   type ClassRoutedTransport,
-  PROVISIONAL_SENDER_IDS,
   type SendContext,
   type SendRequest,
   sendMessage,
   type TransportRequest,
 } from './send.ts'
+import { PROVISIONAL_SENDER_IDS } from './sender-identity.ts'
 
 /** 14:00 Asia/Dubai: trading, and well inside the promotional window. Nothing here is about timing. */
 const AFTERNOON = '2026-09-18T10:00:00.000Z'
@@ -34,6 +34,7 @@ const AFTERNOON = '2026-09-18T10:00:00.000Z'
 const OFFER: ClassifiedTemplate = {
   key: 'campaign.offer',
   messageClass: 'promotional',
+  approvalState: 'approved',
   channel: 'sms',
   locale: 'en',
   body: 'Two treatments for the price of one this week. Stop: {{link}}',
@@ -43,6 +44,7 @@ const OFFER: ClassifiedTemplate = {
 const CONFIRMATION: ClassifiedTemplate = {
   key: 'booking.confirmed',
   messageClass: 'transactional',
+  approvalState: 'approved',
   channel: 'sms',
   locale: 'en',
   body: 'Booking confirmed for {{date}} at {{time}}. Details or changes: {{link}}',
@@ -159,7 +161,7 @@ describe('an evaluator that cannot decide never resolves to allowed', () => {
 
     expect(result).toMatchObject({ kind: 'sent', senderId: 'AD-BERELAX' })
     expect(transport.calls).toHaveLength(1)
-    expect(transport.calls[0]?.senderId.messageClass).toBe('promotional')
+    expect(transport.calls[0]?.senderId?.messageClass).toBe('promotional')
   })
 
   it('blocks on the frequency-cap evaluator too, which is the fourth stored input', async () => {

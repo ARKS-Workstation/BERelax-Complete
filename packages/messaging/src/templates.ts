@@ -32,8 +32,30 @@
  * A test asserts every shipped SMS default renders inside one segment in both languages. It is a
  * cost gate wearing a correctness gate's clothes, and it is worth having: the difference is roughly
  * half the SMS bill.
+ *
+ * ## Why one shipped template is promotional, and why it ships in `draft`
+ *
+ * `review.request` is here for two reasons, and the first is the ordinary one: asking a satisfied customer
+ * for a review is a real thing this business will do, it is unambiguously **promotional** under TDRA
+ * (docs/04 §5) rather than a service update, and `review_request` is already one of the two send-gating
+ * consent purposes migration 0056 declares. Modelling it as transactional would be the misclassification
+ * `message_class`'s immutability exists to make expensive.
+ *
+ * The second reason is that a corpus with nothing promotional in it makes several assertions *vacuous*.
+ * "No promotional template can resolve to the transactional identity" and "the kill switch refuses every
+ * promotional send in the corpus" are both satisfied perfectly by an all-transactional corpus, and both
+ * were, for as long as there was one. So the corpus now contains both classes and a test asserts it
+ * always will (brief rule 3).
+ *
+ * It ships with `approvalState: 'draft'` — the only shipped template that does — and that is the honest
+ * statement rather than a placeholder in the body. The words here are a starting point, not approved
+ * marketing copy, and a promotional SMS additionally needs an opt-out route this build has no preference
+ * centre for yet (C-CRM-04). `draft` is a state the send path REFUSES: `judgeVariant` returns
+ * `template_not_approved` and `sendMessage` blocks, so these words cannot reach a customer until somebody
+ * with the authority to approve marketing copy has done so. A body carrying a `[DRAFT]` marker would be
+ * the weaker version of the same idea — sendable, and embarrassing.
  */
-import type { TemplateDefinition } from './render.ts'
+import type { TemplateVariant } from './template.ts'
 
 /** Words that must never appear in a default transactional body. */
 export const DISCRETION_FORBIDDEN_VARIABLES = [
@@ -45,7 +67,7 @@ export const DISCRETION_FORBIDDEN_VARIABLES = [
   'style',
 ] as const
 
-export interface DefaultTemplate extends TemplateDefinition {
+export interface DefaultTemplate extends TemplateVariant {
   readonly messageClass: 'transactional' | 'promotional'
   readonly purpose: string
 }
@@ -62,6 +84,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.confirmed',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent when a booking is made. Time and place only; detail is behind the link.',
     channel: 'sms',
     locale: 'en',
@@ -71,6 +94,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.confirmed',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent when a booking is made. Time and place only; detail is behind the link.',
     channel: 'sms',
     locale: 'ar',
@@ -80,6 +104,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.reminder',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent before the appointment. Same discretion rule.',
     channel: 'sms',
     locale: 'en',
@@ -89,6 +114,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.reminder',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent before the appointment. Same discretion rule.',
     channel: 'sms',
     locale: 'ar',
@@ -98,6 +124,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.cancelled',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent when a booking is cancelled, by either side.',
     channel: 'sms',
     locale: 'en',
@@ -107,6 +134,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'booking.cancelled',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Sent when a booking is cancelled, by either side.',
     channel: 'sms',
     locale: 'ar',
@@ -116,6 +144,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'auth.otp',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'One-time code for a customer viewing their own booking or clinical flags.',
     channel: 'sms',
     locale: 'en',
@@ -125,6 +154,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'auth.otp',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'One-time code for a customer viewing their own booking or clinical flags.',
     channel: 'sms',
     locale: 'ar',
@@ -154,6 +184,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     locale: 'en',
     body: 'Compliance due {{date}}: {{obligation}}. Owed by the {{role}}.',
     variables: ['date', 'obligation', 'role'],
+    approvalState: 'approved',
   },
   {
     key: 'compliance.obligation_reminder',
@@ -167,6 +198,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     // key and a date written inside an Arabic sentence otherwise render in the wrong order.
     body: 'استحقاق {{date}}: {{obligation}}. على {{role}}.',
     variables: ['date', 'obligation', 'role'],
+    approvalState: 'approved',
   },
   {
     key: 'compliance.obligation_escalation',
@@ -179,6 +211,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     locale: 'en',
     body: 'Overdue, unacknowledged: {{obligation}}, due {{date}}. Now with the {{role}}.',
     variables: ['obligation', 'date', 'role'],
+    approvalState: 'approved',
   },
   {
     key: 'compliance.obligation_escalation',
@@ -191,10 +224,12 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     locale: 'ar',
     body: 'متأخر ولم يُقر: {{obligation}}، {{date}}. إلى {{role}}.',
     variables: ['obligation', 'date', 'role'],
+    approvalState: 'approved',
   },
   {
     key: 'invoice.issued',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Emails the tax invoice. Email may carry detail; the SMS channel may not.',
     channel: 'email',
     locale: 'en',
@@ -205,6 +240,7 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
   {
     key: 'invoice.issued',
     messageClass: 'transactional',
+    approvalState: 'approved',
     purpose: 'Emails the tax invoice. Email may carry detail; the SMS channel may not.',
     channel: 'email',
     locale: 'ar',
@@ -212,9 +248,47 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     body: 'فاتورتك الضريبية {{invoice_number}} بتاريخ {{date}} مرفقة. المجموع {{total}}.',
     variables: ['invoice_number', 'date', 'total'],
   },
+  {
+    key: 'review.request',
+    messageClass: 'promotional',
+    // Ships in DRAFT, and it is the only shipped template that does. See the header section below.
+    approvalState: 'draft',
+    purpose:
+      'Asks a customer for a review after a visit. Promotional, so it is consent-gated, confined to ' +
+      '07:00-21:00 and leaves from the AD- identity.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Thank you for your visit. A short review would mean a lot to us: {{link}}',
+    variables: ['link'],
+  },
+  {
+    key: 'review.request',
+    messageClass: 'promotional',
+    approvalState: 'draft',
+    purpose:
+      'Asks a customer for a review after a visit. Promotional, so it is consent-gated, confined to ' +
+      '07:00-21:00 and leaves from the AD- identity.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'شكراً لزيارتك. تقييم قصير منك يعني لنا الكثير: {{link}}',
+    variables: ['link'],
+  },
 ]
 
 /** The transactional subset, which is what the discretion rule applies to. */
 export function transactionalDefaults(): DefaultTemplate[] {
   return DEFAULT_TEMPLATES.filter((template) => template.messageClass === 'transactional')
+}
+
+/**
+ * The promotional subset.
+ *
+ * Exported for the same reason `transactionalDefaults` is, and for one more: several claims about
+ * promotional traffic — that no promotional template can resolve to the transactional identity, that the
+ * marketing kill switch stops all of them — are assertions over the *corpus*, and a corpus with nothing
+ * promotional in it satisfies every one of them while proving nothing (brief rule 3). This function is
+ * what a test iterates, and `template-corpus.test.ts` asserts it is not empty.
+ */
+export function promotionalDefaults(): DefaultTemplate[] {
+  return DEFAULT_TEMPLATES.filter((template) => template.messageClass === 'promotional')
 }

@@ -75,6 +75,7 @@ import {
   genderMatchingMode,
   type TherapistSkill,
 } from '@berelax/shared'
+import { evaluateCredentialsOn } from '../hr/credentials.ts'
 import type { LocalDate } from '../time.ts'
 import { mergePeriods } from './intervals.ts'
 import type { Period } from './room-predicates.ts'
@@ -382,29 +383,52 @@ export function employedOn(record: TherapistRecord, tradingDate: LocalDate): boo
  * The **latest** expiry per type is what counts, because a renewal is a new row rather than an edit
  * (`employee_document_one_row_per_expiry`): taking the earliest, or the first returned, would report a
  * therapist as expired on the strength of the licence they have already replaced.
+ *
+ * ## P-HR-03: the rule is `../hr/credentials.ts`'s, and this is the wiring
+ *
+ * This function used to carry its own copy of "latest expiry per mandatory type, compared against the
+ * trading date". P-HR-02 then built the same rule a second time, in `evaluateCredentials`, because the
+ * HR screen needs four statuses where availability needs one boolean — and a third caller arrived with
+ * P-HR-03's nightly sweep, which has to flag exactly the appointments availability would refuse to
+ * offer. Three implementations of one rule is three answers to "is this therapist's file current", and
+ * the failure mode is not a crash: the sweep would leave an appointment unflagged for a therapist the
+ * booking page has already stopped offering, and nobody would see either half.
+ *
+ * So the judgement is delegated and the MAPPING stays here. What this function still owns is the port's
+ * vocabulary: which of the four statuses excludes, and that MISSING is reported ahead of EXPIRED.
+ * `blocking` is ordered worst-first by `CREDENTIAL_STATUSES`, in which MISSING is worst, so the
+ * head of that list reproduces the early return this function used to make — and the SQL mirror in
+ * `@berelax/db` puts its `any_missing` arm ahead of `any_expired` for the same reason.
+ *
+ * `nonExpiringTypes` is empty and `expiringSoonDays` is zero, and both are decisions rather than
+ * placeholders. {@link EligibilityFacts} carries no non-expiring set, so the strict reading — every
+ * credential must be renewed — is the only one this port can honestly apply; it is also 0054's DEFAULT,
+ * so it is what every database that exists today holds. And the EXPIRING_SOON window is a **warning and
+ * never a refusal**, so no value of it can change this verdict: zero is the value that makes that
+ * visible, because a window that mattered here would make the answer depend on it.
  */
 export function credentialVerdict(args: {
   readonly credentials: readonly TherapistCredential[]
   readonly mandatoryDocumentTypes: readonly string[]
   readonly tradingDate: LocalDate
 }): 'ok' | 'credential_missing' | 'credential_expired' {
-  const { credentials, mandatoryDocumentTypes, tradingDate } = args
-  let expired = false
-  for (const documentType of mandatoryDocumentTypes) {
-    const held = credentials.filter((credential) => credential.documentType === documentType)
-    if (held.length === 0) return 'credential_missing'
-    const latest = held.reduce(
-      (best, credential) => (credential.expiresOn > best ? credential.expiresOn : best),
-      held[0]?.expiresOn as LocalDate,
-    )
-    // Inclusive: a licence valid through the 18th covers the 18th's trading date, and that date runs
-    // to 02:00 on the 19th. Comparing against the slot's calendar date instead would take the last
-    // two hours of every trading day away from a therapist who is licensed for all of it.
-    if (latest < tradingDate) expired = true
-  }
-  // Missing beats expired by returning early above; expired is reported only once every mandatory type
-  // has at least one row, so the two reasons cannot both be true of one answer.
-  return expired ? 'credential_expired' : 'ok'
+  const { blocking } = evaluateCredentialsOn({
+    credentials: args.credentials,
+    policy: {
+      mandatoryTypes: args.mandatoryDocumentTypes,
+      nonExpiringTypes: [],
+      expiringSoonDays: 0,
+    },
+    // Inclusive, and a trading DATE rather than an instant: a licence valid through the 18th covers the
+    // 18th's trading date, and that date runs to 02:00 on the 19th. Comparing against the slot's
+    // calendar date instead would take the last two hours of every trading day away from a therapist
+    // who is licensed for all of it — which is why `evaluateCredentialsOn` exists beside
+    // `evaluateCredentials` rather than this function manufacturing an instant to hand it.
+    asOfDate: args.tradingDate,
+  })
+  const worst = blocking[0]
+  if (worst === undefined) return 'ok'
+  return worst.status === 'MISSING' ? 'credential_missing' : 'credential_expired'
 }
 
 /**

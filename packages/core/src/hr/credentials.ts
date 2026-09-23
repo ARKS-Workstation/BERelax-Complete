@@ -219,8 +219,9 @@ export function credentialStatusFor(args: {
  * ## What is not decided here
  *
  * Employment dates, skills, the roster and approved leave. Those are
- * `../availability/eligibility-port.ts`'s, and keeping the division is what lets P-HR-03 add this
- * predicate to that list rather than reconciling two answers to "is this therapist bookable".
+ * `../availability/eligibility-port.ts`'s, and keeping the division is what let P-HR-03 point that
+ * port's `credentialVerdict` at this rule — see {@link evaluateCredentialsOn} — rather than leave two
+ * answers to "is this therapist's file current" to disagree with each other.
  */
 export function evaluateCredentials(args: {
   readonly credentials: readonly HeldCredential[]
@@ -228,6 +229,40 @@ export function evaluateCredentials(args: {
   readonly at: Instant
 }): CredentialEvaluation {
   const { credentials, policy, at } = args
+  const zone = policy.zone ?? ASIA_DUBAI
+  // The ONE place an instant becomes a date, and the reason the zone is an argument. Everything below
+  // this line is date arithmetic; everything a caller can get wrong about the boundary is above it.
+  const asOfDate = toLocal(at, zone).date
+  return { evaluatedAt: at, ...evaluateCredentialsOn({ credentials, policy, asOfDate }) }
+}
+
+/**
+ * The same judgement, at a wall-clock DATE that the caller has already resolved.
+ *
+ * Exported because two callers have a date and not an instant, and both of them would otherwise have to
+ * invent one:
+ *
+ *   - `credentialVerdict` in `../availability/eligibility-port.ts`, whose input is a **trading date**.
+ *     Trading runs 11:00–02:00, so the trading date is not the calendar date of any particular instant
+ *     during it, and a caller that manufactured "noon on the trading date" to call
+ *     {@link evaluateCredentials} would be converting a date to an instant so that this function could
+ *     convert it back — two conversions whose only possible contribution is a disagreement at 02:00.
+ *   - P-HR-03's nightly sweep, which judges each future appointment against **that appointment's**
+ *     trading date rather than against the moment the sweep runs. A licence lapsing next week does not
+ *     make tonight's appointment unservable, and it does make the one three weeks out unservable — and
+ *     the sweep must agree with availability, which compares `expires_on < trading_date`.
+ *
+ * `asOfDate` is therefore trusted as a wall-clock date in the policy's zone. `policy.zone` is unused
+ * here and that is deliberate rather than an oversight: the zone's whole job is turning an instant into
+ * this date, and re-applying it to a date that already went through that conversion is how a boundary
+ * moves twice.
+ */
+export function evaluateCredentialsOn(args: {
+  readonly credentials: readonly HeldCredential[]
+  readonly policy: CredentialPolicy
+  readonly asOfDate: LocalDate
+}): Omit<CredentialEvaluation, 'evaluatedAt'> {
+  const { credentials, policy, asOfDate } = args
   if (!Number.isInteger(policy.expiringSoonDays) || policy.expiringSoonDays < 0) {
     throw new AppError(
       'validation',
@@ -238,8 +273,6 @@ export function evaluateCredentials(args: {
     )
   }
 
-  const zone = policy.zone ?? ASIA_DUBAI
-  const asOfDate = toLocal(at, zone).date
   const nonExpiring = new Set(policy.nonExpiringTypes)
   // De-duplicated, because a profile array with a repeated label would otherwise assess the same type
   // twice and report it twice in `blocking`. Order preserved: the profile's order is what a screen
@@ -278,7 +311,6 @@ export function evaluateCredentials(args: {
     )
 
   return {
-    evaluatedAt: at,
     asOfDate,
     mandatory,
     other,

@@ -11,7 +11,7 @@
 import { parseConfig } from '@berelax/config'
 import { describe, expect, it } from 'vitest'
 import type { MessageId, OutboundMessage } from '../port.ts'
-import { PROVISIONAL_SENDER_IDS } from '../send.ts'
+import { PROVISIONAL_SENDER_IDS } from '../sender-identity.ts'
 import { createResendTransport, mapResendEvent, RESEND_EVENT_MAP } from './resend.ts'
 import { createSmsalaTransport, mapSmsalaStatus, SMSALA_STATUS_MAP } from './smsala.ts'
 

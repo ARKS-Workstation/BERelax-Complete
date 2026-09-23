@@ -135,3 +135,56 @@ export async function businessDayFingerprint(sql: Sql): Promise<string> {
   `
   return row?.digest ?? 'empty'
 }
+
+/** The trading session an instant falls in, by its own open and close instants. */
+export interface BusinessDayAt {
+  readonly tradingDate: string
+  /** Epoch milliseconds, as `business_day.opens_at` holds it. */
+  readonly opensAt: number
+  readonly closesAt: number
+  /** True when the instant is inside `[opens_at, closes_at)` — the session is actually trading. */
+  readonly isOpen: boolean
+}
+
+/**
+ * The trading session an instant belongs to, read from the materialised calendar.
+ *
+ * `tradingDateAt` answers the same question with one column and is what a job needs when it only has
+ * to date a row. This returns the **instants**, and P-HR-03's nightly sweep needs them for a reason
+ * that is the whole of its fifth acceptance line: the window of "future appointments" has to start at a
+ * trading date, and the trading date at 00:30 is YESTERDAY'S, because the session that opened at 11:00
+ * closes at 02:00 the following calendar day (0011). A sweep that floored its window with
+ * `date(at)` would miss tonight's 01:30 appointment entirely — the one whose calendar date is tomorrow
+ * and whose trading date is the day before that.
+ *
+ * `isOpen` distinguishes the two cases a caller may legitimately care about. The nightly pass runs at
+ * 05:00, after `closes_at`, so it is looking at the session that has just ENDED and `isOpen` is false;
+ * a pass driven by hand at midnight is inside one and `isOpen` is true. Either way the trading date is
+ * the same row, which is the point — the answer does not change depending on which side of 02:00
+ * somebody ran it.
+ *
+ * Returns `null` when the calendar holds no session at or before the instant. The caller must refuse
+ * rather than substitute a calendar date, for the reason `tradingDateAt` gives: a row dated by a guess
+ * is a row nobody can reconcile.
+ */
+export async function businessDayAt(sql: Sql, atIso: string): Promise<BusinessDayAt | null> {
+  const [row] = await sql<
+    { trading_date: string; opens_at: Date; closes_at: Date; is_open: boolean }[]
+  >`
+    select trading_date::text as trading_date,
+           opens_at,
+           closes_at,
+           (${atIso}::timestamptz < closes_at) as is_open
+      from business_day
+     where opens_at <= ${atIso}::timestamptz
+     order by opens_at desc
+     limit 1
+  `
+  if (row === undefined) return null
+  return {
+    tradingDate: row.trading_date,
+    opensAt: row.opens_at.getTime(),
+    closesAt: row.closes_at.getTime(),
+    isOpen: row.is_open,
+  }
+}

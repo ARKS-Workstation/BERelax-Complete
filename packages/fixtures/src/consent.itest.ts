@@ -901,6 +901,10 @@ describe('acceptance — the record reaches the send choke point', () => {
   const TEMPLATE: ClassifiedTemplate = {
     key: 'ccrm03.campaign',
     messageClass: 'promotional',
+    // Required since C-AUTO-01: a template with no approval state is refused by the choke point before
+    // the gate is ever reached, so a consent test whose template was unapproved would be asserting about
+    // the approval rule instead of about consent.
+    approvalState: 'approved',
     channel: 'sms',
     locale: 'en',
     body: 'BE RELAX: {{offer}}',

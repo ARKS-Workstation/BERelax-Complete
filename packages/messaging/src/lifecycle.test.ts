@@ -25,12 +25,8 @@ import {
 import { createInMemoryMessageStore } from './lifecycle-memory.ts'
 import { InMemoryOutbox } from './outbox.ts'
 import type { MessageId } from './port.ts'
-import {
-  type ClassifiedTemplate,
-  PROVISIONAL_SENDER_IDS,
-  type SendContext,
-  type SendRequest,
-} from './send.ts'
+import type { ClassifiedTemplate, SendContext, SendRequest } from './send.ts'
+import { PROVISIONAL_SENDER_IDS } from './sender-identity.ts'
 import { DEFAULT_TEMPLATES } from './templates.ts'
 import { createResendTransport } from './transports/resend.ts'
 import { createSmsalaTransport } from './transports/smsala.ts'
@@ -64,6 +60,7 @@ const INVOICE_EMAIL = templateFor('invoice.issued')
 const OFFER: ClassifiedTemplate = {
   key: 'campaign.offer',
   messageClass: 'promotional',
+  approvalState: 'approved',
   channel: 'sms',
   locale: 'en',
   body: 'Two treatments for the price of one this week. Stop: {{link}}',

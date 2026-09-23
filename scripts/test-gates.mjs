@@ -17333,14 +17333,33 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     as `therapist_not_eligible` on all 400 iterations of `booking-concurrency.itest.ts`, a file about room
     locks that mentions neither credentials nor the lexicon.
 
-    So the fixture is the real thing rather than a model of it: remove the carry-forward, RUN the lexicon
-    file so the corruption exists in the database, and require the concurrency file to fail by the error
-    the corruption actually produces. The control then proves the corrected helper leaves the set alone,
-    because a gate that only ever sees the broken state cannot tell a fix from a coincidence.
+    So the fixture is the real thing rather than a model of it: a profile in force the DEFAULT does not
+    equal, the lexicon file RUN on top of it, and the observation on what the supersede wrote.
+
+    ## P-HR-03 moved the observation, and the reason is the whole of that unit
+
+    This case used to require `booking-concurrency.itest.ts` to fail by `therapist_not_eligible`, which
+    was the error the corruption actually produced. It cannot any more, and that is a repair rather than
+    a regression. The corruption was visible through that file because the ROW in force and the column
+    DEFAULT DISAGREED — the row held 0030's two, the default held 0054's six — so a supersede that
+    dropped the column replaced the two with the six and made four therapists `credential_missing`.
+    0058 reconciled the row WITH the default, and the availability fixtures now file the mandatory set
+    IN FORCE rather than a hard-coded pair. Both halves of that divergence are gone: dropping the column
+    writes back what was already there, and the downstream suites are immune by construction.
+
+    What is gone is the hazard's PRECONDITION, not the hazard. The mechanism is untouched — an INSERT
+    that does not name a column writes the DEFAULT — and it bites the moment anybody supersedes the
+    profile to something the default does not equal, which is what every credential probe in the estate
+    does. Leaving the case pointed at the concurrency suite would have left it GREEN and testing
+    nothing, which is ADR 0002's failure and the one this file exists to refuse. So the fixture now
+    creates the precondition itself, spelled as the history actually holds it (version 22's
+    `work permit is the only mandatory credential (probe)`), and asserts on the row: the value in force
+    is LOST and replaced by the default. 66y is the control, and it is no longer trivially true —
+    with the carry-forward in place the same run of the same file carries `{work_permit}` forward
+    untouched, which is a claim about the helper rather than about the row happening to equal the default.
   */
   {
     const LEXICON = 'packages/fixtures/src/catalogue-compliance.itest.ts'
-    const CONCURRENCY = 'packages/fixtures/src/booking-concurrency.itest.ts'
 
     const mandatoryInForce = () =>
       run('psql', [
@@ -17352,11 +17371,19 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       ]).output.trim()
 
     /**
-     * Puts the seeded mandatory set back, by INSERTING a version — never by deleting a row.
+     * Puts the seeded profile back, by INSERTING a version — never by deleting a row.
      *
      * Load-bearing, for the reason case 57 records about its own roster: `withEditedFile` restores the
      * source bytes and cannot undo what the edited source WROTE. Without this the corrupted profile
      * outlives the fixture, every later gate case and the next branch.
+     *
+     * It names ONLY `source_note`, so every other column takes its DEFAULT — which is character for
+     * character what 0004's seed and 0058's reconciliation both do, and is therefore the definition of
+     * "the seeded profile" rather than a copy of it. It used to spell out
+     * `array['professional_licence','health_certificate']` and every other column of the retired row;
+     * P-HR-03's 0058 revised the set in force to decision 20's six, at which point a spelled-out
+     * restore would have been quietly writing the OLD answer back after every run of this case. A
+     * restore that restates a value is a restore that can restate it wrongly.
      */
     const restoreSeededProfile = () =>
       run('psql', [
@@ -17366,17 +17393,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         'ON_ERROR_STOP=1',
         dbUrl ?? '',
         '-c',
-        'with retired as (update regulatory_profile set superseded_at = now() ' +
-          'where superseded_at is null returning *) ' +
-          'insert into regulatory_profile (licence_class, emirate, clinical_retention_years, ' +
-          'financial_retention_years, erasure_overrides_retention, medical_claims_permitted, ' +
-          'permitted_public_titles, banned_claim_terms, is_provisional, source_note, ' +
-          'mandatory_therapist_document_types, non_expiring_document_types) ' +
-          'select licence_class, emirate, clinical_retention_years, financial_retention_years, ' +
-          'erasure_overrides_retention, medical_claims_permitted, permitted_public_titles, ' +
-          "banned_claim_terms, is_provisional, 'gate 66w: restoring the seeded mandatory set', " +
-          "array['professional_licence','health_certificate']::employee_document_type[], " +
-          'array[]::employee_document_type[] from retired',
+        'update regulatory_profile set superseded_at = now() where superseded_at is null; ' +
+          'insert into regulatory_profile (source_note) values ' +
+          "('gate 66w: restoring the seeded profile — every column at its DEFAULT, which is what 0004 " +
+          "and 0058 both insert')",
       ])
 
     /** The carry-forward removed, in the four places it appears. Leaves the SQL valid, so the fixture
@@ -17409,24 +17429,59 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         'TEST_DATABASE_URL or DATABASE_URL is required to corrupt and restore the profile',
       )
     } else {
+      // The seeded value is captured AFTER a restore rather than read out of whatever the database
+      // happens to hold, and that is this case's own version of the defect it is testing for. A
+      // `seeded` read straight from `regulatory_profile_current` is a snapshot of the pollution when
+      // there is any — which is exactly how this control came to fail with
+      // `before={professional_licence,health_certificate} after={...} seeded={work_permit}` on a reused
+      // database while passing on every fresh one.
+      restoreSeededProfile()
       const seeded = mandatoryInForce()
-      const result = withEditedFile(LEXICON, withoutCarryForward, () => {
+
+      /**
+       * The precondition, spelled as the history holds it: a profile in force the DEFAULT does not equal.
+       *
+       * Version 22 of this table carries this exact note. It is the probe a B-AVAIL-04 run left behind
+       * when it was stopped between its supersede and its `finally`, and it is what every credential
+       * probe in the estate looks like while it is running — which is why it is the right state to test
+       * the dropped column against rather than an invented one.
+       */
+      const probeProfileInForce = () =>
+        run('psql', [
+          '--no-psqlrc',
+          '-q',
+          '-v',
+          'ON_ERROR_STOP=1',
+          dbUrl ?? '',
+          '-c',
+          'update regulatory_profile set superseded_at = now() where superseded_at is null; ' +
+            'insert into regulatory_profile (source_note, mandatory_therapist_document_types) values ' +
+            "('B-AVAIL-04 pair itest: work permit is the only mandatory credential (probe)', " +
+            "array['work_permit']::employee_document_type[])",
+        ])
+      const PROBE_SET = '{work_permit}'
+
+      probeProfileInForce()
+      const probed = mandatoryInForce()
+      const dropped = withEditedFile(LEXICON, withoutCarryForward, () =>
         // The lexicon file has to RUN for the corruption to exist: the defect is what its supersede
         // WRITES, not what its source says.
-        run('pnpm', integration(LEXICON))
-        return runExpectingFailure('pnpm', integration(CONCURRENCY))
-      })
-      checkRejectedBy(
-        'a superseding helper that drops a regulatory_profile column is rejected',
-        result,
-        'therapist_not_eligible',
+        {
+          run('pnpm', integration(LEXICON))
+          return mandatoryInForce()
+        },
       )
-      restoreSeededProfile()
+      check(
+        'a superseding helper that drops a regulatory_profile column is rejected',
+        probed === PROBE_SET && dropped !== probed && dropped === seeded,
+        `in force before the lexicon file=${probed}, after=${dropped}, the column DEFAULT=${seeded}`,
+      )
 
       // 66x-66y. The controls, and they are what say the fix is a fix rather than a coincidence. With the
-      //          carry-forward in place the same file passes AND leaves the mandatory set exactly as it
-      //          found it — so the case above is about the dropped column and not about the lexicon file
-      //          having become unable to run at all.
+      //          carry-forward in place the same file passes AND carries the value in force forward
+      //          untouched — so the case above is about the dropped column and not about the lexicon file
+      //          having become unable to run at all, and not about the row happening to equal the default.
+      probeProfileInForce()
       const before = mandatoryInForce()
       const lexicon = run('pnpm', integration(LEXICON))
       check(
@@ -17437,8 +17492,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       const after = mandatoryInForce()
       check(
         'a corrected superseding helper leaves the mandatory set untouched',
-        before === after && after === seeded,
-        `before=${before} after=${after} seeded=${seeded}`,
+        before === PROBE_SET && after === before,
+        `before=${before} after=${after} probe=${PROBE_SET}`,
+      )
+      // The probe is a probe. It must not outlive this block, or every later gate case and the next
+      // branch inherit a mandatory set nobody chose — which is the defect this case is about, arriving
+      // by way of the case that tests for it.
+      restoreSeededProfile()
+      check(
+        'the seeded mandatory set is back in force after 66w-66y',
+        mandatoryInForce() === seeded,
+        `in force=${mandatoryInForce()}, seeded=${seeded}`,
       )
     }
   }
@@ -19578,6 +19642,361 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 75a-75x. (P-HR-03) An expired credential removes a therapist from availability and flags their
+// appointments. Every case here breaks something real and requires a NAMED test to go red (ADR 0003):
+// the credential arms of the availability pool, the two dates the sweep must not confuse, the database
+// idempotency that makes a nightly pass safe, the promise that nothing about the appointment changes, and
+// the restore in `hr-credentials.itest.ts` that used to propagate pollution instead of repairing it.
+// 75x is the control: every one of those files, unedited, passes.
+{
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const POOL = 'packages/db/src/repositories/eligibility.ts'
+  const PORT = 'packages/core/src/availability/eligibility-port.ts'
+  const SWEEP = 'apps/worker/src/jobs/credential-sweep.ts'
+  const FLAGS = 'packages/db/src/repositories/reassignment.ts'
+  const HR_CREDENTIALS = 'packages/fixtures/src/hr-credentials.itest.ts'
+  const SWEEP_TEST = integration('apps/worker/src/jobs/credential-sweep.itest.ts')
+  const POOL_TEST = integration('packages/db/src/repositories/eligibility.itest.ts')
+  const PAIR_TEST = integration('packages/fixtures/src/therapist-eligibility.itest.ts')
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  /** A replacement that must actually match. `withEditedFile` only sees the whole-file no-op. */
+  const mustReplace = (src, from, to) => {
+    if (!src.includes(from)) {
+      throw new Error(
+        `gate 75: the fixture's search string has gone stale against the real source:\n${from}`,
+      )
+    }
+    return src.replace(from, to)
+  }
+
+  // 75a. THE criterion: "deleting the credential predicate from the eligibility list makes a named test
+  //      fail, so the gate is proven to fire." The `credential_expired` arm removed from the pool's
+  //      `case`, which leaves the SQL valid and the query returning MORE therapists — the direction no
+  //      assertion about "returns slots" can see, which is why this fixture exists rather than a review.
+  checkRejectedBy(
+    'the sweep suite fails when the credential_expired arm is deleted from the pool',
+    withEditedFile(
+      POOL,
+      (src) =>
+        mustReplace(src, "               when cr.any_expired then 'credential_expired'\n", ''),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    'credential_expired',
+  )
+
+  // 75b. The other half of the same predicate. `credential_missing` is the fail-closed reading — absence
+  //      of evidence is not permission — and it has its own arm, so deleting either one on its own is a
+  //      therapist offered who should not be.
+  checkRejectedBy(
+    'the pool suite fails when the credential_missing arm is deleted',
+    withEditedFile(
+      POOL,
+      (src) =>
+        mustReplace(src, "               when cr.any_missing then 'credential_missing'\n", ''),
+      () => runExpectingFailure('pnpm', POOL_TEST),
+    ),
+    'credential_missing',
+  )
+
+  // 75c. The PURE half of the same predicate, which P-HR-03 rewired to `evaluateCredentialsOn` so the
+  //      rule is written once. `credentialVerdict` returning 'ok' unconditionally is what a delegation
+  //      that had quietly stopped consulting the evaluator would look like, and the agreement test in
+  //      packages/fixtures is the thing that catches it: the SQL still excludes, the rule no longer does,
+  //      and the two implementations disagree about one question.
+  checkRejectedBy(
+    'the pair suite fails when the pure credential verdict stops excluding anybody',
+    withEditedFile(
+      PORT,
+      (src) =>
+        mustReplace(
+          src,
+          '  const worst = blocking[0]\n',
+          '  const worst = blocking[blocking.length]\n',
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'credential_expired',
+  )
+
+  // 75d. The sweep judging every appointment at the moment it RUNS instead of at the appointment's own
+  //      trading date. It is right for tonight and wrong for every date after it: a card lapsing at the
+  //      end of the 17th leaves the 18th's appointments unflagged, while the booking page has already
+  //      stopped offering that therapist for the 18th. The two answers to "is this therapist bookable on
+  //      the 18th" then disagree, and only one of them is in front of a human.
+  checkRejectedBy(
+    'the sweep suite fails when a future appointment is judged at the sweep instant',
+    withEditedFile(
+      SWEEP,
+      (src) =>
+        mustReplace(
+          src,
+          '      tradingDate: candidate.tradingDate,',
+          '      tradingDate: day.tradingDate,',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    // The named assertion, spelled as the failure prints it: the appointment on the day the card does
+    // NOT cover is the one that stops being flagged.
+    "flags.get('lapsed')",
+  )
+
+  // 75e. The window floored with the sweep instant's CALENDAR date instead of the trading date read from
+  //      `business_day`. Trading closes at 02:00, so at 00:30 the session in force opened yesterday: this
+  //      edit silently drops every appointment between midnight and 02:00 — the two hours in which a
+  //      therapist whose card lapsed at local midnight keeps their bookings. It is the one mutation here
+  //      that a suite with no after-midnight fixture cannot see at all.
+  checkRejectedBy(
+    "the sweep suite fails when the window is floored with the instant's calendar date",
+    withEditedFile(
+      SWEEP,
+      (src) =>
+        mustReplace(
+          src,
+          '    fromTradingDate: day.tradingDate,',
+          '    fromTradingDate: atIso.slice(0, 10),',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    // The 01:30 appointment carrying the PREVIOUS trading date is the one that vanishes from the window.
+    "flags.get('after-midnight-expired')",
+  )
+
+  // 75f. The idempotency, removed. `on conflict ... do nothing` against the PARTIAL unique index is what
+  //      makes a nightly pass raise once per incident rather than once per run; 0031 records the
+  //      alternative and its cost. Without it the second pass of the same day is refused by the index,
+  //      which is the loud half — the quiet half would be a duplicate flag, a duplicate audit row and a
+  //      second notification about a booking nobody has touched.
+  checkRejectedBy(
+    'the sweep suite fails when the flag insert drops its on-conflict guard',
+    withEditedFile(
+      FLAGS,
+      (src) =>
+        mustReplace(
+          src,
+          '      on conflict (appointment_id) where cleared_at is null do nothing\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    'appointment_reassignment_flag_one_live_per_appointment',
+  )
+
+  // 75g. The thing the unit exists NOT to do. A sweep that cancelled would satisfy "the appointment is
+  //      flagged" and every other assertion about the flag, and the customer would find out from a
+  //      cancellation notice for a booking the business intends to keep. `holds_resources` is GENERATED
+  //      from the status (0024), so this edit also releases the therapist and the room mid-decision.
+  checkRejectedBy(
+    'the sweep suite fails when a flagged appointment is cancelled as well',
+    withEditedFile(
+      SWEEP,
+      (src) =>
+        mustReplace(
+          src,
+          '    const flagged = await flagAppointmentsForReassignment(uow.sql, toFlag)\n',
+          '    const flagged = await flagAppointmentsForReassignment(uow.sql, toFlag)\n' +
+            '    for (const gateFlag of flagged) {\n' +
+            "      await uow.sql`update appointment set status = 'cancelled_by_salon'\n" +
+            '        where id = ' +
+            '$' +
+            '{gateFlag.appointmentId}::uuid`\n' +
+            '    }\n',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    'cancelled_by_salon',
+  )
+
+  // 75h. The notification stops naming the document type. "A credential lapsed" is the message the
+  //      recipient cannot act on, and the acceptance line asks for the type by name. The flag row still
+  //      carries it, so nothing about the queue looks wrong — which is why the assertion is on the
+  //      payload and not on the row.
+  checkRejectedBy(
+    'the sweep suite fails when the notification stops naming the document type',
+    withEditedFile(
+      SWEEP,
+      (src) =>
+        mustReplace(
+          src,
+          '          documentType: flag.documentType,\n' +
+            '          documentExpiresOn: flag.documentExpiresOn,\n' +
+            '          detectedOn: flag.detectedOn,',
+          '          documentExpiresOn: flag.documentExpiresOn,\n' +
+            '          detectedOn: flag.detectedOn,',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    'documentType',
+  )
+
+  // 75i. The clearance removed, which is "renewing the document before the appointment unflags it on the
+  //      next sweep" read from the other end. A flag that never clears turns the reassignment queue into
+  //      a list that only grows, and the first renewal nobody acts on is the one that teaches the desk to
+  //      ignore it.
+  checkRejectedBy(
+    'the sweep suite fails when a renewal no longer clears the flag',
+    withEditedFile(
+      SWEEP,
+      (src) => mustReplace(src, '      toClear.push(candidate.appointmentId)\n', ''),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    // By test name rather than by value: what breaks is that `cleared` comes back empty, and an empty
+    // array prints nothing a rule string could match.
+    'clears the flag with no manual step',
+  )
+
+  /*
+    75j-75l. The restore that propagated pollution instead of repairing it.
+
+    `hr-credentials.itest.ts` restored "the profile this file found in force", read in its own `beforeAll`.
+    A restore that re-asserts what it FOUND cannot repair pollution: it writes it back, and every later run
+    finds what the previous one wrote. The append-only history has the chain in it — version 22 carries
+    `B-AVAIL-04 pair itest: work permit is the only mandatory credential (probe)`, a probe left in force by
+    a suite stopped between its supersede and its `finally`, and from there on every run re-inserted
+    `{work_permit}` and called it the original.
+
+    It never failed a merge verify, because CI creates the database from nothing. It failed case 66y, on a
+    reused database, with `seeded={work_permit}` — a control on somebody else's fixture reporting a defect
+    in this one.
+
+    So the fixture is the real thing: corrupt the profile in force under the historical note, run the file,
+    and require the set in force afterwards to be the SEEDED one. 75k is the known-bad half, with the
+    found-value restore put back — under which the file goes red AND the corruption survives it, which is
+    the pair of facts that says the repair is a repair rather than a coincidence.
+  */
+  const mandatoryInForce = () =>
+    run('psql', [
+      '--no-psqlrc',
+      '-At',
+      dbUrl ?? '',
+      '-c',
+      'select mandatory_therapist_document_types::text from regulatory_profile_current',
+    ]).output.trim()
+
+  /** The seeded profile: a version naming ONLY source_note, so every column takes its DEFAULT. */
+  const restoreSeededProfile = () =>
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      dbUrl ?? '',
+      '-c',
+      'update regulatory_profile set superseded_at = now() where superseded_at is null; ' +
+        'insert into regulatory_profile (source_note) values ' +
+        "('gate 75: restoring the seeded profile - every column at its DEFAULT, which is what 0004 " +
+        "and 0058 both insert')",
+    ])
+
+  /** The pollution, spelled as the history actually holds it. */
+  const polluteProfile = () =>
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      dbUrl ?? '',
+      '-c',
+      'update regulatory_profile set superseded_at = now() where superseded_at is null; ' +
+        'insert into regulatory_profile (source_note, mandatory_therapist_document_types) values ' +
+        "('B-AVAIL-04 pair itest: work permit is the only mandatory credential (probe)', " +
+        "array['work_permit']::employee_document_type[])",
+    ])
+
+  /** The restore as it was: the value this file read in its own beforeAll, written back. */
+  const restoringWhatItFound = (src) => {
+    let out = mustReplace(
+      src,
+      'let sql: Sql\n/** The `employee.id` of each fixture employee, by handle. */',
+      'let sql: Sql\nlet gateFoundPolicy: { mandatoryTypes: readonly string[] }\n' +
+        '/** The `employee.id` of each fixture employee, by handle. */',
+    )
+    out = mustReplace(
+      out,
+      '  await seedSettingDefaults(sql)\n',
+      '  await seedSettingDefaults(sql)\n  gateFoundPolicy = await readCredentialPolicy(sql)\n',
+    )
+    return mustReplace(
+      out,
+      'async function restoreSeededProfile(): Promise<void> {\n  await sql`',
+      'async function restoreSeededProfile(): Promise<void> {\n' +
+        '  await supersedeProfile({\n' +
+        '    mandatory: gateFoundPolicy.mandatoryTypes,\n' +
+        "    note: 'gate 75: restoring the profile this file FOUND in force',\n" +
+        '  })\n' +
+        '  if (gateFoundPolicy === undefined)\n' +
+        '  await sql`',
+    )
+  }
+
+  if (dbUrl === undefined) {
+    check(
+      '75j ran against a database',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required to corrupt and restore the profile',
+    )
+  } else {
+    // 75j. The repair. A polluted profile in, the seeded one out, with no manual step.
+    polluteProfile()
+    const polluted = mandatoryInForce()
+    const repaired = run('pnpm', integration(HR_CREDENTIALS))
+    const afterRepair = mandatoryInForce()
+    check(
+      'the credential pair suite passes against a polluted profile in force',
+      !repaired.failed,
+      repaired.output,
+    )
+    check(
+      'and leaves the SEEDED mandatory set in force rather than the pollution it found',
+      afterRepair !== polluted && afterRepair.includes('labour_card'),
+      `polluted=${polluted} after=${afterRepair}`,
+    )
+
+    // 75k. The known-bad half: the found-value restore put back. The file goes red — its own restore
+    //      assertion is what catches it — and the corruption is still in force afterwards.
+    polluteProfile()
+    const survived = withEditedFile(HR_CREDENTIALS, restoringWhatItFound, () => {
+      const result = runExpectingFailure('pnpm', integration(HR_CREDENTIALS))
+      return { result, inForce: mandatoryInForce() }
+    })
+    checkRejectedBy(
+      'a restore that re-asserts the profile it FOUND fails the credential pair suite',
+      survived.result,
+      'work_permit',
+    )
+    check(
+      'and the pollution survives it, which is what makes the repair a repair',
+      survived.inForce.includes('work_permit'),
+      `in force after the broken restore: ${survived.inForce}`,
+    )
+    restoreSeededProfile()
+
+    // 75l. The control on the restore itself, and on this whole block: the seeded profile is back, the
+    //      set in force is decision 20's six, and nothing above left the database changed for the next
+    //      gate case or the next branch.
+    const restored = mandatoryInForce()
+    check(
+      'the seeded mandatory set is back in force after this block',
+      restored.includes('labour_card') && !restored.includes('work_permit'),
+      `in force: ${restored}`,
+    )
+  }
+
+  // 75x. The control. Every file this block edits passes unedited — so each rejection above is about the
+  //      edit and not about a suite that had become unable to run at all.
+  {
+    const sweep = run('pnpm', SWEEP_TEST)
+    check('the credential sweep suite passes on the committed tree', !sweep.failed, sweep.output)
+  }
+}
+
 // 76a-76x. (P-HR-05) Working hours across midnight: the rules 0059 refuses, and the ways the shift
 //          arithmetic can be got wrong, each of which must make a named test fail.
 //
@@ -20174,6 +20593,514 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     ),
     'resolves no recipient for any role',
   )
+}
+
+// 78a-78z. (C-AUTO-01) The template model: message_class immutable by SQLSTATE, the approval state
+//          machine, the 24-hour care window, and the sender identity as a fact the database keeps.
+//
+//     Almost every rule in this unit is a refusal, and every one of the broken versions BELOW SENDS THE
+//     MESSAGE. That is what makes the fixtures worth the lines: a `?? variants[0]` fallback sends an SMS
+//     body down WhatsApp and the delivery receipt is positive; an approval check that answers `true`
+//     sends unreviewed marketing copy and every screen says it was approved; a sender-identity table
+//     that falls back to the other slot sends a promotional blast from the identity every booking
+//     confirmation depends on, and nothing reports it until the registration is suspended. None of these
+//     presents as an error — each one presents as a successful send.
+//
+//     The database half is the other shape of the same problem. A CHECK and a trigger are only gates once
+//     something has been seen to bounce off them (ADR 0003), so every probe states the rule it must trip
+//     and `checkRejectedBy` fails if the rejection came from anything else — a bare non-zero exit is also
+//     what a typo in a column name produces. `VERBOSITY=verbose` so the SQLSTATE and the constraint name
+//     are both in psql's output: the four trigger rules are asserted by their own codes (ZM001-ZM004) and
+//     the two CHECKs by name.
+//
+//     Every psql probe runs inside `begin; ... ; rollback;`, and here that is not tidiness: `message` and
+//     `message_delivery_receipt` cannot be cleaned up even in principle, because the receipt table
+//     refuses DELETE and protects the message with ON DELETE RESTRICT (brief rule 12). A probe that
+//     committed would leave a row nothing in this repository can remove.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const SEND = 'packages/messaging/src/send.ts'
+  const IDENTITY = 'packages/messaging/src/sender-identity.ts'
+  const TEMPLATE = 'packages/messaging/src/template.ts'
+  const TEMPLATES = 'packages/messaging/src/templates.ts'
+  const SHARED = 'packages/shared/src/messaging.ts'
+  const LIFECYCLE = 'packages/messaging/src/lifecycle.ts'
+
+  const IDENTITY_SUITE = 'packages/messaging/src/sender-identity.test.ts'
+  const TEMPLATE_SUITE = 'packages/messaging/src/template.test.ts'
+  const CORPUS_SUITE = 'packages/messaging/src/template-corpus.test.ts'
+  const APPROVAL_SUITE = 'packages/shared/src/template-approval.test.ts'
+  const TEMPLATE_ITEST = 'packages/fixtures/src/message-template.itest.ts'
+  const LIFECYCLE_ITEST = 'packages/fixtures/src/message-lifecycle.itest.ts'
+  const FIXTURE = 'packages/messaging/src/__gate_fixture__.ts'
+
+  /**
+   * One anchored edit to a shipped file, asserting the anchor is still there AND that it moved.
+   *
+   * `split`/`join` rather than `String.replace`, because three of the mutants below have to change BOTH
+   * locales of a template: `replace` with a string needle changes the first occurrence only, and a mutant
+   * that changed the English `review.request` and left the Arabic one promotional would leave the corpus
+   * still carrying both classes — the control it was meant to trip would pass.
+   */
+  const cautoMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        if (!text.includes(anchor)) {
+          throw new Error(`the C-AUTO-01 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        const mutated = text.split(anchor).join(replacement)
+        if (mutated === text) {
+          throw new Error(`the C-AUTO-01 gate's edit to ${path} changed nothing: ${anchor}`)
+        }
+        return mutated
+      },
+      body,
+    )
+  checkRejectedBy(
+    'C-AUTO-01 gate: a send request carrying a messageClass fails typecheck, even via a variable',
+    withFixture(
+      FIXTURE,
+      [
+        "import { type SendContext, type SendRequest, sendMessage } from './send.ts'",
+        '',
+        'export async function routed(ctx: SendContext, base: SendRequest) {',
+        '  // What a drag-and-drop flow builder assembles: the class chosen at the call site.',
+        "  const request = { ...base, messageClass: 'promotional' as const }",
+        '  return await sendMessage(ctx, request)',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    ),
+    'messageClass',
+  )
+
+  checkRejectedBy(
+    'C-AUTO-01 gate: a send request carrying a senderId fails typecheck',
+    withFixture(
+      FIXTURE,
+      [
+        "import { type SendContext, type SendRequest, sendMessage } from './send.ts'",
+        '',
+        'export async function routed(ctx: SendContext, base: SendRequest) {',
+        "  const request = { ...base, senderId: 'BERELAX' }",
+        '  return await sendMessage(ctx, request)',
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    ),
+    'senderId',
+  )
+
+  // 78c. The control, and it carries more weight than usual: a `SendRequest` nothing is assignable to
+  //      would satisfy both cases above, and the two fixtures would be reporting on a type nobody can
+  //      construct.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import { type SendContext, type SendRequest, sendMessage } from './send.ts'",
+        '',
+        'export async function routed(ctx: SendContext, base: SendRequest) {',
+        '  return await sendMessage(ctx, { ...base })',
+        '}',
+      ].join('\n'),
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'C-AUTO-01 gate: a send request with no routing override typechecks',
+      !result.failed,
+      String(result.output),
+    )
+  }
+
+  // 78d. The fence itself. Removing `messageClass?: never` leaves the literal spelling refused by the
+  //      excess-property check and the variable spelling permitted — so the type-level test's
+  //      `@ts-expect-error` on the variable becomes unused and its `satisfies false` becomes wrong. Both
+  //      are `tsc` errors, which is the only thing that checks a type-level assertion.
+  checkRejectedBy(
+    'C-AUTO-01 gate: removing the messageClass fence from SendRequest fails the typechecker',
+    cautoMutant(
+      SEND,
+      '  readonly messageClass?: never',
+      '  // mutant: the fence is gone, so a request assembled in a variable may carry a class',
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    ),
+    'send-api-shape.test.ts',
+  )
+
+  // 78e. The approval check removed, so every template is sendable whatever state it is in. This is the
+  //      mutant that sends unreviewed marketing copy, and nothing about the outcome looks wrong.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a send path that ignores the approval state is caught',
+    cautoMutant(
+      TEMPLATE,
+      "  if (isSendableApproval(variant.approvalState)) return { kind: 'variant', variant }",
+      "  if (isSendableApproval(variant.approvalState) || true) return { kind: 'variant', variant }",
+      () => runExpectingFailure('pnpm', unit(TEMPLATE_SUITE)),
+    ),
+    'template_not_approved',
+  )
+
+  // 78f. The `?? variants[0]` fallback, which is the shape every "resolve a variant" function starts as.
+  //      It sends the SMS body down WhatsApp: it renders, it delivers, and the receipt is positive.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a variant resolver that falls back to another channel is caught',
+    cautoMutant(
+      TEMPLATE,
+      '  const variant = template.variants.find(\n' +
+        '    (candidate) => candidate.channel === channel && candidate.locale === locale,\n' +
+        '  )',
+      '  const variant =\n' +
+        '    template.variants.find(\n' +
+        '      (candidate) => candidate.channel === channel && candidate.locale === locale,\n' +
+        '    ) ?? template.variants[0]',
+      () => runExpectingFailure('pnpm', unit(TEMPLATE_SUITE)),
+    ),
+    'no_variant',
+  )
+
+  // 78g. A contact who has never written in read as INSIDE the care window. Every contact in this build
+  //      has never written in, because nothing receives an inbound WhatsApp message — so this mutant
+  //      opens the free-form path for the entire customer base.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a care window that opens for a contact with no inbound message is caught',
+    cautoMutant(
+      TEMPLATE,
+      "  if (state.lastInboundAt === null) return 'closed'",
+      "  if (state.lastInboundAt === null) return 'open'",
+      () => runExpectingFailure('pnpm', unit(TEMPLATE_SUITE)),
+    ),
+    'outside_care_window',
+  )
+
+  // 78h. The boundary. `<=` counts the 24-hour mark as inside the window, which puts every job that runs
+  //      on the hour on the wrong side of the rule — and most of them run on the hour.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a care window that includes the 24-hour mark is caught',
+    cautoMutant(
+      TEMPLATE,
+      "  return elapsed >= 0 && elapsed < WHATSAPP_CARE_WINDOW_HOURS * HOUR_MS ? 'open' : 'closed'",
+      "  return elapsed >= 0 && elapsed <= WHATSAPP_CARE_WINDOW_HOURS * HOUR_MS ? 'open' : 'closed'",
+      () => runExpectingFailure('pnpm', unit(TEMPLATE_SUITE)),
+    ),
+    'shut at the boundary',
+  )
+
+  // 78i. The fallback the whole module exists to refuse: an unregistered pair answered with the registry
+  //      slot for its class. The send succeeds, from an identity that was never registered for that
+  //      channel, and the first symptom is a suspension.
+  checkRejectedBy(
+    'C-AUTO-01 gate: an unregistered (class, channel) pair falling back to the registry is caught',
+    cautoMutant(IDENTITY, "  if (route === 'unregistered') {", '  if (false as boolean) {', () =>
+      runExpectingFailure('pnpm', unit(IDENTITY_SUITE)),
+    ),
+    'never falls back',
+  )
+
+  // 78j. A registry whose slots and classes disagree, used anyway. This is what a swapped pair of
+  //      environment variables produces, and using it routes each class out of the other identity.
+  checkRejectedBy(
+    'C-AUTO-01 gate: resolving an identity from a registry that may not be used is caught',
+    cautoMutant(IDENTITY, '  if (fault !== null) {', '  if (fault !== null && false) {', () =>
+      runExpectingFailure('pnpm', unit(IDENTITY_SUITE)),
+    ),
+    'refuses a swapped pair',
+  )
+
+  // 78k. Every pair answered with the TRANSACTIONAL slot. The pairs that are transactional still answer
+  //      correctly, which is exactly why a case set over the six pairs would not see it — the corpus
+  //      assertion is what does.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a table that answers every pair with the transactional identity is caught',
+    cautoMutant(
+      IDENTITY,
+      "  return { kind: 'identity', identity: registry[messageClass] }",
+      "  return { kind: 'identity', identity: registry.transactional }",
+      () => runExpectingFailure('pnpm', unit(IDENTITY_SUITE)),
+    ),
+    'no promotional template reaches the transactional identity',
+  )
+
+  // 78l. Email routed to the SMS registry, which is the state this unit found and fixed: `senderIdFor`
+  //      answered `BERELAX` for an email message and `deliverMessage` wrote that onto the row.
+  checkRejectedBy(
+    'C-AUTO-01 gate: an email pair routed to an SMS registration is caught',
+    cautoMutant(IDENTITY, "    email: 'delegated',", "    email: 'registered',", () =>
+      runExpectingFailure('pnpm', unit(IDENTITY_SUITE)),
+    ),
+    'delegates a channel whose identity is its transport',
+  )
+
+  // 78m. The non-vacuity control itself. An empty promotional subset makes "no promotional template
+  //      resolves to the transactional identity" true by having nothing to be true of — which is what
+  //      the corpus really was until this unit shipped `review.request`.
+  checkRejectedBy(
+    'C-AUTO-01 gate: a corpus with no promotional template is caught',
+    cautoMutant(
+      TEMPLATES,
+      "  return DEFAULT_TEMPLATES.filter((template) => template.messageClass === 'promotional')",
+      '  return []',
+      () => runExpectingFailure('pnpm', unit(IDENTITY_SUITE)),
+    ),
+    'ships at least one template of each class',
+  )
+
+  // 78n. The same corpus hole from the other direction: the promotional template reclassified in the
+  //      source. BOTH locales, which is why `cautoMutant` replaces every occurrence — changing only the
+  //      English one would leave the corpus still carrying both classes.
+  checkRejectedBy(
+    'C-AUTO-01 gate: relabelling the shipped promotional template transactional is caught',
+    cautoMutant(
+      TEMPLATES,
+      "    key: 'review.request',\n    messageClass: 'promotional',",
+      "    key: 'review.request',\n    messageClass: 'transactional',",
+      () => runExpectingFailure('pnpm', unit(CORPUS_SUITE)),
+    ),
+    'both classes',
+  )
+
+  // 78o. The shipped promotional template approved in the source, so unapproved marketing copy is
+  //      sendable on the day of install.
+  checkRejectedBy(
+    'C-AUTO-01 gate: shipping the promotional template pre-approved is caught',
+    cautoMutant(TEMPLATES, "    approvalState: 'draft',", "    approvalState: 'approved',", () =>
+      runExpectingFailure('pnpm', unit(CORPUS_SUITE)),
+    ),
+    'NOT sendable',
+  )
+
+  // 78p. `pending` made sendable. One word, and the review step stops meaning anything.
+  checkRejectedBy(
+    'C-AUTO-01 gate: treating a pending template as sendable is caught',
+    cautoMutant(
+      SHARED,
+      "  return state === 'approved'\n}",
+      "  return state === 'approved' || state === 'pending'\n}",
+      () => runExpectingFailure('pnpm', unit(APPROVAL_SUITE)),
+    ),
+    'sendable state',
+  )
+
+  // 78q-78r. A `draft -> approved` edge added to the state machine. Caught twice, and both matter: the
+  //          unit suite sees the SHAPE break (nothing reaches approved except from pending), and the
+  //          integration suite sees the two dialects disagree — the TypeScript list and
+  //          `template_approval_transition_allowed` in SQL are compared on all sixteen ordered pairs.
+  {
+    const EDGE = "  ['draft', 'pending'],"
+    const WITH_JUMP = "  ['draft', 'pending'],\n  ['draft', 'approved'],"
+
+    checkRejectedBy(
+      'C-AUTO-01 gate: a draft-to-approved edge is caught by the state machine suite',
+      cautoMutant(SHARED, EDGE, WITH_JUMP, () => runExpectingFailure('pnpm', unit(APPROVAL_SUITE))),
+      'reach approved',
+    )
+
+    checkRejectedBy(
+      'C-AUTO-01 gate: a draft-to-approved edge is caught as a disagreement with the SQL',
+      cautoMutant(SHARED, EDGE, WITH_JUMP, () =>
+        runExpectingFailure('pnpm', integration(TEMPLATE_ITEST)),
+      ),
+      'draft->approved',
+    )
+  }
+
+  // 78s. The defect this unit found in `deliverMessage`, as a fixture.
+  //
+  //      `recordAttempt` updates a message row by id and is never handed the message, so `sender_id` is
+  //      written on the INSERT and never again. With the identity resolved only on the `sent` branch, a
+  //      message that was rate-limited on attempt 1 and accepted on attempt 2 was stored as `sent` with no
+  //      record of the registered identity it left from — which is exactly the evidence a sender-ID
+  //      suspension investigation asks for, and which the cost report groups by.
+  //
+  //      Nothing in the unit suite could see it, because the in-memory store has no constraint. The
+  //      database does: `message_sender_id_is_sms_only` is a biconditional, so an SMS row with a null
+  //      identity is unstorable, and B-MSG-04's own retry case — rate-limited, then accepted — is the one
+  //      that bounces off it. Reverting the resolution to `null` is the mutant.
+  checkRejectedBy(
+    'C-AUTO-01 gate: resolving the sender identity only on success is caught by the message row',
+    cautoMutant(
+      LIFECYCLE,
+      "    senderId: identity.kind === 'identity' ? identity.identity.value : null,",
+      '    senderId: null,',
+      () => runExpectingFailure('pnpm', integration(LIFECYCLE_ITEST)),
+    ),
+    'message_sender_id_is_sms_only',
+  )
+
+  // 78t-78z. The database's own rules, as known-bad fixtures against real PostgreSQL.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    const KEY = 'gate-fixture-cauto01'
+    const PROMO_KEY = 'gate-fixture-cauto01-promo'
+
+    const psqlProbe = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statements}; rollback;`,
+      ])
+
+    /** A template and one approved sms variant, per class. Both seeded by every probe. */
+    const seed = [
+      'insert into message_template (template_key, version, message_class, purpose, is_current) ' +
+        `values ('${KEY}', 1, 'transactional', 'C-AUTO-01 gate fixture', true)`,
+      'insert into message_template_variant (template_id, channel, locale, approval_state, body, ' +
+        "variables) select id, 'sms', 'en', 'approved', 'Booking confirmed.', '{}'::text[] " +
+        `from message_template where template_key = '${KEY}'`,
+      'insert into message_template (template_key, version, message_class, purpose, is_current) ' +
+        `values ('${PROMO_KEY}', 1, 'promotional', 'C-AUTO-01 gate fixture', true)`,
+    ].join('; ')
+
+    /** A sent message row, with any column overridden. The defaults are a row the database accepts. */
+    const messageRow = (templateKey, overrides = {}) => {
+      const v = {
+        channel: "'sms'::message_channel",
+        messageClass: "'transactional'::message_class",
+        vendor: "'smsala'",
+        recipient: "'+971500000902'",
+        senderId: "'BERELAX'",
+        subject: 'null',
+        bodyHtml: 'null',
+        segments: '1',
+        costFils: '9',
+        providerMessageId: "'smsala-gate-cauto01-0001'",
+        ...overrides,
+      }
+      return (
+        'insert into message (template_id, channel, message_class, locale, vendor, recipient, ' +
+        'sender_id, subject, body, body_html, encoding, segments, cost_fils, status, ' +
+        'provider_message_id, attempts, queued_at, sent_at) select id, ' +
+        `${v.channel}, ${v.messageClass}, 'en', ${v.vendor}, ${v.recipient}, ${v.senderId}, ` +
+        `${v.subject}, 'Booking confirmed.', ${v.bodyHtml}, 'GSM-7', ${v.segments}, ${v.costFils}, ` +
+        `'sent'::message_status, ${v.providerMessageId}, 1, now(), now() ` +
+        `from message_template where template_key = '${templateKey}'`
+      )
+    }
+
+    const probes = [
+      {
+        // 78t. The positive control, first, because every probe below is a refusal and a database that
+        //      refused everything would satisfy all of them. If this one fails, none of the rest means
+        //      anything.
+        name: 'C-AUTO-01 gate: a template, a variant and a sent SMS row are ACCEPTED',
+        accept: true,
+        sql: messageRow(KEY),
+      },
+      {
+        name: 'C-AUTO-01 gate: a promotional SMS from the AD- identity is ACCEPTED',
+        accept: true,
+        sql: messageRow(PROMO_KEY, {
+          messageClass: "'promotional'::message_class",
+          senderId: "'AD-BERELAX'",
+        }),
+      },
+      {
+        // 78u. By its own SQLSTATE. `restrict_violation` — what 0014 raised — is raised by seven other
+        //      triggers and by every ON DELETE RESTRICT foreign key here, so a probe asserting 23001
+        //      would pass when the statement bounced off something else entirely.
+        name: 'C-AUTO-01 gate: an UPDATE of message_class is refused with ZM001',
+        rule: 'ZM001',
+        sql: `update message_template set message_class = 'promotional' where template_key = '${KEY}'`,
+      },
+      {
+        // 78v. Nothing reaches approved except from pending, so a draft cannot be approved in one step by
+        //      whoever wrote it.
+        name: 'C-AUTO-01 gate: approving a draft in one step is refused with ZM002',
+        rule: 'ZM002',
+        sql:
+          "update message_template_variant set approval_state = 'draft' " +
+          `where template_id = (select id from message_template where template_key = '${KEY}'); ` +
+          "update message_template_variant set approval_state = 'approved' " +
+          `where template_id = (select id from message_template where template_key = '${KEY}')`,
+      },
+      {
+        // 78w. An approved variant's body edited in place. The same defect as an editable class: the
+        //      approval stays attached while the words underneath it change.
+        name: 'C-AUTO-01 gate: editing an approved variant in place is refused with ZM003',
+        rule: 'ZM003',
+        sql:
+          "update message_template_variant set body = 'Half price this week. Stop: brlx.ae/x' " +
+          `where template_id = (select id from message_template where template_key = '${KEY}')`,
+      },
+      {
+        // 78x. An SMS alphanumeric on an email row, and an SMS row with no identity. One biconditional,
+        //      both directions, because `sender_id` is a TDRA registration and only SMS has one.
+        name: 'C-AUTO-01 gate: an SMS sender identity on an email row is refused',
+        rule: 'message_sender_id_is_sms_only',
+        sql: messageRow(KEY, {
+          channel: "'email'::message_channel",
+          vendor: "'resend'",
+          recipient: "'guest@example.com'",
+          subject: "'Your tax invoice'",
+          bodyHtml: "'<!doctype html><html><body><p>x</p></body></html>'",
+          segments: '0',
+          costFils: '0',
+          providerMessageId: "'resend-gate-cauto01-0001'",
+        }),
+      },
+      {
+        name: 'C-AUTO-01 gate: an SMS row with no sender identity is refused',
+        rule: 'message_sender_id_is_sms_only',
+        sql: messageRow(KEY, { senderId: 'null' }),
+      },
+      {
+        // 78y. The send that gets a registration suspended, in both directions.
+        name: 'C-AUTO-01 gate: a promotional SMS from the transactional identity is refused',
+        rule: 'message_sms_identity_matches_its_class',
+        sql: messageRow(PROMO_KEY, { messageClass: "'promotional'::message_class" }),
+      },
+      {
+        name: 'C-AUTO-01 gate: a transactional SMS from the AD- identity is refused',
+        rule: 'message_sms_identity_matches_its_class',
+        sql: messageRow(KEY, { senderId: "'AD-BERELAX'" }),
+      },
+      {
+        // 78z. The copy checked against its source. `message.message_class` is copied from the template
+        //      at send time and never recomputed, and a copy nobody checks is two readings of one
+        //      question — with the frequency cap, the kill switch and the cost report all reading this
+        //      one.
+        name: 'C-AUTO-01 gate: a message whose class disagrees with its template is refused with ZM004',
+        rule: 'ZM004',
+        sql: messageRow(KEY, {
+          messageClass: "'promotional'::message_class",
+          senderId: "'AD-BERELAX'",
+        }),
+      },
+    ]
+
+    if (!dbUrl) {
+      check(
+        'C-AUTO-01 gate: the database probes need TEST_DATABASE_URL or DATABASE_URL',
+        false,
+        'neither is set, so the four trigger rules and two CHECKs of migration 0061 were not exercised',
+      )
+    } else {
+      for (const probe of probes) {
+        const result = psqlProbe(`${seed}; ${probe.sql}`)
+        if (probe.accept === true) {
+          check(probe.name, !result.failed, String(result.output))
+        } else {
+          checkRejectedBy(probe.name, result, probe.rule)
+        }
+      }
+    }
+  }
 }
 
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.

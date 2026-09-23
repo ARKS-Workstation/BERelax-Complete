@@ -70,21 +70,15 @@ export {
   validateTemplate,
 } from './render.ts'
 export {
-  assertSenderIdRegistry,
   CampaignSpend,
   type ClassifiedTemplate,
   type ClassRoutedTransport,
   idempotencyKeyFor,
   outboundMessageFor,
-  PROMOTIONAL_SENDER_PREFIX,
-  PROVISIONAL_SENDER_IDS,
   type SendContext,
-  type SenderIdentity,
-  type SenderIdRegistry,
   type SendRefusal,
   type SendRequest,
   type SendResult,
-  senderIdFor,
   sendMessage,
   type TransportFailure,
   type TransportOutcome,
@@ -92,8 +86,39 @@ export {
 } from './send.ts'
 export { type GuardContext, type GuardDecision, guardOutbound } from './send-guard.ts'
 export {
+  assertSenderIdRegistry,
+  PROMOTIONAL_SENDER_PREFIX,
+  PROVISIONAL_SENDER_IDS,
+  resolveSenderIdentity,
+  SENDER_IDENTITY_ROUTES,
+  type SenderIdentity,
+  type SenderIdentityRefusal,
+  type SenderIdentityResolution,
+  type SenderIdentityRoute,
+  type SenderIdRegistry,
+  type SenderIdRegistryFault,
+  senderIdFor,
+  senderIdRegistryFault,
+} from './sender-identity.ts'
+export {
+  type CareWindow,
+  type CareWindowState,
+  type ClassifiedTemplateRow,
+  careWindow,
+  classifyTemplateRow,
+  judgeVariant,
+  type MessageTemplate,
+  resolveVariant,
+  type TemplateVariant,
+  type TemplateVariantRow,
+  type VariantRefusal,
+  type VariantResolution,
+  WHATSAPP_CARE_WINDOW_HOURS,
+} from './template.ts'
+export {
   DEFAULT_TEMPLATES,
   type DefaultTemplate,
   DISCRETION_FORBIDDEN_VARIABLES,
+  promotionalDefaults,
   transactionalDefaults,
 } from './templates.ts'

@@ -78,11 +78,19 @@ describe('acceptance — message_class is immutable', () => {
     expect(row?.purpose).toBe('revised')
   })
 
-  it('reclassifies through one privileged path that resets approval to pending', async () => {
+  it('reclassifies through one privileged path that resets approval to draft', async () => {
     // The bodies carry over; the approval does not. A template whose class changed is a different
     // template as far as the regulator is concerned, so inheriting the approval it was granted as
     // transactional would launder it. Doing this as a function rather than three statements is the
     // point: the third statement is the one that gets skipped at 9pm.
+    //
+    // `draft` and not `pending` since C-AUTO-01 and migration 0061. `pending` means "these words are
+    // finished, decide about them", and the words of a template that has just become promotional are not
+    // finished — a promotional SMS needs an opt-out route and leaves from a different registered identity,
+    // and a booking confirmation's body says neither. Landing in `pending` shows a reviewer transactional
+    // copy under a promotional label and asks yes or no; the likely answer, because the words look fine,
+    // is yes. 0061's state machine is what makes `draft` more than a default: nothing reaches `approved`
+    // except from `pending`, so the reset cannot be undone by one UPDATE.
     const id = await seedTemplate(key('booking.confirmed'))
     await sql`
       insert into message_template_variant (template_id, channel, locale, body, approval_state, variables)
@@ -96,7 +104,7 @@ describe('acceptance — message_class is immutable', () => {
     const [variant] = await sql<{ approval_state: string; body: string }[]>`
       select approval_state, body from message_template_variant where template_id = ${newId}
     `
-    expect(variant?.approval_state).toBe('pending')
+    expect(variant?.approval_state).toBe('draft')
     expect(variant?.body).toBe('Confirmed {{date}}')
 
     const rows = await sql<{ version: number; is_current: boolean; message_class: string }[]>`

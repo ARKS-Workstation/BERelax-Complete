@@ -27,6 +27,72 @@ export type Channel = 'sms' | 'email' | 'whatsapp'
  */
 export type MessageClass = 'transactional' | 'promotional'
 
+/** Both classes as a value, so a test can iterate them instead of restating the union. */
+export const MESSAGE_CLASSES = ['transactional', 'promotional'] as const
+
+/** Every channel as a value, for the same reason. */
+export const MESSAGE_CHANNELS = ['sms', 'email', 'whatsapp'] as const
+
+/**
+ * A template variant's approval state — `template_approval` in the database since 0014.
+ *
+ * Here for the reason `MessageStatus` below is here: `packages/db` writes it and may not import
+ * `packages/core`, `packages/messaging` decides whether it may be sent, and the admin surface renders it.
+ * `shared` is the only leaf all of them may see one copy in.
+ */
+export const TEMPLATE_APPROVAL_STATES = ['draft', 'pending', 'approved', 'rejected'] as const
+export type TemplateApprovalState = (typeof TEMPLATE_APPROVAL_STATES)[number]
+
+/**
+ * The declared edges of the approval state machine. Everything not listed is refused.
+ *
+ * `template_approval_transition_allowed` in migration 0061 is the same list in SQL, and
+ * `packages/fixtures/src/message-template.itest.ts` asserts the two agree on **all sixteen** ordered
+ * pairs rather than on the seven that are legal — two implementations that refuse everything agree
+ * perfectly, so the permitted set has to be compared as well as the refused one.
+ *
+ * The shape of the rule, rather than the list:
+ *
+ *   - nothing reaches `approved` except from `pending`, so no single UPDATE can approve something no
+ *     reviewer was shown;
+ *   - `rejected` goes only to `draft`, never back to `pending`, because a rejection answered by
+ *     resubmitting the identical words is the reviewer being asked the same question until they agree;
+ *   - `approved` can be withdrawn to `draft`, which — together with the ZM003 freeze on an approved
+ *     variant's words — is the ONLY way to edit an approved body.
+ */
+export const TEMPLATE_APPROVAL_TRANSITIONS: readonly (readonly [
+  TemplateApprovalState,
+  TemplateApprovalState,
+])[] = [
+  ['draft', 'pending'],
+  ['pending', 'approved'],
+  ['pending', 'rejected'],
+  ['pending', 'draft'],
+  ['rejected', 'draft'],
+  ['approved', 'draft'],
+  ['approved', 'rejected'],
+]
+
+/** True when the state machine has an edge from `from` to `to`. A self-move is not an edge. */
+export function isTemplateApprovalTransition(
+  from: TemplateApprovalState,
+  to: TemplateApprovalState,
+): boolean {
+  return TEMPLATE_APPROVAL_TRANSITIONS.some(([f, t]) => f === from && t === to)
+}
+
+/**
+ * The one state a template may be sent in.
+ *
+ * Written as a function over the whole vocabulary rather than as `state === 'approved'` at each call
+ * site, because the interesting property is that it is TOTAL: a fifth state added to
+ * `TEMPLATE_APPROVAL_STATES` is not sendable until somebody says so here, where the reason can be
+ * written down. A `switch` with a permissive `default` is how `pending` becomes sendable by accident.
+ */
+export function isSendableApproval(state: TemplateApprovalState): boolean {
+  return state === 'approved'
+}
+
 /**
  * The status lifecycle of one outbound message, and the order it may move in.
  *

@@ -517,6 +517,12 @@ export async function drainObligationNotice(
         body: content.body,
         variables: [...content.variables],
         messageClass: 'transactional',
+        // `ClassifiedTemplate` gained this in 0061 (C-AUTO-01): the send path refuses a template whose
+        // words nobody has approved, so it has to be stated rather than assumed. The row this content came
+        // from is read through `readCurrentTemplate`, which no longer filters on the approval state — it
+        // returns the row carrying it, so the refusal names `template_not_approved` instead of collapsing
+        // into "there is no template". These are the shipped compliance notices and ship approved.
+        approvalState: 'approved',
       },
       values: content.values,
       recipient: content.recipient,

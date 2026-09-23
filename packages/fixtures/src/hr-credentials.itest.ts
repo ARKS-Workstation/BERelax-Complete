@@ -10,7 +10,6 @@ import {
 } from '@berelax/core'
 import {
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
-  type CredentialPolicyRead,
   createConnection,
   PROVISIONAL_EXPIRING_SOON_DAYS,
   readCredentialPolicy,
@@ -51,11 +50,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * The integration suite runs sequentially against one database and earlier files leave rows behind. So:
  * every read is narrowed to the employees this file creates, the staff references are prefixed
  * `PHR02 CRED`, and `regulatory_profile` is append-only (ADR 0008) — the flips SUPERSEDE and INSERT, the
- * count assertion is a DELTA, and the restore is a further row rather than a delete. The restore carries
- * **every** column of the retired row rather than restating any of them, which is the failure
- * `opening-balances.itest.ts` and `catalogue-compliance.itest.ts` both record: a fixture that restores
- * *nearly* the original row breaks another suite one file later. This file's own restore is checked at
- * the end by comparing the policy to the snapshot taken in `beforeAll`.
+ * count assertion is a DELTA, and the restore is a further row rather than a delete. The restore puts
+ * back the SEEDED profile — every column at its DEFAULT, which is what 0004 and 0058 both insert — and
+ * never what this file found in force. A restore that re-asserts what it FOUND propagates pollution
+ * instead of repairing it, and that is not hypothetical: see {@link restoreSeededProfile} for the
+ * version of this table's history it produced and the gate case that now proves the repair.
  *
  * No employee here has a name. `staff_reference` is an internal handle, and no document number, licence
  * number or issuing authority is invented (brief rule 15).
@@ -65,20 +64,24 @@ if (!url)
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
 
 let sql: Sql
-/** The policy in force when this file started, restored before it finishes. */
-let originalPolicy: CredentialPolicyRead
-/**
- * The licence class in force when this file started, restored with the policy.
- *
- * Snapshotted separately because `readCredentialPolicy` does not return it and the restore has to. A
- * probe below sets `licence_class` to `healthcare` deliberately — it is the control that the mandatory
- * set comes from the ROW and not from a lookup on the class — and leaving it there would change the
- * banned-claims lint, the permitted public titles and the JSON-LD vocabulary for every suite that runs
- * after this one. Brief rule 12, in the one column of this table that reaches the public site.
- */
-let originalLicenceClass: NonNullable<ProfileChange['licenceClass']>
 /** The `employee.id` of each fixture employee, by handle. */
 const employees = new Map<string, string>()
+
+/**
+ * The SEEDED profile, which is what {@link restoreSeededProfile} puts back — every column at its DEFAULT.
+ *
+ * These three constants are the columns this file MUTATES, and they are written down rather than
+ * snapshotted for the reason the restore's own header gives: a restore that re-asserts what it FOUND
+ * cannot repair pollution, it propagates it. Each is asserted to be the database's own default
+ * elsewhere in this file, so a migration that revises one fails here rather than drifting silently:
+ * `mandatory` and `nonExpiring` by the test that inserts a version naming no set at all, and the licence
+ * class by the restore assertion at the end of the first test.
+ */
+const SEEDED_MANDATORY = CANDIDATE_MANDATORY_CREDENTIALS.healthcare
+/** 0054's default and the strict reading: every credential must be renewed until somebody says otherwise. */
+const SEEDED_NON_EXPIRING: readonly string[] = []
+/** 0004's default. An unconfirmed licence resolves to the stricter combination (Y1-licence). */
+const SEEDED_LICENCE_CLASS = 'unconfirmed'
 
 const HEALTHCARE = [...CANDIDATE_MANDATORY_CREDENTIALS.healthcare]
 const WELLNESS = [...CANDIDATE_MANDATORY_CREDENTIALS.wellness]
@@ -196,30 +199,68 @@ async function profileRowCount(): Promise<number> {
   return Number((row as { n: string }).n)
 }
 
-/** Restores the policy this file found, by INSERTING it again — never by deleting a row. */
-async function restoreOriginalProfile(): Promise<void> {
-  await supersedeProfile({
-    mandatory: originalPolicy.mandatoryTypes,
-    nonExpiring: originalPolicy.nonExpiringTypes,
-    licenceClass: originalLicenceClass,
-    note: 'P-HR-02 hr-credentials itest: restoring the profile this file found in force',
-  })
+/**
+ * Restores the SEEDED profile, by INSERTING a version that names ONLY `source_note` — never by deleting
+ * a row, and never by restating a value.
+ *
+ * ## The defect this replaces, and why "restore what you found" is not a restore
+ *
+ * This function used to re-insert `originalPolicy` — the profile this file read in its own `beforeAll`.
+ * A restore that re-asserts what it FOUND cannot repair pollution: it propagates it, and it propagates
+ * it for ever, because every subsequent run finds what the previous one wrote. The append-only history
+ * has the whole chain in it. Version 22 carries the note
+ * `B-AVAIL-04 pair itest: work permit is the only mandatory credential (probe)` — a probe left in force
+ * by another suite that was stopped between its supersede and its `finally` — and from that version on
+ * every run of this file read `{work_permit}`, called it the original, and wrote it back.
+ *
+ * The visible symptom was somewhere else entirely, which is why it survived so long: gate case 66y
+ * snapshots the set in force as `seeded`, its `restoreSeededProfile()` writes the value the migrations
+ * actually seed, and the control then failed with
+ * `before={professional_licence,health_certificate} after={professional_licence,health_certificate}
+ * seeded={work_permit}`. Red on a reused database, green on a fresh one — so it never failed a merge
+ * verify, where the database is created from nothing.
+ *
+ * ## Why naming only `source_note` is the whole of the fix
+ *
+ * `insert into regulatory_profile (source_note) values (...)` is character for character what 0004's
+ * own seed does and what 0058's reconciliation does, so every other column takes its DEFAULT — which
+ * makes "the seeded profile" and "every column at its DEFAULT" the same sentence. Nothing is restated,
+ * so nothing can be restated wrongly (the failure `opening-balances.itest.ts` records from one side and
+ * `catalogue-compliance.itest.ts` from the other), and nothing is read back from a row another suite may
+ * have left behind, so there is nothing to propagate.
+ *
+ * It therefore HEALS a polluted database rather than merely surviving one. That is asserted by gate case
+ * 75: the profile in force is deliberately corrupted, this file is run, and the set in force afterwards
+ * must be the seeded one — with the found-value version of this function restored as the known-bad
+ * control, under which the corruption survives.
+ */
+async function restoreSeededProfile(): Promise<void> {
+  await sql`
+    with retired as (
+      update regulatory_profile set superseded_at = now() where superseded_at is null returning version
+    )
+    insert into regulatory_profile (source_note)
+    select 'P-HR-02 hr-credentials itest: restoring the SEEDED profile — every column at its DEFAULT, '
+        || 'which is what 0004 and 0058 both insert. Retired version ' || retired.version || '.'
+      from retired
+  `
 }
 
 /**
- * Runs `body` with a named profile in force, and restores whatever this file found, always.
+ * Runs `body` with a named profile in force, and restores the SEEDED profile afterwards, always.
  *
  * The boundary and window assertions below are about `labour_card`, which is in decision 20's stricter
- * reading and is **not** in the set 0030 seeded and still has in force. Rather than assert against
- * whatever set another unit last wrote, those tests state the profile they need — which is also what a
- * database with the revised default would give them, and what P-HR-03 will make the row in force say.
+ * reading. Since migration 0058 that is also what the row in force says, so these wrappers now state a
+ * profile the database already has — which is deliberate rather than redundant: a test that leaned on
+ * the row in force would go quiet the day somebody supersedes it, and stating the profile it needs is
+ * what keeps "VALID at 23:59:59+04:00, EXPIRED one second later" a claim about the labour card.
  */
 async function withProfile<T>(change: ProfileChange, body: () => Promise<T>): Promise<T> {
   await supersedeProfile(change)
   try {
     return await body()
   } finally {
-    await restoreOriginalProfile()
+    await restoreSeededProfile()
   }
 }
 
@@ -246,13 +287,10 @@ beforeAll(async () => {
   // but this file's own Unconfirmed Assumptions assertion needs the `app_setting` row and the insert is
   // `on conflict do nothing`, so re-running it is free and cannot overwrite a confirmed value.
   await seedSettingDefaults(sql)
-  originalPolicy = await readCredentialPolicy(sql)
-  const [profile] = await sql<{ licence_class: string }[]>`
-    select licence_class::text from regulatory_profile_current
-  `
-  originalLicenceClass = (profile as { licence_class: string }).licence_class as NonNullable<
-    ProfileChange['licenceClass']
-  >
+  // Nothing about the profile is snapshotted here, and that is the point of this file's repair: the
+  // value in force at the start of a run is not evidence of anything — it is whatever the previous run,
+  // or a suite that was stopped mid-probe, happened to leave. What this file restores is the SEEDED
+  // profile; see restoreSeededProfile.
 
   for (const handle of ['full', 'wellness-only', 'lapsed', 'nothing', 'nonexpiring']) {
     await makeEmployee(handle)
@@ -367,12 +405,17 @@ describe('acceptance — the mandatory set is derived from regulatory_profile an
       expect((await evaluate('nothing')).eligible).toBe(true)
     } finally {
       versions += 1
-      await restoreOriginalProfile()
+      await restoreSeededProfile()
     }
     // A delta, never a total, and nothing deleted: the table is append-only, so the profile in force on
     // any past date stays recoverable.
     expect(await profileRowCount()).toBe(before + versions)
-    expect((await readCredentialPolicy(sql)).mandatoryTypes).toEqual(originalPolicy.mandatoryTypes)
+    // The SEEDED value, not the one this file found. Asserting the restore against the snapshot would be
+    // asserting that the restore wrote back what the restore was told to write back, which is true of
+    // the broken version too — see restoreSeededProfile.
+    const policy = await readCredentialPolicy(sql)
+    expect([...policy.mandatoryTypes]).toEqual([...SEEDED_MANDATORY])
+    expect([...policy.nonExpiringTypes]).toEqual([...SEEDED_NON_EXPIRING])
     // And the licence class, which is the column of this table that reaches the public site: the probe
     // above set it to `healthcare` on purpose, and a restore that put back only the two arrays would
     // leave the banned-claims lint, the permitted titles and the JSON-LD vocabulary changed for every
@@ -380,7 +423,7 @@ describe('acceptance — the mandatory set is derived from regulatory_profile an
     const [restored] = await sql<{ licence_class: string }[]>`
       select licence_class::text from regulatory_profile_current
     `
-    expect((restored as { licence_class: string }).licence_class).toBe(originalLicenceClass)
+    expect((restored as { licence_class: string }).licence_class).toBe(SEEDED_LICENCE_CLASS)
   })
 
   it('yields the stricter set when the profile states no mandatory set, which is the DEFAULT', async () => {
@@ -399,7 +442,7 @@ describe('acceptance — the mandatory set is derived from regulatory_profile an
       // every credential must be renewed until somebody says otherwise.
       expect([...defaulted.nonExpiringTypes]).toEqual([])
     } finally {
-      await restoreOriginalProfile()
+      await restoreSeededProfile()
     }
     expect(await profileRowCount()).toBe(before + 2)
   })
@@ -479,7 +522,7 @@ describe('acceptance — a type configured as non-expiring, against real Postgre
          where employee_id = ${employees.get('nonexpiring') as string}
            and expires_on is null
       `
-      await restoreOriginalProfile()
+      await restoreSeededProfile()
     }
     expect(await profileRowCount()).toBe(before + 2)
     // And the control: with the declaration withdrawn, the type is refused a NULL expiry again.

@@ -18,6 +18,7 @@ import {
   readAvailabilityLimits,
   readBookableVariants,
   readGenderMatching,
+  readMandatoryDocumentTypes,
   type Sql,
 } from '@berelax/db'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
@@ -234,8 +235,9 @@ async function addEmployee(reference: string): Promise<string> {
   `
   // Without a row per mandatory document type the read model answers `credential_missing` and the
   // therapist is not bookable at all — which is B-AVAIL-04's rule working, and why the nineteen seeded
-  // therapists offer nothing. A fixture that skipped these would assert against an empty page.
-  for (const documentType of ['professional_licence', 'health_certificate'] as const) {
+  // therapists offer nothing. A fixture that skipped these would assert against an empty page. The set
+  // is read IN FORCE rather than named: 0058 reconciled it with the column DEFAULT (decision 20's six).
+  for (const documentType of await readMandatoryDocumentTypes(sql)) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${id}, ${documentType}::employee_document_type, '2099-12-31')

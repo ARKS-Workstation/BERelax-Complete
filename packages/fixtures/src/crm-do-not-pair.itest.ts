@@ -17,6 +17,7 @@ import {
   ensureCustomer,
   liftDoNotPair,
   readAvailabilityFacts,
+  readMandatoryDocumentTypes,
   type Sql,
   setDoNotPair,
   type TherapistExclusion,
@@ -71,6 +72,8 @@ if (!url)
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
 
 const TRADING_DATE = '2099-09-14'
+/** Every mandatory credential a fixture therapist holds expires here unless the case is about an expiry. */
+const FAR_FUTURE = '2099-12-31'
 const NEXT_DAY = '2099-09-15'
 const MARKER = 'ccrm01 do-not-pair itest'
 const MANAGER = 'manager'
@@ -111,6 +114,27 @@ const allIds = (): string[] => [...staff.values()]
  */
 const authorise = mayChangeBlocklist satisfies BlocklistAuthoriser
 
+/**
+ * The mandatory credential set IN FORCE, far in the future, with `lapsed` overriding one type's expiry.
+ *
+ * Read from `regulatory_profile_current` rather than naming `professional_licence` and
+ * `health_certificate`, which is what this file did until migration 0058 reconciled the row in force with
+ * the column DEFAULT — docs/01 decision 20's six. A fixture naming two types stops meaning "holds every
+ * mandatory document" the moment that answer changes, and the failure is `credential_missing` in a file
+ * that mentions no credentials (0054's header, brief rule 12).
+ *
+ * `lapsed` names the type whose expiry a case is ABOUT, and it has to be one of the mandatory ones or the
+ * therapist is not excluded at all — which is why it is an override on this list and not a separate array.
+ */
+async function mandatoryDocuments(
+  lapsed: Readonly<Record<string, string>> = {},
+): Promise<readonly { readonly type: string; readonly expiresOn: string }[]> {
+  return (await readMandatoryDocumentTypes(sql)).map((type) => ({
+    type,
+    expiresOn: lapsed[type] ?? FAR_FUTURE,
+  }))
+}
+
 async function addEmployee(args: {
   readonly reference: string
   readonly documents?: readonly { readonly type: string; readonly expiresOn: string }[]
@@ -123,10 +147,7 @@ async function addEmployee(args: {
   const id = (row as { id: string }).id
   staff.set(args.reference, id)
   await sql`insert into employee_skill (employee_id, skill) values (${id}, 'asian_style')`
-  for (const document of args.documents ?? [
-    { type: 'professional_licence', expiresOn: '2099-12-31' },
-    { type: 'health_certificate', expiresOn: '2099-12-31' },
-  ]) {
+  for (const document of args.documents ?? (await mandatoryDocuments())) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${id}, ${document.type}::employee_document_type, ${document.expiresOn})
@@ -256,10 +277,10 @@ beforeAll(async () => {
   // every case above and fail on a Saturday.
   await addEmployee({
     reference: 'ccrm01-dnp-lapsed',
-    documents: [
-      { type: 'professional_licence', expiresOn: '2099-09-13' },
-      { type: 'health_certificate', expiresOn: '2099-12-31' },
-    ],
+    // `labour_card` and not `professional_licence`: only a type in the mandatory set 0058 put in force
+    // excludes anybody, so a lapsed document that is merely on file would make this therapist eligible
+    // and the `credential_expired` expectations below would be asserting nothing.
+    documents: await mandatoryDocuments({ labour_card: '2099-09-13' }),
   })
 
   const [shift] = await sql<{ id: string }[]>`

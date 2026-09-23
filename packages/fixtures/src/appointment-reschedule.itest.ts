@@ -24,6 +24,7 @@ import {
   type NoShowClockCheck,
   type RescheduleDeps,
   type RescheduleInput,
+  readMandatoryDocumentTypes,
   readScheduledStepKeys,
   rescheduleAppointment,
   rescheduleAppointmentTx,
@@ -86,6 +87,8 @@ const MARKER = 'blife03 reschedule pair itest'
 const TRADING_DATE = '2099-12-04'
 /** The next trading date. The midnight cases are the difference between these two. */
 const NEXT_TRADING_DATE = '2099-12-05'
+/** Every mandatory credential a fixture therapist holds expires here unless the case is about an expiry. */
+const FAR_FUTURE = '2099-12-31'
 const PROBE = 'blife03_probe'
 const PROBE_PHONE = '+971590000631'
 const SINGLE_ROOM = 'blife03-single'
@@ -296,6 +299,28 @@ async function moneyRowCounts(): Promise<Record<string, number>> {
   }
 }
 
+/**
+ * The mandatory credential set IN FORCE, far in the future, with `lapsed` overriding one type's expiry.
+ *
+ * Read from `regulatory_profile_current` rather than naming `professional_licence` and
+ * `health_certificate`, which is what this file did until migration 0058 reconciled the row in force
+ * with the column DEFAULT — docs/01 decision 20's six. A fixture naming two types stops meaning "holds
+ * every mandatory document" the moment that answer changes, and the failure is `credential_missing` in a
+ * file that mentions no credentials (0054's header, brief rule 12).
+ *
+ * `lapsed` names the type whose expiry a case is ABOUT, and it has to be one of the mandatory ones or
+ * the therapist is not excluded at all — which is why it is an override on this list rather than a
+ * separate array a caller assembles.
+ */
+async function mandatoryDocuments(
+  lapsed: Readonly<Record<string, string>> = {},
+): Promise<readonly { readonly type: string; readonly expiresOn: string }[]> {
+  return (await readMandatoryDocumentTypes(sql)).map((type) => ({
+    type,
+    expiresOn: lapsed[type] ?? FAR_FUTURE,
+  }))
+}
+
 async function addEmployee(args: {
   readonly reference: string
   readonly gender: 'female' | 'male'
@@ -317,10 +342,7 @@ async function addEmployee(args: {
       on conflict do nothing
     `
   }
-  for (const document of args.documents ?? [
-    { type: 'professional_licence', expiresOn: '2099-12-31' },
-    { type: 'health_certificate', expiresOn: '2099-12-31' },
-  ]) {
+  for (const document of args.documents ?? (await mandatoryDocuments())) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${id}, ${document.type}::employee_document_type, ${document.expiresOn})
@@ -464,16 +486,15 @@ beforeAll(async () => {
   await addEmployee({ reference: 'blife03-b', gender: 'female' })
   await addEmployee({ reference: 'blife03-c', gender: 'female' })
   await addEmployee({ reference: 'blife03-d', gender: 'female' })
-  // A licence that expires ON the first trading date. `expires_on < trading_date` is the exclusion rule
-  // (B-AVAIL-04), so this therapist is eligible on the 4th and NOT on the 5th — which is what makes
-  // "the eligibility model is re-applied against the date the appointment is MOVING to" testable.
+  // A mandatory credential that expires ON the first trading date. `expires_on < trading_date` is the
+  // exclusion rule (B-AVAIL-04), so this therapist is eligible on the 4th and NOT on the 5th — which is
+  // what makes "the eligibility model is re-applied against the date the appointment is MOVING to"
+  // testable. The lapsing type is `labour_card` because it is in the set 0058 put in force; a type that
+  // is merely ON FILE and not mandatory excludes nobody, so the case would pass vacuously.
   await addEmployee({
     reference: 'blife03-expiring',
     gender: 'female',
-    documents: [
-      { type: 'professional_licence', expiresOn: TRADING_DATE },
-      { type: 'health_certificate', expiresOn: '2099-12-31' },
-    ],
+    documents: await mandatoryDocuments({ labour_card: TRADING_DATE }),
   })
 
   for (const [date, nextCalendarDate] of [

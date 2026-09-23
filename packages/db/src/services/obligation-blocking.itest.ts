@@ -6,7 +6,11 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from '../connection.ts'
 import { readAvailabilityFacts } from '../queries/availability.ts'
-import { type TherapistExclusion, therapistPoolCtes } from '../repositories/eligibility.ts'
+import {
+  readMandatoryDocumentTypes,
+  type TherapistExclusion,
+  therapistPoolCtes,
+} from '../repositories/eligibility.ts'
 import { withUnitOfWork } from '../tx.ts'
 import {
   completeObligationInstance,
@@ -264,10 +268,12 @@ beforeAll(async () => {
       insert into employee_skill (employee_id, skill) values (${id}, 'asian_style')
       on conflict do nothing
     `
-    // Both mandatory document types, unexpired. The point of this file is the obligation, so the
+    // Every mandatory document type, unexpired. The point of this file is the obligation, so the
     // credential gate that B-AVAIL-04 already owns must be satisfied: a therapist excluded by
-    // `credential_missing` would make every assertion below pass for the wrong reason.
-    for (const documentType of ['professional_licence', 'health_certificate'] as const) {
+    // `credential_missing` would make every assertion below pass for the wrong reason. The set is read
+    // IN FORCE rather than named, because 0058 reconciled it with the column DEFAULT and a fixture
+    // naming two types stops meaning "holds them all" the moment that answer changes.
+    for (const documentType of await readMandatoryDocumentTypes(sql)) {
       await sql`
         insert into employee_document (employee_id, document_type, expires_on)
         values (${id}, ${documentType}::employee_document_type, '2099-12-31')

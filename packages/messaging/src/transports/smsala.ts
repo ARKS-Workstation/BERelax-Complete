@@ -142,15 +142,32 @@ export function createSmsalaTransport(args: {
   const transport: ClassRoutedTransport = {
     channel: 'sms',
     async send(request: TransportRequest): Promise<TransportOutcome> {
+      const identity = request.senderId
+      if (identity === null) {
+        // `TransportRequest.senderId` is nullable because email's identity belongs to its transport
+        // (`SENDER_IDENTITY_ROUTES` answers `delegated`). SMS's does not: an alphanumeric sender ID is a
+        // TDRA registration, every SMS leaves from one, and a message with no resolved identity must not
+        // reach the vendor to have one chosen for it. Unreachable through `sendMessage`, which refuses
+        // first — and refused here as well, because this transport can also be called directly by a test.
+        return {
+          kind: 'failed',
+          reason: 'provider_rejected',
+          detail:
+            'An SMS reached the SMSala transport with no resolved sender identity. Every SMS leaves ' +
+            'from a registered identity and the choke point chooses it; sending without one would let ' +
+            'the vendor pick, which is how promotional traffic leaves under a transactional ' +
+            'registration.',
+        }
+      }
       // Keyed on the SENDER's class, so a forced mismatch reaches the identity it claims to be and
       // is refused by the provider's own sender-ID check — the second line of defence behind
-      // `senderIdFor`.
-      const provider = providers[request.senderId.messageClass]
+      // `resolveSenderIdentity`.
+      const provider = providers[identity.messageClass]
       try {
         const accepted = await provider.send({
           recipient: request.message.recipient,
           body: request.message.body,
-          senderId: request.senderId,
+          senderId: identity,
           messageClass: request.message.messageClass,
           idempotencyKey: request.idempotencyKey,
         })

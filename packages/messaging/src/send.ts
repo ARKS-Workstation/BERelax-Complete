@@ -3,20 +3,29 @@
  *
  * Every outbound message in the system goes through `sendMessage`, in this order:
  *
- *  1. resolve `message_class` from the **template**, never from the call site;
- *  2. select the sender identity registered for that class;
- *  3. run the promotional gate (`gate.ts`), which fails closed;
- *  4. compute encoding, segments and cost, and check the campaign spend cap;
- *  5. apply the staging send guard, then hand the message to the transport and record the provider id.
+ *  1. judge the template variant (`template.ts`) — approved, or refused with `no_variant`,
+ *     `template_not_approved` or `outside_care_window`;
+ *  2. resolve `message_class` from the **template**, never from the call site;
+ *  3. select the sender identity registered for that (class, channel) pair, or refuse;
+ *  4. run the promotional gate (`gate.ts`), which fails closed;
+ *  5. compute encoding, segments and cost, and check the campaign spend cap;
+ *  6. apply the staging send guard, then hand the message to the transport and record the provider id.
  *
  * ## Why there is no `senderId` on `SendRequest`
  *
- * The compliance decision that matters — which registered identity a message leaves from — is made
- * from the template's immutable class and nothing else. `SendRequest` therefore has no `senderId`,
- * no `messageClass` and no channel: there is no argument a caller can pass to route promotional
- * content down the transactional identity. A drag-and-drop flow builder is exactly where somebody
- * will try (docs/03 §5), and the type signature is what makes it impossible rather than discouraged.
- * `send.test.ts` asserts both overrides fail to compile.
+ * The compliance decision that matters — which registered identity a message leaves from — is made from
+ * the template's immutable class and its channel, and from nothing else. `SendRequest` therefore has no
+ * `senderId`, no `messageClass` and no `channel`, and all three are *fenced out* with `?: never` rather
+ * than merely absent, so a request assembled into a variable is refused as well as one written as a
+ * literal. See the field comments there. A drag-and-drop flow builder is exactly where somebody will try
+ * (docs/03 §5), and the type is what makes it impossible rather than discouraged.
+ *
+ * ## Why the template is judged before anything else
+ *
+ * An unapproved template is not sendable, and "not sendable" has to mean a refused send rather than the
+ * absence of a call: a reader who proves it by showing nothing called the transport has proved something
+ * about their own test. So `sendMessage` returns `blocked` with the template's own reason, the outcome is
+ * recorded, and the reason says which of the four situations it was.
  *
  * ## Why the gate runs before the staging guard
  *
@@ -39,119 +48,20 @@ import { costOf } from './encoding.ts'
 import { evaluateGate, type GateContext, type GateEvaluatorName, type GateRefusal } from './gate.ts'
 import type { InMemoryOutbox } from './outbox.ts'
 import type { Channel, MessageClass, MessageId, OutboundMessage } from './port.ts'
-import {
-  placeholdersIn,
-  renderTemplate,
-  type TemplateDefinition,
-  type TemplateValues,
-} from './render.ts'
+import { placeholdersIn, renderTemplate, type TemplateValues } from './render.ts'
 import { guardOutbound } from './send-guard.ts'
-
-/** Promotional identities are registered with an `AD-` prefix; transactional ones must not carry it. */
-export const PROMOTIONAL_SENDER_PREFIX = 'AD-'
-
-/** A TDRA-registered sender identity, and the one class of traffic it may carry. */
-export interface SenderIdentity {
-  readonly value: string
-  readonly messageClass: MessageClass
-}
-
-/**
- * The two registrations.
- *
- * Two, not one, and separately registered: with a single identity one over-eager blast suspends it
- * and every booking confirmation, reminder and OTP stops with it — a marketing mistake becoming an
- * operational outage. See ADR 0016 and docs/04 §5.
- */
-export interface SenderIdRegistry {
-  readonly transactional: SenderIdentity
-  readonly promotional: SenderIdentity
-}
-
-/**
- * Checks a registry at the point it is built, rather than at the point a message needs it.
- *
- * A misconfigured registry is a configuration error, and the configuration is read at boot where a
- * deploy fails and somebody is watching. Discovering it on the 9pm reminder run instead means the
- * first symptom is a rejected send.
- */
-export function assertSenderIdRegistry(registry: SenderIdRegistry): SenderIdRegistry {
-  for (const messageClass of ['transactional', 'promotional'] as const) {
-    const identity = registry[messageClass]
-    if (identity.messageClass !== messageClass) {
-      throw new AppError(
-        'invariant_violated',
-        `The ${messageClass} sender ID '${identity.value}' is registered as ` +
-          `${identity.messageClass}. A registry whose slots and classes disagree routes one class of ` +
-          'traffic out of the other identity, which is the send that gets a sender ID suspended.',
-        { details: { messageClass, identity } },
-      )
-    }
-  }
-
-  // Checked before the prefix rules, and not after: one identity used for both classes always trips
-  // one prefix rule or the other, so reporting the prefix would send somebody off to rename a sender
-  // ID when the actual fault is that only one was ever registered.
-  if (registry.transactional.value === registry.promotional.value) {
-    throw new AppError(
-      'invariant_violated',
-      `Both classes are registered to '${registry.transactional.value}'. One identity means a ` +
-        'promotional suspension takes every booking confirmation and OTP with it — the outage two ' +
-        'registrations exist to remove.',
-      { details: { registry } },
-    )
-  }
-
-  if (!registry.promotional.value.startsWith(PROMOTIONAL_SENDER_PREFIX)) {
-    throw new AppError(
-      'invariant_violated',
-      `The promotional sender ID '${registry.promotional.value}' must carry the ` +
-        `'${PROMOTIONAL_SENDER_PREFIX}' prefix TDRA registers promotional identities under.`,
-      { details: { promotional: registry.promotional } },
-    )
-  }
-
-  if (registry.transactional.value.startsWith(PROMOTIONAL_SENDER_PREFIX)) {
-    throw new AppError(
-      'invariant_violated',
-      `The transactional sender ID '${registry.transactional.value}' must not carry the ` +
-        `'${PROMOTIONAL_SENDER_PREFIX}' prefix. A booking confirmation that arrives looking like an ` +
-        'advert is what customers block.',
-      { details: { transactional: registry.transactional } },
-    )
-  }
-
-  return registry
-}
-
-/**
- * The registrations the build assumed, validated at import.
- *
- * Provisional: the real values are `Y6-sender-ids` in docs/OPEN-QUESTIONS.md, and registration is an
- * external dependency with a lead time (docs/05). They are a single constant so correcting them is one
- * edit, and `assertSenderIdRegistry` runs here so a wrong pair fails at boot rather than at 9pm.
- */
-export const PROVISIONAL_SENDER_IDS: SenderIdRegistry = assertSenderIdRegistry({
-  transactional: { value: 'BERELAX', messageClass: 'transactional' },
-  promotional: { value: 'AD-BERELAX', messageClass: 'promotional' },
-})
-
-/** The identity for a class. The only way a sender ID is ever chosen. */
-export function senderIdFor(
-  registry: SenderIdRegistry,
-  messageClass: MessageClass,
-): SenderIdentity {
-  const identity = registry[messageClass]
-  if (identity.messageClass !== messageClass) {
-    throw new AppError(
-      'invariant_violated',
-      `The ${messageClass} slot holds '${identity.value}', which is registered as ` +
-        `${identity.messageClass}. Refusing to send rather than sending from the wrong identity.`,
-      { details: { messageClass, identity } },
-    )
-  }
-  return identity
-}
+import {
+  resolveSenderIdentity,
+  type SenderIdentity,
+  type SenderIdentityRefusal,
+  type SenderIdRegistry,
+} from './sender-identity.ts'
+import {
+  type CareWindowState,
+  judgeVariant,
+  type TemplateVariant,
+  type VariantRefusal,
+} from './template.ts'
 
 // --- the transport seam ------------------------------------------------------------------------
 
@@ -168,7 +78,15 @@ export function senderIdFor(
  */
 export interface TransportRequest {
   readonly message: OutboundMessage
-  readonly senderId: SenderIdentity
+  /**
+   * The registered identity, or `null` for a channel whose identity belongs to its transport.
+   *
+   * Nullable because `SENDER_IDENTITY_ROUTES` answers `delegated` for email: the verified sending
+   * address is the transport's own configuration (Y6-email-sender), and handing an SMS transport's
+   * `BERELAX` to it was how an SMS alphanumeric ended up in the `sender_id` column of an email row.
+   * The SMS transport refuses a null rather than sending without one.
+   */
+  readonly senderId: SenderIdentity | null
   /** The same key must never produce a second message or a second charge. */
   readonly idempotencyKey: string
 }
@@ -238,8 +156,19 @@ export class CampaignSpend {
 
 // --- the request, the result, the context ------------------------------------------------------
 
-/** A template as the choke point needs it: its own declaration plus the immutable class. */
-export interface ClassifiedTemplate extends TemplateDefinition {
+/**
+ * A template as the choke point needs it: one resolved variant plus the immutable class.
+ *
+ * One VARIANT and not a whole template, because choosing between variants is a decision about channels
+ * and locales that has already been made by the time a send is requested — `resolveVariant` in
+ * `template.ts` makes it, and `no_variant` is its refusal. What arrives here is the words, the channel,
+ * the locale, the approval state and the class, which is exactly the set `sendMessage` decides from.
+ *
+ * `approvalState` is required and has no default. A template whose approval state could be omitted is a
+ * template that is sendable by existing, which is the state migration 0014's `default 'draft'` and this
+ * type both exist to refuse.
+ */
+export interface ClassifiedTemplate extends TemplateVariant {
   readonly messageClass: MessageClass
 }
 
@@ -255,12 +184,38 @@ export interface SendRequest {
   readonly values: TemplateValues
   /** E.164 for sms/whatsapp, an address for email. */
   readonly recipient: string
+  /**
+   * The three fences, and they are not fields.
+   *
+   * `readonly x?: never` makes any object carrying the property unassignable to this type — not only an
+   * object *literal*, which is all an excess-property check catches. That distinction is the whole value
+   * of writing them out: `sendMessage(ctx, { ...base, messageClass: 'promotional' })` was already refused
+   * by the excess-property rule, and
+   *
+   *     const request = { ...base, messageClass: 'promotional' }
+   *     await sendMessage(ctx, request)
+   *
+   * was NOT — a variable is checked for assignability and not for extra keys, so the two-line version of
+   * the same mistake compiled. A flow builder assembles its send request exactly that way (docs/03 §5).
+   *
+   * All three come from the template, which is where the regulator's view of the message lives: the
+   * class is immutable on the template row, the channel is the variant's, and the identity is resolved
+   * from the pair of them by `resolveSenderIdentity`. There is no argument a caller can pass to route
+   * promotional content down the transactional identity, and `send.test.ts` asserts each of the three
+   * fails to compile.
+   */
+  readonly messageClass?: never
+  readonly senderId?: never
+  readonly channel?: never
 }
 
 export type SendRefusal =
   | GateRefusal
   | 'blocked_unevaluable'
-  | 'sender_id_class_mismatch'
+  /** The template's own refusals: not approved, no variant, and the WhatsApp care window. */
+  | VariantRefusal
+  /** No identity is registered for this (class, channel), or the registry may not be used. */
+  | SenderIdentityRefusal
   | 'campaign_cap_exceeded'
   | 'channel_has_no_transport'
 
@@ -268,7 +223,8 @@ export type SendResult =
   | {
       readonly kind: 'sent'
       readonly providerMessageId: string
-      readonly senderId: string
+      /** `null` for a channel whose identity is its transport's. See `TransportRequest.senderId`. */
+      readonly senderId: string | null
       readonly segments: number
       readonly costFils: number
     }
@@ -299,6 +255,15 @@ export interface SendContext {
   readonly clock: Clock
   readonly gate: GateContext
   readonly campaign?: CampaignSpend
+  /**
+   * What is known about the recipient's last inbound WhatsApp message.
+   *
+   * Optional, and the default is the restrictive one — `{ lastInboundAt: null }`, no inbound ever, care
+   * window shut. Nothing in this build receives an inbound WhatsApp message (there is no contracted
+   * vendor), so that default is also the truth today rather than a convenience; a context that forgot to
+   * supply it gets the answer that refuses a free-form send rather than the one that permits it.
+   */
+  readonly care?: CareWindowState
 }
 
 const detailOf = (error: unknown): string =>
@@ -354,19 +319,37 @@ function renderSubject(template: ClassifiedTemplate, values: TemplateValues): st
 
 export async function sendMessage(ctx: SendContext, request: SendRequest): Promise<SendResult> {
   const instant: Instant = ctx.clock.now()
+
+  // 1. May these words be sent at all? Before the identity and before the gate, because an unapproved
+  //    template is not sendable however the registry is configured and whatever the recipient consented
+  //    to — and because this is the one check that is about the template rather than about the send.
+  //    `judgeVariant` is the same function `resolveVariant` ends in, so the refusal a caller gets when it
+  //    resolves a template and the refusal it gets from here are one reading with one reason.
+  const judged = judgeVariant({
+    templateKey: request.template.key,
+    variant: request.template,
+    at: instant,
+    care: ctx.care ?? { lastInboundAt: null },
+  })
+  if (judged.kind === 'refused') {
+    return { kind: 'blocked', reason: judged.reason, evaluator: null, detail: judged.detail }
+  }
+
   const message = buildMessage(request)
 
-  let senderId: SenderIdentity
-  try {
-    senderId = senderIdFor(ctx.senderIds, message.messageClass)
-  } catch (error) {
+  // 2. The identity, from the (class, channel) pair and from nothing else. A refusal here is a refusal:
+  //    the table never falls back to another pair's registration, because a promotional message leaving
+  //    from the transactional identity is the send that gets that identity suspended.
+  const resolved = resolveSenderIdentity(ctx.senderIds, message)
+  if (resolved.kind === 'refused') {
     return {
       kind: 'blocked',
-      reason: 'sender_id_class_mismatch',
+      reason: resolved.reason,
       evaluator: null,
-      detail: detailOf(error),
+      detail: resolved.detail,
     }
   }
+  const senderId: SenderIdentity | null = resolved.kind === 'identity' ? resolved.identity : null
 
   const decision = evaluateGate(ctx.gate, message, instant)
   if (decision.kind === 'refuse' || decision.kind === 'unevaluable') {
@@ -435,7 +418,7 @@ export async function sendMessage(ctx: SendContext, request: SendRequest): Promi
   return {
     kind: 'sent',
     providerMessageId: outcome.providerMessageId,
-    senderId: senderId.value,
+    senderId: senderId?.value ?? null,
     segments: outcome.segments,
     costFils: outcome.costFils,
   }

@@ -14,6 +14,7 @@ import {
   noAvailabilityAlternatives,
   peekAvailabilityCache,
   queryAvailability,
+  readMandatoryDocumentTypes,
   readWaitlistFor,
   type SlotRecheck,
   type Sql,
@@ -142,7 +143,11 @@ async function addEmployee(reference: string): Promise<string> {
     insert into employee_skill (employee_id, skill) values (${id}, 'asian_style')
     on conflict do nothing
   `
-  for (const documentType of ['professional_licence', 'health_certificate'] as const) {
+  // The mandatory credential set IN FORCE, not a hard-coded pair. Migration 0058 reconciled the row
+  // with the column DEFAULT — docs/01 decision 20's six — and a fixture naming two of them stops meaning
+  // "holds every mandatory document" the moment that answer changes, which surfaces as
+  // `credential_missing` in a file that mentions no credentials (0054's header, brief rule 12).
+  for (const documentType of await readMandatoryDocumentTypes(sql)) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${id}, ${documentType}::employee_document_type, '2099-12-31')

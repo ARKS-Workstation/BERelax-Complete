@@ -111,6 +111,7 @@ beforeAll(async () => {
   liveTemplateId = await ensureMessageTemplate(sql, {
     key: liveTemplateKey,
     channel: 'sms',
+    messageClass: 'transactional',
     body: 'Your appointment on {{date}} at {{time}} is confirmed. {{link}}',
     subject: null,
   })
@@ -299,6 +300,7 @@ describe('acceptance — the row carries the lifecycle, and a DLR cannot move it
 const SMS_TEMPLATE = (key: string): ClassifiedTemplate => ({
   key,
   messageClass: 'transactional',
+  approvalState: 'approved',
   channel: 'sms',
   locale: 'en',
   body: 'Your appointment on {{date}} at {{time}} is confirmed. {{link}}',
@@ -463,6 +465,10 @@ describe('acceptance — a delivery receipt cannot un-count a message against th
     const promotionalTemplateId = await ensureMessageTemplate(sql, {
       key: `bmsg04.${RUN}.promo`,
       channel: 'sms',
+      // The template's class, and it has to be `promotional` because the message rows below are. This
+      // fixture used to create the template as `transactional` and record promotional messages against
+      // it; `message_class_matches_its_template` (ZM004, migration 0061) refuses that now.
+      messageClass: 'promotional',
       body: 'Two treatments for one this week.',
       subject: null,
     })

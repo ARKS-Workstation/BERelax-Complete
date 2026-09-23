@@ -24,6 +24,7 @@ import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
+import { CREDENTIAL_SWEEP_AGENT, runCredentialSweep } from './jobs/credential-sweep.ts'
 import {
   GOOGLE_HEALTH_AGENT,
   GOOGLE_LIVENESS_AGENT,
@@ -226,6 +227,31 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     // running past it is blocked on a lock rather than slow, and reclaiming it is the right answer.
     expireInSeconds: 300,
     handler: reverseChargeHandler,
+  },
+  {
+    name: 'hr.credential-sweep',
+    purpose:
+      'Re-applies the credential gate to every FUTURE appointment and flags the ones whose therapist may ' +
+      'no longer take them as needs_reassignment, clearing the flag again once the document is renewed. ' +
+      'Never cancels and never unassigns. The availability query already refuses to OFFER a therapist ' +
+      'whose mandatory credentials lapsed; this is the half that covers the bookings already in the ' +
+      'diary, which nothing else in the system can see (P-HR-03, docs/04 §7).',
+    // 04:45 Asia/Dubai, after trading closes at 02:00. Later than recurring-cost.check at 03:45 and
+    // vat.reverse-charge-exceptions at 04:15, and deliberately not at the same minute as
+    // seo.gsc-snapshot: the four nightly passes should not contend, and this one reads the whole future
+    // diary. Inside trading hours it would judge the session that is still running, which is legal — the
+    // window's floor is the trading date, not midnight — but it would also flag an appointment two hours
+    // before the therapist turns up for it, which is the reassignment nobody can make.
+    cron: '45 4 * * *',
+    agent: CREDENTIAL_SWEEP_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 60,
+    retryBackoff: true,
+    // One read of the future diary, one read of those therapists' documents, and two writes. Five
+    // minutes is generous; a pass still running past it is blocked on a lock rather than slow, and the
+    // flags are idempotent so reclaiming it cannot double-raise.
+    expireInSeconds: 300,
+    handler: credentialSweepHandler,
   },
   {
     name: 'google-connection.health',
@@ -443,6 +469,32 @@ async function recurringCostHandler(_data: never, context: JobContext): Promise<
   console.log(
     `recurring-cost.check ${result.asOf}: ${result.generated} period(s) generated, ` +
       `${result.raised.length} alert(s) raised`,
+  )
+}
+
+/**
+ * The credential sweep's pass.
+ *
+ * Thin for the same reason the two above are: the window and the trading date are resolved by
+ * `runCredentialSweep`, which takes its instant as an argument so the integration suite can drive it at a
+ * frozen clock and ask it the one question a job reading `new Date()` cannot be asked — whether the second
+ * run of the same day flags anything. The log line reports both counts because a night with nothing to do
+ * is the normal night: a pass that logged only when it flagged something would be indistinguishable from a
+ * pass that had stopped running, which is docs/10 §6's failure and the reason `agent_heartbeat` exists.
+ */
+async function credentialSweepHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The credential sweep ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const result = await runCredentialSweep(sql, context.now())
+  console.log(
+    `hr.credential-sweep ${result.asOf}: ${result.considered} future appointment(s) considered, ` +
+      `${result.flagged.length} flagged, ${result.cleared.length} cleared`,
   )
 }
 

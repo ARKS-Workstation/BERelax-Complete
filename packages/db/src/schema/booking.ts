@@ -7,6 +7,7 @@ import {
   customType,
   date,
   index,
+  integer,
   pgEnum,
   pgTable,
   smallint,
@@ -19,6 +20,7 @@ import { serviceShape, serviceVariant } from './catalogue.ts'
 import { customer } from './customer.ts'
 import { priceList } from './price-list.ts'
 import { rooms } from './rooms.ts'
+import { employeeDocumentType } from './staff.ts'
 import { businessDay } from './trading.ts'
 
 /**
@@ -409,5 +411,90 @@ export const bookingIdempotency = pgTable(
   (t) => [
     check('booking_idempotency_key_nonempty', sql`btrim(${t.idempotencyKey}) <> ''`),
     check('booking_idempotency_fingerprint_nonempty', sql`btrim(${t.requestFingerprint}) <> ''`),
+  ],
+)
+
+/**
+ * Why an appointment needs a different therapist (0058).
+ *
+ * The two labels are the credential half of `ELIGIBILITY_EXCLUSION_REASONS` in `@berelax/core`,
+ * spelled identically on purpose: a reason a caller cannot line up with the availability answer is a
+ * reason nobody can act on. P-HR-04 adds the labels for approved leave and therapist archival.
+ */
+export const appointmentReassignmentReason = pgEnum('appointment_reassignment_reason', [
+  'credential_missing',
+  'credential_expired',
+])
+
+/**
+ * Drizzle mirror of `packages/db/migrations/0058_appointment_reassignment_flag.sql`.
+ *
+ * An appointment whose therapist may no longer take it — **never** a cancellation and never a silent
+ * unassignment. `appointment.status` is untouched, so `holds_resources` stays true and the slot is not
+ * handed to somebody else while a human decides (0024). P-HR-03's nightly sweep raises and clears
+ * these; P-HR-04 acts on them.
+ *
+ * `appointmentId` deliberately references NOTHING. PostgreSQL refuses `truncate appointment` while a
+ * referencing table is missing from the statement, and three files truncate it by an explicit list —
+ * the same decision 0055 records for its indexes, 0021 for `agent_run.job_id` and 0024 for
+ * `appointment.therapist_id`.
+ */
+export const appointmentReassignmentFlag = pgTable(
+  'appointment_reassignment_flag',
+  {
+    id: uuid('id').primaryKey(),
+    /** No foreign key, on purpose. See this table's header. */
+    appointmentId: uuid('appointment_id').notNull(),
+    /**
+     * The therapist the appointment was sold with, copied rather than joined: a reassignment REPLACES
+     * `appointment.therapist_id` (P-HR-04), after which the join no longer answers who it was taken
+     * away from.
+     */
+    therapistId: uuid('therapist_id').notNull(),
+    /**
+     * The appointment's TRADING date, which is the date the credential judgement was made against.
+     * Trading runs 11:00–02:00, so a licence valid through the 18th covers the 18th's 01:30
+     * appointment, whose calendar date is the 19th.
+     */
+    appointmentTradingDate: date('appointment_trading_date').notNull(),
+    reason: appointmentReassignmentReason('reason').notNull(),
+    /** WHICH credential. "A credential lapsed" is the message the recipient cannot act on. */
+    documentType: employeeDocumentType('document_type').notNull(),
+    /** The expiry judged against. NULL for `credential_missing`; whole-or-nothing with `reason`. */
+    documentExpiresOn: date('document_expires_on'),
+    /** The profile version whose mandatory set produced this flag — the set is provisional and versioned. */
+    regulatoryProfileVersion: integer('regulatory_profile_version').notNull(),
+    /** The TRADING date of the sweep, read from `business_day` and never truncated from the instant. */
+    detectedOn: date('detected_on').notNull(),
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }).notNull(),
+    /** Stamped rather than deleted: the flag is the evidence the check ran and what it said. */
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    clearedOn: date('cleared_on'),
+    /** Generated in the database from `cleared_at`, so one column answers "is it in the queue". */
+    needsReassignment: boolean('needs_reassignment').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    /** The idempotency of the nightly sweep, in the database. Partial, so a second lapse can re-flag. */
+    uniqueIndex('appointment_reassignment_flag_one_live_per_appointment')
+      .on(t.appointmentId)
+      .where(sql`${t.clearedAt} is null`),
+    index('appointment_reassignment_flag_queue_idx')
+      .on(t.appointmentTradingDate, t.therapistId)
+      .where(sql`${t.clearedAt} is null`),
+    index('appointment_reassignment_flag_therapist_idx').on(t.therapistId, t.flaggedAt.desc()),
+    check(
+      'appointment_reassignment_flag_clearance_is_whole',
+      sql`(${t.clearedAt} is null) = (${t.clearedOn} is null)`,
+    ),
+    check(
+      'appointment_reassignment_flag_cleared_after_flagged',
+      sql`${t.clearedAt} is null or ${t.clearedAt} >= ${t.flaggedAt}`,
+    ),
+    check(
+      'appointment_reassignment_flag_expiry_matches_reason',
+      sql`(${t.reason} = 'credential_expired') = (${t.documentExpiresOn} is not null)`,
+    ),
   ],
 )

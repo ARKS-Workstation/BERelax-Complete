@@ -17,6 +17,7 @@ import {
   createPostgresMessageStore,
   listMessageInbox,
   readCurrentTemplate,
+  readMandatoryDocumentTypes,
   rebuildScheduledSteps,
   rescheduleAppointmentTx,
   type ScheduledStepMaintainer,
@@ -383,13 +384,13 @@ beforeAll(async () => {
       insert into employee_skill (employee_id, skill) values (${id}, 'asian_style'::therapist_skill)
       on conflict do nothing
     `
-    for (const [type, expires] of [
-      ['professional_licence', '2099-12-31'],
-      ['health_certificate', '2099-12-31'],
-    ] as const) {
+    // The mandatory set IN FORCE, not a hard-coded pair: migration 0058 reconciled the row with the
+    // column DEFAULT (docs/01 decision 20's six), and a fixture naming two of them stops meaning "holds
+    // every mandatory document" the moment that answer changes (0054's header, brief rule 12).
+    for (const type of await readMandatoryDocumentTypes(sql)) {
       await sql`
         insert into employee_document (employee_id, document_type, expires_on)
-        values (${id}, ${type}::employee_document_type, ${expires})
+        values (${id}, ${type}::employee_document_type, '2099-12-31')
         on conflict do nothing
       `
     }

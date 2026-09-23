@@ -11,6 +11,7 @@ import {
   type BlocklistAuthoriser,
   CRM_AUDIT_ACTIONS,
   createConnection,
+  readMandatoryDocumentTypes,
   type Sql,
   withUnitOfWork,
 } from '@berelax/db'
@@ -177,7 +178,10 @@ beforeAll(async () => {
   `
   therapistId = (employee as { id: string }).id
   await sql`insert into employee_skill (employee_id, skill) values (${therapistId}, 'asian_style')`
-  for (const type of ['professional_licence', 'health_certificate']) {
+  // The mandatory set IN FORCE, not a hard-coded pair: migration 0058 reconciled the row with the
+  // column DEFAULT (docs/01 decision 20's six), and a fixture naming two of them stops meaning "holds
+  // every mandatory document" the moment that answer changes (0054's header, brief rule 12).
+  for (const type of await readMandatoryDocumentTypes(sql)) {
     await sql`
       insert into employee_document (employee_id, document_type, expires_on)
       values (${therapistId}, ${type}::employee_document_type, '2099-12-31')

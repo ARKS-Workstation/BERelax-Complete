@@ -214,11 +214,29 @@ async function ensureTradingDays(sql: Sql): Promise<void> {
  */
 export async function ensureMessageTemplate(
   sql: Sql,
-  args: { key: string; channel: 'sms' | 'email'; body: string; subject: string | null },
+  args: {
+    key: string
+    channel: 'sms' | 'email'
+    body: string
+    subject: string | null
+    /**
+     * The class the template carries, and it is REQUIRED rather than defaulted.
+     *
+     * It was the literal `'transactional'` in the INSERT below, while the itest beside this file created
+     * a `promotional` MESSAGE pointing at one of these rows — so a promotional message was recorded
+     * against a transactional template, and `message.message_class` (which the frequency cap, the
+     * marketing kill switch and the cost report all read) disagreed with the template it was copied
+     * from. Nothing said so, because nothing compared them. `message_class_matches_its_template`
+     * (ZM004, migration 0061) now refuses the row, and this argument is what lets the fixture say which
+     * class it means. Required and not optional, because a default here is how the same two rows come to
+     * disagree again.
+     */
+    messageClass: 'transactional' | 'promotional'
+  },
 ): Promise<string> {
   const [template] = await sql<{ id: string }[]>`
     insert into message_template (template_key, version, message_class, purpose, is_current)
-    values (${args.key}, 1, 'transactional', 'B-MSG-04 cost fixture', true)
+    values (${args.key}, 1, ${args.messageClass}::message_class, 'B-MSG-04 cost fixture', true)
     returning id
   `
   if (template === undefined) throw new Error(`Could not create template ${args.key}`)
@@ -251,12 +269,14 @@ export async function seedMessagingFixture(
   const smsTemplateId = await ensureMessageTemplate(sql, {
     key: smsTemplateKey,
     channel: 'sms',
+    messageClass: 'transactional',
     body: 'Your appointment is confirmed.',
     subject: null,
   })
   const emailTemplateId = await ensureMessageTemplate(sql, {
     key: emailTemplateKey,
     channel: 'email',
+    messageClass: 'transactional',
     body: 'Your tax invoice is attached.',
     subject: 'Your tax invoice',
   })

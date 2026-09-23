@@ -43,6 +43,16 @@ export interface TemplateSeedDefinition {
   readonly subject?: string
   readonly body: string
   readonly variables: readonly string[]
+  /**
+   * The approval state the shipped definition declares, written verbatim.
+   *
+   * It used to be the literal `'approved'` here for every row, which was true of the templates that
+   * existed then and became a lie the moment one shipped in `draft`: `review.request` is promotional
+   * marketing copy nobody with the authority to approve it has seen, and a seed that approved it on
+   * their behalf would make it sendable. So the definition decides, and 0061's state machine is what
+   * stops a later UPDATE moving it to `approved` in one step.
+   */
+  readonly approvalState: 'draft' | 'pending' | 'approved' | 'rejected'
 }
 
 export interface TemplateSeedResult {
@@ -107,7 +117,8 @@ export async function seedMessageTemplates(
         insert into message_template_variant
           (template_id, channel, locale, approval_state, customer_care_window, subject, body, variables)
         values (
-          ${template.id}, ${variant.channel}::message_channel, ${variant.locale}, 'approved', false,
+          ${template.id}, ${variant.channel}::message_channel, ${variant.locale},
+          ${variant.approvalState}::template_approval, false,
           ${variant.subject ?? null}, ${variant.body}, ${sql.array([...variant.variables])}
         )
         on conflict (template_id, channel, locale) do nothing
@@ -130,6 +141,19 @@ export interface ResolvedTemplateRow {
   readonly subject: string | null
   readonly body: string
   readonly variables: readonly string[]
+  /**
+   * The variant's approval state, returned rather than filtered on.
+   *
+   * This reader used to add `and v.approval_state = 'approved'` to its WHERE clause, so an unapproved
+   * template was indistinguishable from a missing one — and the worker recorded the difference as
+   * `content_unavailable`, which sends whoever reads the report to look for a rendering fault. The send
+   * choke point refuses an unapproved template with `template_not_approved` and records that, so the row
+   * comes back and the decision is made where the reason can be stated. C-AUTO-01.
+   */
+  readonly approvalState: string
+  /** The 24-hour WhatsApp care-window flag. Carried so a caller need not read the row twice. */
+  readonly customerCareWindow: boolean
+  readonly category: string | null
 }
 
 /**
@@ -139,6 +163,10 @@ export interface ResolvedTemplateRow {
  * approval, so the newest row is not necessarily the one that may be sent. Returns `undefined` rather
  * than throwing, because "no template" is a decision the caller has to record — a scheduled step whose
  * template is missing is skipped with a reason code, not crashed on.
+ *
+ * It does NOT filter on `approval_state`, deliberately. See `ResolvedTemplateRow.approvalState`: a filter
+ * here collapses "nobody has approved these words" into "there is no template", and those are different
+ * facts with different repairs.
  */
 export async function readCurrentTemplate(
   sql: Sql,
@@ -154,17 +182,20 @@ export async function readCurrentTemplate(
       subject: string | null
       body: string
       variables: string[]
+      approval_state: string
+      customer_care_window: boolean
+      category: string | null
     }[]
   >`
     select t.id::text as template_id, t.template_key, t.message_class::text as message_class,
-           v.channel::text as channel, v.locale, v.subject, v.body, v.variables
+           v.channel::text as channel, v.locale, v.subject, v.body, v.variables,
+           v.approval_state::text as approval_state, v.customer_care_window, v.category
       from message_template t
       join message_template_variant v on v.template_id = t.id
      where t.template_key = ${args.key}
        and t.is_current
        and v.channel = ${args.channel}::message_channel
        and v.locale = ${args.locale}
-       and v.approval_state = 'approved'
      limit 1
   `
   if (row === undefined) return undefined
@@ -177,5 +208,8 @@ export async function readCurrentTemplate(
     subject: row.subject,
     body: row.body,
     variables: row.variables,
+    approvalState: row.approval_state,
+    customerCareWindow: row.customer_care_window,
+    category: row.category,
   }
 }

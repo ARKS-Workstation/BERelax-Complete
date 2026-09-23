@@ -71,6 +71,8 @@ import {
   withUnitOfWork,
 } from '@berelax/db'
 import {
+  type ClassifiedTemplate,
+  classifyTemplateRow,
   type DeliveryDeps,
   deliverMessage,
   InMemoryOutbox,
@@ -159,12 +161,19 @@ async function reminderContentFor(
   magicLink: MagicLinkBuilder,
 ): Promise<{
   readonly templateId: string
-  readonly templateKey: string
-  readonly body: string
-  readonly variables: readonly string[]
-  readonly locale: 'en' | 'ar'
   readonly recipient: string
   readonly values: Readonly<Record<string, string>>
+  /**
+   * The template as `classifyTemplateRow` narrowed it: the words, the channel, the locale, the approval
+   * state and the CLASS, all read off the row.
+   *
+   * It used to be four loose fields plus the literal `messageClass: 'transactional'` at the call site
+   * below. That was true of `booking.reminder` and it was a hole all the same — `reclassify_template` can
+   * make any template promotional, and a restated class sends promotional content from the transactional
+   * identity with every gate skipped, because `evaluateGate` returns `allow` on its first line for a
+   * message that says it is transactional. C-AUTO-01.
+   */
+  readonly template: ClassifiedTemplate
 } | null> {
   if (step.recipient === null) return null
   const key = templateKeyFor(step.stepType)
@@ -185,14 +194,18 @@ async function reminderContentFor(
     hour12: false,
   }).format(new Date(step.startsAtMs))
 
+  // Narrowed by `@berelax/messaging`, never asserted here. `readCurrentTemplate` returns the vocabulary
+  // columns as `string` because `packages/db` has no reason to hold those unions, and a label this build
+  // cannot read is a label whose permissions it does not know — so the step is skipped with
+  // `content_unavailable` rather than sent under a guess.
+  const classified = classifyTemplateRow({ ...template, locale })
+  if (classified.kind !== 'template') return null
+
   return {
     templateId: template.templateId,
-    templateKey: template.templateKey,
-    body: template.body,
-    variables: template.variables,
-    locale,
     recipient: step.recipient,
     values: { time, link },
+    template: classified.template,
   }
 }
 
@@ -268,14 +281,11 @@ export async function drainScheduledStep(
       // the fake reissue the same provider message id and `message_provider_id_unique` refuse the second
       // row. A random id here would make a double drain two messages.
       id: `step-${step.id}` as MessageId,
-      template: {
-        key: content.templateKey,
-        channel: 'sms',
-        locale: content.locale,
-        body: content.body,
-        variables: [...content.variables],
-        messageClass: 'transactional',
-      },
+      // Whole, from the row. Nothing here restates the class, the channel or the approval state — and
+      // the reader no longer filters unapproved variants out either, so the choke point refuses one with
+      // `template_not_approved` and the step records `send_refused` instead of the misleading
+      // `content_unavailable` a missing row produces.
+      template: content.template,
       values: content.values,
       recipient: content.recipient,
     })

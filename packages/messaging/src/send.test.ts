@@ -20,18 +20,20 @@ import { InMemoryOutbox } from './outbox.ts'
 import type { MessageId, OutboundMessage } from './port.ts'
 import { renderTemplate, type TemplateValues } from './render.ts'
 import {
-  assertSenderIdRegistry,
   CampaignSpend,
   type ClassifiedTemplate,
   type ClassRoutedTransport,
-  PROVISIONAL_SENDER_IDS,
   type SendContext,
-  type SenderIdRegistry,
   type SendRequest,
   type SendResult,
-  senderIdFor,
   sendMessage,
 } from './send.ts'
+import {
+  assertSenderIdRegistry,
+  PROVISIONAL_SENDER_IDS,
+  type SenderIdRegistry,
+  senderIdFor,
+} from './sender-identity.ts'
 import { DEFAULT_TEMPLATES } from './templates.ts'
 import { createSmsalaTransport, transportFailureFor } from './transports/smsala.ts'
 
@@ -52,10 +54,12 @@ const RECIPIENT = '+971528239069'
 const OFFER: ClassifiedTemplate = {
   key: 'campaign.offer',
   messageClass: 'promotional',
+  approvalState: 'approved',
   channel: 'sms',
   locale: 'en',
-  // No shipped default is promotional; campaign templates arrive with C-AUTO. This one exists so the
-  // promotional half of the send path has something to carry.
+  // A campaign template rather than a shipped default. `review.request` is now a shipped promotional
+  // template (C-AUTO-01) and would do for the class, but it ships in `draft` on purpose, so a send of it
+  // is refused before the gate — which is the wrong thing for this file to be measuring.
   body: 'Two treatments for the price of one this week. Stop: {{link}}',
   variables: ['link'],
 }
