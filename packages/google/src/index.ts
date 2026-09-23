@@ -262,6 +262,14 @@ export {
 } from './reviews/llm-provider.ts'
 export { type RewrapReport, rewrapRefreshTokens } from './rewrap.ts'
 export {
+  type IngestCandidatesDeps,
+  type IngestSummary,
+  ingestSuggestionCandidates,
+  type SeoIngestLogger,
+  type SeoIngestLogLine,
+  type SuggestionCandidatePersist,
+} from './seo/candidate-ingest.ts'
+export {
   assertWindowRespectsLag,
   type CollectOptions,
   collectGscSnapshot,

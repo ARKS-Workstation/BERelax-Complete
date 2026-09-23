@@ -261,6 +261,20 @@ export async function unconfirmedAssumptionRows(
       union all
       select 'customer_acquisition_source', source, open_question_id, provisional_note
         from customer_acquisition_source where is_provisional
+      -- The consent purposes and the consent wording (0056). The vocabulary is here for the same reason
+      -- the two above are: a TABLE rather than an enum precisely so each label can carry the provenance
+      -- trio and reach this panel. The WORDING is the one that matters most, and it is the reason the
+      -- table carries the trio at all: a consent statement is legal copy, the build has drafted it
+      -- (Y9-consent-wording), and a drafted statement that did not appear on this screen would be
+      -- indistinguishable from one somebody's lawyer had approved. Keyed by purpose and version, because
+      -- consent_wording is append-only: answering the question publishes version 2 and version 1 stays,
+      -- so the panel row leaves by the NEW row being confirmed rather than by the old one being edited.
+      union all
+      select 'consent_purpose', purpose, open_question_id, provisional_note
+        from consent_purpose where is_provisional
+      union all
+      select 'consent_wording', purpose || ' v' || version::text, open_question_id, provisional_note
+        from consent_wording where is_provisional
       union all
       select source, column_name, question,
              -- The value itself is the note: 'WHATSAPP-PENDING-Y1-NAP' says what it is, and a NULL

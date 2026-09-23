@@ -30,6 +30,7 @@
   is known, and a rule that can only run against a live server is a rule whose failure nobody has seen.
 */
 
+export * from './candidate-screen.ts'
 export * from './cannibalisation.ts'
 export * from './content-gaps.ts'
 export * from './ctr-outliers.ts'
@@ -38,4 +39,6 @@ export * from './jsonld/index.ts'
 export * from './link-graph.ts'
 export * from './query-rows.ts'
 export * from './rare-query-gap.ts'
+export * from './target-allowlist.ts'
+export * from './untrusted-envelope.ts'
 export * from './url-inspection-cap.ts'

@@ -67,14 +67,26 @@ function otpRuntime(): OtpEndpointDeps {
     gate: {
       marketingKillSwitch: false,
       promotionalWindow: TDRA_PROMOTIONAL_WINDOW,
-      // The consent, suppression and frequency stores are C-CRM-03, C-CRM-04 and C-AUTO-03 and do not
-      // exist yet. These throw rather than returning a permissive default, which means a promotional
-      // message routed through this runtime is recorded as `blocked_unevaluable` and never sent — the
-      // fail-closed behaviour B-MSG-02 exists for. `auth.otp` is transactional, so the gate returns
-      // before reading any of them; that is why an OTP is unaffected by all three being absent.
+      // These throw rather than returning a permissive default, which means a promotional message routed
+      // through this runtime is recorded as `blocked_unevaluable` and never sent — the fail-closed
+      // behaviour B-MSG-02 exists for. `auth.otp` is transactional, so the gate returns before reading
+      // any of them; that is why an OTP is unaffected by all three.
+      //
+      // The consent store now EXISTS (C-CRM-03), and `hasConsent` below is still a throw on purpose.
+      // The real evaluator is `consentGateEvaluator` in `@berelax/core`, and it is built over a map of
+      // logs PREFETCHED for the recipients a campaign is about (`readConsentLogs` in `@berelax/db`) —
+      // there is no per-message lookup, because the gate is synchronous. This route sends one
+      // transactional OTP to one number and reads no consent at all, so wiring a prefetch here would be
+      // a query that never decides anything. The unit that assembles a promotional recipient list is the
+      // one that builds the evaluator; `packages/fixtures/src/consent.itest.ts` drives the real thing
+      // through this same `sendMessage` choke point against real rows. The suppression list is C-CRM-04's
+      // and the frequency store C-AUTO-03's, and both are still absent.
       evaluators: {
         hasConsent: () => {
-          throw new Error('No consent store yet (C-CRM-03). Promotional sends fail closed.')
+          throw new Error(
+            'This runtime prefetches no consent logs (C-CRM-03 stores them; the evaluator needs the ' +
+              'recipient list). Promotional sends fail closed.',
+          )
         },
         isSuppressed: () => {
           throw new Error('No suppression list yet (C-CRM-04). Promotional sends fail closed.')

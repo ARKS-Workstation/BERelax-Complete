@@ -17996,6 +17996,873 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 72a-72x. (C-CRM-03) Consent: the resolver that must fail closed, the append-only tables, and the hash
+//          that makes a tampered wording detectable.
+//
+//     Almost every claim in this unit is about something NOT happening, and each of the broken versions
+//     returns a perfectly good answer. A resolver that settles a tied timestamp by taking whichever row
+//     the query returned first is correct in every fixed-order test. A grant whose wording version cannot
+//     be produced still says `granted`. An evaluator that answers `false` for a recipient it never read a
+//     log for reports a clean campaign run in which every message was refused. So each one is broken here
+//     deliberately and the suite that must notice is named.
+//
+//     The database half is the other shape of the same problem: a CHECK, a trigger and a GENERATED column
+//     are only gates once something has been seen to bounce off them (ADR 0003). Every probe states the
+//     rule it must trip and `checkRejectedBy` fails if the rejection came from anything else — a bare
+//     non-zero exit is also what a typo in a column name produces.
+//
+//     `VERBOSITY=verbose` so the SQLSTATE and the constraint name are both in psql's output: the three
+//     trigger rules are asserted by their own codes (ZP001, ZP002, ZP003) and the CHECKs by name. Every
+//     probe runs inside `begin; … ; rollback;`, which is also the only way they can be written at all:
+//     `consent` refuses DELETE for every role including the owner, so a probe row that committed could
+//     never be swept.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const RESOLVE = 'packages/core/src/consent/resolve.ts'
+  const PERMISSION = 'packages/core/src/consent/send-permission.ts'
+  const CONTRACT = 'packages/shared/src/schemas/consent.ts'
+  const MIGRATION = 'packages/db/migrations/0056_consent.sql'
+
+  const CORE_SUITE = 'packages/core/src/consent'
+  const CONTRACT_SUITE = 'packages/shared/src/schemas/consent.test.ts'
+  const CONSENT_ITEST = 'packages/fixtures/src/consent.itest.ts'
+
+  /** One anchored edit to a shipped file, asserting the anchor is still there AND that it moved. */
+  const consentMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes the assertion vacuous, so it is an error rather than a no-op
+        // replace: `String.replace` with a missing needle returns the text unchanged, and the mutant
+        // would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the C-CRM-03 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        const mutated = text.replace(anchor, replacement)
+        if (mutated === text) {
+          throw new Error(`the C-CRM-03 gate's edit to ${path} changed nothing: ${anchor}`)
+        }
+        return mutated
+      },
+      body,
+    )
+
+  // 72a. The maximum reduce dropped, so the "newest" record is whichever one the array happened to hold
+  //      first. Every fixed-order case still passes; only the shuffle property can see it, which is why
+  //      that property exists at all.
+  checkRejectedBy(
+    'consent gate: a resolver that takes the first applicable record is caught',
+    consentMutant(
+      RESOLVE,
+      '  for (const record of applicable) if (record.recordedAt > newest.recordedAt) newest = record',
+      '  // mutant: whichever record arrived first is treated as the newest',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'insertion-order independent',
+  )
+
+  // 72b. The tie check removed. A grant and a withdrawal at one instant then resolve to one of them, and
+  //      half the time the one is the grant — fail-open, and order-dependent with it.
+  checkRejectedBy(
+    'consent gate: a resolver that settles a tied timestamp is caught',
+    consentMutant(RESOLVE, '  if (tied.length > 1) {', '  if (false) {', () =>
+      runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'fails closed',
+  )
+
+  // 72c. The wording lookup made positional instead of by id, so a grant under a version nobody supplied
+  //      resolves against the first version in the log. The record still says `granted`, which is the
+  //      whole difficulty: nothing about the answer looks wrong.
+  checkRejectedBy(
+    'consent gate: a grant resolved against the wrong wording version is caught',
+    consentMutant(
+      RESOLVE,
+      '  const wording = contact.wordingVersions.find((version) => version.id === wordingId)',
+      '  const wording = contact.wordingVersions[0]',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'fails closed',
+  )
+
+  // 72d. The point-in-time filter opened up. A withdrawal recorded AFTER the instant asked about then
+  //      counts, so rebuilding a historical campaign reports every send it made as non-compliant.
+  checkRejectedBy(
+    'consent gate: a resolver that reads records from after the instant is caught',
+    consentMutant(
+      RESOLVE,
+      '      record.recordedAt <= at,',
+      '      record.recordedAt <= Number.POSITIVE_INFINITY,',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'point-in-time',
+  )
+
+  // 72e. An unread log answered as a refusal. This is the shorter, never-throwing version of the
+  //      evaluator, and it turns a campaign whose recipient list and consent prefetch have drifted apart
+  //      into a clean run in which every message was "refused for no consent".
+  checkRejectedBy(
+    'consent gate: an unread consent log answered as a refusal is caught',
+    consentMutant(
+      PERMISSION,
+      '    if (log === undefined) {',
+      '    if (log === undefined) return false\n    if (false) {',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'an unread log is neither permission nor refusal',
+  )
+
+  // 72f. Fail-open at the choke point: anything that is not an explicit withdrawal reads as permission,
+  //      so `unknown` — never asked, unresolvable wording, a tied timestamp — becomes a send. Run against
+  //      the integration suite, because the claim is about the send and not about the resolver.
+  checkRejectedBy(
+    'consent gate: treating unknown as permission at the send path is caught',
+    consentMutant(
+      PERMISSION,
+      "    return resolveConsent(log, message.channel, input.purpose, input.at).state === 'granted'",
+      "    return resolveConsent(log, message.channel, input.purpose, input.at).state !== 'withdrawn'",
+      () => runExpectingFailure('pnpm', integration(CONSENT_ITEST)),
+    ),
+    'refuses a never-asked contact',
+  )
+
+  // 72g. The send-gating check opened to every purpose, so a `photography` grant becomes permission to
+  //      text somebody an offer. Nothing in the send path would report it: there IS a consent record.
+  checkRejectedBy(
+    'consent gate: a send gated on a non-messaging purpose is caught',
+    consentMutant(
+      CONTRACT,
+      '  (SEND_GATING_CONSENT_PURPOSES as readonly string[]).includes(purpose)',
+      '  purpose.length > 0',
+      () => runExpectingFailure('pnpm', unit(CONTRACT_SUITE)),
+    ),
+    'a send may be gated on',
+  )
+
+  // 72h-72i. The conventions gate must fire on THIS migration's append-only tables, not only on the ones
+  //          case 28 already covers. Both mutants are static — `pnpm db:conventions` reads the migration
+  //          files — so neither touches a database.
+  {
+    const RULE = 'append-only-table-must-refuse-update-and-delete'
+
+    checkRejectedBy(
+      'consent gate: a consent table with no UPDATE refusal fails the conventions gate',
+      consentMutant(
+        MIGRATION,
+        'create trigger consent_no_update before update on consent\n' +
+          '  for each row execute function refuse_consent_change();',
+        '-- mutant: the UPDATE refusal trigger is gone',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: consent is documented as raising on UPDATE and DELETE`,
+    )
+
+    checkRejectedBy(
+      'consent gate: a wording table with no DELETE refusal fails the conventions gate',
+      consentMutant(
+        MIGRATION,
+        'create trigger consent_wording_no_delete before delete on consent_wording\n' +
+          '  for each row execute function refuse_consent_wording_change();',
+        '-- mutant: the DELETE refusal trigger is gone',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: consent_wording is documented as raising on UPDATE and DELETE`,
+    )
+
+    // 72j. An `updated_at` on an append-only table. A row with no second version has no update time, and
+    //      the column is how somebody talks themselves into an UPDATE path.
+    checkRejectedBy(
+      'consent gate: an updated_at column on the consent table fails the conventions gate',
+      consentMutant(
+        MIGRATION,
+        '  contact_customer_id uuid            not null,',
+        '  updated_at          timestamptz,\n  contact_customer_id uuid            not null,',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: consent is append-only and has an updated_at column`,
+    )
+  }
+
+  // 72k-72l. The purity gate must fire on this package. `resolveConsent` is a fold over a log at an
+  //          instant, and the instant is an argument — the moment it reads a clock, "consent as at the
+  //          instant the campaign was assembled" and "consent now" become the same call, and a rebuilt
+  //          historical campaign silently answers the wrong question.
+  {
+    const FIXTURE = 'packages/core/src/consent/__gate_fixture__.ts'
+
+    checkRejectedBy(
+      'purity gate rejects a clock read in packages/core/src/consent',
+      withFixture(FIXTURE, 'export const resolvedNow = (): number => Date.now()', () =>
+        run('node', ['scripts/check-core-purity.mjs']),
+      ),
+      'inject a Clock and pass the instant in',
+    )
+
+    // 72l. The control, and it matters more than usual here: the resolver's whole signature is "take the
+    //      instant as an argument", so a gate that rejected that shape would make the module unwritable
+    //      and the case above would be satisfied by a purity check that failed on everything.
+    {
+      const result = withFixture(
+        FIXTURE,
+        [
+          'export const isBefore = (recordedAt: number, at: number): boolean => recordedAt <= at',
+          '',
+        ].join('\n'),
+        () => run('node', ['scripts/check-core-purity.mjs']),
+      )
+      check(
+        'purity gate allows a consent resolver whose instant is an argument',
+        !result.failed,
+        String(result.output),
+      )
+    }
+  }
+
+  // 72m-72x. The database's own rules, as known-bad fixtures against real PostgreSQL.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    const psqlProbe = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statements}; rollback;`,
+      ])
+
+    // A contact uuid literal, and no row has to exist for it: `consent.contact_customer_id` is
+    // deliberately NOT a foreign key (0024's rule for an append-only log), which is what makes these
+    // probes possible without creating a customer the rollback would have to remove.
+    const CONTACT = "'00000000-0000-7000-8000-00000000c703'::uuid"
+    const WORDING = "(select id from consent_wording where purpose = 'marketing' and version = 1)"
+    const HASH =
+      "(select content_hash from consent_wording where purpose = 'marketing' and version = 1)"
+
+    /** The consent insert, with any field overridden. The defaults are a row the database accepts. */
+    const consentRow = (overrides = {}) => {
+      const v = {
+        channel: "'sms'",
+        purpose: "'marketing'",
+        kind: "'granted'",
+        recordedAt: "'2099-11-01T10:00:00Z'",
+        wordingId: WORDING,
+        hash: HASH,
+        source: "'front_desk'",
+        actorKind: "'staff'",
+        actorLabel: "'Receptionist'",
+        locale: "'en'",
+        ...overrides,
+      }
+      return (
+        'insert into consent (contact_customer_id, channel, purpose, kind, recorded_at, ' +
+        'consent_wording_id, wording_hash, capture_source, capture_actor_kind, capture_actor_label, ' +
+        `capture_locale) values (${CONTACT}, ${v.channel}, ${v.purpose}, ${v.kind}, ` +
+        `${v.recordedAt}::timestamptz, ${v.wordingId}, ${v.hash}, ${v.source}, ${v.actorKind}, ` +
+        `${v.actorLabel}, ${v.locale})`
+      )
+    }
+
+    /** A wording version, with any field overridden. Version 99, so it cannot collide with the seed. */
+    const wordingRow = (overrides = {}) => {
+      const v = {
+        purpose: "'photography'",
+        version: '99',
+        textEn: "'A stated English consent statement.'",
+        textAr: "'صياغة عربية مذكورة بالكامل.'",
+        publishedAt: "'2099-11-01T10:00:00Z'",
+        provisional: 'true',
+        question: "'Y9-consent-wording'",
+        note: "'gate probe'",
+        ...overrides,
+      }
+      return (
+        'insert into consent_wording (purpose, version, text_en, text_ar, published_at, ' +
+        `is_provisional, open_question_id, provisional_note) values (${v.purpose}, ${v.version}, ` +
+        `${v.textEn}, ${v.textAr}, ${v.publishedAt}::timestamptz, ${v.provisional}, ${v.question}, ` +
+        `${v.note})`
+      )
+    }
+
+    // 72m. THE precondition, and it is a case rather than a comment. Every probe below references the
+    //      seeded marketing wording through a subquery, and a subquery that returns NULL would make the
+    //      wording reference absent — which trips `consent_grant_carries_its_wording` instead of the rule
+    //      under test, and reports a pass for the wrong reason.
+    {
+      const result = run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-At',
+        dbUrl ?? '',
+        '-c',
+        "select count(*) from consent_wording where purpose = 'marketing' and version = 1",
+      ])
+      check(
+        'consent gate: the seeded marketing wording the probes reference exists',
+        !result.failed && String(result.output).trim() === '1',
+        `expected exactly one seeded marketing wording version; psql said: ${String(result.output)}`,
+      )
+    }
+
+    const probes = [
+      {
+        // 72n. The positive control, first, because every probe below is a refusal and a database that
+        //      refused everything would satisfy all of them. If this one fails, none of the rest means
+        //      anything.
+        name: 'consent gate: a whole consent row is ACCEPTED, so the refusals below are about the fault',
+        accept: true,
+        sql: consentRow(),
+      },
+      {
+        // 72o. The hash the record claims does not match the wording stored. Computed by the database's
+        //      own function over ALTERED text, so it is the right hash of the wrong words — the only
+        //      interesting case, and the one a caller that re-read a republished version produces.
+        name: 'consent gate: a consent row whose wording hash does not match the stored text is refused',
+        rule: 'ZP002',
+        sql: consentRow({
+          hash:
+            "consent_wording_hash((select text_en from consent_wording where purpose = 'marketing' " +
+            "and version = 1) || ' We may also share your number with partners.', " +
+            "(select text_ar from consent_wording where purpose = 'marketing' and version = 1))",
+        }),
+      },
+      {
+        // 72p. A GRANT with no wording version. Not a proof of anything, and TDRA asks for the proof
+        //      before the blast rather than after the complaint.
+        name: 'consent gate: a grant with no wording version is refused',
+        rule: 'consent_grant_carries_its_wording',
+        sql: consentRow({ wordingId: 'null', hash: 'null' }),
+      },
+      {
+        // 72q. Half of the reference. A hash with no version cannot be verified, and a version with no
+        //      hash records nothing about what was shown.
+        name: 'consent gate: a wording reference with no hash is refused',
+        rule: 'consent_wording_reference_is_whole',
+        sql: consentRow({ hash: 'null' }),
+      },
+      {
+        name: 'consent gate: a placeholder capture actor is refused',
+        rule: 'consent_actor_is_stated',
+        sql: consentRow({ actorLabel: "'TBC'" }),
+      },
+      {
+        // 72r. NOT NULL rather than a CHECK, asserted by the column the message names.
+        name: 'consent gate: a NULL capture source is refused, naming the column',
+        rule: 'null value in column "capture_source"',
+        sql: consentRow({ source: 'null' }),
+      },
+      {
+        name: 'consent gate: a capture source outside the closed set is refused',
+        rule: 'consent_capture_source_check',
+        sql: consentRow({ source: "'email_blast'" }),
+      },
+      {
+        name: 'consent gate: a capture locale outside en/ar is refused',
+        rule: 'consent_capture_locale_check',
+        sql: consentRow({ locale: "'fr'" }),
+      },
+      {
+        // 72s. A purpose nobody declared. The foreign key into the vocabulary table is what makes the
+        //      closed set a fact rather than a convention the repository remembers.
+        name: 'consent gate: a purpose outside the vocabulary is refused',
+        rule: 'consent_purpose_fkey',
+        sql: consentRow({ purpose: "'service_updates'" }),
+      },
+      {
+        // 72t. UPDATE, for the OWNER. `revoke update from berelax_app` covers the application role; the
+        //      trigger is what covers a migration and the psql session a "one-off correction" comes from.
+        name: 'consent gate: an UPDATE to a consent row is refused for the table owner',
+        rule: 'ZP003',
+        sql: `${consentRow()}; update consent set capture_locale = 'ar' where contact_customer_id = ${CONTACT}`,
+      },
+      {
+        name: 'consent gate: a DELETE of a consent row is refused for the table owner',
+        rule: 'ZP003',
+        sql: `${consentRow()}; delete from consent where contact_customer_id = ${CONTACT}`,
+      },
+      {
+        name: 'consent gate: a whole wording version is ACCEPTED',
+        accept: true,
+        sql: wordingRow(),
+      },
+      {
+        // 72u. An UPDATE to a published statement. `content_hash` is GENERATED, so the edit would move
+        //      the hash with the text and every consent row pointing at it would carry a stale snapshot —
+        //      which is the only surviving evidence that the words changed.
+        name: 'consent gate: an UPDATE to a published wording row is refused for the table owner',
+        rule: 'ZP001',
+        sql:
+          `${wordingRow()}; update consent_wording set text_en = text_en || ' amended' ` +
+          "where purpose = 'photography' and version = 99",
+      },
+      {
+        name: 'consent gate: a DELETE of a published wording row is refused for the table owner',
+        rule: 'ZP001',
+        sql: `${wordingRow()}; delete from consent_wording where purpose = 'photography' and version = 99`,
+      },
+      {
+        // 72v. One text in BOTH columns. One keystroke away, and the silent failure it produces is a
+        //      client shown the wrong language with the record claiming otherwise.
+        //
+        //      The duplicated text is the ARABIC one, and that is not a detail: duplicating the English
+        //      text trips `consent_wording_ar_is_arabic_script` first, and this probe then passed by the
+        //      wrong rule — which `checkRejectedBy` is precisely there to refuse (ADR 0003). Using the
+        //      Arabic text in both columns leaves `consent_wording_languages_differ` as the only rule the
+        //      row can bounce off.
+        name: 'consent gate: one text in both language columns is refused',
+        rule: 'consent_wording_languages_differ',
+        sql: wordingRow({ textEn: "'صياغة عربية مذكورة بالكامل.'" }),
+      },
+      {
+        name: 'consent gate: an Arabic column with no Arabic script is refused',
+        rule: 'consent_wording_ar_is_arabic_script',
+        sql: wordingRow({ textAr: "'Nous vous enverrons des offres.'" }),
+      },
+      {
+        name: 'consent gate: a placeholder wording is refused',
+        rule: 'consent_wording_en_is_stated',
+        sql: wordingRow({ textEn: "'Wording TBC'" }),
+      },
+      {
+        // 72w. A control character in the wording. U+001F is the separator `consent_wording_hash` puts
+        //      between the two texts, so a text containing one could make two different pairs hash
+        //      identically — the exact ambiguity the separator exists to remove.
+        name: 'consent gate: a control character in the wording is refused',
+        rule: 'consent_wording_no_control_characters',
+        sql: wordingRow({ textEn: "('A stated' || chr(31) || 'statement.')" }),
+      },
+      {
+        // 72x. A caller-supplied hash on the wording row itself. GENERATED ALWAYS is what makes a wording
+        //      row unable to lie about its own words, and a supplied value has to bounce rather than win.
+        name: 'consent gate: a supplied content hash on a wording row is refused',
+        rule: 'cannot insert a non-DEFAULT value into column "content_hash"',
+        sql:
+          'insert into consent_wording (purpose, version, text_en, text_ar, published_at, ' +
+          "content_hash, is_provisional, open_question_id) values ('photography', 98, 'A statement.', " +
+          "'صياغة عربية.', '2099-11-01T10:00:00Z'::timestamptz, sha256('x'::bytea), true, " +
+          "'Y9-consent-wording')",
+      },
+    ]
+
+    for (const probe of probes) {
+      const result = psqlProbe(probe.sql)
+      if (probe.accept === true) {
+        check(probe.name, !result.failed, String(result.output))
+      } else {
+        checkRejectedBy(probe.name, result, probe.rule)
+      }
+    }
+  }
+}
+
+// 73a-73o. (G-SEO-02) The seo_agent cage: publish denied at the permission layer, the target allowlist
+//           enforced by the database, and the untrusted-data envelope every SEO prompt must go through.
+//
+//    Everything in this unit is a refusal, and a refusal has the property that nothing fails when it stops
+//    working. A principal that quietly acquired `content:publish` still returns a permission set; a
+//    constraint dropped from a table still accepts every legitimate row; a filter that stopped scanning still
+//    writes candidates; an envelope with no gutter still produces a region. Each of those is green.
+//
+//    So each one is broken here deliberately, and the suite that must notice is named. Three of the cases are
+//    the acceptance criteria's own fixtures — 73a grants publish to the principal, 73e inserts each of the
+//    four denied targets against real PostgreSQL, and 73k builds a prompt module with no envelope — and the
+//    rest close the ways those three could be satisfied by something other than the rule under test.
+//
+//    73c is the one that is easy to leave out and is the most important. "The seo_agent is refused" is also
+//    satisfied by a matrix that refuses everybody, which is a broken product that passes a security test. It
+//    breaks the PERMITTED half and watches the control fail.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const BOUNDARIES = [
+    'exec',
+    'depcruise',
+    '--config',
+    '.dependency-cruiser.cjs',
+    'packages',
+    'apps',
+  ]
+
+  const SEO_AGENT = 'packages/core/src/access/principals/seo-agent.ts'
+  const POLICY = 'packages/core/src/access/principal-policy.ts'
+  const PUBLICATION = 'packages/core/src/access/publication.ts'
+  const ALLOWLIST = 'packages/core/src/seo/target-allowlist.ts'
+  const SCREEN = 'packages/core/src/seo/candidate-screen.ts'
+  const ENVELOPE = 'packages/core/src/seo/untrusted-envelope.ts'
+  const POLICY_TEST = 'packages/core/src/access/seo-agent.policy.test.ts'
+  const FUZZ_TEST = 'packages/core/src/seo/untrusted-envelope.fuzz.test.ts'
+  const CAGE_ITEST = 'packages/google/src/seo/seo-agent-cage.itest.ts'
+
+  /**
+   * One anchored edit to a shipped file, asserting the anchor is still there AND that the edit moved it.
+   *
+   * Both halves, because either alone leaves a case that reports PASS having tested nothing: `String.replace`
+   * with a missing needle returns the text unchanged, and a replacement that happens to equal its anchor does
+   * the same. The mutant would then be the shipped code passing its own tests.
+   */
+  const seoMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        if (!text.includes(anchor)) {
+          throw new Error(`the G-SEO-02 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        const mutated = text.replace(anchor, replacement)
+        if (mutated === text) {
+          throw new Error(`the G-SEO-02 gate's edit to ${path} changed nothing: ${anchor}`)
+        }
+        return mutated
+      },
+      body,
+    )
+
+  // 73a. The criterion's own fixture, word for word: grant publish to the seo_agent principal and assert the
+  //      policy test FAILS. Nothing else in the build would notice — the agent would simply be able to
+  //      publish, which is what every part of this unit exists to prevent.
+  checkRejectedBy(
+    'seo gate: granting publish to the seo_agent principal fails the policy suite',
+    seoMutant(
+      SEO_AGENT,
+      "  'seo_suggestion:propose',",
+      "  'seo_suggestion:propose',\n  'content:publish',",
+      () => runExpectingFailure('pnpm', unit(POLICY_TEST)),
+    ),
+    'excludes publish, revalidate, sitemap, redirect, robots, noindex, canonical and cms writes',
+  )
+
+  // 73b. The same hole through the door somebody would actually walk through: the agent resolved as the
+  //      `system` ROLE. That role is every background worker in the product, so it holds `content:write` and
+  //      `campaign:send` — written for the campaign sender and the CMS seeder — and an agent modelled as it
+  //      inherits both. This is the mistake the principal layer exists for, and it reads as a simplification.
+  checkRejectedBy(
+    'seo gate: an agent principal resolved through the system ROLE fails the policy suite',
+    seoMutant(
+      POLICY,
+      '  const declared = AGENT_PRINCIPAL_GRANTS[principal.agent]',
+      "  const declared = resolvedPermissionsOf({ kind: 'staff', role: 'system' })",
+      () => runExpectingFailure('pnpm', unit(POLICY_TEST)),
+    ),
+    'is narrower than the system ROLE',
+  )
+
+  // 73c. The control, and the case that matters most. Break the PERMITTED half — resolve every staff role to
+  //      nothing — and the "a permitted principal performs every one of the same nine actions" assertion must
+  //      fail. Without this case, every refusal above is also satisfied by an authorisation matrix that
+  //      refuses everybody, and that matrix passes a security review and ships a product nobody can use.
+  checkRejectedBy(
+    'seo gate: a matrix that refuses EVERYBODY fails the permitted-principal control',
+    seoMutant(
+      POLICY,
+      "    return definition.permissions === 'all' ? PERMISSIONS : definition.permissions",
+      '    return []',
+      () => runExpectingFailure('pnpm', unit(POLICY_TEST)),
+    ),
+    'a permitted principal performs every one of the same nine actions',
+  )
+
+  // 73d. The refusal moved OUT of the policy module and into the publication function — the same class, the
+  //      same message, the same status code, raised one file further out. This is precisely the shape the
+  //      criterion distinguishes from a permission-layer denial, and the only assertion that can see the
+  //      difference is the one that reads the call site off the stack. The import line moves with it, because
+  //      a mutant that does not compile is a mutant that proves nothing.
+  checkRejectedBy(
+    'seo gate: a refusal constructed in the publication function fails the call-site assertion',
+    withEditedFile(
+      PUBLICATION,
+      (text) => {
+        const IMPORT = "import { assertPrincipalMay, type Principal } from './principal-policy.ts'"
+        const CALL =
+          '  assertPrincipalMay(args.principal, permissionForPublicationAction(args.action))'
+        if (!text.includes(IMPORT) || !text.includes(CALL)) {
+          throw new Error(`the G-SEO-02 gate's anchors are no longer in ${PUBLICATION}`)
+        }
+        return text
+          .replace(
+            IMPORT,
+            "import {\n  assertPrincipalMay,\n  PrincipalDenied,\n  principalCan,\n  type Principal,\n} from './principal-policy.ts'",
+          )
+          .replace(
+            CALL,
+            '  const needed = permissionForPublicationAction(args.action)\n' +
+              '  if (!principalCan(args.principal, needed)) {\n' +
+              '    throw new PrincipalDenied(args.principal, needed)\n' +
+              '  }',
+          )
+      },
+      () => runExpectingFailure('pnpm', unit(POLICY_TEST)),
+    ),
+    'the refusal originates in the policy module, by error type and by call site',
+  )
+
+  // 73e. The target allowlist as the DATABASE enforces it. Four denied target kinds, and the same four
+  //      surfaces again wearing an allowlisted kind — which is the case the kind allowlist alone cannot see,
+  //      because `target_kind: 'body_copy'` with `target_ref: '/robots.txt'` is an honest-looking label on the
+  //      forbidden edit.
+  //
+  //      Every probe must be refused BY THE NAME of the constraint written for it. A bare non-zero exit is
+  //      also what a typo in a column name produces, and the constraint under test would then be dead while
+  //      this file reported PASS for ever (ADR 0003). Each runs inside `begin; … rollback;`, so a probe that
+  //      is wrongly ACCEPTED leaves nothing behind either.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    const SITE = "'sc-domain:gate-fixture.example'"
+    const candidate = (kind, ref) =>
+      'insert into seo_suggestion_candidate (site_url, finding_kind, target_kind, target_ref, query) ' +
+      `values (${SITE}, 'ctr_outlier', '${kind}', '${ref}', 'massage abu dhabi')`
+    const psqlProbe = (statement) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statement}; rollback;`,
+      ])
+
+    const probes = [
+      // The four the criterion names, as a target kind would spell them.
+      {
+        name: 'seo gate: the database rejects a suggestion targeting robots.txt',
+        rule: 'seo_suggestion_candidate_target_kind_allowlisted',
+        sql: candidate('robots_txt', '/spa#title'),
+      },
+      {
+        name: 'seo gate: the database rejects a suggestion targeting a canonical tag',
+        rule: 'seo_suggestion_candidate_target_kind_allowlisted',
+        sql: candidate('canonical', '/spa#title'),
+      },
+      {
+        name: 'seo gate: the database rejects a suggestion targeting a redirect rule',
+        rule: 'seo_suggestion_candidate_target_kind_allowlisted',
+        sql: candidate('redirect', '/spa#title'),
+      },
+      {
+        name: 'seo gate: the database rejects a suggestion targeting a noindex directive',
+        rule: 'seo_suggestion_candidate_target_kind_allowlisted',
+        sql: candidate('noindex', '/spa#title'),
+      },
+      // The same four surfaces under an allowlisted kind. Different constraint, same refusal.
+      {
+        name: 'seo gate: the database rejects robots.txt disguised as body copy',
+        rule: 'seo_suggestion_candidate_target_ref_is_not_a_machine_directive',
+        sql: candidate('body_copy', '/robots.txt'),
+      },
+      {
+        name: 'seo gate: the database rejects a canonical disguised as a page title',
+        rule: 'seo_suggestion_candidate_target_ref_is_not_a_machine_directive',
+        sql: candidate('page_title', 'link[rel=canonical]'),
+      },
+      {
+        name: 'seo gate: the database rejects a redirect rule disguised as a heading',
+        rule: 'seo_suggestion_candidate_target_ref_is_not_a_machine_directive',
+        sql: candidate('heading', 'redirect_map:/old-price-list'),
+      },
+      {
+        name: 'seo gate: the database rejects a noindex directive disguised as a meta description',
+        rule: 'seo_suggestion_candidate_target_ref_is_not_a_machine_directive',
+        sql: candidate('meta_description', 'meta[name=robots][content=noindex]'),
+      },
+      // And the finding vocabulary, so a new analysis is a migration rather than a row somebody inserted.
+      {
+        name: 'seo gate: the database rejects a finding kind outside the closed set',
+        rule: 'seo_suggestion_candidate_finding_kind_check',
+        sql: candidate('page_title', '/spa#title').replace('ctr_outlier', 'llm_hunch'),
+      },
+    ]
+
+    if (!dbUrl) {
+      check(
+        'the seo suggestion-target constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      for (const { name, rule, sql: statement } of probes) {
+        checkRejectedBy(name, psqlProbe(statement), rule)
+      }
+
+      // The control, and the reason the nine above mean anything: the same table accepts the legitimate row.
+      // Without it, a renamed table or a broken connection string would reject every probe and this gate
+      // would report nine passes while examining nothing.
+      const allowed = psqlProbe(candidate('page_title', '/treatments/hot-oil-massage#title'))
+      check(
+        'seo gate: the database accepts a title suggestion for a treatment page',
+        !allowed.failed,
+        `rejected a legitimate suggestion — the allowlist is refusing everything:\n${allowed.output}`,
+      )
+    }
+  }
+
+  // 73f. One marker removed from the core allowlist, so the code and the SQL predicate disagree. Every
+  //      single-marker assertion still passes; only the agreement case can see it. This is the drift that
+  //      0026's `is_placeholder_text` records as the cost of two implementations of one list.
+  checkRejectedBy(
+    'seo gate: a marker removed from the core allowlist fails the SQL-agreement suite',
+    seoMutant(
+      ALLOWLIST,
+      // Anchored on the marker BEFORE it, because `'canonical',` also appears in
+      // DENIED_SUGGESTION_TARGET_KINDS earlier in the file — and `String.replace` takes the first match, so a
+      // bare anchor edited the wrong list and the case failed on a length assertion instead of on the
+      // agreement it exists to test.
+      "  'x-robots-tag',\n  'canonical',",
+      "  'x-robots-tag',",
+      () => runExpectingFailure('pnpm', integration(CAGE_ITEST)),
+    ),
+    'agrees on every specimen, in both directions',
+  )
+
+  // 73g. The banned-claim screen switched off at the ingest boundary. The candidate is then written, and the
+  //      term is in our records — in a worklist an owner reads and in whatever prompt a later unit builds
+  //      from the row. Nothing about the run looks different: same counts, same success, one more row.
+  checkRejectedBy(
+    'seo gate: an ingest screen that stops scanning the query fails the persisted-row suite',
+    seoMutant(
+      SCREEN,
+      '    const term = proposal.query === null ? null : bannedTermIn(proposal.query, policy)',
+      '    const term = null',
+      () => runExpectingFailure('pnpm', integration(CAGE_ITEST)),
+    ),
+    'persists the clean findings and no row whose query carries the term',
+  )
+
+  // 73h. The redaction removed from the drop log. The row is still not written, so every count still agrees —
+  //      and the banned phrase is now verbatim in the log stream, which is the place that gets grepped,
+  //      aggregated and pasted into a ticket. The filter would have moved the problem rather than removed it.
+  checkRejectedBy(
+    'seo gate: a drop logged with the term in full fails the redaction suite',
+    seoMutant(
+      SCREEN,
+      '  const masked = REDACTION_BULLET.repeat(trimmed.length - 1)',
+      '  const masked = trimmed.slice(1)',
+      () => runExpectingFailure('pnpm', integration(CAGE_ITEST)),
+    ),
+    'logs the drop with the term redacted',
+  )
+
+  // 73i. The gutter emptied. The envelope still produces a region with two fences, and every line of a
+  //      fetched page can now be a fence at column zero — which is the whole injection surface, restored by
+  //      deleting two characters.
+  checkRejectedBy(
+    'seo gate: an envelope with no gutter fails the 200-string fuzz suite',
+    seoMutant(
+      ENVELOPE,
+      "export const SEO_UNTRUSTED_GUTTER = '| '",
+      "export const SEO_UNTRUSTED_GUTTER = ''",
+      () => runExpectingFailure('pnpm', unit(FUZZ_TEST)),
+    ),
+    'holds for all 200 on every one of the four sources',
+  )
+
+  // 73j. The other half of the same defence: the fingerprint unbound from the content. A constant fence is
+  //      one an attacker can write, because they no longer have to know a value derived from their own
+  //      payload. Separate from 73i because either alone is a defence and the corpus contains payloads that
+  //      only the pair refuses.
+  checkRejectedBy(
+    'seo gate: an envelope whose fence is a constant fails the 200-string fuzz suite',
+    seoMutant(
+      ENVELOPE,
+      '  const fingerprint = fingerprintOf(fenced)',
+      "  const fingerprint = '00000000'",
+      () => runExpectingFailure('pnpm', unit(FUZZ_TEST)),
+    ),
+    'holds for all 200 on every one of the four sources',
+  )
+
+  // 73k. The dependency rule's known-bad fixture, and the ONLY evidence that rule is alive: it matches no
+  //      module on the committed tree, because G-SEO-05 adds the LLM drafting. A rule that can never fire on
+  //      the tree it guards is a rule nobody has seen fail (ADR 0003).
+  checkRejectedBy(
+    'seo gate: a prompt module that does not import the untrusted envelope is rejected',
+    withFixture(
+      'packages/google/src/seo/__gate_fixture__prompt.ts',
+      "import type { LlmProvider } from '@berelax/providers/llm'\nexport type Probe = LlmProvider",
+      () => run('pnpm', BOUNDARIES),
+    ),
+    'seo-prompt-must-use-the-untrusted-envelope',
+  )
+
+  // 73l. The control for 73k, and it is not a formality: a required rule that could not be satisfied would
+  //      condemn every prompt module ever written, and the only way to satisfy this one is a DIRECT import of
+  //      the envelope — @berelax/core exports its barrel and nothing else, so the import has to come from
+  //      inside packages/core/src/seo. That constraint is the design (a prompt is a pure function and belongs
+  //      in core, where it can be fuzzed) and this case is what proves it is reachable.
+  {
+    const satisfied = withFixture(
+      'packages/core/src/seo/__gate_fixture__prompt.ts',
+      "import { encloseUntrustedSeoData } from './untrusted-envelope.ts'\n" +
+        'export const probe = (html: string): string =>\n' +
+        "  encloseUntrustedSeoData({ source: 'fetched_html', text: html }).region",
+      () => run('pnpm', BOUNDARIES),
+    )
+    check(
+      'seo gate: a prompt module that DOES import the untrusted envelope is accepted',
+      !satisfied.failed && String(satisfied.output).includes('no dependency violations found'),
+      String(satisfied.output),
+    )
+  }
+
+  // 73m. The companion rule. Without it the convention is the whole defence: a module called analysis.ts
+  //      builds a prompt, reaches the provider, and satisfies both rules by matching neither.
+  checkRejectedBy(
+    'seo gate: a non-prompt SEO module reaching an LLM provider is rejected',
+    withFixture(
+      'packages/google/src/seo/__gate_fixture__analysis.ts',
+      "import type { LlmProvider } from '@berelax/providers/llm'\nexport type Probe = LlmProvider",
+      () => run('pnpm', BOUNDARIES),
+    ),
+    'seo-llm-only-through-a-prompt-module',
+  )
+
+  // 73n. And the publish path itself. The permission layer is what refuses a publish; this is the half that
+  //      says the agent's code cannot hold a reference to one, so the refusal is not the only thing standing
+  //      between an LLM and a live site.
+  checkRejectedBy(
+    'seo gate: an SEO module importing the cache-revalidation API is rejected',
+    withFixture(
+      'packages/google/src/seo/__gate_fixture__publisher.ts',
+      "import { revalidatePath } from 'next/cache'\nexport const probe = () => revalidatePath('/pricing')",
+      () => run('pnpm', BOUNDARIES),
+    ),
+    'seo-agent-must-not-reach-a-publish-path',
+  )
+
+  // 73o. The control on all four fixtures above: the committed tree cruises clean, and it cruised something.
+  //      ADR 0002's green tick on zero modules is the failure this second half exists for — three of the four
+  //      cases above are a difference against the violation list, and a cruise that examined nothing reports
+  //      no violations too.
+  {
+    const clean = run('pnpm', BOUNDARIES)
+    const modules = Number(/(\d+) modules/.exec(String(clean.output))?.[1] ?? 0)
+    check(
+      'seo gate: the committed tree cruises clean, over a non-zero number of modules',
+      !clean.failed && modules > 100,
+      `modules=${modules}\n${String(clean.output)}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

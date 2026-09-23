@@ -4550,7 +4550,7 @@ units:
       resolveConsent is a point-in-time function over the record log, and it fails closed to 'unknown',
       never to 'granted'.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-01
@@ -4579,6 +4579,64 @@ units:
     - 'H03 seed test: the fixture salon contains at least one contact in each (channel x purpose) state
       - granted, withdrawn, never-asked - and every migration-style reconstructed contact has zero promotional
       consent rows'
+    - 'NOTE: scoped where a dependency does not exist yet, plus the decisions this unit had to make.
+      Beyond the four files this list names it adds packages/db/migrations/0056_consent.sql,
+      packages/shared/src/schemas/consent.ts (the zod contract - see (8)),
+      packages/core/src/consent/send-permission.ts (the bridge to B-MSG-02''s gate - see (2)) and
+      packages/fixtures/src/consent.itest.ts. (1)
+      There is NO consent capture surface. No booking form collects consent (B-UI-02 owns the customer
+      flow), the preference centre a withdrawal really arrives through is C-CRM-04''s, and nothing
+      publishes a wording version through a screen. Capture is exercised through the repository
+      (recordConsent, withdrawConsent, publishConsentWording) and through the seed, both of which go
+      past the same zod contract and the same constraints a real capture would. The acceptance list
+      asks for no page and none is built. (2) There is no PROMOTIONAL SEND PATH to wire the evaluator
+      into: B-MSG-03 owns scheduled steps and C-AUTO owns campaigns, both todo. So the choke point is
+      proved end to end in packages/fixtures/src/consent.itest.ts, which drives the real sendMessage
+      with the real gate and consentGateEvaluator over real rows - granted sends, withdrawn and
+      never-asked and reconstructed are refused_no_consent, and a recipient absent from the prefetch is
+      blocked_unevaluable with evaluator=consent. B-LIFE-02''s OTP route deliberately still throws from
+      hasConsent: the evaluator is built over a PREFETCHED map of logs because the gate is synchronous,
+      and that route sends one transactional OTP and reads no consent at all, so a prefetch there would
+      be a query that decides nothing. Its comment was corrected to say so rather than to go on claiming
+      the store does not exist. (3) EMAIL recipients cannot be addressed. customer has no email column
+      (C-CRM-01''s NOTE 3: nothing in the build collects one), so readContactsByPhone resolves E.164
+      recipients only. Email consent rows are stored, read and resolved exactly like the other two
+      channels - the seed carries them and the itest asserts them - and mapping an address to a contact
+      is C-CRM-04''s, which hashes recipients under a pepper. (4) consent.contact_customer_id is a plain
+      uuid with NO foreign key, the choice 0005, 0016 and 0024 make for an append-only log: a cascade
+      would fire the row-level refusal trigger and make `delete from customer` raise for every caller
+      including the four suites that clear that table, and the record has to outlive the erasure of the
+      identity it is about (docs/04 SS4, SS8). C-CRM-05''s merge therefore re-points consent by INSERTing
+      a re-pointed row rather than updating one, and resolving two logs to the strictest state is its
+      acceptance rather than this unit''s. (5) The purpose vocabulary is a TABLE and not the Postgres
+      enum the provisional line names, for C-CRM-01''s stated reason: an enum label cannot carry
+      is_provisional, an OPEN-QUESTIONS id or a note, and brief rule 15 requires one. Y9-consent-purpose
+      is a new row in docs/OPEN-QUESTIONS.md, the four labels reach the Unconfirmed Assumptions panel
+      through unconfirmedAssumptionRows, and consent_purpose.is_send_gating is pinned to
+      SEND_GATING_CONSENT_PURPOSES in @berelax/shared - clinical_processing and photography are lawful
+      bases for holding a record, not permission to message anybody. Transactional service updates are
+      deliberately absent from the vocabulary. (6) The WORDING TEXT is this build''s draft
+      (Y9-consent-wording, also new). It opens with `[DRAFT WORDING - not approved copy]` in both
+      languages as well as carrying the provenance trio, because rule 15''s point is that plausible legal
+      copy in this table is indistinguishable from approved legal copy to anybody reading the row. It
+      deliberately does NOT carry a marker is_placeholder_text() refuses: a wording the database would
+      not store makes every consent path untestable. Answering the question publishes version 2;
+      consent_wording is append-only and version 1 stays as the record of what earlier consents were
+      given under. (7) Y8-customers and Y1-entity, which this unit is blocked_on_owner for, are
+      unchanged. The real customer list does not exist, so `every migration-style reconstructed contact
+      has zero promotional consent rows` is asserted against a seeded contact with created_via=import
+      and a control that a non-imported contact does have rows; and Federal PDPL remains the assumption.
+      (8) The zod contract lives in packages/shared/src/schemas/consent.ts rather than in core, the same
+      placement schemas/catalogue.ts argues for: packages/db validates at the write and may not import
+      packages/core, so a contract declared in core would be one db could not use. resolveConsent itself
+      is in packages/core as the acceptance requires. (9) A WITHDRAWAL is accepted with no wording
+      version and a GRANT is not (consent_grant_carries_its_wording). The realistic withdrawal is
+      somebody telling the receptionist to stop texting them, and a system that refused to record it
+      until an operator produced a wording version would be easier to opt into than out of. (10) The
+      acceptance line about `a published consent_wording row` is satisfied more strictly than it asks:
+      there is no draft state and no nullable published_at, so UPDATE and DELETE raise for EVERY wording
+      row. A wording nobody has shown to anybody has no reason to be in the table that records what was
+      shown, and a mutable draft row is an UPDATE path into an append-only table.'
     files:
     - packages/db/src/schema/consent.ts
     - packages/core/src/consent/resolve.ts
@@ -11185,7 +11243,7 @@ units:
       a prompt or a UI guard. Suggestion targets are restricted to an allowlist that excludes robots.txt,
       canonicals, redirects and noindex, enforced by a check constraint as well as code.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F07
@@ -11208,6 +11266,68 @@ units:
     - 'The keyword blocking filter from the regulatory profile is applied at the ingest boundary: a banned
       medical term present in the GSC fixture never appears in any persisted candidate row, and the drop
       is logged with the term redacted'
+    - 'NOTE: the permission layer is where F07 decides, and it grew a PRINCIPAL. `can(role, permission)` is
+      unchanged; `packages/core/src/access/principal-policy.ts` adds the other kind of caller — a discriminated
+      `Principal` that is either a staff role or a declared agent id — and it is the only function in the
+      repository that raises `PrincipalDenied`, which is what makes "the refusal originated in the policy
+      module" checkable by reading the top stack frame. The seo_agent does NOT resolve through the `system`
+      ROLE, and that is the whole point: `ROLE_DEFINITIONS.system` holds `content:write` and `campaign:send`
+      because it is every background worker in the product, so an agent modelled as that role would have
+      inherited both and the cage would have been open before the agent existed. Gate case 73b breaks it
+      exactly that way. Seven permissions were added to F07''s catalogue — cache:revalidate, sitemap:write,
+      redirect:write, robots:write, noindex:write, canonical:write and seo_suggestion:propose — because the
+      criterion names eight capabilities that must be absent BY NAME, and six of them had no permission string
+      to be absent from. No interactive role gained any of them; the owner holds them through its wildcard.'
+    - 'NOTE: the publication control plane overlap with W-SITE-10, scoped explicitly. This unit needed a
+      publication function to be refused at, and W-SITE-10 (which owns the draft -> lint_passed -> approved ->
+      published state machine, the banned-claims lint, the named approval against a content hash and the
+      append-only publication record) is still `todo`. So G-SEO-02 built ONLY the authorisation chokepoint:
+      `packages/core/src/access/publication.ts`, which declares the nine publication actions, maps each to its
+      permission, and performs one by taking the effect as a thunk so a refusal cannot be a no-op. It publishes
+      nothing and decides nothing — it calls `assertPrincipalMay` and lets the policy layer''s error through.
+      W-SITE-10 should build its state machine and its record BEHIND that chokepoint rather than beside it; its
+      own acceptance line "the SEO agent''s role grant set excludes the publish permission ... and an explicit
+      publish attempt with that credential returns 403" is already satisfied at the policy layer and needs the
+      403 mapping at its route, not a second decision.'
+    - 'NOTE: the migration is 0057_seo_target_allowlist.sql, not the 0046 this entry''s files list guessed at,
+      and SCHEMA_VERSION moves to 57. 55 and 56 are held by units in flight alongside this one, so the gap is
+      left rather than closed — renumbering would apply one number to two different migrations on two branches.
+      The table is `seo_suggestion_candidate`: the one table the `system:seo_agent` principal may write to, with
+      `target_kind` checked against the seven allowlisted copy surfaces and `target_ref` checked against a new
+      IMMUTABLE, deliberately NOT STRICT `seo_target_ref_is_denied()`. It carries NO foreign key to
+      `agent_run` — three integration suites delete from that table and a candidate must outlive the run that
+      produced it, the same decision 0021 makes for `agent_run.job_id`. G-SEO-05''s `seo_suggestion` (before,
+      after, the NOT NULL rollback descriptor) is a separate table and is still that unit''s to add.'
+    - 'NOTE: the banned-claim filter has NO database counterpart, by decision rather than omission. The target
+      allowlist is a closed set of literal labels plus a substring match over a locator, so SQL mirrors it
+      exactly and the mirror is held to the code specimen by specimen. The claim filter is `containsPhrase` over
+      `lexiconTokens` — accent folding, splitting on every non-alphanumeric character, and the inflection
+      tolerance that makes "healing" the same claim as "heal" — and `lexicon.ts` says in its own comments why
+      that comparison must exist once: a phrase the catalogue lint refuses on a menu must not be admitted
+      elsewhere by a second, slightly different reading of the same list. So the filter runs at the ingest
+      boundary in code and is proved over the rows the table actually holds, counted in SQL. Relatedly, the
+      screen deliberately does NOT scan `target_ref`: a locator is not a claim, and this site''s locators live
+      under `/treatments/`, which tokenises to a word the stricter default profile bans — scanning it would drop
+      every candidate for every treatment page.'
+    - 'NOTE: `seo-prompt-must-use-the-untrusted-envelope` matches no module on the committed tree, and is
+      therefore proved ONLY by its known-bad fixture (gate 73k) plus a control fixture that satisfies it (73l).
+      G-SEO-05 adds the LLM drafting; naming the shape now is the same decision
+      `reviews-generator-must-not-reach-clinical-data` records for the intake repository that does not yet
+      exist. Two consequences for G-SEO-05. First, the rule is satisfiable only by a RELATIVE import of
+      `packages/core/src/seo/untrusted-envelope.ts`, because `@berelax/core` exports its barrel and nothing
+      else — so the SEO prompt builder must live in `packages/core/src/seo`, pure and fuzzable, exactly where
+      `buildReviewReplyPrompt` lives. Second, `seo-llm-only-through-a-prompt-module` forbids every other SEO
+      module from reaching `packages/providers/src/llm`, so the module that talks to a model is nameable.
+      `seo-agent-must-not-reach-a-publish-path` is a third rule, added because "denied where it cannot be
+      bypassed" has a structural half: it closes @berelax/cms, next/cache and publication.ts to the agent''s
+      modules. It cannot close the `@berelax/core` BARREL, which the agent legitimately imports for
+      `assertPrincipalMay`; that half is the policy layer''s and is asserted rather than linted.'
+    - 'NOTE: the integration test is `packages/google/src/seo/seo-agent-cage.itest.ts`, not in
+      `packages/fixtures`. The core-plus-db pairing would belong there, but the third participant is
+      `ingestSuggestionCandidates` in `@berelax/google`, and `packages/fixtures` does not depend on that
+      package. Widening the dependency graph to host one file was the worse trade against putting it beside
+      `nightly-pass.itest.ts`, which already drives `@berelax/db` from that package for the same reason. No port
+      band was taken: nothing here starts a server (rule 18).'
     files:
     - packages/core/src/access/principals/seo-agent.ts
     - packages/core/src/seo/target-allowlist.ts

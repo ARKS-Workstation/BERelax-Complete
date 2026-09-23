@@ -184,6 +184,59 @@ module.exports = {
       },
     },
     {
+      name: 'seo-llm-only-through-a-prompt-module',
+      comment:
+        'Only a *prompt* module under packages/google/src/seo may reach an LLM provider. G-SEO-02 requires ' +
+        'that every byte the SEO agent did not write passes through one untrusted-data envelope ' +
+        '(packages/core/src/seo/untrusted-envelope.ts), and the companion rule ' +
+        'seo-prompt-must-use-the-untrusted-envelope requires every *prompt* module to import it. Those two ' +
+        'rules only add up to the criterion if the set of SEO modules that can reach a model IS the set of ' +
+        'prompt modules — otherwise a module called analysis.ts builds a prompt, reaches the provider, and ' +
+        'satisfies both rules by matching neither. ' +
+        'WHY THIS IS A RULE AND NOT A CONVENTION. The SEO agent’s inputs are fetched competitor HTML, SERP ' +
+        'text and Search Console query strings: all three arrive through an API, which is exactly why they ' +
+        'read as trustworthy at the call site — nobody typed them into our form. An `${html}` in a template ' +
+        'literal handed to a model is one line, works, and is invisible in review. ' +
+        'WHAT IS DELIBERATELY NOT FORBIDDEN. The provider barrel is already closed to everything outside a ' +
+        'transport by messaging-providers-only-inside-a-transport, so this names the llm subpath only; and ' +
+        'tests are exempt, because a fuzz corpus has to be able to drive a fake provider directly.',
+      severity: 'error',
+      from: {
+        path: '^packages/google/src/seo/',
+        pathNot: ['^packages/google/src/seo/[^/]*prompt[^/]*\\.ts$', '\\.(test|itest)\\.ts$'],
+      },
+      to: { path: '^packages/providers/src/llm/' },
+    },
+    {
+      name: 'seo-agent-must-not-reach-a-publish-path',
+      comment:
+        'No module of the SEO agent may import the CMS, Next’s cache API or the publication chokepoint. ' +
+        'docs/07 §3: the agent is "propose-only, with publish denied at the permission layer — not a prompt ' +
+        'instruction, an API permission", and G-SEO-02 is the unit that builds that cage. The permission ' +
+        'layer is the guarantee; this rule is the second half of it, which is that the agent’s code cannot ' +
+        'hold a reference to the thing it may not do. A refusal it never reaches is a refusal that cannot be ' +
+        'argued with at three in the morning. ' +
+        'WHAT THIS RULE CAN AND CANNOT DO, because the difference is the whole design. Dependency-cruiser ' +
+        'sees module-to-module edges, so it closes the paths a module names DIRECTLY: @berelax/cms and ' +
+        'next/cache (neither is a dependency of packages/google, so both resolve to their bare names — the ' +
+        'same reason core-must-be-pure carries three alternations), and ' +
+        'packages/core/src/access/publication.ts by path. It does NOT close the @berelax/core BARREL, which ' +
+        'the agent legitimately imports and which re-exports performPublication: that is the loophole ' +
+        'messaging-providers-only-inside-a-transport documents, and here it cannot be closed by banning the ' +
+        'barrel because the barrel is where assertPrincipalMay comes from. The barrel half is closed by the ' +
+        'POLICY layer instead and not by a lint: a caller that reaches performPublication through the barrel ' +
+        'and calls it with the seo_agent principal gets PrincipalDenied, which is asserted in ' +
+        'packages/core/src/access/seo-agent.policy.test.ts. ' +
+        'The known-bad fixture is in scripts/test-gates.mjs and asserts this rule fires BY NAME.',
+      severity: 'error',
+      from: { path: '^(packages/google/src/seo/|packages/core/src/seo/)' },
+      to: {
+        path:
+          '^packages/cms/|^@berelax/cms(/|$)|^next(/|$)|(^|/)node_modules/next/' +
+          '|^packages/core/src/access/publication\\.ts$',
+      },
+    },
+    {
       name: 'no-lucide-outside-the-icon-wrapper',
       comment:
         'Only packages/ui/src/icon.tsx may import Lucide. docs/08 §7 asks for it "behind a wrapped ' +
@@ -261,6 +314,51 @@ module.exports = {
         ],
       },
       to: {},
+    },
+  ],
+  /**
+   * `required` rules: a module matching `module` MUST depend on something matching `to`.
+   *
+   * The inverse of everything above, and the only shape that can express "this must go through that". A
+   * `forbidden` rule can say a module may not reach a provider; it cannot say that a module which does reach
+   * one must also reach the escaping primitive, because that is a conjunction over two edges.
+   */
+  required: [
+    {
+      name: 'seo-prompt-must-use-the-untrusted-envelope',
+      comment:
+        'Any *prompt* module under packages/core/src/seo or packages/google/src/seo must import ' +
+        'packages/core/src/seo/untrusted-envelope.ts. G-SEO-02: fetched HTML, SERP text and Search Console ' +
+        'query strings are untrusted input (docs/07 §3, §4 on review text for the same reason), and they pass ' +
+        'through ONE wrapper that fences them so the region cannot be closed from inside — proven over 200 ' +
+        'adversarial strings by untrusted-envelope.fuzz.test.ts. A prompt module that does not import it is ' +
+        'either interpolating the text directly or has written a second envelope, and a second envelope is a ' +
+        'second thing to get right. ' +
+        'WHY A PATH CONVENTION IS THE RIGHT MATCHER HERE. Dependency-cruiser cannot see a template literal, ' +
+        'so the set of modules this applies to has to be nameable. The companion rule ' +
+        'seo-llm-only-through-a-prompt-module closes the gap that a convention alone leaves: it forbids every ' +
+        'OTHER SEO module from reaching an LLM provider at all, so a module that builds a prompt and is not ' +
+        'called *prompt* cannot send it. ' +
+        'THE RULE IS SATISFIABLE ONLY FROM INSIDE packages/core/src/seo, AND THAT IS THE POINT rather than a ' +
+        'limitation. @berelax/core exports its barrel and nothing else, so an import of the envelope through ' +
+        '@berelax/core is an edge to packages/core/src/index.ts and does NOT satisfy this rule — only a ' +
+        'relative import of untrusted-envelope.ts does. So a prompt builder under packages/google/src/seo ' +
+        'fails this rule, which is the correct answer: a prompt is a pure function of its inputs and belongs ' +
+        'in core, where it can be fuzzed over 200 adversarial strings with no provider and no database. That ' +
+        'is exactly where buildReviewReplyPrompt lives, for exactly those reasons, and G-REV-04 records them. ' +
+        'THIS RULE MATCHES NO MODULE ON THE COMMITTED TREE, and that is deliberate rather than dead. ' +
+        'G-SEO-05 adds the LLM drafting; naming the shape now is the same decision ' +
+        'reviews-generator-must-not-reach-clinical-data records for the intake repository that does not yet ' +
+        'exist — a rule added after the import is a rule added after the review that would have caught it. ' +
+        'Because it can therefore never fire on the committed tree, the known-bad fixture in ' +
+        'scripts/test-gates.mjs is the ONLY evidence it is alive (ADR 0003), and there is a matching control ' +
+        'fixture that imports the envelope and must pass.',
+      severity: 'error',
+      module: {
+        path: '^packages/(core|google)/src/seo/[^/]*prompt[^/]*\\.ts$',
+        pathNot: '\\.(test|itest)\\.ts$',
+      },
+      to: { path: '^packages/core/src/seo/untrusted-envelope\\.ts$' },
     },
   ],
   options: {

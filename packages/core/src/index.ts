@@ -9,12 +9,17 @@
  */
 
 export * from './access/permissions.ts'
+export * from './access/principal-policy.ts'
+export * from './access/principals/registry.ts'
+export * from './access/principals/seo-agent.ts'
+export * from './access/publication.ts'
 export * from './agents/index.ts'
 export { assertNever } from './assert-never.ts'
 export * from './availability/index.ts'
 export * from './business-day/index.ts'
 export * from './checkout/index.ts'
 export * from './compliance/index.ts'
+export * from './consent/index.ts'
 export * from './crm/index.ts'
 export * from './documents/invoice-template.ts'
 export * from './google/index.ts'

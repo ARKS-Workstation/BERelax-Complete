@@ -138,3 +138,37 @@ export const seoUrlInspectionRun = pgTable(
   },
   (t) => [uniqueIndex('seo_url_inspection_run_unique').on(t.siteUrl, t.runDate)],
 )
+
+/**
+ * Drizzle mirror of the SEO agent's propose-only surface (migration 0057).
+ *
+ * The two CHECK constraints that make this table the cage — `target_kind` against the allowlist, and
+ * `target_ref` against `seo_target_ref_is_denied()` — are not expressible here and are not meant to be.
+ * Drizzle's job in this repository is the drift comparison over names and presence; the constraints are
+ * proved against a real PostgreSQL by `packages/google/src/seo/seo-agent-cage.itest.ts`, which inserts
+ * each of the four denied targets and asserts the constraint name that refused it.
+ *
+ * `runId` carries no `.references()`, and that is the schema and not an omission: 0057's header explains
+ * why a foreign key to `agent_run` would either block that table's cleanup or cascade away the only record
+ * that the agent ever proposed anything.
+ */
+export const seoSuggestionCandidate = pgTable(
+  'seo_suggestion_candidate',
+  {
+    candidateId: uuid('candidate_id').primaryKey().default(sql`uuid_generate_v7()`),
+    /** The agent_run it came from. Deliberately no foreign key — see migration 0057. */
+    runId: uuid('run_id'),
+    /** `sc-domain:example.com` or `https://example.com/`, as 0042 spells it. */
+    siteUrl: text('site_url').notNull(),
+    /** `ctr_outlier` | `content_gap` | `cannibalisation`. Constrained in SQL; a new one is a migration. */
+    findingKind: text('finding_kind').notNull(),
+    /** One of the seven allowlisted targets. Everything else is refused by CHECK. */
+    targetKind: text('target_kind').notNull(),
+    /** A locator, never copy. `/treatments/hot-oil-massage#title`, `faq:parking`. */
+    targetRef: text('target_ref').notNull(),
+    /** The query that produced it, already screened at ingest. NULL for a page-derived finding. */
+    query: text('query'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('seo_suggestion_candidate_site_created_idx').on(t.siteUrl, t.createdAt)],
+)

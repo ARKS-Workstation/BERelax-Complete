@@ -107,6 +107,30 @@ export const PERMISSIONS = [
   'content:publish',
   'seo_agent:configure',
 
+  // The technical-SEO surfaces (G-SEO-02). Six permissions rather than one, and none of them folded into
+  // `content:publish`, because they are not the same act and the SEO agent has to be refused each one by
+  // name: a denial the enumeration test can only express as "publish is absent" would pass on the day
+  // somebody added a `robots.txt` writer that checked a different permission.
+  //
+  // Each of these can take the site out of the index on its own, without anything that looks like a
+  // publication happening. A `noindex` directive, a `Disallow: /` in robots.txt, a canonical pointing at
+  // somebody else's URL and a redirect from a page that still ranks are four ways to lose the organic
+  // traffic docs/09 §"Technical SEO" says there is real money in — and all four are edits a machine
+  // optimising a metric would make deliberately, because each one can improve a number in the short run.
+  // `cache:revalidate` is here for a different reason: it is the one that reaches the public with no row
+  // changing anywhere, so it is the capability a caller who has been refused every write still wants.
+  'cache:revalidate',
+  'sitemap:write',
+  'redirect:write',
+  'robots:write',
+  'noindex:write',
+  'canonical:write',
+  // The SEO agent's ONE write, and the only permission it holds that changes a row (G-SEO-02). A
+  // suggestion is a proposal: it reaches a human queue and nothing else, which is what makes it safe to
+  // grant to a principal that may publish nothing. No interactive role holds it — a human does not
+  // propose to themselves, they approve or reject.
+  'seo_suggestion:propose',
+
   // Platform
   'settings:read',
   'settings:write',

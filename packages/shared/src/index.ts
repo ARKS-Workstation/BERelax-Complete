@@ -101,6 +101,31 @@ export {
   treatmentKeySchema,
   treatmentStyleSchema,
 } from './schemas/catalogue.ts'
+export {
+  CONSENT_ACTOR_KINDS,
+  CONSENT_CAPTURE_SOURCES,
+  CONSENT_CHANNELS,
+  CONSENT_KINDS,
+  CONSENT_LOCALES,
+  CONSENT_PURPOSES,
+  type ConsentActorKind,
+  type ConsentCaptureContext,
+  type ConsentCaptureSource,
+  type ConsentChannel,
+  type ConsentKind,
+  type ConsentLocale,
+  type ConsentPurpose,
+  type ConsentRecordInput,
+  type ConsentWordingInput,
+  consentCaptureContextSchema,
+  consentRecordSchema,
+  consentWordingSchema,
+  isSendGatingPurpose,
+  MAX_CONSENT_WORDING_LENGTH,
+  PLACEHOLDER_MARKERS,
+  SEND_GATING_CONSENT_PURPOSES,
+  type SendGatingConsentPurpose,
+} from './schemas/consent.ts'
 
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }

@@ -27,11 +27,15 @@ import {
   localTime,
 } from '@berelax/core'
 import {
+  CONSENT_SEED_STATES,
+  type ConsentSeedContact,
+  type ConsentSeedState,
   ensureLegalEntity,
   generateBusinessDays,
   readCompliancePolicy,
   type Sql,
   seedCatalogue,
+  seedConsent,
   seedMessageTemplates,
   seedPremises,
   seedSettingDefaults,
@@ -42,10 +46,12 @@ import {
   FIXTURE_CLOSE,
   FIXTURE_FORWARD_DAYS,
   FIXTURE_HISTORY_DAYS,
+  FIXTURE_NOW_ISO,
   FIXTURE_OPEN,
   FIXTURE_TODAY,
 } from './clock.ts'
 import type { FixtureSalon } from './salon.ts'
+import { assertSynthetic, syntheticPerson } from './synthetic.ts'
 
 export interface Loader {
   /** Ordered: a loader runs after every loader it names. */
@@ -244,6 +250,75 @@ const messageTemplateLoader: Loader = {
   },
 }
 
+/**
+ * The consent wording versions and the fixture salon's consent states (C-CRM-03).
+ *
+ * Here rather than in `packages/db`'s own seed for one reason: the CONTACTS. `packages/db` may not import
+ * `packages/fixtures`, and the guarantee that a fixture phone number sits on the unallocated `+971 59`
+ * prefix and cannot ring anybody lives in `synthetic.ts` and is enforced by `assertSynthetic`. So the
+ * numbers are built and checked here and the rows are written by `seedConsent`; a seed that spelled its
+ * own numbers inside `packages/db` would be a second, unasserted copy of that rule in the one package
+ * with no way to check it.
+ *
+ * `CONSENT_SEED_INDEXES` are deliberately outside the band `generateSalon` uses for its 140 synthetic
+ * customers (1–140) and outside the bands the CRM integration suites hold (4411 upward), because a
+ * collision under the phone-first identity rule is not a clash, it is one customer (ADR 0014) — and this
+ * loader's contacts would silently become somebody else's probe subject.
+ *
+ * Every row is stamped with `FIXTURE_NOW_ISO` rather than the wall clock, which is what makes a second
+ * `pnpm seed` a no-op: `consent_one_record_per_instant` collapses it. With `now()` the second run would
+ * add a differently-timed grant per contact, and two grants at different instants is a log rather than a
+ * duplicate, so nothing would report it.
+ *
+ * After `premises` for the ordering `pnpm seed` prints. It does not read the fixture salon.
+ */
+export const CONSENT_SEED_INDEXES: Readonly<Record<ConsentSeedState, number>> = Object.freeze({
+  granted: 9101,
+  withdrawn: 9102,
+  never_asked: 9103,
+  reconstructed: 9104,
+})
+
+/**
+ * The four fixture contacts, from ONE builder.
+ *
+ * Exported because `packages/fixtures/src/consent.itest.ts` re-runs the seed in its own `beforeAll`: the
+ * integration suite shares one database and `customer-identity.itest.ts` clears the whole `customer`
+ * table between its cases, so a file that assumed the loader's contacts were still there would pass or
+ * fail on vitest's file ordering (brief rule 12). Re-seeding is isolation by construction. It has to be
+ * the same builder rather than a copy of it, or the file would assert about contacts the fixture does not
+ * contain.
+ */
+export function consentSeedContacts(): readonly ConsentSeedContact[] {
+  return CONSENT_SEED_STATES.map((state) => {
+    const person = syntheticPerson(CONSENT_SEED_INDEXES[state])
+    // Checked at the point of creation, not asserted once in a test somebody may later delete. A consent
+    // record is the one row in this schema that says "you may message this number".
+    assertSynthetic(person)
+    return {
+      phoneE164: person.phone,
+      // Both locales are represented, because the wording is versioned per language and a fixture where
+      // every capture happened in English would never show the Arabic column being used.
+      locale: state === 'withdrawn' ? ('ar' as const) : ('en' as const),
+      state,
+      label: person.label,
+    }
+  })
+}
+
+const consentLoader: Loader = {
+  name: 'consent',
+  after: ['premises'],
+  async load(sql, salon) {
+    void salon
+    const result = await seedConsent(sql, {
+      contacts: consentSeedContacts(),
+      recordedAtIso: FIXTURE_NOW_ISO,
+    })
+    return result.wordingVersions + result.contacts + result.consentRows
+  },
+}
+
 function shift(date: string, offsetDays: number) {
   const value = new Date(`${date}T00:00:00Z`)
   value.setUTCDate(value.getUTCDate() + offsetDays)
@@ -256,6 +331,7 @@ const LOADERS: Loader[] = [
   settingsLoader,
   businessDayLoader,
   therapistRosterLoader,
+  consentLoader,
   messageTemplateLoader,
 ]
 

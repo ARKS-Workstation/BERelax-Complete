@@ -251,6 +251,31 @@ export {
   TREATMENTS_INDEX_PATH,
 } from './repositories/catalogue.ts'
 export {
+  CONSENT_AUDIT_ACTIONS,
+  CONSENT_REFUSALS,
+  CONSENT_SQLSTATE,
+  type ConsentContactByPhone,
+  type ConsentIntegrityBreach,
+  type ConsentLogRead,
+  type ConsentPurposeRecord,
+  type ConsentRefusal,
+  type ConsentRow,
+  type ConsentWordingRecord,
+  consentRefusalOf,
+  consentStateCounts,
+  consentWordingHash,
+  consentWordingIntegrity,
+  publishConsentWording,
+  readConsentLog,
+  readConsentLogs,
+  readConsentPurposes,
+  readConsentWording,
+  readContactsByPhone,
+  readCurrentConsentWording,
+  recordConsent,
+  withdrawConsent,
+} from './repositories/consent.ts'
+export {
   BOOKABLE_STATUSES,
   BOOKING_REFUSALS,
   BOOKING_SQLSTATE,
@@ -514,6 +539,15 @@ export {
   settleScheduledSteps,
 } from './repositories/scheduled-step.ts'
 export {
+  countCandidatesMentioning,
+  insertSuggestionCandidates,
+  readSuggestionCandidates,
+  SEO_CANDIDATE_CONSTRAINTS,
+  type SuggestionCandidateInsert,
+  type SuggestionCandidateRow,
+  type SuggestionCandidateWrite,
+} from './repositories/seo-candidates.ts'
+export {
   type ClaimedInspection,
   claimUrlInspectionBatch,
   countGscDailyRows,
@@ -541,6 +575,19 @@ export {
   PRICE_ON_REQUEST_SEED,
   seedCatalogue,
 } from './seed/catalogue.ts'
+export {
+  CONSENT_SEED_STATES,
+  CONSENT_WORDING_DRAFTS,
+  CONSENT_WORDING_OPEN_QUESTION,
+  CONSENT_WORDING_PROVISIONAL_NOTE,
+  type ConsentSeedContact,
+  type ConsentSeedInput,
+  type ConsentSeedResult,
+  type ConsentSeedState,
+  type SeededWording,
+  seedConsent,
+  seedConsentWording,
+} from './seed/consent.ts'
 export {
   comparePriceCells,
   DOCS_13_PRICE_POINT_COUNT,
@@ -781,6 +828,35 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // NOT NULL. The mandatory-set DEFAULT is revised to decision 20's six; the row in force is deliberately
 // left as 0030 wrote it, and that migration's header says why.
 //
+// 56 is 0056_consent.sql: consent per (contact, channel, purpose, instant) carrying the exact wording
+// version shown, both append-only. `consent_purpose` is the vocabulary TABLE (Y9-consent-purpose, four
+// labels, every one provisional) and `is_send_gating` on it is what stops a photography grant reading as
+// permission to text somebody. `consent_wording.content_hash` is GENERATED from the EN and AR text
+// through `consent_wording_hash()`, so a wording row cannot lie about its own hash; the consent row
+// SNAPSHOTS that hash and `assert_consent_wording_hash()` (ZP002) refuses an insert that disagrees, which
+// is the only way an edit to a published statement is detectable at all. A withdrawal is a NEW row and so
+// is a correction — UPDATE and DELETE raise for every role (ZP001, ZP003). `contact_customer_id` is a
+// plain uuid with NO foreign key, the choice 0005, 0016 and 0024 make: a cascade would fire the refusal
+// trigger and make `delete from customer` impossible, and this record has to outlive the erasure of the
+// identity it is about (docs/04 §4, §8). `kind` is in `consent_one_record_per_instant` deliberately, so a
+// withdrawal recorded at the same instant as a grant is stored rather than discarded as a duplicate — the
+// log is then ambiguous and `resolveConsent` fails closed to `unknown`.
+//
+// 57 is 0057_seo_target_allowlist.sql: the SEO agent's propose-only surface (G-SEO-02).
+// `seo_suggestion_candidate` is the one table the `system:seo_agent` principal may write to, and its two
+// CHECK constraints are the database half of the target allowlist — `target_kind` against the seven
+// allowlisted copy surfaces, and `target_ref` against `seo_target_ref_is_denied()`, which refuses a locator
+// naming robots.txt, an X-Robots-Tag, a canonical, a noindex, a redirect or the sitemap even under an
+// allowlisted kind. The function is IMMUTABLE because a CHECK may only call one, and NOT STRICT for 0026's
+// reason: a strict function returns NULL for NULL and a CHECK whose expression is NULL passes. The claim
+// filter from `regulatory_profile.banned_claim_terms` deliberately has NO counterpart here — it is
+// `containsPhrase` over `lexiconTokens`, and a SQL re-implementation would be the second, slightly different
+// reading of one lexicon that `lexicon.ts` exists to prevent — so it is enforced at the ingest boundary in
+// code and proved over the rows this table holds. No foreign key to `agent_run`: same decision as
+// `agent_run.job_id` in 0021, because three integration suites delete from that table and a candidate must
+// outlive the run that produced it.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL.
-export const SCHEMA_VERSION = 54 as const
+// come to apply the same number to different SQL. 55 is held by C-CRM-02, still in flight, so
+// SCHEMA_VERSION counts to 57 across a gap at 55 rather than waiting for it.
+export const SCHEMA_VERSION = 57 as const

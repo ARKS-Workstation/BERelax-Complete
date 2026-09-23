@@ -80,7 +80,8 @@ function harness(options: { allowlist?: readonly string[]; nowIso?: string } = {
       promotionalWindow: TDRA_PROMOTIONAL_WINDOW,
       // Transactional traffic returns from the gate before any evaluator is read, so these throwing
       // stubs are the same fail-closed wiring the route ships with — and a proof that an OTP does not
-      // depend on a consent store that does not exist yet (C-CRM-03).
+      // depend on the consent store at all. C-CRM-03 has since built it, and this route still prefetches
+      // nothing: the real evaluator is assembled over a campaign's recipient list, and an OTP has none.
       evaluators: {
         hasConsent: () => {
           throw new Error('no consent store yet')

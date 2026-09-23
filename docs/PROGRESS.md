@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**83 / 207 units complete.**
+**85 / 207 units complete.**
 
 ## Next up
 
@@ -89,7 +89,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
 | [ ] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
 | [ ] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
-| [ ] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
+| [x] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
 | [ ] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
 | [ ] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
 | [ ] | 78 | `C-AUTO-03` | Frequency ledger and a global cap across every flow and campaign | `C-AUTO-01`, `C-CRM-05` | — | Y6-sender-ids |
@@ -183,7 +183,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 166 | `G-REV-06` | Approval queue: Copy reply, deep link, Marked as posted | `G-REV-05`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 167 | `G-REV-07` | API delivery mode: the legacy v4 reviews adapter, isolated, flipped by a row | `G-CONN-05`, `G-REV-06`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y3-gbp-api, Y2-gbp-status, Y2-listing-owner |
 | [x] | 168 | `G-SEO-01` | GSC warehouse: nightly snapshots, startRow paging, the rare-query gap | `G-AGT-01`, `G-CONN-05` | — | — |
-| [ ] | 169 | `G-SEO-02` | The seo_agent principal: publish denied at the permission layer, target allowlist | `F07`, `G-SEO-01` | — | — |
+| [x] | 169 | `G-SEO-02` | The seo_agent principal: publish denied at the permission layer, target allowlist | `F07`, `G-SEO-01` | — | — |
 | [x] | 170 | `G-SEO-03` | Query-side deterministic analyses: CTR outliers, content gaps, cannibalisation | `G-SEO-01` | — | — |
 | [ ] | 171 | `G-SEO-04` | Site-side deterministic analyses: coverage anomalies, internal links, structured data | `G-SEO-01`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 172 | `G-SEO-05` | Suggestion store with before/after and rollback, LLM drafting, red-team gate | `G-AGT-01`, `G-SEO-02`, `G-SEO-03`, `G-SEO-04` | — | — |
