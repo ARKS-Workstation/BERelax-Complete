@@ -587,6 +587,14 @@ export {
   registerInspectionCandidates,
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
+export {
+  type PublicHolidayClosureRow,
+  type RosteredShiftRow,
+  readPublicHolidayClosures,
+  readRosteredShifts,
+  readWorkingHoursRules,
+  type WorkingHoursRuleRow,
+} from './repositories/working-hours.ts'
 export * as schema from './schema/index.ts'
 export {
   type CatalogueSeedResult,
@@ -669,6 +677,41 @@ export {
   setObligationAnchorDate,
   type TradingDateHoursRow,
 } from './services/obligation.ts'
+export {
+  EVIDENCE_DOWNLOAD_REFUSALS,
+  EVIDENCE_GRANT_TTL_SECONDS,
+  type EvidenceDownloadRefusal,
+  type IssuedEvidenceGrant,
+  issueObligationEvidenceGrant,
+  type RedeemedEvidence,
+  readObligationEvidence,
+  recordEvidenceDownload,
+  redeemObligationEvidenceGrant,
+  revokeObligationEvidenceGrant,
+} from './services/obligation-evidence.ts'
+export {
+  acknowledgeObligationInstance,
+  type ClaimedNotice,
+  claimObligationNotice,
+  dueObligationNotices,
+  type NoticePlanMode,
+  type NoticePlanResult,
+  type NoticeStateCount,
+  type NoticeSubjectRow,
+  OBLIGATION_NOTICE_REFUSALS,
+  OBLIGATION_NOTICE_SQLSTATE,
+  type ObligationNoticeRefusal,
+  obligationNoticeRefusalOf,
+  obligationNoticeStateCounts,
+  obligationNoticesFor,
+  type PlannedObligationNoticeRow,
+  planObligationNotices,
+  readObligationAcknowledgements,
+  readObligationNoticeSubjects,
+  recordNoticeSent,
+  recordNoticeSkipped,
+  supersedePendingNotices,
+} from './services/obligation-notice.ts'
 export {
   type ImportedOpeningBalances,
   importOpeningBalances,
@@ -763,6 +806,12 @@ export {
   CANCELLATION_WINDOW_SETTING_KEY,
   readCancellationWindow,
 } from './settings/cancellation.ts'
+export {
+  OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
+  OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
+  readObligationEscalationOffsets,
+  readObligationReminderOffsets,
+} from './settings/compliance.ts'
 export {
   REMINDER_OFFSETS_SETTING_KEY,
   readReminderOffsets,
@@ -891,8 +940,49 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `agent_run.job_id` in 0021, because three integration suites delete from that table and a candidate must
 // outlive the run that produced it.
 //
+// 59 is 0059_hr_shift.sql: the working-hours rate table, and nothing else. `working_hours_rule` holds one
+// row per VERSION of the rules — ordinary minutes per day and per week, the day a working week starts on,
+// the daily overtime cap, the minimum rest gap, the night window as two wall-clock times and the four
+// bucket multipliers in basis points — keyed on the first TRADING date the version governs, and the version
+// that applies to a date is the latest row at or before it. Versioned and not an `app_setting`, which is
+// the decision this file is the right place to record: a setting has one current value and payroll is asked
+// about the past, so recomputing March in April would use April's rates and every figure would look
+// plausible. `ordinary_multiplier_bp` is pinned to 10000 by a CHECK and stored anyway, so the pure splitter
+// in `packages/core/src/hr/working-hours.ts` reads every multiplier from the table and holds no rate
+// literal of its own; `working_hours_rule_uplifts_are_not_reductions` is what keeps "each minute is counted
+// once, in the dearest applicable bucket" a partition rather than a mis-sort. `effective_from` is
+// deliberately NOT a foreign key into `business_day` — a labour rule commences on a calendar date whether
+// or not the premises trades that day. It creates NO table and adds NO column for shifts: 0030's `shift`
+// and `shift_assignment` already carry the `tstzrange` period and the `trading_date` foreign key, and this
+// migration deliberately adds no constraint tying the period to the day's window, because 0030 says why and
+// `resolveTradingDate` in `@berelax/core` is the one reading of where a trading day ends. Version 1 is
+// seeded from the sentinel date 1900-01-01 — visibly before any trading this business could have done,
+// because every other candidate would be a claim about when the figures took effect — with every figure
+// flagged provisional against Y9-overtime and listed by the Unconfirmed Assumptions panel.
+//
+// 58 and 61 are allocated to units in flight; 60 landed alongside this one and is described below.
+//
+// 60 is 0060_obligation_notice.sql: the compliance calendar's notices (M-VAT-11, docs/04 §9).
+// `obligation_notice` is 0051's mechanism restated rather than a second one — a reminder about a deadline
+// that has moved is the same bug as a reminder about an appointment that has moved, so the schedule is a
+// ROW carrying an `invalidation_key` derived from the occurrence's CURRENT due date, `pending` is the only
+// non-terminal state and leaving it is a one-way door, and every terminal state carries `settled_at`. Two
+// things differ and both are deliberate: `notify_on` is a `date`, because an obligation falls due at the
+// end of a day and the trading date is the unit of comparison; and there are TWO partial unique indexes
+// rather than one, because the acceptance asks for at most one SENT notice per (occurrence, step) for ever
+// and not merely one live one — which is the "(instance, step) idempotency key" M-VAT-10's NOTE deferred.
+// `to_role` is NOT NULL and `assert_obligation_notice_names_an_accountable_role()` (ZN001) refuses a
+// reminder addressed to anybody but the declared owner and an escalation addressed to the SAME role,
+// because an escalation nobody new is accountable for is decoration. Acknowledgement is three columns on
+// `obligation_instance` and not a state on the notice: it is a fact about the duty, and recorded against a
+// notice it would stop only that rung. `obligation_evidence_grant` is the private-serving capability
+// M-TILL-12's NOTE asked whichever unit landed first to own — a stored, expiring, revocable grant whose
+// sha256 alone is kept, rather than an HMAC over a URL, so no fourth signing secret enters the rotation
+// inventory for a link that lives fifteen minutes.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 55, 56 and 57 landed out of order and within an hour
+// come to apply the same number to different SQL. 58 and 61 are HELD by units still in flight, so the
+// gap below 60 is an allocation rather than an omission. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 57 as const
+export const SCHEMA_VERSION = 60 as const

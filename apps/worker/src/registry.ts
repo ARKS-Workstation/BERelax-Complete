@@ -36,6 +36,11 @@ import {
   gscUrlInspectionHandler,
   SEO_URL_INSPECTION_AGENT,
 } from './jobs/gsc-url-inspection-rotation.ts'
+import {
+  COMPLIANCE_CALENDAR_JOB,
+  REBUILD_OBLIGATION_NOTICES_JOB,
+  SEND_OBLIGATION_NOTICE_JOB,
+} from './jobs/obligation-reminders.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
@@ -333,6 +338,18 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   SCHEDULED_STEP_SWEEP_JOB,
   SEND_SCHEDULED_STEP_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
+  // M-VAT-11's three, and the same arrangement one more time. The CALENDAR is the only one with a cron,
+  // and its 02:30 is after trading closes at 02:00 rather than a number picked for tidiness: inside
+  // trading hours the compliance calendar's as-of date is still the previous trading date, so a pass that
+  // ran at 23:00 would plan tomorrow's notices against yesterday. Its declared interval in 0060 is 24
+  // hours, which is what makes the watchdog's "no success within twice the interval" alert mean something.
+  //
+  // The other two are announced: a due notice by the calendar pass, and a rebuild by the settings change
+  // that made the old plan wrong (the F09 registry's `rerunJobs` on both compliance ladder keys). Neither
+  // is a poller, so neither declares an agent — the thing being watched is the calendar, and the caller.
+  COMPLIANCE_CALENDAR_JOB,
+  SEND_OBLIGATION_NOTICE_JOB,
+  REBUILD_OBLIGATION_NOTICES_JOB,
 ]
 
 /**

@@ -327,7 +327,21 @@ describe('acceptance — with no setting row present, zero cross-gender assignme
     expect(exercised.ids).toBeGreaterThan(RUNS)
     expect(exercised.assignments).toBeGreaterThan(RUNS / 4)
     expect(exercised.refusals).toBeGreaterThan(RUNS / 10)
-  })
+    // 30 seconds, not vitest's default 5.
+    //
+    // This is a CORRECTNESS property, not a performance one: ~5,200 generated cases through the solver,
+    // asserting that nobody of the wrong gender is ever offered or assigned. On an idle box it takes about
+    // two seconds, which sounds like plenty of margin and is not — under four concurrent verify runs it was
+    // measured at 5,677ms and failed outright, and it is the most likely identity of the 1-in-3,784 failure
+    // inside the "coverage thresholds reject an uncovered file" gate, whose own comment already blames a
+    // load timeout for sending two earlier units hunting the fixture's size.
+    //
+    // The case count stays at RUNS because the acceptance line names it; the timeout moves instead. Third
+    // instance of this shape in one session — see `search-analytics.test.ts`'s 60,000-row paging case and
+    // `availability-perf.itest.ts`'s p95 budget — which is why it is written out rather than just widened:
+    // a correctness test with an implicit performance budget fails for a reason its own name does not
+    // mention, and somebody then goes looking in the wrong place.
+  }, 30_000)
 
   it('is not vacuous: the same day DOES return slots once a gender is on both sides', () => {
     // Without this, "no cross-gender offers" is satisfied by a rule that offers nothing at all.

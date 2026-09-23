@@ -232,6 +232,64 @@ export const ROUTES = [
       'copy change when the catalogue does.',
   },
   {
+    id: 'compliance-calendar',
+    path: '/compliance',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-VAT-11s compliance calendar (docs/04 §9): every obligation definition, its dated occurrences, ' +
+      'the reminders and escalations planned against each, and the owner banner an overdue BLOCKING ' +
+      'obligation raises. A handler answering text/html rather than a document, for the reason the ' +
+      'credentials screen and the Messages inbox give: a document must be served in both locales, which ' +
+      'would need an Arabic admin document and the W-SYS-01 shell, and would join a screenshot matrix ' +
+      'whose RTL half has to be a real Arabic route. Dynamic because the page is a claim about which ' +
+      'TRADING date it is, so a prerendered copy would be wrong from the next close of trading. The /compliance ' +
+      'prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and it is NOT authenticated until ' +
+      'W-SYS-01, exactly as the routes under /hr and /settings record. It shows no licence number, ' +
+      'permit number or TRN: none is on file (Y1-licence, Y1-trn) and the obligation table holds none.',
+  },
+  {
+    id: 'compliance-evidence',
+    path: '/compliance/evidence/[evidenceId]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-VAT-11s private evidence download: the bytes of one filed attachment, served only against an ' +
+      'expiring grant and audited on every download. A handler rather than a document for a reason of ' +
+      'its own beyond the two the calendar gives — it returns a STATUS CODE and a byte stream, and ' +
+      '"403 without a grant" is a status code. Every refusal is 403 and never 404, deliberately: a 404 ' +
+      'for an id that does not exist and a 403 for one that does would answer "has an inspection report ' +
+      'been filed against this occurrence" to anybody who can guess a uuid. Covered by the /compliance ' +
+      'noindex prefix, and the response repeats the directive itself so a direct hit cannot lose it.',
+  },
+  {
+    id: 'compliance-questions',
+    path: '/compliance/unverified',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-VAT-11s open-compliance-questions dashboard, driven by the [UNVERIFIED] flags on the ' +
+      'obligation table so an unresolved legal question stays visible in the product instead of being ' +
+      'lost in docs/04. Its own route rather than a section of the calendar, because the distinction it ' +
+      'exists to make is the one the calendar must not blur: an unconfirmed DUTY, a confirmed duty with ' +
+      'no deadline on file, and an actual breach are three different facts with three different ' +
+      'remedies, and a screen that added them together would report every unanswered question as a ' +
+      'false alarm. A handler for the calendars reasons; dynamic because the overdue section is a claim ' +
+      'about the trading date. Covered by the /compliance noindex prefix.',
+  },
+  {
     id: 'contact',
     path: '/contact',
     kind: 'document',
@@ -631,8 +689,18 @@ export type RouteId = Route['id']
  * puts eight more routes under it — `/hr/rota`, `/hr/timesheets`, `/hr/payroll`, `/hr/leave/[id]` and the
  * rest — and every one of them shows wages, identity documents or somebody's leave. A prefix means the
  * ninth arrives noindex on the commit that creates it rather than on the commit that remembers to.
+ *
+ * `/compliance` is M-VAT-11's, and a prefix for a sharper version of the same reason: the three routes
+ * under it today are the calendar, the open-questions dashboard and the private evidence download, and the
+ * third serves the bytes of a municipality inspection report. A per-route rule would have to be remembered
+ * for the fourth, and the fourth is the one that leaks.
  */
-export const ADMIN_GROUP_PREFIXES: readonly string[] = ['/analytics', '/hr', '/settings']
+export const ADMIN_GROUP_PREFIXES: readonly string[] = [
+  '/analytics',
+  '/compliance',
+  '/hr',
+  '/settings',
+]
 
 /**
  * The value a non-indexable response carries.

@@ -1,4 +1,8 @@
 import { getDefinition, SETTINGS } from '@berelax/config'
+import {
+  OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
+  OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
+} from '@berelax/shared'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from '../connection.ts'
 import { readAvailabilityFacts } from '../queries/availability.ts'
@@ -764,10 +768,28 @@ describe('the blocking flag has no settings writer', () => {
   it('no declared setting key reaches it, and an invented one is refused as undeclared', () => {
     // The registry is the whole vocabulary of things a settings screen can write, so this is an
     // enumeration of every writable key rather than a search for a name somebody might have used.
-    const touching = SETTINGS.filter((setting) =>
-      /obligation|blocking|compliance_calendar/i.test(setting.key),
-    )
+    //
+    // The pattern matches the SHAPE of a duty — whether it blocks, what it blocks, who owns it, what
+    // class it is, what evidence it demands — and no longer the bare word "obligation". It was the bare
+    // word until M-VAT-11, which declares two settings that move when a NOTICE about a deadline goes out
+    // and cannot reach any of the above. Left as it was, this line asserted "no declared setting mentions
+    // a compliance duty", which is a wider claim than the one this block is named for and is no longer
+    // true of the system.
+    const SHAPE_OF_A_DUTY =
+      /blocking|obligation_class|obligation_owner|obligation_evidence|obligation_cadence|compliance_calendar/i
+    const touching = SETTINGS.filter((setting) => SHAPE_OF_A_DUTY.test(setting.key))
     expect(touching.map((setting) => setting.key)).toEqual([])
+
+    // The other half, so narrowing the pattern did not turn an enumeration into a hole: EVERY declared key
+    // that names an obligation at all is listed here by name, imported rather than spelled out. A third
+    // one cannot appear without this assertion failing and somebody deciding whether it reaches the shape.
+    expect(
+      SETTINGS.filter((setting) => /obligation/i.test(setting.key))
+        .map((setting) => setting.key)
+        .sort(),
+    ).toEqual(
+      [OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY, OBLIGATION_REMINDER_OFFSETS_SETTING_KEY].sort(),
+    )
 
     // And the key a future screen would reach for does not exist — `writeSetting` reads the definition
     // first, so an undeclared key cannot be written at all.

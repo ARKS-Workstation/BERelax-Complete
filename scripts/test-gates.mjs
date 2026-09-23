@@ -19578,6 +19578,604 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 76a-76x. (P-HR-05) Working hours across midnight: the rules 0059 refuses, and the ways the shift
+//          arithmetic can be got wrong, each of which must make a named test fail.
+//
+// Three groups, the same shape as case 66's.
+//
+// The first is 0059's constraints against real PostgreSQL, plus `shift_trading_date_fkey` — which 0030
+// created and this unit depends on completely, because "no fixture can invent a date the premises does
+// not trade on" is an acceptance criterion and a foreign key nothing has bounced off is not a guarantee
+// (ADR 0003). Each probe names the error it must trip, so a fixture rejected by an unrelated constraint
+// fails rather than passing.
+//
+// The second is the controls. A legitimate second rule version, an uplift exactly EQUAL to the ordinary
+// rate, a night window that does not wrap and a shift on a date the premises really trades on all have to
+// be ACCEPTED, or the rules above are "refuse everything" wearing four names.
+//
+// The third breaks the shipped arithmetic in the seven ways this unit is most likely to be got wrong and
+// requires the test that claims to cover each to fail, by name:
+//
+//   - the night window read in UTC instead of Asia/Dubai. This is the defect that survives every other
+//     check in the unit: the trading window is 07:00-22:00 UTC, so a UTC implementation gets the trading
+//     DATE right on every row in the database and loses the whole night window, and the buckets still sum
+//     to the total.
+//   - the trading date re-derived in SQL from the end of the period instead of read from the column. That
+//     is "which day is it" answered a second time, and it moves a 18:00-02:00 shift onto the next day.
+//   - abutting shift rows not merged, which turns every rota written in two halves into a rest breach.
+//   - the dearest-bucket tie broken the other way, which hides a public holiday inside the night bucket.
+//   - the ordinary allowance given to each shift instead of to the day, so two five-hour shifts are no
+//     overtime at all.
+//   - every applicable bucket incremented instead of the dearest one, which is the double count the
+//     property exists to refuse.
+//   - the week keyed on the trading date itself instead of on the week it falls in.
+//
+// Every mutant is followed by the same suite run UNMUTATED and required to pass. Without that pair, a
+// suite broken for an unrelated reason would make every `runExpectingFailure` above it report PASS having
+// proved nothing — which is the exact failure mode this file exists to prevent, one level up.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  /** A `working_hours_rule` insert with every column stated, so one probe changes exactly one thing. */
+  const ruleInsert = (overrides = {}) => {
+    const columns = {
+      effective_from: "date '2030-01-01'",
+      ordinary_minutes_per_day: '480',
+      ordinary_minutes_per_week: '2880',
+      week_starts_on: '1',
+      overtime_daily_cap_minutes: '120',
+      minimum_rest_minutes: '660',
+      night_window_from: "time '22:00'",
+      night_window_until: "time '04:00'",
+      ordinary_multiplier_bp: '10000',
+      overtime_multiplier_bp: '12500',
+      night_multiplier_bp: '15000',
+      public_holiday_multiplier_bp: '15000',
+      is_provisional: 'false',
+      provisional_note: 'null',
+      open_question_id: 'null',
+      // 'gate probe' carries no marker `is_placeholder_text()` refuses, for case 57's reason: 'pending',
+      // 'unknown' and 'placeholder' are all markers 0026 rejects, and a probe named after one is rejected
+      // by the wrong constraint.
+      source_note: "'gate probe'",
+      ...overrides,
+    }
+    const names = Object.keys(columns).join(', ')
+    const values = Object.values(columns).join(', ')
+    return `insert into working_hours_rule (${names}) values (${values})`
+  }
+
+  const probes = [
+    {
+      name: 'an ordinary multiplier that is not the base rate',
+      rule: 'working_hours_rule_ordinary_is_the_base_rate',
+      sql: ruleInsert({ ordinary_multiplier_bp: '9000' }),
+    },
+    {
+      name: 'a night uplift below the ordinary rate, which would send night minutes to ordinary',
+      rule: 'working_hours_rule_uplifts_are_not_reductions',
+      sql: ruleInsert({ night_multiplier_bp: '9500' }),
+    },
+    {
+      name: 'a night window whose ends are equal, so the night rule would silently never apply',
+      rule: 'working_hours_rule_night_window_nonempty',
+      sql: ruleInsert({ night_window_until: "time '22:00'" }),
+    },
+    {
+      name: 'a provisional rate set that names no open question',
+      rule: 'working_hours_rule_provisional_names_a_question',
+      sql: ruleInsert({ is_provisional: 'true' }),
+    },
+    {
+      name: 'a placeholder provenance note, which would read as a configured one',
+      rule: 'working_hours_rule_source_note_not_placeholder',
+      sql: ruleInsert({ source_note: "'TBC'" }),
+    },
+    {
+      name: 'a week that starts on an eighth weekday',
+      rule: 'working_hours_rule_week_starts_on_is_a_weekday',
+      sql: ruleInsert({ week_starts_on: '7' }),
+    },
+    {
+      name: 'a day with no ordinary minutes at all',
+      rule: 'working_hours_rule_ordinary_day_plausible',
+      sql: ruleInsert({ ordinary_minutes_per_day: '0' }),
+    },
+    {
+      name: 'a second version taking effect on a date another version already governs',
+      rule: 'working_hours_rule_pkey',
+      sql: ruleInsert({ effective_from: "date '1900-01-01'" }),
+    },
+    {
+      // The acceptance criterion, as a database guarantee rather than as a convention.
+      name: 'a shift filed under a date the premises does not trade on',
+      rule: 'shift_trading_date_fkey',
+      sql:
+        "insert into shift (trading_date, period) values (date '1999-01-01', " +
+        "tstzrange(timestamptz '1999-01-01 18:00:00+04', timestamptz '1999-01-02 02:00:00+04', '[)'))",
+    },
+  ]
+
+  if (dbUrl === undefined) {
+    check(
+      '0059 probes ran against a database',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required; the 0059 rules cannot be proved without one',
+    )
+  } else {
+    for (const probe of probes) {
+      checkRejectedBy(`0059 refuses: ${probe.name}`, psqlProbe(probe.sql), probe.rule)
+    }
+
+    const accepted = [
+      {
+        name: 'a legitimate second rule version, so the table really is versioned',
+        sql: ruleInsert({ effective_from: "date '2031-06-01'", overtime_multiplier_bp: '20000' }),
+      },
+      {
+        name: 'an uplift EQUAL to the ordinary rate, so the rule is about reductions and not equality',
+        sql: ruleInsert({ night_multiplier_bp: '10000' }),
+      },
+      {
+        name: 'a night window that does not wrap midnight, which is a legal row',
+        sql: ruleInsert({ night_window_from: "time '01:00'", night_window_until: "time '05:00'" }),
+      },
+      {
+        name: 'a shift on a date the premises DOES trade on, the foreign key control',
+        sql:
+          'insert into shift (trading_date, period) ' +
+          "select bd.trading_date, tstzrange(bd.opens_at, bd.closes_at, '[)') " +
+          'from business_day bd order by bd.trading_date limit 1',
+      },
+      {
+        name: 'version 1 is seeded, provisional, and names Y9-overtime',
+        // In SQL rather than in a comment: 0059's whole claim about what it seeded is this row, and the
+        // itest reads it through the repository, which could agree with a row nobody checked.
+        sql:
+          'do $$ begin if not exists (select 1 from working_hours_rule where effective_from = ' +
+          "date '1900-01-01' and is_provisional and open_question_id = 'Y9-overtime' and " +
+          "ordinary_minutes_per_day = 480 and night_window_from = time '22:00') then " +
+          "raise exception 'SeededRuleMissing: 0059 version 1 is not the provisional row it claims'; " +
+          'end if; end $$',
+      },
+    ]
+    for (const control of accepted) {
+      const result = psqlProbe(control.sql)
+      check(`0059 control: ${control.name}`, !result.failed, result.output)
+    }
+  }
+
+  // --- the arithmetic must be able to fail --------------------------------------------------------
+  const SPLITTER = 'packages/core/src/hr/working-hours.ts'
+  const RATES = 'packages/core/src/hr/rates.ts'
+  const READER = 'packages/db/src/repositories/working-hours.ts'
+  const PANEL = 'packages/db/src/settings-store.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const WORKED = unit('packages/core/src/hr/working-hours.test.ts')
+  const PROPERTY = unit('packages/core/src/hr/working-hours.property.test.ts')
+  const LITERALS = unit('packages/fixtures/src/hr-working-hours.test.ts')
+  const PAIR = integration('packages/fixtures/src/hr-working-hours.itest.ts')
+
+  // The defect the acceptance criterion is really about. 18:00-02:00 Asia/Dubai is 14:00-22:00 UTC, so
+  // the night window read as UTC contains not one minute of it — and the split still sums to 480.
+  checkRejectedBy(
+    'the worked-hours suite fails when the night window is read in UTC',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'if (isWithinNightWindow(toLocal(at, zone).time, rules.nightWindow))',
+          "if (isWithinNightWindow(toLocal(at, 'UTC' as TimeZone).time, rules.nightWindow))",
+        ),
+      () => runExpectingFailure('pnpm', WORKED),
+    ),
+    'in the night bucket',
+  )
+
+  // Abutting rows left unmerged. The gap between them is zero minutes, which is under every minimum
+  // there could be, so the roster reports a rest breach every single day.
+  checkRejectedBy(
+    'the worked-hours suite fails when abutting shift rows are not merged',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'if (open !== undefined && shift.period.startsAt <= open.period.endsAt) {',
+          'if (open !== undefined && shift.period.startsAt < open.period.endsAt) {',
+        ),
+      () => runExpectingFailure('pnpm', WORKED),
+    ),
+    'abutting halves',
+  )
+
+  // The daily allowance given to each shift. Two five-hour shifts then work no overtime at all, which is
+  // the reading that makes a split shift free.
+  checkRejectedBy(
+    'the worked-hours suite fails when the ordinary allowance is per shift instead of per day',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'if (minutesAlreadyWorked + offset >= rules.ordinaryMinutesPerDay) {',
+          'if (offset >= rules.ordinaryMinutesPerDay) {',
+        ),
+      () => runExpectingFailure('pnpm', WORKED),
+    ),
+    'shares one day allowance',
+  )
+
+  // The week keyed on the trading date itself rather than on the week that date falls in.
+  checkRejectedBy(
+    'the worked-hours suite fails when weekly aggregation keys on the day instead of the week',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'return stepDate(tradingDate, -((weekday - weekStartsOn + 7) % 7))',
+          'return stepDate(tradingDate, 0)',
+        ),
+      () => runExpectingFailure('pnpm', WORKED),
+    ),
+    'wholly in Friday',
+  )
+
+  // The tie-break reversed. Version 1 pays night and public holiday at the same rate, so the money is
+  // identical either way and only the bucket moves — which is how a year of public-holiday working
+  // becomes unreportable.
+  checkRejectedBy(
+    'the worked-hours suite fails when the dearest-bucket tie goes the other way',
+    withEditedFile(
+      RATES,
+      (src) =>
+        src.replace(
+          'if (rules.multiplierBp[bucket] > rules.multiplierBp[dearest]) dearest = bucket',
+          'if (rules.multiplierBp[bucket] >= rules.multiplierBp[dearest]) dearest = bucket',
+        ),
+      () => runExpectingFailure('pnpm', WORKED),
+    ),
+    'at the holiday rate when the TRADING date is the holiday',
+  )
+
+  // Every applicable bucket incremented instead of the dearest. The buckets then sum to more than the
+  // minutes worked, which is precisely what the property refuses.
+  checkRejectedBy(
+    'the property suite fails when a minute is counted in every bucket that applies',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'minutes[dearestBucket(rules, uplifts)] += 1',
+          "for (const b of uplifts.length > 0 ? uplifts : (['ordinary'] as WorkedMinuteBucket[])) minutes[b] += 1",
+        ),
+      () => runExpectingFailure('pnpm', PROPERTY),
+    ),
+    'partitions the worked minutes exactly',
+  )
+
+  // A rate literal in the splitter. The grep test is an acceptance criterion in its own right, so it has
+  // to be seen to fail.
+  checkRejectedBy(
+    'the rate-literal suite fails when a multiplier is written into the splitter',
+    withEditedFile(
+      SPLITTER,
+      (src) =>
+        src.replace(
+          'export function workedMinutes(period: Period): number {',
+          'const OVERTIME_BP = 12500\nexport function workedMinutes(period: Period): number {',
+        ),
+      () => runExpectingFailure('pnpm', LITERALS),
+    ),
+    'holds no rate literal',
+  )
+
+  if (dbUrl !== undefined) {
+    // "Which day is it", answered a second time — in SQL, from the end of the period, instead of read
+    // from the column the foreign key protects. The 18:00-02:00 shift moves to the next trading date and
+    // every figure derived from it stays plausible.
+    checkRejectedBy(
+      'the pair suite fails when the trading date is re-derived from the end of the period',
+      withEditedFile(
+        READER,
+        (src) =>
+          src.replace(
+            's.trading_date::text as "tradingDate"',
+            '(upper(s.period) at time zone \'Asia/Dubai\')::date::text as "tradingDate"',
+          ),
+        () => runExpectingFailure('pnpm', PAIR),
+      ),
+      'EARLIER calendar date',
+    )
+
+    // The panel arm removed. Without this the "every figure is listed" assertion is satisfied by a query
+    // that lists nothing and a test that looks for nothing.
+    checkRejectedBy(
+      'the pair suite fails when the rate table stops reaching the Unconfirmed Assumptions panel',
+      withEditedFile(
+        PANEL,
+        (src) =>
+          src.replace(
+            'from working_hours_rule where is_provisional',
+            'from working_hours_rule where false',
+          ),
+        () => runExpectingFailure('pnpm', PAIR),
+      ),
+      'lists the rate table against Y9-overtime',
+    )
+  }
+
+  // --- and each suite must PASS unmutated ---------------------------------------------------------
+  // Without these, a suite broken for an unrelated reason would make every case above report PASS having
+  // proved nothing: `runExpectingFailure` cannot tell "the mutant was caught" from "the file does not
+  // run". `withEditedFile` already refuses an edit that changed nothing, which covers a stale search
+  // string; this covers everything else.
+  for (const [name, argv] of [
+    ['worked-hours', WORKED],
+    ['property', PROPERTY],
+    ['rate-literal', LITERALS],
+    ...(dbUrl === undefined ? [] : [['pair', PAIR]]),
+  ]) {
+    const result = run('pnpm', argv)
+    check(`the ${name} suite passes unmutated`, !result.failed, result.output)
+  }
+}
+
+// 77a-77k. (M-VAT-11) The compliance calendar's notices: the escalation that must be accountable, the
+//     idempotency that must be the schema's rather than the drain's, and the dashboard that must not report
+//     an unanswered question as a breach.
+//
+//     Every case below breaks one of those in shipped code and watches a test catch it. They are worth
+//     having because each failure is SILENT in the direction that matters: an escalation addressed to the
+//     role that already had the reminder still sends a message, a second notice for one step still reads as
+//     a working ladder, and a dashboard that counts a question as a breach still looks like a compliance
+//     screen doing its job — right up to the fortnight in which nobody reads it any more.
+//
+//     Three are integration cases and they are the ones this unit most needs: 77b proves the DATABASE
+//     refuses a misaddressed escalation when the ladder in core collapses, 77j proves a repeated pass is a
+//     no-op because of the schema and the planner's guard rather than because the drain is careful, and 77k
+//     proves the SHIPPED recipient resolver answers null for every role — which the skip-reason case beside
+//     it cannot see, because that one injects a resolver of its own.
+{
+  const NOTICE = 'packages/core/src/compliance/obligation-notice.ts'
+  const NOTICE_TEST = 'packages/core/src/compliance/obligation-notice.test.ts'
+  const SERVICE = 'packages/db/src/services/obligation-notice.ts'
+  const JOB = 'apps/worker/src/jobs/obligation-reminders.ts'
+  const JOB_ITEST = 'apps/worker/src/jobs/obligation-reminders.itest.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 77a. The escalation ladder collapsed onto the owning role — the `?? ownerRole` fallback, which reads as
+  //      "escalate to somebody, at least". It is the trap this unit is judged on: a second message to the
+  //      person who already had the first is not an escalation, nobody new is accountable, and the noise is
+  //      what teaches its reader to ignore both.
+  checkRejectedBy(
+    'the notice suite fails when escalation falls back to the role that owes the duty',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          'export function escalationRoleFor(ownerRole: Role): Role | null {\n  return OBLIGATION_ESCALATION_LADDER[ownerRole]',
+          'export function escalationRoleFor(ownerRole: Role): Role | null {\n  return OBLIGATION_ESCALATION_LADDER[ownerRole] ?? ownerRole',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'does not escalate to itself',
+  )
+
+  // 77b. The same collapse, driven all the way to the database. The ladder lives in `@berelax/core` and SQL
+  //      cannot read it, so "an escalation must not name the role that owes the duty" is the half the schema
+  //      can make — and this is the case that proves the half is load-bearing: the planner tries to write
+  //      the misaddressed row and 0060's ZN001 refuses it. Without a refusal in the schema, a psql session,
+  //      a later admin screen and a background job would each be a way past 77a.
+  checkRejectedBy(
+    'the calendar pass fails when the plan addresses an escalation to the owning role',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          "      push('escalation', offsetDays, escalationRole)",
+          "      push('escalation', offsetDays, request.ownerRole)",
+        ),
+      () => runExpectingFailure('pnpm', integration(JOB_ITEST)),
+    ),
+    'notice_role_not_accountable',
+  )
+
+  // 77c. Acknowledgement made to silence the reminders as well as the escalations. It reads as tidier —
+  //      "they said they are dealing with it, stop telling them" — and it means one click at 60 days
+  //      silences the notice at 7, which is the notice that matters.
+  checkRejectedBy(
+    'the notice suite fails when acknowledgement silences the reminders too',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          "if (notice.kind === 'escalation' && occurrence.acknowledged) {",
+          'if (occurrence.acknowledged) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    // The test NAME, because the failing assertion prints only the verdict kind: with the edit the
+    // reminder comes back `skip` where `send` was expected, and the reason is one of the two properties
+    // vitest omits from the diff.
+    'does not stop the reminders',
+  )
+
+  // 77d. The due check moved AHEAD of the invalidation key, so a notice about a deadline that has moved is
+  //      deferred instead of refused — and refused later, or never. This is B-MSG-03's damaging bug wearing
+  //      a compliance hat: the owner is eventually told a licence expires on a date the calendar no longer
+  //      holds, and every log line is green.
+  checkRejectedBy(
+    'the notice suite fails when a stale deadline is not the first thing refused',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          '  if (notice.invalidationKey !== expected) {',
+          '  if (daysBetweenDates(asOf, notice.notifyOn) < 0) {\n' +
+            "    return { kind: 'defer', why: 'not due yet' }\n" +
+            '  }\n' +
+            '  if (notice.invalidationKey !== expected) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'invalidation_key_stale',
+  )
+
+  // 77e. The due date dropped from the key, everything else left in place. The notice would still be about
+  //      "this occurrence, this rung" and would survive a due-date correction — which is the one thing the
+  //      key exists to catch, and the thing 77d cannot see on its own.
+  checkRejectedBy(
+    'the notice suite fails when the key does not carry the deadline it was built for',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          'return `${request.step}:${instanceId}:${request.dueOn}`',
+          'return `${request.step}:${instanceId}`',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'changes when the deadline moves',
+  )
+
+  // 77f. An unconfirmed duty with no date on file listed as a missing DEADLINE. The conflation this unit is
+  //      judged on, in the pure rule: nobody has confirmed there is a deadline to miss, and reporting it as
+  //      one puts rows on a screen where nothing is late — and counts the same blank twice.
+  checkRejectedBy(
+    'the notice suite fails when an unconfirmed duty is counted as a missing deadline',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          "      rows.filter((row) => !row.isUnconfirmedDuty && row.deadlineState === 'no_deadline_on_file'),",
+          "      rows.filter((row) => row.deadlineState === 'no_deadline_on_file'),",
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'b_confirmed_no_date',
+  )
+
+  // 77g. "Overdue" made inclusive, so every obligation is a breach on its own due date. Here that is a red
+  //      banner the owner sees on every renewal morning, which is the fastest way to teach somebody that
+  //      the banner means nothing.
+  checkRejectedBy(
+    'the notice suite fails when an obligation due today is reported overdue today',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          'const overdue = [...obligation.openDueDates].filter((dueOn) => dueOn < asOf).sort()',
+          'const overdue = [...obligation.openDueDates].filter((dueOn) => dueOn <= asOf).sort()',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'scheduled',
+  )
+
+  // 77h. The plan's total order removed. Determinism is what makes "two runs produce identical rows" a
+  //      property of the module, and the defect is invisible from one run: the same SET of notices, in
+  //      whichever order the two ladders happened to arrive in.
+  checkRejectedBy(
+    'the notice suite fails when the notice plan is not in a total order',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          '        if (left.notifyOn !== right.notifyOn) return left.notifyOn < right.notifyOn ? -1 : 1\n' +
+            '        return left.step < right.step ? -1 : 1',
+          '        return 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    'identical rows',
+  )
+
+  // 77i. The ladder reader made to swallow a malformed setting. `[]` is a legal ladder meaning "send
+  //      nothing", so defaulting a corrupt value to it makes a broken row and a deliberate switch-off
+  //      indistinguishable — and the notices then simply stop, silently.
+  checkRejectedBy(
+    'the notice suite fails when a malformed ladder reads as an empty one',
+    withEditedFile(
+      NOTICE,
+      (src) =>
+        src.replace(
+          "  if (!Array.isArray(value)) return refuse('it is not an array')",
+          '  if (!Array.isArray(value)) return Object.freeze([])',
+        ),
+      () => runExpectingFailure('pnpm', unit(NOTICE_TEST)),
+    ),
+    // The test NAME again: the assertion is `expect(fn).toThrow(/not an array/)`, and vitest reports "to
+    // throw an error" without echoing the pattern it was looking for.
+    'refuses every malformed value',
+  )
+
+  // 77j. The planner's guard reduced to the PENDING index, which is all `on conflict` alone can give. The
+  //      daily pass then re-creates a pending notice over every step it has already sent, the drain sends
+  //      it, and `obligation_notice_one_send_per_step` raises inside a job — so "exactly one message per
+  //      (instance, step)" becomes a failed job rather than a no-op. This is the case that proves the
+  //      idempotency is the schema's and the planner's together.
+  checkRejectedBy(
+    'the notice suite fails when a repeated pass re-plans a step it has already sent',
+    withEditedFile(
+      SERVICE,
+      (src) =>
+        src.replace(
+          "                  and (${mode} = 'new_only' or existing.state in ('pending', 'sent'))",
+          "                  and existing.state = 'pending'",
+        ),
+      () => runExpectingFailure('pnpm', integration(JOB_ITEST)),
+    ),
+    'obligation_notice_one_send_per_step',
+  )
+
+  // 77k. The SHIPPED recipient resolver made to invent a number. Brief rule 15 exactly: a plausible UAE
+  //      mobile is indistinguishable from a configured one, and a renewal notice sent to somebody else's
+  //      phone is a compliance disclosure nothing would ever report. The suite asserts the shipped value
+  //      for every role in the matrix, which is why an invented default fails it — the skip-reason case
+  //      beside it injects its own resolver and would not notice.
+  checkRejectedBy(
+    'the notice suite fails when the shipped runtime invents a contact detail',
+    withEditedFile(
+      JOB,
+      (src) =>
+        src.replace(
+          '    recipientForRole: () => null,',
+          "    recipientForRole: () => '+9715' + '0000000',",
+        ),
+      () => runExpectingFailure('pnpm', integration(JOB_ITEST)),
+    ),
+    'resolves no recipient for any role',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

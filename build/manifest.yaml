@@ -4204,7 +4204,7 @@ units:
       gate, private evidence attachments served by signed URL, the calendar UI, and the open-compliance-questions
       dashboard driven by the UNVERIFIED flags from docs/04.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H02
@@ -4221,11 +4221,183 @@ units:
       equals the number of [UNVERIFIED] items seeded from docs/04-uae-compliance.md
     - axe reports zero serious or critical violations on the calendar and dashboard at 3 viewports, and
       screenshots show zero pixel diff across two consecutive runs
+    - 'NOTE: migration 0060_obligation_notice.sql, and SCHEMA_VERSION is set to 60 rather than 58. 58, 59
+      and 61 are HELD by units in flight, so the gap below 60 is an allocation and not an omission — the
+      ledger paragraph in packages/db/src/index.ts says so in numeric order, and the number is a high-water
+      mark rather than a count.'
+    - 'NOTE: the reminder mechanism is 0051''s, restated, rather than a second one — which is the whole
+      reason the brief points at B-MSG-03. A compliance notice is a ROW carrying an invalidation_key derived
+      from the occurrence''s CURRENT due date, the queue carries a notice id and nothing else, leaving
+      `pending` is a one-way door, every terminal state carries settled_at, and the skip reasons are a
+      closed set. Two things differ and both are stated in the migration: notify_on is a `date`, because an
+      obligation falls due at the END of a day and the trading date is the unit of comparison (0052); and
+      there are TWO partial unique indexes rather than one, because the acceptance asks for at most one SENT
+      notice per (occurrence, step) FOR EVER and not merely one live one. What is NOT reused is
+      invalidationKeyFor itself: it takes an appointment id, a `reminder_NNNh` label 0051''s CHECK accepts
+      and a period of two instants, and widening it to take either shape would give one value two meanings
+      — in an equality comparison, which is the one kind that fails silently when the two sides were built
+      from different vocabularies.'
+    - 'NOTE: the idempotency needed a THIRD layer that the partial index alone does not give, found by the
+      integration suite rather than by reasoning. `on conflict (occurrence, step) where state = ''pending''`
+      dedupes against LIVE rows only, so the second daily pass re-created a pending notice over every step
+      it had already sent, the drain sent it, and obligation_notice_one_send_per_step raised inside a job —
+      "exactly one message" became a failed job rather than a no-op. planObligationNotices therefore takes a
+      mode: `new_only` (the daily pass) plans nothing over a pair that has ANY notice, and `rebuild` (the
+      settings-change pass) plans over a terminal row but still refuses a pending or sent one. Without the
+      first, a persistently skipped notice would be re-created once a day for ever, which in the shipped
+      state — no staff contact detail on file — is every notice, every day. Gate 77j reduces the guard to
+      the pending index and watches the itest fail.'
+    - 'NOTE: NOTHING IS SENT on a correctly configured production worker today, and that is the honest
+      shipped state rather than an oversight. No table in this build holds a staff phone number or address,
+      so `recipientForRole` is an injected seam whose shipped value returns null for every role — the same
+      arrangement send-scheduled-step.ts has with `magicLink`, and for the same reason: a plausible UAE
+      mobile for the owner is brief rule 15 exactly, indistinguishable from a configured one, and worse than
+      a blank because a renewal notice sent to somebody else''s phone is a compliance disclosure nothing
+      would ever report. Every due notice is therefore SKIPPED with `no_recipient_on_file` recorded on its
+      row: visible on the calendar, countable in a report, and distinguished from `content_unavailable`
+      because the two send somebody to two different places. The integration suite injects a resolver, which
+      is what exercises the gate, the local outbox and the message row end to end, and it asserts the
+      shipped resolver returns null for every role in ROLES (gate 77k breaks that). Deferred to whichever
+      unit puts a staff contact detail on file — P-HR''s employment record is the obvious home, and a
+      bounded settings key per role is the other; neither exists, and this unit deliberately did not invent
+      one.'
+    - 'NOTE: "served by signed URL" is realised as a stored, expiring, revocable GRANT rather than an HMAC
+      over the URL, and the choice is recorded because the wording differs. M-TILL-12''s NOTE asked whichever
+      unit landed first to own the capability rather than build a second one, and this is it
+      (packages/db/src/services/obligation-evidence.ts plus /compliance/evidence/[evidenceId]). Three
+      reasons, in order of weight: build/secret-inventory.json classifies seven secrets, each with a
+      rotation procedure somebody follows at 02:00, and an eighth entry for a link that lives fifteen
+      minutes is a poor trade; a grant is revocable by DELETE where a signature is valid until it expires;
+      and the row records WHO asked for the link, which is the question an inspection asks about a hygiene
+      report that left the building. Only the sha256 of the token is stored, as repositories/otp.ts stores a
+      digest of a six-digit code. M-TILL-13''s tax-document download should be a sibling table of the same
+      shape rather than a second mechanism.'
+    - 'NOTE: every refusal on the evidence route is 403 and never 404, including an evidence id that does
+      not exist. A 404 for a missing id and a 403 for a real one is an oracle: it answers "has an inspection
+      report been filed against this occurrence" to anybody who can guess a uuid, which is a fact about the
+      premises. The one 404 is [evidence-object-missing], for a row whose bytes are not in the private
+      bucket — that is a lost file rather than a refused one, and the two are different incidents. The grant
+      is the ONLY gate today: there is no admin session until W-SYS-01, exactly as /hr/credentials,
+      /settings/messages and the two Google routes record, which is also why minting is a function in
+      packages/db rather than an endpoint — an unauthenticated mint endpoint would hand a link to anybody
+      who asked, which is the whole of what the 403 exists to prevent.'
+    - 'NOTE: the dashboard reports TWO independent facts per obligation rather than one enumeration, and
+      that is the trap the unit is judged on resolved rather than dodged. `isUnconfirmedDuty` is
+      obligation.is_unverified, answered by a lawyer; `deadlineState` is exclusive — overdue,
+      no_deadline_on_file or scheduled — answered by a renewal or by somebody reading a document. An
+      enumeration would have to drop one of the two, and either ordering loses something real: "unconfirmed
+      first" hides a genuinely lapsed licence behind an unanswered question, and "overdue first" removes the
+      question from the screen that exists to hold it. So the unconfirmed section lists exactly the flagged
+      rows (the acceptance''s count), the no-deadline section is CONFIRMED duties only, the overdue section
+      is not filtered by the flag at all, and an obligation may appear in the first and the third — which is
+      two facts rather than one counted twice. no_deadline_on_file and overdue cannot both hold, by
+      construction. The itest also ties every flagged row back to a docs/04 section that genuinely carries
+      an [UNVERIFIED] marker, parsed out of the real file, so the count is not a coincidence between a
+      number in a document and a number in a table.'
+    - 'NOTE: escalation goes to the role ABOVE the declared owner, from OBLIGATION_ESCALATION_LADDER in
+      @berelax/core, which is total over ROLES so a role added to the F07 matrix fails to compile until
+      somebody decides where its escalations go. It returns null for `owner` (nobody above), `auditor`
+      ("read-only oversight, writes nothing") and `system` ("no interactive login exists"), and null means
+      NO escalation is planned and the absence is reported — not one addressed to whoever is left. 0060''s
+      assert_obligation_notice_names_an_accountable_role() (ZN001) is the half SQL can make: a reminder must
+      name the declared owner or the owner, and an escalation must name somebody ELSE. Gate 77a breaks the
+      ladder with the `?? ownerRole` fallback that reads as reasonable in review, and gate 77b drives the
+      same collapse to the database.'
+    - 'NOTE: two new F09 settings, both `operational` and both carrying rerunJobs —
+      compliance.obligation_reminder_offsets_days (provisionally 60/30/7 days before) and
+      compliance.obligation_escalation_offsets_days (provisionally 7/21 days after), each provisional
+      against Y1-licence because docs/04 §1 and §7 mark the licence classification and every renewal
+      interval [UNVERIFIED], so the lead time that should precede an unknown interval is unknown with it.
+      `operational` rather than `compliance_locked` for the reason the credential warning window gives: the
+      tier follows what a value can RELAX, and no value here changes whether an obligation blocks —
+      is_blocking is GENERATED and refuse_obligation_shape_change() refuses everything but the due date, so
+      an empty ladder switches the notices off and changes nothing about the consequence of missing the
+      deadline. Changing either re-runs compliance.rebuild-obligation-notices over the occurrences ALREADY
+      in the calendar, which is the half a new ladder applied at generation time would miss.'
+    - 'NOTE: file paths differ from the list below, which is recorded rather than quietly done. The app
+      directory is apps/web/app and not apps/web/src/app, and both screens are ROUTE HANDLERS rather than
+      page.tsx — the reason the Messages inbox, the breakpoint preview and the HR credentials screen are:
+      registry.test.ts requires every *document* to be served in both locales, so a page here would need an
+      Arabic admin document and the W-SYS-01 shell, and would join a twelve-cell screenshot matrix whose RTL
+      half must be a real Arabic route. The acceptance asks for three viewports for exactly that reason. A
+      third route, /compliance/evidence/[evidenceId], serves the attachment, and /compliance is added to
+      ADMIN_GROUP_PREFIXES so the fourth route under it arrives noindex on the commit that creates it. The
+      web integration suite is apps/web/src/compliance.itest.ts rather than beside the routes, because
+      apps/web/src/test-ports.test.ts scans that directory for the suites that draw a port.'
+    - 'NOTE: deferred — the ACTIONS on both screens. Acknowledging an occurrence, completing one, filing an
+      attachment and minting a download link are services in packages/db with audit rows and integration
+      coverage, and none has an HTTP route: there is no admin session to attribute a mutation to until
+      W-SYS-01, and an unauthenticated POST that silenced a compliance escalation would be the off switch
+      this module exists to refuse. Both screens are GET-only and read-only today, which is why neither
+      records an actor.'
+    - 'NOTE: the compliance calendar''s daily pass also performs the SCHEDULED GENERATION run M-VAT-10
+      deferred here (its second NOTE). It generates the next twelve months of occurrences, plans the
+      notices, and hands the due ones to the queue, and all three steps are idempotent so a reclaimed pass,
+      a retry and a manual re-run write nothing the second time. The therapist list a per-therapist
+      obligation generates for comes from readCredentialSubjects — the same employment-period predicate
+      rather than a second spelling of it — and the pass THROWS if that read comes back at its ceiling,
+      because a per-therapist obligation generated over a truncated list leaves the rest with no occurrence,
+      and a blocking obligation with no occurrence never blocks.'
+    - 'NOTE: gate block 77a-77k in scripts/test-gates.mjs, immediately before case 29. Four are integration
+      cases. Port band `compliance` { start: 9400, width: 300 } in packages/harness/src/ports.ts, used by
+      apps/web/src/compliance.itest.ts. Screenshots land in artifacts/screens/M-VAT-11/ (gitignored): twelve
+      PNGs, two screens x three viewports x two themes, each captured through captureUntilStable and
+      compared byte for byte.'
+    - 'NOTE: apps/web/src/compliance.itest.ts leaves THREE rows behind permanently and that is stated rather
+      than hidden: one obligation definition (mvat11_web_evidence_probe, cadence event_driven so no
+      generator ever adds to it), its one occurrence, and the one obligation_evidence row the 403-and-audit
+      assertions download over HTTP. Evidence is append-only (ZO004 refuses DELETE for every role including
+      the owner) and the occurrence beneath it is ON DELETE RESTRICT, so an attachment a SEPARATE PROCESS
+      must fetch cannot be rolled back the way apps/worker''s suite rolls its own back. The occurrence is
+      marked COMPLETED with its attachment, which is the only completion 0052 permits for a duty that
+      requires one — and a completed occurrence appears in no dashboard section and adds nothing to any
+      overdue count, which is why this shape was chosen over an open one. Every reader in this unit narrows
+      by key, and M-VAT-10''s own suite already reads the seeded obligations by key rather than by count for
+      this reason. Neither probe definition carries an anchor_on: an anchor IS a renewal date read off a
+      document and these two have none (rule 15), the occurrence each needs is stated directly to
+      generateObligationInstances, and the first full verify proved the point — the anchor the first revision
+      set failed M-VAT-10''s and packages/fixtures'' enumerations of every obligation row, in every run from
+      then on, because the row is permanent.'
+    - 'NOTE: ONE file outside this unit changed, and only the assertion that this unit made untrue.
+      packages/db/src/services/obligation-blocking.itest.ts asserted that no declared setting key matches
+      /obligation|blocking|compliance_calendar/ — a claim about the WORD, under a heading that claims
+      something narrower: "the blocking flag has no settings writer". The two settings above name an
+      obligation and move when a NOTICE goes out; they cannot reach is_blocking (GENERATED),
+      blocking_effect, the class, the owner or the evidence requirement, all of which
+      refuse_obligation_shape_change() refuses for every role. So the pattern now matches the SHAPE of a
+      duty, and a second assertion lists BY NAME, imported from @berelax/shared, every declared key that
+      mentions an obligation at all — which makes the case stronger than it was rather than weaker: a third
+      such key cannot be added without failing it. Renaming this unit''s keys to dodge the substring was the
+      alternative and was rejected: it would leave that file asserting something false about the registry,
+      and hand the same failure to the next unit that needs an obligation setting.'
     files:
+    - packages/shared/src/compliance-notices.ts
+    - packages/core/src/compliance/obligation-notice.ts
+    - packages/core/src/compliance/obligation-notice.test.ts
+    - packages/core/src/compliance/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/db/migrations/0060_obligation_notice.sql
+    - packages/db/src/schema/obligation.ts
+    - packages/db/src/services/obligation-notice.ts
+    - packages/db/src/services/obligation-evidence.ts
+    - packages/db/src/settings/compliance.ts
+    - packages/db/src/index.ts
+    - packages/messaging/src/templates.ts
+    - packages/harness/src/ports.ts
     - apps/worker/src/jobs/obligation-reminders.ts
-    - apps/web/src/app/(admin)/compliance/page.tsx
-    - apps/web/src/app/(admin)/compliance/unverified/page.tsx
     - apps/worker/src/jobs/obligation-reminders.itest.ts
+    - apps/worker/src/registry.ts
+    - apps/worker/src/run.ts
+    - apps/web/app/(admin)/compliance/route.ts
+    - apps/web/app/(admin)/compliance/render.ts
+    - apps/web/app/(admin)/compliance/unverified/route.ts
+    - apps/web/app/(admin)/compliance/unverified/render.ts
+    - apps/web/app/(admin)/compliance/evidence/[evidenceId]/route.ts
+    - apps/web/src/compliance/as-of.ts
+    - apps/web/src/compliance.itest.ts
+    - apps/web/src/routes/registry.ts
+    - packages/db/src/services/obligation-blocking.itest.ts
+    - scripts/test-gates.mjs
     - artifacts/screens/M-VAT-11/
   - id: M-VAT-12
     order: 67
@@ -5704,7 +5876,7 @@ units:
       from a versioned rate table — the maths that a 18:00–02:00 shift breaks if written against calendar
       dates.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - P-HR-01
@@ -5729,6 +5901,42 @@ units:
       for one employee is under the configured minimum
     - overtime multipliers, daily/weekly caps and the night window are settings flagged provisional:true
       and appear in the Unconfirmed Assumptions panel rather than being silently defaulted
+    - 'NOTE: the concrete files this list left as placeholders. The migration is
+      packages/db/migrations/0059_hr_shift.sql; the Drizzle mirror is the working_hours_rule table appended
+      to packages/db/src/schema/hr.ts; the read side is packages/db/src/repositories/working-hours.ts; the
+      property suite is packages/core/src/hr/working-hours.property.test.ts; the grep test and the
+      core-plus-database pair live in packages/fixtures/src/hr-working-hours.test.ts and
+      packages/fixtures/src/hr-working-hours.itest.ts, because packages/core may not read a file and
+      packages/db may not import packages/core'
+    - 'NOTE: 0059 creates NO shift table and adds NO column to shift or shift_assignment. 0030 already
+      carries both as a tstzrange period plus a trading_date foreign key into business_day, which is what
+      B-AVAIL-04''s therapist pool reads, so this unit extends the model rather than starting it. It also
+      deliberately adds no constraint tying shift.period to its trading date''s window: 0030 states why,
+      and resolveTradingDate in @berelax/core is the one reading of where a trading day ends — a CHECK
+      re-deriving it in SQL would be the second reading that drifts'
+    - 'NOTE: the buckets are a PARTITION and not four tallies. Each worked minute is counted ONCE, in the
+      dearest applicable bucket, because the acceptance property (every bucket sums to the total exactly)
+      is only expressible that way and a minute counted in both night and overtime makes the split
+      unreconcilable against shift.period. One consequence is worth knowing before payroll reads it: with
+      version 1''s figures the night uplift (1.5x) is dearer than the overtime uplift (1.25x), so an
+      ordinary 18:00-02:00 evening reports ZERO minutes in the overtime BUCKET while overtimeMinutes — the
+      eligibility the daily cap is judged on — can still be 180. The cap is deliberately read off the
+      eligibility and not off the bucket, or a breach would vanish whenever the night rate absorbed it'
+    - 'NOTE: scoped — the public-holiday CALENDAR is deferred to Y9-overtime. premises_closure (0003)
+      carries kind = public_holiday with is_confirmed, and publicHolidayTradingDates in @berelax/core
+      expands those rows into the set the maths needs, but a public holiday the premises TRADES THROUGH has
+      no closure row at all, so that set is a FLOOR and not the calendar. The holiday flag therefore reaches
+      the arithmetic as an argument the caller resolves. Seeding a list of lunar dates here is what brief
+      rule 15 refuses: a plausible holiday calendar is indistinguishable from a confirmed one'
+    - 'NOTE: deferred — turning weightedMinuteBp (whole basis-point-minutes) into fils. employee.basic_wage_fils
+      is a MONTHLY figure and the monthly-to-hourly divisor is a policy question nobody has answered
+      (Y9-overtime, Y8-staff), so this unit stops at the weighting and does not invent it. The payroll unit
+      that needs money takes the bucket minutes and the multipliers from here'
+    - 'NOTE: week_starts_on is a column of working_hours_rule that the acceptance list does not name, and it
+      is part of the rule rather than a display preference: a 48h weekly cap without a week boundary is not
+      a cap. It is the figure in version 1 whose wrongness is silent — a boundary on the wrong day moves
+      minutes between weeks without changing any day''s total — so it is flagged provisional against
+      Y9-overtime with the rest'
     files:
     - packages/db/migrations/*_hr_shift.sql
     - packages/db/src/schema/hr.ts

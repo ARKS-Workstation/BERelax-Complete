@@ -250,6 +250,18 @@ export async function unconfirmedAssumptionRows(
       select 'employee_language', e.staff_reference || ' -> ' || l.language::text,
              l.open_question_id, null
         from employee_language l join employee e on e.id = l.employee_id where l.is_provisional
+      -- The working-hours rules (0059). Every figure in version 1 is the build's strictest reading of
+      -- Federal Decree-Law 33 of 2021 and none is confirmed, so the whole row is one assumption keyed by
+      -- the trading date it takes effect on. Per VERSION and not per figure: the multipliers, the caps,
+      -- the night window and the week boundary are one decision somebody makes in one sitting, and a
+      -- separate flag per column would let the panel clear for a rate change that answered nothing. The
+      -- table is versioned rather than held in app_setting because payroll is asked about the past;
+      -- answering Y9-overtime therefore publishes a NEW version and the panel row leaves by that version
+      -- being confirmed, the way consent_wording's does.
+      union all
+      select 'working_hours_rule', 'rules effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from working_hours_rule where is_provisional
       -- The two CRM vocabularies (0053). They are TABLES rather than Postgres enums precisely so that
       -- each label can carry the provenance trio and reach this panel: an enum label has nowhere to put
       -- is_provisional, an OPEN-QUESTIONS id or a note, and a provisional value that cannot be marked

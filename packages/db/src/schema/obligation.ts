@@ -9,8 +9,10 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+import { message } from './message.ts'
 import { employee } from './staff.ts'
 
 /**
@@ -167,11 +169,23 @@ export const obligationInstance = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     completedByRole: text('completed_by_role'),
     completedByLabel: text('completed_by_label'),
+    /**
+     * When somebody took responsibility for this occurrence (0060).
+     *
+     * On the OCCURRENCE and not on the notice, because it is a fact about the duty rather than about one
+     * message: recorded against a notice it would stop only that rung, so the second escalation would
+     * still fire about a duty somebody picked up on day eight. It stops ESCALATION and deliberately not
+     * the reminders — an acknowledgement at 60 days must not silence the notice at 7.
+     */
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    acknowledgedByRole: text('acknowledged_by_role'),
+    acknowledgedByLabel: text('acknowledged_by_label'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     index('obligation_instance_open_due_idx').on(t.dueOn, t.obligationId),
+    index('obligation_instance_unacknowledged_idx').on(t.dueOn),
     index('obligation_instance_subject_idx').on(t.subjectEmployeeId),
     /**
      * UNIQUE **NULLS NOT DISTINCT**, which is what makes the generator idempotent.
@@ -195,6 +209,17 @@ export const obligationInstance = pgTable(
     check(
       'obligation_instance_completion_has_an_actor',
       sql`${t.status} <> 'completed' or (${t.completedByRole} is not null and ${t.completedByLabel} is not null)`,
+    ),
+    check(
+      'obligation_instance_acknowledged_by_role_known',
+      sql`${t.acknowledgedByRole} is null or ${t.acknowledgedByRole} in ('owner', 'manager', 'accountant', 'receptionist', 'therapist', 'marketer', 'auditor', 'system')`,
+    ),
+    // All three or none: an acknowledgement with no actor is a compliance control that stops escalating
+    // because somebody unknown clicked something.
+    check(
+      'obligation_instance_acknowledgement_is_whole',
+      sql`(${t.acknowledgedAt} is null) = (${t.acknowledgedByRole} is null)
+          and (${t.acknowledgedAt} is null) = (${t.acknowledgedByLabel} is null)`,
     ),
   ],
 )
@@ -226,5 +251,138 @@ export const obligationEvidence = pgTable(
       sql`not is_placeholder_text(${t.storageKey})`,
     ),
     check('obligation_evidence_content_hash_shape', sql`${t.contentHash} ~ '^[a-f0-9]{64}$'`),
+  ],
+)
+
+/**
+ * Drizzle mirror of the 0060 half: the notices and the evidence grant.
+ *
+ * The structure is `scheduledStep`'s (0051) and that is deliberate rather than convergent — a reminder
+ * about a deadline that has moved is the same bug as a reminder about an appointment that has moved, and
+ * a second mechanism for it would be a second thing to reconcile. Two things differ and both are stated
+ * in the migration: `notifyOn` is a `date`, because an obligation falls due at the end of a day; and
+ * there are TWO partial unique indexes rather than one, because the acceptance criterion asks for at most
+ * one SENT notice per (occurrence, step) for ever and not merely one live one.
+ */
+export const obligationNoticeKind = pgEnum('obligation_notice_kind', ['reminder', 'escalation'])
+
+/**
+ * Four states, not 0051's five.
+ *
+ * `cancelled` is absent because an obligation occurrence is never cancelled — its status is open or
+ * completed — and a completed one is recorded as a SKIP carrying `obligation_completed`, so "how many
+ * notices did we not send because the renewal was already filed" stays a countable answer.
+ */
+export const obligationNoticeState = pgEnum('obligation_notice_state', [
+  'pending',
+  'sent',
+  'skipped',
+  'superseded',
+])
+
+export const obligationNotice = pgTable(
+  'obligation_notice',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    /**
+     * CASCADE, for 0051's reason and not by symmetry: a pending notice is an intention, and 0052 keeps
+     * DELETE granted on `obligation_instance` so the generator may withdraw a future occurrence. What a
+     * SENT notice leaves behind is the `message` row, referenced RESTRICT below.
+     */
+    obligationInstanceId: uuid('obligation_instance_id')
+      .notNull()
+      .references(() => obligationInstance.id, { onDelete: 'cascade' }),
+    kind: obligationNoticeKind('kind').notNull(),
+    /** `reminder_60d`. Bounded by pattern rather than by an enum: both ladders are settings. */
+    step: text('step').notNull(),
+    /**
+     * The F07 role this notice names. NOT NULL, because a notice nobody is accountable for is
+     * decoration. A reminder names the duty's declared owner; an escalation must name somebody else,
+     * which `assert_obligation_notice_names_an_accountable_role()` refuses to let a writer forget.
+     */
+    toRole: text('to_role').notNull(),
+    invalidationKey: text('invalidation_key').notNull(),
+    /** A `date`: the calendar is a date calendar, and the trading date is the unit of comparison. */
+    notifyOn: date('notify_on').notNull(),
+    state: obligationNoticeState('state').notNull(),
+    messageId: uuid('message_id').references(() => message.id, { onDelete: 'restrict' }),
+    stalenessNote: text('staleness_note'),
+    skippedReason: text('skipped_reason'),
+    /** Required for every terminal state. What makes a silent settlement unstorable. */
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index('obligation_notice_due_idx').on(t.notifyOn),
+    index('obligation_notice_instance_idx').on(t.obligationInstanceId, t.step),
+    uniqueIndex('obligation_notice_one_pending_per_step').on(t.obligationInstanceId, t.step),
+    uniqueIndex('obligation_notice_one_send_per_step').on(t.obligationInstanceId, t.step),
+    unique('obligation_notice_message_claimed_once').on(t.messageId),
+    check(
+      'obligation_notice_to_role_known',
+      sql`${t.toRole} in ('owner', 'manager', 'accountant', 'receptionist', 'therapist', 'marketer', 'auditor', 'system')`,
+    ),
+    check(
+      'obligation_notice_step_is_a_declared_rung',
+      sql`${t.step} ~ '^(reminder|escalation)_[1-9][0-9]{0,2}d$'`,
+    ),
+    check(
+      'obligation_notice_pending_has_settled_nothing',
+      sql`${t.state} <> 'pending'
+          or (${t.settledAt} is null and ${t.messageId} is null and ${t.skippedReason} is null
+              and ${t.stalenessNote} is null)`,
+    ),
+    check(
+      'obligation_notice_terminal_is_settled',
+      sql`${t.state} = 'pending' or ${t.settledAt} is not null`,
+    ),
+    check(
+      'obligation_notice_sent_carries_its_message',
+      sql`(${t.state} = 'sent') = (${t.messageId} is not null)`,
+    ),
+    check(
+      'obligation_notice_skipped_carries_a_reason',
+      sql`(${t.state} = 'skipped') = (${t.skippedReason} is not null)`,
+    ),
+  ],
+)
+
+/**
+ * An expiring capability to download one filed evidence file (0060).
+ *
+ * `tokenSha256` and never the token: a grant table that held its own tokens would be a table that grants
+ * access to every evidence file in the business, which is why `repositories/otp.ts` stores a digest of a
+ * six-digit code rather than the code. A stored grant rather than an HMAC over the URL for three reasons
+ * the migration sets out — no new signing secret for a link that lives fifteen minutes, revocable by
+ * DELETE, and the row records who asked.
+ */
+export const obligationEvidenceGrant = pgTable(
+  'obligation_evidence_grant',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    obligationEvidenceId: uuid('obligation_evidence_id')
+      .notNull()
+      .references(() => obligationEvidence.id, { onDelete: 'restrict' }),
+    tokenSha256: text('token_sha256').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** A role and a label, never a person's name (ADR 0020). */
+    issuedToRole: text('issued_to_role').notNull(),
+    issuedToLabel: text('issued_to_label').notNull(),
+    purpose: text('purpose').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index('obligation_evidence_grant_evidence_idx').on(t.obligationEvidenceId, t.expiresAt),
+    check('obligation_evidence_grant_token_shape', sql`${t.tokenSha256} ~ '^[a-f0-9]{64}$'`),
+    check(
+      'obligation_evidence_grant_role_known',
+      sql`${t.issuedToRole} in ('owner', 'manager', 'accountant', 'receptionist', 'therapist', 'marketer', 'auditor', 'system')`,
+    ),
+    check(
+      'obligation_evidence_grant_purpose_not_placeholder',
+      sql`not is_placeholder_text(${t.purpose})`,
+    ),
+    check('obligation_evidence_grant_expires_after_issue', sql`${t.expiresAt} > ${t.createdAt}`),
   ],
 )

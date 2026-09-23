@@ -5,6 +5,12 @@ import { createBoss, shutdown } from './boss.ts'
 import { enqueue } from './enqueue.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
+import {
+  obligationNoticeRuntimeFor,
+  SEND_OBLIGATION_NOTICE_JOB,
+  setObligationNoticeEnqueue,
+  setObligationNoticeRuntime,
+} from './jobs/obligation-reminders.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
 import {
   SEND_SCHEDULED_STEP_JOB,
@@ -84,6 +90,18 @@ async function main(): Promise<void> {
   // enqueue harmless — but it keeps the queue from filling with work the first job already has.
   setScheduledStepEnqueue((data) =>
     enqueue(boss).send(SEND_SCHEDULED_STEP_JOB, data, { singletonKey: data.stepId }),
+  )
+  // M-VAT-11, and the same two calls for the same two reasons. The recipient resolver inside the runtime
+  // answers null for every role and that is the shipped value, not a placeholder: no table in this build
+  // holds a staff phone number, so every due notice is skipped with `no_recipient_on_file` recorded —
+  // which is a row on the calendar rather than a renewal notice sent to a number somebody invented.
+  setObligationNoticeRuntime(obligationNoticeRuntimeFor(sql))
+  // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
+  // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
+  // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first
+  // job already has.
+  setObligationNoticeEnqueue((data) =>
+    enqueue(boss).send(SEND_OBLIGATION_NOTICE_JOB, data, { singletonKey: data.noticeId }),
   )
   await boss.start()
   const registered = await registerJobs(boss, JOB_REGISTRY)

@@ -3,16 +3,23 @@ import {
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   credentialExpiringSoonDaysSchema,
   DEFAULT_LLM_PROVIDER,
+  DEFAULT_OBLIGATION_ESCALATION_OFFSETS_DAYS,
+  DEFAULT_OBLIGATION_REMINDER_OFFSETS_DAYS,
   DEFAULT_REMINDER_OFFSETS_HOURS,
   DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
   genderMatchingModeSchema,
   LLM_PROVIDER_SETTING_KEY,
   llmProviderSchema,
+  MAX_OBLIGATION_NOTICE_OFFSET_DAYS,
+  MAX_OBLIGATION_NOTICE_OFFSETS,
   MAX_REMINDER_OFFSET_HOURS,
   MAX_REMINDER_OFFSETS,
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
+  OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
+  OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
   PROVISIONAL_EXPIRING_SOON_DAYS,
+  REBUILD_OBLIGATION_NOTICES_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
   REMINDER_OFFSETS_SETTING_KEY,
   REVIEW_AUTOSEND_DISABLED,
@@ -485,6 +492,83 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y1-licence',
       note: 'docs/04 §7 lists the therapist screening requirements and their renewal intervals as [UNVERIFIED], so the interval is unknown and the warning window that should precede it is unknown with it. 60 days is the longest of the three obvious candidates (30/60/90) and therefore the conservative one: a warning too early is noise, a warning too late is a therapist off the rota with a day of bookings to reassign by hand.',
+    },
+  }),
+  define({
+    /**
+     * How far ahead of a statutory deadline the compliance calendar sends each reminder (M-VAT-11).
+     *
+     * `operational` and not `compliance_locked`, and the reason is the one the review-reply languages
+     * give: the tier follows what a value can RELAX, not what the subject sounds like. No value here
+     * changes whether an obligation BLOCKS — `obligation.is_blocking` is GENERATED from
+     * `blocking_effect` and `refuse_obligation_shape_change()` refuses an UPDATE to anything but the due
+     * date (0052), so an empty ladder switches the notices off and changes nothing about the consequence
+     * of missing the deadline. A therapist with an overdue credential still leaves availability and
+     * publishing is still refused, whether or not anybody was reminded.
+     *
+     * `rerunJobs` is load-bearing rather than tidy, and this is the second setting in the registry that
+     * needs it. Changing the ladder changes WHICH NOTICES ARE DUE: the step label carries the offset, so
+     * every pending notice built under the old ladder carries a label the new one does not declare. The
+     * rebuild supersedes those rows and plans the new set over the occurrences already in the calendar —
+     * the twelve months a new default applied at generation time would leave on the old timing.
+     */
+    key: OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
+    tier: 'operational',
+    // Whole days before the due date, each between 1 and a year, no repeats, at most four. The bounds are
+    // restated as a CHECK in migration 0060, because the database cannot import this registry and a
+    // `reminder_9999d` row would put a renewal notice in the calendar before the previous renewal.
+    schema: z
+      .array(z.number().int().min(1).max(MAX_OBLIGATION_NOTICE_OFFSET_DAYS))
+      .max(MAX_OBLIGATION_NOTICE_OFFSETS)
+      .refine((days) => new Set(days).size === days.length, {
+        message: 'each reminder must be a different number of days before the deadline',
+      }),
+    defaultValue: [...DEFAULT_OBLIGATION_REMINDER_OFFSETS_DAYS],
+    label: 'Compliance deadline reminders',
+    help: 'How many days before a licence renewal, permit, inspection or filing deadline each reminder is sent to the role that owes it. An empty list turns these reminders off; it does not stop an overdue obligation blocking. Changing this re-plans the notices of every occurrence already in the calendar.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // No cache tag: a notice is a message rather than a page, so nothing rendered changes. The work is
+    // the REBUILD.
+    invalidates: [],
+    rerunJobs: [REBUILD_OBLIGATION_NOTICES_JOB],
+    provisional: {
+      openQuestionId: 'Y1-licence',
+      note: 'docs/04 §1 and §7 mark the licence classification and every renewal interval [UNVERIFIED], so how long a renewal actually takes at ADDED, at Abu Dhabi Municipality or at MOHRE is not on file — and the lead time that should precede an unknown interval is unknown with it. 60/30/7 days is the conservative reading: the failure is asymmetric, since a notice too early is noise somebody ignores and a notice too late is a lapsed trade licence that blocks publishing or a lapsed credential that takes a therapist off the rota with a day of bookings to reassign by hand.',
+    },
+  }),
+  define({
+    /**
+     * How long an unacknowledged deadline waits before it escalates to the role above (M-VAT-11).
+     *
+     * A second setting rather than a field on the first, because the two answer different questions and
+     * are wrong in different directions: a reminder too early is noise, and an escalation too early is a
+     * message to the proprietor about something the manager was always going to do on Thursday. One list
+     * covering both would also make "turn the escalations off and keep the reminders" unexpressible,
+     * which is the first change an owner asks for.
+     *
+     * Escalation goes to the role ABOVE the declared owner (`escalationRoleFor` in `@berelax/core`), and
+     * no value here can choose that role: an escalation addressed to whoever is on shift is decoration,
+     * and 0060's trigger refuses one addressed to the owning role at all.
+     */
+    key: OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
+    tier: 'operational',
+    schema: z
+      .array(z.number().int().min(1).max(MAX_OBLIGATION_NOTICE_OFFSET_DAYS))
+      .max(MAX_OBLIGATION_NOTICE_OFFSETS)
+      .refine((days) => new Set(days).size === days.length, {
+        message: 'each escalation must be a different number of days after the deadline',
+      }),
+    defaultValue: [...DEFAULT_OBLIGATION_ESCALATION_OFFSETS_DAYS],
+    label: 'Compliance deadline escalation',
+    help: 'How many days after a deadline passes unacknowledged before it is escalated to the role above the one that owes it. An empty list turns escalation off. Acknowledging an occurrence stops the escalations and deliberately not the reminders.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    rerunJobs: [REBUILD_OBLIGATION_NOTICES_JOB],
+    provisional: {
+      openQuestionId: 'Y1-licence',
+      note: 'An escalation interval is a judgement about how long a renewal can safely sit unacknowledged, which follows from how long the renewal takes — and docs/04 marks every renewal interval [UNVERIFIED]. 7 and 21 days: a week is short enough that the second rung still lands before a month has passed, and the second rung exists because one escalation nobody answers is a notice with nowhere left to go.',
     },
   }),
 ] as const

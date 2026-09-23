@@ -12,7 +12,13 @@
  * are `@berelax/db`'s. It answers when a statutory obligation falls due, whether an overdue one is
  * blocking, and which behaviour a breach stops — a therapist leaving bookable availability, or publishing
  * refused with `PublishingBlocked`.
+ *
+ * `obligation-notice.ts` is M-VAT-11's continuation of it: who is told about a dated occurrence and when,
+ * which role an unacknowledged one escalates to, what refuses a notice whose deadline has moved, and the
+ * three states the open-compliance-questions dashboard separates — an unconfirmed duty, a confirmed duty
+ * with no deadline on file, and an actual breach.
  */
 
 export * from './lexicon.ts'
 export * from './obligation.ts'
+export * from './obligation-notice.ts'

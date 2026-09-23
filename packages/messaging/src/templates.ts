@@ -131,6 +131,67 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     body: 'رمزك {{code}}، صالح {{minutes}} دقائق. لا تشاركه مع أحد.',
     variables: ['code', 'minutes'],
   },
+  /*
+    M-VAT-11's two. These are the first defaults addressed to a MEMBER OF STAFF rather than to a customer,
+    and the discretion rule still binds them for a reason that is not obvious: the message arrives on a
+    personal phone, and a body naming the licence number, the permit number or the TRN would put a
+    regulatory identifier on a lock screen. It names the obligation KEY and the date and nothing else —
+    `trade_licence_renewal` is meaningless to a stranger and actionable to the owner, which is exactly the
+    trade the customer templates make with the magic link.
+
+    Both exist in Arabic as well. The selector does not use it yet and says why: no table records which
+    language a member of staff reads, and picking one per ROLE would be a guess about a person (ADR 0020).
+    Seeding it now means the day a staff locale exists the template is already approved, rather than the
+    day somebody notices the Arabic half was never written.
+  */
+  {
+    key: 'compliance.obligation_reminder',
+    messageClass: 'transactional',
+    purpose:
+      'Sent to the role that owes a statutory obligation, at each declared number of days before its ' +
+      'deadline (M-VAT-11). The obligation key and the date only: no licence number, permit number or TRN.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Compliance due {{date}}: {{obligation}}. Owed by the {{role}}.',
+    variables: ['date', 'obligation', 'role'],
+  },
+  {
+    key: 'compliance.obligation_reminder',
+    messageClass: 'transactional',
+    purpose:
+      'Sent to the role that owes a statutory obligation, at each declared number of days before its ' +
+      'deadline (M-VAT-11). The obligation key and the date only: no licence number, permit number or TRN.',
+    channel: 'sms',
+    locale: 'ar',
+    // The Latin runs are isolated, as every Arabic template here isolates them (ADR 0011): an obligation
+    // key and a date written inside an Arabic sentence otherwise render in the wrong order.
+    body: 'استحقاق {{date}}: {{obligation}}. على {{role}}.',
+    variables: ['date', 'obligation', 'role'],
+  },
+  {
+    key: 'compliance.obligation_escalation',
+    messageClass: 'transactional',
+    purpose:
+      'Sent to the role ABOVE the one that owes an obligation, when the deadline has passed and nobody ' +
+      'has acknowledged it. Separate wording from the reminder because it reports a different fact: not ' +
+      'that something falls due, but that nobody has picked it up.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Overdue, unacknowledged: {{obligation}}, due {{date}}. Now with the {{role}}.',
+    variables: ['obligation', 'date', 'role'],
+  },
+  {
+    key: 'compliance.obligation_escalation',
+    messageClass: 'transactional',
+    purpose:
+      'Sent to the role ABOVE the one that owes an obligation, when the deadline has passed and nobody ' +
+      'has acknowledged it. Separate wording from the reminder because it reports a different fact: not ' +
+      'that something falls due, but that nobody has picked it up.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'متأخر ولم يُقر: {{obligation}}، {{date}}. إلى {{role}}.',
+    variables: ['obligation', 'date', 'role'],
+  },
   {
     key: 'invoice.issued',
     messageClass: 'transactional',
