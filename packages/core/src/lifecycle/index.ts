@@ -11,5 +11,10 @@
  * `packages/core` reads no clock.
  */
 export * from './cancellation-policy.ts'
+/**
+ * B-MSG-03's invalidation key: the value that decides, at the moment of sending, whether a scheduled
+ * message is still about the appointment it was built for. Pure, and the instant is an argument.
+ */
+export * from './invalidation-key.ts'
 export * from './reschedule-policy.ts'
 export * from './transitions.ts'

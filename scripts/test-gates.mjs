@@ -15924,6 +15924,463 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 63a-63v. (B-MSG-03) Scheduled steps and the invalidation key: the rules 0051 refuses, and the lines
+//           whose removal makes a reminder about a period the appointment no longer holds sendable again.
+//
+// The manifest calls the bug this unit removes "the most damaging bug in the domain", and it is worth
+// stating once more because every case below is aimed at it: a booking is confirmed for Friday, a reminder
+// is queued with a 24-hour delay, the customer moves the appointment, and on Thursday evening the delayed
+// job tells her to come tomorrow at seven. She arrives on the wrong day, the room has been sold, and
+// nothing recorded a fault — the send succeeded and the receipt was positive.
+//
+// Two kinds of fixture, because there are two kinds of claim.
+//
+// **The schema half** is a set of psql probes, each a statement the database must refuse by the NAME of the
+// rule written for it. A bare non-zero exit is also what a typo in a column name produces, and the rule
+// under test would then be dead while this file reported PASS for ever (ADR 0003). Every probe runs inside
+// `begin; … ; rollback;` against its own fixture rows, and each violates exactly ONE rule. 63j is the
+// control: the same cancellation with the step settled FIRST commits, so the nine refusals are about the
+// values they changed rather than about a column list that stopped matching the table.
+//
+// **The code half** is mutants, each removing one line the unit depends on, run against the suite that is
+// supposed to notice. Three of them are worth reading twice.
+//
+// 63l removes the PERIOD from the invalidation key and leaves everything else — the appointment, the step
+// type, the comparison, the skip reason. Every key still matches every key, so nothing is ever stale and
+// the property test's 2,000 histories pass every check except the one that counts. It is the shape of the
+// mistake somebody makes when the key looks like ceremony.
+//
+// 63o swaps two statements in the rebuild: build first, then supersede. It looks like a reordering with no
+// consequence and it is the difference between a rebuild and a pass that reports success over an empty
+// forward book — the new step types are not the old ones, so nothing conflicts, both sets are inserted, and
+// then the supersede settles the rows that had just been written.
+//
+// 63q removes the drain's `state = 'pending'` guard, which is the layer that stops a second drain reaching
+// a vendor at all. The other two layers (the idempotency key and `message_provider_id_unique`) still refuse
+// the duplicate ROW, so the symptom is not a duplicate message — it is a second charge from SMSala for a
+// message the database then refuses to record.
+{
+  const stepDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const STEP_MARKER = 'gate fixture scheduled step'
+  const STEP_DATE = "'2099-12-09'"
+  const STEP_ROOM = 'gate-fixture-bmsg03-room'
+  const STEP_PHONE = '+971500000197'
+  const STEP_BOOKING = "'51000000-0000-4000-8000-00000000d201'"
+  const STEP_APPOINTMENT = "'51000000-0000-4000-8000-00000000d202'"
+  const STEP_THERAPIST = "'51000000-0000-4000-8000-00000000d203'::uuid"
+  const STEP_DELIVERY = "'51000000-0000-4000-8000-00000000d204'::uuid"
+  const STEP_ID = "'51000000-0000-4000-8000-00000000d205'"
+
+  /** The pending 24-hour reminder every probe starts from. Its send instant is a day before the start. */
+  const STEP_INSERT =
+    'insert into scheduled_step (id, appointment_id, step_type, invalidation_key, send_at) values (' +
+    `${STEP_ID}, ${STEP_APPOINTMENT}, 'reminder_24h', ` +
+    `'reminder_24h:${STEP_APPOINTMENT.replaceAll("'", '')}:period', ` +
+    "'2099-12-08 19:00:00+00');"
+
+  /** Settles the step the way a cancellation does, which is what makes the cancellation below legal. */
+  const STEP_SETTLE = `update scheduled_step set state = 'cancelled', settled_at = now() where id = ${STEP_ID};`
+  const STEP_CANCEL = `update appointment set status = 'cancelled_by_customer' where id = ${STEP_APPOINTMENT};`
+
+  const stepSetup = [
+    `insert into customer (phone_e164, created_via) values ('${STEP_PHONE}', 'guest_booking')
+       on conflict (phone_e164) do nothing`,
+    `insert into business_day (trading_date, opens_at, closes_at, source)
+       values (${STEP_DATE}, '2099-12-09 07:00:00+00', '2099-12-09 22:00:00+00', 'weekly')
+       on conflict (trading_date) do nothing`,
+    // 60 minutes: `service_variant_duration_allowed` accepts 45, 60, 90 and 120, and the other two gates
+    // on this seeded service hold 90 (B-LIFE-01) and 120 (B-LIFE-03).
+    `insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
+       select s.id, 60, 25000, '${STEP_MARKER}' from service s
+        where s.style = 'asian' and s.treatment_key = 'normal_massage'
+       on conflict (service_id, duration_minutes) do nothing`,
+    `insert into rooms (code, name, room_type, capacity, display_order, notes)
+       values ('${STEP_ROOM}', 'Gate scheduled step room', 'standard', 1, 87, '${STEP_MARKER}')
+       on conflict (code) do nothing`,
+    `insert into booking (id, customer_id, source, notes)
+       values (${STEP_BOOKING},
+               (select id from customer where phone_e164 = '${STEP_PHONE}'),
+               'front_desk', '${STEP_MARKER}')`,
+    'insert into appointment (id, booking_id, trading_date, service_variant_id, shape, therapist_id, ' +
+      'room_id, period, status, delivery_id, room_places, turnaround_minutes, ' +
+      'therapist_buffer_minutes, gross_price_fils, net_fils, vat_fils) values (' +
+      `${STEP_APPOINTMENT}, ${STEP_BOOKING}, ${STEP_DATE}, ` +
+      '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+      "where s.style = 'asian' and s.treatment_key = 'normal_massage' limit 1), 'solo', " +
+      `${STEP_THERAPIST}, (select id from rooms where code = '${STEP_ROOM}'), ` +
+      "tstzrange('2099-12-09 19:00:00+00','2099-12-09 20:00:00+00','[)'), 'confirmed', " +
+      `${STEP_DELIVERY}, 1, 20, 10, 25000, 23810, 1190)`,
+  ].join('; ')
+
+  const stepProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      stepDbUrl ?? '',
+      '-c',
+      // `set constraints all immediate` after every probe, because two of the rules are DEFERRED
+      // constraint triggers: without it they would fire at a COMMIT this statement never reaches, and
+      // every probe below would report success.
+      `begin; ${stepSetup}; ${STEP_INSERT} ${statement}; set constraints all immediate; rollback;`,
+    ])
+
+  if (!stepDbUrl) {
+    check(
+      'the scheduled-step rules hold',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 63a. At most one LIVE step per (appointment, step type). This is the database's half of "exactly one
+    //      live step per step_type remains" after a reschedule and a reschedule back, and it is what makes
+    //      the invalidation key safe to be non-unique.
+    checkRejectedBy(
+      'scheduled-step gate rejects a second pending step of the same type',
+      stepProbe(
+        'insert into scheduled_step (appointment_id, step_type, invalidation_key, send_at) values (' +
+          `${STEP_APPOINTMENT}, 'reminder_24h', 'another', '2099-12-08 19:00:00+00')`,
+      ),
+      'scheduled_step_one_pending_step_per_type',
+    )
+
+    // 63b. The bound the F09 registry puts on a reminder offset, restated in SQL because the database
+    //      cannot import the registry. A `reminder_9999h` step schedules a reminder a year before the
+    //      booking.
+    checkRejectedBy(
+      'scheduled-step gate rejects a step type outside the registry bounds',
+      stepProbe(
+        'insert into scheduled_step (appointment_id, step_type, invalidation_key, send_at) values (' +
+          `${STEP_APPOINTMENT}, 'reminder_9999h', 'out-of-range', '2099-12-08 19:00:00+00')`,
+      ),
+      'scheduled_step_type_is_a_declared_reminder',
+    )
+
+    // 63c. THE backstop. A pending step on an appointment that no longer holds its resources is a reminder
+    //      waiting to be sent about something that will not happen. DEFERRED, so the transaction is judged
+    //      on what it commits rather than on the state it holds in the middle of a cancellation.
+    checkRejectedBy(
+      'scheduled-step gate rejects a cancellation that would commit a pending step',
+      stepProbe(STEP_CANCEL),
+      'scheduled_step_must_not_outlive_its_appointment',
+    )
+
+    // 63d. Leaving `pending` is a one-way door. The acceptance criterion says a reschedule and a reschedule
+    //      back must not "resurrect the first superseded step"; the application does that by inserting a
+    //      new row, and this is the half that holds when somebody reaches past the application.
+    checkRejectedBy(
+      'scheduled-step gate rejects reviving a settled step',
+      stepProbe(
+        `${STEP_SETTLE} update scheduled_step set state = 'pending', settled_at = null
+          where id = ${STEP_ID}`,
+      ),
+      'scheduled_step_must_not_be_resurrected',
+    )
+
+    // 63e. The other clause of the same trigger, and the only half of the staleness rule SQL can see: the
+    //      key is derived in packages/core and the database cannot derive it, but it CAN see that a
+    //      reminder is now scheduled at or after the treatment it is reminding somebody about.
+    checkRejectedBy(
+      'scheduled-step gate rejects a pending step due at or after the treatment starts',
+      stepProbe(
+        `update appointment set period = tstzrange('2099-12-08 18:00:00+00',
+                                                  '2099-12-08 19:00:00+00','[)')
+          where id = ${STEP_APPOINTMENT}`,
+      ),
+      'scheduled_step_must_not_outlive_its_appointment',
+    )
+
+    // 63f. `sent` with no message id is the invisible-stub shape docs/12 §1 forbids: a step that claims to
+    //      have produced a message nobody can find.
+    checkRejectedBy(
+      'scheduled-step gate rejects a sent step with no message to point at',
+      stepProbe(
+        `update scheduled_step set state = 'sent', settled_at = now() where id = ${STEP_ID}`,
+      ),
+      'scheduled_step_sent_carries_its_message',
+    )
+
+    // 63g. The whole of "no step ends in a silent unrecorded state", as a constraint rather than as a test:
+    //      a row that left `pending` without recording WHEN is not storable.
+    checkRejectedBy(
+      'scheduled-step gate rejects a terminal step with no settled instant',
+      stepProbe(
+        `update scheduled_step set state = 'skipped', skipped_reason = 'appointment_not_live'
+          where id = ${STEP_ID}`,
+      ),
+      'scheduled_step_terminal_is_settled',
+    )
+
+    // 63h. And the reason code, which is what a report groups by. A skip with no reason is the silent state
+    //      again, wearing a label.
+    checkRejectedBy(
+      'scheduled-step gate rejects a skipped step with no reason code',
+      stepProbe(
+        `update scheduled_step set state = 'skipped', settled_at = now() where id = ${STEP_ID}`,
+      ),
+      'scheduled_step_skipped_carries_a_reason',
+    )
+
+    // 63i. The other direction: a PENDING step has decided nothing. Without this a row can be pending and
+    //      carry a skip reason, which reads as a step that was both sent and not sent.
+    checkRejectedBy(
+      'scheduled-step gate rejects a pending step carrying a skip reason',
+      stepProbe(
+        `update scheduled_step set skipped_reason = 'appointment_not_live' where id = ${STEP_ID}`,
+      ),
+      'scheduled_step_pending_has_settled_nothing',
+    )
+
+    // 63j. The control for all nine. Settle the step FIRST and the same cancellation commits — so each
+    //      refusal above is about the value it changed, and the deferred trigger is a rule about what a
+    //      transaction commits rather than a table that cannot be written to.
+    const stepControl = stepProbe(`${STEP_SETTLE} ${STEP_CANCEL}`)
+    check(
+      'scheduled-step gate accepts a cancellation whose steps were settled first',
+      !stepControl.failed,
+      `the nine refusals above are not about the values they changed:\n${stepControl.output}`,
+    )
+
+    // Every probe above rolls back, so this sweeps nothing in the ordinary case. It is here for the case a
+    // probe is wrongly accepted, and because a room or a booking left behind fails a later gate with an
+    // error about something else entirely.
+    run('psql', [
+      '--no-psqlrc',
+      '-q',
+      stepDbUrl,
+      '-c',
+      `delete from scheduled_step where appointment_id = ${STEP_APPOINTMENT}; ` +
+        `delete from appointment where booking_id = ${STEP_BOOKING}; ` +
+        `delete from booking where notes = '${STEP_MARKER}'; ` +
+        `delete from rooms where notes = '${STEP_MARKER}'; ` +
+        `delete from service_variant where provisional_note = '${STEP_MARKER}'; ` +
+        `delete from business_day where trading_date = ${STEP_DATE}; ` +
+        `delete from customer where phone_e164 = '${STEP_PHONE}';`,
+    ])
+  }
+
+  // 63k-63v. The code half.
+  const STEP_KEY = 'packages/core/src/lifecycle/invalidation-key.ts'
+  const STEP_REPO = 'packages/db/src/repositories/scheduled-step.ts'
+  const STEP_TRANSITION = 'packages/db/src/repositories/appointment-transition.ts'
+  const STEP_RESCHEDULE = 'packages/db/src/repositories/reschedule.ts'
+  const STEP_JOB = 'apps/worker/src/jobs/send-scheduled-step.ts'
+  const STEP_CORE_SUITE = 'packages/core/src/lifecycle'
+  const STEP_UNIT = 'apps/worker/src/jobs/send-scheduled-step.test.ts'
+  const STEP_PAIR = 'apps/worker/src/jobs/send-scheduled-step.itest.ts'
+
+  /** Applies one anchored edit to a shipped file, asserting the anchor is still there. */
+  const stepMutant = (path, anchor, replacement, body) =>
+    withEditedFile(
+      path,
+      (text) => {
+        // An anchor that has moved makes the assertion vacuous, so it is an error rather than a no-op
+        // replace: `String.replace` with a missing needle returns the text unchanged, and the mutant
+        // would be the shipped code passing its own tests.
+        if (!text.includes(anchor)) {
+          throw new Error(`the B-MSG-03 gate's anchor is no longer in ${path}: ${anchor}`)
+        }
+        return text.replace(anchor, replacement)
+      },
+      body,
+    )
+
+  const stepCoreSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', STEP_CORE_SUITE])
+  const stepUnitSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', STEP_UNIT])
+  const stepPairSuite = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', STEP_PAIR])
+
+  // 63k. THE check. With the comparison gone, every stale step is sendable and the property test's 2,000
+  //      generated histories are what notice — which is the whole reason they are generated rather than
+  //      written: a correct lifecycle never leaves a stale pending step, so the histories have to include
+  //      the writer that forgot.
+  checkRejectedBy(
+    'scheduled-step gate: a drain that does not compare the invalidation key is caught',
+    stepMutant(
+      STEP_KEY,
+      '  if (step.invalidationKey !== expected) {',
+      '  if ((false as boolean)) {',
+      stepCoreSuite,
+    ),
+    'sends zero messages for a step whose key does not match',
+  )
+
+  // 63l. The key without the PERIOD. See the header: every key then matches every key, the comparison
+  //      still runs, the skip reason still exists, and nothing is ever stale.
+  //
+  //      The two instants are blanked rather than the template literal being rewritten, for a reason this
+  //      file has hit before (61f): an anchor containing a template placeholder trips
+  //      `noTemplateCurlyInString` in this very file. Blanking them is the same mutation — the period stops
+  //      contributing to the key — expressed in a string Biome will accept.
+  checkRejectedBy(
+    'scheduled-step gate: an invalidation key that omits the period is caught',
+    stepMutant(
+      STEP_KEY,
+      `  const startsAt = isoOf(request.period.startsAtMs, 'the period start')
+  const endsAt = isoOf(request.period.endsAtMs, 'the period end')`,
+      `  const startsAt = ''
+  const endsAt = ''`,
+      stepCoreSuite,
+    ),
+    'sends zero messages for a step whose key does not match',
+  )
+
+  // 63m. The staleness note. A tolerance wider than any real outage means a six-hour-late reminder is
+  //      recorded as though it went out on time, and "sent with a recorded staleness note" becomes "sent".
+  checkRejectedBy(
+    'scheduled-step gate: a lateness tolerance no outage can exceed is caught',
+    stepMutant(
+      STEP_KEY,
+      'export const SCHEDULED_STEP_LATE_TOLERANCE_MINUTES = 30',
+      'export const SCHEDULED_STEP_LATE_TOLERANCE_MINUTES = 100_000',
+      stepCoreSuite,
+    ),
+    'sends a step the outage made late',
+  )
+
+  // 63n. The reminder set is read from a setting, and a reader that defaults a value it cannot parse makes
+  //      a corrupt row indistinguishable from an owner who turned reminders off — which is a legal state.
+  checkRejectedBy(
+    'scheduled-step gate: defaulting an unreadable reminder setting instead of refusing it is caught',
+    stepMutant(
+      STEP_KEY,
+      "  if (!Array.isArray(value)) return refuse('it is not an array')",
+      '  if (!Array.isArray(value)) return [24, 2]',
+      stepCoreSuite,
+    ),
+    'refusing anything it cannot read rather than defaulting',
+  )
+
+  // 63o. The rebuild's ORDER. See the header: build-then-supersede settles the rows it has just written,
+  //      and the pass reports a tidy count over a forward book with no live reminders in it.
+  checkRejectedBy(
+    'scheduled-step gate: rebuilding before superseding is caught',
+    stepMutant(
+      STEP_REPO,
+      `    superseded += await settleScheduledSteps(uow, {
+      appointmentId: row.id,
+      state: 'superseded',
+    })
+    built += (await buildScheduledSteps(uow, { appointmentId: row.id }, deps)).length`,
+      `    built += (await buildScheduledSteps(uow, { appointmentId: row.id }, deps)).length
+    superseded += await settleScheduledSteps(uow, {
+      appointmentId: row.id,
+      state: 'superseded',
+    })`,
+      stepPairSuite,
+    ),
+    'rebuilds bookings taken BEFORE the change',
+  )
+
+  // 63p. Fail closed. A rebuild with no planner supersedes every pending reminder in the forward book and
+  //      inserts nothing in their place — the quietest possible way to turn reminders off.
+  checkRejectedBy(
+    'scheduled-step gate: defaulting the missing step planner in the rebuild is caught',
+    stepMutant(
+      STEP_REPO,
+      `  if (typeof deps?.plan !== 'function') {
+    throw refusal(
+      'invariant_violated',
+      'step_plan_not_derived',
+      'no step planner was supplied, so the rebuild had no keys to write.`,
+      `  if ((false as boolean)) {
+    throw refusal(
+      'invariant_violated',
+      'step_plan_not_derived',
+      'no step planner was supplied, so the rebuild had no keys to write.`,
+      stepPairSuite,
+    ),
+    'rebuilds bookings taken BEFORE the change',
+  )
+
+  // 63q. The drain's own idempotency guard. See the header: the other two layers refuse the duplicate ROW,
+  //      so what this removes is the thing that stops a second vendor charge.
+  checkRejectedBy(
+    'scheduled-step gate: draining a step that is already settled is caught',
+    stepMutant(
+      STEP_JOB,
+      "    if (step.state !== 'pending') {",
+      '    if ((false as boolean)) {',
+      stepPairSuite,
+    ),
+    'draining the same step twice produces exactly one message row',
+  )
+
+  // 63r. The skip RECORD. Treating a refusal as "not due yet" leaves the row pending with nothing written
+  //      against it — which is the third outcome the acceptance criterion forbids, and the sweep would then
+  //      hand the same step back every fifteen minutes for ever.
+  checkRejectedBy(
+    'scheduled-step gate: a drain that defers instead of recording a skip is caught',
+    stepMutant(
+      STEP_JOB,
+      "    if (verdict.kind === 'defer') return { kind: 'deferred', why: verdict.why }",
+      "    if (verdict.kind === 'defer' || verdict.kind === 'skip')\n" +
+        "      return { kind: 'deferred', why: 'the gate removed the skip record' }",
+      stepPairSuite,
+    ),
+    'skips a step whose key no longer matches',
+  )
+
+  // 63s. The payload. One extra field is all it takes: a recipient in `pgboss.job.data` is a phone number
+  //      in a table with a seven-day retention and no access control of its own, and a body there is the
+  //      delayed job this unit exists to remove.
+  checkRejectedBy(
+    'scheduled-step gate: a queue payload carrying more than a step id is caught',
+    stepMutant(
+      STEP_JOB,
+      '    const payload: SendScheduledStepData = { stepId: step.id }',
+      "    const payload = { stepId: step.id, recipient: '+971501234567' } as SendScheduledStepData",
+      stepUnitSuite,
+    ),
+    'builds one payload per due step',
+  )
+
+  // 63t. The maintainer inside the ONE write path every transition comes through. Without it CONFIRMED
+  //      builds nothing and a cancellation settles nothing — and the second of those is refused by 0051's
+  //      deferred trigger, which is what makes forgetting this loud rather than dangerous.
+  checkRejectedBy(
+    'scheduled-step gate: a transition that does not maintain the scheduled steps is caught',
+    stepMutant(
+      STEP_TRANSITION,
+      `  const steps = await deps.steps?.(uow, {
+    appointmentId: input.appointmentId,
+    toStatus: transition.to,
+  })`,
+      '  const steps = undefined',
+      stepPairSuite,
+    ),
+    'CONFIRMED creates the declared set',
+  )
+
+  // 63u. And the successor's own set, which no transition ever builds: a successor is born by INSERT. A
+  //      reschedule without this leaves the customer with a moved appointment and no reminders at all.
+  checkRejectedBy(
+    'scheduled-step gate: a reschedule that builds no steps for the successor is caught',
+    stepMutant(
+      STEP_RESCHEDULE,
+      '  await buildSuccessorSteps(uow, deps.steps, moving, successorIds)',
+      '  await Promise.resolve()',
+      stepPairSuite,
+    ),
+    'RESCHEDULED supersedes the old rows',
+  )
+
+  // 63v. The controls. The committed files pass all three suites, so every probe above is the line it
+  //      removed and not a suite that fails for its own reasons.
+  const stepCoreClean = stepCoreSuite()
+  const stepUnitClean = stepUnitSuite()
+  const stepPairClean = stepPairSuite()
+  check(
+    'scheduled-step gate: the committed key, jobs and write paths pass their own suites',
+    !stepCoreClean.failed && !stepUnitClean.failed && !stepPairClean.failed,
+    'a committed B-MSG-03 path failed its own suite:\n' +
+      `${stepCoreClean.output}${stepUnitClean.output}${stepPairClean.output}`,
+  )
+}
+
 // 64. The compliance calendar, and the blocking behaviour that gives it its value (M-VAT-10).
 //
 //     docs/04 §9: "an overdue blocking obligation changes system behaviour — a therapist leaves bookable

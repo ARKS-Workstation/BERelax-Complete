@@ -3,6 +3,7 @@ import type { Actor, ActorKind, RequestContext } from '../audit.ts'
 import type { Sql } from '../connection.ts'
 import type { UnitOfWork } from '../tx.ts'
 import { withUnitOfWork } from '../tx.ts'
+import type { ScheduledStepMaintainer, ScheduledStepMaintenance } from './scheduled-step.ts'
 
 /**
  * The write half of the appointment lifecycle (B-LIFE-01).
@@ -141,6 +142,22 @@ export type TransitionDecider = (
 
 export interface TransitionDeps {
   readonly decide: TransitionDecider
+  /**
+   * B-MSG-03's scheduled-step maintainer, injected.
+   *
+   * Every transition in the lifecycle comes through this function, which is what makes this the one seam
+   * where "CONFIRMED creates the reminder set, RESCHEDULED supersedes it, CANCELLED_* and NO_SHOW settle
+   * it" can be true without four call sites each remembering to do it. It runs inside the same
+   * transaction as the status change, its history row, its audit row and its event: a reminder that
+   * survived a rolled-back cancellation would be the bug from the other direction.
+   *
+   * OPTIONAL in the type, so that every caller written before B-MSG-03 compiles unchanged — and that
+   * would be a permissive default if it were the only layer. It is not. 0051's deferred constraint
+   * trigger refuses any transaction that COMMITS a pending step on an appointment which no longer holds
+   * its resources, so omitting this does not silently leave a live reminder on a cancelled booking: it
+   * fails, by name, naming the step and the appointment.
+   */
+  readonly steps?: ScheduledStepMaintainer
 }
 
 export interface TransitionInput {
@@ -192,6 +209,8 @@ export type TransitionResult =
       /** The outbox row this transition enqueued. Exactly one, in the same transaction. */
       readonly eventId: string
       readonly history: TransitionHistoryRow
+      /** What this move did to the appointment's scheduled steps. Absent when no maintainer was given. */
+      readonly steps?: ScheduledStepMaintenance
     }
   | {
       /** The state was already the one asked for and the table declares the repeat idempotent. */
@@ -552,6 +571,14 @@ export async function transitionAppointment(
     )
   }
 
+  // After the event, so that a maintainer which throws rolls back the whole transition rather than
+  // leaving a status change with no reminders and no event. It is the last thing this function does
+  // because it is the only part of it that is about something other than the appointment row.
+  const steps = await deps.steps?.(uow, {
+    appointmentId: input.appointmentId,
+    toStatus: transition.to,
+  })
+
   return {
     kind: 'transitioned',
     appointmentId: input.appointmentId,
@@ -560,6 +587,7 @@ export async function transitionAppointment(
     eventType: transition.eventType,
     eventId,
     history,
+    ...(steps === undefined ? {} : { steps }),
   }
 }
 

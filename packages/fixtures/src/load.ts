@@ -32,10 +32,12 @@ import {
   readCompliancePolicy,
   type Sql,
   seedCatalogue,
+  seedMessageTemplates,
   seedPremises,
   seedSettingDefaults,
   seedTherapistRoster,
 } from '@berelax/db'
+import { DEFAULT_TEMPLATES } from '@berelax/messaging'
 import {
   FIXTURE_CLOSE,
   FIXTURE_FORWARD_DAYS,
@@ -214,6 +216,34 @@ const therapistRosterLoader: Loader = {
   },
 }
 
+/**
+ * The shipped message templates, as ROWS (B-MSG-03).
+ *
+ * B-MSG-01 declared them as data and every use so far has rendered one at the call site. A `message` row
+ * cannot exist without one: `message.template_id` is a `not null references message_template(id)`, because
+ * "a message has to keep pointing at the words and the class it actually left with". A scheduled step
+ * resolves its template by key at SEND time, so the row has to be here — and B-MSG-04's own NOTE hands
+ * this seed to B-MSG-03 for exactly that reason.
+ *
+ * This loader is the seam, in the same shape the catalogue loader takes for its compliance lint:
+ * `packages/db` may import `@berelax/shared` and `@berelax/config` only, so it cannot reach
+ * `DEFAULT_TEMPLATES`, and `packages/fixtures` is the one package that may hold both halves. The seed
+ * writes version 1 only and leaves later versions alone, which is what makes a second `pnpm seed` (H03's
+ * idempotence criterion) produce the same rows and what stops it reverting an owner's reworded template.
+ *
+ * After `premises` for the ordering `pnpm seed` prints, and because nothing here depends on the fixture
+ * salon: `salon` is unused, as it is in four of the five loaders above.
+ */
+const messageTemplateLoader: Loader = {
+  name: 'message-templates',
+  after: ['premises'],
+  async load(sql, salon) {
+    void salon
+    const result = await seedMessageTemplates(sql, DEFAULT_TEMPLATES)
+    return result.templatesWritten + result.variantsWritten
+  },
+}
+
 function shift(date: string, offsetDays: number) {
   const value = new Date(`${date}T00:00:00Z`)
   value.setUTCDate(value.getUTCDate() + offsetDays)
@@ -226,6 +256,7 @@ const LOADERS: Loader[] = [
   settingsLoader,
   businessDayLoader,
   therapistRosterLoader,
+  messageTemplateLoader,
 ]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */

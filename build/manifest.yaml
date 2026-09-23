@@ -2098,7 +2098,7 @@ units:
       supersedes it and creates a new one, CANCELLED_* cancels it. The worker refuses any step whose key
       no longer matches. This is the most damaging bug in the domain, so it is tested as an invariant.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-LIFE-03
@@ -2122,6 +2122,178 @@ units:
       staleness note or skipped with a recorded reason code; a test asserts no step ends in a silent unrecorded
       state
     - Draining the same scheduled_step twice produces exactly one message row, asserted
+    - 'NOTE: migration 0051_scheduled_step.sql and SCHEMA_VERSION is 51 (22, 41 and 47 stay unused;
+      renumbering to close a gap is how two branches apply the same number to different SQL). One table,
+      one enum, one BEFORE trigger and two DEFERRED constraint triggers. The table has deliberately NO
+      body, recipient or template_id column: all three are resolved at send time, because a body stored on
+      Thursday is a body written about Friday''s period. `invalidation_key` is deliberately NOT unique -
+      reschedule Friday to Saturday and back re-derives the FIRST (now superseded) row''s key, and a unique
+      constraint would refuse that legal third state while its obvious repair is the resurrection this unit
+      is asked to prevent. Liveness is the row''s STATE instead: a partial unique index on
+      (appointment_id, step_type) WHERE state = ''pending'' allows exactly one live step per type, and
+      `refuse_scheduled_step_resurrection` makes leaving `pending` a one-way door. `settled_at` is what
+      makes "no step ends in a silent unrecorded state" a thing the database REFUSES rather than a thing a
+      test looks for: `scheduled_step_terminal_is_settled` makes a row that left `pending` without one
+      unstorable.'
+    - 'NOTE: `step_type` is text with a pattern CHECK and not an enum, and that is what makes the
+      settings-rebuild criterion true rather than a wording to satisfy. The reminder set is the F09 setting
+      `booking.reminder_offsets_hours` and the label is DERIVED from the offset (24 hours is
+      `reminder_24h`), so changing the timing is a settings change rather than a migration - and because
+      the label is part of the key, moving the reminder from 24 hours to 48 changes every key of every
+      pending step, which is the "new keys" the criterion asks to see. The bound the registry''s Zod schema
+      puts on an offset (1 to 168 hours) is restated in SQL, because the database cannot import the
+      registry and a `reminder_9999h` row would schedule a reminder a year before the booking; gate 63b
+      watches the SQL half refuse it.'
+    - 'NOTE: the damaging bug is refused in TWO layers, and the second is the reason the first is safe to be
+      an optional dependency. `transitionAppointment` - B-LIFE-01''s single write path for every transition
+      - gained one optional dep, `steps`, so CONFIRMED / RESCHEDULED / CANCELLED_* / NO_SHOW all maintain
+      the set through ONE seam rather than four call sites each remembering to. Optional in the TYPE so
+      every caller written before this unit compiles unchanged, and that would be a permissive default if
+      it stood alone. It does not: 0051''s deferred constraint trigger
+      `appointment_leaves_no_pending_scheduled_step` refuses any transaction that COMMITS a pending step on
+      an appointment whose generated `holds_resources` is false, so omitting the maintainer fails by name
+      with the step and the appointment in the message instead of leaving a live reminder on a cancelled
+      booking. Deferred rather than immediate because a cancellation moves the status and then settles the
+      steps: the transaction is judged on what it commits. The same trigger''s second clause catches the
+      other way in - an UPDATE of `period` on a LIVE appointment, which is not the reschedule path and
+      leaves every attached key stale - as far as SQL can see it, which is "a reminder now due at or after
+      the treatment it is reminding somebody about". It cannot see the key itself, because the key is
+      derived in `packages/core` and the database cannot derive it. Gate 63c and 63e are the two clauses.'
+    - 'NOTE: the property test generates the DEFECT, and without that it would be worth nothing. A correct
+      lifecycle never leaves a stale PENDING step - a reschedule supersedes them and inserts new ones - so
+      2,000 histories built only from correct operations would give the key check nothing to refuse, and a
+      decider with no key check at all would pass. So the operation set includes `drift`: the period moves
+      and the steps are left where they were, which is a real writer (a direct `update appointment set
+      period`, a future lifecycle path whose author did not know the table existed, a sweep). The oracle
+      never derives a key - each model step records the period it was BUILT FOR as two numbers, which is
+      knowledge about the input rather than an inspection of the output - and four controls stop the
+      invariant passing vacuously: a deliberately stale key IS detected by name, a matching key IS sent,
+      two mutant deciders (one with no key check, one whose key forgets the period) both produce
+      violations, and the run asserts it really produced reschedules, cancels, reschedules BACK to a period
+      already used, late sends, deferred steps and drifts. "Zero MESSAGES are sent" is asserted in two
+      places, because the 2,000 sequences are over the DECISION: the property test proves the verdict is
+      never `send` for a step the model says is stale, and the itest proves the consequence against a real
+      PostgreSQL and the real send choke point - a stale step is skipped with zero calls in the fake
+      SMSala''s log, with the control beside it that the same step on an untouched appointment IS sent and
+      logs exactly one.'
+    - 'NOTE: three jobs rather than the one the files list names, and no `startAfter` anywhere. Nothing is
+      queued in advance, which is the whole of "never a fire-and-forget delayed job": `messaging.
+      scheduled-step-sweep` (the only cron, `*/15 * * * *`, reporting to 0021''s `reminder_scheduler`
+      agent, whose declared interval is the same fifteen minutes so the watchdog''s "no success within
+      twice the interval" alert means something) finds the pending rows whose send instant has passed and
+      hands each to `messaging.send-scheduled-step`, whose payload is a step id and NOTHING else - no body,
+      no phone number, no template id, asserted in the unit suite over what the sweep builds and again in
+      the itest over the row `pgboss.job` really stored. That is also what makes a 6-hour outage
+      self-healing rather than a lost batch: the rows did not move, so the first sweep after the restart
+      finds all of them. The third job is `messaging.rebuild-scheduled-steps`, which the F09 registry names
+      in `rerunJobs` on the reminder setting - the field that registry has carried since F09 with the
+      comment "e.g. rebuilding scheduled reminders", and this is the setting it was written for. The name
+      is one constant in `@berelax/shared`, so the registry and the worker cannot be two strings, and a
+      unit test resolves `invalidationsFor(...).jobs` against `JOB_REGISTRY`.'
+    - 'NOTE: DEFERRED, to B-UI-02, and it is the one place this unit ships a path that does not send. The
+      `booking.reminder` template declares `{{time}}` and `{{link}}`; `{{link}}` is a per-booking expiring
+      MAGIC LINK (docs/06 D2) and B-UI-02 owns magic links, so nothing in this build can mint one.
+      B-MSG-01''s renderer refuses a blank for a declared variable - deliberately, because "Details or
+      changes: " sends successfully and is reported as delivered - and inventing a URL would be brief rule
+      15 exactly, a plausible value indistinguishable from a configured one, and worse than a blank because
+      a link to a 404 in a reminder is a customer who thinks the salon has lost their booking. So
+      `MagicLinkBuilder` is an injected seam, the shipped `scheduledStepRuntimeFor` supplies one that
+      answers null, and a due reminder is then SKIPPED with `content_unavailable` recorded on the row -
+      visible in the table, countable in a report, and never a step left pending to be re-swept for ever.
+      The itest drives both: a stub link proves the whole send path end to end (message row, provider call,
+      inbox entry), and the shipped `null` proves the skip. One line in `scheduledStepRuntimeFor` on the
+      day B-UI-02 lands.'
+    - 'NOTE: found and RECORDED rather than fixed, because fixing it belongs to another unit''s acceptance.
+      The shipped `booking.reminder` template reads "Reminder: your booking TOMORROW at {{time}}" (and the
+      Arabic the same), so its words are true for the 24-hour step and not for the 2-hour one - and both
+      resolve to it, because there is one reminder template and the step type carries only the offset. The
+      wording is B-MSG-01''s (its templates are asserted for the discretion rule and for one segment in both
+      languages, and a second body would join both proofs), and the words themselves are the owner''s to
+      give, so this unit does not invent one. It cannot reach a customer in this build either: every due
+      reminder is currently skipped with `content_unavailable` because the magic link does not exist yet, so
+      the fix - a `booking.reminder_soon` key, or a template whose words are true for any offset - has to
+      land with or before B-UI-02''s magic link rather than after it. Recorded here because the next person
+      to wire the link is the person who needs to know.'
+    - 'NOTE: the integration suite is `apps/worker/src/jobs/send-scheduled-step.itest.ts` rather than a
+      pair suite in `packages/fixtures`, and that is forced rather than chosen: `nothing-imports-an-app` in
+      .dependency-cruiser.cjs forbids a package importing an app, and every claim here is about the
+      worker''s jobs and about a real `pgboss.job` row. It does everything a pair suite does - core''s four
+      rules injected into the db write paths with `satisfies` and not a cast, every assertion against a
+      real PostgreSQL - on the trading dates 2099-11-16 and 2099-11-17, which no other suite and no gate
+      uses. `message` and `message_delivery_receipt` cannot be cleaned up even in principle (the receipt
+      table refuses DELETE and protects the message with ON DELETE RESTRICT), so every message assertion is
+      narrowed to this run''s own recipient and none is a total; `scheduled_step` needs no cleanup of its
+      own because it is the one CASCADE in the table and goes with the appointment.'
+    - 'NOTE: one thing this unit broke in existing code, found by running the whole integration suite rather
+      than only its own file. `scheduled_step.appointment_id` is `appointment`''s FIRST referencing foreign
+      key, and PostgreSQL refuses `TRUNCATE` on a table a foreign key points at unless every referencing
+      table is in the SAME statement. Four suites truncate `appointment` between cases -
+      booking-constraints.itest.ts (three sites, one of them a `beforeEach`, so 24 of its 24 cases failed at
+      once), catalogue.itest.ts (two) and catalogue-compliance.itest.ts (one) - and all four now name
+      `scheduled_step` in the list. NAMED rather than reached with `CASCADE`, because those files list the
+      tables they truncate and explain the choice (TRUNCATE rather than DELETE, since
+      `appointment_status_history` refuses a DELETE from every role), and a CASCADE would silently take in
+      whatever references `appointment` next. Worth recording because the failure looks nothing like its
+      cause: a unit that added a table to the messaging domain turned every booking-constraint assertion
+      red, in a file it never touched.
+
+      And one latent defect that break UNCOVERED, which is fixed here because it will bite again:
+      booking-constraints.itest.ts inserted `+971500000143` as the control customer for its
+      delete-refusal case, and that is `catalogue.itest.ts`''s own PROBE_PHONE. `customer.phone_e164` is
+      UNIQUE (B-LIFE-02), so the two suites sharing one number is a collision that hides while both clean
+      up after themselves - and the truncate above is what stopped one of them doing so, leaving the row
+      behind to fail the other file''s INSERT. One writer, one value (brief rule 12): the control now uses
+      `+971500000145`, which nothing else does.'
+    - 'NOTE: two files this unit added that another unit asked for. `packages/db/src/seed/templates.ts` is
+      the seed B-MSG-01''s files list named and B-MSG-04''s NOTE handed here ("nothing yet seeds the
+      shipped templates into the database ... once B-MSG-03 adds that seed"): a scheduled step resolves its
+      template by KEY at send time and `message.template_id` is a not-null foreign key, so without the row
+      a reminder cannot produce a message at all. The definitions arrive as an ARGUMENT because
+      `packages/db` may import `@berelax/shared` and `@berelax/config` only - the same seam `seedCatalogue`
+      takes for its compliance lint - and `packages/fixtures/src/load.ts` registers the loader that passes
+      `DEFAULT_TEMPLATES` in, so `pnpm seed` writes them. Version 1 only, `on conflict do nothing`, which
+      is what keeps a second `pnpm seed` idempotent (H03) and stops it reverting an owner''s reworded
+      template. What was NOT done is the other half of that NOTE: B-LIFE-02''s OTP route still calls the
+      bare `sendMessage` rather than `deliverMessage`. It is a one-line change now that the row exists, and
+      it belongs to B-MSG-04''s "every fake send is in the inbox" criterion rather than to any line of this
+      unit''s - changing the OTP route''s outcome type and its suites from here would be editing another
+      unit''s acceptance.'
+    - 'NOTE: twelve files added and seventeen changed, against the five this list names, and the shape is
+      the unit''s: one PURE rule in core, one migration and its mirror, one repository, three jobs, and the
+      seams that carry the rule across boundaries neither side may cross. Added:
+      packages/core/src/lifecycle/invalidation-key.ts and its two suites (the worked examples and the
+      2,000-sequence property test), packages/shared/src/reminders.ts (the setting key, its bounds, its
+      default and the rebuild job''s name - four packages need those to agree exactly and shared is the
+      only leaf all four may import, which is where `gender-matching.ts` already lives),
+      packages/db/migrations/0051_scheduled_step.sql, packages/db/src/schema/scheduled-step.ts,
+      packages/db/src/repositories/scheduled-step.ts, packages/db/src/settings/reminders.ts,
+      packages/db/src/seed/templates.ts, and apps/worker/src/jobs/send-scheduled-step.ts with its unit and
+      integration suites. Changed: four barrels (packages/core/src/lifecycle/index.ts,
+      packages/shared/src/index.ts, packages/db/src/schema/index.ts and packages/db/src/index.ts, which also
+      carries SCHEMA_VERSION), the F09 registry (one setting), three write paths that pass the maintainer
+      through (appointment-transition.ts, cancel.ts, reschedule.ts), packages/fixtures/src/load.ts (the
+      template loader), packages/fixtures/src/appointment-reschedule.itest.ts (B-LIFE-03''s deferred
+      assertion, now that the table exists), three suites whose TRUNCATE had to name the new child table,
+      the worker''s registry.ts and run.ts, scripts/test-gates.mjs (gate 63a-63v) and this manifest.'
+    - 'NOTE: scoped out, with the dependency each one waits on. (1) Nothing ENQUEUES the rebuild when the
+      setting changes: `writeSetting` already returns the `jobs` a change requires and the itest asserts it
+      names this job, but the caller that turns that into a `boss.send` is the admin settings surface,
+      which does not exist (W-SYS-01, and C-AUTO-05 for the persisted kill switch beside it). The rebuild
+      is asserted by calling it, which is what the criterion asks ("rebuilds existing pending steps ...
+      asserted by comparing key sets before and after"). (2) `createBooking` does not build steps for an
+      appointment born `confirmed` - B-AVAIL-06 owns that transaction and it has its own gate block - so
+      the walk-in path relies on the rebuild sweep, which covers it BY DESIGN rather than by accident: the
+      pass is over APPOINTMENTS and not over steps, and the itest includes a booking with no steps at all
+      for exactly that reason. Wiring it is one optional dep the day B-UI-02''s flow needs it. The rebuild
+      is also deliberately NOT run over `pnpm seed`''s forward book in the suite, though it would reach it
+      in production: leaving pending steps on the shared fixture''s appointments would mean any later
+      integration file that cancelled one without injecting the maintainer would be refused by 0051''s
+      deferred trigger - the backstop working exactly as designed, failing the wrong unit''s suite. (3) The
+      consent, suppression and frequency evaluators throw in the shipped runtime, exactly as B-LIFE-02''s
+      route wires them: their stores are C-CRM-03, C-CRM-04 and C-AUTO-03. A reminder is transactional, so
+      the gate returns before any of them is read. (4) No `whatsapp` step type: the channel exists in the
+      schema (ADR 0016) and the vendor does not (`vendorFor` refuses it), so a step resolves to the `sms`
+      variant and nothing guesses a second one.'
     files:
     - packages/db/src/schema/scheduled-step.ts
     - apps/worker/src/jobs/send-scheduled-step.ts

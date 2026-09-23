@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**81 / 207 units complete.**
+**82 / 207 units complete.**
 
 ## Next up
 
-1. **B-MSG-03 — Scheduled steps with invalidation keys, and reminder rebuilds**
 1. **B-UI-01 — Public booking flow: service, therapist and slot selection**
 1. **M-TILL-06 — Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender**
+1. **M-VAT-11 — Compliance calendar reminders, escalation, evidence and the unverified dashboard**
 
 ## All units
 
@@ -49,7 +49,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 32 | `B-MSG-01` | Channel-shaped template model, encoding, segment count and cost | `F04`, `F06`, `F09` | — | — |
 | [x] | 33 | `B-MSG-02` | The single send choke point, sender-ID class routing and fail-closed evaluation | `B-MSG-01`, `F03`, `H02` | — | Y6-sender-ids |
 | [x] | 34 | `B-LIFE-02` | Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP | `B-MSG-02`, `F04`, `F06` | — | — |
-| [ ] | 35 | `B-MSG-03` | Scheduled steps with invalidation keys, and reminder rebuilds | `B-LIFE-03`, `B-MSG-02` | — | — |
+| [x] | 35 | `B-MSG-03` | Scheduled steps with invalidation keys, and reminder rebuilds | `B-LIFE-03`, `B-MSG-02` | — | — |
 | [x] | 36 | `B-MSG-04` | Delivery receipts, message lifecycle and the admin Messages inbox | `B-MSG-02`, `F11`, `H02` | — | — |
 | [ ] | 37 | `B-UI-01` | Public booking flow: service, therapist and slot selection | `B-AVAIL-07`, `F11`, `H04` | M1 | — |
 | [ ] | 38 | `B-UI-02` | Public booking flow: details, OTP, confirm and the nine enumerated edge states | `B-LIFE-01`, `B-LIFE-02`, `B-UI-01` | M1 | — |

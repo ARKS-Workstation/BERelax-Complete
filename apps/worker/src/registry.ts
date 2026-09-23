@@ -39,6 +39,11 @@ import {
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
+import {
+  REBUILD_SCHEDULED_STEPS_JOB,
+  SCHEDULED_STEP_SWEEP_JOB,
+  SEND_SCHEDULED_STEP_JOB,
+} from './jobs/send-scheduled-step.ts'
 
 export type { JobContext, JobDefinition, JobHandler } from './job.ts'
 
@@ -318,6 +323,16 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // retained ciphertext, a pair migration 0040 guarantees — so the sweep is safe to reclaim, safe to
   // repeat and healthy when it finds nothing.
   GOOGLE_REVOKE_RETRY_JOB,
+  // B-MSG-03's three. The SWEEP is the only one with a cron, and its fifteen minutes is
+  // `reminder_scheduler`'s declared interval in 0021 rather than a number picked here — the watchdog's
+  // "no success within twice the interval" alert is only meaningful when the two agree.
+  //
+  // The other two are announced: a due step by the sweep, and a rebuild by the settings change that made
+  // the old plan wrong (the F09 registry's `rerunJobs` on `booking.reminder_offsets_hours`). Neither is a
+  // poller, so neither declares an agent — the thing being watched is the sweep, and the caller.
+  SCHEDULED_STEP_SWEEP_JOB,
+  SEND_SCHEDULED_STEP_JOB,
+  REBUILD_SCHEDULED_STEPS_JOB,
 ]
 
 /**

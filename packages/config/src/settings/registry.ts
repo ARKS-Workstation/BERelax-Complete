@@ -3,13 +3,18 @@ import {
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   credentialExpiringSoonDaysSchema,
   DEFAULT_LLM_PROVIDER,
+  DEFAULT_REMINDER_OFFSETS_HOURS,
   DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
   genderMatchingModeSchema,
   LLM_PROVIDER_SETTING_KEY,
   llmProviderSchema,
+  MAX_REMINDER_OFFSET_HOURS,
+  MAX_REMINDER_OFFSETS,
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
   PROVISIONAL_EXPIRING_SOON_DAYS,
+  REBUILD_SCHEDULED_STEPS_JOB,
+  REMINDER_OFFSETS_SETTING_KEY,
   REVIEW_AUTOSEND_DISABLED,
   REVIEW_AUTOSEND_SETTING_KEY,
   REVIEW_COOLING_OFF_SETTING_KEY,
@@ -179,6 +184,33 @@ export const SETTINGS = [
     audited: true,
     invalidates: ['content'],
     provisional: { openQuestionId: 'Y9-windows', note: '24 hours, flagged only, no fee.' },
+  }),
+  define({
+    key: REMINDER_OFFSETS_SETTING_KEY,
+    tier: 'operational',
+    // Whole hours before the treatment, each between 1 and a week, no repeats, at most four. The bounds
+    // are restated as a CHECK in migration 0051, because the database cannot import this registry and a
+    // `reminder_9999h` step would schedule a reminder for a year before the booking.
+    schema: z
+      .array(z.number().int().min(1).max(MAX_REMINDER_OFFSET_HOURS))
+      .max(MAX_REMINDER_OFFSETS)
+      .refine((hours) => new Set(hours).size === hours.length, {
+        message: 'each reminder must be a different number of hours before the treatment',
+      }),
+    defaultValue: [...DEFAULT_REMINDER_OFFSETS_HOURS],
+    label: 'Appointment reminders',
+    help: 'How many hours before the treatment each reminder is sent. An empty list turns reminders off. Changing this rebuilds the reminders of every booking already taken, not only the ones made afterwards.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // No cache tag: a reminder is a message rather than a page, so nothing rendered changes. The work is
+    // the REBUILD, and `rerunJobs` is what carries it — the field this registry has declared since F09
+    // with the comment 'e.g. rebuilding scheduled reminders', and this is the setting it was written for.
+    invalidates: [],
+    rerunJobs: [REBUILD_SCHEDULED_STEPS_JOB],
+    provisional: {
+      openQuestionId: 'Y9-windows',
+      note: 'No reminder policy supplied; 24 hours and 2 hours before the treatment assumed.',
+    },
   }),
   define({
     key: GENDER_MATCHING_SETTING_KEY,

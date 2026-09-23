@@ -6,12 +6,14 @@ import {
   decideAppointmentTransition,
   noShowVerdictFor,
   recheckShapeAssignment,
+  reminderPlanFor,
   rescheduleTradingDate,
   successorStatusFor,
 } from '@berelax/core'
 import {
   type Actor,
   bookSlot,
+  buildScheduledSteps,
   CANCELLATION_WINDOW_SETTING_KEY,
   type CancellationPolicy,
   cancelAppointmentTx,
@@ -27,8 +29,11 @@ import {
   rescheduleAppointmentTx,
   rescheduleRefusalOf,
   type ScheduledStepKeyReader,
+  type ScheduledStepPlanner,
   type SlotRecheck,
   type Sql,
+  scheduledStepMaintainer,
+  scheduledStepsFor,
   type TradingDateResolver,
   type TransitionActor,
   type TransitionDecider,
@@ -118,6 +123,19 @@ const classify = cancellationVerdictFor satisfies CancellationPolicy
 const clock = noShowVerdictFor satisfies NoShowClockCheck
 
 const RESCHEDULE_DEPS: RescheduleDeps = { decide, recheck, resolveTradingDate }
+
+/**
+ * B-MSG-03's step planner and maintainer, with the offsets written out rather than read from the setting.
+ *
+ * Only ONE case here needs them — the one B-MSG-03 unblocked — and they are deliberately NOT folded into
+ * `RESCHEDULE_DEPS`: a reschedule that built a reminder set on every successor would leave pending steps
+ * behind, and the cancellation cases below inject no maintainer, so 0051's deferred trigger would refuse
+ * them. Which is the trigger being right: this file's other cases are about periods and locks, and an
+ * appointment with no reminders attached is the state they mean to describe.
+ */
+const stepPlan: ScheduledStepPlanner = ({ appointmentId, period }) =>
+  reminderPlanFor({ appointmentId, period, offsetsHours: [24, 2] })
+const stepMaintainer = scheduledStepMaintainer({ plan: stepPlan })
 const CANCEL_DEPS = { decide, classify }
 const NO_SHOW_DEPS = { decide, clock }
 
@@ -964,15 +982,23 @@ describe('acceptance — the reschedule event carries the periods and the schedu
     expect(event.payload['fromStatus']).toBe('confirmed')
   })
 
-  it('carries the keys of the steps ACTUALLY present, which today is none because the table is absent', async () => {
-    // B-MSG-03 owns `scheduled_step` and is `status: todo`. Asserting a NON-EMPTY key list here would mean
-    // faking a step, so what is asserted instead is the key set against the rows that exist — and the fact
-    // that the table does not, which the event records as `scheduled_step_table: 'absent'` so a reader can
-    // tell "no reminders attached" from "nothing schedules reminders yet".
+  it('carries the keys of the steps ACTUALLY present, which is non-empty now that the table exists', async () => {
+    /*
+      The assertion B-LIFE-03 DEFERRED, written the day B-MSG-03 landed.
+
+      Its own NOTE said why it could not be made then: `scheduled_step` did not exist, "no step row was
+      faked to make the criterion pass", and the empty list was EXPLAINED rather than assumed by asserting
+      `to_regclass('public.scheduled_step') is null` beside it. Migration 0051 creates the table, so the
+      explanation flips and the criterion — "the key list is non-empty and matches the steps actually in the
+      table" — is now assertable with real rows and no stub.
+
+      The steps are built through B-MSG-03's own maintainer rather than by hand: a key this test composed
+      itself would agree with `readScheduledStepKeys` however wrong both were.
+    */
     const [present] = await sql<{ table_exists: boolean }[]>`
       select to_regclass('public.scheduled_step') is not null as table_exists
     `
-    expect(present?.table_exists).toBe(false)
+    expect(present?.table_exists).toBe(true)
 
     const booked = await book({
       key: 'steps',
@@ -983,8 +1009,18 @@ describe('acceptance — the reschedule event carries the periods and the schedu
       endsAt: at(TRADING_DATE, '19:45'),
     })
     const original = booked.appointmentIds[0] as string
-    // The reader agrees with the schema rather than with this test's expectation.
-    expect(await readScheduledStepKeys(sql, original)).toEqual({ tablePresent: false, keys: [] })
+    // `createBooking` sells this appointment already `confirmed` and never transitions into that status,
+    // so the reminder set is built through the same maintainer the lifecycle injects.
+    await withUnitOfWork(sql, CALLER, (uow) =>
+      buildScheduledSteps(uow, { appointmentId: original }, { plan: stepPlan }),
+    )
+    const attached = await scheduledStepsFor(sql, original)
+    const keys = [...attached.map((step) => step.invalidationKey)].sort()
+    expect(keys.length).toBeGreaterThan(0)
+
+    // The reader agrees with the ROWS, which is the criterion. `ORDER BY invalidation_key` in the reader is
+    // why the expectation is sorted rather than in plan order.
+    expect(await readScheduledStepKeys(sql, original)).toEqual({ tablePresent: true, keys })
 
     const result = await rescheduleAppointmentTx(
       sql,
@@ -994,14 +1030,22 @@ describe('acceptance — the reschedule event carries the periods and the schedu
         reason: REASON,
         treatment: { startsAt: at(TRADING_DATE, '21:00'), endsAt: at(TRADING_DATE, '21:45') },
       },
-      RESCHEDULE_DEPS,
+      { ...RESCHEDULE_DEPS, steps: stepMaintainer },
     )
-    expect(result.scheduledSteps).toEqual({ tablePresent: false, keys: [] })
+    expect(result.scheduledSteps).toEqual({ tablePresent: true, keys })
     const event = (await eventsOf(original)).find(
       (row) => row.event_type === 'appointment.rescheduled',
     ) as EventRow
-    expect(event.payload['scheduled_step_invalidation_keys']).toEqual([])
-    expect(event.payload['scheduled_step_table']).toBe('absent')
+    expect(event.payload['scheduled_step_invalidation_keys']).toEqual(keys)
+    expect(event.payload['scheduled_step_table']).toBe('present')
+    // And the keys it carried are the ones being INVALIDATED: every one of them now belongs to a superseded
+    // row, and the successor's live set is a different set entirely.
+    const superseded = await scheduledStepsFor(sql, original)
+    expect(superseded.map((step) => step.state)).toEqual(attached.map(() => 'superseded'))
+    const successorKeys = (await scheduledStepsFor(sql, result.rows[0]?.successorId as string)).map(
+      (step) => step.invalidationKey,
+    )
+    for (const key of successorKeys) expect(keys).not.toContain(key)
   })
 
   it('carries the keys the reader FOUND, asserted with a reader that finds two', async () => {

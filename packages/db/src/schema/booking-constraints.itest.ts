@@ -130,7 +130,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql.unsafe('truncate booking_idempotency, appointment_status_history, appointment, booking')
+  await sql.unsafe(
+    'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
+  )
   await sql`delete from rooms where code = ${TWIN_ROOM_CODE}`
   await sql`delete from service_variant where provisional_note = 'B-AVAIL-01 fixture'`
   await sql`delete from business_day where trading_date = ${TRADING_DATE}`
@@ -142,7 +144,14 @@ beforeEach(async () => {
   // TRUNCATE, not DELETE: appointment_status_history refuses a DELETE from every role including this
   // one, which is the property the privilege case tests. TRUNCATE fires no row-level trigger, which
   // is precisely why 0024 revokes it from the application role.
-  await sql.unsafe('truncate booking_idempotency, appointment_status_history, appointment, booking')
+  //
+  // `scheduled_step` is in the list because 0051 (B-MSG-03) gave `appointment` its first referencing
+  // table, and PostgreSQL refuses to truncate a table a foreign key points at unless every referencing
+  // table is truncated in the SAME statement. Named rather than reached with CASCADE, so the next table
+  // to reference `appointment` shows up here as a failing test rather than as rows quietly removed.
+  await sql.unsafe(
+    'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
+  )
   await sql`update rooms set capacity = 2 where code = ${TWIN_ROOM_CODE}`
 })
 
@@ -807,7 +816,7 @@ describe('acceptance — rooms.capacity cannot be reduced below what the room al
     expect(refused.code).toBe(CAPACITY_BELOW_COMMITTED)
 
     await sql.unsafe(
-      'truncate booking_idempotency, appointment_status_history, appointment, booking',
+      'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
     )
     await sql`delete from business_day where trading_date = '2020-03-01'`
   })
@@ -1029,8 +1038,15 @@ describe('booking — the commercial container', () => {
 
     // Control: a customer with no bookings deletes, so the refusal is the reference and not a
     // customer table that has stopped accepting deletes.
+    //
+    // `+971500000145` and not `+971500000143`, which is `catalogue.itest.ts`'s own `PROBE_PHONE`.
+    // `customer.phone_e164` is UNIQUE (B-LIFE-02), so the two suites sharing one number is a collision
+    // that hides while both clean up after themselves and surfaces the moment one of them does not — which
+    // is exactly what happened when B-MSG-03's new foreign key made that file's `afterAll` truncate throw
+    // before it reached its `delete from customer`. The number left behind then failed THIS insert, in a
+    // file that had nothing to do with either change. Brief rule 12: one writer, one value.
     const [spare] = await sql<{ id: string }[]>`
-      insert into customer (phone_e164, created_via) values ('+971500000143', 'front_desk')
+      insert into customer (phone_e164, created_via) values ('+971500000145', 'front_desk')
       returning id
     `
     const spareId = spare?.id as string

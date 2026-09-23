@@ -2,9 +2,16 @@ import { loadConfig } from '@berelax/config'
 import { createConnection, createPostgresMessageStore } from '@berelax/db'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
 import { createBoss, shutdown } from './boss.ts'
+import { enqueue } from './enqueue.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
+import {
+  SEND_SCHEDULED_STEP_JOB,
+  scheduledStepRuntimeFor,
+  setScheduledStepEnqueue,
+  setScheduledStepRuntime,
+} from './jobs/send-scheduled-step.ts'
 import { JOB_REGISTRY, registerJobs, setMaintenanceSql, startWorkers } from './registry.ts'
 
 /**
@@ -68,6 +75,16 @@ async function main(): Promise<void> {
     store: createPostgresMessageStore(sql),
     sources: [createSmsalaTransport({ config, now: () => new Date().toISOString() }).receipts],
   })
+  // B-MSG-03: the connection, the send context and the magic-link builder, before `startWorkers` for the
+  // same reason the media adapters are — a handler that attached first would take a job off the queue and
+  // fail on a missing dependency, burning a retry on nothing.
+  setScheduledStepRuntime(scheduledStepRuntimeFor(sql))
+  // `singletonKey` is the step id, so a sweep overlapping the previous one does not queue the same step
+  // twice. It is not the guarantee — the step's own `state = 'pending'` is, and it is what makes a double
+  // enqueue harmless — but it keeps the queue from filling with work the first job already has.
+  setScheduledStepEnqueue((data) =>
+    enqueue(boss).send(SEND_SCHEDULED_STEP_JOB, data, { singletonKey: data.stepId }),
+  )
   await boss.start()
   const registered = await registerJobs(boss, JOB_REGISTRY)
   await startWorkers(boss, () => new Date().toISOString(), JOB_REGISTRY)

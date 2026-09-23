@@ -485,6 +485,26 @@ export {
   recordRoutingVerdict,
 } from './repositories/reviews.ts'
 export {
+  buildScheduledSteps,
+  type ClaimedStep,
+  claimScheduledStep,
+  dueScheduledSteps,
+  type PlannedStep,
+  type RebuildResult,
+  rebuildScheduledSteps,
+  recordStepSent,
+  recordStepSkipped,
+  SCHEDULED_STEP_REFUSALS,
+  type ScheduledStepMaintainer,
+  type ScheduledStepMaintenance,
+  type ScheduledStepPlanner,
+  type ScheduledStepRefusal,
+  scheduledStepMaintainer,
+  scheduledStepRefusalOf,
+  scheduledStepsFor,
+  settleScheduledSteps,
+} from './repositories/scheduled-step.ts'
+export {
   type ClaimedInspection,
   claimUrlInspectionBatch,
   countGscDailyRows,
@@ -542,6 +562,13 @@ export {
   WHATSAPP_CANDIDATES,
   WHATSAPP_PENDING,
 } from './seed/premises.ts'
+export {
+  type ResolvedTemplateRow,
+  readCurrentTemplate,
+  seedMessageTemplates,
+  type TemplateSeedDefinition,
+  type TemplateSeedResult,
+} from './seed/templates.ts'
 export {
   seedTherapistRoster,
   THERAPIST_HEADCOUNT,
@@ -663,6 +690,10 @@ export {
   readCancellationWindow,
 } from './settings/cancellation.ts'
 export {
+  REMINDER_OFFSETS_SETTING_KEY,
+  readReminderOffsets,
+} from './settings/reminders.ts'
+export {
   readSetting,
   // Exported for `packages/fixtures/src/load.ts`, which seeds the settings table before overriding three
   // of its values: every key in the registry is a row nothing else creates, and the two itests that
@@ -706,6 +737,13 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // makes ADR 0020's publication guard a column nothing can write, `employee_language`,
 // `employee_bank_detail` with one sealed payload per account, and `employee_document`'s sealed number.
 //
+// 51 is 0051_scheduled_step.sql: the reminder as a ROW carrying an `invalidation_key` derived from the
+// appointment's current period, a partial unique index that allows exactly one PENDING step per
+// (appointment, step type), a trigger making the exit from `pending` a one-way door, and two DEFERRED
+// constraint triggers that refuse any transaction committing a pending step on an appointment which no
+// longer holds its resources. There is deliberately no body, recipient or template column: all three are
+// resolved at send time, because a body stored yesterday is a body about yesterday's period (B-MSG-03).
+//
 // 52 is 0052_obligation.sql: the compliance calendar (docs/04 §9). `obligation` with the seven seeded
 // duties and their cadence, owner role, evidence requirement and unverified flag; `obligation_instance`,
 // whose UNIQUE NULLS NOT DISTINCT key is what makes deterministic generation a constraint rather than a
@@ -735,6 +773,5 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // left as 0030 wrote it, and that migration's header says why.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 51 is reserved for B-MSG-03, still in flight, and is
-// a gap on disk until that unit lands.
+// come to apply the same number to different SQL.
 export const SCHEMA_VERSION = 54 as const

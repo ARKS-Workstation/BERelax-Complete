@@ -12,6 +12,7 @@ import { withUnitOfWork } from '../tx.ts'
 import {
   type TransitionActor,
   type TransitionDecider,
+  type TransitionDeps,
   type TransitionResult,
   transitionAppointment,
 } from './appointment-transition.ts'
@@ -24,6 +25,7 @@ import {
   type SlotRecheckShape,
 } from './create-booking.ts'
 import { readCommittedAppointments, readEligibleTherapists } from './eligibility.ts'
+import type { ScheduledStepMaintainer } from './scheduled-step.ts'
 
 /**
  * The reschedule transaction (B-LIFE-03). The old period released and the new one acquired, or neither.
@@ -174,6 +176,17 @@ export interface RescheduleDeps {
   readonly resolveTradingDate: TradingDateResolver
   /** Defaults to {@link readScheduledStepKeys}, which reads the real table when it exists. */
   readonly readScheduledStepKeys?: ScheduledStepKeyReader
+  /**
+   * B-MSG-03's scheduled-step maintainer, passed through to {@link transitionAppointment} and called a
+   * SECOND time here, for the successor.
+   *
+   * Twice, because a reschedule is two different facts about two different rows. The predecessor moves to
+   * `rescheduled` through the transition, so its pending steps are superseded by the same seam that
+   * settles a cancellation. The successor is born by INSERT and never transitions into its status, so
+   * nothing would ever build its reminder set — which would leave the customer with a moved appointment
+   * and no reminders at all, a quieter failure than the one this unit is about and a failure all the same.
+   */
+  readonly steps?: ScheduledStepMaintainer
 }
 
 export interface RescheduleInput {
@@ -728,6 +741,7 @@ export async function rescheduleAppointment(
 
   const room = locked.find((candidate) => candidate.id === newRoomId) as SlotRecheckRoom
   const stepReader = deps.readScheduledStepKeys ?? readScheduledStepKeys
+  const transitionDeps = transitionDepsFrom(deps)
   const successorIds = await freshIds(uow, moving.length + 1)
   const deliveryId = successorIds[moving.length] as string
 
@@ -774,7 +788,7 @@ export async function rescheduleAppointment(
           scheduled_step_table: steps.tablePresent ? 'present' : 'absent',
         },
       },
-      { decide: deps.decide },
+      transitionDeps,
     )
     if (transition.kind !== 'transitioned') {
       // `rescheduled` declares its repeat REFUSED, so the decider answers `already_in_status` rather than
@@ -879,6 +893,12 @@ export async function rescheduleAppointment(
     tradingDate,
   })
 
+  // The successors' reminder sets, built over the NEW period and therefore under new keys (B-MSG-03).
+  // After `set constraints all immediate`, so the successors are already known to the two deferred
+  // triggers by the time a step is attached to one — a step inserted against a row the capacity trigger
+  // was about to reject would be a refusal naming the wrong table.
+  await buildSuccessorSteps(uow, deps.steps, moving, successorIds)
+
   return {
     bookingId: first.booking_id,
     tradingDate,
@@ -887,6 +907,41 @@ export async function rescheduleAppointment(
     roomId: newRoomId,
     rows: moved,
     scheduledSteps,
+  }
+}
+
+/**
+ * The deps `transitionAppointment` is given: the decider, and B-MSG-03's step maintainer when there is one.
+ *
+ * A function rather than an inline object literal because `exactOptionalPropertyTypes` makes
+ * `steps: deps.steps` a type error when it may be undefined, so the field has to be SPREAD conditionally —
+ * and a conditional spread inside the per-row loop is a cognitive-complexity point `pnpm lint` counts
+ * against a transaction already at its ceiling.
+ */
+function transitionDepsFrom(deps: RescheduleDeps): TransitionDeps {
+  return { decide: deps.decide, ...(deps.steps === undefined ? {} : { steps: deps.steps }) }
+}
+
+/**
+ * The successors' scheduled steps, built one row at a time (B-MSG-03).
+ *
+ * A function rather than a loop inside `rescheduleAppointment` for a reason `pnpm lint` states as a
+ * number: that transaction is already at the cognitive-complexity ceiling, and one more loop pushes it
+ * over. Sequentially rather than with `Promise.all`, because these are writes on one transaction — a
+ * postgres.js transaction is one connection and concurrent statements on it interleave unpredictably.
+ */
+async function buildSuccessorSteps(
+  uow: UnitOfWork,
+  steps: ScheduledStepMaintainer | undefined,
+  moving: readonly { readonly status: string }[],
+  successorIds: readonly string[],
+): Promise<void> {
+  if (steps === undefined) return
+  for (const [index, row] of moving.entries()) {
+    await steps(uow, {
+      appointmentId: successorIds[index] as string,
+      toStatus: successorStatus(row.status),
+    })
   }
 }
 

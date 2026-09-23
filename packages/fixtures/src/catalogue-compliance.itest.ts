@@ -216,7 +216,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql.unsafe('truncate booking_idempotency, appointment_status_history, appointment, booking')
+  await sql.unsafe(
+    'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
+  )
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from business_day where trading_date = ${TRADING_DATE}`
   await sql`delete from customer where phone_e164 = ${PROBE_PHONE}`

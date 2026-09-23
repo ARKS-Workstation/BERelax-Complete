@@ -210,7 +210,9 @@ beforeAll(async () => {
 afterAll(async () => {
   // audit_event is append-only (ADR 0008): nothing here deletes from it, and the assertions above are
   // deltas for exactly that reason.
-  await sql.unsafe('truncate booking_idempotency, appointment_status_history, appointment, booking')
+  await sql.unsafe(
+    'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
+  )
   await sql`delete from redirect_map where source_path like ${`/treatments/${PROBE_SLUG}%`}`
   await sql`delete from redirect_map where target_path like ${`/treatments/${PROBE_SLUG}%`}`
   await sql`delete from service where treatment_key like ${`${PROBE}%`}`
@@ -221,7 +223,9 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql.unsafe('truncate booking_idempotency, appointment_status_history, appointment, booking')
+  await sql.unsafe(
+    'truncate booking_idempotency, appointment_status_history, scheduled_step, appointment, booking',
+  )
   await sql`delete from redirect_map where source_path like ${`/treatments/${PROBE_SLUG}%`}`
   await sql`delete from redirect_map where target_path like ${`/treatments/${PROBE_SLUG}%`}`
   await sql`delete from service where treatment_key like ${`${PROBE}%`}`

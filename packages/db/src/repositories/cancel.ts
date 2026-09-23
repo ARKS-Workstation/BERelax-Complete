@@ -7,9 +7,11 @@ import { withUnitOfWork } from '../tx.ts'
 import {
   type TransitionActor,
   type TransitionDecider,
+  type TransitionDeps,
   type TransitionResult,
   transitionAppointment,
 } from './appointment-transition.ts'
+import type { ScheduledStepMaintainer } from './scheduled-step.ts'
 
 /**
  * Cancellation and the no-show, as writes (B-LIFE-03).
@@ -114,12 +116,33 @@ export type NoShowClockCheck = (input: { readonly startsAtMs: number; readonly a
 export interface CancelDeps {
   readonly decide: TransitionDecider
   readonly classify: CancellationPolicy
+  /**
+   * B-MSG-03's scheduled-step maintainer, passed through to {@link transitionAppointment}.
+   *
+   * A cancellation settles the appointment's pending reminders as `cancelled`. Optional in the type so
+   * every caller written before B-MSG-03 compiles, and NOT a permissive default: 0051's deferred
+   * constraint trigger refuses any transaction that commits a pending step on an appointment which no
+   * longer holds its resources, so a cancellation without this fails by name instead of leaving a live
+   * reminder on a cancelled booking.
+   */
+  readonly steps?: ScheduledStepMaintainer
 }
 
 export interface NoShowDeps {
   readonly decide: TransitionDecider
   readonly clock: NoShowClockCheck
+  /** The same seam, for the same reason. A no-show has nothing left to remind anybody about. */
+  readonly steps?: ScheduledStepMaintainer
 }
+
+/** The deps `transitionAppointment` is given, with the optional step maintainer spread rather than set. */
+const transitionDepsFrom = (deps: {
+  readonly decide: TransitionDecider
+  readonly steps?: ScheduledStepMaintainer
+}): TransitionDeps => ({
+  decide: deps.decide,
+  ...(deps.steps === undefined ? {} : { steps: deps.steps }),
+})
 
 export interface CancelAppointmentInput {
   readonly appointmentId: string
@@ -268,7 +291,7 @@ export async function cancelAppointment(
         cancellation_open_question: 'Y9-windows',
       },
     },
-    { decide: deps.decide },
+    transitionDepsFrom(deps),
   )
 
   // Only after the status is cancelled, because `appointment_late_cancellation_needs_a_cancellation`
@@ -438,7 +461,7 @@ export async function markNoShow(
         cancellation_open_question: 'Y9-windows',
       },
     },
-    { decide: deps.decide },
+    transitionDepsFrom(deps),
   )
   return {
     appointmentId: input.appointmentId,
