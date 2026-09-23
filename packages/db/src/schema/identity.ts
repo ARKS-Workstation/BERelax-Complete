@@ -129,6 +129,22 @@ export const regulatoryProfile = pgTable('regulatory_profile', {
   mandatoryTherapistDocumentTypes: employeeDocumentType('mandatory_therapist_document_types')
     .array()
     .notNull(),
+  /**
+   * Document types whose records carry no expiry date (0054).
+   *
+   * Beside the mandatory set and not in `app_setting`, for the reason the mandatory set is here:
+   * whether an Emiratisation registration or a good-conduct certificate has to be renewed is part of
+   * the same [UNVERIFIED] paragraph of docs/04 §7 as which credentials a therapist must hold, and one
+   * read of one row should answer the whole credential policy — two reads can disagree about which
+   * profile version they belong to.
+   *
+   * **Empty by default**, which is the strict reading: a credential must be renewed until somebody
+   * confirms it need not be. The empty default is also what keeps 0030's guarantee intact on every
+   * database that exists today — `employee_document.expires_on` became nullable in 0054 and the
+   * `employee_document_expiry_is_declared` trigger refuses a NULL for any type not listed here, so
+   * while this array is empty no row may have one.
+   */
+  nonExpiringDocumentTypes: employeeDocumentType('non_expiring_document_types').array().notNull(),
   isProvisional: boolean('is_provisional').notNull(),
   sourceNote: text('source_note'),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),

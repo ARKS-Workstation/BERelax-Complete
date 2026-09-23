@@ -268,6 +268,16 @@ export {
   type SlotRecheckShape,
 } from './repositories/create-booking.ts'
 export {
+  CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
+  type CredentialPolicyRead,
+  type CredentialSubjectRow,
+  type EmployeeCredentialRow,
+  PROVISIONAL_EXPIRING_SOON_DAYS,
+  readCredentialPolicy,
+  readCredentialSubjects,
+  readEmployeeCredentials,
+} from './repositories/credentials.ts'
+export {
   addBlocklistEntry,
   addCustomerTag,
   applyCustomerLifecycleEvent,
@@ -713,9 +723,18 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // Y9-crm-source) and an enum label cannot carry `is_provisional`, an OPEN-QUESTIONS id or a note; they are
 // audited by a trigger rather than by a repository because they have no repository. Removing a blocklist
 // entry or a do-not-pair flag is a LIFT and `delete` is revoked on both: the record of who blocked
-// in flight.
+// somebody and who unblocked them is the only evidence either happened.
+//
+// 54 is 0054_hr_credentials.sql: the credential registry. Eight labels added to `employee_document_type`
+// — the four of docs/01 decision 20's stricter healthcare reading the enum could not previously spell,
+// plus the two insurance records and the Emiratisation record of docs/04 §7, which are document types in
+// this registry rather than three more tables — `employee_document.issuing_authority`,
+// `regulatory_profile.non_expiring_document_types`, and `expires_on` made nullable with 0030's
+// guarantee carried by the `employee_document_expiry_is_declared` trigger (ZS006) instead of by the
+// NOT NULL. The mandatory-set DEFAULT is revised to decision 20's six; the row in force is deliberately
+// left as 0030 wrote it, and that migration's header says why.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 51 is reserved for B-MSG-03, still in flight — it is
-// a gap on disk today and must not be taken by anything else.
-export const SCHEMA_VERSION = 53 as const
+// come to apply the same number to different SQL. 51 is reserved for B-MSG-03, still in flight, and is
+// a gap on disk until that unit lands.
+export const SCHEMA_VERSION = 54 as const

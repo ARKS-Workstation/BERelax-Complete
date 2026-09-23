@@ -5131,7 +5131,7 @@ units:
       EXPIRING_SOON / EXPIRED) at a supplied instant. Mandatory-insurance and Emiratisation records are
       document types in the same registry.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - P-HR-01
@@ -5156,6 +5156,140 @@ units:
     - a type configured as non-expiring never returns EXPIRED even with a null expiry date, proven by test
     - the EXPIRING_SOON window is a settings-registry value flagged provisional:true and is returned by
       the Unconfirmed Assumptions query
+    - 'NOTE: the concrete files. The migration is packages/db/migrations/0054_hr_credentials.sql and
+      SCHEMA_VERSION is 54 (51, 52 and 53 are numbers reserved by units in flight; 22, 41 and 47 stay
+      unused, because renumbering to close a gap is how two branches apply one number to different SQL).
+      It is expand-only over 0030 and 0050: eight labels added to employee_document_type, one column on
+      regulatory_profile, one column and one constraint on employee_document, one partial unique index,
+      one trigger, one view replacement and one changed column DEFAULT. Nothing is dropped, renamed or
+      retyped. The eight `alter type ... add value if not exists` statements sit OUTSIDE the
+      begin/commit block, which is load-bearing rather than untidy: PostgreSQL permits adding an enum
+      label inside a transaction and refuses to USE it until that transaction commits, so a default
+      naming a new label in the same block fails with "unsafe use of new value of enum type". `psql -f`
+      sends statements in autocommit, so each label commits on its own and the block then references it.
+      No new `pnpm` gate script was added, so case 29''s required list is unchanged.'
+    - 'NOTE: the mandatory set. The first acceptance line is satisfied through the column DEFAULT and
+      deliberately NOT by superseding the row in force, and the reason is the one 0030 already wrote for
+      the same column: "introducing a column is not a change to the profile, and superseding the seeded
+      row to carry it would record a decision nobody took. The default IS the provisional answer, and it
+      is the stricter option." 0030''s default was {professional_licence, health_certificate} - the
+      strictest set the enum of the day could spell - and 0054 revises it to docs/01 decision 20''s six.
+      The row in force still carries 0030''s two, so after this unit the DEFAULT and the ROW diverge.
+      That is a decision with a blast radius behind it rather than an oversight: nine integration files
+      across four other units seed a therapist with a professional licence and a health certificate and
+      then assert that therapist is offered a slot (availability-query, availability-perf,
+      booking-transaction, booking-concurrency, appointment-reschedule, queries/availability,
+      repositories/eligibility, therapist-eligibility, plus repositories/eligibility.itest.ts''s literal
+      assertion that the set in force is exactly those two). Writing the six into the row in force makes
+      every one of those therapists credential_missing, in files this unit does not own, on branches
+      running right now - brief rule 12 in its most expensive form. Reconciling the row with the default
+      belongs to P-HR-03, whose whole subject is credential expiry removing a therapist from
+      availability, and it belongs there together with the seeded documents that keep those suites green.
+      Nothing reads the default at runtime: every consumer reads regulatory_profile_current, which is
+      the row, and packages/fixtures/src/hr-credentials.itest.ts asserts the default by INSERTING a
+      profile version that names no mandatory set and reading back what the database chose - rather than
+      by parsing pg_get_expr, which would prove the SQL says something and not that the database does
+      it.'
+    - 'NOTE: how "derived from regulatory_profile" is made falsifiable, because the weaker version of
+      this unit passes every other assertion in the list. The evaluator takes the set as an argument and
+      `readCredentialPolicy` reads it from the view, so the discriminating test is a profile carrying a
+      set that is NEITHER published reading - {passport, training_certificate} under licence_class
+      healthcare - which the itest asserts is honoured exactly as written. A hard-coded list with a
+      licence-class lookup round it satisfies "the default yields the stricter set" and "wellness
+      shrinks it" and fails that one. Gate 66m is the fixture: it replaces the row read with
+      CANDIDATE_MANDATORY_CREDENTIALS.healthcare and requires the pair suite to fail by name, and 66n
+      does the reader''s half by querying the TABLE instead of the view. CANDIDATE_MANDATORY_CREDENTIALS
+      exists in packages/core/src/hr/credentials.ts only to record what the alternative reading IS -
+      the Unconfirmed Assumptions panel''s job is to name the assumption and the answer that would
+      change it - and its own test asserts nothing consults it.'
+    - 'NOTE: "a type configured as non-expiring" is configured in regulatory_profile, and making it
+      storable needed the one change in this unit that looks like a reversal. 0030 made
+      employee_document.expires_on NOT NULL and said why: "a nullable expiry would read as valid for
+      ever, which is the permissive default that makes an unrenewed licence invisible." That reasoning
+      is kept rather than reversed. The column is now nullable and the
+      employee_document_expiry_is_declared trigger (SQLSTATE ZS006, continuing 0050''s private ZS class
+      for this estate) refuses a NULL unless the document''s type is listed in
+      regulatory_profile.non_expiring_document_types - which defaults to the EMPTY set, so on every
+      database that exists today no row may have a NULL expiry and 0030''s guarantee is bit-for-bit
+      intact. What changed is that "this kind of document does not expire" became a claim somebody makes
+      in the versioned row that carries every other consequence of the licence answer, instead of being
+      unsayable. A CHECK cannot express it (the permitted set is in another table), and the set is on
+      regulatory_profile rather than in app_setting because whether a credential must be renewed is part
+      of the same [UNVERIFIED] paragraph of docs/04 SS7 as which credentials are mandatory - one read of
+      one row answers the whole policy, where two reads can land either side of a supersede.
+      employee_document_one_row_per_non_expiring is a partial unique index rather than an extension of
+      0030''s constraint, because UNIQUE treats two NULLs as distinct and that constraint includes
+      expires_on. The existing availability SQL needed NO change: it already computes any_expired as
+      `expires_on is not null and expires_on < trading_date`, so a NULL was already "held and not
+      expired" there - unreachable before this migration, and now reachable exactly for a type somebody
+      declared.'
+    - 'NOTE: the EXPIRING_SOON window is declared in packages/config/src/settings/registry.ts as
+      hr.credential_expiring_soon_days, operational, owner/manager, audited, provisional against
+      Y1-licence - and its key, default and schema live in packages/shared/src/credential-window.ts
+      rather than in packages/core. Forced, and the same boundary gender-matching.ts already describes:
+      packages/config depends on @berelax/shared alone, packages/db may never import packages/core, and
+      all three read this number, so a constant in core would be re-spelled in the registry and the day
+      60 becomes 90 one of them would learn about it. It is `operational` and not `compliance_locked`
+      because the tier follows what a value can RELAX: EXPIRING_SOON is a warning and never a refusal,
+      so no window makes anybody bookable who would otherwise not be, and what removes a therapist is
+      EXPIRED - the date on the document against the Asia/Dubai calendar, which no setting touches. That
+      is the same argument agents.review_reply_languages makes for its own tier. `invalidates: []` is a
+      conclusion: nothing is prerendered from it, and the notice job that will also read it is P-HR-10''s
+      and belongs in `rerunJobs` when it exists.'
+    - 'NOTE: apps/web/app/(admin)/hr/credentials/page.tsx is NOT what was built. The surface is
+      route.ts plus a pure render.ts at the same path, for the reason the Messages inbox and the
+      breakpoint preview both record one directory along: apps/web/src/routes/registry.ts is in exact
+      bijection with the filesystem and registry.test.ts requires every DOCUMENT to be served in both
+      locales, so a page.tsx here would need an Arabic admin document and the admin shell W-SYS-01 has
+      not built, and it would join a screenshot matrix whose RTL half must be a real Arabic route. The
+      registry entry is id `hr-credentials`, path /hr/credentials, kind handler, and `/hr` was added to
+      ADMIN_GROUP_PREFIXES - a prefix rather than one entry per screen, because the manifest puts eight
+      more HR routes under it and every one of them shows wages, identity documents or somebody''s
+      leave. Like the routes under /settings it is NOT authenticated (no admin session until W-SYS-01),
+      it is GET-only and read-only, and it shows no document number: `hasSealedNumber` is a boolean over
+      `number_ct is not null` and the page prints "recorded" or "not recorded". People are identified by
+      staff_reference ("Therapist 07") and never by a name (ADR 0020, Y8-staff).'
+    - 'NOTE: two readers were added to packages/db and one column of employee_document was not used.
+      readCredentialPolicy and readEmployeeCredentials are in
+      packages/db/src/repositories/credentials.ts beside readMandatoryDocumentTypes''s file rather than
+      replacing it: B-AVAIL-04''s reader feeds the SQL half of the availability pool and returns one
+      array, this one returns the whole policy and the profile version, and P-HR-03 is the unit that
+      decides whether the pool stops needing its own. `issuing_authority` is written by nothing in this
+      unit - there is no admin write path yet, and brief rule 15 forbids seeding a plausible MOHRE or ICP
+      string - so the column exists, is placeholder-checked, is read by the screen and is NULL on every
+      row. Deferred to whichever unit builds the HR write path.'
+    - 'NOTE: the cross-suite defect this unit introduced, found by `pnpm verify` rather than by reading,
+      and the reason gate cases 66w-66y exist. `regulatory_profile` is append-only (ADR 0008), so a change
+      is an INSERT of a new version - and a column the inserting statement does not name takes its
+      DEFAULT, not the value in force. Before 0054 that was invisible: 0030''s default for
+      mandatory_therapist_document_types happened to EQUAL the array the seeded row held, so
+      packages/fixtures/src/catalogue-compliance.itest.ts - which supersedes the profile to flip the
+      banned-claims lexicon and never mentioned the credential columns - wrote the same array back by
+      luck. 0054 revises that default to decision 20''s stricter six and the luck ran out: every suite
+      running after the lexicon file saw a mandatory set nobody had chosen, and four therapists seeded
+      with a professional licence and a health certificate became credential_missing. It surfaced as
+      therapist_not_eligible on ALL 400 iterations of booking-concurrency.itest.ts - a file about room
+      locks that mentions neither credentials nor the lexicon - and as the p95 budget in
+      availability-perf.itest.ts. Fixed by carrying both credential columns forward in that helper and in
+      therapist-eligibility.itest.ts''s supersedeMandatory, which is what both files'' own headers already
+      claimed they did ("a fixture that restores NEARLY the original row is a fixture that breaks another
+      suite one file later"). The second was inert today - the non-expiring set is empty everywhere - and
+      is fixed anyway, because it stops being inert the day a profile declares a type non-expiring. Two
+      other units'' files, two lines each, forced by this unit rather than incidental to it. Case 66w is
+      the known-bad fixture: it removes the carry-forward, RUNS the lexicon file so the corruption exists
+      in the database, and requires booking-concurrency to fail by the error the corruption actually
+      produces; 66x-66y are the controls, and the gate restores the seeded set by INSERTING a version
+      rather than deleting a row.'
+    - 'NOTE: one finding in existing code, found by a gate on this unit''s first verify run rather than by
+      reading. apps/web/src/seo/brand.test.ts scans every title-bearing line in apps/web and packages/ui
+      for the bare brand, because berelax.com is an international airport-spa chain with an outlet in the
+      same city (docs/09 SS"The brand collision"), and this unit''s admin page shipped
+      `<title>Credentials - BE RELAX admin</title>`. It is fixed by removing the brand rather than by
+      adding a fourth entry to that test''s EXEMPT list: the Messages inbox is exempt because its title
+      genuinely reads "BE RELAX admin" and rewriting an internal screen to the full trading name would
+      make it say something it does not mean, but an HR back-office page has no reason to name the
+      business at all, so "Credentials - HR admin" needs no exemption. The gate worked exactly as
+      written, on the first run, on a file that had never been reviewed by anybody.'
     files:
     - packages/db/migrations/*_hr_credentials.sql
     - packages/db/src/schema/hr.ts

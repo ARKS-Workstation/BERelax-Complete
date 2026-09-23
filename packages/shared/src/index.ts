@@ -4,6 +4,11 @@
  */
 
 export {
+  CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
+  credentialExpiringSoonDaysSchema,
+  PROVISIONAL_EXPIRING_SOON_DAYS,
+} from './credential-window.ts'
+export {
   GENDER_MATCHING_MODES,
   GENDER_MATCHING_SETTING_KEY,
   type GenderMatchingMode,

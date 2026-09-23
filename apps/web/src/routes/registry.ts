@@ -262,6 +262,28 @@ export const ROUTES = [
       'the address of whichever photograph was there at build time.',
   },
   {
+    id: 'hr-credentials',
+    path: '/hr/credentials',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-02s credential registry: every employees mandatory documents, their expiry and the ' +
+      'eligibility verdict, judged at one instant against the regulatory profile in force. A handler ' +
+      'answering text/html rather than a document, for the reason the Messages inbox and the breakpoint ' +
+      'preview both give: a document must be served in both locales, which would need an Arabic admin ' +
+      'document and the W-SYS-01 shell, and would join a screenshot matrix whose RTL half has to be a ' +
+      'real Arabic route. This surface is English-only on purpose — it shows an HR administrator ' +
+      'which credentials are current — and it shows no document number: number_ct is a ciphertext ' +
+      'under STAFF_PII_KEK and the only path to a plaintext is the audited decrypt in packages/hr. ' +
+      'Dynamic because the verdict is a claim about which day it is, so a prerendered copy would be ' +
+      'wrong from the next midnight. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, ' +
+      'and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+  },
+  {
     id: 'journal',
     path: '/journal',
     kind: 'document',
@@ -577,8 +599,13 @@ export type RouteId = Route['id']
  * sitemap"), and declaring the prefix now means the route arrives already excluded instead of being
  * indexed for as long as it takes somebody to notice. `route-spine.itest.ts` asserts the header is on
  * the live response today, where the route is a 404.
+ *
+ * `/hr` is P-HR's, and it is a prefix for the same reason rather than one entry per screen. The manifest
+ * puts eight more routes under it — `/hr/rota`, `/hr/timesheets`, `/hr/payroll`, `/hr/leave/[id]` and the
+ * rest — and every one of them shows wages, identity documents or somebody's leave. A prefix means the
+ * ninth arrives noindex on the commit that creates it rather than on the commit that remembers to.
  */
-export const ADMIN_GROUP_PREFIXES: readonly string[] = ['/analytics', '/settings']
+export const ADMIN_GROUP_PREFIXES: readonly string[] = ['/analytics', '/hr', '/settings']
 
 /**
  * The value a non-indexable response carries.

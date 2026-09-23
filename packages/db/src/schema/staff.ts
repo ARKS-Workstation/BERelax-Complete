@@ -76,6 +76,18 @@ export const employeeGender = pgEnum('employee_gender', ['female', 'male'])
  * has confirmed (Y1-licence). An enum rather than free text because the profile names a subset of
  * these: a mandatory type spelled two ways matches no document, and the therapist is then bookable
  * with no certificate at all.
+ *
+ * The order is the order the labels were added, because that is the order PostgreSQL holds them in and
+ * `enum_range` is asserted against this list. 0030 declared the first six; 0054 added the six of
+ * docs/01 decision 20's stricter healthcare reading that the enum could not previously spell, plus the
+ * two insurance records and the Emiratisation record docs/04 §7 names in the same paragraph. Those
+ * three are in **this** registry rather than in tables of their own: each is a dated record with an
+ * issuing authority and an expiry, which is what this table already is.
+ *
+ * There is deliberately no `residence_permit` beside `residence_visa` and no
+ * `municipality_health_card` beside `occupational_health_card`. docs/04 §7 marks that whole paragraph
+ * [UNVERIFIED], and two labels for one document is this enum's own failure mode read from the other
+ * end — the profile names one, the file holds the other, and nothing matches.
  */
 export const employeeDocumentType = pgEnum('employee_document_type', [
   'professional_licence',
@@ -84,6 +96,14 @@ export const employeeDocumentType = pgEnum('employee_document_type', [
   'emirates_id',
   'passport',
   'training_certificate',
+  'labour_card',
+  'residence_visa',
+  'occupational_health_card',
+  'medical_fitness_certificate',
+  'good_conduct_certificate',
+  'health_insurance',
+  'unemployment_insurance',
+  'emiratisation_record',
 ])
 
 /**
@@ -370,12 +390,24 @@ export const leaveRequest = pgTable(
  *
  * `expiresOn` is a **date**, not a timestamptz, and it is compared against the appointment's TRADING
  * date inclusively: a licence valid through the 18th covers the 18th's 01:30 appointment, whose
- * calendar date is the 19th. It is NOT NULL because a nullable expiry reads as "valid for ever", which
- * is the permissive default that makes an unrenewed licence invisible.
+ * calendar date is the 19th. The comparison boundary is **Asia/Dubai** and never UTC — the zone is four
+ * hours ahead, so a UTC comparison keeps an expired document valid for the four hours after local
+ * midnight (`packages/core/src/hr/credentials.ts`).
+ *
+ * It became **nullable** in 0054, and 0030's guarantee did not go with it. A NULL is permitted only for
+ * a document type listed in `regulatory_profile.non_expiring_document_types`, which defaults to the
+ * empty set; every other type is refused by the `employee_document_expiry_is_declared` trigger
+ * (SQLSTATE ZS006). So "this kind of document does not expire" became a claim somebody makes in the
+ * versioned profile instead of something the schema could not say, and "a nullable expiry reads as
+ * valid for ever" — 0030's reason for the NOT NULL — stays false. Neither the trigger nor the partial
+ * unique index below is expressible in Drizzle; both live in the migration and are asserted against
+ * real PostgreSQL by `packages/fixtures/src/hr-credentials.itest.ts`.
  *
  * A renewal is a **new row** with a later expiry rather than an edit, so the file still shows what was
  * valid last March; `employee_document_one_row_per_expiry` refuses only the exact duplicate, and the
- * eligibility read takes the latest expiry per (employee, type).
+ * eligibility read takes the latest expiry per (employee, type). The non-expiring case cannot use that
+ * constraint — UNIQUE treats two NULLs as distinct — so `employee_document_one_row_per_non_expiring` is
+ * a partial unique index in the migration.
  */
 export const employeeDocument = pgTable(
   'employee_document',
@@ -392,7 +424,17 @@ export const employeeDocument = pgTable(
      */
     reference: text('reference'),
     issuedOn: date('issued_on'),
-    expiresOn: date('expires_on').notNull(),
+    expiresOn: date('expires_on'),
+    /**
+     * Who issued it: MOHRE, ICP, the municipality, a training provider (0054).
+     *
+     * Free text and not an enum, which is the opposite call from `documentType` one line above and is
+     * made for the opposite reason. The document TYPES are a closed vocabulary the profile has to match
+     * exactly; the issuing BODIES are marked [UNVERIFIED] in docs/04 §7, so an enum missing the right
+     * label would leave an admin with no correct value to enter. Null until somebody types the real
+     * one, and a placeholder marker is refused (`is_placeholder_text`, 0026).
+     */
+    issuingAuthority: text('issuing_authority'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 
@@ -436,6 +478,17 @@ export const employeeDocument = pgTable(
     check(
       'employee_document_number_kid_shape',
       sql`${t.numberKid} is null or ${t.numberKid} ~ '^[a-z0-9][a-z0-9._-]{0,31}$'`,
+    ),
+    // 0054's third identity-bearing type. A SECOND named constraint rather than a rewrite of 0050's:
+    // dropping and re-adding a constraint is a window in which neither exists, and 0050's is named in
+    // another unit's gate probe and has to keep firing under its own name.
+    check(
+      'employee_document_visa_number_is_encrypted',
+      sql`not (${t.documentType} = 'residence_visa' and ${t.reference} is not null)`,
+    ),
+    check(
+      'employee_document_issuing_authority_not_placeholder',
+      sql`${t.issuingAuthority} is null or not is_placeholder_text(${t.issuingAuthority})`,
     ),
   ],
 )

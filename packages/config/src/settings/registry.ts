@@ -1,5 +1,7 @@
 import {
   AppError,
+  CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
+  credentialExpiringSoonDaysSchema,
   DEFAULT_LLM_PROVIDER,
   DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
@@ -7,6 +9,7 @@ import {
   LLM_PROVIDER_SETTING_KEY,
   llmProviderSchema,
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
+  PROVISIONAL_EXPIRING_SOON_DAYS,
   REVIEW_AUTOSEND_DISABLED,
   REVIEW_AUTOSEND_SETTING_KEY,
   REVIEW_COOLING_OFF_SETTING_KEY,
@@ -415,6 +418,42 @@ export const SETTINGS = [
     editableBy: OWNER_MANAGER,
     audited: true,
     invalidates: [],
+  }),
+  define({
+    /**
+     * How long before a credential expires the registry starts warning about it (P-HR-02).
+     *
+     * `operational` and not `compliance_locked`, and the reason is the same one the review-reply
+     * languages give: the tier follows what a value can RELAX, not what the subject sounds like.
+     * EXPIRING_SOON is a warning and never a refusal — an employee whose every mandatory document is
+     * expiring soon is still eligible (`packages/core/src/hr/credentials.ts`) — so no value here can make
+     * anybody bookable who would otherwise not be. What removes a therapist from availability is EXPIRED,
+     * and that is decided by the date on the document against the Asia/Dubai calendar, which no setting
+     * touches.
+     *
+     * `credentialExpiringSoonDaysSchema` from `@berelax/shared` rather than a local `z.number()`, and
+     * `PROVISIONAL_EXPIRING_SOON_DAYS` rather than the literal 60. Three packages that may not import one
+     * another read this number — this registry, the `@berelax/db` reader and the `@berelax/core`
+     * evaluator — and a second spelling is a second place for them to disagree.
+     *
+     * `invalidates: []` is a conclusion and not an oversight: nothing is prerendered from this value. It
+     * is read per request by the HR credentials screen, and the notice job that will also read it is
+     * P-HR-10's — when that job exists it belongs in `rerunJobs`, because changing the window changes
+     * which notices are due.
+     */
+    key: CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
+    tier: 'operational',
+    schema: credentialExpiringSoonDaysSchema,
+    defaultValue: PROVISIONAL_EXPIRING_SOON_DAYS,
+    label: 'Credential expiry warning window (days)',
+    help: 'How far ahead of its expiry date a labour card, visa, health card or certificate is flagged as expiring soon. A warning only — a document is not refused until the day after it expires, judged on the Asia/Dubai calendar.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y1-licence',
+      note: 'docs/04 §7 lists the therapist screening requirements and their renewal intervals as [UNVERIFIED], so the interval is unknown and the warning window that should precede it is unknown with it. 60 days is the longest of the three obvious candidates (30/60/90) and therefore the conservative one: a warning too early is noise, a warning too late is a therapist off the rota with a day of bookings to reassign by hand.',
+    },
   }),
 ] as const
 

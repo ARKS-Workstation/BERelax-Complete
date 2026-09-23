@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**80 / 207 units complete.**
+**81 / 207 units complete.**
 
 ## Next up
 
@@ -105,7 +105,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
 | [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
 | [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
-| [ ] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
+| [x] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
 | [ ] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
 | [ ] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
 | [ ] | 94 | `P-HR-05` | Shift model and midnight-crossing working-hours maths | `P-HR-01` | — | Y9-overtime |

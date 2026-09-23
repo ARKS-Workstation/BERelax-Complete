@@ -112,18 +112,31 @@ async function supersedeProfile(
     with retired as (
       update regulatory_profile set superseded_at = now() where superseded_at is null
       returning banned_claim_terms, clinical_retention_years, financial_retention_years,
-                erasure_overrides_retention, emirate
+                erasure_overrides_retention, emirate,
+                -- The two credential columns, carried forward rather than left to their DEFAULTs.
+                -- This file's own header states the rule (a fixture that restores NEARLY the original
+                -- row is a fixture that breaks another suite one file later) and these two lines are
+                -- what make it true of the credential policy as well as of the lexicon. They were
+                -- invisible until P-HR-02: 0030's default for the mandatory set happened to equal the
+                -- value in force, so omitting the column wrote the same array back by luck. 0054 revises
+                -- that default to docs/01 decision 20's stricter six, and without these lines this
+                -- helper silently rewrote the mandatory set for every suite that runs after this one,
+                -- which presents as therapist_not_eligible on all 400 iterations of
+                -- booking-concurrency, a file that has nothing to do with the lexicon.
+                mandatory_therapist_document_types, non_expiring_document_types
     )
     insert into regulatory_profile
       (licence_class, emirate, clinical_retention_years, financial_retention_years,
        erasure_overrides_retention, medical_claims_permitted, permitted_public_titles,
-       banned_claim_terms, is_provisional, source_note)
+       banned_claim_terms, is_provisional, source_note,
+       mandatory_therapist_document_types, non_expiring_document_types)
     select
       ${snapshot.licenceClass}::licence_class,
       retired.emirate, retired.clinical_retention_years, retired.financial_retention_years,
       retired.erasure_overrides_retention, ${snapshot.medicalClaimsPermitted},
       ${sql.array([...snapshot.permittedPublicTitles])}::text[], retired.banned_claim_terms,
-      ${snapshot.isProvisional}, ${snapshot.note}
+      ${snapshot.isProvisional}, ${snapshot.note},
+      retired.mandatory_therapist_document_types, retired.non_expiring_document_types
     from retired
     returning version
   `

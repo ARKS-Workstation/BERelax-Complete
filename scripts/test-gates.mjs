@@ -16407,6 +16407,547 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 66a-66y. (P-HR-02) The credential registry: the rules migration 0054 refuses, and the ways the
+//           evaluator can be got wrong, each of which must make a named test fail.
+//
+// Three groups. The first is 0054's constraints, its partial unique index and its ZS006 trigger against
+// real PostgreSQL, because the whole reason 0030's `NOT NULL` became a trigger is that the guarantee had
+// to survive the column becoming nullable — and a rule nothing has bounced off is not a rule (ADR 0003).
+// Each probe names the error it must trip, so a fixture rejected by an unrelated constraint fails rather
+// than passing.
+//
+// The second is the controls. A NULL expiry on a DECLARED type, a renewal, a real issuing authority and a
+// mandatory set read from the row all have to be ACCEPTED, or the rules above are "refuse everything"
+// wearing four names.
+//
+// The third breaks the shipped evaluator in the four ways this unit is most likely to be got wrong and
+// requires the test that claims to cover each to fail, by name:
+//
+//   - the expiry boundary computed in UTC instead of Asia/Dubai. This is the defect the acceptance
+//     criterion singles out, and it is invisible for twenty hours of every day: Dubai is UTC+4, so a UTC
+//     comparison keeps an expired document valid until 04:00 local.
+//   - the mandatory set taken from a constant instead of from the profile row. A hard-coded list with a
+//     lookup wrapped round it passes every weaker test in the unit.
+//   - EXPIRING_SOON made a refusal. The opposite direction from the others: it does not let an expired
+//     document through, it removes a therapist who is still current, which nobody reads as a bug in the
+//     credential gate.
+//   - a non-expiring type judged on its date anyway, which is the one case the schema cannot produce and
+//     a JSON payload can.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  // `GATE` rather than a word `is_placeholder_text()` matches, for the reason case 57 records: 'pending',
+  // 'unknown' and 'placeholder' are all markers 0026 refuses in a staff reference, and a fixture employee
+  // named after one is a probe rejected by the wrong constraint.
+  const EMP = "'0dec0de5-0000-7000-8000-000000000101'::uuid"
+  const employee = (id, reference) =>
+    'insert into employee (id, staff_reference, employed_from) values ' +
+    `(${id}, '${reference}', date '2020-01-01')`
+
+  /** Supersedes the profile in force inside the probe's transaction, which is rolled back. */
+  const withProfile = (mandatory, nonExpiring) =>
+    'with retired as (update regulatory_profile set superseded_at = now() ' +
+    'where superseded_at is null returning *) ' +
+    'insert into regulatory_profile (licence_class, emirate, clinical_retention_years, ' +
+    'financial_retention_years, erasure_overrides_retention, medical_claims_permitted, ' +
+    'permitted_public_titles, banned_claim_terms, is_provisional, source_note, ' +
+    'mandatory_therapist_document_types, non_expiring_document_types) ' +
+    'select licence_class, emirate, clinical_retention_years, financial_retention_years, ' +
+    'erasure_overrides_retention, medical_claims_permitted, permitted_public_titles, ' +
+    "banned_claim_terms, is_provisional, 'gate probe', " +
+    `array[${mandatory}]::employee_document_type[], ` +
+    `array[${nonExpiring}]::employee_document_type[] from retired`
+
+  const probes = [
+    {
+      name: 'a NULL expiry on a type the profile does not declare non-expiring',
+      rule: 'EmployeeDocumentExpiryIsDeclared',
+      sql:
+        `${employee(EMP, 'GATE 66')}; ` +
+        'insert into employee_document (employee_id, document_type, expires_on) values ' +
+        `(${EMP}, 'emiratisation_record', null)`,
+    },
+    {
+      name: 'a second record of a type that IS declared non-expiring',
+      rule: 'employee_document_one_row_per_non_expiring',
+      sql:
+        `${employee(EMP, 'GATE 66')}; ${withProfile("'emiratisation_record'", "'emiratisation_record'")}; ` +
+        'insert into employee_document (employee_id, document_type, expires_on) values ' +
+        `(${EMP}, 'emiratisation_record', null); ` +
+        'insert into employee_document (employee_id, document_type, expires_on) values ' +
+        `(${EMP}, 'emiratisation_record', null)`,
+    },
+    {
+      name: 'a residence-visa file number typed into the plaintext reference column',
+      rule: 'employee_document_visa_number_is_encrypted',
+      sql:
+        `${employee(EMP, 'GATE 66')}; ` +
+        'insert into employee_document (employee_id, document_type, reference, expires_on) values ' +
+        `(${EMP}, 'residence_visa', 'anything at all', date '2030-01-01')`,
+    },
+    {
+      name: 'a placeholder issuing authority, which would read as a configured one',
+      rule: 'employee_document_issuing_authority_not_placeholder',
+      sql:
+        `${employee(EMP, 'GATE 66')}; ` +
+        'insert into employee_document (employee_id, document_type, issuing_authority, expires_on) ' +
+        `values (${EMP}, 'labour_card', 'TBC', date '2030-01-01')`,
+    },
+    {
+      name: 'an UPDATE that clears the expiry of a type nobody declared non-expiring',
+      rule: 'EmployeeDocumentExpiryIsDeclared',
+      // BEFORE INSERT OR UPDATE, not INSERT alone. The route to a "valid for ever" row that a
+      // insert-only trigger would leave open is editing a row that already exists.
+      sql:
+        `${employee(EMP, 'GATE 66')}; ` +
+        'insert into employee_document (employee_id, document_type, expires_on) values ' +
+        `(${EMP}, 'labour_card', date '2030-01-01'); ` +
+        `update employee_document set expires_on = null where employee_id = ${EMP}`,
+    },
+  ]
+
+  if (dbUrl === undefined) {
+    check(
+      '0054 probes ran against a database',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required; the 0054 rules cannot be proved without one',
+    )
+  } else {
+    for (const probe of probes) {
+      checkRejectedBy(`0054 refuses: ${probe.name}`, psqlProbe(probe.sql), probe.rule)
+    }
+
+    // --- the controls -----------------------------------------------------------------------------
+    const accepted = [
+      {
+        name: 'a NULL expiry IS accepted once the profile declares the type non-expiring',
+        sql:
+          `${employee(EMP, 'GATE 66')}; ${withProfile("'emiratisation_record'", "'emiratisation_record'")}; ` +
+          'insert into employee_document (employee_id, document_type, expires_on) values ' +
+          `(${EMP}, 'emiratisation_record', null)`,
+      },
+      {
+        name: 'a renewal is a second row with a later expiry, and both stay on file',
+        sql:
+          `${employee(EMP, 'GATE 66')}; ` +
+          'insert into employee_document (employee_id, document_type, expires_on) values ' +
+          `(${EMP}, 'labour_card', date '2026-03-31'), (${EMP}, 'labour_card', date '2027-03-31'); ` +
+          'do $$ begin if (select count(*) from employee_document where document_type = ' +
+          "'labour_card' and employee_id = '0dec0de5-0000-7000-8000-000000000101') <> 2 then " +
+          "raise exception 'RenewalReplacedTheRow: a renewal must not overwrite the lapsed record'; " +
+          'end if; end $$',
+      },
+      {
+        name: 'a real issuing authority is accepted, so the placeholder rule is about placeholders',
+        sql:
+          `${employee(EMP, 'GATE 66')}; ` +
+          'insert into employee_document (employee_id, document_type, issuing_authority, expires_on) ' +
+          `values (${EMP}, 'labour_card', ` +
+          "'Ministry of Human Resources and Emiratisation', date '2030-01-01')",
+      },
+      {
+        name: 'the column DEFAULT is decision 20’s stricter six, read back from the database',
+        // Inserts a profile version naming no mandatory set, so the value comes from the DEFAULT. The
+        // check is in SQL rather than in a comment: 0054's whole claim about the default is this row.
+        sql:
+          'with retired as (update regulatory_profile set superseded_at = now() ' +
+          'where superseded_at is null returning *) ' +
+          'insert into regulatory_profile (licence_class, emirate, clinical_retention_years, ' +
+          'financial_retention_years, erasure_overrides_retention, medical_claims_permitted, ' +
+          'permitted_public_titles, banned_claim_terms, is_provisional, source_note) ' +
+          'select licence_class, emirate, clinical_retention_years, financial_retention_years, ' +
+          'erasure_overrides_retention, medical_claims_permitted, permitted_public_titles, ' +
+          "banned_claim_terms, is_provisional, 'gate probe' from retired; " +
+          'do $$ begin if (select mandatory_therapist_document_types from ' +
+          "regulatory_profile_current) <> array['labour_card','emirates_id','residence_visa'," +
+          "'occupational_health_card','medical_fitness_certificate','good_conduct_certificate']" +
+          '::employee_document_type[] then ' +
+          "raise exception 'MandatoryDefaultWrong: the column default is not decision 20''s stricter " +
+          "six'; end if; end $$",
+      },
+      {
+        name: 'the view carries the new column, which a `select *` view does NOT get for free',
+        // 0030 recorded this trap and 0054 walked into the same one: `regulatory_profile_current` was
+        // created as `select *`, the star was expanded at CREATE time, and a column added to the table
+        // does not appear in the view until it is replaced. The failure is a missing column at runtime.
+        sql: 'do $$ begin perform non_expiring_document_types from regulatory_profile_current; end $$',
+      },
+    ]
+    for (const control of accepted) {
+      const result = psqlProbe(control.sql)
+      check(`0054 control: ${control.name}`, !result.failed, result.output)
+    }
+  }
+
+  // --- the evaluator must be able to fail ---------------------------------------------------------
+  const EVALUATOR = 'packages/core/src/hr/credentials.ts'
+  const POLICY_READER = 'packages/db/src/repositories/credentials.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const EVALUATOR_TEST = unit('packages/core/src/hr/credentials.test.ts')
+  const PAIR_TEST = integration('packages/fixtures/src/hr-credentials.itest.ts')
+
+  // The defect the acceptance criterion singles out. `toLocal(at, zone)` with the zone replaced by UTC is
+  // the whole of the mistake, and it is right for twenty hours out of twenty-four.
+  checkRejectedBy(
+    'the evaluator suite fails when the expiry boundary is computed in UTC',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          'const asOfDate = toLocal(at, zone).date',
+          "const asOfDate = toLocal(at, 'UTC' as TimeZone).date",
+        ),
+      () => runExpectingFailure('pnpm', EVALUATOR_TEST),
+    ),
+    'is EXPIRED at 2026-04-01T00:00:00+04:00',
+  )
+
+  // And the same defect against real rows, because the unit test could in principle be satisfied by an
+  // evaluator that is right about literals and wrong about what comes back from a `date` column.
+  checkRejectedBy(
+    'the pair suite fails when the expiry boundary is computed in UTC',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          'const asOfDate = toLocal(at, zone).date',
+          "const asOfDate = toLocal(at, 'UTC' as TimeZone).date",
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'the expiry boundary is Asia/Dubai',
+  )
+
+  // The mandatory set taken from a constant rather than from the row. This is the fixture that separates
+  // "derived from regulatory_profile" from "hard-coded with a lookup wrapped round it": every assertion
+  // in the unit that uses one of the two published readings still passes with this edit in place.
+  checkRejectedBy(
+    'the pair suite fails when the mandatory set comes from a constant instead of the profile row',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          '  const mandatoryTypes = [...new Set(policy.mandatoryTypes)]',
+          '  const mandatoryTypes = [...CANDIDATE_MANDATORY_CREDENTIALS.healthcare]',
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'and from nothing else',
+  )
+
+  // The reader's half of the same claim: querying the TABLE rather than the view returns every version
+  // ever written, so the answer becomes whichever row PostgreSQL happened to return first.
+  checkRejectedBy(
+    'the pair suite fails when the policy is read from the table instead of the view',
+    withEditedFile(
+      POLICY_READER,
+      (src) => src.replace('from regulatory_profile_current\n  `', 'from regulatory_profile\n  `'),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'reads the view and not the table',
+  )
+
+  // EXPIRING_SOON made a refusal. The opposite direction from every other fixture here: it does not let
+  // an expired document through, it removes a therapist whose credentials are current — which presents as
+  // an empty availability grid and not as a credential bug.
+  checkRejectedBy(
+    'the evaluator suite fails when EXPIRING_SOON stops satisfying a mandatory type',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          "const SATISFYING: ReadonlySet<CredentialStatus> = new Set<CredentialStatus>([\n  'VALID',\n  'EXPIRING_SOON',\n])",
+          "const SATISFYING: ReadonlySet<CredentialStatus> = new Set<CredentialStatus>(['VALID'])",
+        ),
+      () => runExpectingFailure('pnpm', EVALUATOR_TEST),
+    ),
+    'satisfies exactly two of them',
+  )
+
+  // A non-expiring type judged on its date anyway. The schema cannot produce that row — 0054's trigger
+  // refuses a dated row for a declared type only in the other direction, and the declaration is the
+  // authority — but a JSON payload can, and the criterion is that such a type NEVER returns EXPIRED.
+  checkRejectedBy(
+    'the evaluator suite fails when a non-expiring type is judged on its expiry date',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          "  if (nonExpiring) return { status: 'VALID', expiresOn: null }",
+          "  if (nonExpiring && held.every((c) => c.expiresOn === null))\n    return { status: 'VALID', expiresOn: null }",
+        ),
+      () => runExpectingFailure('pnpm', EVALUATOR_TEST),
+    ),
+    'is VALID even with an expiry date long past',
+  )
+
+  // The eligibility biconditional. `some` for `every` is the classic, and it is the one edit that makes
+  // an employee holding one of six mandatory documents bookable.
+  checkRejectedBy(
+    'the evaluator suite fails when eligibility stops requiring EVERY mandatory type',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          '  const blocking = mandatory\n    .filter((assessment) => !statusSatisfies(assessment.status))',
+          '  const blocking = mandatory\n    .filter(() => false)',
+        ),
+      () => runExpectingFailure('pnpm', EVALUATOR_TEST),
+    ),
+    'agrees with the specification in both directions',
+  )
+
+  // And the control on the property test itself. `fc.assert` over a property nothing can falsify passes,
+  // so the file runs the same generator against a deliberately wrong predicate and requires a
+  // disagreement. Make the generator produce only ineligible cases and that control must fail — which is
+  // what says the two properties above are evidence rather than ceremony.
+  checkRejectedBy(
+    'the property test fails when its generator can no longer straddle the boundary',
+    withEditedFile(
+      'packages/core/src/hr/credentials.test.ts',
+      (src) =>
+        src.replace(
+          '    mandatoryTypes: fc.uniqueArray(fc.constantFrom(...TYPES), { maxLength: 6 }),',
+          "    mandatoryTypes: fc.constant(['no_such_document_type']),",
+        ),
+      () => runExpectingFailure('pnpm', EVALUATOR_TEST),
+    ),
+    'a deliberately wrong predicate disagrees',
+  )
+
+  // The settings half. Remove the `provisional` block and the registry test must fail: a window the build
+  // chose and did not declare provisional is a guess presented as an answer, which is what the
+  // Unconfirmed Assumptions panel exists to prevent.
+  checkRejectedBy(
+    'the registry suite fails when the expiry window stops being declared provisional',
+    withEditedFile(
+      'packages/config/src/settings/registry.ts',
+      (src) =>
+        src.replace(
+          "    provisional: {\n      openQuestionId: 'Y1-licence',",
+          "    unusedProvisional: {\n      openQuestionId: 'Y1-licence',",
+        ),
+      () => runExpectingFailure('pnpm', unit('packages/config/src/settings/registry.test.ts')),
+    ),
+    'lists the credential expiry window',
+  )
+
+  // And the database half of the same claim, because the panel reads `app_setting` and not the registry:
+  // a seed that dropped the provenance columns would leave the value flagged in TypeScript and confirmed
+  // in the database.
+  checkRejectedBy(
+    'the pair suite fails when the seeded window is not flagged provisional in the database',
+    withEditedFile(
+      'packages/db/src/settings-store.ts',
+      // A regex and not a string literal, for the reason case 61f gives: the text being matched is a
+      // template literal, and writing it as a string trips `noTemplateCurlyInString` in this very file.
+      // `row.isProvisional` appears exactly once in that module, so one substitution is enough.
+      (src) => src.replace(/\$\{row\.isProvisional\}/, 'false'),
+      () => {
+        // The row already exists and `seedSettingDefaults` is `on conflict do nothing`, so the edited
+        // seed would write nothing at all and the gate would be vacuous. Brief rule 12 arriving through a
+        // gate: the key has to be removed first, and put back by the unedited seed afterwards.
+        run('psql', [
+          '--no-psqlrc',
+          '-q',
+          dbUrl ?? '',
+          '-c',
+          "delete from app_setting where key = 'hr.credential_expiring_soon_days'",
+        ])
+        return runExpectingFailure('pnpm', PAIR_TEST)
+      },
+    ),
+    'is returned by the Unconfirmed Assumptions query',
+  )
+
+  /*
+    Put the setting back, with the unedited seed.
+
+    `withEditedFile` restores the source bytes; it cannot undo what the edited source WROTE, and in this
+    case it cannot undo what the FIXTURE deleted either. Without this line the key is missing — or present
+    and not provisional — for every later run and for the next branch, on somebody else's change.
+  */
+  run('psql', [
+    '--no-psqlrc',
+    '-q',
+    dbUrl ?? '',
+    '-c',
+    "delete from app_setting where key = 'hr.credential_expiring_soon_days'",
+  ])
+  run('pnpm', ['seed'])
+
+  // The purity rule, which is an acceptance criterion in its own right ("no Date.now, no DB and no
+  // framework import; the evaluation instant is an argument"). A clock in the evaluator is the defect that
+  // makes every test in this unit true only on the day it was written.
+  checkRejectedBy(
+    'pnpm purity rejects a clock read in the credential evaluator',
+    withEditedFile(
+      EVALUATOR,
+      (src) =>
+        src.replace(
+          '  const zone = policy.zone ?? ASIA_DUBAI',
+          '  const zone = policy.zone ?? ASIA_DUBAI\n  const _unused = Date.now()',
+        ),
+      () => runExpectingFailure('node', ['scripts/check-core-purity.mjs']),
+    ),
+    'inject a Clock and pass the instant in',
+  )
+
+  // And the committed tree passes, which is the control that keeps the rejection above from being a gate
+  // that rejects everything.
+  {
+    const clean = run('node', ['scripts/check-core-purity.mjs'])
+    check('pnpm purity accepts the committed core package', !clean.failed, clean.output)
+  }
+
+  /*
+    66w-66y. A superseding helper that DROPS a regulatory_profile column.
+
+    This is the defect P-HR-02 introduced and then found, and it is brief rule 12 in its most expensive
+    form. `regulatory_profile` is append-only (ADR 0008), so a change is an INSERT of a new version — and
+    a column the inserting statement does not name takes its DEFAULT, not the value in force.
+
+    Before 0054 that was invisible. 0030's default for `mandatory_therapist_document_types` happened to
+    equal the array the seeded row held, so `catalogue-compliance.itest.ts` — which supersedes the profile
+    to flip the banned-claims lexicon and never mentioned the credential columns — wrote the same array
+    back by luck. 0054 revises that default to docs/01 decision 20's stricter six, and the luck ran out:
+    every suite running after the lexicon file saw a mandatory set nobody had chosen, and four therapists
+    seeded with a professional licence and a health certificate became `credential_missing`. It surfaced
+    as `therapist_not_eligible` on all 400 iterations of `booking-concurrency.itest.ts`, a file about room
+    locks that mentions neither credentials nor the lexicon.
+
+    So the fixture is the real thing rather than a model of it: remove the carry-forward, RUN the lexicon
+    file so the corruption exists in the database, and require the concurrency file to fail by the error
+    the corruption actually produces. The control then proves the corrected helper leaves the set alone,
+    because a gate that only ever sees the broken state cannot tell a fix from a coincidence.
+  */
+  {
+    const LEXICON = 'packages/fixtures/src/catalogue-compliance.itest.ts'
+    const CONCURRENCY = 'packages/fixtures/src/booking-concurrency.itest.ts'
+
+    const mandatoryInForce = () =>
+      run('psql', [
+        '--no-psqlrc',
+        '-At',
+        dbUrl ?? '',
+        '-c',
+        'select mandatory_therapist_document_types::text from regulatory_profile_current',
+      ]).output.trim()
+
+    /**
+     * Puts the seeded mandatory set back, by INSERTING a version — never by deleting a row.
+     *
+     * Load-bearing, for the reason case 57 records about its own roster: `withEditedFile` restores the
+     * source bytes and cannot undo what the edited source WROTE. Without this the corrupted profile
+     * outlives the fixture, every later gate case and the next branch.
+     */
+    const restoreSeededProfile = () =>
+      run('psql', [
+        '--no-psqlrc',
+        '-q',
+        '-v',
+        'ON_ERROR_STOP=1',
+        dbUrl ?? '',
+        '-c',
+        'with retired as (update regulatory_profile set superseded_at = now() ' +
+          'where superseded_at is null returning *) ' +
+          'insert into regulatory_profile (licence_class, emirate, clinical_retention_years, ' +
+          'financial_retention_years, erasure_overrides_retention, medical_claims_permitted, ' +
+          'permitted_public_titles, banned_claim_terms, is_provisional, source_note, ' +
+          'mandatory_therapist_document_types, non_expiring_document_types) ' +
+          'select licence_class, emirate, clinical_retention_years, financial_retention_years, ' +
+          'erasure_overrides_retention, medical_claims_permitted, permitted_public_titles, ' +
+          "banned_claim_terms, is_provisional, 'gate 66w: restoring the seeded mandatory set', " +
+          "array['professional_licence','health_certificate']::employee_document_type[], " +
+          'array[]::employee_document_type[] from retired',
+      ])
+
+    /** The carry-forward removed, in the four places it appears. Leaves the SQL valid, so the fixture
+     *  fails for the reason under test rather than for a syntax error. */
+    const withoutCarryForward = (src) =>
+      src
+        .replace(
+          '                erasure_overrides_retention, emirate,\n',
+          '                erasure_overrides_retention, emirate\n',
+        )
+        .replace(
+          '                mandatory_therapist_document_types, non_expiring_document_types\n',
+          '',
+        )
+        .replace(
+          '       banned_claim_terms, is_provisional, source_note,\n       mandatory_therapist_document_types, non_expiring_document_types)',
+          '       banned_claim_terms, is_provisional, source_note)',
+        )
+        // A regex for the last one, because the line above it holds a template placeholder and writing
+        // it as a string literal trips `noTemplateCurlyInString` in this very file (case 61f's reason).
+        .replace(
+          /,\n {6}retired\.mandatory_therapist_document_types, retired\.non_expiring_document_types\n/,
+          '\n',
+        )
+
+    if (dbUrl === undefined) {
+      check(
+        '66w ran against a database',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required to corrupt and restore the profile',
+      )
+    } else {
+      const seeded = mandatoryInForce()
+      const result = withEditedFile(LEXICON, withoutCarryForward, () => {
+        // The lexicon file has to RUN for the corruption to exist: the defect is what its supersede
+        // WRITES, not what its source says.
+        run('pnpm', integration(LEXICON))
+        return runExpectingFailure('pnpm', integration(CONCURRENCY))
+      })
+      checkRejectedBy(
+        'a superseding helper that drops a regulatory_profile column is rejected',
+        result,
+        'therapist_not_eligible',
+      )
+      restoreSeededProfile()
+
+      // 66x-66y. The controls, and they are what say the fix is a fix rather than a coincidence. With the
+      //          carry-forward in place the same file passes AND leaves the mandatory set exactly as it
+      //          found it — so the case above is about the dropped column and not about the lexicon file
+      //          having become unable to run at all.
+      const before = mandatoryInForce()
+      const lexicon = run('pnpm', integration(LEXICON))
+      check(
+        'the lexicon suite still passes with the carry-forward in place',
+        !lexicon.failed,
+        lexicon.output,
+      )
+      const after = mandatoryInForce()
+      check(
+        'a corrected superseding helper leaves the mandatory set untouched',
+        before === after && after === seeded,
+        `before=${before} after=${after} seeded=${seeded}`,
+      )
+    }
+  }
+}
+
 // 67a-67i. (M-TILL-05) The checkout basket: the reason code the type system refuses, the scoped purity
 // rule, and the five shipped-file edits that must make the basket's own tests go red. Every case here
 // breaks something real — fixtures that must not compile or must not pass purity, and five edits to files

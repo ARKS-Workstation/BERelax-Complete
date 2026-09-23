@@ -361,17 +361,26 @@ async function supersedeMandatory(snapshot: ProfileSnapshot): Promise<number> {
       update regulatory_profile set superseded_at = now() where superseded_at is null
       returning licence_class, emirate, clinical_retention_years, financial_retention_years,
                 erasure_overrides_retention, medical_claims_permitted, permitted_public_titles,
-                banned_claim_terms, is_provisional
+                banned_claim_terms, is_provisional,
+                -- Added by P-HR-02 (0054), and carried forward for the reason the comment above gives
+                -- about every other column: a column this helper omits takes its DEFAULT, not the value
+                -- in force. Empty is the default and the value today, so the omission was inert — and it
+                -- stops being inert the day a profile declares a type non-expiring, at which point
+                -- running this suite would withdraw the declaration and turn every NULL-expiry row on
+                -- file into a MISSING credential.
+                non_expiring_document_types
     )
     insert into regulatory_profile
       (licence_class, emirate, clinical_retention_years, financial_retention_years,
        erasure_overrides_retention, medical_claims_permitted, permitted_public_titles,
-       banned_claim_terms, is_provisional, source_note, mandatory_therapist_document_types)
+       banned_claim_terms, is_provisional, source_note, mandatory_therapist_document_types,
+       non_expiring_document_types)
     select retired.licence_class, retired.emirate, retired.clinical_retention_years,
            retired.financial_retention_years, retired.erasure_overrides_retention,
            retired.medical_claims_permitted, retired.permitted_public_titles,
            retired.banned_claim_terms, retired.is_provisional, ${snapshot.note},
-           ${sql.array([...snapshot.mandatory])}::employee_document_type[]
+           ${sql.array([...snapshot.mandatory])}::employee_document_type[],
+           retired.non_expiring_document_types
     from retired
     returning version
   `

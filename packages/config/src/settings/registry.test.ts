@@ -1,7 +1,9 @@
 import {
   type AppError,
+  CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   DETECTABLE_REVIEW_LANGUAGES,
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
+  PROVISIONAL_EXPIRING_SOON_DAYS,
   REVIEW_AUTOSEND_SETTING_KEYS,
 } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
@@ -231,6 +233,56 @@ describe('the Unconfirmed Assumptions panel', () => {
     const keys = provisionalSettings().map((p) => p.key)
     expect(keys).not.toContain('messaging.promotional_window')
     expect(keys).not.toContain('theme.accent')
+  })
+
+  it('lists the credential expiry window, which P-HR-02 flagged provisional against Y1-licence', () => {
+    // The acceptance criterion names this explicitly: "the EXPIRING_SOON window is a settings-registry
+    // value flagged provisional:true and is returned by the Unconfirmed Assumptions query". This is the
+    // registry half; `packages/fixtures/src/hr-credentials.itest.ts` asserts the database half, where the
+    // panel actually reads from `app_setting`.
+    const entry = provisionalSettings().find((p) => p.key === CREDENTIAL_EXPIRING_SOON_SETTING_KEY)
+    expect(entry, CREDENTIAL_EXPIRING_SOON_SETTING_KEY).toBeDefined()
+    expect(entry?.openQuestionId).toBe('Y1-licence')
+    expect(entry?.defaultValue).toBe(PROVISIONAL_EXPIRING_SOON_DAYS)
+    // The note has to say what is unanswered, not merely that something is. `[UNVERIFIED]` is the marker
+    // docs/04 uses for the paragraph this window depends on.
+    expect(entry?.note).toContain('[UNVERIFIED]')
+  })
+})
+
+describe('the credential expiry window', () => {
+  const definition = () => getDefinition(CREDENTIAL_EXPIRING_SOON_SETTING_KEY)
+
+  it('is operational rather than compliance-locked, because no value it can hold relaxes a rule', () => {
+    // The tier follows what a value can RELAX. EXPIRING_SOON is a warning and never a refusal, so no
+    // window makes anybody bookable who would otherwise not be; what removes a therapist is EXPIRED, and
+    // that is the date on the document against the Asia/Dubai calendar, which this setting cannot touch.
+    expect(definition().tier).toBe('operational')
+    expect([...definition().editableBy]).toEqual(['owner', 'manager'])
+    expect(definition().audited).toBe(true)
+  })
+
+  it('accepts a whole number of days in bounds and refuses one that is not', () => {
+    const schema = definition().schema
+    expect(schema.safeParse(PROVISIONAL_EXPIRING_SOON_DAYS).success).toBe(true)
+    // Zero is legitimate: "warn me on the day it expires" is a policy somebody may hold.
+    expect(schema.safeParse(0).success).toBe(true)
+    expect(schema.safeParse(365).success).toBe(true)
+    // The controls. A negative window is a badge in the past, a fractional one is a badge at a time of
+    // day nobody can name, and a window longer than a renewal cycle flags every document on file — at
+    // which point the badge distinguishes nothing.
+    expect(schema.safeParse(-1).success).toBe(false)
+    expect(schema.safeParse(60.5).success).toBe(false)
+    expect(schema.safeParse(366).success).toBe(false)
+    expect(schema.safeParse('60').success).toBe(false)
+  })
+
+  it('states the default once, so the registry and the evaluator cannot drift apart', () => {
+    // Two literals is how a comment and a default come to disagree. The constant is in
+    // `@berelax/shared` because the registry, the `@berelax/db` reader and the `@berelax/core` evaluator
+    // all read it and none of the three may import the other two.
+    expect(definition().defaultValue).toBe(PROVISIONAL_EXPIRING_SOON_DAYS)
+    expect(PROVISIONAL_EXPIRING_SOON_DAYS).toBe(60)
   })
 })
 
