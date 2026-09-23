@@ -288,6 +288,7 @@ export {
   readMandatoryDocumentTypes,
   type ScheduledAppointmentRow,
   type SqlFragment,
+  type TherapistExclusion,
   type TherapistPoolCtesQuery,
   type TherapistPoolRead,
   type TherapistShiftRow,
@@ -501,6 +502,25 @@ export {
   therapistStyleSkill,
 } from './seed/therapists.ts'
 export {
+  completeObligationInstance,
+  fileObligationEvidence,
+  generateObligationInstances,
+  OBLIGATION_SQLSTATE,
+  type ObligationDefinitionRow,
+  type ObligationGenerationResult,
+  type ObligationInstanceRow,
+  OVERDUE_BLOCKING_OBLIGATION_EXCLUSION,
+  OVERDUE_BLOCKING_OBLIGATION_REASON,
+  overdueBlockingObligationExclusion,
+  type PlannedObligationInstanceRow,
+  readObligationDefinitions,
+  readObligationInstances,
+  readTradingHoursAround,
+  rescheduleObligationInstance,
+  setObligationAnchorDate,
+  type TradingDateHoursRow,
+} from './services/obligation.ts'
+export {
   type ImportedOpeningBalances,
   importOpeningBalances,
   isBeforeOpeningBalance,
@@ -638,6 +658,15 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // makes ADR 0020's publication guard a column nothing can write, `employee_language`,
 // `employee_bank_detail` with one sealed payload per account, and `employee_document`'s sealed number.
 //
-// 41 and 47 are still unused and will stay unused: renumbering to close a gap is how two branches come to
+// 52 is 0052_obligation.sql: the compliance calendar (docs/04 §9). `obligation` with the seven seeded
+// duties and their cadence, owner role, evidence requirement and unverified flag; `obligation_instance`,
+// whose UNIQUE NULLS NOT DISTINCT key is what makes deterministic generation a constraint rather than a
+// convention; and `obligation_evidence`, append-only. The blocking flag is GENERATED from
+// `blocking_effect` and `refuse_obligation_shape_change()` refuses an UPDATE to anything but the due
+// date, so there is nothing for a settings key to write — which is the unit's whole value. No seeded row
+// carries a renewal date: the build has seen no licence, permit or certificate, and a plausible date
+// would be indistinguishable from a configured one.
+//
+// 41, 47 and 51 are unused and will stay unused: renumbering to close a gap is how two branches come to
 // apply the same number to different SQL.
-export const SCHEMA_VERSION = 50 as const
+export const SCHEMA_VERSION = 52 as const

@@ -9,9 +9,11 @@ import {
 import type { Sql } from '../connection.ts'
 import {
   type ScheduledAppointmentRow,
+  type TherapistExclusion,
   type TherapistPoolCtesQuery,
   therapistPoolCtes,
 } from '../repositories/eligibility.ts'
+import { overdueBlockingObligationExclusion } from '../services/obligation.ts'
 
 /**
  * The availability **read** path (B-AVAIL-07). One indexed statement per request, memoised for seconds,
@@ -411,6 +413,32 @@ function dubaiCalendarDate(now: number): string {
 }
 
 /**
+ * The exclusions composed into this read, in one list.
+ *
+ * **Add to the list; do not inline a condition.** Every unit that has to take a therapist out of
+ * availability for a reason `resolveTherapistPool` cannot compute contributes a named
+ * {@link TherapistExclusion} here, and `therapistPoolCtes` splices each one into its `case` ahead of the
+ * gender arm. The alternative — each unit adding a condition to the pool's SQL — is the merge that keeps
+ * one of two filters and loses the other silently, because the query still compiles and still returns
+ * therapists.
+ *
+ * Every entry is unconditional. There is no flag, no setting and no request field that removes one:
+ * M-VAT-10's whole value is that an overdue blocking obligation cannot be switched off from settings, and
+ * an `if (options.applyObligations)` here would be that switch with a different name.
+ */
+function availabilityExclusions(
+  sql: Sql,
+  request: AvailabilityRequest,
+): readonly TherapistExclusion[] {
+  return [
+    // M-VAT-10. An overdue blocking obligation of class credential — a lapsed practice licence, an
+    // unrenewed occupational health card — takes that therapist out of the bookable pool until the
+    // occurrence is completed with its evidence.
+    overdueBlockingObligationExclusion(sql, { tradingDate: request.tradingDate }),
+  ]
+}
+
+/**
  * The one statement, as a fragment rather than as a result.
  *
  * Built and returned unawaited, which is what lets {@link readAvailabilityFacts} execute it and
@@ -441,6 +469,7 @@ function availabilityFactsStatement(sql: Sql, request: AvailabilityRequest, now:
     // which is why a scalar subquery over it is legal here and why the pool and the variant cannot
     // disagree about which skill was required.
     requiredSkill: sql`(select v.required_skill from av_variant v)`,
+    exclusions: availabilityExclusions(sql, request),
     ...(request.therapistIds === undefined ? {} : { employeeIds: request.therapistIds }),
     ...(request.clientGender === undefined ? {} : { clientGender: request.clientGender }),
     ...(request.genderMatching === undefined ? {} : { genderMatching: request.genderMatching }),

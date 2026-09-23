@@ -1,5 +1,5 @@
 /**
- * Compliance vocabulary (B-CAT-05, ADR 0020).
+ * Compliance: the public vocabulary (B-CAT-05, ADR 0020) and the calendar (M-VAT-10, docs/04 §9).
  *
  * The public display-name lint and the lexicon behind it. Pure: the licence-dependent half of the
  * rule — the claim terms and the permitted staff titles — is read from `regulatory_profile` by the
@@ -7,6 +7,12 @@
  * is still an open question (Y1-licence) whose answer must reach the lint as data.
  *
  * W-SITE-05 and W-SITE-10 reuse this for page copy; it is deliberately not scoped to the catalogue.
+ *
+ * `obligation.ts` is the other half of the same subject and the same shape: the rule is pure and the rows
+ * are `@berelax/db`'s. It answers when a statutory obligation falls due, whether an overdue one is
+ * blocking, and which behaviour a breach stops — a therapist leaving bookable availability, or publishing
+ * refused with `PublishingBlocked`.
  */
 
 export * from './lexicon.ts'
+export * from './obligation.ts'

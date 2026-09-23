@@ -3896,7 +3896,7 @@ units:
       behaviour that gives the module its value: an overdue blocking obligation removes a therapist from
       bookable availability or blocks publishing. Blocking cannot be switched off from settings.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-AVAIL-01
@@ -3922,12 +3922,63 @@ units:
       an attachment is refused with EvidenceRequired
     - 'the blocking flag has no settings writer: a test asserts no settings key can change it, only the
       due date, and that the due-date change writes an audit_event'
+    - 'NOTE: no seeded obligation carries a due date, and that is the design rather than an omission.
+      anchor_on is NULL on all seven rows because the build has seen no trade licence, municipality
+      permit or therapist certificate, and brief rule 15 makes a plausible renewal date worse than a
+      blank one: blank is visibly unanswered, plausible is indistinguishable from configured. A NULL
+      anchor generates no occurrences, so nothing blocks until somebody enters a real date through
+      setObligationAnchorDate, which is audited. The first due dates are a deploy-and-check task, and
+      the unverified rows carry Y1-licence / Y11-tax-agent with a note naming the exact unanswered part.'
+    - 'NOTE: the blocking flag is unwritable by construction rather than by the absence of a settings
+      key. obligation.is_blocking is GENERATED from blocking_effect (the technique 0050 used for
+      employee.is_publishable) and refuse_obligation_shape_change() refuses an UPDATE that changes ANY
+      column but the due date, for every role including the owner — a to_jsonb difference, so a column
+      a later migration adds is covered the day it appears. is_blocking is subtracted from that
+      comparison for a reason worth recording: PostgreSQL computes a generated column AFTER the BEFORE
+      triggers, so new.is_blocking is NULL inside the trigger and comparing it would refuse every
+      update, including the one permitted change. It cost a run to find.'
+    - 'NOTE: the availability exclusion is a separately named composable predicate,
+      overdueBlockingObligationExclusion(sql, { tradingDate }) returning a TherapistExclusion { name,
+      reason, when }, spliced into therapistPoolCtes''s case ahead of the gender arm from a LIST in
+      availabilityExclusions() in queries/availability.ts. C-CRM-01''s do-not-pair exclusion appends to
+      that array rather than editing the SQL, and gate 64h proves the composition is load-bearing by
+      reducing the arms to one and watching the itest fail. The reason string is deliberately NOT an
+      eighth EligibilityExclusionReason: those seven are the port''s vocabulary, pinned to core in both
+      directions, and resolveTherapistPool cannot compute a fact that lives in a compliance calendar.'
+    - 'NOTE: deferred to M-VAT-11 — reminder offsets, escalation intervals and the (instance, step)
+      idempotency key; serving obligation_evidence privately by signed URL and auditing every download;
+      the compliance calendar UI and the owner banner docs/04 §9 asks for; and the
+      open-compliance-questions dashboard. obligation.is_unverified, unverified_note and
+      open_question_id are seeded for that dashboard to count, and obligation_evidence exists with its
+      storage key and content hash because the completion trigger needs something real to join to — but
+      nothing reads it back out over HTTP yet. unconfirmedAssumptionRows() is deliberately NOT widened
+      to include obligations: the unverified dashboard is M-VAT-11''s and a count assertion in
+      business-seed.itest.ts should not move under it.'
+    - 'NOTE: deferred to M-VAT-11 — the scheduled generation run. The generator is a pure plan
+      (obligationInstancePlan in core) plus a write (generateObligationInstances in db), and the pair is
+      driven by packages/fixtures/src/obligation-calendar.itest.ts under a frozen clock. No cron job
+      calls it, because apps/worker''s obligation job is M-VAT-11''s file; the per-therapist obligations
+      also need the therapist list, which the plan takes as an argument rather than reading.'
+    - 'NOTE: the publish gate is applied on the CMS publish hook (guardJournalPostPublication) and
+      deliberately NOT on the render path, although read.ts re-applies the copy lints there. An overdue
+      licence must stop new copy going out; taking the existing site down the moment a renewal lapses is
+      a different decision of a different size, and not one to arrive at by symmetry with a lint.'
+    - 'NOTE: the completion cases in obligation-blocking.itest.ts assert INSIDE a unit of work and then
+      throw, so the transaction rolls back. That is not tidiness: a completion that has filed its
+      evidence is permanent by design — obligation_evidence is append-only (ZO004) and the occurrence
+      beneath it is ON DELETE RESTRICT — so a committed one would leave a row no test could remove, and
+      the NEXT run would find the occurrence already completed and assert against stale state. The
+      service''s own writes are what the assertions read, and both integration suites leave the database
+      exactly as they found it (7 seeded obligations, no occurrences, no evidence), which is asserted by
+      running them twice.'
     files:
     - packages/db/src/schema/obligation.ts
-    - packages/db/migrations/00xx_obligation.sql
+    - packages/db/migrations/0052_obligation.sql
     - packages/core/src/compliance/obligation.ts
-    - packages/db/src/services/obligation-blocking.itest.ts
     - packages/core/src/compliance/obligation.test.ts
+    - packages/db/src/services/obligation.ts
+    - packages/db/src/services/obligation-blocking.itest.ts
+    - packages/fixtures/src/obligation-calendar.itest.ts
   - id: M-VAT-11
     order: 66
     title: Compliance calendar reminders, escalation, evidence and the unverified dashboard

@@ -15924,6 +15924,187 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 64. The compliance calendar, and the blocking behaviour that gives it its value (M-VAT-10).
+//
+//     docs/04 §9: "an overdue blocking obligation changes system behaviour — a therapist leaves bookable
+//     availability, publishing is blocked, the owner sees a banner." Every case below breaks one of those
+//     behaviours in shipped code and watches a test catch it, because a compliance gate that refuses
+//     nothing is indistinguishable from one that works: the salon books as usual, the site publishes as
+//     usual, and the first person to learn otherwise is an inspector.
+//
+//     The last two are integration cases, and they are the ones this unit most needs. One proves the
+//     exclusion is really composed into the availability read rather than merely exported; the other
+//     proves two exclusions can be in play at once, which is the property that stops a second unit's
+//     filter being silently dropped in a merge.
+{
+  const OBLIGATION = 'packages/core/src/compliance/obligation.ts'
+  const OBLIGATION_TEST = 'packages/core/src/compliance/obligation.test.ts'
+  const ELIGIBILITY = 'packages/db/src/repositories/eligibility.ts'
+  const AVAILABILITY = 'packages/db/src/queries/availability.ts'
+  const SERVICE = 'packages/db/src/services/obligation.ts'
+  const BLOCKING_ITEST = 'packages/db/src/services/obligation-blocking.itest.ts'
+  const CALENDAR_ITEST = 'packages/fixtures/src/obligation-calendar.itest.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 64a. "Overdue" made inclusive. An obligation due today is due today and not late today, and the
+  //      inclusive comparison empties the rota on every renewal date — which reads as a scheduling bug
+  //      rather than as a compliance rule, so nobody looks here.
+  checkRejectedBy(
+    'the obligation suite fails when an obligation due today is treated as overdue today',
+    withEditedFile(
+      OBLIGATION,
+      (src) =>
+        src.replace(
+          'if (!(instance.dueOn < asOf)) continue',
+          'if (!(instance.dueOn <= asOf)) continue',
+        ),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'is strictly overdue, open, and blocking',
+  )
+
+  // 64b. Every obligation made blocking. The permissive direction is the one to expect from a refactor —
+  //      "it is a compliance obligation, of course it blocks" — and it takes the floor down for a filing
+  //      deadline.
+  checkRejectedBy(
+    'the obligation suite fails when a non-blocking obligation is treated as blocking',
+    withEditedFile(
+      OBLIGATION,
+      (src) => src.replace("return definition.blockingEffect !== 'none'", 'return true'),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'calls a consequence blocking exactly when there is one',
+  )
+
+  // 64c. The plan's total order removed. Determinism is the acceptance criterion, and the defect is
+  //      invisible from one run: the rows are the same SET, in the order the caller happened to hand the
+  //      therapists over, so the comparison of two runs fails only when something upstream reorders them.
+  checkRejectedBy(
+    'the obligation suite fails when the generated plan is not in a total order',
+    withEditedFile(
+      OBLIGATION,
+      (src) =>
+        src.replace(
+          'if (leftSubject !== rightSubject) return leftSubject < rightSubject ? -1 : 1',
+          'if (leftSubject !== rightSubject) return 0',
+        ),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'two runs produce identical rows, in one total order',
+  )
+
+  // 64d. The month clamp removed. 31 January plus a month becomes 3 March, so an obligation anchored on
+  //      the 31st walks its due date forward a few days every year — and a renewal a week late is the
+  //      first sign of it.
+  checkRejectedBy(
+    'the obligation suite fails when a month-end due date rolls into the next month',
+    withEditedFile(
+      OBLIGATION,
+      (src) => src.replace('const clamped = Math.min(day, lastDay)', 'const clamped = day'),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'clamps to the end of the target month',
+  )
+
+  // 64e. The two completion refusals reported in the other order. Harmless-looking, and it makes the pure
+  //      rule and the database trigger answer one question two ways — which is how the admin screen comes
+  //      to ask for an attachment from somebody who may not complete the obligation at all.
+  checkRejectedBy(
+    'the obligation suite fails when the evidence refusal is reported before the role refusal',
+    withEditedFile(
+      OBLIGATION,
+      (src) =>
+        src.replace(
+          "  if (args.role !== args.definition.ownerRole && args.role !== 'owner') return 'RoleNotPermitted'\n" +
+            "  if (args.definition.evidenceRequired && !args.hasEvidence) return 'EvidenceRequired'",
+          "  if (args.definition.evidenceRequired && !args.hasEvidence) return 'EvidenceRequired'\n" +
+            "  if (args.role !== args.definition.ownerRole && args.role !== 'owner') return 'RoleNotPermitted'",
+        ),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'reports the role before the evidence',
+  )
+
+  // 64f. The publishing filter dropped, so an overdue therapist credential blocks the website. The two
+  //      consequences are enforced in two different code paths precisely so that one cannot become the
+  //      other, and this is the collapse that makes a lapsed health card an outage.
+  checkRejectedBy(
+    'the obligation suite fails when any blocking breach blocks publishing',
+    withEditedFile(
+      OBLIGATION,
+      (src) =>
+        src.replace(
+          '  return obligationBreaches(instances, asOf).filter(\n' +
+            "    (breach) => breach.blockingEffect === 'publishing_blocked',\n" +
+            '  )',
+          '  return obligationBreaches(instances, asOf)',
+        ),
+      () => runExpectingFailure('pnpm', unit(OBLIGATION_TEST)),
+    ),
+    'nothing overdue publishes, and an unrelated error is not a block',
+  )
+
+  // 64g. The exclusion removed from the availability read. This is the case that proves the unit's value
+  //      is wired rather than merely exported: `overdueBlockingObligationExclusion` would still exist,
+  //      still be tested in isolation, and no overdue credential would take anybody off the floor.
+  checkRejectedBy(
+    'the blocking suite fails when the availability read stops composing the exclusion',
+    withEditedFile(
+      AVAILABILITY,
+      (src) =>
+        src.replace(
+          'overdueBlockingObligationExclusion(sql, { tradingDate: request.tradingDate }),',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', integration(BLOCKING_ITEST)),
+    ),
+    'the availability query returns them before, and does not after',
+  )
+
+  // 64h. The composed arms reduced to the LAST exclusion — which is exactly what a merge does when two
+  //      units inline a condition into one expression and one of the two edits wins. The query still
+  //      compiles, still returns therapists, and one unit's compliance rule has silently stopped
+  //      applying. This case is the reason the mechanism is a list of named predicates at all.
+  checkRejectedBy(
+    'the blocking suite fails when only one composed exclusion survives',
+    withEditedFile(
+      ELIGIBILITY,
+      (src) =>
+        src.replace(
+          'for (const exclusion of exclusions) {\n    arms = sql',
+          'for (const exclusion of exclusions.slice(-1)) {\n    arms = sql',
+        ),
+      () => runExpectingFailure('pnpm', integration(BLOCKING_ITEST)),
+    ),
+    'applies both, and names each therapist with its own reason',
+  )
+
+  // 64i. The generator made non-idempotent. Determinism is not a property of the writer's good intentions:
+  //      it is `obligation_instance_one_per_due_date`, and without the conflict clause the second run over
+  //      the same horizon raises instead of writing nothing.
+  checkRejectedBy(
+    'the calendar suite fails when a second generation run is not a no-op',
+    withEditedFile(
+      SERVICE,
+      (src) =>
+        src.replace(
+          'on conflict on constraint obligation_instance_one_per_due_date do nothing',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', integration(CALENDAR_ITEST)),
+    ),
+    'two runs under the frozen clock produce identical rows',
+  )
+}
+
 // 67a-67i. (M-TILL-05) The checkout basket: the reason code the type system refuses, the scoped purity
 // rule, and the five shipped-file edits that must make the basket's own tests go red. Every case here
 // breaks something real — fixtures that must not compile or must not pass purity, and five edits to files

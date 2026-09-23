@@ -33,6 +33,14 @@ import type { Sql } from '../connection.ts'
  * directions, at runtime for the order and at compile time for the membership, so a reason that exists
  * on one side only fails `pnpm typecheck` rather than a booking.
  *
+ * ## The seven are the port's; a composed exclusion is somebody else's
+ *
+ * {@link TherapistExclusion} is the seam for a unit that has to take a therapist out of availability
+ * for a reason the port cannot compute — M-VAT-10's overdue blocking credential obligation, C-CRM-01's
+ * do-not-pair flag. They arrive as a LIST of named predicates and are spliced into the `case` ahead of
+ * the gender arm, so two of them apply at once and neither is an edit to this SQL. Two units inlining a
+ * condition into one expression is the merge that silently keeps one of the two.
+ *
  * ## Same-gender matching is the seventh, and it is the last arm of the `case`
  *
  * B-AVAIL-05, and a hard constraint rather than a preference (ADR 0020, docs/04 §3, `Y9-gender` still
@@ -246,16 +254,105 @@ export async function readMandatoryDocumentTypes(sql: Sql): Promise<readonly str
 export type SqlFragment = ReturnType<Sql>
 
 /**
- * {@link therapistPoolCtes}'s query, which differs from {@link EligibilityQueryInput} in one field.
+ * One **composable exclusion**: a named reason, and a predicate over the candidate row.
+ *
+ * The mechanism exists because more than one unit needs to take a therapist out of availability for a
+ * reason that is not one of the seven, and two units each inlining a condition into the `case` below is
+ * the merge that silently drops one of them — both branches edit the same expression, one wins, and the
+ * lost filter is invisible because the query still compiles and still returns therapists. M-VAT-10's
+ * overdue blocking credential obligation and C-CRM-01's therapist/customer do-not-pair flag are the
+ * first two. Each is a value, both can be in the list at once, and adding a third is an array entry
+ * rather than an edit to this SQL.
+ *
+ * Why it is not an eighth `EligibilityExclusionReason`. Those seven are the **port's** vocabulary,
+ * mirrored word for word in `@berelax/core` and pinned in both directions by
+ * `packages/fixtures/src/therapist-eligibility.itest.ts`, and `resolveTherapistPool` computes every one
+ * of them from facts the port declares. A composed exclusion is a fact from somewhere else entirely — a
+ * compliance calendar, a CRM flag — so widening the port's union for it would make the pure rule
+ * incapable of answering its own question. `readEligibleTherapists` is therefore the port and takes no
+ * exclusions; the availability read composes them in and reports the reason as an open string, which is
+ * what `AvailabilityFacts.excluded[].reason` has always been.
+ *
+ * `when` is a boolean SQL expression evaluated against **`c`**, the candidate row of `tp_candidate`
+ * (`c.id` is the employee id). That coupling is the price of one round trip: a predicate that had to be
+ * a joined CTE instead would need a unique name per contributor, and two contributors picking one name
+ * is the collision this type exists to avoid.
+ */
+export interface TherapistExclusion {
+  /** For the error message when two exclusions collide, and for the test that names one. */
+  readonly name: string
+  /**
+   * The reason reported for an excluded therapist. NOT one of {@link EXCLUSION_REASONS}: a composed
+   * reason is deliberately outside the port's closed union — see the type's header.
+   */
+  readonly reason: string
+  /** A boolean expression over `c.id`, the candidate's employee id. */
+  readonly when: SqlFragment
+}
+
+/**
+ * {@link therapistPoolCtes}'s query, which differs from {@link EligibilityQueryInput} in two fields.
  *
  * `requiredSkill` may be a **SQL expression** as well as a value. B-AVAIL-07 resolves the skill from the
  * service variant inside the same statement — `(select required_skill from av_variant)` — because the
  * skill a treatment's style requires is not known until the variant has been read, and reading it first
  * would make the availability query two round trips instead of one. A value is still the ordinary case
  * and `readEligibleTherapists` passes one.
+ *
+ * `exclusions` are the composed predicates, applied in the order given and **before** the gender arm.
+ * Deliberately absent from {@link EligibilityQueryInput}, so the port implementation cannot be handed a
+ * reason its answer shape may not carry.
  */
 export type TherapistPoolCtesQuery = Omit<EligibilityQueryInput, 'requiredSkill'> & {
   readonly requiredSkill: TherapistSkill | SqlFragment
+  readonly exclusions?: readonly TherapistExclusion[]
+}
+
+/**
+ * The composed exclusions as `case` arms, or an empty fragment when there are none.
+ *
+ * Two names that are the same are refused rather than deduplicated. Two contributors that both call
+ * their exclusion `overdue` have not written one rule twice: they have written two, and the permissive
+ * reading applies whichever the array happens to hold first — which is the silent loss this whole
+ * mechanism exists to prevent, reintroduced by a copy-paste. The reason strings are refused as
+ * duplicates for the same reason, and refused if one collides with the port's seven, because a composed
+ * exclusion reporting `credential_expired` would send a caller to a renewal screen for a CRM flag.
+ */
+function composedExclusionArms(sql: Sql, exclusions: readonly TherapistExclusion[]): SqlFragment {
+  const seen = new Set<string>()
+  for (const exclusion of exclusions) {
+    for (const [what, value] of [
+      ['name', exclusion.name],
+      ['reason', exclusion.reason],
+    ] as const) {
+      if (seen.has(`${what}:${value}`)) {
+        throw new AppError(
+          'invariant_violated',
+          `Two composed therapist exclusions share the ${what} "${value}". Each is a separate rule and ` +
+            'both must apply; one name for two rules is how a merge drops one of them.',
+          { details: { what, value, names: exclusions.map((e) => e.name) } },
+        )
+      }
+      seen.add(`${what}:${value}`)
+    }
+    if ((EXCLUSION_REASONS as readonly string[]).includes(exclusion.reason)) {
+      throw new AppError(
+        'invariant_violated',
+        `Composed exclusion "${exclusion.name}" reports "${exclusion.reason}", which is one of the ` +
+          'seven port reasons. A composed reason must be its own, or a caller is told to renew a ' +
+          'credential that is not the problem.',
+        { details: { name: exclusion.name, reason: exclusion.reason } },
+      )
+    }
+  }
+  // An empty template is a fragment that contributes nothing, so the `case` below has one shape whether
+  // or not anything was composed in — a conditional `case` would be two statements for a plan test to
+  // measure.
+  let arms: SqlFragment = sql``
+  for (const exclusion of exclusions) {
+    arms = sql`${arms} when ${exclusion.when} then ${exclusion.reason}`
+  }
+  return arms
 }
 
 /**
@@ -272,7 +369,8 @@ export type TherapistPoolCtesQuery = Omit<EligibilityQueryInput, 'requiredSkill'
  * caller reads are the last two:
  *
  *   - `tp_pool(employee_id, gender, skills, reason)` — one row per candidate. `reason` null means
- *     eligible; anything else is an `EligibilityExclusionReason`.
+ *     eligible; anything else is an `EligibilityExclusionReason` or a composed exclusion's own reason
+ *     ({@link TherapistExclusion}), which is why the availability read types it as a string.
  *   - `tp_presence(employee_id, starts_at, ends_at)` — presence net of approved leave, **n rows per
  *     therapist**, because the multirange difference is `unnest`ed. That is why this was two statements
  *     before and why a caller that wants both either runs two queries or aggregates each side to JSON:
@@ -289,6 +387,7 @@ export function therapistPoolCtes(sql: Sql, query: TherapistPoolCtesQuery) {
   // Normalised here rather than passed through, so the SQL cannot be handed a mode this build does not
   // know how to be strict about. `genderMatchingMode` is the same function core applies.
   const strictGender = genderMatchingMode(query.genderMatching) === 'strict'
+  const composedArms = composedExclusionArms(sql, query.exclusions ?? [])
 
   return sql`
     tp_profile as (
@@ -374,6 +473,13 @@ export function therapistPoolCtes(sql: Sql, query: TherapistPoolCtesQuery) {
                when cr.any_expired then 'credential_expired'
                when p.employee_id is null then 'not_rostered'
                when isempty(p.net) then 'on_approved_leave'
+               -- The COMPOSED exclusions ({@link TherapistExclusion}), in the order the caller listed
+               -- them. Spliced here rather than appended after the gender arm, because gender is last
+               -- for a reason that still holds: reporting a therapist's recorded gender to a caller that
+               -- cannot book them anyway discloses it for nothing. An overdue blocking obligation is the
+               -- more actionable answer and it is a fact about the therapist's file, so it belongs with
+               -- the credential arms and ahead of the question about who is asking.
+               ${composedArms}
                -- Same-gender matching (B-AVAIL-05), LAST. "is distinct from" and not "<>": a therapist
                -- whose gender nobody has recorded (Y8-staff leaves employee.gender nullable) is a
                -- MISMATCH and not a wildcard, and "<>" against NULL is NULL, which a case treats as

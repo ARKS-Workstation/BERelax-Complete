@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**78 / 207 units complete.**
+**79 / 207 units complete.**
 
 ## Next up
 
@@ -79,7 +79,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 62 | `M-VAT-07` | VAT201 box mapping and working papers with drill-down | `M-TILL-10`, `M-VAT-02`, `M-VAT-03`, `M-VAT-06` | — | Y11-tax-agent, Y11-vat-package |
 | [ ] | 63 | `M-VAT-08` | Immutable VAT return snapshot with preparer and reviewer sign-off | `F07`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 64 | `M-VAT-09` | Absence of auto-file, proven, and the Zoho Books export | `M-VAT-08` | — | — |
-| [ ] | 65 | `M-VAT-10` | Compliance calendar engine and blocking obligations | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F09` | — | — |
+| [x] | 65 | `M-VAT-10` | Compliance calendar engine and blocking obligations | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F09` | — | — |
 | [ ] | 66 | `M-VAT-11` | Compliance calendar reminders, escalation, evidence and the unverified dashboard | `H02`, `M-VAT-10` | — | — |
 | [ ] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |

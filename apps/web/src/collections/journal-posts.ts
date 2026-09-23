@@ -4,7 +4,7 @@ import {
   JOURNAL_POSTS,
   type JournalPostForPublication,
 } from '@berelax/cms'
-import type { CompliancePolicy } from '@berelax/core'
+import type { CompliancePolicy, HoursForDate, Instant } from '@berelax/core'
 import { isAppError } from '@berelax/shared'
 import type { CollectionBeforeChangeHook } from 'payload'
 import { APIError } from 'payload'
@@ -87,6 +87,66 @@ async function policyFor(): Promise<CompliancePolicy> {
 }
 
 /**
+ * Refuses the publish outright when a blocking licence obligation is overdue (M-VAT-10).
+ *
+ * docs/04 §9: *"an overdue blocking obligation changes system behaviour — a therapist leaves bookable
+ * availability, publishing is blocked, the owner sees a banner."* This is the publishing half. The rule and
+ * the refusal are `@berelax/core`'s `assertPublishingNotBlocked`, which throws `PublishingBlocked` naming
+ * the obligation; the rows are `@berelax/db`'s; this function is the wiring and nothing else.
+ *
+ * ## Why the as-of date is not `new Date()` truncated
+ *
+ * Trading crosses midnight, so in the small hours the business is still working the previous trading date
+ * and an obligation due that date is not yet overdue. `complianceAsOfDate` is the one implementation of
+ * that rule and it takes the hours as an argument, which is why this reads `business_day` first — the
+ * hours themselves live in `premises_hours` and are never typed into a file under `apps/web`
+ * (`nap-hours-literal-outside-the-seed`). A calendar comparison here would block publishing early on
+ * every renewal date.
+ *
+ * ## Why it is on the publish and not on the render
+ *
+ * `read.ts` re-applies the copy lints when a page renders, because a row can arrive through a path that
+ * bypassed this hook. This gate deliberately does NOT go there: an overdue licence must stop new copy
+ * going out, and taking the existing site down the moment a renewal lapses is a different decision of a
+ * different size — one nobody has taken, and not one to arrive at by symmetry with a lint.
+ *
+ * Every import is dynamic, for the reason {@link policyFor} states: `scripts/check-cms-boundary.mjs` loads
+ * this module with Node's strip-only TypeScript loader, and a static `@berelax/db` import drags
+ * `packages/db/src/audit.ts` and its parameter property into that loader.
+ */
+async function assertPublishingIsNotBlocked(): Promise<void> {
+  const [db, core, { factsRuntime }] = await Promise.all([
+    import('@berelax/db'),
+    import('@berelax/core'),
+    import('../facts/runtime.ts'),
+  ])
+  const sql = factsRuntime().sql
+  const now = Date.now() as Instant
+  const hours = await db.readTradingHoursAround(sql, now)
+  const hoursFor: HoursForDate = (date) => {
+    const row = hours.find((entry) => entry.tradingDate === date)
+    return row === undefined
+      ? undefined
+      : { open: core.localTime(row.open), close: core.localTime(row.close) }
+  }
+  const asOf = core.complianceAsOfDate(now, hoursFor, core.ASIA_DUBAI)
+  const blockers = await db.readObligationInstances(sql, { blockingOnly: true })
+  core.assertPublishingNotBlocked(
+    blockers.map((row) => ({
+      instanceId: row.instanceId,
+      obligationKey: row.obligationKey,
+      title: row.title,
+      obligationClass: row.obligationClass,
+      blockingEffect: row.blockingEffect,
+      dueOn: core.localDate(row.dueOn),
+      status: row.status,
+      ...(row.subjectEmployeeId === undefined ? {} : { subjectEmployeeId: row.subjectEmployeeId }),
+    })),
+    asOf,
+  )
+}
+
+/**
  * Refuses a publish that would put unpublishable copy on the site.
  *
  * `data` and not `originalDoc`: the rules are about what is *being saved*, and a post whose byline is being
@@ -106,6 +166,10 @@ export const guardJournalPostPublication: CollectionBeforeChangeHook = async ({
 
   const post = postForPublication(record)
   try {
+    // First, because it is not about the copy: while a blocking licence obligation is overdue nothing may
+    // be published at all, and telling an editor to fix a byline on a post that may not go out either way
+    // would send them to the wrong screen.
+    await assertPublishingIsNotBlocked()
     const global = await req.payload.findGlobal({
       slug: 'compliance_notices' as never,
       depth: 0,
