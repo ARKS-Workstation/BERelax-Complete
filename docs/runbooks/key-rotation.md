@@ -244,6 +244,48 @@ one nobody reads.
 
 ---
 
+## Rotating the suppression pepper
+
+`SUPPRESSION_PEPPER` is the HMAC key behind `suppression.key_hmac` (C-CRM-04, migration 0064). It is
+not a KEK: nothing is encrypted with it, nothing can be decrypted from it, and losing it does not make
+a single row unreadable. What it does is make the stored list of opted-out contact details
+irreversible, and that is the whole reason it is not in the database.
+
+1. Generate a new pepper and keep the old one:
+   `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`.
+2. Move the current values into `SUPPRESSION_PEPPER_PREVIOUS` and
+   `SUPPRESSION_PEPPER_PREVIOUS_VERSION`, set the new ones in `SUPPRESSION_PEPPER` and
+   `SUPPRESSION_PEPPER_VERSION` (bump the label — `v2`), and deploy. Reads consult both peppers, so
+   nothing stops matching at this point and there is no window in which a suppressed recipient becomes
+   sendable.
+3. Re-key what can be re-keyed. `rekeySuppressionKeys` walks `suppression` rows whose `pepper_version`
+   is the retired label, finds the plaintext recipient the row is about through
+   `customer.phone_e164`, and INSERTs an equivalent row under the new pepper. It is an INSERT and never
+   an UPDATE, because the table refuses UPDATE for every role including the owner (ZQ001).
+4. Remove `SUPPRESSION_PEPPER_PREVIOUS` only when `rekeySuppressionKeys` reports nothing left to move
+   **and** you have accepted step 5.
+
+### What this rotation cannot recover, and why that is the design working
+
+A row whose plaintext recipient this system no longer holds cannot be re-keyed. There is no way round
+it and it is not a defect: the table deliberately holds no plaintext, so the only source for a
+re-derivation is a `customer` row carrying the same detail. The rows that cannot move are:
+
+- a `hard_bounce` for an address with no `customer` record — `customer` has no email column at all
+  (C-CRM-01's NOTE 3), so **no** email suppression can be re-keyed today;
+- a `dnc_register` entry for a number that has never booked;
+- a suppression for a contact whose `customer` row has since been erased under PDPL, which is the
+  case the whole append-only design exists to survive.
+
+So the retired pepper is **retained indefinitely** unless the business accepts losing those entries,
+and that acceptance is a decision somebody records rather than a step in a runbook. Do not delete
+`SUPPRESSION_PEPPER_PREVIOUS` to tidy the environment: a deleted retired pepper turns every row keyed
+under it into a row nothing will ever match, which presents as a promotional message sent to somebody
+who opted out — the exact failure this area exists to prevent, arriving months after the change that
+caused it, with nothing to point at.
+
+---
+
 ## What rotation does not cover
 
 Rotating a KEK changes which key is used **from now on**. It does not reach into anything already

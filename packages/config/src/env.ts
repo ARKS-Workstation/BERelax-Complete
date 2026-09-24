@@ -99,6 +99,36 @@ const schema = z
     STAFF_PII_KEK_PREVIOUS: z.string().optional(),
     STAFF_PII_KEK_PREVIOUS_VERSION: z.string().optional(),
 
+    /**
+     * The suppression list's pepper, and the label of the pepper each row was keyed under.
+     *
+     * NOT a key-encrypting key and not a signing key: it is an HMAC key whose only job is to make
+     * `suppression.key_hmac` irreversible. C-CRM-04 adds it because a plain digest would not be — the UAE
+     * mobile space is about ten million numbers per prefix and a laptop enumerates it in seconds, so an
+     * unpeppered SHA-256 of a phone number is a phone number with extra steps, and the whole claim of that
+     * table is that a database dump does not disclose who has opted out.
+     *
+     * It is the one secret this unit could not avoid, and it is worth saying what was avoided instead: the
+     * opt-out TOKEN is a STORED grant whose sha256 alone is kept, exactly as `obligation_evidence_grant`
+     * is, rather than an HMAC over a URL — so there is one new entry in `build/secret-inventory.json` here
+     * and not two.
+     *
+     * `…_PREVIOUS` is the retired pepper, RETAINED so rows keyed under it stay matchable while a rotation
+     * is in progress. `suppression.pepper_version` holds the LABEL and never the pepper, the way
+     * `google_connection.refresh_token_kid` does for a KEK. What a rotation cannot do is re-key a row
+     * whose plaintext this system no longer holds — a hard bounce for an address with no customer record,
+     * or a number imported from the national register — and `build/secret-inventory.json` states that
+     * rather than implying the rotation is complete.
+     *
+     * Optional here for the reason the three KEKs are: declaring the names is what this schema is for, and
+     * the runtime reader (`loadSuppressionPepper` in `@berelax/db`) refuses loudly and by name when it is
+     * absent, which is the behaviour that matters and is tested.
+     */
+    SUPPRESSION_PEPPER: z.string().optional(),
+    SUPPRESSION_PEPPER_VERSION: z.string().optional(),
+    SUPPRESSION_PEPPER_PREVIOUS: z.string().optional(),
+    SUPPRESSION_PEPPER_PREVIOUS_VERSION: z.string().optional(),
+
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   })

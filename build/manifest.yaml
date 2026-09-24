@@ -5442,6 +5442,94 @@ units:
       comparison (asserted by a unit test on the comparator)'
     - 'Integration test: the 11th token verification from one IP inside a minute is refused with a named
       rate-limit error'
+    - 'NOTE: what was scoped, what C-CRM-03 deferred here and what is deferred onward. Beyond the four files
+      this list names it adds packages/db/migrations/0064_suppression.sql,
+      packages/shared/src/schemas/suppression.ts (the zod contract, placed there for the reason
+      schemas/consent.ts argues: packages/db validates at the write and may not import packages/core),
+      packages/db/src/seed/suppression.ts, packages/fixtures/src/suppression.ts,
+      packages/fixtures/src/suppression.itest.ts, apps/web/app/api/v1/preferences/{route,handler}.ts and
+      apps/web/src/preferences-route.itest.ts. (1) A SUPPRESSION LIST IS NOT A SECOND BLOCKLIST, and the
+      brief asked for that to be settled before a second one was built. It is a real difference and 0064''s
+      header states it: C-CRM-01''s customer_blocklist is "we will not SERVE this person", consulted by the
+      BOOKING path before any record is read, and its entries are the business''s decision; suppression is
+      "we will not MARKET to this person", consulted at evaluateGate''s isSuppressed and NOWHERE else, and
+      most of its entries are the customer''s decision, an aggregator''s or a mail provider''s. Collapsing
+      them breaks in both directions invisibly - a blocked walk-in would appear on a suppression report as
+      somebody who opted out, and, far worse, an unsubscribe would start refusing appointments for ever with
+      the only evidence being a booking that quietly never happens. The two do share the KEY vocabulary
+      (phone, email) and the one normaliser, deliberately: a key is the same thing in both lists, and a
+      second spelling of "canonical" is how they come to disagree. (2) THE KEY IS THE HASHED CONTACT DETAIL
+      AND NOT A CONTACT ID, which is C-CRM-03''s NOTE (4) question answered - and answered DIFFERENTLY from
+      consent, for a reason rather than by inconsistency. consent names a contact, so C-CRM-05 must re-point
+      it by INSERT; suppression names a DETAIL, and both details survive a merge with their suppressions
+      attached, so C-CRM-05 re-points NOTHING here. The only thing a merge owes this table is the
+      contact_customer_id back-reference on the survivor, and that is an INSERT for the same reason: the
+      table refuses UPDATE for every role including the owner (ZQ001). (3) THE PREFERENCE CENTRE, which
+      C-CRM-03''s NOTE (1) deferred here by name, is built as its FUNCTIONAL half and its rendered half is
+      re-deferred. /api/v1/preferences (registered in apps/web/src/routes/registry.ts, unparameterised, one
+      URL) verifies a token, answers the current state per channel and purpose plus the wording in BOTH
+      languages, and records an unsubscribe or a resubscribe - so a customer with the link can change their
+      mind with no login, which is what docs/04 SS5 makes the only functional opt-out this business has
+      (an alphanumeric sender ID cannot receive an SMS). What is NOT built is the bilingual SCREEN: the RTL
+      page, the buttons and the tokens belong with the customer-facing surface, and DEFERRED TO B-UI-02,
+      which owns the customer flow. The endpoint answers JSON that a screen can render, and it publishes the
+      wording with is_provisional on it so a page cannot present this build''s draft as approved copy
+      (Y9-consent-wording, brief rule 15). An unsubscribe writes BOTH halves in one transaction - a consent
+      withdrawal for every channel x send-gating purpose, and a preference_centre suppression on the detail
+      the link was reached through - because dropping either leaves a hole: the withdrawal is the PDPL
+      record, and the suppression is what outlives a later booking-form grant. (4) EMAIL RECIPIENTS: half
+      answered, half re-deferred, and the half that is answered is the useful one. C-CRM-03 asked this unit
+      to map an address to a contact; it cannot, because customer has no email column at all (C-CRM-01''s
+      NOTE 3) and nothing in the build collects one. But suppression needs NO contact - it keys on the
+      hashed address - so an address CAN be suppressed and a promotional email to it IS refused at the choke
+      point, which suppression.itest.ts proves with its positive control beside it. What remains impossible
+      is email CONSENT resolution, since consent is keyed on a contact id; promotional email therefore fails
+      closed as blocked_unevaluable today, which is the correct state. DEFERRED TO whichever unit adds an
+      email column to customer (Y8-customers is where the real list arrives); it is C-CRM-01''s table and
+      not this unit''s to expand. (5) THE TOKEN IS A STORED GRANT, not a signature, following
+      obligation_evidence_grant exactly: 32 random bytes handed out once, only their sha256 stored, an expiry
+      on the row, revocation by DELETE. No further signing secret enters the rotation inventory, a link
+      minted for the wrong contact is a DELETE rather than a key rotation, and the row records that the link
+      existed. The one figure not copied from M-VAT-11 is the TTL: thirty days rather than fifteen minutes,
+      because the person who needs this link is reading a message they were sent three weeks ago and a link
+      that has expired by then is an opt-out this business does not have. The URL names the CONTACT as well
+      as carrying the token, and the redundancy is load-bearing: a template loop that paired one recipient
+      with another recipient''s token would show the wrong preferences and record the wrong withdrawal with
+      a perfectly valid token, so the two halves must agree or the request is refused - the same argument
+      0060 makes for putting the evidence id beside its token. Every refusal answers OPT_OUT_NOT_FOUND, one
+      frozen object, byte for byte: a 403 for expired against a 404 for unknown tells a caller that a
+      contact has been sent a link. The rate limit is the one distinguishable refusal and is deliberate.
+      (6) ONE NEW SECRET, and it could not be avoided. suppression.key_hmac is HMAC-SHA256 under
+      SUPPRESSION_PEPPER because a plain digest of a UAE mobile number is a phone number with extra steps -
+      about ten million per prefix, enumerable on a laptop - and the whole claim of the table is that a dump
+      does not disclose who opted out. It is classified in build/secret-inventory.json as a signing-key with
+      a runbook section of its own, and pepper_version on every row makes a rotation an operation rather
+      than a data loss. What the runbook states plainly is that a rotation can only RE-KEY a row whose
+      plaintext this system still holds, so the retired pepper is retained indefinitely rather than until a
+      sweep finishes; deleting it would turn those rows into rows nothing matches, which presents as a
+      promotional message to somebody who opted out months later. (7) SUPPRESSION IS PROVED BY A REFUSED
+      SEND. Every refusal case in suppression.itest.ts has its positive control beside it - the same
+      recipient, the same template, the same consent, with the list not consulted - sent, with exactly one
+      transport call. That pairing caught a real defect while this unit was being written: the probe
+      suppressions were stamped in 2099 and the campaign instant is in 2026, so resolveSuppression correctly
+      ignored them and every refusal case read as a send. A test that had only asserted zero calls would
+      have been green. (8) SCHEMA_VERSION is 64. 62, 63 and 65 are ALLOCATIONS held by units in flight and
+      are not gaps to be closed; the ledger paragraph in packages/db/src/index.ts says so in numeric order.
+      (9) NO PORT BAND was taken (brief rule 18): the preference endpoint is driven as a handler with its
+      dependencies supplied, exactly as apps/web/src/otp-route.itest.ts drives its own, so nothing here
+      starts a server. (10) A NEW OPEN QUESTION, Y9-dnc-register: whether the national do-not-call register
+      binds this business directly or only the aggregator. Treated as binding on us - the stricter reading -
+      so a key suppressed under dnc_register refuses a send before the aggregator sees the message. If the
+      looser reading is correct nothing has to change; if the stricter one is and this had been built the
+      other way, the first campaign would be the breach. (11) DEFECTS FOUND IN CODE THIS UNIT DOES NOT OWN,
+      both fixed or guarded rather than left: scripts/check-secret-rotation.mjs''s SECRET_SHAPED pattern
+      matched no name containing PEPPER or SALT, so the one rule that gate exists for would not have fired
+      on SUPPRESSION_PEPPER - both words are now in the pattern, and no other name this repository reads
+      contains either. And normaliseEmail in packages/core/src/crm/blocklist.ts accepts a control character
+      in the local part (its shape test excludes whitespace and @, and U+001F is neither), which would let
+      two different (kind, value) pairs produce one suppression key; suppressionKey refuses such a value by
+      name rather than tightening that normaliser, because tightening it would change which values
+      customer_blocklist accepts and that is 0053''s key space.'
     files:
     - packages/db/src/schema/suppression.ts
     - packages/core/src/consent/sendability.ts

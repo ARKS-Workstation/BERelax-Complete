@@ -228,6 +228,25 @@ export const ROUTES = [
       'the request body — and exempt from the proxy, because a 301 turns its POST into a GET.',
   },
   {
+    id: 'preferences',
+    path: '/api/v1/preferences',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-04s preference centre, which docs/04 SS5 makes the only functional opt-out this business ' +
+      'has: an alphanumeric sender ID cannot receive an SMS, so "reply STOP" does not exist here and the ' +
+      'link in a message is it. Locale-neutral for the reason the OTP route above gives - one endpoint, ' +
+      'one URL - and the locale the wording was shown in is a field on the request, because it is part of ' +
+      'the consent capture context rather than a property of the URL. Not indexable and covered by the ' +
+      'proxy exemption rather than by a header, exactly like the three endpoints above. Unparameterised on ' +
+      'purpose: the contact and the capability are query parameters, so a path segment does not make the ' +
+      'token part of the resource identity and appear in every log line and Referer for one page.',
+  },
+  {
     id: 'book',
     path: '/book',
     kind: 'document',

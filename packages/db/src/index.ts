@@ -634,6 +634,52 @@ export {
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
 export {
+  applyPreferenceCentreChange,
+  type IssuedOptOutGrant,
+  issueOptOutGrant,
+  loadSuppressionPeppers,
+  MIN_SUPPRESSION_PEPPER_LENGTH,
+  OPTOUT_VERIFY_LIMITS,
+  OPTOUT_VERIFY_MAX_PER_IP,
+  OPTOUT_VERIFY_WINDOW_SECONDS,
+  type OptOutDecider,
+  type OptOutShapeChecker,
+  type OptOutVerification,
+  type OptOutVerifyLimit,
+  type OptOutVerifyResult,
+  optOutTokenDigest,
+  type PlaintextLeak,
+  PREFERENCE_CENTRE_ACTIONS,
+  type PreferenceCentreAction,
+  type PreferenceCentreChange,
+  type PreferenceCentreResult,
+  pruneOptOutVerificationAttempts,
+  readSuppressionHistory,
+  readSuppressionLogs,
+  recordSuppression,
+  revokeOptOutGrant,
+  SUPPRESSION_AUDIT_ACTIONS,
+  SUPPRESSION_REFUSALS,
+  SUPPRESSION_SQLSTATE,
+  SUPPRESSION_TABLES,
+  type SuppressionInput,
+  type SuppressionKeying,
+  type SuppressionKeyNormaliser,
+  type SuppressionLogRead,
+  type SuppressionPepper,
+  type SuppressionPepperEnv,
+  type SuppressionPeppers,
+  type SuppressionRefusal,
+  type SuppressionRow,
+  suppressionColumns,
+  suppressionKey,
+  suppressionPlaintextLeaks,
+  suppressionRefusalOf,
+  suppressionSourceCounts,
+  unsuppressKey,
+  verifyOptOutToken,
+} from './repositories/suppression.ts'
+export {
   type PublicHolidayClosureRow,
   type RosteredShiftRow,
   readPublicHolidayClosures,
@@ -690,6 +736,14 @@ export {
   WHATSAPP_CANDIDATES,
   WHATSAPP_PENDING,
 } from './seed/premises.ts'
+export {
+  SUPPRESSION_SEED_STATES,
+  type SuppressionSeedEntry,
+  type SuppressionSeedInput,
+  type SuppressionSeedResult,
+  type SuppressionSeedState,
+  seedSuppression,
+} from './seed/suppression.ts'
 export {
   type ResolvedTemplateRow,
   readCurrentTemplate,
@@ -1078,68 +1132,45 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
-// 62 is 0062_booking_session.sql: the public booking flow's session (B-UI-02), which is the thing
-// B-LIFE-02 stopped at and named — *"a successful verification has to mint a customer session or
-// magic-link token and nothing in the system defines one yet"*. One table, no enum and no trigger.
-// The token is 32 CSPRNG bytes in a cookie and the row holds their SHA-256; there is no column holding
-// the token, exactly as `otp_challenge` holds no code. The one deliberate difference from 0019 is the
-// hash: SHA-256 rather than an HMAC under a per-row salt, because a 256-bit random token has nothing to
-// guess and the lookup has to be BY hash, which a per-row salt makes a full scan. `customer_id` and
-// `booking_id` are plain uuids with NO foreign key — 0056's reason (a record outlives the erasure of the
-// identity it is about, and a cascade makes `delete from customer` raise for every caller) plus
-// B-MSG-03's TRUNCATE finding, since a key from here would break the four suites that truncate
-// `appointment` and the four that clear `customer`. Three CHECKs carry the rules that matter:
-// `verified_at` and `customer_id` are null together or set together, because `verified_at is not null`
-// reads as "verified" everywhere and a row with no customer would pass that test and book for nobody;
-// `booking_id` may only be set on a verified row; and `expires_at > created_at`, which is also what makes
-// ending a session an UPDATE rather than a DELETE — `readBookingSession` distinguishes `expired` from
-// `unknown`, and a delete would collapse the enumerated edge state into a first arrival. No sweep job:
-// the retention pass docs/04 §8 asks for is one pass over every table holding a personal identifier, and
-// a private sweep for this one would be the first of fourteen. `booking_session_expires_at_idx` is the
-// index it will use.
-// 63 is 0063_checkout.sql: checkout finalisation (M-TILL-06). Three tables and one column, and every one
-// of them exists so that a till sale is one fact rather than five that usually arrive together.
-// `checkout_finalisation`'s PRIMARY KEY is on an idempotency key the CALLER supplies — a key generated
-// here could not deduplicate a retry, because the retry would generate a second one — and it is where two
-// concurrent finalisations SERIALISE: the second INSERT blocks on the index until the first commits (then
-// `checkout_finalisation_key_pk` refuses it, by name, which is what the test asserts) or rolls back (then
-// the retry gets a fresh attempt). `booking_idempotency`'s mechanism (0024) applied to the till, and
-// `request_fingerprint` is 0024's second column for 0024's reason: a replay with a DIFFERENT basket is a
-// caller bug, and answering it with the first invoice looks exactly like success. The claim is written
-// INSIDE the checkout's transaction, which is also what keeps the statutory range gap-free — the loser's
-// rollback returns its number to the counter (M-TILL-03) — and it is written BEFORE the appointment link
-// on purpose, so a retry trips the KEY and a genuinely different checkout billing an already-billed
-// treatment trips `invoice_appointment_appointment_once`; the other order answers a retry with "already
-// billed" and shows an error for a sale that went through. `invoice_appointment` is the wiring
-// M-TILL-04's NOTE deferred, as a table rather than a column on `invoice_line` because the constraint
-// that matters is UNIQUE on the APPOINTMENT and a column there would claim every invoice line is one;
-// `appointment_id`, `booking_id` and `customer_id` carry NO foreign key, which is 0055's decision, 0058's
-// and 0024's — PostgreSQL refuses `truncate appointment` while a referencing table is absent from the
-// statement and four suites truncate it, and `booking` with it, by an explicit list. `payment` is created
-// here because this unit's first acceptance line names it (an aborted finalisation must leave zero rows in
-// it) and is deliberately minimal: M-TILL-07 owns the tender-type registry that replaces
-// `payment_tender_kind_known` with a foreign key, plus refunds, over-tender change and the gateway
-// adapter, and it EXTENDS this table rather than adding a second one beside it, because two tables
-// recording money received is two answers to "what has this invoice been paid". `posting_account_code` is
-// snapshotted from `TENDER_ACCOUNT` in `@berelax/core` for the reason every money column here is
-// snapshotted: re-mapping `card_in_salon` from 1040 to 1020 must not restate a posting already filed —
-// and 1040 rather than 1020 in the first place because the terminal settles in a batch, net of fees, days
-// later. `invoice.booking_id` is the other half of the deferred wiring and the column the `invoice.issued`
-// payload reads its booking id from, because an id carried on an event and stored nowhere is a fact with
-// no record; `finaliseCheckout` DERIVES it from the appointments it is billing, so it cannot disagree with
-// `invoice_appointment`. There is deliberately no `billed` appointment status: `holds_resources` is
-// GENERATED from that enum (0024), so a tenth label would change what holds a room, and "billed" is
-// therefore the link row existing rather than a second column that could contradict it. The three tables
-// get INSERT and SELECT and no UPDATE or DELETE, and no refusal TRIGGER — 0018's distinction for `account`
-// and `period_lock`: the history is the invoice and the journal entry, these are records ABOUT it, and
-// dropping a trigger to fix a typed reference is how the trigger ends up dropped.
+// 64 is 0064_suppression.sql: the suppression list and the opt-out grant (C-CRM-04). `suppression` keys on
+// HMAC-SHA256 of the NORMALISED recipient under a server-side pepper (`SUPPRESSION_PEPPER`), lower-case
+// hex, and `suppression_key_is_hmac_hex` is what makes "no plaintext" a fact rather than a promise: a
+// normalised E.164 is at most 16 characters and an address contains an `@`, so the 64-hex CHECK refuses
+// every recipient by length and by alphabet. A plain digest would not have done — the UAE mobile space is
+// about ten million numbers per prefix, so an unpeppered hash of one is a phone number with extra steps —
+// and `pepper_version` holds the LABEL and never the pepper, exactly as `google_connection.refresh_token_kid`
+// does for a KEK, so a rotation is an operation rather than a data loss. The KEY is the hashed contact
+// DETAIL and NOT a contact id, which is 0053's decision for `customer_blocklist` and the answer to what
+// C-CRM-03's NOTE (4) asked this unit to settle: it is a DIFFERENT answer from `consent`'s rather than the
+// same one, because a suppression names a detail and both details survive a merge with their suppressions
+// attached — so C-CRM-05 re-points nothing here, and the only thing a merge owes this table is a
+// `contact_customer_id` back-reference, which is an INSERT because the table refuses UPDATE (ZQ001) for
+// every role including the owner. A suppression list is deliberately not a second blocklist: 0053's is "we
+// will not SERVE this person" at the booking path, this one is "we will not MARKET to this person" at
+// `evaluateGate`'s `isSuppressed` and nowhere else, and collapsing them would make an unsubscribe refuse
+// appointments for ever. `suppression_source` and `suppression_kind` are Postgres ENUMS where
+// `consent_purpose` is a table, and the contrast is the rule rather than an inconsistency: those labels are
+// this build's guess at a business vocabulary and need `is_provisional`, while these five name mechanisms
+// that already exist. `optout_grant` is `obligation_evidence_grant` restated — a stored, expiring,
+// revocable grant whose sha256 alone is kept rather than an HMAC over a URL, so no second signing secret
+// enters the rotation inventory — with one deliberate difference of two orders of magnitude: thirty days
+// rather than fifteen minutes, because the person who needs this link is reading a message they were sent
+// three weeks ago and a link that has expired by then is an opt-out this business does not have.
+// `optout_verification_attempt` IS the rate limit (ten per address per minute, counted in SQL because a
+// per-process counter is the limit multiplied by however many containers are running), and its
+// `request_ip` is NOT NULL where `otp_challenge`'s is nullable: the OTP endpoint has a per-number limit
+// that still binds without an address and this one has a single dimension, so the route refuses an
+// unattributable request by name rather than recording one it cannot count.
 //
-// 62, 64 and 65 are ALLOCATIONS, not gaps: three units were in flight beside this one and each holds its
-// number. They are not the four permanent gaps below and must not be reused to tidy the sequence.
+// 62, 63 and 65 are ALLOCATIONS held by units in flight, not gaps to be closed. 64 was taken while they were
+// open and landed first, which is the same arrangement the note below records for 55, 56 and 57: the number
+// is a high-water mark, not a count. Nothing here renumbers to tidy the sequence, for the reason that note
+// gives — renumbering is how two branches come to apply the same number to different SQL.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 62 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
+// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones plus the three
+// allocations above. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 63 as const
+export const SCHEMA_VERSION = 64 as const

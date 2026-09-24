@@ -79,8 +79,16 @@ function otpRuntime(): OtpEndpointDeps {
       // transactional OTP to one number and reads no consent at all, so wiring a prefetch here would be
       // a query that never decides anything. The unit that assembles a promotional recipient list is the
       // one that builds the evaluator; `packages/fixtures/src/consent.itest.ts` drives the real thing
-      // through this same `sendMessage` choke point against real rows. The suppression list is C-CRM-04's
-      // and the frequency store C-AUTO-03's, and both are still absent.
+      // through this same `sendMessage` choke point against real rows.
+      //
+      // The suppression list now EXISTS too (C-CRM-04), and `isSuppressed` below is a throw for exactly
+      // the same reason: `suppressionGateEvaluator` in `@berelax/core` is built over a map of logs
+      // PREFETCHED for the recipients a campaign is about (`readSuppressionLogs` in `@berelax/db`),
+      // because the gate is synchronous. This route sends one transactional OTP to one number, so a
+      // prefetch here would be a query that never decides anything — and
+      // `packages/fixtures/src/suppression.itest.ts` drives the real evaluator through this same choke
+      // point, refusing a suppressed recipient and sending to the same recipient when the list is clear.
+      // The frequency store is C-AUTO-03's and is still absent.
       evaluators: {
         hasConsent: () => {
           throw new Error(
@@ -89,7 +97,10 @@ function otpRuntime(): OtpEndpointDeps {
           )
         },
         isSuppressed: () => {
-          throw new Error('No suppression list yet (C-CRM-04). Promotional sends fail closed.')
+          throw new Error(
+            'This runtime prefetches no suppression logs (C-CRM-04 stores them; the evaluator needs the ' +
+              'recipient list). Promotional sends fail closed.',
+          )
         },
         frequencyCapReached: () => {
           throw new Error('No frequency store yet (C-AUTO-03). Promotional sends fail closed.')
