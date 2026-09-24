@@ -143,6 +143,21 @@ export {
   SEND_GATING_CONSENT_PURPOSES,
   type SendGatingConsentPurpose,
 } from './schemas/consent.ts'
+export {
+  isUnsuppressionSource,
+  SUPPRESSION_ACTOR_KINDS,
+  SUPPRESSION_KEY_KINDS,
+  SUPPRESSION_KINDS,
+  SUPPRESSION_SOURCES,
+  type SuppressionActorKind,
+  type SuppressionEntryInput,
+  type SuppressionKeyKind,
+  type SuppressionKind,
+  type SuppressionSource,
+  suppressionEntrySchema,
+  UNSUPPRESSION_SOURCES,
+  type UnsuppressionSource,
+} from './schemas/suppression.ts'
 
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }

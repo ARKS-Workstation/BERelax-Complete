@@ -49,9 +49,17 @@ const CONFIG_SCHEMA_PATH = 'packages/config/src/env.ts'
  * Shape-based rather than a hand-kept list, because a hand-kept list is exactly what this gate exists
  * to replace. `…_URL` is in it because a database URL carries a password; the escape for a URL that
  * does not is a `notSecrets` entry with a reason, which is reviewable.
+ *
+ * `PEPPER` and `SALT` were added by C-CRM-04, which found the gap by adding a secret the gate did not
+ * ask it to declare. `SUPPRESSION_PEPPER` holds the HMAC key behind the suppression list — with a
+ * database dump it is the list of everybody who has opted out of marketing — and it matched none of the
+ * shapes above, so the one rule this whole gate exists for ("adding a credential to the code fails the
+ * build until its rotation is written") would not have fired. A pepper and a salt are key material
+ * whatever the column they defend is called, and neither word appears in any other name this repository
+ * reads.
  */
 const SECRET_SHAPED =
-  /(^|_)(SECRETS?|PASSWORD|PASSWD|CREDENTIALS?|KEK|DSN|TOKEN)($|_)|(PRIVATE|ACCESS|API)_?KEY($|_)|(^|_)URL$/
+  /(^|_)(SECRETS?|PASSWORD|PASSWD|CREDENTIALS?|KEK|DSN|TOKEN|PEPPER|SALT)($|_)|(PRIVATE|ACCESS|API)_?KEY($|_)|(^|_)URL$/
 
 /** Kinds whose value is a key that gets rotated by re-wrapping rather than by re-collection. */
 const KEK_KIND = 'kek'

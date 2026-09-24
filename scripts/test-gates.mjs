@@ -21103,6 +21103,614 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 82a-82x. (C-CRM-04) The suppression list, the precedence rule, and the opt-out token.
+//
+//     Every claim in this unit is a REFUSAL, and a refusal has the property that nothing fails when it
+//     stops working. A resolver that reads a tied timestamp as "not suppressed" is correct in every
+//     fixed-order test. An evaluator that answers `false` for a recipient it never read a log for reports a
+//     clean campaign run in which nothing was refused — while having messaged everybody who opted out. A
+//     comparator that returns on the first differing character compares two digests perfectly well. A
+//     refusal body that names its reason answers every request correctly and is an enumeration oracle. So
+//     each one is broken here deliberately and the suite that must notice is named.
+//
+//     Three of the cases are about the thing the whole unit turns on: **a suppression beats consent with no
+//     exceptions**. 82a inverts the precedence, 82b opens the tie arm and 82c opens the unknown-kind arm,
+//     and all three produce a send to somebody who asked not to be messaged with nothing in the logs to
+//     point at.
+//
+//     The database half is the other shape of the same problem: a CHECK, an enum and a trigger are only
+//     gates once something has been seen to bounce off them (ADR 0003). Every probe states the rule it must
+//     trip and `checkRejectedBy` fails if the rejection came from anything else — a bare non-zero exit is
+//     also what a typo in a column name produces. `VERBOSITY=verbose` so the SQLSTATE and the constraint
+//     name are both in psql's output, and every probe runs inside `begin; … ; rollback;`, which is also the
+//     only way most of them can be written at all: `suppression` refuses DELETE for every role including
+//     the owner, so a probe row that committed could never be swept.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const SENDABILITY = 'packages/core/src/consent/sendability.ts'
+  const TOKEN = 'packages/core/src/consent/optout-token.ts'
+  const REPO = 'packages/db/src/repositories/suppression.ts'
+  const HANDLER = 'apps/web/app/api/v1/preferences/handler.ts'
+  const MIGRATION = 'packages/db/migrations/0064_suppression.sql'
+
+  const CORE_SUITE = 'packages/core/src/consent'
+  const CONTRACT_SUITE = 'packages/shared/src/schemas/suppression.test.ts'
+  const ITEST = 'packages/fixtures/src/suppression.itest.ts'
+  const ROUTE_ITEST = 'apps/web/src/preferences-route.itest.ts'
+
+  /** One anchored edit to a shipped file. `replaceOnce` refuses an ambiguous or stale anchor (rule 20). */
+  const suppressionMutant = (path, anchor, replacement, body) =>
+    withEditedFile(path, (text) => replaceOnce(text, anchor, replacement), body)
+
+  // 82a. The precedence inverted: consent first, so a granted contact who has opted out is sendable. This
+  //      is the acceptance criterion's exact negation, and the mutant is the natural way to write the
+  //      function — check the cheap thing first — which is why it needs a property test rather than a case.
+  checkRejectedBy(
+    'suppression gate: consent taking precedence over a suppression is caught',
+    suppressionMutant(
+      SENDABILITY,
+      "  if (input.suppression.state === 'suppressed') {",
+      "  if (input.consent.state === 'granted' && input.suppression.state !== 'suppressed') {\n" +
+        "    return { kind: 'sendable', consentRecordId: input.consent.recordId }\n" +
+        '  }\n' +
+        '  if (false) {',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'blocks whenever a suppression exists',
+  )
+
+  // 82b. The tie arm opened, so a suppression and a lift at one instant read as CLEAR. Half of those are a
+  //      send to somebody who opted out, and the log looks perfectly ordinary.
+  checkRejectedBy(
+    'suppression gate: a tied suppression timestamp resolved as clear is caught',
+    suppressionMutant(SENDABILITY, '  if (tied.length > 1) {', '  if (false) {', () =>
+      runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    // The whole test name, not the shared prefix: two cases begin "fails closed to SUPPRESSED" and a rule
+    // that matched both would let either one of them stand in for the other.
+    'fails closed to SUPPRESSED on a tie',
+  )
+
+  // 82c. The unknown-kind arm removed, so a `kind` a later migration adds reads as "not suppressed". A
+  //      prohibition whose unrecognised values mean "not prohibited" is one a migration can switch off.
+  checkRejectedBy(
+    'suppression gate: an unrecognised suppression kind read as clear is caught',
+    suppressionMutant(
+      SENDABILITY,
+      '  if (!isKnownKind(newest.kind)) {',
+      '  if (false && !isKnownKind(newest.kind)) {',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'fails closed to SUPPRESSED for a kind this build does not know',
+  )
+
+  // 82d. The point-in-time filter opened. A suppression recorded AFTER the instant asked about then counts,
+  //      so rebuilding a historical campaign reports every send it made as non-compliant. The mirror of
+  //      case 72d, and it matters in both directions.
+  checkRejectedBy(
+    'suppression gate: a resolver reading records from after the instant is caught',
+    suppressionMutant(
+      SENDABILITY,
+      '    (record) => Number.isFinite(record.recordedAt) && record.recordedAt <= at,',
+      '    (record) => Number.isFinite(record.recordedAt),',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'ignores records after the instant',
+  )
+
+  // 82e. An unread suppression log answered as a clearance. This is the shorter, never-throwing version of
+  //      the evaluator, and it turns a campaign whose recipient list and suppression prefetch have drifted
+  //      apart into a run that messaged everybody on the list and reported nothing.
+  checkRejectedBy(
+    'suppression gate: an unread suppression log answered as a clearance is caught',
+    suppressionMutant(
+      SENDABILITY,
+      '    if (log === undefined) {',
+      '    if (log === undefined) return false\n    if (false) {',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    // The TEST NAME rather than the assertion's own regex: `checkRejectedBy` searches the runner's output,
+    // and vitest prints the name of a failing case and not the matcher inside it. A rule string that only
+    // appeared in the source would make this case pass on any failure of that file at all.
+    'THROWS for a recipient it has no log for',
+  )
+
+  // 82f. The refusal at the send path, proved against the SEND rather than against the resolver: the
+  //      evaluator answers `false` for everybody, which is what a suppression list that is decoration looks
+  //      like from the gate's side. The itest's positive controls are what make this reachable — a refusal
+  //      case with no paired send would pass against this mutant.
+  checkRejectedBy(
+    'suppression gate: an evaluator that never suppresses is caught at the send path',
+    suppressionMutant(
+      SENDABILITY,
+      "    return resolveSuppression(log, input.at).state === 'suppressed'",
+      "    return resolveSuppression(log, input.at).state === 'never_a_state'",
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'REFUSES a suppressed contact',
+  )
+
+  // 82g. The comparator short-circuited on the first differing character. Every equality answer stays
+  //      correct, which is the whole difficulty: only the pinned accumulator value can see it.
+  checkRejectedBy(
+    'suppression gate: a short-circuiting digest comparator is caught',
+    suppressionMutant(
+      TOKEN,
+      '    difference |= codeAt(a, i) ^ codeAt(b, i)',
+      '    if (codeAt(a, i) !== codeAt(b, i)) return codeAt(a, i) ^ codeAt(b, i)',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'accumulates every position',
+  )
+
+  // 82h. The token shape loosened to a minimum length, which is how a truncated paste becomes a lookup.
+  checkRejectedBy(
+    'suppression gate: a token shape that accepts a wrong length is caught',
+    suppressionMutant(
+      TOKEN,
+      'const OPT_OUT_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/',
+      'const OPT_OUT_TOKEN_SHAPE = /^[A-Za-z0-9_-]{8,}$/',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'refuses every near miss',
+  )
+
+  // 82i. The cross-contact check removed, so a valid token opens any contact's page. The token would still
+  //      be unforgeable and the page would still need one — and a template loop that paired one recipient
+  //      with another's token would record the wrong person's withdrawal with nothing reporting it.
+  checkRejectedBy(
+    'suppression gate: a token honoured for another contact page is caught',
+    suppressionMutant(
+      TOKEN,
+      '  if (grant.contactCustomerId !== input.requestedContactId) {',
+      '  if (false) {',
+      () => runExpectingFailure('pnpm', unit(CORE_SUITE)),
+    ),
+    'refuses a valid grant presented for a DIFFERENT contact',
+  )
+
+  // 82j. The enumeration oracle, written out in full: a distinguishable body for an expired token. This is
+  //      the most tempting mutation in the unit because the body is HONEST and more useful to a caller —
+  //      and it tells anybody who guesses a contact id whether that contact has ever been sent a link.
+  checkRejectedBy(
+    'suppression gate: a refusal body that names its reason is caught',
+    suppressionMutant(
+      HANDLER,
+      // A TWO-LINE anchor, because the one-line version appears twice — once in the read handler and once
+      // in the write handler — and `replaceOnce` refuses an ambiguous anchor by name (brief rule 20). That
+      // refusal is the mechanism working: taking the first match would have mutated whichever one happened
+      // to come first, and the case would have reported PASS about the other.
+      "  if (verified.kind === 'refused') return notFound()\n\n  const contactId = verified.contactCustomerId",
+      "  if (verified.kind === 'refused') {\n" +
+        '    return json(410, { error: verified.reason, detail: verified.detail })\n' +
+        '  }\n\n  const contactId = verified.contactCustomerId',
+      () => runExpectingFailure('pnpm', integration(ROUTE_ITEST)),
+    ),
+    'ONE status and ONE body',
+  )
+
+  // 82k. The rate limit off by one, so the eleventh verification is served. A limit that binds one request
+  //      later than it says is not a bug anybody notices and it is not a limit anybody can rely on.
+  checkRejectedBy(
+    'suppression gate: a rate limit that admits the 11th attempt is caught',
+    suppressionMutant(
+      REPO,
+      'Number(count.attempts) >= OPTOUT_VERIFY_MAX_PER_IP',
+      'Number(count.attempts) > OPTOUT_VERIFY_MAX_PER_IP',
+      () => runExpectingFailure('pnpm', integration(ROUTE_ITEST)),
+    ),
+    'refuses the 11th verification',
+  )
+
+  // 82l. The retired pepper dropped from the read's candidate keys. Nothing fails at the rotation; every
+  //      row keyed under the old pepper simply stops matching, which presents months later as a promotional
+  //      message to somebody who opted out, with nothing to point at.
+  checkRejectedBy(
+    'suppression gate: a read that ignores the retired pepper is caught',
+    suppressionMutant(
+      REPO,
+      '      retired === null ? [current] : [current, suppressionKey(retired, keyKind, normalised)],',
+      '      [current],',
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'still matches a row keyed under the RETIRED pepper',
+  )
+
+  // 82m. An unkeyable recipient given an empty log instead of being left out of the map. That is a
+  //      clearance derived from a failure: the evaluator would answer `false` for a number nothing could
+  //      normalise, rather than throwing and letting the gate record `blocked_unevaluable`.
+  checkRejectedBy(
+    'suppression gate: an unkeyable recipient treated as not suppressed is caught',
+    suppressionMutant(
+      REPO,
+      "      if (refusal === 'suppression_key_not_keyable') continue",
+      "      if (refusal === 'suppression_key_not_keyable') {\n" +
+        "        logs.set(recipient, { key: 'unkeyable', records: [] })\n" +
+        '        continue\n' +
+        '      }',
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'leaves a recipient that cannot be keyed OUT of the prefetch',
+  )
+
+  // 82n. The domain separator dropped from the key, so ('phone', x) and ('phon', 'e' + x) hash identically
+  //      and one kind's key can be another's. The keys all still look perfectly valid.
+  checkRejectedBy(
+    'suppression gate: a key with no separator between the kind and the value is caught',
+    suppressionMutant(
+      REPO,
+      '    .update(`${keyKind}${UNIT_SEPARATOR}${normalisedValue}`, ',
+      '    .update(`${keyKind}${normalisedValue}`, ',
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'separates the kind from the value',
+  )
+
+  // 82o. The pepper defaulted instead of refused. Keys computed under an empty pepper are reversible AND
+  //      match nothing already stored, so the endpoint would report a successful unsubscribe and suppress
+  //      nobody — the exact failure the secret exists to prevent, arriving as a success.
+  checkRejectedBy(
+    'suppression gate: a defaulted suppression pepper is caught',
+    suppressionMutant(
+      REPO,
+      "  const secret = env.SUPPRESSION_PEPPER ?? ''",
+      "  const secret = env.SUPPRESSION_PEPPER ?? 'default-development-pepper-0123456789'",
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'refuses to load an absent, short, half-retired or same-labelled pair',
+  )
+
+  // 82p. The zod half of the closed source set opened, which is the acceptance criterion's own fixture for
+  //      the edge. The database enum still refuses it, so the symptom is a CHECK violation rendered as a
+  //      500 rather than a readable message — which is precisely why both halves exist.
+  checkRejectedBy(
+    'suppression gate: a zod contract that accepts an unknown source is caught',
+    suppressionMutant(
+      'packages/shared/src/schemas/suppression.ts',
+      '    source: z.enum(SUPPRESSION_SOURCES),',
+      '    source: z.string(),',
+      () => runExpectingFailure('pnpm', unit(CONTRACT_SUITE)),
+    ),
+    'refuses a source outside the closed set',
+  )
+
+  // 82q. The unsuppression restriction dropped from the contract, so a hard bounce can un-bounce itself.
+  checkRejectedBy(
+    'suppression gate: an unsuppression from an event that cannot un-happen is caught',
+    suppressionMutant(
+      'packages/shared/src/schemas/suppression.ts',
+      "  .refine((value) => value.kind !== 'unsuppressed' || isUnsuppressionSource(value.source), {",
+      '  .refine(() => true, {',
+      () => runExpectingFailure('pnpm', unit(CONTRACT_SUITE)),
+    ),
+    'refuses an unsuppression whose source is an event',
+  )
+
+  // 82r-82t. The conventions gate must fire on THIS migration's append-only table, not only on the ones
+  //          cases 28 and 72 already cover. All three mutants are static — `pnpm db:conventions` reads the
+  //          migration files — so none of them touches a database.
+  {
+    const RULE = 'append-only-table-must-refuse-update-and-delete'
+
+    checkRejectedBy(
+      'suppression gate: a suppression table with no UPDATE refusal fails the conventions gate',
+      suppressionMutant(
+        MIGRATION,
+        'create trigger suppression_no_update before update on suppression\n' +
+          '  for each row execute function refuse_suppression_change();',
+        '-- mutant: the UPDATE refusal trigger is gone',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: suppression is documented as raising on UPDATE and DELETE`,
+    )
+
+    checkRejectedBy(
+      'suppression gate: a suppression table with no DELETE refusal fails the conventions gate',
+      suppressionMutant(
+        MIGRATION,
+        'create trigger suppression_no_delete before delete on suppression\n' +
+          '  for each row execute function refuse_suppression_change();',
+        '-- mutant: the DELETE refusal trigger is gone',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: suppression is documented as raising on UPDATE and DELETE`,
+    )
+
+    // 82t. An `updated_at` on an append-only table. A row with no second version has no update time, and
+    //      the column is how somebody talks themselves into an UPDATE path.
+    checkRejectedBy(
+      'suppression gate: an updated_at column on the suppression table fails the conventions gate',
+      suppressionMutant(
+        MIGRATION,
+        '  key_kind            text               not null check (key_kind in (',
+        '  updated_at          timestamptz,\n  key_kind            text               not null check (key_kind in (',
+        () => runExpectingFailure('pnpm', ['db:conventions']),
+      ),
+      `${RULE}: suppression is append-only and has an updated_at column`,
+    )
+  }
+
+  // 82u-82x. The database's own rules, as known-bad fixtures against real PostgreSQL.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    const psqlProbe = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statements}; rollback;`,
+      ])
+
+    /** A 64-character lower-case hex value, which is what an HMAC and a sha256 both are. */
+    const HEX = `'${'ab12cd34'.repeat(8)}'`
+    const HEX2 = `'${'ef56ab78'.repeat(8)}'`
+    const CONTACT = "'00000000-0000-7000-8000-00000000c404'::uuid"
+
+    /** The suppression insert, with any field overridden. The defaults are a row the database accepts. */
+    const suppressionRow = (overrides = {}) => {
+      const v = {
+        keyKind: "'phone'",
+        keyHmac: HEX,
+        pepperVersion: "'gate-probe'",
+        kind: "'suppressed'",
+        source: "'complaint'",
+        reason: "'Complaint reported by the aggregator against this number.'",
+        actorKind: "'system'",
+        actorLabel: "'Aggregator feedback'",
+        recordedAt: "'2099-11-01T10:00:00Z'",
+        contact: CONTACT,
+        ...overrides,
+      }
+      return (
+        'insert into suppression (key_kind, key_hmac, pepper_version, kind, source, reason, ' +
+        'actor_kind, actor_label, recorded_at, contact_customer_id) values ' +
+        `(${v.keyKind}, ${v.keyHmac}, ${v.pepperVersion}, ${v.kind}::suppression_kind, ` +
+        `${v.source}::suppression_source, ${v.reason}, ${v.actorKind}, ${v.actorLabel}, ` +
+        `${v.recordedAt}::timestamptz, ${v.contact})`
+      )
+    }
+
+    /** The grant insert, with any field overridden. */
+    const grantRow = (overrides = {}) => {
+      const v = {
+        token: HEX,
+        contact: CONTACT,
+        purpose: "'preference_centre'",
+        channel: "'sms'",
+        issuedAt: "'2099-11-01T10:00:00Z'",
+        expiresAt: "'2099-12-01T10:00:00Z'",
+        ...overrides,
+      }
+      return (
+        'insert into optout_grant (token_sha256, contact_customer_id, purpose, channel, issued_at, ' +
+        `expires_at) values (${v.token}, ${v.contact}, ${v.purpose}, ${v.channel}::message_channel, ` +
+        `${v.issuedAt}::timestamptz, ${v.expiresAt}::timestamptz)`
+      )
+    }
+
+    /** The attempt insert, with any field overridden. */
+    const attemptRow = (overrides = {}) => {
+      const v = {
+        ip: "'203.0.113.200'",
+        attemptedAt: "'2099-11-01T10:00:00Z'",
+        outcome: "'granted'",
+        ...overrides,
+      }
+      return (
+        'insert into optout_verification_attempt (request_ip, attempted_at, outcome) values ' +
+        `(${v.ip}::inet, ${v.attemptedAt}::timestamptz, ${v.outcome})`
+      )
+    }
+
+    const probes = [
+      {
+        // 82u. The positive control, first, because every probe below is a refusal and a database that
+        //      refused everything would satisfy all of them. If this one fails, none of the rest means
+        //      anything.
+        name: 'suppression gate: a whole suppression row is ACCEPTED, so the refusals below are the fault',
+        accept: true,
+        sql: suppressionRow(),
+      },
+      {
+        // 82v. THE probe this table exists for: a plaintext phone number in the key column. Refused by
+        //      length and by alphabet before anything else, which is what makes "no plaintext" a fact the
+        //      database keeps rather than a promise the repository makes.
+        name: 'suppression gate: a plaintext phone number as the key is refused',
+        rule: 'suppression_key_is_hmac_hex',
+        sql: suppressionRow({ keyHmac: "'+971590009302'" }),
+      },
+      {
+        name: 'suppression gate: an address as the key is refused',
+        rule: 'suppression_key_is_hmac_hex',
+        sql: suppressionRow({ keyHmac: "'guest@example.com'" }),
+      },
+      {
+        // Upper-case hex is the same digest spelled differently, and two spellings of one key is a key
+        // that matches half the time.
+        name: 'suppression gate: an upper-case hex key is refused',
+        rule: 'suppression_key_is_hmac_hex',
+        sql: suppressionRow({ keyHmac: `'${'AB12CD34'.repeat(8)}'` }),
+      },
+      {
+        // 82w. A source outside the closed set — the acceptance criterion's database-side fixture. The
+        //      ENUM is the instrument here, where `consent.purpose` uses a foreign key into a vocabulary
+        //      table, and 0064's header says why the two differ.
+        name: 'suppression gate: a source outside the enum is refused',
+        rule: 'invalid input value for enum suppression_source',
+        sql: suppressionRow({ source: "'email_blast'" }),
+      },
+      {
+        name: 'suppression gate: a kind outside the enum is refused',
+        rule: 'invalid input value for enum suppression_kind',
+        sql: suppressionRow({ kind: "'paused'" }),
+      },
+      {
+        name: 'suppression gate: a key kind outside phone/email is refused',
+        rule: 'suppression_key_kind_check',
+        sql: suppressionRow({ keyKind: "'whatsapp'" }),
+      },
+      {
+        name: 'suppression gate: an unsuppression from a hard bounce is refused',
+        rule: 'suppression_unsuppression_has_a_decision_behind_it',
+        sql: suppressionRow({ kind: "'unsuppressed'", source: "'hard_bounce'" }),
+      },
+      {
+        name: 'suppression gate: a preference-centre entry attributed to staff is refused',
+        rule: 'suppression_preference_centre_is_the_customer',
+        sql: suppressionRow({ source: "'preference_centre'", actorKind: "'staff'" }),
+      },
+      {
+        name: 'suppression gate: a placeholder reason is refused',
+        rule: 'suppression_reason_is_stated',
+        sql: suppressionRow({ reason: "'TBC'" }),
+      },
+      {
+        name: 'suppression gate: a placeholder actor label is refused',
+        rule: 'suppression_actor_is_stated',
+        sql: suppressionRow({ actorLabel: "'pending'" }),
+      },
+      {
+        name: 'suppression gate: a blank pepper version is refused',
+        rule: 'suppression_pepper_version_is_stated',
+        sql: suppressionRow({ pepperVersion: "'   '" }),
+      },
+      {
+        // NOT NULL rather than a CHECK, asserted by the column the message names.
+        name: 'suppression gate: a NULL recorded_at is refused, naming the column',
+        rule: 'null value in column "recorded_at"',
+        sql: suppressionRow({ recordedAt: 'null' }),
+      },
+      {
+        // 82x. UPDATE and DELETE, for the OWNER. `revoke update, delete from berelax_app` covers the
+        //      application role; the trigger is what covers a migration and the psql session a "one-off
+        //      correction" comes from.
+        name: 'suppression gate: an UPDATE to a suppression row is refused for the table owner',
+        rule: 'ZQ001',
+        sql: `${suppressionRow()}; update suppression set reason = 'edited' where key_hmac = ${HEX}`,
+      },
+      {
+        name: 'suppression gate: a DELETE of a suppression row is refused for the table owner',
+        rule: 'ZQ001',
+        sql: `${suppressionRow()}; delete from suppression where key_hmac = ${HEX}`,
+      },
+      {
+        name: 'suppression gate: a whole opt-out grant is ACCEPTED',
+        accept: true,
+        sql: grantRow(),
+      },
+      {
+        name: 'suppression gate: a token digest that is not 64 hex characters is refused',
+        rule: 'optout_grant_token_shape',
+        sql: grantRow({ token: "'not-a-digest'" }),
+      },
+      {
+        // A grant that has already expired when it is written is a link that reads to a customer as simply
+        // broken — and this link is the only functional opt-out this product has.
+        name: 'suppression gate: a grant that expires before it is issued is refused',
+        rule: 'optout_grant_expires_after_issue',
+        sql: grantRow({ expiresAt: "'2099-10-01T10:00:00Z'" }),
+      },
+      {
+        name: 'suppression gate: a grant minted for an undeclared purpose is refused',
+        rule: 'optout_grant_purpose_known',
+        sql: grantRow({ purpose: "'data_export'" }),
+      },
+      {
+        // Two grants on one digest would mean one token opening two contacts' pages.
+        name: 'suppression gate: two grants sharing one token digest are refused',
+        rule: 'optout_grant_token_sha256_key',
+        sql: `${grantRow()}; ${grantRow({ contact: "'00000000-0000-7000-8000-00000000c405'::uuid" })}`,
+      },
+      {
+        name: 'suppression gate: a whole verification attempt is ACCEPTED',
+        accept: true,
+        sql: attemptRow(),
+      },
+      {
+        name: 'suppression gate: an attempt outcome outside the closed set is refused',
+        rule: 'optout_verification_attempt_outcome_known',
+        sql: attemptRow({ outcome: "'something_else'" }),
+      },
+      {
+        // The one column that differs from `otp_challenge`'s equivalent, and deliberately: this endpoint
+        // has a single rate-limit dimension, so an unattributable attempt cannot be recorded at all.
+        name: 'suppression gate: an attempt with no address is refused, naming the column',
+        rule: 'null value in column "request_ip"',
+        sql: attemptRow({ ip: 'null' }),
+      },
+      {
+        // The control on the whole probe set: the second suppression row for one key at a DIFFERENT
+        // instant is accepted, so the refusals above are about their rules and not about a table that
+        // takes one row per key.
+        name: 'suppression gate: a second row for one key at a different instant is ACCEPTED',
+        accept: true,
+        sql: `${suppressionRow()}; ${suppressionRow({
+          kind: "'unsuppressed'",
+          source: "'manual'",
+          actorKind: "'staff'",
+          actorLabel: "'Manager'",
+          reason: "'Complaint was mis-attributed to this number.'",
+          recordedAt: "'2099-11-01T10:01:00Z'",
+        })}`,
+      },
+      {
+        // And its mirror: the SAME (key, kind, instant) twice is refused, which is the idempotence a
+        // double-clicked unsubscribe relies on.
+        name: 'suppression gate: the same key, kind and instant twice is refused',
+        rule: 'suppression_one_record_per_instant',
+        sql: `${suppressionRow()}; ${suppressionRow({ keyHmac: HEX })}`,
+      },
+      {
+        // The last control: a different key is a different row, so the unique index is about the key and
+        // not about the table.
+        name: 'suppression gate: a different key at the same instant is ACCEPTED',
+        accept: true,
+        sql: `${suppressionRow()}; ${suppressionRow({ keyHmac: HEX2 })}`,
+      },
+    ]
+
+    for (const probe of probes) {
+      const result = psqlProbe(probe.sql)
+      if (probe.accept === true) {
+        check(probe.name, !result.failed, String(result.output))
+      } else {
+        checkRejectedBy(probe.name, result, probe.rule)
+      }
+    }
+  }
+
+  // The controls on the whole block: the committed suites pass, so the twenty cases above are about the
+  // fixtures and not about a unit that was already red.
+  {
+    const core = run('pnpm', unit(CORE_SUITE))
+    check(
+      'suppression gate: the committed core consent suite passes',
+      !core.failed,
+      String(core.output),
+    )
+    const contract = run('pnpm', unit(CONTRACT_SUITE))
+    check(
+      'suppression gate: the committed suppression contract suite passes',
+      !contract.failed,
+      String(contract.output),
+    )
+  }
+}
 // 84a-84d. One timed-out test must not take six others with it.
 //
 // Numbered 84 and placed before 79 on purpose: 79 is the harness block and stays last before case 29, so

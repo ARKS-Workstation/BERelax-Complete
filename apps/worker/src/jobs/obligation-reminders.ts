@@ -762,15 +762,19 @@ export function obligationNoticeRuntimeFor(sql: Sql): ObligationNoticeRuntime {
     gate: {
       marketingKillSwitch: false,
       promotionalWindow: TDRA_PROMOTIONAL_WINDOW,
-      // The same three fail-closed evaluators B-MSG-03's runtime wires, for the same reason: the consent,
-      // suppression and frequency stores are C-CRM-03, C-CRM-04 and C-AUTO-03. A compliance notice is
-      // transactional, so the gate returns before any of them is read.
+      // The same three fail-closed evaluators B-MSG-03's runtime wires, for the same reason: the consent and
+      // suppression stores exist (C-CRM-03, C-CRM-04) and both evaluators are built over logs PREFETCHED for
+      // a recipient list, which this runtime does not have; the frequency store is C-AUTO-03's and is still
+      // absent. A compliance notice is transactional, so the gate returns before any of the three is read.
       evaluators: {
         hasConsent: () => {
           throw new Error('No consent store yet (C-CRM-03). Promotional sends fail closed.')
         },
         isSuppressed: () => {
-          throw new Error('No suppression list yet (C-CRM-04). Promotional sends fail closed.')
+          throw new Error(
+            'This runtime prefetches no suppression logs (C-CRM-04 stores them; the evaluator needs the ' +
+              'recipient list). Promotional sends fail closed.',
+          )
         },
         frequencyCapReached: () => {
           throw new Error('No frequency store yet (C-AUTO-03). Promotional sends fail closed.')

@@ -33,12 +33,15 @@ import {
   ensureLegalEntity,
   generateBusinessDays,
   readCompliancePolicy,
+  readContactsByPhone,
   type Sql,
+  type SuppressionSeedEntry,
   seedCatalogue,
   seedConsent,
   seedMessageTemplates,
   seedPremises,
   seedSettingDefaults,
+  seedSuppression,
   seedTherapistRoster,
 } from '@berelax/db'
 import { DEFAULT_TEMPLATES } from '@berelax/messaging'
@@ -51,6 +54,7 @@ import {
   FIXTURE_TODAY,
 } from './clock.ts'
 import type { FixtureSalon } from './salon.ts'
+import { fixtureSuppressionPeppers } from './suppression.ts'
 import { assertSynthetic, syntheticPerson } from './synthetic.ts'
 
 export interface Loader {
@@ -319,6 +323,139 @@ const consentLoader: Loader = {
   },
 }
 
+/**
+ * The fixture salon's suppression list (C-CRM-04).
+ *
+ * `SUPPRESSION_SEED_INDEXES` are outside every band already in use — `generateSalon`'s 1–140, the CRM
+ * suites' 4411 upward, the consent loader's 9101–9104 and `consent.itest.ts`'s 9111–9112 — because a
+ * collision under the phone-first identity rule is not a clash, it is one customer (ADR 0014), and this
+ * loader's numbers would silently become somebody else's probe subject.
+ *
+ * Five entries, one per `suppression_source`, because a fixture in which every row said `manual` would
+ * demonstrate one mechanism and document five. Three of them are about a detail this system has no
+ * `customer` row for at all, which is not a gap in the fixture but the case the keying scheme exists for:
+ * a hard bounce for an address, and a number on the national register that has never booked, are
+ * suppressions with no contact to hang on — and a list keyed on a customer id could not hold either.
+ *
+ * Two DO name a contact, and they reuse the consent loader's rather than creating more: the
+ * `preference_centre` entry is on the contact whose consent the consent loader already withdrew through
+ * the preference centre, so the fixture holds the pair a real unsubscribe writes — a withdrawal and a
+ * suppression, for one person.
+ *
+ * Every row is stamped with `FIXTURE_NOW_ISO` rather than the wall clock, which is what makes a second
+ * `pnpm seed` a no-op: `suppression_one_record_per_instant` collapses it.
+ */
+export const SUPPRESSION_SEED_INDEXES = Object.freeze({
+  complaint: 9201,
+  hard_bounce: 9202,
+  dnc_register: 9203,
+})
+
+/**
+ * The five seeded entries, from ONE builder.
+ *
+ * Exported because `packages/fixtures/src/suppression.itest.ts` re-runs the seed in its own `beforeAll`:
+ * the integration suite shares one database and `customer-identity.itest.ts` clears the whole `customer`
+ * table between its cases, so a file that assumed these rows were still there would pass or fail on
+ * vitest's file ordering (brief rule 12). `suppression` itself is append-only and nothing removes its
+ * rows, but the two entries that name a contact resolve that contact by phone — so the builder takes the
+ * ids it is given rather than ones it remembers.
+ */
+export function suppressionSeedEntries(
+  contactIdByPhone: ReadonlyMap<string, string>,
+): readonly SuppressionSeedEntry[] {
+  const complaint = syntheticPerson(SUPPRESSION_SEED_INDEXES.complaint)
+  const bounce = syntheticPerson(SUPPRESSION_SEED_INDEXES.hard_bounce)
+  const dnc = syntheticPerson(SUPPRESSION_SEED_INDEXES.dnc_register)
+  const manualSubject = syntheticPerson(CONSENT_SEED_INDEXES.never_asked)
+  const linkSubject = syntheticPerson(CONSENT_SEED_INDEXES.withdrawn)
+  // Checked at the point of creation, not asserted once in a test somebody may later delete. A
+  // suppression entry is the one row in this schema that says "never message this number again", and a
+  // fixture number that could ring a real handset would be the worst thing to get wrong here.
+  for (const person of [complaint, bounce, dnc, manualSubject, linkSubject]) assertSynthetic(person)
+
+  return [
+    {
+      keyKind: 'phone',
+      recipient: manualSubject.phone,
+      source: 'manual',
+      state: 'suppressed',
+      reason: 'Asked the front desk not to be included in offers.',
+      actorKind: 'staff',
+      actorLabel: 'Receptionist (fixture)',
+      contactCustomerId: contactIdByPhone.get(manualSubject.phone) ?? null,
+    },
+    {
+      keyKind: 'phone',
+      recipient: complaint.phone,
+      source: 'complaint',
+      state: 'suppressed',
+      reason: 'Complaint reported by the aggregator against this number.',
+      actorKind: 'system',
+      actorLabel: 'Aggregator feedback (fixture)',
+      // No contact: a complaint can arrive about a number this business has no record of, which is
+      // exactly why the list is keyed on the number.
+      contactCustomerId: null,
+    },
+    {
+      keyKind: 'email',
+      recipient: bounce.email,
+      source: 'hard_bounce',
+      state: 'lifted',
+      reason: 'Permanent delivery failure reported for this address.',
+      actorKind: 'system',
+      actorLabel: 'Mail provider feedback (fixture)',
+      // No contact, and it CANNOT have one: `customer` has no email column at all (C-CRM-01's NOTE 3),
+      // so no address in this system resolves to a record. The suppression works anyway, which is the
+      // half of C-CRM-03's deferred email problem this unit can answer.
+      contactCustomerId: null,
+    },
+    {
+      keyKind: 'phone',
+      recipient: dnc.phone,
+      source: 'dnc_register',
+      state: 'suppressed',
+      reason: 'Listed on the national do-not-call register.',
+      actorKind: 'system',
+      actorLabel: 'DNC register import (fixture)',
+      contactCustomerId: null,
+    },
+    {
+      keyKind: 'phone',
+      recipient: linkSubject.phone,
+      source: 'preference_centre',
+      state: 'suppressed',
+      reason: 'Unsubscribed through the preference centre link.',
+      actorKind: 'customer',
+      actorLabel: 'Preference centre (link holder)',
+      contactCustomerId: contactIdByPhone.get(linkSubject.phone) ?? null,
+    },
+  ]
+}
+
+const suppressionLoader: Loader = {
+  name: 'suppression',
+  // After `consent`, because two entries name a contact the consent loader creates. A suppression does
+  // not NEED a contact — three of the five have none — but the pair a real unsubscribe writes is only in
+  // the fixture if both halves are.
+  after: ['consent'],
+  async load(sql, salon) {
+    void salon
+    const wanted = [
+      syntheticPerson(CONSENT_SEED_INDEXES.never_asked).phone,
+      syntheticPerson(CONSENT_SEED_INDEXES.withdrawn).phone,
+    ]
+    const contacts = await readContactsByPhone(sql, wanted)
+    const byPhone = new Map(contacts.map((row) => [row.phoneE164, row.contactId]))
+    const result = await seedSuppression(sql, {
+      entries: suppressionSeedEntries(byPhone),
+      peppers: fixtureSuppressionPeppers(process.env),
+      recordedAtIso: FIXTURE_NOW_ISO,
+    })
+    return result.suppressions + result.lifts
+  },
+}
+
 function shift(date: string, offsetDays: number) {
   const value = new Date(`${date}T00:00:00Z`)
   value.setUTCDate(value.getUTCDate() + offsetDays)
@@ -332,6 +469,7 @@ const LOADERS: Loader[] = [
   businessDayLoader,
   therapistRosterLoader,
   consentLoader,
+  suppressionLoader,
   messageTemplateLoader,
 ]
 

@@ -613,6 +613,52 @@ export {
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
 export {
+  applyPreferenceCentreChange,
+  type IssuedOptOutGrant,
+  issueOptOutGrant,
+  loadSuppressionPeppers,
+  MIN_SUPPRESSION_PEPPER_LENGTH,
+  OPTOUT_VERIFY_LIMITS,
+  OPTOUT_VERIFY_MAX_PER_IP,
+  OPTOUT_VERIFY_WINDOW_SECONDS,
+  type OptOutDecider,
+  type OptOutShapeChecker,
+  type OptOutVerification,
+  type OptOutVerifyLimit,
+  type OptOutVerifyResult,
+  optOutTokenDigest,
+  type PlaintextLeak,
+  PREFERENCE_CENTRE_ACTIONS,
+  type PreferenceCentreAction,
+  type PreferenceCentreChange,
+  type PreferenceCentreResult,
+  pruneOptOutVerificationAttempts,
+  readSuppressionHistory,
+  readSuppressionLogs,
+  recordSuppression,
+  revokeOptOutGrant,
+  SUPPRESSION_AUDIT_ACTIONS,
+  SUPPRESSION_REFUSALS,
+  SUPPRESSION_SQLSTATE,
+  SUPPRESSION_TABLES,
+  type SuppressionInput,
+  type SuppressionKeying,
+  type SuppressionKeyNormaliser,
+  type SuppressionLogRead,
+  type SuppressionPepper,
+  type SuppressionPepperEnv,
+  type SuppressionPeppers,
+  type SuppressionRefusal,
+  type SuppressionRow,
+  suppressionColumns,
+  suppressionKey,
+  suppressionPlaintextLeaks,
+  suppressionRefusalOf,
+  suppressionSourceCounts,
+  unsuppressKey,
+  verifyOptOutToken,
+} from './repositories/suppression.ts'
+export {
   type PublicHolidayClosureRow,
   type RosteredShiftRow,
   readPublicHolidayClosures,
@@ -669,6 +715,14 @@ export {
   WHATSAPP_CANDIDATES,
   WHATSAPP_PENDING,
 } from './seed/premises.ts'
+export {
+  SUPPRESSION_SEED_STATES,
+  type SuppressionSeedEntry,
+  type SuppressionSeedInput,
+  type SuppressionSeedResult,
+  type SuppressionSeedState,
+  seedSuppression,
+} from './seed/suppression.ts'
 export {
   type ResolvedTemplateRow,
   readCurrentTemplate,
@@ -1041,9 +1095,45 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
+// 64 is 0064_suppression.sql: the suppression list and the opt-out grant (C-CRM-04). `suppression` keys on
+// HMAC-SHA256 of the NORMALISED recipient under a server-side pepper (`SUPPRESSION_PEPPER`), lower-case
+// hex, and `suppression_key_is_hmac_hex` is what makes "no plaintext" a fact rather than a promise: a
+// normalised E.164 is at most 16 characters and an address contains an `@`, so the 64-hex CHECK refuses
+// every recipient by length and by alphabet. A plain digest would not have done — the UAE mobile space is
+// about ten million numbers per prefix, so an unpeppered hash of one is a phone number with extra steps —
+// and `pepper_version` holds the LABEL and never the pepper, exactly as `google_connection.refresh_token_kid`
+// does for a KEK, so a rotation is an operation rather than a data loss. The KEY is the hashed contact
+// DETAIL and NOT a contact id, which is 0053's decision for `customer_blocklist` and the answer to what
+// C-CRM-03's NOTE (4) asked this unit to settle: it is a DIFFERENT answer from `consent`'s rather than the
+// same one, because a suppression names a detail and both details survive a merge with their suppressions
+// attached — so C-CRM-05 re-points nothing here, and the only thing a merge owes this table is a
+// `contact_customer_id` back-reference, which is an INSERT because the table refuses UPDATE (ZQ001) for
+// every role including the owner. A suppression list is deliberately not a second blocklist: 0053's is "we
+// will not SERVE this person" at the booking path, this one is "we will not MARKET to this person" at
+// `evaluateGate`'s `isSuppressed` and nowhere else, and collapsing them would make an unsubscribe refuse
+// appointments for ever. `suppression_source` and `suppression_kind` are Postgres ENUMS where
+// `consent_purpose` is a table, and the contrast is the rule rather than an inconsistency: those labels are
+// this build's guess at a business vocabulary and need `is_provisional`, while these five name mechanisms
+// that already exist. `optout_grant` is `obligation_evidence_grant` restated — a stored, expiring,
+// revocable grant whose sha256 alone is kept rather than an HMAC over a URL, so no second signing secret
+// enters the rotation inventory — with one deliberate difference of two orders of magnitude: thirty days
+// rather than fifteen minutes, because the person who needs this link is reading a message they were sent
+// three weeks ago and a link that has expired by then is an opt-out this business does not have.
+// `optout_verification_attempt` IS the rate limit (ten per address per minute, counted in SQL because a
+// per-process counter is the limit multiplied by however many containers are running), and its
+// `request_ip` is NOT NULL where `otp_challenge`'s is nullable: the OTP endpoint has a per-number limit
+// that still binds without an address and this one has a single dimension, so the route refuses an
+// unattributable request by name rather than recording one it cannot count.
+//
+// 62, 63 and 65 are ALLOCATIONS held by units in flight, not gaps to be closed. 64 was taken while they were
+// open and landed first, which is the same arrangement the note below records for 55, 56 and 57: the number
+// is a high-water mark, not a count. Nothing here renumbers to tidy the sequence, for the reason that note
+// gives — renumbering is how two branches come to apply the same number to different SQL.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
+// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones plus the three
+// allocations above. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 61 as const
+export const SCHEMA_VERSION = 64 as const
