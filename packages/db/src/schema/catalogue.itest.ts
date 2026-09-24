@@ -240,23 +240,40 @@ describe('acceptance — the composite foreign key B-CAT-02 deferred is attached
   })
 
   it('carries a renamed treatment key into its compatibility rows, and cascades a delete', async () => {
-    // ON UPDATE CASCADE and ON DELETE CASCADE, proved on a probe service rather than argued about. The
-    // delete case is the one that matters: two cascade paths reach this table and
-    // service_resource_shape, and a RESTRICT on either would refuse a legitimate delete depending on
-    // which path PostgreSQL ran first.
-    const renamed = `${PROBE}_renamed`
+    /*
+     * ON UPDATE CASCADE and ON DELETE CASCADE, proved on a service of this case's OWN rather than on the
+     * shared probe. The delete case is the one that matters: two cascade paths reach this table and
+     * service_resource_shape, and a RESTRICT on either would refuse a legitimate delete depending on
+     * which path PostgreSQL ran first.
+     *
+     * Its own service, because the earlier version deleted `probeServiceId` and re-inserted it at the END
+     * of this body. Everything between those two statements was a window in which the row the rest of the
+     * file hangs its variants off did not exist — so a timeout, or any failing assertion inside the
+     * window, left `probeServiceId` pointing at a deleted row and SIX later tests failed with 23503.
+     * One defect, seven failures, and the six said nothing about themselves. The only test whose whole
+     * subject is destroying a row is the last one that should be destroying a shared one.
+     */
+    const cascadeKey = `${PROBE}_cascade`
+    const renamed = `${PROBE}_cascade_renamed`
+    const [own] = await sql<{ id: string }[]>`
+      insert into service
+        (style, treatment_key, slug, internal_name, public_display_name, turnaround_minutes)
+      values ('asian', ${cascadeKey}, ${`${PROBE_SLUG}-cascade`}, 'Probe', 'Probe', 20)
+      returning id
+    `
+    const ownId = (own as { id: string }).id
     await sql`
       insert into service_room_type_compat (service_style, service_treatment_key, room_type)
-      values ('asian', ${PROBE}, 'standard')
+      values ('asian', ${cascadeKey}, 'standard')
     `
     await sql`
       insert into service_resource_shape
         (service_style, service_treatment_key, shape, therapists_required, rooms_required,
          min_room_capacity, required_room_type, therapist_buffer_minutes)
-      values ('asian', ${PROBE}, 'solo', 1, 1, 1, 'standard', 10)
+      values ('asian', ${cascadeKey}, 'solo', 1, 1, 1, 'standard', 10)
     `
 
-    await sql`update service set treatment_key = ${renamed} where id = ${probeServiceId}`
+    await sql`update service set treatment_key = ${renamed} where id = ${ownId}`
     const [moved] = await sql<{ n: string }[]>`
       select count(*)::text as n from service_room_type_compat
       where service_treatment_key = ${renamed}
@@ -268,7 +285,7 @@ describe('acceptance — the composite foreign key B-CAT-02 deferred is attached
     `
     expect(shapeMoved?.n).toBe('1')
 
-    await sql`delete from service where id = ${probeServiceId}`
+    await sql`delete from service where id = ${ownId}`
     const [compatLeft] = await sql<{ n: string }[]>`
       select count(*)::text as n from service_room_type_compat
       where service_treatment_key = ${renamed}
@@ -279,14 +296,13 @@ describe('acceptance — the composite foreign key B-CAT-02 deferred is attached
     `
     expect([compatLeft?.n, shapeLeft?.n]).toEqual(['0', '0'])
 
-    // Put the probe service back: the tests below hang variants off it.
-    const [reborn] = await sql<{ id: string }[]>`
-      insert into service
-        (style, treatment_key, slug, internal_name, public_display_name, turnaround_minutes)
-      values ('asian', ${PROBE}, ${'bcat03-probe-service'}, 'Probe', 'Probe', 20)
-      returning id
+    // The shared probe is untouched, which is the point of the change and worth asserting rather than
+    // assuming: it is what the six cascading failures were about, and an edit that reintroduced the
+    // deletion would otherwise show up six tests later instead of here.
+    const [shared] = await sql<{ n: string }[]>`
+      select count(*)::text as n from service where id = ${probeServiceId}
     `
-    probeServiceId = reborn?.id as string
+    expect(shared?.n, 'the shared probe service must survive this case').toBe('1')
   })
 })
 

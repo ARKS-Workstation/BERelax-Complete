@@ -531,9 +531,22 @@ describe('a deliberately stale memo never sells a slot that no longer exists', (
 })
 
 describe('the no-availability answer is structured data', () => {
+  /**
+   * A UUID, in the canonical 8-4-4-4-12 form.
+   *
+   * Identifiers are skipped by the prose scan below, and the reason is a real intermittent failure rather
+   * than tidiness: hex is spelled with the letters a-f, so a UUIDv7 group can legitimately begin `feb` or
+   * `dec` — `01a0ccbd-febc-7de4-…` — and the month pattern then reports a rendered date in a therapist id.
+   * It was observed red once. The scan's claim is "this answer carries no pre-rendered prose"; matching a
+   * month inside an identifier measures something else entirely, and the fix is to scan only the values
+   * that could carry prose rather than to loosen the pattern, which would stop it catching `Dec` in a real
+   * day name.
+   */
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
   /** Every string anywhere inside a value, for the "no pre-rendered string" assertion. */
   const stringsIn = (value: unknown): string[] => {
-    if (typeof value === 'string') return [value]
+    if (typeof value === 'string') return UUID.test(value) ? [] : [value]
     if (Array.isArray(value)) return value.flatMap(stringsIn)
     if (value !== null && typeof value === 'object') {
       return Object.values(value as Record<string, unknown>).flatMap(stringsIn)
@@ -617,6 +630,11 @@ describe('the no-availability answer is structured data', () => {
       ...stringsIn(answer.waitlistEligible),
     ]
     expect(strings.length).toBeGreaterThan(0)
+    // The control on the UUID exclusion. Skipping identifiers is only safe if the patterns still catch
+    // prose, and an exclusion wide enough to swallow a real day name would make this whole loop decorative.
+    expect(stringsIn(['Tuesday 18 Mar', '01a0ccbd-febc-7de4-9b3a-2f6c1d4e8a90'])).toEqual([
+      'Tuesday 18 Mar',
+    ])
     for (const value of strings) {
       expect(value, `"${value}" looks like a rendered time`).not.toMatch(/\d{1,2}:\d{2}/)
       expect(value, `"${value}" looks like a rendered date`).not.toMatch(
