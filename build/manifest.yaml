@@ -3183,9 +3183,21 @@ units:
       and it does real work: 300 generated shifts, each split into four buckets and checked against every
       invariant. Measured at 2.12s alone and 5,666ms with three worktrees building concurrently (load
       average 13), so it timed out and failed two of this unit''s verify runs while passing in both of the
-      others. The remedy the brief names is to declare a timeout, so `, 30_000` was added with the
-      measurement in a comment. It is additive and changes nothing the case asserts; drop it at merge if
-      the reconciler would rather the owning unit made the change. TWO further pre-existing flakes were
+      others. A `, 30_000` was added here with the measurement in a comment and then REVERTED, because
+      main had already fixed it the same way: commit 01847fc ("four checks that measured something other
+      than what they claimed") is merged into this branch and carries that timeout.'
+    - 'NOTE: a fourth pre-existing failure, in main and still open at the time this unit was written, so a
+      later run that goes red on it is NOT this unit''s. packages/fixtures/src/availability-perf.itest.ts
+      asserts `return a p95 under 300 ms with the memo disabled` against the WALL CLOCK, which measures the
+      machine as much as the query: it failed one of this unit''s verify runs at 315.7 ms with load average
+      14 (the three batches were 662.3, 467.3 and 315.7 ms, and the case already takes the best of three),
+      and the coordinator reports a further failure at 2,376 ms on another branch. 01847fc did NOT replace
+      that case — it ADDED three load-independent ones beside it (exactly one statement per uncached call,
+      one on a cache hit, and a constant answer size) and left the wall-clock budget in place because the
+      acceptance line demands it. The proper fix is the coordinator''s and is in progress: assert the
+      budget only when the sequential median shows the machine can hold it, and skip loudly with both
+      numbers when it cannot. Nothing about it was changed here.'
+    - 'NOTE: TWO further pre-existing flakes were
       hit and NOT changed, because neither has a one-line remedy and neither is this unit''s to design:
       (1) apps/web/src/breakpoint-preview.itest.ts failed once with `Bad port: "6665" is reserved for
       ircu` — its TEST_PORT_BANDS band is {start: 6400, width: 300}, which spans 6400-6699 and therefore
@@ -3194,9 +3206,16 @@ units:
       failure with no retry; packages/harness/src/ports.test.ts proves the bands are disjoint, below the
       ephemeral range and wide enough, and has no assertion that a band avoids the unsafe-port list.
       (2) gate case 72a (C-CRM-03) asserts its consent mutant is rejected by a rule name that lives in a
-      fast-check property with a fresh seed per run; running the identical mutant eight times, the rule
-      was named in 7 and absent in 1, so the case fails about one run in eight.'
-    - 'NOTE: gate labels used: 81a-81x, in scripts/test-gates.mjs immediately before block 29. Twelve psql
+      fast-check property; running the identical mutant eight times, the rule was named in 7 and absent in
+      1, so the case fails about one run in eight. The mutant ALWAYS fails the suite — what varies is
+      whether the NAMED test is among the failures, which is what the eight runs were for, because eight
+      lines of truncated detail are equally consistent with a killed child and a genuinely wrong gate. The
+      coordinator has since diagnosed it from that measurement as a GENERATOR defect rather than a seed
+      problem: about one generated record set in eight cannot exercise insertion-order dependence at all —
+      a single applicable record, or a tie — so no shuffle can tell first from newest and the property
+      passes under the mutant. The fix is to constrain the arbitrary to at least two applicable records
+      with distinct timestamps, with a control proving a degenerate set would have been vacuous.'
+    - 'NOTE: gate labels used: 81a-81x, in scripts/test-gates.mjs between blocks 78 and 84. Twelve psql
       probes assert each 0063 constraint BY NAME against real PostgreSQL, with two controls (the correct
       claim/tender/link set is accepted, and two appointments on one invoice are accepted, so the
       billed-twice probe is about one appointment on two documents rather than about the link table
@@ -3224,7 +3243,6 @@ units:
     - packages/fixtures/src/checkout.test.ts
     - packages/fixtures/src/checkout-finalisation.itest.ts
     - packages/fixtures/src/appointment-reschedule.itest.ts
-    - packages/core/src/hr/working-hours.property.test.ts
     - packages/fixtures/src/invoice-document.itest.ts
     - packages/fixtures/src/tax-document.itest.ts
     - packages/fixtures/src/index.ts

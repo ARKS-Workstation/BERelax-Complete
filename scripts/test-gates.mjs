@@ -21103,6 +21103,368 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 81a-81x. (M-TILL-06) Checkout finalisation: the constraints that make a second sale impossible, and
+// the shipped-file edits that must make the posting rule's own tests go red.
+//
+// Two halves, because the unit has two halves. The first twelve cases are known-bad fixtures against real
+// PostgreSQL: every rule `0063_checkout.sql` adds is a DATABASE rule — a primary key, three UNIQUEs, four
+// CHECKs, a foreign key — and a constraint is only a gate once something has been seen to bounce off it.
+// Each probe asserts the rule it must trip BY NAME, because a bare non-zero exit is also what a typo in a
+// column name produces (ADR 0003), and because the whole point of `checkout_finalisation_key_pk` is that
+// the caller can tell "already finalised" from every other conflict in the same transaction.
+//
+// `VERBOSITY=verbose` so psql prints the constraint name as well as the SQLSTATE, and every probe runs
+// inside `begin; … ; rollback;` — which is also the only way they can be written at all: `invoice` refuses
+// DELETE for every role including the owner (ZI003), so a probe row that committed could not be swept.
+//
+// The second half breaks `packages/core/src/checkout/posting.ts` five ways and watches `posting.test.ts`
+// fail, plus one edit to `services/checkout-finalise.ts` that turns the idempotency key from a constraint
+// the database enforces into a claim the repository tolerates — the exact defect this unit exists to
+// avoid, and the one a passing suite would otherwise never notice. 81w and 81x are the controls: both
+// suites, unedited, must pass.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'GATE-CHECKOUT'
+  // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is refused
+  // by two CHECKs on `invoice` (0026).
+  const GATE_TRN = '100123456700003'
+  const APPOINTMENT = '00000000-0000-4000-8000-0000000c0de1'
+  const OTHER_APPOINTMENT = '00000000-0000-4000-8000-0000000c0de2'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; rollback;`,
+    ])
+
+  /** One accepted invoice header, numbered in the gate's own period so it collides with nothing. */
+  const invoice = (n) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `values ('tax_invoice', 'TAX-INV', '${MARKER}', ${900_100 + n}, '${MARKER}-000${n}', ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'2026-09-19'::date, '2026-09-18'::date, 20, 2, 22, '${MARKER}-${n}')`
+
+  /** A balanced two-line entry, so nothing below is refused for a reason this gate is not about. */
+  const entry = (n) =>
+    `insert into journal_entry (entry_id, entry_date, narrative, source) values ('${MARKER}-JE-${n}', ` +
+    "'2026-09-19'::date, 'Gate probe', 'sale'); " +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+    `('${MARKER}-JE-${n}', 1, '1010', 22, 0), ('${MARKER}-JE-${n}', 2, '4010', 0, 22)`
+
+  const idOf = (n) => `(select id from invoice where notes = '${MARKER}-${n}')`
+
+  /** One claim. Every field overridable, and the defaults are a claim that is accepted. */
+  const claim = (overrides = {}) => {
+    const v = {
+      key: `'${MARKER}-KEY-1'`,
+      fingerprint: `'${MARKER}-FP'`,
+      basket: `'${MARKER}-BASKET'`,
+      invoice: idOf(1),
+      entry: `'${MARKER}-JE-1'`,
+      total: '22',
+      ...overrides,
+    }
+    return (
+      'insert into checkout_finalisation (idempotency_key, request_fingerprint, basket_id, ' +
+      'invoice_id, journal_entry_id, trading_date, tender_total_fils) values (' +
+      `${v.key}, ${v.fingerprint}, ${v.basket}, ${v.invoice}, ${v.entry}, '2026-09-19'::date, ` +
+      `${v.total})`
+    )
+  }
+
+  /** One tender. Every field overridable, and the defaults are a tender that is accepted. */
+  const tender = (overrides = {}) => {
+    const v = {
+      invoice: idOf(1),
+      no: '1',
+      kind: "'cash'",
+      account: "'1010'",
+      amount: '22',
+      reference: 'null',
+      ...overrides,
+    }
+    return (
+      'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, amount_fils, ' +
+      `reference, trading_date) values (${v.invoice}, ${v.no}, ${v.kind}, ${v.account}, ` +
+      `${v.amount}, ${v.reference}, '2026-09-19'::date)`
+    )
+  }
+
+  /** One appointment link. The constraint this gate is most about lives on `appointment_id`. */
+  const link = (overrides = {}) => {
+    const v = { invoice: idOf(1), appointment: `'${APPOINTMENT}'`, lineNo: '1', ...overrides }
+    return (
+      'insert into invoice_appointment (invoice_id, appointment_id, line_no) values (' +
+      `${v.invoice}, ${v.appointment}::uuid, ${v.lineNo})`
+    )
+  }
+
+  /** Two invoices and two entries, so a probe about ONE constraint can trip only that one. */
+  const TWO = `${invoice(1)}; ${invoice(2)}; ${entry(1)}; ${entry(2)}`
+
+  const probes = [
+    {
+      // THE case. A second claim of one idempotency key, against a DIFFERENT invoice and entry so that
+      // only the primary key can refuse it — reusing the first claim's invoice id would violate
+      // `checkout_finalisation_one_invoice` as well, and which of two unique indexes PostgreSQL reports
+      // is not a contract. This is the refusal that makes finalisation idempotent rather than lucky.
+      name: 'checkout gate rejects a second claim of one idempotency key',
+      rule: 'checkout_finalisation_key_pk',
+      sql: `${TWO}; ${claim()}; ${claim({ invoice: idOf(2), entry: `'${MARKER}-JE-2'` })}`,
+    },
+    {
+      name: 'checkout gate rejects two finalisations claiming one invoice',
+      rule: 'checkout_finalisation_one_invoice',
+      sql: `${TWO}; ${claim()}; ${claim({ key: `'${MARKER}-KEY-2'`, entry: `'${MARKER}-JE-2'` })}`,
+    },
+    {
+      name: 'checkout gate rejects two finalisations claiming one journal entry',
+      rule: 'checkout_finalisation_one_entry',
+      sql: `${TWO}; ${claim()}; ${claim({ key: `'${MARKER}-KEY-2'`, invoice: idOf(2) })}`,
+    },
+    {
+      // The other half of "billed once": a retry is answered with the winner's invoice, and a DIFFERENT
+      // checkout that tries to bill a treatment already on a document is refused outright. An issued
+      // invoice is never edited or voided; the correction is a credit note (docs/04 §4).
+      name: 'checkout gate rejects an appointment billed on a second invoice',
+      rule: 'invoice_appointment_appointment_once',
+      sql: `${TWO}; ${link()}; ${link({ invoice: idOf(2) })}`,
+    },
+    {
+      name: 'checkout gate rejects the same appointment twice on one invoice',
+      rule: 'invoice_appointment_pk',
+      sql: `${TWO}; ${link()}; ${link({ lineNo: '2' })}`,
+    },
+    {
+      // `fils_nonneg` alone would accept this. Zero is a tender somebody started and did not fill in,
+      // and it reconciles to nothing against a counted drawer.
+      name: 'checkout gate rejects a tender of zero fils',
+      rule: 'payment_amount_positive',
+      sql: `${TWO}; ${tender({ amount: '0' })}`,
+    },
+    {
+      name: 'checkout gate rejects a tender kind outside the closed list',
+      rule: 'payment_tender_kind_known',
+      sql: `${TWO}; ${tender({ kind: "'gift_card'" })}`,
+    },
+    {
+      // An empty string is not a missing reference; it is a caller that meant null and said something
+      // else, and the difference is the whole record when a card payment is disputed.
+      name: 'checkout gate rejects a blank tender reference',
+      rule: 'payment_reference_nonempty',
+      sql: `${TWO}; ${tender({ reference: "''" })}`,
+    },
+    {
+      // The snapshotted account has to be a real one, or the tender posts nowhere and the drawer cannot
+      // be reconciled to the ledger at all.
+      name: 'checkout gate rejects a tender posted to an account the chart does not contain',
+      rule: 'payment_posting_account_code_fkey',
+      sql: `${TWO}; ${tender({ account: "'9999'" })}`,
+    },
+    {
+      name: 'checkout gate rejects a blank idempotency key',
+      rule: 'checkout_finalisation_key_nonempty',
+      sql: `${TWO}; ${claim({ key: "'   '" })}`,
+    },
+    {
+      // Without the fingerprint a key replayed with a DIFFERENT basket is answered with the first
+      // invoice, and the caller reads that as success — 0024's argument for `booking_idempotency`.
+      name: 'checkout gate rejects a blank request fingerprint',
+      rule: 'checkout_finalisation_fingerprint_nonempty',
+      sql: `${TWO}; ${claim({ fingerprint: "''" })}`,
+    },
+    {
+      name: 'checkout gate rejects a finalisation that collected nothing',
+      rule: 'checkout_finalisation_tender_total_positive',
+      sql: `${TWO}; ${claim({ total: '0' })}`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'the checkout constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statements } of probes) {
+      checkRejectedBy(name, psqlProbe(statements), rule)
+    }
+
+    // The control, and the reason the twelve probes above mean anything: the correct set of rows — two
+    // documents, two entries, one claim, one tender and one link — is ACCEPTED. Without it a renamed
+    // column or a broken connection string would reject every probe and this gate would report twelve
+    // passes while examining nothing.
+    const accepted = psqlProbe(`${TWO}; ${claim()}; ${tender()}; ${link()}`)
+    check(
+      'checkout gate accepts one claim, one tender and one appointment link',
+      !accepted.failed,
+      `rejected the finalisation this unit exists to write:\n${accepted.output}`,
+    )
+
+    // The second control: a SECOND appointment on the same invoice is accepted, so the fourth probe is
+    // about one appointment on two documents rather than about the link table refusing a second row —
+    // which would make every two-treatment checkout in the business unbillable.
+    const twoLines = psqlProbe(
+      `${TWO}; ${link()}; ${link({ appointment: `'${OTHER_APPOINTMENT}'`, lineNo: '2' })}`,
+    )
+    check(
+      'checkout gate accepts two appointments on one invoice',
+      !twoLines.failed,
+      `a two-treatment checkout was refused:\n${twoLines.output}`,
+    )
+  }
+
+  // --- the posting rule, broken five ways ---------------------------------------------------------
+  //
+  // Every case edits a shipped file and restores it in a `finally`, and every anchor goes through
+  // `replaceOnce` (brief rule 20): `String.replace` takes the first match silently, and three cases in
+  // this file have edited the wrong construct and then reported PASS about a file that still contained
+  // exactly what they meant to remove.
+  const POSTING = 'packages/core/src/checkout/posting.ts'
+  const POSTING_TEST = 'packages/core/src/checkout/posting.test.ts'
+  const FINALISE = 'packages/db/src/services/checkout-finalise.ts'
+  const FINALISE_ITEST = 'packages/db/src/services/checkout-finalise.itest.ts'
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  // 81m. Card money debited to the bank instead of to the terminal clearing account. It balances
+  //      perfectly and leaves the bank reconciliation permanently out by every unsettled batch and every
+  //      processing fee — the failure an accountant discovers months later.
+  {
+    const result = withEditedFile(
+      POSTING,
+      (text) =>
+        replaceOnce(
+          text,
+          '  card_in_salon: ACCOUNTS.cardTerminalClearing,',
+          '  card_in_salon: ACCOUNTS.bankCurrent,',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
+    )
+    check('card money debited to the bank fails the posting tests', result.failed)
+  }
+
+  // 81n. The discount's VAT left off the output VAT account. The entry then credits tax on an amount the
+  //      customer never paid — M-TILL-05's `vatIfDiscountTaxedSeparately` arriving in the ledger instead
+  //      of on the document — and it no longer balances either.
+  {
+    const result = withEditedFile(
+      POSTING,
+      (text) =>
+        replaceOnce(
+          text,
+          "    record(movements, OUTPUT_VAT_ACCOUNT, line.tax.vat.fils, 'VAT relieved by discounts')",
+          '    // removed by gate 81n',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
+    )
+    check('a discount that does not relieve its VAT fails the posting tests', result.failed)
+  }
+
+  // 81o. An account whose debits and credits cancel posted as a zero line instead of omitted. The
+  //      11-fils probe is exactly that case — the 6 fils actually charged carries no VAT — and a zero
+  //      line is refused by `journal_line_exactly_one_side` in the database, so this is a posting that
+  //      cannot be stored at all.
+  {
+    const result = withEditedFile(
+      POSTING,
+      (text) => replaceOnce(text, '    if (net === 0) continue', '    // removed by gate 81o'),
+      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
+    )
+    check('a zero-movement account posted as a line fails the posting tests', result.failed)
+  }
+
+  // 81p. The tenders no longer required to add up to the basket. A partial payment leaves a receivable
+  //      and an over-tender gives change — both M-TILL-07's — and absorbing either here posts an entry
+  //      that balances against the wrong cash.
+  {
+    const result = withEditedFile(
+      POSTING,
+      (text) =>
+        replaceOnce(
+          text,
+          '    throw new TendersDoNotCoverBasket(',
+          '    if (tendered.fils !== tendered.fils) throw new TendersDoNotCoverBasket(',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
+    )
+    check('tenders that need not cover the basket fail the posting tests', result.failed)
+  }
+
+  // 81q. Revenue credited at the wrong figure by one fils. The narrowest possible break, and the one
+  //      that says the entry is checked against the document rather than against itself: an entry whose
+  //      two sides were both wrong by the same amount would still balance.
+  {
+    const result = withEditedFile(
+      POSTING,
+      (text) =>
+        replaceOnce(
+          text,
+          "      record(movements, line.account, line.tax.net.fils, 'Treatments delivered')",
+          "      record(movements, line.account, line.tax.net.fils - 1, 'Treatments delivered')",
+        ),
+      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
+    )
+    check('revenue credited one fils short fails the posting tests', result.failed)
+  }
+
+  // 81r. THE case for the transaction half, and the one a green suite would never notice: the idempotency
+  //      claim inserted with `on conflict do nothing`. The second finalisation then does not bounce off
+  //      `checkout_finalisation_key_pk` at all — it writes a SECOND document and returns it, which is two
+  //      invoices for one sale. A key the database refuses and a claim the repository tolerates look
+  //      identical until this case is run.
+  if (dbUrl) {
+    const result = withEditedFile(
+      FINALISE,
+      (text) =>
+        replaceOnce(
+          text,
+          '            ${input.tradingDate}::date, ${tenderTotalFils}\n          )\n        `',
+          '            ${input.tradingDate}::date, ${tenderTotalFils}\n          )\n' +
+            '          on conflict (idempotency_key) do nothing\n        `',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(FINALISE_ITEST)),
+    )
+    check(
+      'an idempotency claim that tolerates a conflict fails the finalisation itest',
+      result.failed,
+    )
+  } else {
+    check(
+      'an idempotency claim that tolerates a conflict fails the finalisation itest',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  }
+
+  // 81w. The control for 81m-81q: the same runner, on the same file, with nothing edited, must pass. Five
+  //      cases above assert that a broken posting rule fails; if the suite failed for an unrelated reason
+  //      — a missing dependency, a renamed path — all five would report PASS and none of them would be
+  //      about the posting rule.
+  {
+    const result = run('pnpm', unitRun(POSTING_TEST))
+    check('the posting tests pass with nothing edited', !result.failed, result.output)
+  }
+
+  // 81x. And the control for 81r, for the same reason: the finalisation itest passes on the committed
+  //      tree, so 81r is about the `on conflict` and not about a suite that was already red.
+  if (dbUrl) {
+    const result = run('pnpm', itestRun(FINALISE_ITEST))
+    check('the finalisation itest passes with nothing edited', !result.failed, result.output)
+  }
+}
+
 // 84a-84d. One timed-out test must not take six others with it.
 //
 // Numbered 84 and placed before 79 on purpose: 79 is the harness block and stays last before case 29, so
@@ -21492,368 +21854,6 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       !serverClean.failed && !portsClean.failed,
       `a committed suite failed:\n${serverClean.output}${portsClean.output}`,
     )
-  }
-}
-
-// 81a-81x. (M-TILL-06) Checkout finalisation: the constraints that make a second sale impossible, and
-// the shipped-file edits that must make the posting rule's own tests go red.
-//
-// Two halves, because the unit has two halves. The first twelve cases are known-bad fixtures against real
-// PostgreSQL: every rule `0063_checkout.sql` adds is a DATABASE rule — a primary key, three UNIQUEs, four
-// CHECKs, a foreign key — and a constraint is only a gate once something has been seen to bounce off it.
-// Each probe asserts the rule it must trip BY NAME, because a bare non-zero exit is also what a typo in a
-// column name produces (ADR 0003), and because the whole point of `checkout_finalisation_key_pk` is that
-// the caller can tell "already finalised" from every other conflict in the same transaction.
-//
-// `VERBOSITY=verbose` so psql prints the constraint name as well as the SQLSTATE, and every probe runs
-// inside `begin; … ; rollback;` — which is also the only way they can be written at all: `invoice` refuses
-// DELETE for every role including the owner (ZI003), so a probe row that committed could not be swept.
-//
-// The second half breaks `packages/core/src/checkout/posting.ts` five ways and watches `posting.test.ts`
-// fail, plus one edit to `services/checkout-finalise.ts` that turns the idempotency key from a constraint
-// the database enforces into a claim the repository tolerates — the exact defect this unit exists to
-// avoid, and the one a passing suite would otherwise never notice. 81w and 81x are the controls: both
-// suites, unedited, must pass.
-{
-  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
-  const MARKER = 'GATE-CHECKOUT'
-  // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is refused
-  // by two CHECKs on `invoice` (0026).
-  const GATE_TRN = '100123456700003'
-  const APPOINTMENT = '00000000-0000-4000-8000-0000000c0de1'
-  const OTHER_APPOINTMENT = '00000000-0000-4000-8000-0000000c0de2'
-
-  const psqlProbe = (statements) =>
-    run('psql', [
-      '--no-psqlrc',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-v',
-      'VERBOSITY=verbose',
-      '-q',
-      dbUrl ?? '',
-      '-c',
-      `begin; ${statements}; rollback;`,
-    ])
-
-  /** One accepted invoice header, numbered in the gate's own period so it collides with nothing. */
-  const invoice = (n) =>
-    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
-    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
-    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
-    `values ('tax_invoice', 'TAX-INV', '${MARKER}', ${900_100 + n}, '${MARKER}-000${n}', ` +
-    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
-    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
-    `'2026-09-19'::date, '2026-09-18'::date, 20, 2, 22, '${MARKER}-${n}')`
-
-  /** A balanced two-line entry, so nothing below is refused for a reason this gate is not about. */
-  const entry = (n) =>
-    `insert into journal_entry (entry_id, entry_date, narrative, source) values ('${MARKER}-JE-${n}', ` +
-    "'2026-09-19'::date, 'Gate probe', 'sale'); " +
-    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
-    `('${MARKER}-JE-${n}', 1, '1010', 22, 0), ('${MARKER}-JE-${n}', 2, '4010', 0, 22)`
-
-  const idOf = (n) => `(select id from invoice where notes = '${MARKER}-${n}')`
-
-  /** One claim. Every field overridable, and the defaults are a claim that is accepted. */
-  const claim = (overrides = {}) => {
-    const v = {
-      key: `'${MARKER}-KEY-1'`,
-      fingerprint: `'${MARKER}-FP'`,
-      basket: `'${MARKER}-BASKET'`,
-      invoice: idOf(1),
-      entry: `'${MARKER}-JE-1'`,
-      total: '22',
-      ...overrides,
-    }
-    return (
-      'insert into checkout_finalisation (idempotency_key, request_fingerprint, basket_id, ' +
-      'invoice_id, journal_entry_id, trading_date, tender_total_fils) values (' +
-      `${v.key}, ${v.fingerprint}, ${v.basket}, ${v.invoice}, ${v.entry}, '2026-09-19'::date, ` +
-      `${v.total})`
-    )
-  }
-
-  /** One tender. Every field overridable, and the defaults are a tender that is accepted. */
-  const tender = (overrides = {}) => {
-    const v = {
-      invoice: idOf(1),
-      no: '1',
-      kind: "'cash'",
-      account: "'1010'",
-      amount: '22',
-      reference: 'null',
-      ...overrides,
-    }
-    return (
-      'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, amount_fils, ' +
-      `reference, trading_date) values (${v.invoice}, ${v.no}, ${v.kind}, ${v.account}, ` +
-      `${v.amount}, ${v.reference}, '2026-09-19'::date)`
-    )
-  }
-
-  /** One appointment link. The constraint this gate is most about lives on `appointment_id`. */
-  const link = (overrides = {}) => {
-    const v = { invoice: idOf(1), appointment: `'${APPOINTMENT}'`, lineNo: '1', ...overrides }
-    return (
-      'insert into invoice_appointment (invoice_id, appointment_id, line_no) values (' +
-      `${v.invoice}, ${v.appointment}::uuid, ${v.lineNo})`
-    )
-  }
-
-  /** Two invoices and two entries, so a probe about ONE constraint can trip only that one. */
-  const TWO = `${invoice(1)}; ${invoice(2)}; ${entry(1)}; ${entry(2)}`
-
-  const probes = [
-    {
-      // THE case. A second claim of one idempotency key, against a DIFFERENT invoice and entry so that
-      // only the primary key can refuse it — reusing the first claim's invoice id would violate
-      // `checkout_finalisation_one_invoice` as well, and which of two unique indexes PostgreSQL reports
-      // is not a contract. This is the refusal that makes finalisation idempotent rather than lucky.
-      name: 'checkout gate rejects a second claim of one idempotency key',
-      rule: 'checkout_finalisation_key_pk',
-      sql: `${TWO}; ${claim()}; ${claim({ invoice: idOf(2), entry: `'${MARKER}-JE-2'` })}`,
-    },
-    {
-      name: 'checkout gate rejects two finalisations claiming one invoice',
-      rule: 'checkout_finalisation_one_invoice',
-      sql: `${TWO}; ${claim()}; ${claim({ key: `'${MARKER}-KEY-2'`, entry: `'${MARKER}-JE-2'` })}`,
-    },
-    {
-      name: 'checkout gate rejects two finalisations claiming one journal entry',
-      rule: 'checkout_finalisation_one_entry',
-      sql: `${TWO}; ${claim()}; ${claim({ key: `'${MARKER}-KEY-2'`, invoice: idOf(2) })}`,
-    },
-    {
-      // The other half of "billed once": a retry is answered with the winner's invoice, and a DIFFERENT
-      // checkout that tries to bill a treatment already on a document is refused outright. An issued
-      // invoice is never edited or voided; the correction is a credit note (docs/04 §4).
-      name: 'checkout gate rejects an appointment billed on a second invoice',
-      rule: 'invoice_appointment_appointment_once',
-      sql: `${TWO}; ${link()}; ${link({ invoice: idOf(2) })}`,
-    },
-    {
-      name: 'checkout gate rejects the same appointment twice on one invoice',
-      rule: 'invoice_appointment_pk',
-      sql: `${TWO}; ${link()}; ${link({ lineNo: '2' })}`,
-    },
-    {
-      // `fils_nonneg` alone would accept this. Zero is a tender somebody started and did not fill in,
-      // and it reconciles to nothing against a counted drawer.
-      name: 'checkout gate rejects a tender of zero fils',
-      rule: 'payment_amount_positive',
-      sql: `${TWO}; ${tender({ amount: '0' })}`,
-    },
-    {
-      name: 'checkout gate rejects a tender kind outside the closed list',
-      rule: 'payment_tender_kind_known',
-      sql: `${TWO}; ${tender({ kind: "'gift_card'" })}`,
-    },
-    {
-      // An empty string is not a missing reference; it is a caller that meant null and said something
-      // else, and the difference is the whole record when a card payment is disputed.
-      name: 'checkout gate rejects a blank tender reference',
-      rule: 'payment_reference_nonempty',
-      sql: `${TWO}; ${tender({ reference: "''" })}`,
-    },
-    {
-      // The snapshotted account has to be a real one, or the tender posts nowhere and the drawer cannot
-      // be reconciled to the ledger at all.
-      name: 'checkout gate rejects a tender posted to an account the chart does not contain',
-      rule: 'payment_posting_account_code_fkey',
-      sql: `${TWO}; ${tender({ account: "'9999'" })}`,
-    },
-    {
-      name: 'checkout gate rejects a blank idempotency key',
-      rule: 'checkout_finalisation_key_nonempty',
-      sql: `${TWO}; ${claim({ key: "'   '" })}`,
-    },
-    {
-      // Without the fingerprint a key replayed with a DIFFERENT basket is answered with the first
-      // invoice, and the caller reads that as success — 0024's argument for `booking_idempotency`.
-      name: 'checkout gate rejects a blank request fingerprint',
-      rule: 'checkout_finalisation_fingerprint_nonempty',
-      sql: `${TWO}; ${claim({ fingerprint: "''" })}`,
-    },
-    {
-      name: 'checkout gate rejects a finalisation that collected nothing',
-      rule: 'checkout_finalisation_tender_total_positive',
-      sql: `${TWO}; ${claim({ total: '0' })}`,
-    },
-  ]
-
-  if (!dbUrl) {
-    check(
-      'the checkout constraints reject their known-bad fixtures',
-      false,
-      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
-    )
-  } else {
-    for (const { name, rule, sql: statements } of probes) {
-      checkRejectedBy(name, psqlProbe(statements), rule)
-    }
-
-    // The control, and the reason the twelve probes above mean anything: the correct set of rows — two
-    // documents, two entries, one claim, one tender and one link — is ACCEPTED. Without it a renamed
-    // column or a broken connection string would reject every probe and this gate would report twelve
-    // passes while examining nothing.
-    const accepted = psqlProbe(`${TWO}; ${claim()}; ${tender()}; ${link()}`)
-    check(
-      'checkout gate accepts one claim, one tender and one appointment link',
-      !accepted.failed,
-      `rejected the finalisation this unit exists to write:\n${accepted.output}`,
-    )
-
-    // The second control: a SECOND appointment on the same invoice is accepted, so the fourth probe is
-    // about one appointment on two documents rather than about the link table refusing a second row —
-    // which would make every two-treatment checkout in the business unbillable.
-    const twoLines = psqlProbe(
-      `${TWO}; ${link()}; ${link({ appointment: `'${OTHER_APPOINTMENT}'`, lineNo: '2' })}`,
-    )
-    check(
-      'checkout gate accepts two appointments on one invoice',
-      !twoLines.failed,
-      `a two-treatment checkout was refused:\n${twoLines.output}`,
-    )
-  }
-
-  // --- the posting rule, broken five ways ---------------------------------------------------------
-  //
-  // Every case edits a shipped file and restores it in a `finally`, and every anchor goes through
-  // `replaceOnce` (brief rule 20): `String.replace` takes the first match silently, and three cases in
-  // this file have edited the wrong construct and then reported PASS about a file that still contained
-  // exactly what they meant to remove.
-  const POSTING = 'packages/core/src/checkout/posting.ts'
-  const POSTING_TEST = 'packages/core/src/checkout/posting.test.ts'
-  const FINALISE = 'packages/db/src/services/checkout-finalise.ts'
-  const FINALISE_ITEST = 'packages/db/src/services/checkout-finalise.itest.ts'
-  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
-  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
-
-  // 81m. Card money debited to the bank instead of to the terminal clearing account. It balances
-  //      perfectly and leaves the bank reconciliation permanently out by every unsettled batch and every
-  //      processing fee — the failure an accountant discovers months later.
-  {
-    const result = withEditedFile(
-      POSTING,
-      (text) =>
-        replaceOnce(
-          text,
-          '  card_in_salon: ACCOUNTS.cardTerminalClearing,',
-          '  card_in_salon: ACCOUNTS.bankCurrent,',
-        ),
-      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
-    )
-    check('card money debited to the bank fails the posting tests', result.failed)
-  }
-
-  // 81n. The discount's VAT left off the output VAT account. The entry then credits tax on an amount the
-  //      customer never paid — M-TILL-05's `vatIfDiscountTaxedSeparately` arriving in the ledger instead
-  //      of on the document — and it no longer balances either.
-  {
-    const result = withEditedFile(
-      POSTING,
-      (text) =>
-        replaceOnce(
-          text,
-          "    record(movements, OUTPUT_VAT_ACCOUNT, line.tax.vat.fils, 'VAT relieved by discounts')",
-          '    // removed by gate 81n',
-        ),
-      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
-    )
-    check('a discount that does not relieve its VAT fails the posting tests', result.failed)
-  }
-
-  // 81o. An account whose debits and credits cancel posted as a zero line instead of omitted. The
-  //      11-fils probe is exactly that case — the 6 fils actually charged carries no VAT — and a zero
-  //      line is refused by `journal_line_exactly_one_side` in the database, so this is a posting that
-  //      cannot be stored at all.
-  {
-    const result = withEditedFile(
-      POSTING,
-      (text) => replaceOnce(text, '    if (net === 0) continue', '    // removed by gate 81o'),
-      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
-    )
-    check('a zero-movement account posted as a line fails the posting tests', result.failed)
-  }
-
-  // 81p. The tenders no longer required to add up to the basket. A partial payment leaves a receivable
-  //      and an over-tender gives change — both M-TILL-07's — and absorbing either here posts an entry
-  //      that balances against the wrong cash.
-  {
-    const result = withEditedFile(
-      POSTING,
-      (text) =>
-        replaceOnce(
-          text,
-          '    throw new TendersDoNotCoverBasket(',
-          '    if (tendered.fils !== tendered.fils) throw new TendersDoNotCoverBasket(',
-        ),
-      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
-    )
-    check('tenders that need not cover the basket fail the posting tests', result.failed)
-  }
-
-  // 81q. Revenue credited at the wrong figure by one fils. The narrowest possible break, and the one
-  //      that says the entry is checked against the document rather than against itself: an entry whose
-  //      two sides were both wrong by the same amount would still balance.
-  {
-    const result = withEditedFile(
-      POSTING,
-      (text) =>
-        replaceOnce(
-          text,
-          "      record(movements, line.account, line.tax.net.fils, 'Treatments delivered')",
-          "      record(movements, line.account, line.tax.net.fils - 1, 'Treatments delivered')",
-        ),
-      () => runExpectingFailure('pnpm', unitRun(POSTING_TEST)),
-    )
-    check('revenue credited one fils short fails the posting tests', result.failed)
-  }
-
-  // 81r. THE case for the transaction half, and the one a green suite would never notice: the idempotency
-  //      claim inserted with `on conflict do nothing`. The second finalisation then does not bounce off
-  //      `checkout_finalisation_key_pk` at all — it writes a SECOND document and returns it, which is two
-  //      invoices for one sale. A key the database refuses and a claim the repository tolerates look
-  //      identical until this case is run.
-  if (dbUrl) {
-    const result = withEditedFile(
-      FINALISE,
-      (text) =>
-        replaceOnce(
-          text,
-          '            ${input.tradingDate}::date, ${tenderTotalFils}\n          )\n        `',
-          '            ${input.tradingDate}::date, ${tenderTotalFils}\n          )\n' +
-            '          on conflict (idempotency_key) do nothing\n        `',
-        ),
-      () => runExpectingFailure('pnpm', itestRun(FINALISE_ITEST)),
-    )
-    check(
-      'an idempotency claim that tolerates a conflict fails the finalisation itest',
-      result.failed,
-    )
-  } else {
-    check(
-      'an idempotency claim that tolerates a conflict fails the finalisation itest',
-      false,
-      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
-    )
-  }
-
-  // 81w. The control for 81m-81q: the same runner, on the same file, with nothing edited, must pass. Five
-  //      cases above assert that a broken posting rule fails; if the suite failed for an unrelated reason
-  //      — a missing dependency, a renamed path — all five would report PASS and none of them would be
-  //      about the posting rule.
-  {
-    const result = run('pnpm', unitRun(POSTING_TEST))
-    check('the posting tests pass with nothing edited', !result.failed, result.output)
-  }
-
-  // 81x. And the control for 81r, for the same reason: the finalisation itest passes on the committed
-  //      tree, so 81r is about the `on conflict` and not about a suite that was already red.
-  if (dbUrl) {
-    const result = run('pnpm', itestRun(FINALISE_ITEST))
-    check('the finalisation itest passes with nothing edited', !result.failed, result.output)
   }
 }
 
