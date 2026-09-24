@@ -78,15 +78,60 @@ const INSTANTS = [
   '2026-09-25T10:00:00.000Z',
 ] as const
 
+/**
+ * The channel and purpose are WEIGHTED towards the ones being asked about, and that is load-bearing.
+ *
+ * Uniform `constantFrom` over three channels and three purposes was the first version, and it made this
+ * property vacuous most of the time. A record is applicable only when its channel is `sms`, its purpose
+ * is `marketing` and its instant is at or before `NOW`: 1/3 x 1/3 x 5/6, about 0.09. Over a set averaging
+ * four records that is 0.37 applicable records expected, so the overwhelming majority of generated sets
+ * had fewer than TWO applicable records — and with fewer than two, no permutation can change the answer
+ * and the property holds for a resolver that is completely order-dependent.
+ *
+ * It was not a theory. Gate case 72a breaks `resolveConsent`'s newest-record reduce and asserts the
+ * mutant is caught by name; run eight times against the identical mutant it named the rule in seven and
+ * missed it in one, because that eighth run drew forty sets none of which could tell first from newest.
+ * The mutant always failed the suite — the fixed-order cases next door see it — so the visible symptom
+ * was a gate reporting a rule as missing, which reads as a gate that does not fire.
+ *
+ * 4:1 puts the applicable probability at 0.8 x 0.8 x 5/6 = 0.556, and `orderSensitiveSets` below counts
+ * what that actually yields rather than trusting the arithmetic. The other channels and purposes still
+ * appear, because "the filter is applied at all" is part of the same claim.
+ */
 const arbitraryRecord = (index: number): fc.Arbitrary<ConsentRecord> =>
   fc.record({
     id: fc.constant(`c${index}`),
-    channel: fc.constantFrom(CHANNEL, 'whatsapp', 'email'),
-    purpose: fc.constantFrom(PURPOSE, 'review_request', 'photography'),
+    channel: fc.oneof(
+      { arbitrary: fc.constant(CHANNEL), weight: 4 },
+      { arbitrary: fc.constantFrom('whatsapp', 'email'), weight: 1 },
+    ),
+    purpose: fc.oneof(
+      { arbitrary: fc.constant(PURPOSE), weight: 4 },
+      { arbitrary: fc.constantFrom('review_request', 'photography'), weight: 1 },
+    ),
     kind: fc.constantFrom('granted' as const, 'withdrawn' as const),
     recordedAt: fc.constantFrom(...INSTANTS).map(at),
     wordingId: fc.constantFrom('w1', 'w2', UNSUPPLIED_VERSION_ID, null),
   })
+
+/**
+ * Whether a different order of THIS set could give a different answer.
+ *
+ * Two applicable records are necessary and not sufficient: two that agree on kind, wording and instant
+ * are interchangeable, so permuting them proves nothing. The condition is two applicable records that
+ * differ in at least one of the three.
+ */
+const couldDisagreeUnderAnotherOrder = (records: readonly ConsentRecord[]): boolean => {
+  const applicable = records.filter(
+    (record) =>
+      record.channel === CHANNEL && record.purpose === PURPOSE && record.recordedAt <= NOW,
+  )
+  if (applicable.length < 2) return false
+  const shapes = new Set(
+    applicable.map((record) => `${record.kind}|${record.wordingId}|${String(record.recordedAt)}`),
+  )
+  return shapes.size > 1
+}
 
 const arbitraryRecords: fc.Arbitrary<readonly ConsentRecord[]> = fc
   .integer({ min: 0, max: 8 })
@@ -127,8 +172,10 @@ function permute<T>(items: readonly T[], seed: number): T[] {
 
 describe('resolveConsent is insertion-order independent', () => {
   it('yields the identical resolution for 1,000 shuffles of the same record set', () => {
+    let orderSensitiveSets = 0
     fc.assert(
       fc.property(arbitraryRecords, (records) => {
+        if (couldDisagreeUnderAnotherOrder(records)) orderSensitiveSets += 1
         const expected = shapeOf(resolveConsent(logOf(records), CHANNEL, PURPOSE, NOW))
         for (let seed = 1; seed <= 25; seed += 1) {
           const shuffled = permute(records, seed * 2_654_435_761)
@@ -140,6 +187,23 @@ describe('resolveConsent is insertion-order independent', () => {
       // shuffle of a thousand different sets would not compare a set against itself at all.
       { numRuns: 40 },
     )
+    // The control that stops the 1,000 shuffles above being 1,000 comparisons of an answer with itself.
+    //
+    // A set with fewer than two DIFFERING applicable records cannot disagree under any permutation, so a
+    // run made entirely of those would pass for a resolver that reads `records[0]`.
+    //
+    // MEASURED, not assumed: twenty runs of this file with the weighted generator gave 15 to 29 of the 40
+    // sets qualifying, mean 21.1, median 21 — about 0.53 each, which matches the 0.8 x 0.8 x 5/6 the
+    // generator's comment works out. The floor is 6, which is roughly five standard deviations below that
+    // mean and so will not trip on its own; the failure it is here to catch is the uniform generator's
+    // nought-to-two, an order of magnitude away. A floor set just under the observed minimum would itself
+    // become a flake, which is the mistake this whole change is about.
+    expect(
+      orderSensitiveSets,
+      `only ${orderSensitiveSets} of 40 generated sets had two applicable records that differ, so the ` +
+        'shuffles mostly compared an answer with itself and this property would pass for an ' +
+        'order-dependent resolver. The generator has drifted — see arbitraryRecord.',
+    ).toBeGreaterThanOrEqual(6)
   })
 
   it('catches a resolver that takes the LAST applicable record — the known-bad control', () => {

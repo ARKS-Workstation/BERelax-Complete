@@ -8,7 +8,7 @@
  *
  * This covers: the unit runner, the typechecker, the linter, and the CI workflow's completeness.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 let failures = 0
@@ -114,6 +114,26 @@ const runExpectingFailure = (cmd, args) => {
   } catch (err) {
     assertCaptured(err, cmd, args)
     return { failed: true, output: `${err.stdout ?? ''}${err.stderr ?? ''}` }
+  }
+}
+
+/**
+ * Both streams of a command, whether it succeeded or not.
+ *
+ * `run` returns `execFileSync`'s value, which is stdout ALONE — on a command that exits zero its stderr is
+ * captured by the pipe and then dropped, so a case asserting on a successful command's stderr asserts on
+ * an empty string and fails for no reason connected to the command. That is how case 89f first came out
+ * red against a child that had done exactly the right thing.
+ *
+ * `spawnSync` gives both. Used where the thing being checked is written to stderr, which for a test runner
+ * is anything a passing or SKIPPED test says: vitest's reporter shows a test's captured stdout only when
+ * the test fails, so `process.stderr.write` is the only way a skip can explain itself.
+ */
+const runBothStreams = (cmd, args) => {
+  const result = spawnSync(cmd, args, CHILD)
+  return {
+    failed: result.status !== 0,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
   }
 }
 
@@ -21661,6 +21681,170 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'harness gate: the old head-only excerpt loses the verdict, which is why 88f asserts the tail',
       !headOnly.includes('line 200') && !headOnly.some((line) => line.includes('elided')),
       'the head-only excerpt somehow contained the tail, so 88f is not testing what it says',
+    )
+  }
+}
+
+// 89. The three checks that used to fail for reasons other than the thing they measure. Each of the three
+//     cost at least one full `pnpm verify` — about two and a half hours on this container — and each was
+//     read as a defect in the code under test before it was read as a defect in the check.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const CONSENT_PROPERTY = 'packages/core/src/consent/resolve.property.test.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+  const PORTS_SUITE = 'packages/harness/src/ports.test.ts'
+  const SERVER = 'packages/harness/src/server.ts'
+  const SERVER_SUITE = 'packages/harness/src/server.test.ts'
+  const PERF = 'packages/fixtures/src/availability-perf.itest.ts'
+
+  // 89a. The consent generator back to uniform, which is what made gate case 72a fail about one run in
+  //      eight: a record is applicable only when its channel, purpose and instant all match, so uniform
+  //      thirds put the expected count of applicable records at 0.37 and most generated sets could not
+  //      disagree under ANY permutation. The property then holds for a completely order-dependent
+  //      resolver, and the symptom is 72a reporting a rule as missing.
+  checkRejectedBy(
+    'determinism gate: a consent generator that cannot produce two differing applicable records is caught',
+    withEditedFile(
+      CONSENT_PROPERTY,
+      // BOTH fields, and that is the finding rather than a detail. Reverting `channel` alone leaves
+      // purpose weighted, which puts the applicable probability at (1/3)(0.8)(5/6) = 0.22 and still yields
+      // enough differing sets to clear the floor of 6 — so the one-field mutant PASSED and this case was
+      // red against a generator that was fine. The vacuity needs both thirds to come back.
+      (text) =>
+        replaceOnce(
+          replaceOnce(
+            text,
+            `    channel: fc.oneof(
+      { arbitrary: fc.constant(CHANNEL), weight: 4 },
+      { arbitrary: fc.constantFrom('whatsapp', 'email'), weight: 1 },
+    ),`,
+            "    channel: fc.constantFrom(CHANNEL, 'whatsapp', 'email'),",
+          ),
+          `    purpose: fc.oneof(
+      { arbitrary: fc.constant(PURPOSE), weight: 4 },
+      { arbitrary: fc.constantFrom('review_request', 'photography'), weight: 1 },
+    ),`,
+          "    purpose: fc.constantFrom(PURPOSE, 'review_request', 'photography'),",
+        ),
+      () => runExpectingFailure('pnpm', unit(CONSENT_PROPERTY)),
+    ),
+    'generated sets had two applicable records that differ',
+  )
+
+  // 89b. `testPort` without its skip. Chromium refuses to CONNECT to the ports in RESTRICTED_PORTS, so the
+  //      server starts perfectly and every Playwright assertion then fails on a navigation the browser
+  //      declined. `breakpoint-preview` contains eight of them in 300.
+  checkRejectedBy(
+    'determinism gate: drawing a port a browser refuses is caught',
+    withEditedFile(
+      PORTS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const restricted of blocked) if (port >= restricted) port += 1',
+          '  // mutant: the restricted ports are not skipped',
+        ),
+      () => runExpectingFailure('pnpm', unit(PORTS_SUITE)),
+    ),
+    'which a browser refuses to connect to',
+  )
+
+  // 89c. And the off-by-one, because mapping an index over the usable ports is exactly the kind of
+  //      arithmetic that silently loses the port just above each restricted one.
+  checkRejectedBy(
+    'determinism gate: a skip that loses a usable port is caught',
+    withEditedFile(
+      PORTS,
+      (text) =>
+        replaceOnce(
+          text,
+          '  for (const restricted of blocked) if (port >= restricted) port += 1',
+          '  for (const restricted of blocked) if (port > restricted) port += 1',
+        ),
+      () => runExpectingFailure('pnpm', unit(PORTS_SUITE)),
+    ),
+    'usable port(s)',
+  )
+
+  // 89d. The fallback pattern. `testPort` not drawing those ports is the fix; this is what stops a port
+  //      Chromium adds to its table LATER being a hard failure with no redraw.
+  checkRejectedBy(
+    'determinism gate: an unusable-port pattern that stops matching is caught',
+    withEditedFile(
+      SERVER,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const UNUSABLE_PORT = /Bad port|ERR_UNSAFE_PORT|is reserved for/i',
+          'export const UNUSABLE_PORT = /ERR_UNSAFE_PORT/i',
+        ),
+      () => runExpectingFailure('pnpm', unit(SERVER_SUITE)),
+    ),
+    'Bad port',
+  )
+
+  // 89e. The p95 budget must still be a budget. Raise the ceiling so the case cannot skip, drop the budget
+  //      to 1 ms, and the assertion has to fire — otherwise "skip when the machine is loaded" would have
+  //      quietly become "never assert".
+  checkRejectedBy(
+    'determinism gate: the p95 budget still fails when it is breached',
+    withEditedFile(
+      PERF,
+      (text) =>
+        replaceOnce(
+          replaceOnce(
+            text,
+            'const SEQUENTIAL_CEILING_MS = 15',
+            'const SEQUENTIAL_CEILING_MS = 100_000',
+          ),
+          'const P95_BUDGET_MS = 300',
+          'const P95_BUDGET_MS = 1',
+        ),
+      () => runExpectingFailure('pnpm', integration(PERF)),
+    ),
+    'breaches the 1 ms budget',
+  )
+
+  // 89f. And over the ceiling it must SKIP rather than pass, with the reason readable. A skip that vitest
+  //      reports as a pass is a dropped acceptance check, and `console.log` would not do: this reporter
+  //      shows a test's stdout only when it fails, which is why the reason goes to stderr.
+  {
+    const { failed, output } = withEditedFile(
+      PERF,
+      (text) =>
+        replaceOnce(text, 'const SEQUENTIAL_CEILING_MS = 15', 'const SEQUENTIAL_CEILING_MS = 0'),
+      () => runBothStreams('pnpm', integration(PERF)),
+    )
+    const text = String(output)
+    check(
+      'determinism gate: over the ceiling the p95 case skips, and says why where it can be read',
+      !failed && text.includes('1 skipped') && text.includes('NOT asserting the 300 ms budget'),
+      `expected a skip with its reason on stderr; failed=${failed}:\n${text}`,
+    )
+  }
+
+  // 89g. The control for all six: the committed files pass. Without it every case above could be passing
+  //      because the suite was already red.
+  {
+    const clean = [
+      unit(CONSENT_PROPERTY),
+      unit(PORTS_SUITE),
+      unit(SERVER_SUITE),
+      integration(PERF),
+    ].map((args) => run('pnpm', args))
+    check(
+      'determinism gate: the committed consent, ports, server and perf suites all pass',
+      clean.every((result) => !result.failed),
+      `a committed suite failed:\n${clean.map((result) => String(result.output)).join('')}`,
     )
   }
 }

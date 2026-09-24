@@ -105,6 +105,17 @@ export function portIsFree(port: number): Promise<boolean> {
  */
 export const ADDRESS_IN_USE = /EADDRINUSE|address already in use|Port \d+ is in use/i
 
+/**
+ * The text a port that cannot be used at all produces, as distinct from one that is merely taken.
+ *
+ * Chromium refuses to connect to the ports in {@link RESTRICTED_PORTS} and says so by naming the service
+ * — `Bad port: "6665" is reserved for ircu`. `testPort` no longer draws those, which is the actual fix;
+ * this pattern is the second line, because that table is Chromium's and not ours, and a port it adds
+ * later would otherwise be a hard failure with no retry. A redraw costs a few seconds; a suite whose every
+ * assertion fails on a navigation the browser declined costs a run and reads as a flake.
+ */
+export const UNUSABLE_PORT = /Bad port|ERR_UNSAFE_PORT|is reserved for/i
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
@@ -215,7 +226,7 @@ async function waitForServer(input: {
   const deadline = Date.now() + readyWithinMs
   for (;;) {
     if (child.exitCode !== null || child.signalCode !== null) {
-      if (ADDRESS_IN_USE.test(output())) return 'address-in-use'
+      if (ADDRESS_IN_USE.test(output()) || UNUSABLE_PORT.test(output())) return 'address-in-use'
       rmSync(temp, { recursive: true, force: true })
       throw new Error(
         `next start exited with ${child.exitCode ?? child.signalCode} before answering on ${origin}. ` +

@@ -176,6 +176,46 @@ caught a real defect in this repository.
     in their files — and every one then reported PASS about a file that still contained what the case meant
     to remove. `withEditedFile`'s no-op guard cannot catch it, because the edit does change something.
 
+21. **A correctness test must not carry an implicit performance budget.** `vitest.config.ts` declares no
+    `testTimeout`, so every test inherits 5,000 ms. A property test with hundreds of cases, or a paging
+    test over tens of thousands of rows, needs an explicit `}, 30_000)` and a comment saying why. Four
+    files have now failed on this, each one under coverage on a loaded machine and each one passing in
+    about two seconds alone — so the failure names the wrong thing and costs a two-and-a-half-hour verify.
+
+22. **A property test's generator has to be able to exercise the claim, and the test has to count that.**
+    `resolveConsent`'s order-independence property generated a record set whose channel, purpose and
+    instant each had to match: uniform thirds put the expected count of *applicable* records at 0.37, so
+    most generated sets had fewer than two and no permutation could change the answer. The property held
+    for a completely order-dependent resolver about one run in eight, and the visible symptom was a gate
+    case reporting a rule as missing. Weight the generator towards inputs that can disagree, count how
+    many of the generated cases actually could, and assert that count against a floor you have MEASURED —
+    a floor set just under the observed minimum becomes its own flake.
+
+23. **A wall-clock assertion measures the machine, not the code.** Where an acceptance line names a
+    latency it also names where — "on the CI Postgres" — and this container is not that. Assert the WORK
+    instead wherever the claim allows it: statements issued, rows read, round trips. Where the absolute
+    figure has to stay, gate it on a signal that says whether the machine can hold it, skip loudly with
+    both numbers when it cannot, and put that message on **stderr** — vitest's reporter shows a test's
+    stdout only when the test fails, so a `console.log` in a passing or skipped test is invisible.
+
+24. **A fresh database needs three steps, not two.** Create it, apply
+    `packages/db/migrations/*.sql` in order, and then `pnpm seed`. Without the seed,
+    `packages/hr/src/employee.itest.ts` fails on "the therapist rows the seed creates ... 19 of them" and
+    `availability-perf.itest.ts` fails its answer-shape assertions, and neither failure mentions seeding.
+    Seed before any suite runs: the seeder is idempotent per table, so a suite that has already inserted a
+    consent row makes it skip that table and leaves the database half seeded.
+
+25. **Use a fresh, uniquely-named log file for every verify run, and end it with a sentinel.** `rm`
+    unlinks but a running process keeps writing to the old inode, so a reused path hands you a previous
+    run's result. Write `echo "VERIFY_EXIT=$?" > "$LOG.done"` and read the sentinel, not the tail. Twice
+    in one session a stale log was read as a live one, once as a 40-minute-old suite mistaken for a
+    current run.
+
+26. **Never `pkill` by pattern.** Several worktrees run the same commands at once; filter by
+    `readlink /proc/<pid>/cwd` so you only stop your own. A blanket `pkill -f test-gates.mjs` killed
+    another unit's run mid-`withEditedFile` and left a mutated shipped file behind in its worktree — the
+    exact hazard rule 13 is about, inflicted from outside.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy

@@ -89,11 +89,60 @@ export function bandsReachingEphemeralRange(): readonly string[] {
 }
 
 /**
- * A port inside the suite's own band.
+ * The ports a browser refuses to connect to, so a server bound to one cannot be reached.
+ *
+ * Chromium keeps a table of ports reserved for protocols it will not speak to over HTTP
+ * (`kRestrictedPorts` in `net/base/port_util.cc`) and answers `ERR_UNSAFE_PORT` for them; the message
+ * that surfaces names the service, `Bad port: "6665" is reserved for ircu`. The server starts perfectly
+ * — nothing is in use, nothing crashes — and every Playwright assertion in the suite then fails on a
+ * navigation the browser declined.
+ *
+ * Five of the fourteen bands contain one. `breakpoint-preview` [6400, 6700) contains EIGHT — 6566 and
+ * 6665-6669 and 6679 and 6697 — so roughly one run of that suite in thirty-eight drew a port its own
+ * assertions could not use, with no `EADDRINUSE` for {@link startWebServer} to redraw on. It read as a
+ * flaky suite for the same reason the random-port collision did: the cause is invisible from the symptom.
+ *
+ * Only the entries that can fall inside a band are listed; the table's low ports (1-995) and 10080 are
+ * below and above every band and listing them would invite the belief that this is the whole table.
+ */
+export const RESTRICTED_PORTS: readonly number[] = [
+  3659, // apple-sasl
+  4045, // lockd
+  4190, // sieve
+  5060, // sip
+  5061, // sips
+  6000, // X11
+  6566, // sane-port
+  6665, // ircu
+  6666, // ircu
+  6667, // ircu
+  6668, // ircu
+  6669, // ircu
+  6679, // osaut
+  6697, // ircs
+] as const
+
+/** The restricted ports inside one band, ascending. Empty for a band that has none. */
+export function restrictedPortsIn(band: TestPortBand): readonly number[] {
+  const end = band.start + band.width
+  return RESTRICTED_PORTS.filter((port) => port >= band.start && port < end)
+}
+
+/** How many ports in a band a suite can actually be reached on. */
+export function usableWidth(band: TestPortBand): number {
+  return band.width - restrictedPortsIn(band).length
+}
+
+/**
+ * A port inside the suite's own band, never one a browser refuses.
  *
  * Random within the band, because several worktrees usually run at once and a fixed port means the second
  * one reads the first one's build. Random *within a band this file owns*, because a band the suite picked
  * for itself is how the overlaps above happened.
+ *
+ * The restricted ports are skipped by mapping an index over the USABLE ports rather than by drawing and
+ * redrawing: a draw-and-retry loop has no bound, and a rejection this function cannot see the reason for
+ * is what {@link RESTRICTED_PORTS} exists to stop. Every usable port stays equally likely.
  */
 export function testPort(suite: TestSuiteName): number {
   const band = TEST_PORT_BANDS[suite]
@@ -101,5 +150,9 @@ export function testPort(suite: TestSuiteName): number {
   if (clashes.length > 0) {
     throw new Error(`[test-port-bands-overlap] ${clashes.join('; ')}`)
   }
-  return band.start + Math.floor(Math.random() * band.width)
+  const blocked = restrictedPortsIn(band)
+  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length))
+  // Ascending, so each skip can only push the answer past a port it has already accounted for.
+  for (const restricted of blocked) if (port >= restricted) port += 1
+  return port
 }

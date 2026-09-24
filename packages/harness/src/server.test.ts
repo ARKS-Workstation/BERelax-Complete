@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ADDRESS_IN_USE, childEnv, portIsFree } from './server.ts'
+import { ADDRESS_IN_USE, childEnv, portIsFree, UNUSABLE_PORT } from './server.ts'
 
 /**
  * The two pieces of {@link startWebServer} that decide whether a port collision is retried or reported as a
@@ -100,6 +100,45 @@ describe('the address-in-use pattern', () => {
     // The same defect `ports.test.ts` records: `.test()` on a `/g` pattern answers true, false, true for
     // identical input, so half the checks in a loop would silently pass.
     expect(ADDRESS_IN_USE.global).toBe(false)
+  })
+})
+
+/*
+ * The second reason to redraw: a port that cannot be used at all, rather than one that is taken.
+ *
+ * `testPort` no longer draws Chromium's restricted ports, which is the fix. This pattern is the fallback
+ * for a port Chromium adds to that table later — without it such a port is a crash with no retry, and the
+ * suite fails on every assertion with a message about ircu.
+ */
+describe('the unusable-port pattern', () => {
+  const unusable = [
+    'Bad port: "6665" is reserved for ircu',
+    'net::ERR_UNSAFE_PORT at http://127.0.0.1:6566/robots.txt',
+    'Error: Port 6000 is reserved for X11 and cannot be used',
+  ]
+  for (const line of unusable) {
+    it(`matches ${JSON.stringify(line.slice(0, 44))}`, () => {
+      expect(UNUSABLE_PORT.test(line)).toBe(true)
+    })
+  }
+
+  const other = [
+    'Error: listen EADDRINUSE: address already in use 127.0.0.1:6668',
+    "Error: Cannot find module 'next/dist/server'",
+    '  ▲ Next.js 16.3.5\n  - Local:  http://127.0.0.1:6668\n ✓ Ready in 812ms',
+    'AppError: Invalid configuration — 1 problem(s):\n  APP_ENV: Invalid option',
+  ]
+  for (const line of other) {
+    it(`does not match ${JSON.stringify(line.slice(0, 44))}`, () => {
+      // The first control is the one that matters: an address-in-use line must NOT be read as an unusable
+      // port. Both lead to a redraw today, so a pattern that swallowed the other would look harmless — and
+      // the day the two are handled differently it would be wrong with no test to say so.
+      expect(UNUSABLE_PORT.test(line)).toBe(false)
+    })
+  }
+
+  it('is not a global regex, for the reason above', () => {
+    expect(UNUSABLE_PORT.global).toBe(false)
   })
 })
 
