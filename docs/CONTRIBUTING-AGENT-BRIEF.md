@@ -138,6 +138,14 @@ caught a real defect in this repository.
     `.next/types/**` exists only after a build, so the generated route types are checked only when one
     has happened. If your unit adds a route, build the app once before believing a clean typecheck.
 
+
+    **After a merge that touches `apps/web`, build BEFORE the integration suite.** `next start` serves
+    whatever `.next` was last built, so a route added on a branch is a 404 in a merged tree nobody built,
+    and the symptom names neither the merge nor the build: `expected 404 to be 303` from a route whose
+    source is right there, a route-spine case failing on a route the registry declares, and a client bundle
+    still holding the dependency a merge was supposed to remove. It cost an integration stage on the
+    five-unit merge — 38 failures across three files, none of them a defect. `pnpm --filter @berelax/web
+    build` first, then verify.
 18. **A server-starting suite draws its port from `@berelax/harness/ports`, never from arithmetic.**
     A band added to `TEST_PORT_BANDS` in that module, and claimed by `startWebServer({ suite: 'your-suite' })`
     — see rule 19 — or by a bare `testPort('your-suite')` if you need the number without a server. Do not

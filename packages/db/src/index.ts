@@ -458,6 +458,28 @@ export {
   type StoredProvisionalMarker,
 } from './repositories/journal.ts'
 export {
+  type AccruedMonthRow,
+  type AccruingEmployeeRow,
+  type LeaveAccrualInput,
+  type LeaveBalanceRow,
+  type LeaveEntitlementRuleRow,
+  readAccruedMonths,
+  readAccruingEmployees,
+  readLeaveBalances,
+  readLeaveEntitlementRules,
+  readUnpaidLeaveDaysByMonth,
+  type UnpaidLeaveDaysRow,
+  type WrittenLeaveAccrual,
+  writeLeaveAccruals,
+} from './repositories/leave.ts'
+export {
+  type ImportedOpeningBalance,
+  importLeaveOpeningBalances,
+  type LeaveOpeningBalanceImport,
+  type LeaveOpeningBalanceRow,
+  readLeaveOpeningBalances,
+} from './repositories/leave-opening-balance.ts'
+export {
   type CostByTemplate,
   type CostByTradingDate,
   type CostWindow,
@@ -1277,11 +1299,39 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `null = 'reassigned'` is NULL, which a CHECK passes: the obvious operator would let a LIVE flag carry
 // a successor and a resolution note.
 //
+// 66 is 0066_hr_leave.sql: leave entitlement, and the ledger a leave balance is the sum of (P-HR-08).
+// `leave_entitlement_rule` is `working_hours_rule`'s shape one subject along — one row per VERSION, keyed
+// on the first date it governs, because leave is asked about the PAST and a disputed month recomputed
+// after a policy change must use the policy that applied then. Every quantity is integer day-hundredths
+// (250 is 2.5 days) and `leave_entitlement_rule_annual_total_matches_monthly_accrual` holds the headline
+// entitlement to twelve times the monthly figure, so a version whose contract number disagrees with its
+// ledger number is not a storable row. `leave_movement` is the ledger, append-only with UPDATE and DELETE
+// raising ZH001 for every role, and `leave_balance` is a VIEW summing it — there is NO stored balance
+// column, which is the decision this file is the right place to record: a leave balance is the figure in
+// an HR system most often corrected retrospectively, and a stored one disagrees with the movements the
+// first time a month is re-accrued or a holiday withdrawn. `leave_movement_one_accrual_per_month` (a
+// partial unique index on `(employee_id, accrual_month)`) IS the accrual job's idempotency guarantee
+// rather than a check on it, and there is deliberately no `taken` movement kind: a request RESERVES when
+// it is made, approval only makes the reservation final, so an approval moves no balance and writes no
+// row. It creates NO table for leave requests: 0030's `leave_request` already carries the tstzrange
+// period, and the one decision 0030 left open — whether a leave day is aligned to the trading day or the
+// calendar day — is taken in `leaveCoveragePeriod()` in `@berelax/core` rather than in SQL, so a leave day
+// covers its session's 00:00-02:00 tail and `resolveTradingDate` stays the one reading of where a trading
+// day ends. Version 1 is seeded from the sentinel 1900-01-01 with every figure provisional against
+// Y9-leave-detail; carry-over expiry is seeded FALSE, which is where the two recorded provisional answers
+// conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
+// visible.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. 62, 63, 64 and 65 were the four allocations this note
-// recorded as open while their units were in flight, and all four have now landed — 55 through 65 are in
+// come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
+// flight in five worktrees, and all five have now landed in one integrating merge — 55 through 66 are in
 // use, so the four permanent ones above are the only gaps left. 55, 56 and 57 landed out of order and
-// within an hour of one another, and 62 through 65 landed together in one integrating merge, which is the
-// arrangement this note exists for: the number is a high-water mark, not a count, and no gap was closed
-// to tidy the sequence.
-export const SCHEMA_VERSION = 65 as const
+// within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
+// exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
+//
+// Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was
+// based before the others' paragraphs existed, so git took the incoming side of this region with nothing
+// to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
+// replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
+// unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
+export const SCHEMA_VERSION = 66 as const

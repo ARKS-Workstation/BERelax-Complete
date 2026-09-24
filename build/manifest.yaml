@@ -3254,7 +3254,7 @@ units:
       and writes the outbox events — all in one transaction, guarded by an idempotency key. Emits invoice.issued
       and payment.recorded carrying the booking id so A-FIRST can reach PAID.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-LIFE-01
@@ -5420,7 +5420,7 @@ units:
       centre with no login and no enumeration risk. Alphanumeric sender IDs cannot receive SMS, so this
       link is the only functional opt-out.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-03
@@ -6614,7 +6614,7 @@ units:
       the booking and its snapshotted money, a customer notification through the messaging gate, and a queue
       that holds appointments with no candidate rather than cancelling them.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -6947,7 +6947,7 @@ units:
       accrued monthly from an imported opening balance, sick-leave tiers, carry-over cap at the leave-year
       boundary, and worked-example tests that each name the rule they encode.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - P-HR-01
@@ -6975,6 +6975,100 @@ units:
       and there is no DB or clock access'
     - 'calendar-day counting is explicit: a 30-day annual request spanning a weekly rest day consumes 30
       days, proven by test against a working-day oracle that must differ'
+    - 'NOTE: the migration is packages/db/migrations/0066_hr_leave.sql and SCHEMA_VERSION is 66. 62, 63,
+      64 and 65 are held by units in flight in other worktrees, and that gap is not closed here for the
+      reason packages/db/src/index.ts already records: renumbering to close a gap is how two branches
+      apply one number to different SQL.'
+    - 'NOTE: this entry says "Y9-leave-policy is NEW and must be added to OPEN-QUESTIONS.md". It is not
+      new and no such id was created. docs/OPEN-QUESTIONS.md A2 already carries Y9-leave-detail —
+      "probation length, first-year and pro-rata accrual, carry-over cap and expiry, and whether a public
+      holiday inside annual leave is counted" — which is the same question. A second id for one question
+      would put two rows in the Unconfirmed Assumptions panel that can only be answered together, and
+      clearing one would clear half a decision. Y9-leave-detail was instead WIDENED to name the parts this
+      unit added (the leave-year anchor, the sick-leave band lengths, which absences stop accrual) and to
+      record the three places its answer is unsettled. Y8-leave was widened the same way, to describe the
+      importer and the flagged-zero default rather than the bare "Zero balances" it held. This entry''s own
+      blocked_on_owner list still names Y9-leave-policy and is deliberately left alone: renaming it would
+      change the row docs/PROGRESS.md renders, and regenerating that file needs `pnpm progress`, which this
+      unit is instructed not to run. Whoever marks the unit done should rename it to Y9-leave-detail in the
+      same pass.'
+    - 'NOTE: the two recorded provisional answers CONFLICT on carry-over expiry and the conflict is
+      resolved rather than averaged. This entry says "carry-over capped at 30 days and not expiring";
+      Y9-leave-detail said "30-day carry-over cap expiring after 12 months". 0066 seeds
+      carry_over_expires_after_one_leave_year = FALSE, because the direction of the error decides it:
+      expiring entitlement that should not expire removes days invisibly from a balance nobody re-reads,
+      while keeping days that should have lapsed only makes a balance too high and shows on a report
+      anybody can read. The engine implements BOTH and both are tested with worked examples, so answering
+      the question is a one-row change and not a code change. The field is a BOOLEAN and not a month count
+      on purpose: a count could state an expiry — "after seven months" — that the engine has no per-day
+      FIFO ledger to honour, and a policy the code silently rounds is worse than one it cannot express.'
+    - 'NOTE: ABSENT days are scoped, not satisfied in full. The accrual reduction takes unpaid-leave days
+      and ABSENT days as separate arguments, each behind its own flag on the rule row, and both are
+      covered by a worked example and its control — so the ENGINE is complete. But there is no attendance
+      register in this schema: ABSENT is P-HR-07''s variance outcome and P-HR-07 is still todo. The nightly
+      pass therefore reads unpaid days from employee_approved_leave and supplies ZERO absent days, which
+      is stated in apps/worker/src/jobs/leave-accrual.ts and in 0066 rather than guessed at. When the
+      register lands, the job gains one read and the engine gains nothing. Deferred to P-HR-07.'
+    - 'NOTE: a public holiday inside annual leave IS counted as a leave day, which reverses the position
+      Y9-leave-detail previously recorded ("public holidays inside leave NOT counted"), and that row now
+      says so. Two reasons. A leave day is a calendar day, which is this entry''s own last acceptance
+      line; and premises_closure is a FLOOR rather than a holiday calendar — P-HR-05 records that a public
+      holiday the premises trades through has no closure row at all — so excluding holidays would exclude
+      an unknown and varying subset of them, which is worse than excluding none. Deferred to P-HR-10,
+      which builds the calendar with its provisional-versus-confirmed states.'
+    - 'NOTE: the unit of account is an integer day-HUNDREDTH (250 is 2.5 days), for ADR 0007''s reason
+      applied to entitlement rather than to money: twelve months of accrual must equal the annual
+      entitlement to the last hundredth, and
+      leave_entitlement_rule_annual_total_matches_monthly_accrual holds the two figures to each other at
+      the database so a version whose contract number disagrees with its ledger number is unstorable. A
+      part month is pro-rated on the days employed and the division rounds UP — towards the employee —
+      because rounding down withholds entitlement invisibly at a hundredth of a day a month while rounding
+      up over-accrues by at most 0.12 of a day a year and shows on a balance anybody can read.'
+    - 'NOTE: deviations from this entry''s files list, each forced or deliberate. (1) There is NO
+      leave_balance table: leave_balance is a VIEW over leave_movement, because a leave balance is the
+      figure in an HR system most often corrected retrospectively and a stored column disagrees with the
+      movements the first time a month is re-accrued or a holiday withdrawn. It is also what makes this
+      entry''s own property — the sum of the movements always equals the balance — true by construction
+      rather than by a reconciliation job. (2) There is no separate leave_opening_balance TABLE either:
+      an opening balance is a leave_movement of kind opening_balance carrying its own source_note,
+      importer and provisional flag, so the import and the ledger cannot hold two different integers for
+      one fact. packages/db/src/repositories/leave-opening-balance.ts is still the importer, as the list
+      names it. (3) packages/db/src/repositories/leave.ts was ADDED beside it for the policy versions, the
+      accrual insert and the balance read, because a file called leave-opening-balance.ts holding the
+      whole ledger is a filename that lies. (4) The property suite is
+      packages/core/src/hr/leave-accrual.property.test.ts rather than part of leave-accrual.test.ts,
+      matching P-HR-05''s working-hours.property.test.ts, and it carries an explicit 30-second timeout
+      because vitest.config.ts declares none and the 5,000 ms default fails on a loaded machine with a
+      message about the wrong thing. (5) The integration suite is
+      apps/worker/src/jobs/leave-accrual.itest.ts, beside the job it drives, as credential-sweep.itest.ts
+      is. (6) No admin screen is built: none of this entry''s acceptance criteria is about a page, and an
+      HR leave screen needs the session and role plumbing an authenticated admin route has. Deferred to
+      the unit that builds the HR section, with P-HR-09''s leave approval page.'
+    - 'NOTE: a leave request RESERVES when it is made and there is no `taken` movement kind. Approval
+      moves no balance and writes no row, because the reservation already took the days out and a taken
+      row would have to be paired with a reversal of the reservation in the same breath — two rows saying
+      one thing, which is how a ledger comes to disagree with itself. Reserving at request is also the
+      strict reading: two pending requests, each affordable on its own and together over the balance, is
+      the failure a balance-at-approval model permits, and it is discovered when the second is approved
+      and the balance goes negative. The property suite replays the same corpus through that model as a
+      mutant and requires it to be caught.'
+    - 'NOTE: runLeaveAccrual takes an optional employeeIds narrowing, and the monthly cron does not use
+      it. It exists for two real callers — an admin re-run after a corrected employment date, and the
+      integration suite, which must isolate itself by narrowing what the code under test can SEE (brief
+      rule 12) rather than by deleting rows afterwards. Unnarrowed against the shared test database the
+      pass would accrue two years of entitlement for the nineteen seeded therapists and for every other
+      file''s fixture employees, into an append-only table.'
+    - 'NOTE: a finding in an existing gate, fixed with its own known-bad fixtures.
+      scripts/check-schema-conventions.mjs decides whether to demand the append-only trigger pair by
+      matching the phrase "UPDATE and DELETE raise" in a table''s SQL comment, and it read the comment as
+      a single `[^;]*` run. SQL concatenates adjacent string literals, so a declaration written across two
+      of them was invisible to it — and bill_line (0028) is written exactly that way ("Append-only: UPDATE
+      and " + "DELETE raise."), so that rule had never been applied to that table at all. Its trigger pair
+      happens to be complete, which is why nothing was failing: a passing check that examined nothing,
+      ADR 0002''s subject. A semicolon in the prose hid a declaration the same way. The comment scan now
+      joins adjacent literals and unwraps '''' escapes, which strictly widens what the rule covers (16
+      tables rather than 15, all passing), and cases 87m and 87n put both holes back with a table that has
+      no triggers and require the rule to fire by name.'
     files:
     - packages/db/migrations/*_hr_leave.sql
     - packages/core/src/hr/leave-accrual.ts

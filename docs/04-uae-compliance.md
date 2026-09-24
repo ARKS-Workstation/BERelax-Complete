@@ -197,6 +197,20 @@ a rota validator enforcing working-hours, rest, break and overtime limits, month
 posting to the ledger, and field-level encryption plus separate access control on identity document
 numbers and bank details, with every read audited.
 
+**Where the leave and working-hours FIGURES are, and why they are not here.** This section states two
+facts — 30 calendar days of annual leave, and sick-leave tiers of full / half / unpaid after probation —
+and no numbers beyond them, because none is confirmed. The figures are versioned rows rather than prose:
+`working_hours_rule` (migration 0059) for the overtime multipliers, the caps, the night window and the
+minimum rest, and `leave_entitlement_rule` (migration 0066) for the annual entitlement, the monthly
+accrual, the probation length, the carry-over cap and its expiry, the leave-year anchor and the three
+sick-leave bands. Every row is flagged `is_provisional` against **Y9-overtime** or **Y9-leave-detail** and
+appears in the Unconfirmed Assumptions panel, so answering either question publishes a new version rather
+than editing a document. The worked examples that encode them, each test named for the rule it carries,
+are `packages/core/src/hr/working-hours.test.ts`, `packages/core/src/hr/leave-accrual.test.ts` and
+`packages/core/src/hr/sick-leave.test.ts` — including the sick-leave band boundaries at days 15, 16, 45,
+46, 90 and 91, and the fact that a leave day is a **calendar** day rather than a working one, which is
+asserted against a working-day oracle that must give a different answer.
+
 ## 8. Privacy (PDPL)
 
 Federal Decree-Law 45 of 2021. **[UNVERIFIED]** the status and content of the executive regulations

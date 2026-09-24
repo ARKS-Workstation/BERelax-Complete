@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**92 / 207 units complete.**
+**96 / 207 units complete.**
 
 ## Next up
 
 1. **B-UI-03 — Admin calendar: room x time primary, therapist x time secondary, drag to reschedule**
 1. **B-UI-05 — Magic-link token service and the manage-booking page**
-1. **M-TILL-06 — Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender**
+1. **M-TILL-07 — Payments and refunds through the manual tender adapter**
 
 ## All units
 
@@ -62,7 +62,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 45 | `M-TILL-03` | Gap-free sequential document numbering allocated inside the insert transaction | `F04` | — | — |
 | [x] | 46 | `M-TILL-04` | Invoice document model: immutable per-line tax derivation and issuer snapshot | `F05`, `M-TILL-02`, `M-TILL-03` | — | Y11-vat-invoice, Y1-trn |
 | [x] | 47 | `M-TILL-05` | Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01` | — | — |
-| [ ] | 48 | `M-TILL-06` | Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F06`, `M-TILL-04`, `M-TILL-05` | — | — |
+| [x] | 48 | `M-TILL-06` | Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F06`, `M-TILL-04`, `M-TILL-05` | — | — |
 | [ ] | 49 | `M-TILL-07` | Payments and refunds through the manual tender adapter | `M-TILL-06` | — | — |
 | [ ] | 50 | `M-TILL-08` | Credit notes as the only correction mechanism | `M-TILL-03`, `M-TILL-06` | — | — |
 | [ ] | 51 | `M-TILL-09` | Versioned package templates and package sale as deferred revenue | `F09`, `M-TILL-06` | — | Y9-package-policy, Y11-vat-package |
@@ -90,7 +90,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
 | [x] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
 | [x] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
-| [ ] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
+| [x] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
 | [ ] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
 | [ ] | 78 | `C-AUTO-03` | Frequency ledger and a global cap across every flow and campaign | `C-AUTO-01`, `C-CRM-05` | — | Y6-sender-ids |
 | [ ] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
@@ -107,11 +107,11 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
 | [x] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
 | [x] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
-| [ ] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
+| [x] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
 | [x] | 94 | `P-HR-05` | Shift model and midnight-crossing working-hours maths | `P-HR-01` | — | Y9-overtime |
 | [ ] | 95 | `P-HR-06` | Rota publishing, coverage and fatigue validator, labour-cost forecast | `P-HR-02`, `P-HR-05` | — | Y9-coverage |
 | [ ] | 96 | `P-HR-07` | Attendance, timesheets and the period lock | `P-HR-06` | — | Y9-attendance |
-| [ ] | 97 | `P-HR-08` | Leave types, entitlement and the accrual engine with worked examples | `P-HR-01` | — | Y8-leave, Y9-leave-policy |
+| [x] | 97 | `P-HR-08` | Leave types, entitlement and the accrual engine with worked examples | `P-HR-01` | — | Y8-leave, Y9-leave-policy |
 | [ ] | 98 | `P-HR-09` | Leave approval: delegation, coverage, booking conflicts, availability block | `P-HR-04`, `P-HR-06`, `P-HR-08` | M6 | Y9-coverage |
 | [ ] | 99 | `P-HR-10` | Holiday calendar, lunar confirmation impact report, Ramadan dated override | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-06` | — | — |
 | [ ] | 100 | `P-HR-11` | Commission: versioned rules and a reproducible engine | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-07` | — | Y9-commission |

@@ -140,11 +140,69 @@ const hasTrigger = (event, table) =>
     allSql,
   )
 
+/**
+ * `comment on table <name> is '<prose>' '<more>' …;` with the adjacent string literals JOINED and the
+ * `''` escapes unwrapped.
+ *
+ * Two mechanical reasons, and both were live holes rather than hypotheticals.
+ *
+ * **SQL concatenates adjacent string literals**, so a comment written across two of them carries one
+ * sentence that no per-literal match can see. `bill_line` (0028) declares `'Append-only: UPDATE and '`
+ * followed by `'DELETE raise. …'`, and the marker below had therefore never matched it — so the rule had
+ * never been applied to that table at all. Its trigger pair happens to be complete, which is exactly why
+ * nothing was failing: a passing check that examined nothing, which is ADR 0002's whole subject.
+ *
+ * **And the prose may contain a semicolon.** The previous matcher ended the statement at `[^;]*`, so a
+ * declaration whose marker sat after one was invisible for a second, unrelated reason.
+ *
+ * Both are found by the known-bad fixtures in `scripts/test-gates.mjs` case 87, which declare an
+ * append-only table with no triggers and the marker split — one across two literals, one behind a
+ * semicolon — and require the rule to fire by name.
+ */
+/**
+ * One SQL string literal starting at `sql[from]`, with its `''` escapes unwrapped.
+ *
+ * Returns the text and the index just past the closing quote. An escaped quote is unwrapped rather than
+ * treated as a boundary, which is what makes a comment containing an apostrophe readable here — and
+ * several of them contain one.
+ */
+function readLiteral(sql, from) {
+  let index = from + 1
+  let text = ''
+  while (index < sql.length) {
+    if (sql[index] !== "'") {
+      text += sql[index]
+      index += 1
+      continue
+    }
+    if (sql[index + 1] === "'") {
+      text += "'"
+      index += 2
+      continue
+    }
+    return { text, next: index + 1 }
+  }
+  return { text, next: index }
+}
+
+function* tableComments(sql) {
+  const opener = /comment\s+on\s+table\s+([a-z0-9_.]+)\s+is\s*/gi
+  for (const match of sql.matchAll(opener)) {
+    let index = match.index + match[0].length
+    const parts = []
+    // Adjacent literals, in order, until something that is not one. SQL concatenates them; so does this.
+    while (index < sql.length && sql[index] === "'") {
+      const literal = readLiteral(sql, index)
+      parts.push(literal.text)
+      index = literal.next
+      while (index < sql.length && /\s/.test(sql[index])) index += 1
+    }
+    if (parts.length > 0) yield { qualified: match[1], prose: parts.join('') }
+  }
+}
+
 for (const { path, sql } of migrations) {
-  // `comment on table <name> is '<prose>';` — the prose may span lines as adjacent string literals.
-  for (const match of sql.matchAll(/comment\s+on\s+table\s+([a-z0-9_.]+)\s+is\s+([^;]*);/gi)) {
-    const qualified = match[1]
-    const prose = match[2]
+  for (const { qualified, prose } of tableComments(sql)) {
     if (!APPEND_ONLY_MARKER.test(prose)) continue
     const table = qualified.replace(/^[a-z0-9_]+\./i, '')
 
@@ -241,6 +299,7 @@ if (problems.length > 0) {
 // A summary that lists the rules makes the loss visible in the output as well.
 console.log(
   'Schema conventions hold: all timestamps are timestamptz, no floating-point amounts, no overloaded ' +
-    'posted_at on a review table, every append-only table refuses UPDATE and DELETE, and no migration ' +
-    'materialises availability as a slot or cache table.',
+    'posted_at on a review table, every append-only table refuses UPDATE and DELETE — including one ' +
+    'whose declaration is split across adjacent string literals, which this gate could not see until ' +
+    'P-HR-08 — and no migration materialises availability as a slot or cache table.',
 )

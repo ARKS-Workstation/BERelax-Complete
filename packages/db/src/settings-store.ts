@@ -262,6 +262,27 @@ export async function unconfirmedAssumptionRows(
       select 'working_hours_rule', 'rules effective ' || effective_from::text,
              open_question_id, provisional_note
         from working_hours_rule where is_provisional
+      -- The leave policy (0066), for exactly the same reasons one subject along: every figure in version 1
+      -- is the build's strictest reading of Federal Decree-Law 33 of 2021 and none is confirmed, so the
+      -- whole row is one assumption keyed by the date it takes effect on. Per VERSION and not per figure,
+      -- because the entitlement, the probation length, the carry-over cap, its expiry and the three
+      -- sick-leave bands are one decision somebody makes in one sitting. Answering Y9-leave-detail
+      -- publishes a NEW version and the panel row leaves by that version being confirmed.
+      union all
+      select 'leave_entitlement_rule', 'leave policy effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from leave_entitlement_rule where is_provisional
+      -- An IMPORTED leave opening balance that is itself an assumption (0066). Keyed by staff_reference,
+      -- which is the internal handle and never a person's name. Only the imported ones can appear: an
+      -- employee nobody has imported a balance for has no row to flag, and that absence is reported by
+      -- readLeaveOpeningBalances() as a provisional zero naming Y8-leave rather than written into the
+      -- table as a zero for everybody - which would make "nobody has told us" and "they had none" the
+      -- same row.
+      union all
+      select 'leave_movement', e.staff_reference || ' opening balance',
+             m.open_question_id, m.provisional_note
+        from leave_movement m join employee e on e.id = m.employee_id
+       where m.kind = 'opening_balance' and m.is_provisional
       -- The two CRM vocabularies (0053). They are TABLES rather than Postgres enums precisely so that
       -- each label can carry the provenance trio and reach this panel: an enum label has nowhere to put
       -- is_provisional, an OPEN-QUESTIONS id or a note, and a provisional value that cannot be marked
