@@ -2539,7 +2539,7 @@ units:
       autofill and resend cooldown, guest confirm, and the nine error and edge states from docs/09 §3 each
       as a designed state with a test rather than a phone call to the front desk.'
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M1
     depends_on:
