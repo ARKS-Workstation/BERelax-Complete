@@ -1,13 +1,14 @@
 'use client'
 
 /**
- * The booking flow's **one** client island: the day strip, the slot grid, and the keyboard behaviour.
+ * The slot picker: the slot grid and its keyboard behaviour.
  *
  * docs/09 §3: *"The booking flow is the one heavy client island; everything else is a server component."*
- * `book.itest.ts` reads the route's `page_client-reference-manifest.js` out of the build and asserts this
- * is the only first-party client module on it beyond the two the shared root layout contributes — so this
- * file is the boundary, and anything it imports has to be server-safe or it joins this chunk rather than
- * becoming a second island.
+ * `book.itest.ts` reads the route's `page_client-reference-manifest.js` out of the build and asserts the
+ * route's first-party client modules are exactly this file and `details.client.tsx` (B-UI-02's four
+ * fields), beyond the two the shared root layout contributes — so this file is a boundary, and anything it
+ * imports has to be server-safe or it joins this chunk. That is not theoretical: the `@berelax/ui/patterns`
+ * barrel put the whole of zod in here until the import below was narrowed to the one component.
  *
  * ## Why it renders forms rather than handlers
  *
@@ -40,7 +41,14 @@
  *     and the announcement has to be an update to be an announcement.
  */
 
-import { SlotGrid } from '@berelax/ui/patterns'
+// The deep path, not the `@berelax/ui/patterns` barrel, and it is not tidiness. That barrel re-exports
+// `nap-block.tsx`, which imports `@berelax/shared` — whose barrel re-exports three zod schema modules.
+// So importing one container-query component through it put the whole of zod in THIS client chunk:
+// measured on the build, the chunk carrying `be-book` also carried `ZodError` and 520 `_zod`
+// references, at 408KB before compression against docs/08 SS8's 110KB gzip for a route's whole
+// first-party JS. Found while B-UI-02 put a number on this route (`apps/web/src/book/budget.ts`),
+// which is what a budget is for.
+import { SlotGrid } from '@berelax/ui/patterns/slot-grid'
 import { useEffect, useRef, useState } from 'react'
 
 /** One offerable start. */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   bandsReachingEphemeralRange,
   EPHEMERAL_PORT_FLOOR,
@@ -78,18 +78,73 @@ describe('test port bands', () => {
    * the suite lost roughly one run in thirty-eight to a cause invisible from the symptom.
    */
 
-  it('never draw a port a browser refuses, over 20,000 draws per band', () => {
+  /**
+   * EXHAUSTIVE, not statistical, and that is the second lesson of this change.
+   *
+   * The first version drew 20,000 random ports from each of the fifteen bands — 300,000 draws, 3.1 s on
+   * an idle machine and 7.9 s under coverage with five sibling verify runs, against vitest's 5,000 ms
+   * default. So the case that exists to stop a flake was a flake, on exactly the hazard brief rule 21
+   * describes, written by the same hand that wrote the rule.
+   *
+   * Stubbing `Math.random` to walk every index instead makes it deterministic AND a stronger claim:
+   * `testPort` maps an index over the usable ports, so covering every index covers every port the
+   * function can return. 300,000 random draws could still have missed one; 4,362 indices cannot. It also
+   * proves reachability in the same pass, which is what the old 60,000-draw case was for.
+   *
+   * `(k + 0.5) / width` rather than `k / width` because `Math.floor((k / w) * w)` is `k - 1` for some
+   * pairs in binary floating point, and a test that mis-states its own index would be worse than none.
+   */
+  it('maps every index in every band onto a usable port, and onto nothing else', () => {
     const forbidden = new Set(RESTRICTED_PORTS)
     for (const suite of Object.keys(TEST_PORT_BANDS) as readonly TestSuiteName[]) {
-      for (let attempt = 0; attempt < 20_000; attempt += 1) {
-        const port = testPort(suite)
-        expect(
-          forbidden.has(port),
-          `${suite} drew ${port}, which a browser refuses to connect to`,
-        ).toBe(false)
+      const band = TEST_PORT_BANDS[suite]
+      const width = usableWidth(band)
+      const expected = new Set<number>()
+      for (let port = band.start; port < band.start + band.width; port += 1) {
+        if (!forbidden.has(port)) expected.add(port)
       }
+      const drawn = new Set<number>()
+      const random = vi.spyOn(Math, 'random')
+      try {
+        for (let index = 0; index < width; index += 1) {
+          random.mockReturnValue((index + 0.5) / width)
+          drawn.add(testPort(suite))
+        }
+      } finally {
+        random.mockRestore()
+      }
+      const restricted = [...drawn].filter((port) => forbidden.has(port))
+      expect(
+        restricted,
+        `${suite} can draw ${restricted.join(', ')}, which a browser refuses`,
+      ).toEqual([])
+      const unreachable = [...expected].filter((port) => !drawn.has(port))
+      expect(unreachable, `${suite} cannot reach ${unreachable.length} usable port(s)`).toEqual([])
+      expect(drawn.size, `${suite} drew ${drawn.size} distinct ports over ${width} indices`).toBe(
+        width,
+      )
     }
   })
+
+  /**
+   * And the real `Math.random` path, because everything above runs against a stub.
+   *
+   * A thousand draws per band is enough to catch a mapping that escapes the band or returns a restricted
+   * port often, and it is two orders of magnitude cheaper than the version that timed out. The explicit
+   * timeout is there because this one does depend on how busy the machine is.
+   */
+  it('stay inside the band and off the restricted ports with the real generator', () => {
+    const forbidden = new Set(RESTRICTED_PORTS)
+    for (const suite of Object.keys(TEST_PORT_BANDS) as readonly TestSuiteName[]) {
+      const band = TEST_PORT_BANDS[suite]
+      for (let attempt = 0; attempt < 1_000; attempt += 1) {
+        const port = testPort(suite)
+        expect(forbidden.has(port), `${suite} drew the restricted port ${port}`).toBe(false)
+        expect(port, `${suite} drew ${port}`).toBeGreaterThanOrEqual(band.start)
+        expect(port, `${suite} drew ${port}`).toBeLessThan(band.start + band.width)
+      }
+    }
+  }, 30_000)
 
   /**
    * The control on the case above, and the reason it is worth 20,000 draws.
@@ -128,26 +183,5 @@ describe('test port bands', () => {
         `${suite} has ${usableWidth(band)} usable ports of ${band.width}`,
       ).toBeGreaterThanOrEqual(100)
     }
-  })
-
-  /**
-   * Every usable port must still be reachable.
-   *
-   * Mapping an index over the usable ports could silently lose the ones just above a restricted port —
-   * an off-by-one in the skip would make 6567 unreachable and nothing else would notice. Drawing
-   * `breakpoint-preview` enough times to cover its 292 usable ports with near-certainty and comparing the
-   * set against the expected one catches that, and would also catch a skip that overshot the band.
-   */
-  it('can still reach every usable port in the worst band', () => {
-    const band = TEST_PORT_BANDS['breakpoint-preview']
-    const forbidden = new Set(restrictedPortsIn(band))
-    const expected = new Set<number>()
-    for (let port = band.start; port < band.start + band.width; port += 1) {
-      if (!forbidden.has(port)) expected.add(port)
-    }
-    const seen = new Set(Array.from({ length: 60_000 }, () => testPort('breakpoint-preview')))
-    const missing = [...expected].filter((port) => !seen.has(port))
-    expect(missing, `60,000 draws never produced ${missing.length} usable port(s)`).toEqual([])
-    expect(seen.size).toBe(expected.size)
   })
 })

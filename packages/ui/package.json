@@ -17,6 +17,7 @@
     "./motion/header-condense": "./src/motion/header-condense.tsx",
     "./motion/reveal": "./src/motion/reveal.tsx",
     "./patterns": "./src/patterns/index.tsx",
+    "./patterns/slot-grid": "./src/patterns/slot-grid.tsx",
     "./primitives": "./src/primitives/index.tsx",
     "./primitives/contract": "./src/primitives/contract.ts",
     "./theme-provider": "./src/theme/theme-provider.tsx",

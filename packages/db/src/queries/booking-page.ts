@@ -230,3 +230,90 @@ export async function readPublishableTherapists(
     isPublishable: row.is_publishable,
   }))
 }
+
+/**
+ * One appointment of a booking, as the confirmation renders it.
+ *
+ * Added for B-UI-02's confirmation step. It exists as a separate read rather than as a field on
+ * `readBookingDeliveries` (B-AVAIL-06) because the two answer different questions: that one groups a
+ * booking's appointment rows for a caller that already knows the booking is theirs, and this one is the
+ * read a **public** page makes, which has to establish that first.
+ */
+export interface BookedAppointmentRow {
+  readonly bookingId: string
+  readonly appointmentId: string
+  /** `YYYY-MM-DD`. A trading date, never a calendar date. */
+  readonly tradingDate: string
+  readonly serviceVariantId: string
+  readonly startsAt: number
+  readonly endsAt: number
+  readonly therapistId: string
+  readonly roomId: string
+  readonly status: string
+  /** VAT-inclusive gross in integer fils, as a string. See {@link BookableVariantRow.grossFils}. */
+  readonly grossFils: string
+}
+
+/**
+ * A booking's appointments, **scoped to the customer it belongs to**.
+ *
+ * The customer id is a predicate in the SQL and not a check in the caller, and that placement is the whole
+ * security of this function. A booking id is a uuid in a query string; a uuid in a query string is not
+ * permission to read a booking. Written as a caller-side comparison, the check is one `if` away from being
+ * dropped by somebody simplifying a component — and the failure would be silent, because the page would
+ * render perfectly for the wrong reader. Written as a join predicate, dropping it is a change to a query
+ * that no longer compiles against this signature.
+ *
+ * An empty array is therefore both "no such booking" and "not yours", which is the same answer a public
+ * page should give to either: distinguishing them tells a caller whether a guessed id exists, and `uuid_v7`
+ * leads with a timestamp, so guessing is not as hard as it sounds.
+ *
+ * Ordered by start, so a couples booking reads in the order the evening happens.
+ */
+export async function readBookingForCustomer(
+  sql: Sql,
+  args: { readonly bookingId: string; readonly customerId: string },
+): Promise<readonly BookedAppointmentRow[]> {
+  const rows = await sql<
+    {
+      booking_id: string
+      appointment_id: string
+      trading_date: string
+      service_variant_id: string
+      starts_at: Date
+      ends_at: Date
+      therapist_id: string
+      room_id: string
+      status: string
+      gross_price_fils: string
+    }[]
+  >`
+    select b.id::text as booking_id,
+           a.id::text as appointment_id,
+           a.trading_date::text as trading_date,
+           a.service_variant_id::text as service_variant_id,
+           lower(a.period) as starts_at,
+           upper(a.period) as ends_at,
+           a.therapist_id::text as therapist_id,
+           a.room_id::text as room_id,
+           a.status::text as status,
+           a.gross_price_fils::text as gross_price_fils
+      from booking b
+      join appointment a on a.booking_id = b.id
+     where b.id = ${args.bookingId}
+       and b.customer_id = ${args.customerId}
+     order by lower(a.period), a.id
+  `
+  return rows.map((row) => ({
+    bookingId: row.booking_id,
+    appointmentId: row.appointment_id,
+    tradingDate: row.trading_date,
+    serviceVariantId: row.service_variant_id,
+    startsAt: row.starts_at.getTime(),
+    endsAt: row.ends_at.getTime(),
+    therapistId: row.therapist_id,
+    roomId: row.room_id,
+    status: row.status,
+    grossFils: row.gross_price_fils,
+  }))
+}

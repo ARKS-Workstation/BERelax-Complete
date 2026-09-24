@@ -12,16 +12,17 @@ import {
   isAllocatedUaeMobile,
   nameMatchKey,
   normaliseNameForMatching,
-  normalisePhone,
   normalisePhoneResult,
   PHONE_MATCH_KEY_DIGITS,
   PHONE_REJECTIONS,
-  PhoneNormalisationError,
   phoneMatchKey,
   phoneTail,
   UAE_LANDLINE_AREA_CODES,
   UAE_MOBILE_PREFIXES,
 } from './normalise-phone.ts'
+// The throwing half moved to a sibling so the rule itself has no runtime dependency and can be
+// imported by a browser bundle — see that module's header. The assertions below are unchanged.
+import { normalisePhone, PhoneNormalisationError } from './phone-error.ts'
 
 /**
  * The five spellings named in the unit's acceptance list, and three more that arrive in practice.

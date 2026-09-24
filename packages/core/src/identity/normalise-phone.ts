@@ -32,7 +32,22 @@
  * {@link PhoneNormalisationError.reason} and asserted by name in the tests — a reason nobody can
  * assert on is a reason that quietly changes meaning.
  */
-import { AppError, type Brand } from '@berelax/shared'
+/*
+  A TYPE-ONLY import, and that is a decision rather than a tidy-up (B-UI-02).
+
+  `verbatimModuleSyntax` erases `import type` entirely, so after this line the module has **no runtime
+  dependency on anything**. That is what lets the booking flow's client island import it through
+  `@berelax/core/phone` and normalise a number on blur through the ONE normaliser, instead of a second
+  copy of the digit folding in the browser (`crm/phone.ts` exists so there are two readings of a UAE
+  number in this repository and not three).
+
+  It had to change because the island is a browser bundle. `AppError` lives in `@berelax/shared`'s barrel,
+  which re-exports three zod schema modules — so importing this module for its pure functions pulled zod
+  into the client chunk, measured at 484KB before compression and over docs/08 SS8's whole first-party JS
+  budget on its own. `PhoneNormalisationError` and `normalisePhone`, the two things that needed `AppError`,
+  moved to `./phone-error.ts` beside it; `@berelax/core` re-exports both, so no caller changed.
+*/
+import type { Brand } from '@berelax/shared'
 
 /** A phone number in E.164, `+` then digits. The only form this system stores. */
 export type E164 = Brand<string, 'E164'>
@@ -70,17 +85,6 @@ export const PHONE_REJECTIONS = [
   'wrong_length',
 ] as const
 export type PhoneRejection = (typeof PHONE_REJECTIONS)[number]
-
-/** Thrown by {@link normalisePhone}. Carries the reason as a value, not as prose. */
-export class PhoneNormalisationError extends AppError {
-  readonly reason: PhoneRejection
-
-  constructor(reason: PhoneRejection, message: string, details: Record<string, unknown>) {
-    super('validation', message, { userFacing: true, details: { ...details, reason } })
-    this.name = 'PhoneNormalisationError'
-    this.reason = reason
-  }
-}
 
 export type PhoneNormalisation =
   | { readonly ok: true; readonly e164: E164 }
@@ -187,19 +191,6 @@ export function normalisePhoneResult(raw: string): PhoneNormalisation {
   // the country, and it is not part of the E.164 form.
   const nsn = digits.startsWith('0') ? digits.slice(1) : digits
   return classifyNsn(nsn)
-}
-
-/** As {@link normalisePhoneResult}, throwing a named error. Use where a bad number is a bug. */
-export function normalisePhone(raw: string): E164 {
-  const result = normalisePhoneResult(raw)
-  if (result.ok) return result.e164
-  throw new PhoneNormalisationError(
-    result.reason,
-    `"${raw}" is not a UAE mobile number this system can send an SMS to (${result.reason}). ` +
-      'Identity is the phone number (ADR 0014), so an un-normalised number becomes a second ' +
-      'customer record rather than an error anybody sees.',
-    { raw },
-  )
 }
 
 /** True when the number is on a prefix the TDRA has actually allocated to a mobile operator. */

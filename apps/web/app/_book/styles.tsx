@@ -133,6 +133,103 @@ export const BOOK_CSS = `
 }
 
 .be-book__note { color: var(--color-ink-2); font-size: var(--text-sm); margin: 0; }
+
+/* Steps 4 and 5's own controls (B-UI-02).
+
+   Every floor here is the same one the select above states and for the same two reasons: 48px because
+   docs/08 §4 requires it at 390px, and --text-base (17px) because a control under 16px makes iOS Safari
+   zoom the page on focus and throw the layout away mid-booking. \`book-flow.itest.ts\` reads the computed
+   size off every control on every step, so a rule that stopped applying would fail rather than surprise
+   somebody on a phone. */
+.be-book__input {
+  min-block-size: 48px;
+  inline-size: 100%;
+  padding-inline: var(--space-5);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+/* The code field. \`tabular-nums\` because six digits that shift width as they are typed look like a
+   control that is moving under a thumb, and \`0.2em\` of tracking so a reader can check a code against a
+   message without counting. */
+.be-book__input--code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2em;
+}
+
+/* The country code beside the number. A logical-property row, so it mirrors in the Arabic document
+   without a second rule — \`pnpm layout\` rejects a physical \`margin-left\` here. */
+.be-book__phone { display: flex; align-items: center; gap: var(--space-4); }
+
+.be-book__dial {
+  min-block-size: 48px;
+  display: inline-flex;
+  align-items: center;
+  padding-inline: var(--space-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-2);
+  background: var(--color-ground-sunk);
+  color: var(--color-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The consent question. A label wrapping its own checkbox, so the whole sentence is the hit target —
+   which is the only way a 48px floor is reachable for a control that is 16px of box by default. */
+.be-book__consent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-block-start: 1px solid var(--color-hairline);
+  padding-block-start: var(--space-5);
+}
+
+.be-book__check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  min-block-size: 48px;
+  padding-block: var(--space-3);
+  color: var(--color-ink);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+/* A 48px target with a 24px glyph, which is the only arrangement that satisfies both rules at once.
+   docs/08 §4's floor is 48px and \`auditTouchTargetsInPage\` measures the element's own box, so a 24px
+   checkbox inside a 48px label is a finding however comfortable the label is to hit — the label is not
+   the control. The padding is what separates the two: with border-box sizing the border box is 48px and
+   the content box the glyph is drawn in is 24px, so a reader gets a thumb-sized target and a checkbox
+   that still looks like a checkbox rather than like a button. */
+.be-book__checkbox {
+  box-sizing: border-box;
+  inline-size: var(--space-10);
+  block-size: var(--space-10);
+  /* 12px each side of a 48px border box leaves a 24px glyph, which is the size a checkbox wants to be. */
+  padding: var(--space-4);
+  margin: 0;
+  flex: none;
+  accent-color: var(--color-accent-gold);
+}
+
+/* A refusal the last submission carried back. --color-ink and not a red: docs/08 §2 publishes no danger
+   token that measures on this ground, and \`pnpm colours\` rejects a literal hex here — so the signal is
+   the rule, the heading and the \`role="alert"\`, which is what a screen reader acts on anyway. */
+.be-book__error {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-inline-start: 3px solid var(--color-accent-gold);
+  background: var(--color-ground-sunk);
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+}
+
+/* An edge state is a panel like any other, with one difference: it sits above the step it is about, so
+   it carries a little more separation from it than two stacked panels would. */
+.be-book__state--edge { border-color: var(--color-border-strong); }
 .be-book__group { display: flex; flex-direction: column; gap: var(--space-5); }
 .be-book__group-heading { margin: 0; font-size: var(--text-sm); color: var(--color-ink-2); }
 

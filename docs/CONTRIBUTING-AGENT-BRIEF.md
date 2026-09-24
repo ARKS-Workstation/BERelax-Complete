@@ -16,9 +16,21 @@ caught a real defect in this repository.
    for f in packages/db/migrations/*.sql; do psql -q postgres://berelax:berelax@127.0.0.1:5432/berelax_<unit> -f "$f"; done
    export TEST_DATABASE_URL=postgres://berelax:berelax@127.0.0.1:5432/berelax_<unit>
    export DATABASE_URL="$TEST_DATABASE_URL"
+   export APP_ENV=test
+   pnpm seed
    ```
 
    Apply your own migration to that database only.
+
+   **Those last two lines are not optional and both have cost a whole run.** `.github/workflows/ci.yml`
+   sets `APP_ENV` for the workflow, so CI never sees its absence; a local run without it gets
+   `AppError: Invalid configuration — APP_ENV: Invalid option`, the built web application answers 500 to
+   every request, and it presents as about 56 failing tests across six files nobody touched. And without
+   `pnpm seed` the database has its tables and no fixture salon, so `packages/hr/src/employee.itest.ts`
+   fails on "the therapist rows the seed creates ... 19 of them" and `availability-perf.itest.ts` fails
+   its answer-shape assertions — neither failure mentioning seeding. Seed before running anything: the
+   seeder is idempotent per table, so a suite that has already inserted a consent row makes it skip that
+   table and leaves the database half seeded.
 
    **Two things that will cost you a false failure when several units are in flight.** The integration
    suite drives the built web application, so run `pnpm --filter @berelax/web build` once in your

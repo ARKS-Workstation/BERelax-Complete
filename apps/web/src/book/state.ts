@@ -49,11 +49,118 @@ export const BOOK_FIELDS = {
   gender: 'gender',
   slot: 'slot',
   step: 'step',
+  /**
+   * The reader-reported problem, when there is one. B-UI-02.
+   *
+   * Two of the nine edge states docs/09 §3 enumerates cannot be derived from anything the server can
+   * see — *"OTP never arrives"* and *"network drop mid-submit"* are both statements about what happened
+   * outside this process — so each has a URL that says it. That is what makes them **states with an
+   * address** rather than a client-side flash: a reader can reload, share the link with the desk, and the
+   * page still says the same thing. See {@link BOOK_ISSUES}.
+   */
+  issue: 'issue',
+  /** The booking a confirmation is about. Only honoured for the booking THIS session produced. */
+  booking: 'booking',
+  /** Where a verified phone leads: the confirm step, or the waitlist join. See {@link BOOK_AFTER}. */
+  after: 'after',
+  /**
+   * What the last submission did wrong, carried back by the POST endpoint's redirect.
+   *
+   * In the URL rather than in a flash cookie, so the state a reader is looking at is the state the URL
+   * describes — which is what makes a failing step reloadable, shareable with the desk and reproducible
+   * in a test with a plain `fetch`. The vocabulary is `BOOK_FLOW_ERRORS` in `./flow.ts`; the page
+   * validates against it and renders nothing for a value it does not know, so a crawler following a
+   * mangled query string cannot put words on the page.
+   */
+  error: 'error',
 } as const
 
-/** The steps this unit renders. B-UI-02 adds `details` and `confirm`. */
-export const BOOK_STEPS = ['choose', 'waitlist'] as const
+/**
+ * Every step of the flow, including the four B-UI-02 adds.
+ *
+ * `choose` covers steps 1–3 (treatment, therapist, day and time), which are one screen because they are
+ * one GET form set — see the module header. `details`, `otp`, `confirm` and `booked` are docs/09 §3's
+ * steps 4 and 5 split at the two points a reader waits: for an SMS, and for a booking to commit.
+ *
+ * `waitlist` and `waitlisted` are the join B-UI-01 deferred here. They are steps rather than a separate
+ * route because they need exactly what the confirm step needs — a verified phone — and a second route
+ * would be a second place that requirement could be forgotten.
+ */
+export const BOOK_STEPS = [
+  'choose',
+  'details',
+  'otp',
+  'confirm',
+  'booked',
+  'waitlist',
+  'waitlisted',
+] as const
 export type BookStep = (typeof BOOK_STEPS)[number]
+
+/**
+ * The steps that require a verified phone.
+ *
+ * Declared as data rather than as a condition at each step's render, because the failure of getting it
+ * wrong is silent in the direction that matters: a `confirm` step that rendered without checking would
+ * take a booking for a number nobody proved, and it would look exactly like a working page.
+ */
+export const VERIFIED_STEPS: readonly BookStep[] = ['confirm', 'booked', 'waitlist', 'waitlisted']
+
+/**
+ * What a reader can tell the page went wrong, as a URL.
+ *
+ * Closed, and deliberately only two. Everything else on docs/09 §3's list is something the server can
+ * work out — the slot, the therapist, the room, the close, the session, the replay — and a field a reader
+ * can set for any of those would let a URL assert a state the page has not checked.
+ */
+export const BOOK_ISSUES = ['code_not_received', 'interrupted'] as const
+export type BookIssue = (typeof BOOK_ISSUES)[number]
+
+/**
+ * The refusals the POST endpoint reports back through the URL.
+ *
+ * Here rather than in `./flow.ts` because `error` is a QUERY FIELD, and this module is what the URL is. It
+ * was in flow.ts first, and `pnpm boundaries` refused the cycle that made: state.ts needed the guard below
+ * as a VALUE, and flow.ts needs `BookStep` and `BookAfter` from here. Placement, not a re-export — a
+ * re-export would have satisfied the cruiser and left two modules that each need the other.
+ *
+ * Distinct from the nine edge states, and the distinction is what stops the two vocabularies merging into
+ * one list nobody can reason about: an edge state is *the situation a reader is in* and is derived from
+ * facts; these are *what this submission did wrong*, and every one of them is answered by the reader
+ * typing something different. A wrong code is not an edge state — it is the ordinary second attempt.
+ */
+export const BOOK_FLOW_ERRORS = [
+  /**
+   * The submission arrived for an attempt that had already produced a booking.
+   *
+   * The one member that is not something the reader typed wrong, and it is here rather than in
+   * `BOOK_ISSUES` for a reason: docs/09 §3's *"double submission"* is a fact about a SUBMISSION, which is
+   * what this vocabulary carries, and `BOOK_ISSUES` is what a reader may assert about themselves. The page
+   * turns it into the `double_submission` edge state only when the session really holds a booking, so a
+   * URL cannot put a "you are already booked" panel in front of somebody who is not.
+   */
+  'already_booked',
+  'phone_not_eligible',
+  'wrong_code',
+  'code_expired',
+  'no_live_challenge',
+  'locked',
+  'rate_limited',
+  'send_failed',
+  'nothing_chosen',
+  'not_available',
+  'waitlist_unavailable',
+  'invalid_request',
+] as const
+export type BookFlowError = (typeof BOOK_FLOW_ERRORS)[number]
+
+export function isBookFlowError(value: string | null): value is BookFlowError {
+  return value !== null && (BOOK_FLOW_ERRORS as readonly string[]).includes(value)
+}
+
+/** Where verification leads. Two destinations, both of which need the customer id it produces. */
+export const BOOK_AFTER = ['confirm', 'waitlist'] as const
+export type BookAfter = (typeof BOOK_AFTER)[number]
 
 /** The client's gender, which strict same-gender matching (B-AVAIL-05) refuses to proceed without. */
 export const CLIENT_GENDERS = ['female', 'male'] as const
@@ -76,6 +183,21 @@ export interface BookingParams {
   /** The chosen start, as epoch milliseconds. A wall-clock string would carry no date and no zone. */
   readonly slot: number | null
   readonly step: BookStep
+  /** What the reader says went wrong, or null. See {@link BOOK_ISSUES}. */
+  readonly issue: BookIssue | null
+  /**
+   * The booking a confirmation is about, or null.
+   *
+   * Validated as a uuid here and **authorised** in `bookingPageData`, which shows it only when the
+   * session that asked for it is the session that produced it. A uuid in a query string is not
+   * permission to read a booking, and treating it as one would make every booking on the system
+   * readable by anybody who could guess a v7 uuid — which is not as hard as it sounds, because v7 leads
+   * with a timestamp.
+   */
+  readonly booking: string | null
+  readonly after: BookAfter | null
+  /** What the last submission did wrong, or null. The vocabulary lives in `./flow.ts`. */
+  readonly error: BookFlowError | null
 }
 
 /** What Next hands a page as `searchParams`. A repeated field arrives as an array. */
@@ -107,6 +229,10 @@ export function parseBookingParams(raw: RawSearchParams): BookingParams {
   const gender = first(raw, BOOK_FIELDS.gender)
   const slot = first(raw, BOOK_FIELDS.slot)
   const step = first(raw, BOOK_FIELDS.step)
+  const issue = first(raw, BOOK_FIELDS.issue)
+  const booking = first(raw, BOOK_FIELDS.booking)
+  const after = first(raw, BOOK_FIELDS.after)
+  const error = first(raw, BOOK_FIELDS.error)
   return {
     variant: variant !== null && UUID.test(variant) ? variant : null,
     date: date !== null && ISO_DATE.test(date) ? date : null,
@@ -118,12 +244,31 @@ export function parseBookingParams(raw: RawSearchParams): BookingParams {
       slot !== null && /^\d{1,15}$/.test(slot) && Number.isSafeInteger(Number(slot))
         ? Number(slot)
         : null,
-    step: step === 'waitlist' ? 'waitlist' : 'choose',
+    // Membership against the declared list rather than a chain of comparisons, so a step added to
+    // `BOOK_STEPS` and not to the parser is a step the URL can never reach — which is a bug that
+    // presents as "the link from the form goes back to the first screen".
+    step: isBookStep(step) ? step : 'choose',
+    issue: isBookIssue(issue) ? issue : null,
+    booking: booking !== null && UUID.test(booking) ? booking : null,
+    after: isBookAfter(after) ? after : null,
+    error: isBookFlowError(error) ? error : null,
   }
 }
 
 export function isClientGender(value: string | null): value is ClientGender {
   return value !== null && (CLIENT_GENDERS as readonly string[]).includes(value)
+}
+
+export function isBookStep(value: string | null): value is BookStep {
+  return value !== null && (BOOK_STEPS as readonly string[]).includes(value)
+}
+
+export function isBookIssue(value: string | null): value is BookIssue {
+  return value !== null && (BOOK_ISSUES as readonly string[]).includes(value)
+}
+
+export function isBookAfter(value: string | null): value is BookAfter {
+  return value !== null && (BOOK_AFTER as readonly string[]).includes(value)
 }
 
 /**

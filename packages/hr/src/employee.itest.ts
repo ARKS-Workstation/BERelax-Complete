@@ -267,11 +267,49 @@ describe('a raw select returns ciphertext only', () => {
       documentId,
       number: FIXTURE_EMIRATES_ID,
     })
-    const [row] = await sql<{ dump: string }[]>`
-      select to_jsonb(d)::text as dump from employee_document d where d.id = ${documentId}
+    const [row] = await sql<{ dump: string; row: Record<string, unknown> }[]>`
+      select to_jsonb(d)::text as dump, to_jsonb(d) as row
+      from employee_document d where d.id = ${documentId}
     `
+    // The whole row for the full number: fifteen digits cannot appear in random bytes by accident.
     expect(row?.dump).not.toContain(FIXTURE_EMIRATES_ID)
-    expect(row?.dump).not.toContain('784')
+
+    /*
+     * The `784` prefix needs a narrower place to look, and naming the columns is the only honest one.
+     *
+     * It used to be asserted against `to_jsonb(d)::text` of the whole row, which carries about 306
+     * characters of random hex plus two microsecond timestamps. Three characters turn up in that by
+     * coincidence: measured at 5 failures in 12 consecutive runs of this file on an idle database, the hit
+     * in a different field each time — `created_at` ending `.178418`, `updated_at` ending `.578449`,
+     * `number_aad_fp` containing `b2493784`, `created_at` ending `.340784`.
+     *
+     * Two narrower filters were tried and are wrong, recorded so they are not tried again. Excluding bytea
+     * and timestamps by SHAPE leaves `number_aad_fp` and both uuids, which are hex text and are where two
+     * of the four measured hits were. Excluding anything that looks like hex would exclude a leak of the
+     * number itself, which is fifteen digits and therefore matches.
+     *
+     * So: the columns a human can type into. `PLAINTEXT_COLUMNS` is asserted against the row's own keys
+     * first, so a rename or a new plaintext column fails this test loudly instead of quietly narrowing it
+     * — which is the property the whole-row dump was chosen for, kept where a 3-character needle allows it.
+     */
+    const PLAINTEXT_COLUMNS = ['document_type', 'reference', 'issuing_authority'] as const
+    const keys = Object.keys(row?.row ?? {})
+    expect(
+      keys,
+      'a plaintext column was renamed or removed, so the prefix assertion below is not looking where it ' +
+        'thinks it is',
+    ).toEqual(expect.arrayContaining([...PLAINTEXT_COLUMNS]))
+    for (const column of PLAINTEXT_COLUMNS) {
+      const value = row?.row[column]
+      if (typeof value !== 'string') continue
+      expect(value, `${column} holds the Emirates ID prefix in plain text`).not.toContain('784')
+    }
+    // And the control on the loop: at least one of those columns must actually hold a string, or every
+    // iteration is skipped and the assertion above checks nothing.
+    expect(
+      PLAINTEXT_COLUMNS.filter((column) => typeof row?.row[column] === 'string'),
+      'every plaintext column is null, so the prefix loop asserted nothing',
+    ).not.toEqual([])
     expect(
       await repository.readDocumentNumber(OWNER, {
         employeeId,

@@ -45,6 +45,7 @@ export const TEST_PORT_BANDS = {
   book: { start: 7000, width: 300 },
   home: { start: 8500, width: 300 },
   compliance: { start: 9400, width: 300 },
+  'book-flow': { start: 9700, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
