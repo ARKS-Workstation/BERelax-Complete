@@ -129,15 +129,23 @@ afterAll(async () => {
 })
 
 /**
- * Empties the two tables and puts the series counters back.
+ * Empties the document tables and puts the series counters back.
  *
  * `truncate` as the OWNER, which is the one statement that fires no row-level DELETE trigger — the
  * same reason `journal.itest.ts` resets this way. `berelax_app` holds no TRUNCATE at all, which is
  * asserted below, so this is not a hole in the append-only guarantee; it is the test credential doing
  * something the application cannot.
+ *
+ * Every table that references `invoice` is NAMED. PostgreSQL refuses a truncate while a referencing
+ * table is missing from the statement, and `0063_checkout.sql` added three — `invoice_appointment`,
+ * `payment` and `checkout_finalisation`. Named rather than reached with CASCADE, so the next table to
+ * reference `invoice` fails here loudly instead of having its rows removed by a statement that never
+ * mentioned it.
  */
 beforeEach(async () => {
-  await sql.unsafe('truncate invoice_line, invoice')
+  await sql.unsafe(
+    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+  )
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

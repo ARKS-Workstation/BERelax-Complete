@@ -88,6 +88,20 @@ export const invoice = pgTable(
     customerAddressSnapshot: text('customer_address_snapshot'),
     customerPhone: text('customer_phone'),
 
+    /**
+     * The booking this document bills, or NULL for a document raised outside a checkout.
+     *
+     * The other half of the wiring M-TILL-04's NOTE deferred to M-TILL-06 (`0063_checkout.sql`), and the
+     * column the `invoice.issued` event's `bookingId` is read from — an id carried on an event but
+     * stored nowhere is a fact with no record.
+     *
+     * No foreign key, deliberately: four integration suites `truncate appointment, booking` by an
+     * explicit list, and PostgreSQL refuses a truncate while a referencing table is absent from it.
+     * `finaliseCheckout` DERIVES this from the appointments it is billing, so it cannot disagree with
+     * `invoice_appointment`.
+     */
+    bookingId: uuid('booking_id'),
+
     /** Date of issue: the calendar date the document was written. */
     issueDate: date('issue_date').notNull(),
     /** The trading date of issue, null when the document was raised while the premises was shut. */
@@ -147,6 +161,7 @@ export const invoice = pgTable(
     ),
     index('invoice_tax_point_date_idx').on(t.taxPointDate),
     index('invoice_issue_trading_date_idx').on(t.issueTradingDate),
+    index('invoice_booking_idx').on(t.bookingId),
   ],
 )
 

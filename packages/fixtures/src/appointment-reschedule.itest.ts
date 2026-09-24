@@ -281,21 +281,40 @@ async function epochOf(tradingDate: string): Promise<{ epoch: string; cause: str
  * DELTAS, never totals: the suite is sequential against one database and every one of these tables is
  * written by other files. `invoice` and `invoice_line` are the documents, `journal_entry` and `journal_line`
  * the money itself — a fee that charged anything would have to appear in at least one of the four.
+ *
+ * `payment` and `checkout_finalisation` joined the list when M-TILL-06 created them (0063). Before that
+ * this file asserted the STRONGER thing — that no table whose name matches `%payment%` exists at all —
+ * and that assertion had to go, because it is now false for a reason that has nothing to do with
+ * cancellation fees: the till records what a customer TENDERED at checkout. The claim being protected is
+ * unchanged and is now carried by the delta, which is the right shape for it: a cancellation must write
+ * no tender and no finalisation. The `%fee%` half of the old assertion is kept below, because THAT
+ * capability still does not exist.
  */
 async function moneyRowCounts(): Promise<Record<string, number>> {
   const [row] = await sql<
-    { invoice: string; invoice_line: string; journal_entry: string; journal_line: string }[]
+    {
+      invoice: string
+      invoice_line: string
+      journal_entry: string
+      journal_line: string
+      payment: string
+      checkout_finalisation: string
+    }[]
   >`
-    select (select count(*) from invoice)::text        as invoice,
-           (select count(*) from invoice_line)::text   as invoice_line,
-           (select count(*) from journal_entry)::text  as journal_entry,
-           (select count(*) from journal_line)::text   as journal_line
+    select (select count(*) from invoice)::text               as invoice,
+           (select count(*) from invoice_line)::text          as invoice_line,
+           (select count(*) from journal_entry)::text         as journal_entry,
+           (select count(*) from journal_line)::text          as journal_line,
+           (select count(*) from payment)::text               as payment,
+           (select count(*) from checkout_finalisation)::text as checkout_finalisation
   `
   return {
     invoice: Number(row?.invoice ?? 0),
     invoice_line: Number(row?.invoice_line ?? 0),
     journal_entry: Number(row?.journal_entry ?? 0),
     journal_line: Number(row?.journal_line ?? 0),
+    payment: Number(row?.payment ?? 0),
+    checkout_finalisation: Number(row?.checkout_finalisation ?? 0),
   }
 }
 
@@ -1259,17 +1278,31 @@ describe('acceptance — the cancellation window is a provisional F09 setting th
     // unrecoverable cannot be accounted for by the fee policy that later reads it.
     expect(Number(row.late_cancellation_window_hours)).toBe(DEFAULT_CANCELLATION_WINDOW_HOURS)
 
-    // DELTAS of zero on all four money tables, counted in SQL.
+    // DELTAS of zero on every money table, counted in SQL — including `payment` and
+    // `checkout_finalisation`, which M-TILL-06 added (0063).
     const after = await moneyRowCounts()
     expect(after).toEqual(before)
-    // And there is no payment or fee table in the schema at all: the business takes no card payments, so a
-    // fee that charged anything would be inventing a capability rather than using one.
+    // And there is no FEE table in the schema at all: a cancellation fee would be inventing a capability
+    // rather than using one, and the provisional F09 setting flags the late cancellation without
+    // charging for it.
+    //
+    // `%payment%` used to be in this pattern and deliberately is not any more. M-TILL-06 created
+    // `payment` for what a customer TENDERS at checkout, which is a different capability from a
+    // cancellation fee and has nothing to do with this test — so the negative schema assertion was
+    // replaced by the DELTA above, which says the thing this case is actually about: a cancellation
+    // writes no tender. Asserting a table's absence is only honest while nothing legitimate needs it.
     const [tables] = await sql<{ n: string }[]>`
       select count(*)::text as n from information_schema.tables
-       where table_schema = 'public'
-         and (table_name like '%payment%' or table_name like '%fee%')
+       where table_schema = 'public' and table_name like '%fee%'
     `
     expect(Number(tables?.n)).toBe(0)
+    // The control for that replacement: `payment` DOES exist now, so the delta above is a real count of
+    // a real table rather than a query that would have thrown.
+    const [tender] = await sql<{ n: string }[]>`
+      select count(*)::text as n from information_schema.tables
+       where table_schema = 'public' and table_name = 'payment'
+    `
+    expect(Number(tender?.n)).toBe(1)
     // The event and the audit row record the amount as zero rather than omitting it — an absent amount
     // reads as "not considered".
     const event = (await eventsOf(original)).find(
