@@ -12,11 +12,42 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 let failures = 0
+
+/** How many lines of a failure's detail to show from each end. */
+const DETAIL_HEAD = 20
+const DETAIL_TAIL = 20
+
+/**
+ * The part of a failure's detail a reader actually gets to see.
+ *
+ * This used to be `detail.split('\n').slice(0, 8)` — the first eight lines, with nothing saying that
+ * anything had been dropped. For a `checkRejectedBy` failure the detail is a whole test runner's output,
+ * and its first eight lines are the banner and the first two failing test names. Everything that says
+ * WHY — the rest of the failures, a crashed worker, a timeout, the summary counts — is past line eight,
+ * so the report named a gate and then hid the reason, and a reader could not tell there was more.
+ *
+ * It cost an hour on `consent gate: a resolver that takes the first applicable record is caught`: the
+ * eight visible lines were consistent with a killed child, with a worker crash, and with the gate being
+ * genuinely wrong, and the run could not be told apart from a re-run that passed.
+ *
+ * So: both ends, and say how many lines went missing in between. A runner puts its verdict at the end.
+ */
+const detailExcerpt = (detail) => {
+  const lines = detail.split('\n')
+  if (lines.length <= DETAIL_HEAD + DETAIL_TAIL + 1) return lines
+  const elided = lines.length - DETAIL_HEAD - DETAIL_TAIL
+  return [
+    ...lines.slice(0, DETAIL_HEAD),
+    `… ${elided} line(s) elided; the end of the output follows, because that is where a runner puts its verdict …`,
+    ...lines.slice(-DETAIL_TAIL),
+  ]
+}
+
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
   if (!ok) {
     failures += 1
-    if (detail) console.log(`      ${detail.split('\n').slice(0, 8).join('\n      ')}`)
+    if (detail) console.log(`      ${detailExcerpt(detail).join('\n      ')}`)
   }
 }
 
@@ -37,12 +68,41 @@ const check = (name, ok, detail = '') => {
 */
 const CHILD = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }
 
-/** A child process whose output we could not capture is not evidence of anything. Say so loudly. */
+/**
+ * A child process whose output we could not capture, or which never finished, is not evidence.
+ *
+ * There are two ways for a child to exit non-zero without having rejected anything, and both of them
+ * read as a gate that did not fire:
+ *
+ *   - **Its output overflowed `maxBuffer`.** Then nothing it said was read at all.
+ *   - **It was killed by a signal.** Then it exits non-zero exactly like a rejecting child does, and the
+ *     half-written output it left behind is compared against a rule name it never got far enough to
+ *     print. This is not hypothetical: the `consent gate: a resolver that takes the first applicable
+ *     record is caught` case reported `exited non-zero but did not report insertion-order independent`
+ *     with an output that stops in the middle of vitest's own failure list, while the same mutation run
+ *     on its own fails the suite and names that rule three times. Four worktrees verifying at once on a
+ *     four-core, 15 GB container is enough to have a vitest worker killed, and the symptom pointed at a
+ *     gate that was fine.
+ *
+ * Both throw rather than return, because a case that cannot tell what happened must stop the suite
+ * rather than report a verdict it has not earned.
+ */
 const assertCaptured = (err, cmd, args) => {
   if (err?.code === 'ENOBUFS') {
     throw new Error(
       `${cmd} ${args.join(' ')} produced more output than maxBuffer (${CHILD.maxBuffer} bytes), so ` +
         'nothing it said was read. Raise CHILD.maxBuffer — do not read this as the command failing.',
+    )
+  }
+  if (err?.signal) {
+    const captured = `${err.stdout ?? ''}${err.stderr ?? ''}`
+    throw new Error(
+      `${cmd} ${args.join(' ')} was killed by ${err.signal} after writing ${captured.length} bytes, so ` +
+        'it never finished saying what it found. This is NOT evidence about the fixture: a killed child ' +
+        'exits non-zero just like a rejecting one, so reading it as a rejection compares half an output ' +
+        'against a rule name the child never reached. On this repository the usual cause is memory ' +
+        'pressure from several worktrees running verify at once — re-run this block with less alongside ' +
+        `it. What it managed to write follows:\n${captured}`,
     )
   }
 }
@@ -21491,6 +21551,116 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'server gate: the committed harness and port discipline both pass',
       !serverClean.failed && !portsClean.failed,
       `a committed suite failed:\n${serverClean.output}${portsClean.output}`,
+    )
+  }
+}
+
+// 88. The gate harness itself: a child that was KILLED must not be read as a child that rejected
+//     something. Every `checkRejectedBy` case in this file rests on `runExpectingFailure`'s claim that a
+//     non-zero exit means the fixture was refused, and a signal death breaks that claim silently — the
+//     case then reports the rule it was looking for as missing, which reads as a gate that does not fire.
+//     It cost an hour on the consent block, where the gate was fine and a vitest worker had been killed.
+//     These four cases are about the harness, not about any unit, which is why they sit beside block 79.
+{
+  const SELF = process.execPath
+
+  // 88a. SIGKILL. The child writes something first, so the case is about a truncated output being
+  //      refused rather than about an empty one.
+  {
+    let message = ''
+    try {
+      runExpectingFailure(SELF, [
+        '-e',
+        "process.stdout.write('half an answer'); process.kill(process.pid, 'SIGKILL')",
+      ])
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    check(
+      'harness gate: a gate child killed by SIGKILL is refused as evidence',
+      message.includes('SIGKILL') && message.includes('NOT evidence'),
+      `a killed child was accepted as a rejection, or the refusal said something else:\n${message}`,
+    )
+  }
+
+  // 88b. And SIGTERM, so the guard is about being signalled rather than about one signal's name.
+  {
+    let message = ''
+    try {
+      runExpectingFailure(SELF, ['-e', "process.kill(process.pid, 'SIGTERM')"])
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    check(
+      'harness gate: a gate child killed by SIGTERM is refused as evidence',
+      message.includes('SIGTERM') && message.includes('NOT evidence'),
+      `a SIGTERM death was accepted as a rejection, or the refusal said something else:\n${message}`,
+    )
+  }
+
+  // 88c. The control that matters: an ORDINARY non-zero exit is still a rejection, and its output still
+  //      reaches the rule match. Without this, 88a and 88b would also pass if the guard threw on every
+  //      failure — which would turn all ~1,240 cases in this file into errors.
+  checkRejectedBy(
+    'harness gate: an ordinary non-zero exit is still read as a rejection',
+    runExpectingFailure(SELF, [
+      '-e',
+      "process.stdout.write('refused by the rule under test\\n'); process.exit(1)",
+    ]),
+    'refused by the rule under test',
+  )
+
+  // 88d. And the other control: a child that exits zero is still not a rejection. `runExpectingFailure`
+  //      returning `failed: true` here would make every gate in the file pass vacuously.
+  {
+    const clean = runExpectingFailure(SELF, ['-e', "process.stdout.write('all well')"])
+    check(
+      'harness gate: a child that exits zero is not a rejection',
+      !clean.failed,
+      `a zero exit was reported as a rejection:\n${clean.output}`,
+    )
+  }
+
+  // 88e. A short detail is printed whole. The elision must not cost anything in the ordinary case, and
+  //      without this the next case would also pass for a function that elided everything.
+  {
+    const short = ['first', 'second', 'third'].join('\n')
+    const shown = detailExcerpt(short)
+    check(
+      'harness gate: a short failure detail is shown whole, with no elision notice',
+      shown.length === 3 && shown.join('\n') === short,
+      `a three-line detail came back as ${shown.length} line(s):\n${shown.join('\n')}`,
+    )
+  }
+
+  // 88f. A long one keeps BOTH ends and says how many lines went missing. The tail is the half that the
+  //      old head-only excerpt threw away, and the half a test runner puts its verdict in — so asserting
+  //      the last line is present is the whole point of this case.
+  {
+    const lines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`)
+    const shown = detailExcerpt(lines.join('\n'))
+    const elided = 200 - DETAIL_HEAD - DETAIL_TAIL
+    check(
+      'harness gate: a long failure detail keeps its end and counts what it elided',
+      shown[0] === 'line 1' &&
+        shown.at(-1) === 'line 200' &&
+        shown.some((line) => line.includes(`${elided} line(s) elided`)) &&
+        shown.length === DETAIL_HEAD + DETAIL_TAIL + 1,
+      `a 200-line detail came back as ${shown.length} line(s), first ${JSON.stringify(shown[0])}, ` +
+        `last ${JSON.stringify(shown.at(-1))}`,
+    )
+  }
+
+  // 88g. And the known-bad for it: the excerpt the eight-line version produced would NOT have contained
+  //      the runner's verdict, so a reader could not tell a killed child from a gate that was wrong. This
+  //      reproduces that excerpt and asserts it is missing exactly what 88f proves is now present.
+  {
+    const lines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`)
+    const headOnly = lines.slice(0, 8)
+    check(
+      'harness gate: the old head-only excerpt loses the verdict, which is why 88f asserts the tail',
+      !headOnly.includes('line 200') && !headOnly.some((line) => line.includes('elided')),
+      'the head-only excerpt somehow contained the tail, so 88f is not testing what it says',
     )
   }
 }
