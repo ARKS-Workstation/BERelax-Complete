@@ -369,6 +369,28 @@ export const ROUTES = [
       'and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-reassignment',
+    path: '/hr/reassignment',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-04s reassignment work queue: every appointment whose therapist may no longer take it, ' +
+      'soonest first, with the credential that took them off it. A handler answering text/html rather ' +
+      'than a document, for the reason the credentials screen one directory along gives: a document must ' +
+      'be served in both locales, which would need an Arabic admin document and the W-SYS-01 shell, and ' +
+      'would join a screenshot matrix whose RTL half has to be a real Arabic route. READ-ONLY on ' +
+      'purpose — reassigning is a write with an actor, a reason and a client gender no table holds ' +
+      '(B-AVAIL-05), so a page that offered a therapist without it would offer one the transaction then ' +
+      'refuses. It names no customer and no therapist: staff_reference is the handle, and nineteen ' +
+      'employees have no name recorded (ADR 0020). Dynamic because a work queue that was prerendered ' +
+      'would still show work already done. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it ' +
+      'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+  },
+  {
     id: 'journal',
     path: '/journal',
     kind: 'document',

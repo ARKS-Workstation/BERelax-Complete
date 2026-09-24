@@ -6162,12 +6162,147 @@ units:
     - a Four Hands (2 therapists, 1 room) and a Couple (2 therapists, capacity-2 room) booking each reassign
       one appointment while the booking's all-or-none resource shape still holds, proven by integration
       test
+    - 'NOTE: what the candidate finder is, and the one thing it deliberately does not do. Five of the seven
+      constraints the first acceptance line names ARE B-AVAIL-04''s eligibility answer - employment, the
+      required skill, credential validity, the roster for the DAY, approved leave, and B-AVAIL-05''s
+      same-gender rule - so reassignmentCandidates CONSUMES a TherapistPool and re-implements none of them:
+      an excluded therapist is rejected with the pool''s own reason, spelled as the pool spelled it. A
+      second copy of the credential predicate here would be a third answer to "is this therapist bookable",
+      and P-HR-03''s header records what that costs. What it adds is the two checks a DATE-shaped pool
+      cannot make about a PERIOD: rostered across the whole of the treatment plus its buffers, and holding
+      no other appointment overlapping it. Membership is therapistsFreeFor''s (B-AVAIL-02) verbatim and the
+      two primitives are used again only to attribute a reason to whoever it dropped, so "free" has one
+      reading. REASSIGNMENT_REJECTIONS adds three labels to the seven - already_assigned,
+      not_rostered_for_the_period, therapist_busy - and reassignment.test.ts asserts none of them collides
+      with the port''s seven, which is the claim composedExclusions makes at runtime made at authoring time
+      on the other side. C-CRM-01''s do-not-pair flag is applied by REMOVING the candidate before the rule
+      runs (its reason is null by design), so the answer carries a COUNT of silent exclusions and never the
+      ids: naming them would reconstruct the do-not-pair list from a screen whose job is to pick a
+      therapist.'
+    - 'NOTE: the race, and why the test is written as one. packages/fixtures/src/reassignment.itest.ts lists
+      the candidates, then makes the offered therapist ineligible by committing a booking for them on
+      another connection, then commits the reassignment with the tuple the listing produced - and requires
+      therapist_not_eligible naming therapist_busy. The control beside it removes the competing booking and
+      commits the SAME tuple, so the refusal is the world changing rather than a transaction that refuses
+      everything. The concurrency line is driven twice: once with the winner''s transaction held OPEN across
+      the loser''s attempt, so the loser really meets appointment_therapist_no_overlap and the refusal
+      carries SQLSTATE 23P01 as a named conflict rather than a 500; and once as a plain interleaved race,
+      where either refusal is correct because the loser may instead read the winner''s committed row. No
+      room lock and no therapist lock are taken, deliberately: a reassignment changes no room, no period and
+      no places, so it cannot move any room''s peak concurrency, and the therapist half is a constraint,
+      which does not race. One thing an undecided race costs the rest of the FILE, because it cost this one
+      a gate: the interleaved case leaves 11:30-12:30 held by one of two therapists depending on which side
+      won, so a later case booking either of them across that hour commits or meets
+      appointment_therapist_no_overlap on the toss. It first showed as the block-83 control failing while
+      the twelve mutations all fired and `pnpm test:integration` was green - the queue cases, three of them,
+      failing on the hour rather than on the queue. The three now use a spare therapist no earlier case
+      touches, and the helper that raises a flag reads the therapist OFF the appointment instead of naming
+      the incumbent, so a queue entry cannot name somebody who does not hold the row. Anything added to this
+      file after an undecided race must take its therapists from outside it.'
+    - 'NOTE: migration 0065, and the numbers around it. 62, 63 and 64 are allocations to units in flight;
+      nothing is renumbered to close the distance, for 0055''s reason. It adds from_therapist_id /
+      to_therapist_id to appointment_status_history because the acceptance asks for a history row with an
+      actor and a reason and neither of the two ways of forcing one in without a column is honest: a row
+      with from_status = to_status is refused by appointment_status_history_is_a_change (rightly - a row
+      recording no change is a chain reading as activity), and a NULL from_status is the shape 0024 gives an
+      appointment''s CREATION, so borrowing it would make "when was this booking taken" unanswerable for
+      every reassigned appointment. is_a_change keeps its NAME and widens to "the status moved, or the
+      therapist did", so the self-transition control that asserts on that name still fires.
+      record_appointment_status() gains a third branch AND its trigger gains a column - 0024 declared it
+      `after insert or update OF STATUS`, so the branch alone would have been correct code that was never
+      called, and the only symptom would have been a reassignment with no history row. On
+      appointment_reassignment_flag, cleared_reason is NOT NULL exactly when cleared_at is: that is the
+      database half of "cannot leave the queue except by reassignment or an audited explicit resolution",
+      because there are then exactly three exits (credential_restored is P-HR-03''s sweep, reassigned and
+      resolved_by_hand are this unit''s), DELETE stays revoked, and a bare UPDATE that stamps cleared_at
+      without naming one is refused. resolved_by_hand carries a mandatory note - it is the one exit with no
+      external fact behind it - and reassigned_to_therapist_id is the mirror of the therapist_id 0058
+      copies, because after a second reassignment the join to appointment answers neither half.'
+    - 'NOTE: the customer notice ships as a template and an EVENT; the transport send is deferred.
+      booking.therapist_changed is a new shipped default in packages/messaging/src/templates.ts - both
+      locales, transactional, approved - naming neither therapist nor treatment (docs/06 D2, and brief rule
+      10: a therapist has no display name until an admin sets one, so a body naming the new one would
+      invent a name or print an id). The reassign transaction RESOLVES that template inside its own
+      transaction, has @berelax/core''s judgeReassignmentNotice judge the row, and refuses to commit on
+      notice_not_sendable - a missing row, the wrong key, a promotional class or unapproved words - then
+      publishes appointment.therapist_changed_notice naming the template VERSION and the class it was judged
+      under. It does not hand the message to a vendor: that needs the per-booking magic link B-UI-02 owns
+      and nothing in this build can mint (send-scheduled-step.ts records the same gap for booking.reminder,
+      which is SKIPPED with content_unavailable for it), and the staff/customer notification set is
+      P-HR-14''s. DEFERRED to P-HR-14 with B-UI-02: a consumer for that event. The refusal direction is a
+      decision with a cost, written out in judgeReassignmentNotice - a template left in draft blocks every
+      reassignment until somebody approves it, which is right, because the appointment stays in the queue
+      where it already was and the alternative is a customer who finds out when a stranger opens the
+      treatment-room door.'
+    - 'NOTE: the screen is a route handler and a READ, and both halves are scope rather than omission. It is
+      apps/web/app/(admin)/hr/reassignment/route.ts plus a pure render.ts, not the page.tsx this entry
+      listed, for the reason P-HR-02 records for its own page and the credentials screen one directory
+      along: apps/web/src/routes/registry.ts is in exact bijection with the filesystem and registry.test.ts
+      requires every DOCUMENT in both locales, so a page.tsx needs an Arabic admin document and the W-SYS-01
+      shell. /hr is already in ADMIN_GROUP_PREFIXES, which is what makes it noindex. It shows the queue -
+      soonest appointment first, the flag''s reason, the credential and the date - and lists NO candidates
+      and offers no form: the candidate finder needs the client''s gender under strict same-gender matching,
+      no table holds it (B-AVAIL-05: customer has no gender column), and a page that listed candidates
+      without it would list therapists the transaction then refuses, which is the exact failure this unit
+      exists to prevent. reassignAppointment therefore refuses an absent client gender by name, the same
+      refusal createBooking makes. DEFERRED to W-SYS-01: acting on the queue from a browser, which needs the
+      admin session an actor and a reason can be attributed to; and to whichever unit collects a client''s
+      gender, which B-AVAIL-05''s NOTE already defers.'
+    - 'NOTE: two of the four reasons are in the vocabulary and nothing raises them yet, deliberately.
+      REASSIGNMENT_REASONS is {credential_expiry, leave_approved, therapist_archived, manual} and 0065
+      mirrors it as a CHECK; the pair itest parses the accepted set out of pg_constraint and asserts it
+      equals the list in both directions, so a fifth reason added to one side fails a test rather than a
+      transaction. credential_expiry is P-HR-03''s sweep and manual is a human; leave_approved belongs to
+      P-HR-09, which depends on this unit and whose acceptance says "each conflict resolves by P-HR-04
+      reassignment", and therapist_archived to whichever unit ends an employment. Both are spelled now
+      because the reason is a stored, constrained value: adding one later is a migration, and shipping the
+      transaction with only the reason its first caller needs would make the second caller''s arrival a
+      schema change.'
+    - 'NOTE: one finding in code this unit does not own, reported rather than repaired.
+      packages/db/src/repositories/reschedule.ts (B-LIFE-03) re-applies readEligibleTherapists to the
+      therapists a reschedule names and does NOT apply C-CRM-01''s composed do-not-pair exclusion, which
+      createBooking does (assertTherapistsAreEligible calls therapistsExcludedBy with doNotPairExclusion for
+      exactly this reason: "the read is a memo and this is the write"). So a reschedule that names a
+      therapist a manager recorded as not to be paired with that customer commits the pairing the flag
+      exists to prevent, and the customer learns about it from the therapist. It is reachable: RescheduleInput
+      takes therapistIds. It is not repaired here because it is another unit''s transaction and the repair
+      needs a decision about the refusal it reports - therapist_not_eligible names no reason for a silent
+      exclusion, which is right, but reschedule''s refusal currently always carries pool.excluded - and
+      about whether a reschedule that KEEPS its therapists should be refused for a flag recorded after the
+      booking was taken. This unit''s own path applies the exclusion (candidatesFor), so the reassignment
+      half of the estate is covered.'
+    - 'NOTE: a second finding in code this unit does not own, and it FAILS `pnpm verify` at random.
+      packages/hr/src/employee.itest.ts:274 (P-HR-01) asserts `expect(row?.dump).not.toContain(''784'')`
+      over `to_jsonb(d)::text` of one `employee_document` row - the whole row, deliberately, so a column
+      added later is covered. The intent is right (no FRAGMENT of an Emirates ID may be in the row, and 784
+      is the real UAE prefix) and the assertion is unsound as written: that dump also contains about 306
+      characters of random HEX - `number_ct`, `number_nonce`, `number_aad_fp`, `number_wrapped_key` and two
+      v7 uuids - plus two microsecond timestamps, so "784" appears in it by coincidence roughly once in
+      three runs. Measured today: five failures in twelve consecutive runs of that one file on an otherwise
+      idle database, with the hit in a different field each time - `created_at` .178418, `updated_at`
+      .578449, `number_aad_fp` b2493784..., `created_at` .340784. It is not caused by this unit: 0065 adds
+      no column to `employee_document`, and the row the assertion reads is created by that file. It is
+      reported rather than repaired because the fix is a decision about P-HR-01''s own acceptance line -
+      the honest form is to dump only the columns that could hold PLAINTEXT (`to_jsonb(d) - ''number_ct'' -
+      ''number_nonce'' - ''number_aad_fp'' - ''number_wrapped_key'' - ''id'' - ''employee_id'' -
+      ''created_at'' - ''updated_at''`), which keeps the fragment check and removes the ciphertext it
+      cannot be run against. Until then it will fail somebody''s verify for reasons that have nothing to
+      do with their unit, which is the shape brief rule 1 warns about from the other direction.'
     files:
     - packages/core/src/hr/reassignment.ts
     - packages/core/src/hr/reassignment.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0065_appointment_reassignment.sql
+    - packages/db/src/schema/booking.ts
     - packages/db/src/repositories/reassignment.ts
-    - apps/web/app/(admin)/hr/reassignment/page.tsx
-    - packages/messaging/src/templates/appointment-therapist-changed.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/reassignment.itest.ts
+    - packages/messaging/src/templates.ts
+    - apps/web/app/(admin)/hr/reassignment/route.ts
+    - apps/web/app/(admin)/hr/reassignment/render.ts
+    - apps/web/src/hr-reassignment-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
   - id: P-HR-05
     order: 94
     title: Shift model and midnight-crossing working-hours maths

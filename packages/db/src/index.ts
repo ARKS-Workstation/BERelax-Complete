@@ -510,13 +510,43 @@ export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
   flagAppointmentsForReassignment,
+  type ListCandidatesInput,
   type LiveReassignmentFlagRow,
+  listReassignmentCandidates,
+  type NoticeRuleVerdict,
+  type NoticeTemplateRow,
   type RaisedReassignmentFlag,
+  REASSIGNED_EVENT,
+  REASSIGNMENT_NOTICE_EVENT,
+  REASSIGNMENT_REFUSALS,
+  REASSIGNMENT_RESOLVED_EVENT,
+  type ReassignInput,
+  type ReassignmentActor,
+  type ReassignmentCandidateList,
   type ReassignmentCandidateRow,
+  type ReassignmentCandidateRule,
+  type ReassignmentDeps,
   type ReassignmentFlagInput,
+  type ReassignmentNoticeRule,
+  type ReassignmentQueueRow,
+  type ReassignmentRefusal,
+  type ReassignmentResult,
+  type ReassignmentRuleAnswer,
+  type ReassignmentRuleAppointment,
+  type ReassignmentRuleInput,
+  type ReassignmentRulePool,
+  type ReassignmentTarget,
   type ReassignmentWindow,
+  type ResolvedFlag,
+  type ResolveFlagInput,
   readLiveReassignmentFlags,
   readReassignmentCandidates,
+  readReassignmentQueue,
+  reassignAppointment,
+  reassignAppointmentTx,
+  reassignmentError,
+  reassignmentRefusalOf,
+  resolveReassignmentFlag,
 } from './repositories/reassignment.ts'
 export {
   RESCHEDULE_REFUSALS,
@@ -1041,9 +1071,39 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
+// 65 is 0065_appointment_reassignment.sql: the reassignment as a RECORDED change, and the three ways a
+// flag leaves the queue (P-HR-04). 62, 63 and 64 are ALLOCATIONS to units in flight rather than gaps —
+// this file is the ledger and the only honest place to say so, and nothing is renumbered to close the
+// distance for the reason 0055 gives. Two tables learn one thing each and neither of them is
+// `appointment`: a reassignment writes `appointment.therapist_id` and nothing else, which is what makes
+// "the customer's booking survives, only the therapist changes" a claim about one column.
+// `appointment_status_history` gains `from_therapist_id` / `to_therapist_id`, because the acceptance
+// asks for a history row carrying the actor and a reason from a closed set and the two ways of forcing
+// one in without a column are both worse: `from_status = to_status` is refused by
+// `appointment_status_history_is_a_change` (rightly — a row recording no change is a chain reading as
+// activity where none occurred), and a NULL `from_status` is the shape 0024 gives a CREATION, so
+// borrowing it would make "when was this booking taken" unanswerable for every reassigned appointment.
+// `is_a_change` therefore keeps its NAME and widens to "the status moved, or the therapist did", so the
+// self-transition control that asserts on that name still fails. `record_appointment_status()` gains a
+// third branch AND its trigger gains a column — 0024 declared it `after insert or update OF STATUS`, so
+// the branch alone would have been correct code that was never called, and the only symptom would have
+// been a reassignment with no history row. The branch is an `elsif`: an UPDATE moving the status and the
+// therapist at once would otherwise append two rows, and `transitionAppointment` refuses a transition
+// that appended anything but exactly one. On `appointment_reassignment_flag`, `cleared_reason` is NOT
+// NULL exactly when `cleared_at` is, which is the database half of "a flagged appointment cannot leave
+// the queue except by reassignment or an audited explicit resolution": there is no fourth exit, DELETE
+// stays revoked, and an UPDATE that stamped `cleared_at` without naming which exit it was is refused by
+// a constraint rather than by review. `resolved_by_hand` carries a mandatory note because it is the one
+// exit with no external fact behind it, and `reassigned_to_therapist_id` is the mirror of the
+// `therapist_id` 0058 copies — after one reassignment the join no longer answers who it was taken from,
+// and after a second it no longer answers who took it. Every pair test is spelled
+// `is not distinct from` rather than `=`, because a live flag's `cleared_reason` is NULL and
+// `null = 'reassigned'` is NULL, which a CHECK passes: the obvious operator would let a LIVE flag carry
+// a successor and a resolution note.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
+// come to apply the same number to different SQL. 62, 63 and 64 are allocated and not yet landed, so
+// they are the only OPEN gaps; 55 through 61 and 65 are in use. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 61 as const
+export const SCHEMA_VERSION = 65 as const
