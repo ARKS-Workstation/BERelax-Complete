@@ -174,7 +174,17 @@ describe('the bucket split, over randomised shifts inside the trading window', (
       ),
       { numRuns: 300 },
     )
-  })
+    // 30 seconds, not vitest's default 5.
+    //
+    // The fourth instance of one shape in this session, and the third in a file whose author had no reason
+    // to suspect it: 300 generated shifts through the bucket splitter passes in about two seconds alone and
+    // timed out at 5,000 ms under v8 coverage instrumentation with three sibling verify runs on the box. It
+    // is a CORRECTNESS property — the buckets partition the worked minutes exactly — and nothing about it
+    // is a claim about speed, so inheriting a performance budget makes it fail for a reason its own name
+    // does not mention. See `search-analytics.test.ts`, `gender-match.property.test.ts` and
+    // `availability-perf.itest.ts` for the same decision and the same reasoning. `numRuns` stays at 300
+    // because the acceptance line asks for the coverage; the timeout moves instead.
+  }, 30_000)
 })
 
 describe('the checker is able to fail', () => {

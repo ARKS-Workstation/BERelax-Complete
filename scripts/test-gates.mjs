@@ -21103,6 +21103,207 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 84a-84d. One timed-out test must not take six others with it.
+//
+// Numbered 84 and placed before 79 on purpose: 79 is the harness block and stays last before case 29, so
+// the unit blocks run in numeric order and the two harness-wide ones bring up the rear.
+//
+// `packages/db/src/schema/catalogue.itest.ts` hangs its variants off one shared probe service, and the
+// case whose whole subject is ON DELETE CASCADE used to delete THAT row and re-insert it at the end of its
+// own body. Everything in between was a window in which the shared row did not exist, so a timeout — or
+// any failing assertion inside the window — left `probeServiceId` pointing at a deleted row and six later
+// tests failed with SQLSTATE 23503. One defect, seven failures, and the six said nothing about themselves.
+//
+// The fix gives that case its own service. This block is the known-bad fixture for it, and it is built the
+// only way that measures the property rather than the presence of a line of code: it REPRODUCES the
+// original by injecting a hang where the timeout used to land, and requires the blast radius to be one.
+// 84c restores the old shared-row deletion under the same hang and requires the radius to be larger and
+// 23503 to appear — without which "exactly one failed" is satisfied by a suite that cannot fail at all.
+{
+  const CATALOGUE = 'packages/db/src/schema/catalogue.itest.ts'
+  // Two seconds: long enough for the statements before the hang, short enough that the run is quick. The
+  // hang is unconditional, so this is not a load-sensitive number — unlike a default timeout, which is
+  // what three separate tests in this repository have already failed under.
+  const timedOut = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    '--testTimeout=2000',
+    file,
+  ]
+  const HANG = '    await new Promise(() => {})\n'
+  const failureCount = (output) => {
+    const match = output.match(/Tests\s+(\d+) failed/)
+    return match === null ? 0 : Number(match[1])
+  }
+
+  // 84a. The hang where the timeout used to land. One test fails; nothing cascades.
+  {
+    const result = withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    await sql`delete from service where id = ${ownId}`\n',
+          '    await sql`delete from service where id = ${ownId}`\n' + HANG,
+        ),
+      () => runExpectingFailure('pnpm', timedOut(CATALOGUE)),
+    )
+    const failed = failureCount(result.output)
+    check(
+      'catalogue gate: a timed-out cascade case fails alone',
+      result.failed && failed === 1,
+      `expected exactly one failing test, saw ${failed}:\n${result.output}`,
+    )
+    check(
+      'catalogue gate: a timed-out cascade case leaves no foreign-key wreckage',
+      !result.output.includes('23503'),
+      `a 23503 appeared, so the shared probe was destroyed after all:\n${result.output}`,
+    )
+  }
+
+  // 84b. The same hang in a case that does NOT touch the shared row, as the control on 84a's arithmetic:
+  //      if `failureCount` misread the summary, this would not come back as one either.
+  {
+    const result = withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    expect(shared?.n, 'the shared probe service must survive this case').toBe('1')\n",
+          "    expect(shared?.n, 'the shared probe service must survive this case').toBe('1')\n" +
+            HANG,
+        ),
+      () => runExpectingFailure('pnpm', timedOut(CATALOGUE)),
+    )
+    const failed = failureCount(result.output)
+    check(
+      'catalogue gate: the failure count is read from the summary and not guessed',
+      result.failed && failed === 1,
+      `expected exactly one failing test, saw ${failed}:\n${result.output}`,
+    )
+  }
+
+  // 84c. The defect as it shipped: delete the SHARED probe, hang before putting it back. This is the case
+  //      that proves 84a is about isolation rather than about the suite being unable to fail.
+  {
+    const result = withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    await sql`delete from service where id = ${ownId}`\n',
+          '    await sql`delete from service where id = ${probeServiceId}`\n' + HANG,
+        ),
+      () => runExpectingFailure('pnpm', timedOut(CATALOGUE)),
+    )
+    const failed = failureCount(result.output)
+    check(
+      'catalogue gate: destroying the shared probe cascades, which is the defect being fixed',
+      result.failed && failed > 1 && result.output.includes('23503'),
+      `expected more than one failure and a 23503, saw ${failed} failures:\n${result.output}`,
+    )
+  }
+
+  // 84d. And the committed suite passes, so the three above are about their fixtures.
+  {
+    const clean = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      CATALOGUE,
+    ])
+    check(
+      'catalogue gate: the committed catalogue suite passes',
+      !clean.failed,
+      `the committed suite failed:\n${clean.output}`,
+    )
+  }
+}
+
+// 85a-85c. The availability read's budget is a count, not a clock — and the count has to be able to fail.
+//
+// Numbered 85 and placed before 79 for the reason 84 gives: 79 is the harness block and stays last.
+//
+// `availability-perf.itest.ts` asserted a p95 against a wall-clock budget, and its own comment conceded
+// that four concurrent verify runs open the spread by about 30%. A budget that measures the query and the
+// machine together cannot say which of them failed, and three other tests in this repository have failed a
+// timing budget while passing in isolation. So the load-bearing assertions are now the number of round
+// trips per call and the size of the answer, both exact and both true on any machine.
+//
+// The number is NINE, measured. The first version of that assertion said one — the reasoning being that
+// `readAvailabilityFacts` is a single call — and the count came back nine, which is the assertion working
+// on its author. What this block proves is that nine can fail: an N+1 added to the uncached path is
+// exactly the regression a budget set on a fixture this small cannot see, because five rooms and eight
+// therapists are fast even done the wrong way.
+{
+  const AVAILABILITY = 'packages/db/src/queries/availability.ts'
+  const PERF = 'packages/fixtures/src/availability-perf.itest.ts'
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 85a. One more statement on the uncached path. This is the N+1 in its smallest form — a single extra
+  //      round trip, which costs about a millisecond here and hundreds at thirty therapists.
+  {
+    const result = withEditedFile(
+      AVAILABILITY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const facts = await readAvailabilityFacts(sql, request, now)\n',
+          '  const facts = await readAvailabilityFacts(sql, request, now)\n  await sql`select 1`\n',
+        ),
+      () => runExpectingFailure('pnpm', integration(PERF)),
+    )
+    checkRejectedBy(
+      'availability gate: a tenth statement on the uncached path is rejected',
+      result,
+      'issues nine statements',
+    )
+  }
+
+  // 85b. And a statement removed from the CACHED path, because the counter has to be able to fail in both
+  //      directions. A cache hit that reads no epoch is a memo nothing invalidates, which is the defect
+  //      `availability_epoch` exists to prevent — and it would make the hit LOOK cheaper.
+  {
+    const result = withEditedFile(
+      AVAILABILITY,
+      (text) =>
+        replaceOnce(
+          text,
+          '      const epochs = await readAvailabilityEpochs(sql, [request.tradingDate])\n',
+          '      const epochs = new Map<string, number>()\n',
+        ),
+      () => runExpectingFailure('pnpm', integration(PERF)),
+    )
+    check(
+      'availability gate: a cache hit that skips the epoch read is rejected',
+      result.failed,
+      `the perf suite passed with the epoch read removed from the cached path:\n${result.output}`,
+    )
+  }
+
+  // 85c. The committed tree passes, so both fixtures above are about their own edits.
+  {
+    const clean = run('pnpm', integration(PERF))
+    check(
+      'availability gate: the committed availability budget passes',
+      !clean.failed,
+      `the committed perf suite failed:\n${clean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

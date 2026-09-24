@@ -295,6 +295,97 @@ function percentile(samples: readonly number[], fraction: number): number {
   return sorted[Math.max(0, rank - 1)] as number
 }
 
+describe('the work one availability query does', () => {
+  /*
+   * These assertions are the ones that hold on ANY machine, and they exist because the p95 below does not.
+   *
+   * A wall-clock budget measures the query and the box it ran on, and cannot tell you which it failed on:
+   * this file's own comment already conceded that four concurrent verify runs open the spread by about
+   * 30%, and three other tests in this repository have failed a timing budget while passing in isolation.
+   * What the acceptance line is actually about is that the availability read does not degrade — and
+   * degradation has a shape you can count rather than time.
+   *
+   * So: the number of round trips, and the size of the answer. Both are exact, both are load-independent,
+   * and an N+1 or a lost filter breaks them on the quietest machine as surely as on the busiest.
+   */
+  it('issues exactly one statement per uncached call, which is what an N+1 would break', async () => {
+    let statements = 0
+    // A counting proxy rather than a wrapper class: `sql` is a tagged-template function with methods, so
+    // anything that replaces it has to stay callable AND keep `sql.array`, `sql.begin` and the rest.
+    const counted = new Proxy(sql, {
+      apply(target, thisArg, args: unknown[]) {
+        statements += 1
+        return Reflect.apply(target as never, thisArg, args as never)
+      },
+    }) as typeof sql
+
+    const answer = await queryAvailability(counted, request(), { solve, now: NOW })
+    expect(answer.refusal).toBeNull()
+    expect(answer.cached).toBe(false)
+    /*
+     * NINE, measured rather than assumed — the first version of this assertion said one, on the reasoning
+     * that `readAvailabilityFacts` is a single call, and the count came back nine. That is the assertion
+     * working on its author: the guess was about the shape of the code and the number is a fact about what
+     * it does.
+     *
+     * Nine is the figure to hold, and it is exact on purpose. Fewer is an improvement and belongs here as a
+     * smaller number with the reason; MORE is the N+1 — a per-therapist or per-room lookup that turns a
+     * 6 ms query into a 600 ms one at thirty therapists while staying inside any budget set on a fixture
+     * this size. The point of counting rather than timing is that the fixture's size cannot hide it.
+     */
+    expect(statements, 'an uncached availability query issues nine statements').toBe(9)
+  })
+
+  it('reads the epoch and nothing else on a cache hit', async () => {
+    // The control on the count above. Without it, `toBe(1)` is satisfied by a proxy that never increments
+    // — and the cached path is where a second statement is legitimate, so asserting it separately is what
+    // says the counter works rather than that the code is simple.
+    const cache = createAvailabilityCache()
+    const options = { solve, now: NOW, cache }
+    await queryAvailability(sql, request(), options)
+
+    let statements = 0
+    const counted = new Proxy(sql, {
+      apply(target, thisArg, args: unknown[]) {
+        statements += 1
+        return Reflect.apply(target as never, thisArg, args as never)
+      },
+    }) as typeof sql
+    const hit = await queryAvailability(counted, request(), options)
+    expect(hit.cached).toBe(true)
+    // One, and a different one: the epoch read that decides whether the memo is still true. A cache hit
+    // that issued NO statement would be a memo nothing invalidates, which is the defect
+    // `availability_epoch` exists to prevent.
+    expect(statements, 'a cache hit reads the epoch, and only the epoch').toBe(1)
+  })
+
+  it('computes the same answer size every time, which is what a lost filter would break', async () => {
+    // The shape of the answer over the probe salon is arithmetic, not a measurement: five rooms, eight
+    // therapists, one trading date, one variant. A query that stopped applying the turnaround, the buffer
+    // or the gender rule would return MORE slots and still be fast — so a timing budget cannot see it and
+    // this can. Recorded as a range rather than an exact figure because the fixture's roster is seeded by
+    // another unit; what matters is that it does not move, and any movement is a change somebody made.
+    const answer = await queryAvailability(sql, request(), { solve, now: NOW })
+    const considered = answer.slots.length + answer.rejected.length
+    console.log(
+      `[B-AVAIL-07] one answer over the probe salon — ${answer.slots.length} offered, ` +
+        `${answer.rejected.length} rejected, ${answer.excluded.length} therapists excluded`,
+    )
+    expect(answer.slots.length).toBeGreaterThan(5)
+    expect(considered).toBeGreaterThan(answer.slots.length)
+    /*
+     * Every exclusion carries a REASON, which is the invariant. The first version of this line asserted
+     * the count was at most this file's eight probe therapists and measured twenty-six: the pool is over
+     * every employee the database holds, not over the ones this fixture seeded, so a count was the wrong
+     * thing to bound. What matters is that nobody is dropped silently — an excluded therapist without a
+     * reason is a therapist the answer cannot explain.
+     */
+    expect(answer.excluded.length).toBeGreaterThan(0)
+    const unexplained = answer.excluded.filter((therapist) => !therapist.reason)
+    expect(unexplained, 'every excluded therapist carries a reason').toEqual([])
+  })
+})
+
 describe('50 concurrent availability queries', () => {
   it(`return a p95 under ${P95_BUDGET_MS} ms with the memo disabled`, async () => {
     // Warm up, deliberately outside the sample. The first call in a process pays for the connection
