@@ -37,6 +37,7 @@ import {
   gscUrlInspectionHandler,
   SEO_URL_INSPECTION_AGENT,
 } from './jobs/gsc-url-inspection-rotation.ts'
+import { LEAVE_ACCRUAL_AGENT, runLeaveAccrual } from './jobs/leave-accrual.ts'
 import {
   COMPLIANCE_CALENDAR_JOB,
   REBUILD_OBLIGATION_NOTICES_JOB,
@@ -252,6 +253,35 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     // flags are idempotent so reclaiming it cannot double-raise.
     expireInSeconds: 300,
     handler: credentialSweepHandler,
+  },
+  {
+    name: 'hr.leave-accrual',
+    purpose:
+      'Monthly: accrues annual leave for every complete month that has no accrual row yet, from the ' +
+      'employment date or the 24-month catch-up window, pro-rated for a part month and reduced by ' +
+      'approved unpaid leave. The only thing in this system that adds to a leave balance; everything ' +
+      'else reads one. Idempotent per (employee, accrual_month) by a partial unique index, so a second ' +
+      'pass writes nothing and the balance — a view over the movements — cannot move (P-HR-08, ' +
+      'docs/04 SS7).',
+    // 05:00 Asia/Dubai on the 1st. After trading closes at 02:00 and after the four nightly passes at
+    // 03:00, 03:45, 04:15 and 04:45, so nothing contends. Deliberately NOT inside 00:00-02:00: the
+    // session in force then opened the previous day, which for the 1st of a month means the month being
+    // accrued has not finished — `latestCompletedAccrualMonth` gets that right and would accrue the month
+    // before, which is correct and a month late. Running after close removes the question.
+    //
+    // The day-of-month field is 1 and the pass is a CATCH-UP sweep, which is what makes one firing a
+    // month safe: a missed month has no row, so the next run accrues it. A daily cron would reach the
+    // same state and ask the database the same question 30 times for nothing.
+    cron: '0 5 1 * *',
+    agent: LEAVE_ACCRUAL_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 300,
+    retryBackoff: true,
+    // Four reads over the roster and one insert. Ten minutes is generous for nineteen employees and two
+    // years of catch-up; a pass still running past it is blocked on a lock rather than slow, and
+    // reclaiming it cannot double-accrue because the unique index refuses the second row.
+    expireInSeconds: 600,
+    handler: leaveAccrualHandler,
   },
   {
     name: 'google-connection.health',
@@ -495,6 +525,33 @@ async function credentialSweepHandler(_data: never, context: JobContext): Promis
   console.log(
     `hr.credential-sweep ${result.asOf}: ${result.considered} future appointment(s) considered, ` +
       `${result.flagged.length} flagged, ${result.cleared.length} cleared`,
+  )
+}
+
+/**
+ * The monthly leave accrual pass.
+ *
+ * Thin, like the sweeps above: which month has completed is resolved by `runLeaveAccrual` from
+ * `business_day`, and it takes its instant as an argument so the integration suite can drive it at a
+ * frozen clock and ask the one question a job reading `new Date()` cannot be asked — whether the second
+ * run of the same month writes anything. The log line reports the employees considered as well as the
+ * accruals written, because a month where everybody already has their row is the normal second run: a
+ * pass that logged only when it wrote something would be indistinguishable from a pass that had stopped,
+ * which is docs/10 SS6's failure and the reason `agent_heartbeat` exists.
+ */
+async function leaveAccrualHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The leave accrual pass ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const result = await runLeaveAccrual(sql, context.now())
+  console.log(
+    `hr.leave-accrual through ${result.throughMonth}: ${result.considered} employee(s) considered, ` +
+      `${result.written.length} accrual(s) written, ${result.accruedHundredths} day-hundredths added`,
   )
 }
 

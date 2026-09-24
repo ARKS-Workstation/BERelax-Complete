@@ -440,6 +440,28 @@ export {
   type StoredProvisionalMarker,
 } from './repositories/journal.ts'
 export {
+  type AccruedMonthRow,
+  type AccruingEmployeeRow,
+  type LeaveAccrualInput,
+  type LeaveBalanceRow,
+  type LeaveEntitlementRuleRow,
+  readAccruedMonths,
+  readAccruingEmployees,
+  readLeaveBalances,
+  readLeaveEntitlementRules,
+  readUnpaidLeaveDaysByMonth,
+  type UnpaidLeaveDaysRow,
+  type WrittenLeaveAccrual,
+  writeLeaveAccruals,
+} from './repositories/leave.ts'
+export {
+  type ImportedOpeningBalance,
+  importLeaveOpeningBalances,
+  type LeaveOpeningBalanceImport,
+  type LeaveOpeningBalanceRow,
+  readLeaveOpeningBalances,
+} from './repositories/leave-opening-balance.ts'
+export {
   type CostByTemplate,
   type CostByTradingDate,
   type CostWindow,
@@ -1041,9 +1063,33 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
+// 66 is 0066_hr_leave.sql: leave entitlement, and the ledger a leave balance is the sum of (P-HR-08).
+// `leave_entitlement_rule` is `working_hours_rule`'s shape one subject along — one row per VERSION, keyed
+// on the first date it governs, because leave is asked about the PAST and a disputed month recomputed
+// after a policy change must use the policy that applied then. Every quantity is integer day-hundredths
+// (250 is 2.5 days) and `leave_entitlement_rule_annual_total_matches_monthly_accrual` holds the headline
+// entitlement to twelve times the monthly figure, so a version whose contract number disagrees with its
+// ledger number is not a storable row. `leave_movement` is the ledger, append-only with UPDATE and DELETE
+// raising ZH001 for every role, and `leave_balance` is a VIEW summing it — there is NO stored balance
+// column, which is the decision this file is the right place to record: a leave balance is the figure in
+// an HR system most often corrected retrospectively, and a stored one disagrees with the movements the
+// first time a month is re-accrued or a holiday withdrawn. `leave_movement_one_accrual_per_month` (a
+// partial unique index on `(employee_id, accrual_month)`) IS the accrual job's idempotency guarantee
+// rather than a check on it, and there is deliberately no `taken` movement kind: a request RESERVES when
+// it is made, approval only makes the reservation final, so an approval moves no balance and writes no
+// row. It creates NO table for leave requests: 0030's `leave_request` already carries the tstzrange
+// period, and the one decision 0030 left open — whether a leave day is aligned to the trading day or the
+// calendar day — is taken in `leaveCoveragePeriod()` in `@berelax/core` rather than in SQL, so a leave day
+// covers its session's 00:00-02:00 tail and `resolveTradingDate` stays the one reading of where a trading
+// day ends. Version 1 is seeded from the sentinel 1900-01-01 with every figure provisional against
+// Y9-leave-detail; carry-over expiry is seeded FALSE, which is where the two recorded provisional answers
+// conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
+// visible.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
+// come to apply the same number to different SQL. 55 through 61 are all in use; 62 through 65 are
+// ALLOCATED to units still in flight in other worktrees and are not gaps to be closed, which is why this
+// migration is 66 and not 62. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 61 as const
+export const SCHEMA_VERSION = 66 as const

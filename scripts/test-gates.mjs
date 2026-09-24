@@ -21495,6 +21495,344 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 87. P-HR-08 — leave entitlement, the accrual engine and the ledger a balance is the sum of.
+//
+//     Every defect this unit exists to prevent produces a PLAUSIBLE number, which is why each one is put
+//     back here and the suite that must notice is named. A working-day count instead of a calendar-day
+//     one answers 26 for a 30-day request; a part month accruing nothing answers 2750 for a year instead
+//     of 3000; a cap applied before an expiry forfeits the same day twice. All three are numbers a reader
+//     would accept, and none of them makes anything else in the system fail.
+//
+//     Four of the fifteen are about the DATABASE rather than the arithmetic: the append-only pair that
+//     makes a leave movement a record rather than a draft, the Drizzle mirror without which
+//     `pnpm db:drift` stops watching the ledger at all, and the two ways an append-only DECLARATION used
+//     to be invisible to `pnpm db:conventions` — split across adjacent string literals, which SQL
+//     concatenates, or sitting behind a semicolon in the prose. `bill_line` (0028) is written the first
+//     way, so that rule had never been applied to it; the widening and both fixtures are this unit's.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  const ENGINE = 'packages/core/src/hr/leave-accrual.ts'
+  const SICK = 'packages/core/src/hr/sick-leave.ts'
+  const MIGRATION = 'packages/db/migrations/0066_hr_leave.sql'
+  const MIRROR = 'packages/db/src/schema/hr.ts'
+
+  const ENGINE_SUITE = 'packages/core/src/hr/leave-accrual.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/hr/leave-accrual.property.test.ts'
+  const SICK_SUITE = 'packages/core/src/hr/sick-leave.test.ts'
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const leaveMutant = (path, anchor, replacement, suite) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', unit(suite)),
+    )
+
+  // 87a. Calendar days counted as WORKING days. This is the acceptance line's whole subject, and the
+  //      mutant is a complete, sensible implementation: it excludes the weekly rest day, answers 26 for a
+  //      30-day March request, and the only symptom in production is a balance running out four days
+  //      early. The oracle case is the one that has to notice, because it is the only assertion that
+  //      compares the two readings rather than checking one of them.
+  checkRejectedBy(
+    'leave gate: counting working days instead of calendar days is caught',
+    leaveMutant(
+      ENGINE,
+      '  return dayDifference(range.to, range.from) + 1',
+      [
+        '  let worked = 0',
+        '  for (let date = range.from; date <= range.to; date = addDays(date, 1)) {',
+        // Concatenated rather than interpolated: a `${...}` inside a plain string here is flagged by
+        // biome's noTemplateCurlyInString, and the mutant does not need the interpolation.
+        "    if (new Date(date + 'T12:00:00Z').getUTCDay() !== 5) worked += 1",
+        '  }',
+        '  return worked',
+      ].join('\n'),
+      ENGINE_SUITE,
+    ),
+    'consumes 30 days for a 30-day annual request spanning four weekly rest days',
+  )
+
+  // 87b. And the other plausible wrong count: half-open, so 1 to 30 March is 29 days. One character.
+  checkRejectedBy(
+    'leave gate: a half-open leave-day count is caught',
+    leaveMutant(
+      ENGINE,
+      '  return dayDifference(range.to, range.from) + 1',
+      '  return dayDifference(range.to, range.from)',
+      ENGINE_SUITE,
+    ),
+    'counts both ends, so a single day of leave is one day and not zero',
+  )
+
+  // 87c. "2.5 days per completed month", read literally. A joiner on the 15th earns nothing for their
+  //      first month, the twelve-month total for a mid-month joiner is 2750, and every figure looks
+  //      ordinary — but Y9-leave-detail's recorded answer is "accrual from day 1".
+  checkRejectedBy(
+    'leave gate: a part month accruing nothing is caught',
+    leaveMutant(
+      ENGINE,
+      '      : ceilDiv(rules.monthlyAccrualHundredths * accruingDays, daysInMonth)',
+      '      : accruingDays === daysInMonth ? rules.monthlyAccrualHundredths : 0',
+      ENGINE_SUITE,
+    ),
+    'accrues from the first day of service, pro-rated for the month of engagement',
+  )
+
+  // 87d. The two accrual-reduction flags ignored, so an unpaid day always costs accrual whatever the
+  //      policy says. The reducing cases all still pass — it is the CONTROL that fails, which is exactly
+  //      why the control exists.
+  checkRejectedBy(
+    'leave gate: an accrual reduction that ignores the policy flags is caught',
+    leaveMutant(
+      ENGINE,
+      [
+        '  const reducedDays =',
+        '    (rules.unpaidLeaveReducesAccrual ? unpaidLeaveDays : 0) +',
+        '    (rules.absentDayReducesAccrual ? absentDays : 0)',
+      ].join('\n'),
+      '  const reducedDays = unpaidLeaveDays + absentDays',
+      ENGINE_SUITE,
+    ),
+    'leaves accrual alone when the policy says unpaid leave does not reduce it',
+  )
+
+  // 87e. A leave day as two calendar midnights, which is the reading 0030 warned this unit off. The
+  //      01:30 appointment in the session's tail falls outside the leave, so the therapist stays rostered
+  //      for the last two hours of a day they are on leave and nothing about the stored period looks
+  //      wrong.
+  checkRejectedBy(
+    'leave gate: a leave period of two calendar midnights is caught',
+    leaveMutant(
+      ENGINE,
+      [
+        '  const openingHours = hoursFor(from)',
+        '  const startsAt =',
+        '    openingHours === undefined ? midnight(from) : tradingBounds(from, openingHours, zone).opensAt',
+        '',
+        '  const closingHours = hoursFor(to)',
+        '  const endsAt =',
+        '    closingHours === undefined',
+        '      ? midnight(addDays(to, 1))',
+        '      : tradingBounds(to, closingHours, zone).closesAt',
+      ].join('\n'),
+      ['  const startsAt = midnight(from)', '  const endsAt = midnight(addDays(to, 1))'].join('\n'),
+      ENGINE_SUITE,
+    ),
+    'covers the 01:30 instant whose calendar date is the day after the leave day',
+  )
+
+  // 87f. "Which month is complete" decided on the calendar rather than on the trading session. A pass at
+  //      01:30 on the 1st would accrue a month whose last session is still running — and 01:30 is exactly
+  //      when a 1st-of-the-month cron lands if anybody moves it to midnight.
+  checkRejectedBy(
+    'leave gate: a completed month decided without the trading session is caught',
+    leaveMutant(
+      ENGINE,
+      '  const complete = session.tradingDate === monthEnd(month) && !session.sessionIsOpen',
+      '  const complete = session.tradingDate === monthEnd(month)',
+      ENGINE_SUITE,
+    ),
+    'will not accrue February at 01:30',
+  )
+
+  // 87g. The cap applied before the expiry. The two reductions then overlap, so the forfeiture reported is
+  //      larger than the balance actually lost and the two parts no longer sum to it — which is the
+  //      reconciliation the split exists to keep possible.
+  checkRejectedBy(
+    'leave gate: capping a carry-over before expiring it is caught',
+    leaveMutant(
+      ENGINE,
+      [
+        '  const afterExpiry = closingHundredths - expiredHundredths',
+        '  const carriedHundredths = Math.min(afterExpiry, rules.carryOverCapHundredths)',
+      ].join('\n'),
+      [
+        '  const capped = Math.min(closingHundredths, rules.carryOverCapHundredths)',
+        '  const afterExpiry = capped',
+        '  const carriedHundredths = capped - expiredHundredths',
+      ].join('\n'),
+      ENGINE_SUITE,
+    ),
+    'applies expiry before the cap, so no hundredth is forfeited twice',
+  )
+
+  // 87h. A request that does not reserve. The obvious model — a pending request has not been granted, so
+  //      why would it touch the balance — and the one that lets two separately affordable requests be
+  //      approved into an overdraft. Caught by the PROPERTY suite, whose randomised sequences are the only
+  //      thing that reaches the overlap.
+  checkRejectedBy(
+    'leave gate: a request that reserves nothing is caught',
+    leaveMutant(
+      ENGINE,
+      '          reservedHundredths: ledger.reservedHundredths + event.hundredths,',
+      '          reservedHundredths: ledger.reservedHundredths,',
+      PROPERTY_SUITE,
+    ),
+    'keeps the balance non-negative and equal to the sum of its movements',
+  )
+
+  // 87i. A forfeiture with no balance check — "the cap already bounded it, so what is there to check".
+  //      It drives the balance negative, which is the invariant the whole unit is built around.
+  checkRejectedBy(
+    'leave gate: a forfeiture that can overdraw the balance is caught',
+    leaveMutant(
+      ENGINE,
+      [
+        "      assertWholeHundredths('A forfeiture', event.hundredths)",
+        '      if (event.hundredths > ledger.availableHundredths) {',
+      ].join('\n'),
+      [
+        "      assertWholeHundredths('A forfeiture', event.hundredths)",
+        '      // mutant: the cap already bounded the forfeiture, so no balance check',
+        '      if (event.hundredths < 0) {',
+      ].join('\n'),
+      PROPERTY_SUITE,
+    ),
+    'keeps the balance non-negative and equal to the sum of its movements',
+  )
+
+  // 87j. The sick-leave bands read zero-based. Day 15 becomes the first half-pay day, which pays one day
+  //      too little at every boundary — and the numbers on every payslip still add up.
+  checkRejectedBy(
+    'leave gate: a zero-based sick-leave band boundary is caught',
+    leaveMutant(
+      SICK,
+      '  if (dayOfIllness <= tiers.fullPayDays) return ',
+      '  if (dayOfIllness < tiers.fullPayDays) return ',
+      SICK_SUITE,
+    ),
+    'pays day 15 in full',
+  )
+
+  // 87k. `unpaid` and `exhausted` collapsed into one answer. They are the same money, so no payroll
+  //      figure moves; what changes is that an HR screen tells somebody they are still on sick leave when
+  //      their entitlement has run out.
+  checkRejectedBy(
+    'leave gate: collapsing exhausted sick leave into unpaid is caught',
+    leaveMutant(
+      SICK,
+      [
+        "  if (dayOfIllness <= sickLeaveEntitlementDays(tiers)) return 'unpaid'",
+        "  return 'exhausted'",
+      ].join('\n'),
+      "  return 'unpaid'",
+      SICK_SUITE,
+    ),
+    'reports day 91 as EXHAUSTED rather than unpaid',
+  )
+
+  // 87l. The append-only pair, half-kept. 0066 declares `leave_movement` as raising on UPDATE and DELETE;
+  //      dropping one of the two triggers leaves the table documenting a guarantee it half keeps, and the
+  //      missing half is invisible in review because the comment says otherwise. The conventions gate is
+  //      the thing that reads the declaration against the triggers, and it must name its own rule.
+  checkRejectedBy(
+    'leave gate: an append-only leave ledger missing its DELETE trigger is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger leave_movement_no_delete before delete on leave_movement\n' +
+            '  for each row execute function refuse_leave_movement_change();',
+          '-- mutant: the DELETE half of the append-only pair, removed',
+        ),
+      () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  // 87m. The append-only declaration SPLIT across two adjacent string literals, which SQL concatenates
+  //      and the conventions gate could not see until this unit widened it. `bill_line` (0028) is written
+  //      that way and had therefore never been covered by the rule at all — its trigger pair happens to be
+  //      complete, which is exactly why nothing was failing: a passing check that examined nothing (ADR
+  //      0002). The fixture declares the same shape with NO triggers, so the rule must now fire.
+  {
+    const f = 'packages/db/migrations/9999__gate_fixture_leave_marker__.sql'
+    const TABLE = 'gate_fixture_leave_split_marker'
+    checkRejectedBy(
+      'leave gate: an append-only declaration split across two string literals is seen',
+      withFixture(
+        f,
+        [
+          '-- Known-bad fixture written by scripts/test-gates.mjs. Removed in a finally.',
+          `create table ${TABLE} (`,
+          '  id bigint generated always as identity primary key',
+          ');',
+          `comment on table ${TABLE} is`,
+          "  'A deliberate fixture, never applied to a database. Append-only: UPDATE and '",
+          "  'DELETE raise.';",
+        ].join('\n'),
+        () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']),
+      ),
+      `append-only-table-must-refuse-update-and-delete: ${TABLE}`,
+    )
+  }
+
+  // 87n. And the second way the same declaration used to be invisible: a SEMICOLON in the prose before the
+  //      marker. The previous matcher read the comment as `[^;]*`, so it ended the statement inside the
+  //      string literal and never reached the phrase.
+  {
+    const f = 'packages/db/migrations/9999__gate_fixture_leave_semicolon__.sql'
+    const TABLE = 'gate_fixture_leave_semicolon_marker'
+    checkRejectedBy(
+      'leave gate: an append-only declaration behind a semicolon in the prose is seen',
+      withFixture(
+        f,
+        [
+          '-- Known-bad fixture written by scripts/test-gates.mjs. Removed in a finally.',
+          `create table ${TABLE} (`,
+          '  id bigint generated always as identity primary key',
+          ');',
+          `comment on table ${TABLE} is`,
+          "  'A deliberate fixture, never applied to a database; and one with a semicolon in it. '",
+          "  'Append-only: UPDATE and DELETE raise.';",
+        ].join('\n'),
+        () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']),
+      ),
+      `append-only-table-must-refuse-update-and-delete: ${TABLE}`,
+    )
+  }
+
+  // 87o. The Drizzle mirror renamed, which is what a forgotten mirror looks like to the drift gate: the
+  //      database has the ledger and nothing in `packages/db/src/schema` declares it, so every query
+  //      against it compiles against a shape no gate is watching.
+  checkRejectedBy(
+    'leave gate: a leave ledger with no Drizzle mirror is caught',
+    withEditedFile(
+      MIRROR,
+      (text) =>
+        replaceOnce(
+          text,
+          "pgTable(\n  'leave_movement',",
+          "pgTable(\n  'leave_movement_gate_fixture',",
+        ),
+      () => runExpectingFailure('node', ['scripts/check-schema-drift.mjs']),
+    ),
+    'Database has table "public.leave_movement" with no Drizzle mirror',
+  )
+
+  // 87p. The committed tree passes all three suites and both database gates, so the fifteen cases above
+  //      are about their fixtures and not about a unit that was already red.
+  {
+    const engineClean = run('pnpm', unit(ENGINE_SUITE))
+    const propertyClean = run('pnpm', unit(PROPERTY_SUITE))
+    const sickClean = run('pnpm', unit(SICK_SUITE))
+    const conventionsClean = run('node', ['scripts/check-schema-conventions.mjs'])
+    const driftClean = run('node', ['scripts/check-schema-drift.mjs'])
+    check(
+      'leave gate: the committed engine, ledger, migration and mirror all pass',
+      !engineClean.failed &&
+        !propertyClean.failed &&
+        !sickClean.failed &&
+        !conventionsClean.failed &&
+        !driftClean.failed,
+      `a committed check failed:\n${engineClean.output}${propertyClean.output}${sickClean.output}` +
+        `${conventionsClean.output}${driftClean.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

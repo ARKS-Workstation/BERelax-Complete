@@ -6,6 +6,7 @@ import {
   date,
   index,
   integer,
+  pgEnum,
   pgTable,
   primaryKey,
   smallint,
@@ -15,11 +16,12 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { employee, staffLanguage } from './staff.ts'
+import { employee, leaveRequest, staffLanguage } from './staff.ts'
 
 /**
- * Drizzle mirror of the two tables `packages/db/migrations/0050_employee.sql` creates, plus the one
- * `packages/db/migrations/0059_hr_shift.sql` adds.
+ * Drizzle mirror of the two tables `packages/db/migrations/0050_employee.sql` creates, the one
+ * `packages/db/migrations/0059_hr_shift.sql` adds, and the two `packages/db/migrations/0066_hr_leave.sql`
+ * adds.
  *
  * The columns 0050 ADDS to `employee` and `employee_document` are in `./staff.ts` beside the rest of
  * those tables, because a mirror is a mirror of a table and not of a migration — splitting one table
@@ -243,6 +245,243 @@ export const workingHoursRule = pgTable(
     check(
       'working_hours_rule_source_note_not_placeholder',
       sql`not is_placeholder_text(${t.sourceNote})`,
+    ),
+  ],
+)
+
+/**
+ * The five kinds of leave-balance movement (migration 0066).
+ *
+ * The sign is fixed per kind and held at the database by `leave_movement_sign_matches_kind`:
+ * `opening_balance`, `accrual` and `released` add, `reserved` and `carry_over_forfeited` take away.
+ * That is what makes the balance the plain sum of one column, and therefore what lets `leave_balance`
+ * be a view rather than a stored figure.
+ *
+ * There is deliberately **no `taken`**. A request reserves when it is made and the reservation only
+ * stops being refundable when it is approved, so an approval moves no balance and writes no row. A
+ * `taken` row at approval would have to be paired with a reversal of the reservation in the same breath,
+ * which is two rows saying one thing — the classic way a ledger comes to disagree with itself.
+ */
+export const leaveMovementKind = pgEnum('leave_movement_kind', [
+  'opening_balance',
+  'accrual',
+  'carry_over_forfeited',
+  'reserved',
+  'released',
+])
+
+/**
+ * The versioned leave policy (migration 0066): entitlement, accrual, probation, carry-over and the
+ * sick-leave bands.
+ *
+ * One row per **version**, keyed on the first date it governs, and the version that applies to a date is
+ * the latest row at or before it. The same decision `workingHoursRule` above records, for the same
+ * reason: leave is asked about the past. A disputed month recomputed after a policy change must use the
+ * policy that applied then, and a single current value — an `app_setting` row, a `superseded_at` column —
+ * answers it with today's figures, which are plausible and wrong.
+ *
+ * Every quantity is integer **day-hundredths**; 250 is 2.5 days. ADR 0007's rule that money is integer is
+ * about reconciliation rather than about money, and
+ * `leave_entitlement_rule_annual_total_matches_monthly_accrual` is what it buys: the headline entitlement
+ * and twelve months of accrual are the same figure stated twice, so the database refuses a version where
+ * they disagree.
+ *
+ * `carryOverExpiresAfterOneLeaveYear` is a boolean and not a month count on purpose — a count could state
+ * an expiry the pure engine has no per-day ledger to honour, and a policy the code silently rounds is
+ * worse than one it cannot express. Version 1 seeds it FALSE, which is where the two recorded provisional
+ * answers conflict; 0066's header states the conflict and why not-expiring is the safe direction.
+ *
+ * Every figure is provisional against **Y9-leave-detail**, so `unconfirmedAssumptionRows()` lists the
+ * version the same way it lists `app_setting` — per VERSION and not per figure, because the whole policy
+ * is one decision somebody makes in one sitting.
+ */
+export const leaveEntitlementRule = pgTable(
+  'leave_entitlement_rule',
+  {
+    /** The first date this version governs. Not a foreign key into `business_day`: see 0059's reason. */
+    effectiveFrom: date('effective_from').primaryKey(),
+    /** Whole calendar days. A leave day is a calendar day, never a working day. */
+    annualEntitlementDays: integer('annual_entitlement_days').notNull(),
+    /** Day-hundredths earned by a whole month of service. 250 is 2.5 days. */
+    monthlyAccrualHundredths: integer('monthly_accrual_hundredths').notNull(),
+    probationMonths: integer('probation_months').notNull(),
+    /** Whether accrual RUNS during probation. Whether leave may be TAKEN is not a column; see 0066. */
+    accruesDuringProbation: boolean('accrues_during_probation').notNull(),
+    carryOverCapHundredths: integer('carry_over_cap_hundredths').notNull(),
+    carryOverExpiresAfterOneLeaveYear: boolean('carry_over_expires_after_one_leave_year').notNull(),
+    leaveYearStartsOnAnniversary: boolean('leave_year_starts_on_anniversary').notNull(),
+    unpaidLeaveReducesAccrual: boolean('unpaid_leave_reduces_accrual').notNull(),
+    absentDayReducesAccrual: boolean('absent_day_reduces_accrual').notNull(),
+    /** With 15 here, day 15 is full pay and day 16 is the first half-pay day. */
+    sickFullPayDays: integer('sick_full_pay_days').notNull(),
+    sickHalfPayDays: integer('sick_half_pay_days').notNull(),
+    sickUnpaidDays: integer('sick_unpaid_days').notNull(),
+    isProvisional: boolean('is_provisional').notNull(),
+    provisionalNote: text('provisional_note'),
+    openQuestionId: text('open_question_id'),
+    /** Where the figures came from. NOT NULL and never a placeholder, for brief rule 15's reason. */
+    sourceNote: text('source_note').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check(
+      'leave_entitlement_rule_annual_entitlement_plausible',
+      sql`${t.annualEntitlementDays} > 0 and ${t.annualEntitlementDays} <= 366`,
+    ),
+    check(
+      'leave_entitlement_rule_monthly_accrual_plausible',
+      sql`${t.monthlyAccrualHundredths} >= 0 and ${t.monthlyAccrualHundredths} <= 36600`,
+    ),
+    // The contract figure and the ledger figure are the same entitlement stated twice. Without this, one
+    // goes on the contract and a different one into the ledger, both look reasonable, and the discrepancy
+    // is found a year later by an employee counting their own days.
+    check(
+      'leave_entitlement_rule_annual_total_matches_monthly_accrual',
+      sql`${t.annualEntitlementDays} * 100 = ${t.monthlyAccrualHundredths} * 12`,
+    ),
+    check(
+      'leave_entitlement_rule_probation_plausible',
+      sql`${t.probationMonths} >= 0 and ${t.probationMonths} <= 60`,
+    ),
+    check(
+      'leave_entitlement_rule_carry_over_cap_plausible',
+      sql`${t.carryOverCapHundredths} >= 0 and ${t.carryOverCapHundredths} <= 36600`,
+    ),
+    check(
+      'leave_entitlement_rule_sick_full_plausible',
+      sql`${t.sickFullPayDays} >= 0 and ${t.sickFullPayDays} <= 366`,
+    ),
+    check(
+      'leave_entitlement_rule_sick_half_plausible',
+      sql`${t.sickHalfPayDays} >= 0 and ${t.sickHalfPayDays} <= 366`,
+    ),
+    check(
+      'leave_entitlement_rule_sick_unpaid_plausible',
+      sql`${t.sickUnpaidDays} >= 0 and ${t.sickUnpaidDays} <= 366`,
+    ),
+    // A tier set with nothing in any band answers `exhausted` to every day of every illness, which
+    // satisfies any boundary test written against it while entitling nobody to anything.
+    check(
+      'leave_entitlement_rule_sick_tiers_are_not_all_empty',
+      sql`${t.sickFullPayDays} + ${t.sickHalfPayDays} + ${t.sickUnpaidDays} > 0`,
+    ),
+    check(
+      'leave_entitlement_rule_provisional_names_a_question',
+      sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
+    ),
+    check(
+      'leave_entitlement_rule_source_note_not_placeholder',
+      sql`not is_placeholder_text(${t.sourceNote})`,
+    ),
+  ],
+)
+
+/**
+ * Every movement of every leave balance (migration 0066), signed, in day-hundredths.
+ *
+ * **Append-only: UPDATE and DELETE raise ZH001 for every role**, by `refuse_leave_movement_change()`. A
+ * balance that could be edited is one nobody can reconcile, so a correction is a further movement and
+ * never an edit — the same rule `journalLine` (0018) and `recurringCostInstance` (0031) follow, for the
+ * same reason.
+ *
+ * The balance has no other home. `leave_balance` is a VIEW summing this table, which is what makes "the
+ * sum of the movements equals the balance" true by construction instead of by a reconciliation job nobody
+ * runs — and a leave balance is the figure in an HR system most often corrected retrospectively, so a
+ * stored column would disagree with the movements the first time a month was re-accrued or a holiday
+ * withdrawn.
+ *
+ * Neither trigger, neither partial unique index nor the view is expressible in Drizzle. All of them live
+ * in the migration and are asserted against real PostgreSQL by
+ * `apps/worker/src/jobs/leave-accrual.itest.ts` — in particular `leave_movement_one_accrual_per_month`,
+ * which IS the accrual job's idempotency guarantee rather than a check on it.
+ */
+export const leaveMovement = pgTable(
+  'leave_movement',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    /**
+     * `RESTRICT`, for 0030's reason: somebody who has accrued leave has a history, and deleting the
+     * person to clear the balance is the delete this refuses. Ending employment is `employedUntil`.
+     */
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employee.id, { onDelete: 'restrict' }),
+    kind: leaveMovementKind('kind').notNull(),
+    /** Signed day-hundredths. The balance is the SUM of this column and nothing else. */
+    hundredths: integer('hundredths').notNull(),
+    /**
+     * A date and not an instant, because a leave movement is a fact about a day and never about a moment
+     * inside one — the opposite of `shift.period`, which is instants for exactly the opposite reason.
+     */
+    occurredOn: date('occurred_on').notNull(),
+    /**
+     * Computed once by `leaveYearStart()` in `@berelax/core` and stored, because the anchor is a POLICY
+     * (the employment anniversary, or 1 January) and re-deriving it in SQL would be a second reading of
+     * that policy which disagrees for every employee not engaged on 1 January.
+     */
+    leaveYearStart: date('leave_year_start').notNull(),
+    /** Set on `accrual` and nothing else. With `employeeId` it is the accrual job's idempotency key. */
+    accrualMonth: date('accrual_month'),
+    /** Set on `reserved` and `released` and nothing else. */
+    leaveRequestId: uuid('leave_request_id').references(() => leaveRequest.id),
+    /**
+     * The policy version that produced the figure. The AMOUNT is snapshotted on this row, so editing a
+     * version cannot change a balance already earned — only the explanation of how it was reached.
+     */
+    ruleEffectiveFrom: date('rule_effective_from').references(
+      () => leaveEntitlementRule.effectiveFrom,
+    ),
+    /** A label, not a uuid: the audit row written in the same transaction carries the actor (F06). */
+    createdBy: text('created_by').notNull(),
+    /** NOT NULL for an opening balance and null otherwise, held by a CHECK in the migration. */
+    sourceNote: text('source_note'),
+    isProvisional: boolean('is_provisional').notNull(),
+    provisionalNote: text('provisional_note'),
+    openQuestionId: text('open_question_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index('leave_movement_employee_idx').on(t.employeeId, t.occurredOn),
+    // The sign is the kind's, always. A positive `reserved` row would credit leave the employee asked to
+    // spend, and the balance would still be the sum of the column, so nothing else could notice.
+    check(
+      'leave_movement_sign_matches_kind',
+      sql`case ${t.kind}
+            when 'carry_over_forfeited' then ${t.hundredths} <= 0
+            when 'reserved'             then ${t.hundredths} <= 0
+            else ${t.hundredths} >= 0
+          end`,
+    ),
+    // Biconditionals throughout: an accrual with no month is as wrong as a forfeiture with one, and one
+    // named constraint catches both directions.
+    check(
+      'leave_movement_accrual_month_matches_kind',
+      sql`(${t.kind} = 'accrual') = (${t.accrualMonth} is not null)`,
+    ),
+    check(
+      'leave_movement_accrual_month_is_a_first',
+      sql`${t.accrualMonth} is null or extract(day from ${t.accrualMonth}) = 1`,
+    ),
+    check(
+      'leave_movement_request_matches_kind',
+      sql`(${t.kind} in ('reserved', 'released')) = (${t.leaveRequestId} is not null)`,
+    ),
+    check(
+      'leave_movement_rule_matches_kind',
+      sql`(${t.kind} in ('accrual', 'carry_over_forfeited')) = (${t.ruleEffectiveFrom} is not null)`,
+    ),
+    check(
+      'leave_movement_opening_balance_has_provenance',
+      sql`(${t.kind} = 'opening_balance') = (${t.sourceNote} is not null)
+       and (${t.sourceNote} is null or not is_placeholder_text(${t.sourceNote}))`,
+    ),
+    check(
+      'leave_movement_provisional_names_a_question',
+      sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
+    ),
+    check(
+      'leave_movement_created_by_not_placeholder',
+      sql`not is_placeholder_text(${t.createdBy})`,
     ),
   ],
 )
