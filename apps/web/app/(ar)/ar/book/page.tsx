@@ -13,7 +13,9 @@
  * rather than only changing language.
  */
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { BOOK_COPY_AR } from '../../../../src/book/copy-ar.ts'
+import { BOOK_SESSION_COOKIE } from '../../../../src/book/flow.ts'
 import { bookingPageData } from '../../../../src/book/read.ts'
 import { parseBookingParams } from '../../../../src/book/state.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
@@ -31,6 +33,9 @@ export default async function ArabicBookPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = parseBookingParams(await searchParams)
-  const data = await bookingPageData(params, { now: Date.now() })
+  // The flow session, read here and passed down — see the English twin for why it is an argument
+  // rather than a `cookies()` call inside `bookingPageData`.
+  const token = (await cookies()).get(BOOK_SESSION_COOKIE)?.value ?? null
+  const data = await bookingPageData(params, { now: Date.now(), sessionToken: token })
   return <BookingPageBody data={data} params={params} copy={BOOK_COPY_AR} locale="ar" />
 }

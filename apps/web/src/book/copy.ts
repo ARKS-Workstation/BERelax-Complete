@@ -11,8 +11,18 @@
  * two languages, and a page that concatenated them would read correctly in one of the two.
  */
 
+import type { BookingEdgeState } from '@berelax/core'
 import type { WaitlistIneligibility } from '@berelax/db'
-import type { SlotGroupName } from './state.ts'
+import type { BookFlowError, SlotGroupName } from './state.ts'
+
+/**
+ * The placeholder a cooldown sentence carries in place of a count.
+ *
+ * Declared here rather than in `./flow.ts`, and that is load-bearing: the island imports it, and
+ * `flow.ts` imports `node:crypto` for the idempotency key. This module's every import is `import type`, so
+ * it compiles to nothing and costs a browser bundle nothing.
+ */
+export const RESEND_SECONDS_TOKEN = '{seconds}'
 
 /** The part of a day, in this locale. Total over the group names, so a fourth one needs copy to compile. */
 export type SlotGroupLabels = Readonly<Record<SlotGroupName, string>>
@@ -117,5 +127,129 @@ export interface BookCopy {
     readonly heading: string
     readonly lede: string
     readonly back: string
+  }
+
+  /** Step 4a: the phone number. */
+  readonly details: {
+    readonly heading: string
+    readonly lede: string
+    readonly phoneLabel: string
+    /** What a reader may type. Never a made-up example number — see {@link BookCopy.details.phoneHint}. */
+    readonly phoneHint: string
+    readonly countryLabel: string
+    /** Why a number is needed at all, said before it is asked for. */
+    readonly why: string
+    readonly submit: string
+    readonly back: string
+  }
+
+  /** Step 4b: the code. */
+  readonly otp: {
+    readonly heading: string
+    /** Names the number the code went to, so a mistyped digit is visible before six more are typed. */
+    readonly lede: (phone: string) => string
+    readonly codeLabel: string
+    readonly codeHint: (digits: number) => string
+    readonly submit: string
+    readonly resend: string
+    /**
+     * The cooldown, as a sentence, for a **string** number of seconds.
+     *
+     * A string rather than a number, so the caller may pass either a real count or
+     * {@link RESEND_SECONDS_TOKEN}. That is what lets the island tick the number down without a copy
+     * function crossing the client boundary — Next refuses a function passed to a client component, and it
+     * is right to: a closure cannot be serialised. The plural rule and the word order stay here, which is
+     * the whole point of this file; only the substitution happens in the browser.
+     */
+    readonly resendIn: (seconds: string) => string
+    /** The way out when the message does not arrive, which docs/09 §3 asks for by name. */
+    readonly notArrived: string
+    /** A way back to the number itself, for the reader who mistyped a digit rather than missed a message. */
+    readonly changeNumber: string
+  }
+
+  /** Step 5: what is about to be booked, and the consent question. */
+  readonly confirm: {
+    readonly heading: string
+    readonly summary: (time: string, day: string, treatment: string, minutes: number) => string
+    readonly priceLine: (amount: string) => string
+    readonly phoneLine: (phone: string) => string
+    readonly submit: string
+    readonly back: string
+    readonly consentHeading: string
+    /** Says what ticking the box does and what leaving it does not. */
+    readonly consentLede: string
+    /** The version a grant is recorded under, shown because the record names it. */
+    readonly consentVersion: (purpose: string, version: number) => string
+    /** Said when a purpose has no published wording, so the box is absent rather than unexplained. */
+    readonly consentUnavailable: string
+    /** The recovery link for a submission whose outcome the browser never learned. */
+    readonly checkInstead: string
+  }
+
+  /** The confirmation. */
+  readonly booked: {
+    readonly heading: string
+    readonly lede: string
+    readonly reference: (id: string) => string
+    readonly summary: (time: string, day: string) => string
+    readonly addToCalendar: string
+    /** Why the calendar entry says so little. docs/06 D2, stated rather than left to look like a bug. */
+    readonly calendarNote: string
+    readonly manageHeading: string
+    /** What a reader does to change the booking while the manage page does not exist. */
+    readonly manageLede: string
+    readonly bookAnother: string
+  }
+
+  /** The waitlist join, which B-UI-01 deferred here. */
+  readonly waitlistJoin: {
+    readonly heading: string
+    readonly lede: (day: string) => string
+    readonly submit: string
+    readonly back: string
+  }
+
+  readonly waitlisted: {
+    readonly heading: string
+    readonly lede: (day: string) => string
+    readonly back: string
+  }
+
+  /**
+   * The nine edge states docs/09 §3 enumerates, each with a heading, a sentence and a way forward.
+   *
+   * Total over `BookingEdgeState`, which is what makes a tenth state added in `@berelax/core` a
+   * compilation failure here rather than a designed panel with no words in it. `action` is the label of
+   * the control the page offers; `null` where the only remedy is the desk telephone, and that is a
+   * decision per state rather than a fallback — a "try again" button on a booking that already exists is
+   * an invitation to take a second slot.
+   */
+  readonly edge: Readonly<
+    Record<
+      BookingEdgeState,
+      { readonly heading: string; readonly body: string; readonly action: string | null }
+    >
+  >
+
+  /**
+   * What the last submission did wrong, in this locale.
+   *
+   * Total over `BOOK_FLOW_ERRORS`. Distinct from {@link BookCopy.edge} for the reason `flow.ts` gives: an
+   * edge state is the situation a reader is in, and these are what one submission got wrong.
+   */
+  readonly flowErrors: Readonly<Record<BookFlowError, string>>
+
+  /**
+   * What a reader with JavaScript switched off is told, on the one step that has a reason to say anything.
+   *
+   * Steps 4 and 5 work without JavaScript — every one of them is a POST that answers 303 — so this is not
+   * an apology for a blank screen. It says which conveniences are absent and gives the desk number, which
+   * is what docs/09 §3's *"a visible path when the message does not arrive"* amounts to for a reader whose
+   * browser will not run the cooldown timer.
+   */
+  readonly noJs: {
+    readonly heading: string
+    readonly body: string
   }
 }

@@ -7,13 +7,26 @@
  *
  * ## What is a server component and what is not
  *
- * Everything here. The single client boundary is `slot-picker.client.tsx`, which this file renders with
- * already-formatted strings. `book.itest.ts` reads the route's own
- * `page_client-reference-manifest.js` — what `next build` actually produced — and asserts that the only
- * first-party client module it names beyond the two the shared root layout contributes is that one file.
- * That is docs/09 §3's requirement — *"the booking flow is the one heavy client island; everything else is
- * a server component"* — asserted against the build rather than against a convention, with `/treatments`
- * as the control that names none.
+ * Everything here. There are exactly two client boundaries and this file renders both with
+ * already-formatted strings: `slot-picker.client.tsx` for the times, and `details.client.tsx` for the four
+ * fields on steps 4 and 5 that HTML cannot express on its own. `book.itest.ts` reads the route's own
+ * `page_client-reference-manifest.js` — what `next build` actually produced — and asserts that the
+ * first-party client modules it names beyond the two the shared root layout contributes are exactly those
+ * two files. That is docs/09 §3's requirement — *"the booking flow is the one heavy client island;
+ * everything else is a server component"* — asserted against the build rather than against a convention,
+ * with `/treatments` as the control that names none.
+ *
+ * Two modules rather than one is the reading of *"one island"* that costs a reader less: the picker is
+ * rendered only when there are times to pick and the fields only on the steps that have them, so a single
+ * module would make every reader download the other half. The claim docs/09 §3 makes is about the flow
+ * being the only heavy island **on the site**, not about a file count.
+ *
+ * ## Steps 4 and 5 are POSTs, and they work with JavaScript off
+ *
+ * Each is a plain `<form method="post">` to `/api/v1/book`, which does the work and answers 303 with the
+ * URL of the next state. That is what keeps B-UI-01's property intact rather than breaking it at step 4:
+ * the URL is still the state, every step is still restorable, and the island still adds only affordances.
+ * `app/api/v1/book/handler.ts` records why 303 and not 302.
  *
  * ## Why the first step cannot show times
  *
@@ -35,9 +48,10 @@
  */
 
 import { formatAmount, grossMoneyFromFils } from '@berelax/core'
+import { OTP_CODE_DIGITS } from '@berelax/db'
 import { DesignSystemStyles, Grid, GridCell, Measure, Section } from '@berelax/ui/layout'
-import type { BookCopy } from '../../src/book/copy.ts'
-import type { BookingPageData, TherapistLabel } from '../../src/book/read.ts'
+import { type BookCopy, RESEND_SECONDS_TOKEN } from '../../src/book/copy.ts'
+import { type BookingPageData, stepIsPermitted, type TherapistLabel } from '../../src/book/read.ts'
 import {
   BOOK_FIELDS,
   BOOK_PATH,
@@ -49,6 +63,7 @@ import {
 } from '../../src/book/state.ts'
 import { type Locale, localisedPath } from '../../src/i18n/locales.ts'
 import { RouteNav } from '../_routes/route-nav.tsx'
+import { OtpField, PhoneField, ResendButton, SubmitOnce } from './details.client.tsx'
 import { SlotPicker } from './slot-picker.client.tsx'
 import { BookStyles } from './styles.tsx'
 
@@ -343,9 +358,27 @@ function ChosenSlot({ data, params, copy, locale }: BookingPageProps) {
           data.variant?.publicDisplayName ?? '',
         )}
       </p>
-      {/* Said rather than implied. A "Continue" button that goes nowhere is the thing docs/09 §3 calls
-          an edge state handled by a phone call to the front desk. */}
+      {/* Said rather than implied: nothing is reserved by choosing a time, and the next step says what it
+          does before it asks for anything. B-UI-01 left this as a named state with no control because the
+          step it leads to did not exist; it exists now, and the control is a plain link because moving to
+          the phone form writes nothing. */}
       <p className="be-book__note">{copy.chosen.next}</p>
+      <p className="be-actions">
+        <a
+          className="be-action"
+          data-book-continue="details"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+            [BOOK_FIELDS.slot]: params.slot,
+            [BOOK_FIELDS.step]: 'details',
+          })}
+        >
+          {copy.details.submit}
+        </a>
+      </p>
       <DeskPhone data={data} copy={copy} />
     </NamedState>
   )
@@ -492,12 +525,400 @@ function Availability(props: BookingPageProps) {
   )
 }
 
-/** The waitlist step: named, explained, and honest about what it does not do yet. */
-function WaitlistStep({ data, params, copy, locale }: BookingPageProps) {
+// ── Steps 4 and 5 (B-UI-02) ────────────────────────────────────────────────────────────────────────
+
+/**
+ * The fields that travel with a POST.
+ *
+ * The same six the GET forms carry, plus the locale — because the endpoint is outside both locale groups
+ * (one endpoint, one URL) and the 303's `Location` has to be built in the document's own language. A
+ * hidden field rather than a `Referer` read: a referrer is optional, strippable and wrong behind some
+ * proxies, and the consequence of guessing would be an Arabic reader landed on the English page.
+ */
+function CarriedInputs({
+  data,
+  params,
+  locale,
+  after,
+}: BookingPageProps & { readonly after?: 'confirm' | 'waitlist' }) {
+  const carried: Readonly<Record<string, string | null>> = {
+    [BOOK_FIELDS.variant]: params.variant,
+    [BOOK_FIELDS.date]: data.selectedDate,
+    [BOOK_FIELDS.therapist]: params.therapist,
+    [BOOK_FIELDS.gender]: params.gender,
+    [BOOK_FIELDS.slot]: params.slot === null ? null : String(params.slot),
+    // The override is how the waitlist path says where verification leads. One field, set once, rather
+    // than a second hidden input beside it: `form.get` returns the FIRST value, so two would be decided
+    // by DOM order — which is exactly the defect `parseBookingParams`' `first()` helper documents.
+    [BOOK_FIELDS.after]: after ?? params.after,
+    locale,
+  }
   return (
-    <NamedState heading={copy.waitlistStep.heading} testId="waitlist-step">
-      <p className="be-book__note">{copy.waitlistStep.lede}</p>
+    <>
+      {Object.entries(carried).map(([name, value]) =>
+        value === null ? null : <input key={name} type="hidden" name={name} value={value} />,
+      )}
+    </>
+  )
+}
+
+/** Where the flow's POSTs go. One endpoint; see `app/api/v1/book/route.ts`. */
+const FLOW_ACTION = '/api/v1/book'
+
+/** The refusal the last submission carried back, as a sentence. Absent when there was none. */
+function FlowError({ params, copy }: BookingPageProps) {
+  if (params.error === null) return null
+  return (
+    <p className="be-book__error" role="alert" data-book-error={params.error}>
+      {copy.flowErrors[params.error]}
+    </p>
+  )
+}
+
+/**
+ * One of docs/09 §3's nine enumerated edge states, as a designed panel.
+ *
+ * The state is decided in `@berelax/core` (`decideBookingEdgeState`) and the words and the control are the
+ * locale's. `action` is `null` for the two states whose only honest answer is *nothing to do* — a booking
+ * that already exists — and a "try again" button there would be an invitation to take a second slot.
+ */
+function EdgeState(props: BookingPageProps) {
+  const { data, copy } = props
+  if (data.edge === null) return null
+  const words = copy.edge[data.edge]
+  return (
+    <div className="be-book__state be-book__state--edge" data-book-edge={data.edge}>
+      <h2 className="be-book__region-heading">{words.heading}</h2>
+      <p className="be-book__note">{words.body}</p>
+      {words.action === null ? null : <EdgeAction {...props} label={words.action} />}
       <DeskPhone data={data} copy={copy} />
+    </div>
+  )
+}
+
+/**
+ * The control an edge state offers, which differs per state because the remedies differ.
+ *
+ * This is the whole point of the nine being NAMED rather than collapsed into one "that did not work"
+ * panel: `therapist_became_unavailable` sends the reader to the same time with the therapist filter
+ * dropped, `session_expired` sends them back to the phone step with their slot intact, and
+ * `network_drop` sends them to a check that writes nothing. A single "start again" link would be correct
+ * for none of them.
+ */
+function EdgeAction({ data, params, locale, label }: BookingPageProps & { label: string }) {
+  const path = localisedPath(BOOK_PATH, locale)
+  const carry = {
+    [BOOK_FIELDS.variant]: params.variant,
+    [BOOK_FIELDS.gender]: params.gender,
+    [BOOK_FIELDS.date]: data.selectedDate,
+  }
+  const href = (() => {
+    switch (data.edge) {
+      case 'therapist_became_unavailable':
+        // The same day and the same time, with the therapist dropped. Keeping the slot is the point: the
+        // page then either offers it with somebody else or says it has gone, which is the next question.
+        return bookHref(path, { ...carry, [BOOK_FIELDS.slot]: params.slot })
+      case 'session_expired':
+        return bookHref(path, {
+          ...carry,
+          [BOOK_FIELDS.therapist]: params.therapist,
+          [BOOK_FIELDS.slot]: params.slot,
+          [BOOK_FIELDS.step]: 'details',
+        })
+      case 'network_drop':
+        // A GET, and deliberately: checking must write nothing. The confirm step re-reads the session's
+        // own booking, so a submission that did commit is reported and one that did not is offered again
+        // under the same idempotency key.
+        return bookHref(path, {
+          ...carry,
+          [BOOK_FIELDS.therapist]: params.therapist,
+          [BOOK_FIELDS.slot]: params.slot,
+          [BOOK_FIELDS.step]: 'confirm',
+        })
+      case 'otp_not_arrived':
+        return bookHref(path, {
+          ...carry,
+          [BOOK_FIELDS.therapist]: params.therapist,
+          [BOOK_FIELDS.slot]: params.slot,
+          [BOOK_FIELDS.step]: 'details',
+        })
+      default:
+        // `slot_taken`, `required_room_taken` and `duration_no_longer_fits` all mean "choose again on this
+        // day", and the chosen time is dropped because it is the thing that is gone.
+        return bookHref(path, { ...carry, [BOOK_FIELDS.therapist]: params.therapist })
+    }
+  })()
+  return (
+    <p className="be-actions">
+      <a className="be-action" href={href} data-book-edge-action={data.edge}>
+        {label}
+      </a>
+    </p>
+  )
+}
+
+/**
+ * What a reader with JavaScript switched off is told.
+ *
+ * Not an apology for a blank screen: every step here is a POST the server answers, so the flow works.
+ * docs/09 §3 asks for a visible path when something does not arrive, and this is that path for a browser
+ * that will not run the cooldown timer — plus the desk number, which is the fallback the acceptance line
+ * asks for by name.
+ */
+function NoScriptNote({ data, copy }: BookingPageProps) {
+  return (
+    <noscript>
+      <div className="be-book__state" data-book-state="no-javascript">
+        <h2 className="be-book__region-heading">{copy.noJs.heading}</h2>
+        <p className="be-book__note">{copy.noJs.body}</p>
+        <DeskPhone data={data} copy={copy} />
+      </div>
+    </noscript>
+  )
+}
+
+/**
+ * Step 4a: the number.
+ *
+ * `testId`, `heading`, `lede` and `after` are props because this step serves two destinations. A reader on
+ * their way to a booking and one on their way to the waiting list need the identical form and different
+ * words, and the alternative — a second component — would be a second place the phone field, the
+ * explanation and the carried fields could drift. The waitlist path keeps B-UI-01's
+ * `data-book-state="waitlist-step"` marker, which is what that unit's test follows its CTA to.
+ */
+function DetailsStep(
+  props: BookingPageProps & {
+    readonly testId?: string
+    readonly heading?: string
+    readonly lede?: string
+    readonly after?: 'confirm' | 'waitlist'
+  },
+) {
+  const { data, params, copy, locale, testId, heading, lede, after } = props
+  const dial = data.facts?.contact.landline?.e164.slice(0, 4) ?? '+971'
+  return (
+    <div className="be-book__state" data-book-state={testId ?? 'details'}>
+      <h2 className="be-book__region-heading">{heading ?? copy.details.heading}</h2>
+      <p className="be-book__note">{lede ?? copy.details.lede}</p>
+      <FlowError {...props} />
+      <form method="post" action={FLOW_ACTION} className="be-book__fields">
+        <CarriedInputs {...props} {...(after === undefined ? {} : { after })} />
+        <fieldset className="be-book__fieldset">
+          <legend className="be-book__legend">{copy.details.heading}</legend>
+          <PhoneField
+            id="book-phone"
+            name="phone"
+            label={copy.details.phoneLabel}
+            hint={copy.details.phoneHint}
+            defaultValue={data.session.kind === 'unknown' ? '' : data.session.session.phoneE164}
+            dialCode={dial}
+            countryLabel={copy.details.countryLabel}
+          />
+        </fieldset>
+        {/* Said before the number is asked for rather than after it is given. An unexplained phone field
+            on a public form reads as data collection, which is the same argument the gender note makes. */}
+        <p className="be-book__note">{copy.details.why}</p>
+        <p className="be-actions">
+          <SubmitOnce
+            action="send_code"
+            label={copy.details.submit}
+            busyLabel={copy.details.submit}
+          />
+        </p>
+      </form>
+      <p className="be-actions">
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+            [BOOK_FIELDS.slot]: params.slot,
+          })}
+        >
+          {copy.details.back}
+        </a>
+      </p>
+      <DeskPhone data={data} copy={copy} />
+      <NoScriptNote {...props} />
+    </div>
+  )
+}
+
+/** Step 4b: the code, its cooldown, and the way out when it does not arrive. */
+function OtpStep(props: BookingPageProps) {
+  const { data, params, copy, locale } = props
+  const phone = data.session.kind === 'unknown' ? '' : data.session.session.phoneE164
+  return (
+    <div className="be-book__state" data-book-state="otp">
+      <h2 className="be-book__region-heading">{copy.otp.heading}</h2>
+      {/* `<bdi>` around the number: an E.164 value is a Latin run inside an Arabic sentence, and without
+          isolation the `+` migrates to the wrong end of it (ADR 0011). */}
+      <p className="be-book__note">
+        {copy.otp.lede('')}
+        <bdi>{phone}</bdi>
+      </p>
+      <FlowError {...props} />
+      <form method="post" action={FLOW_ACTION} className="be-book__fields">
+        <CarriedInputs {...props} />
+        <fieldset className="be-book__fieldset">
+          <legend className="be-book__legend">{copy.otp.codeLabel}</legend>
+          <OtpField
+            id="book-code"
+            name="code"
+            label={copy.otp.codeLabel}
+            hint={copy.otp.codeHint(OTP_CODE_DIGITS)}
+            digits={OTP_CODE_DIGITS}
+          />
+        </fieldset>
+        <p className="be-actions">
+          <SubmitOnce action="verify_code" label={copy.otp.submit} busyLabel={copy.otp.submit} />
+          {/* The resend is a submit button in the SAME form, so it carries the same hidden fields. Its
+              own `name="action"` wins over the other button's, which is how one form serves two actions
+              without JavaScript. */}
+          <ResendButton
+            label={copy.otp.resend}
+            waiting={{
+              one: copy.otp.resendIn('1'),
+              many: copy.otp.resendIn(RESEND_SECONDS_TOKEN),
+            }}
+            initialSeconds={data.resendInSeconds}
+          />
+        </p>
+      </form>
+      <p className="be-actions">
+        {/* docs/09 §3: "a visible path when the message does not arrive". A link and not a button,
+            because it changes nothing — it puts the reader in the named state that offers the three
+            things that help. */}
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+            [BOOK_FIELDS.slot]: params.slot,
+            [BOOK_FIELDS.after]: params.after,
+            [BOOK_FIELDS.step]: 'otp',
+            [BOOK_FIELDS.issue]: 'code_not_received',
+          })}
+          data-book-issue-link="code_not_received"
+        >
+          {copy.otp.notArrived}
+        </a>
+        {/* A separate way out for the reader who mistyped a digit rather than missed a message: the code
+            will never arrive for the wrong number, and resending it four times is what happens without
+            this control. */}
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+            [BOOK_FIELDS.slot]: params.slot,
+            [BOOK_FIELDS.after]: params.after,
+            [BOOK_FIELDS.step]: 'details',
+          })}
+          data-book-change-number="true"
+        >
+          {copy.otp.changeNumber}
+        </a>
+      </p>
+      <NoScriptNote {...props} />
+    </div>
+  )
+}
+
+/** The consent questions, one per send-gating purpose that has a published wording. */
+function ConsentFieldset({ data, copy, locale }: BookingPageProps) {
+  if (data.consentOffers.length === 0) {
+    return (
+      <fieldset className="be-book__fieldset" data-book-consent="unavailable">
+        <legend className="be-book__legend">{copy.confirm.consentHeading}</legend>
+        <p className="be-book__note">{copy.confirm.consentUnavailable}</p>
+      </fieldset>
+    )
+  }
+  return (
+    <fieldset className="be-book__fieldset" data-book-consent="offered">
+      <legend className="be-book__legend">{copy.confirm.consentHeading}</legend>
+      <p className="be-book__note">{copy.confirm.consentLede}</p>
+      {data.consentOffers.map((offer) => (
+        <div key={offer.purpose} className="be-book__consent" data-consent-purpose={offer.purpose}>
+          {/* The purpose, the version and the hash travel with the submission. The hash is what makes the
+              record a claim about the words THIS reader saw: `recordConsent` refuses it when it does not
+              match the stored version, so a wording published between this render and the submit is a
+              named refusal rather than a silent substitution. */}
+          <input type="hidden" name="consent_purpose" value={offer.purpose} />
+          <input type="hidden" name={`consent_wording_${offer.purpose}`} value={offer.wordingId} />
+          <input
+            type="hidden"
+            name={`consent_hash_${offer.purpose}`}
+            value={offer.wordingHashHex}
+          />
+          <label className="be-book__check" htmlFor={`consent-${offer.purpose}`}>
+            {/* Unchecked, and there is no `defaultChecked` anywhere near this element. A pre-ticked
+                marketing box is not an opt-in under TDRA (docs/04 §5) and the record would say it was. */}
+            <input
+              id={`consent-${offer.purpose}`}
+              className="be-book__checkbox"
+              type="checkbox"
+              name={`consent_grant_${offer.purpose}`}
+            />
+            <span>{locale === 'ar' ? offer.textAr : offer.textEn}</span>
+          </label>
+          <p className="be-book__note">
+            {copy.confirm.consentVersion(offer.purpose, offer.version)}
+          </p>
+        </div>
+      ))}
+    </fieldset>
+  )
+}
+
+/** Step 5: what is about to be booked, the consent question, and one button. */
+function ConfirmStep(props: BookingPageProps) {
+  const { data, params, copy, locale } = props
+  const chosen = data.chosen
+  const day = data.selectedDate === null ? '' : tradingDateLabel(data.selectedDate, locale, 'long')
+  return (
+    <div className="be-book__state" data-book-state="confirm">
+      <h2 className="be-book__region-heading">{copy.confirm.heading}</h2>
+      <FlowError {...props} />
+      {chosen === null || data.variant === null ? (
+        <p className="be-book__note">{copy.needs.treatment}</p>
+      ) : (
+        <>
+          <p className="be-book__note">
+            {copy.confirm.summary(
+              wallClock(chosen.startsAt),
+              day,
+              data.variant.publicDisplayName,
+              data.variant.durationMinutes,
+            )}
+          </p>
+          <p className="be-book__note">
+            {copy.confirm.priceLine(formatAmount(grossMoneyFromFils(data.variant.grossFils)))}
+          </p>
+          <p className="be-book__note">
+            {copy.confirm.phoneLine('')}
+            <bdi>{data.session.kind === 'unknown' ? '' : data.session.session.phoneE164}</bdi>
+          </p>
+          <form method="post" action={FLOW_ACTION} className="be-book__fields">
+            <CarriedInputs {...props} />
+            <ConsentFieldset {...props} />
+            <p className="be-actions">
+              <SubmitOnce
+                action="confirm"
+                label={copy.confirm.submit}
+                busyLabel={copy.confirm.submit}
+              />
+            </p>
+          </form>
+        </>
+      )}
       <p className="be-actions">
         <a
           className="be-action be-action--quiet"
@@ -508,11 +929,206 @@ function WaitlistStep({ data, params, copy, locale }: BookingPageProps) {
             [BOOK_FIELDS.date]: data.selectedDate,
           })}
         >
-          {copy.waitlistStep.back}
+          {copy.confirm.back}
+        </a>
+        {/* The recovery for a submission whose outcome the browser never learned, and it is on the page
+            rather than only inside the `network_drop` panel — a reader whose connection dropped may never
+            have received that page at all. A GET, so checking writes nothing; the confirm step re-reads
+            this session's own booking and reports it if the submission did commit. */}
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+            [BOOK_FIELDS.slot]: params.slot,
+            [BOOK_FIELDS.step]: 'confirm',
+            [BOOK_FIELDS.issue]: 'interrupted',
+          })}
+          data-book-issue-link="interrupted"
+        >
+          {copy.confirm.checkInstead}
         </a>
       </p>
-    </NamedState>
+      <NoScriptNote {...props} />
+    </div>
   )
+}
+
+/** The confirmation: what was booked, the calendar file, and how a change is made today. */
+function BookedStep(props: BookingPageProps) {
+  const { data, params, copy, locale } = props
+  const first = data.booking[0]
+  if (first === undefined) {
+    // The booking id in the URL is not this session's — or there is none. The same answer either way,
+    // because distinguishing them tells a caller whether a guessed uuid exists.
+    return (
+      <div className="be-book__state" data-book-state="no-booking">
+        <h2 className="be-book__region-heading">{copy.booked.heading}</h2>
+        <p className="be-book__note">{copy.booked.manageLede}</p>
+        <DeskPhone data={data} copy={copy} />
+      </div>
+    )
+  }
+  return (
+    <div className="be-book__state" data-book-state="booked">
+      <h2 className="be-book__region-heading">{copy.booked.heading}</h2>
+      <p className="be-book__note">{copy.booked.lede}</p>
+      <p className="be-book__note" data-booking-reference={first.bookingId}>
+        {copy.booked.reference('')}
+        <bdi>{first.bookingId}</bdi>
+      </p>
+      <p className="be-book__note">
+        {copy.booked.summary(
+          wallClock(first.startsAt),
+          tradingDateLabel(first.tradingDate, locale, 'long'),
+        )}
+      </p>
+      <p className="be-actions">
+        {/* A plain GET with `download`. The endpoint authorises it against the session's own customer id
+            in SQL, so a booking id in the query string is not permission to download somebody's
+            appointment. */}
+        <a
+          className="be-action"
+          href={`${FLOW_ACTION}?ics=${first.bookingId}`}
+          download={`berelax-${first.bookingId}.ics`}
+          data-book-ics={first.bookingId}
+        >
+          {copy.booked.addToCalendar}
+        </a>
+      </p>
+      {/* Said rather than left to look like a bug. docs/06 D2: the entry carries the time and the place,
+          because a calendar line is read by whoever is holding the phone and it persists. */}
+      <p className="be-book__note">{copy.booked.calendarNote}</p>
+
+      <section className="be-book__region" data-book-region="manage">
+        <h3 className="be-book__region-heading">{copy.booked.manageHeading}</h3>
+        {/* Where the magic link goes once B-UI-05 mints one. A named state and the desk number rather
+            than a link to a page that does not exist: a link to a 404 in a confirmation is a customer who
+            thinks the salon has lost their booking, which is the reason B-MSG-03 ships a reminder that
+            skips rather than one that carries an invented URL. */}
+        <p className="be-book__note">{copy.booked.manageLede}</p>
+        <DeskPhone data={data} copy={copy} />
+      </section>
+
+      <p className="be-actions">
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+          })}
+        >
+          {copy.booked.bookAnother}
+        </a>
+      </p>
+    </div>
+  )
+}
+
+/** The waitlist join, once a phone is verified. */
+function WaitlistJoinStep(props: BookingPageProps) {
+  const { data, params, copy, locale } = props
+  const day = data.selectedDate === null ? '' : tradingDateLabel(data.selectedDate, locale, 'long')
+  return (
+    <div className="be-book__state" data-book-state="waitlist-join">
+      <h2 className="be-book__region-heading">{copy.waitlistJoin.heading}</h2>
+      <p className="be-book__note">{copy.waitlistJoin.lede(day)}</p>
+      <FlowError {...props} />
+      <form method="post" action={FLOW_ACTION} className="be-book__fields">
+        <CarriedInputs {...props} />
+        <p className="be-actions">
+          <SubmitOnce
+            action="join_waitlist"
+            label={copy.waitlistJoin.submit}
+            busyLabel={copy.waitlistJoin.submit}
+          />
+        </p>
+      </form>
+      <p className="be-actions">
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+          })}
+        >
+          {copy.waitlistJoin.back}
+        </a>
+      </p>
+      <NoScriptNote {...props} />
+    </div>
+  )
+}
+
+/** The waitlist confirmation. */
+function WaitlistedStep({ data, params, copy, locale }: BookingPageProps) {
+  const day = data.selectedDate === null ? '' : tradingDateLabel(data.selectedDate, locale, 'long')
+  return (
+    <div className="be-book__state" data-book-state="waitlisted">
+      <h2 className="be-book__region-heading">{copy.waitlisted.heading}</h2>
+      <p className="be-book__note">{copy.waitlisted.lede(day)}</p>
+      <p className="be-actions">
+        <a
+          className="be-action be-action--quiet"
+          href={bookHref(localisedPath(BOOK_PATH, locale), {
+            [BOOK_FIELDS.variant]: params.variant,
+            [BOOK_FIELDS.gender]: params.gender,
+            [BOOK_FIELDS.therapist]: params.therapist,
+            [BOOK_FIELDS.date]: data.selectedDate,
+          })}
+        >
+          {copy.waitlisted.back}
+        </a>
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The step the URL asks for, or the one it is allowed to have.
+ *
+ * A step on `VERIFIED_STEPS` with no verified session renders the **phone step** rather than an error, and
+ * `after` carries where the reader was going. That is the useful answer to a bookmarked `?step=confirm`
+ * from yesterday: the URL still means "I want to book this", and the one thing missing is a number.
+ */
+function FlowStep(props: BookingPageProps) {
+  const { data, params, copy } = props
+  if (!stepIsPermitted(data, params.step)) {
+    // The waitlist keeps its own heading and its own marker, because the reader asked for the waiting
+    // list and not for a booking — and because B-UI-01's test follows that CTA to this state by name.
+    return params.step === 'waitlist' ? (
+      <DetailsStep
+        {...props}
+        testId="waitlist-step"
+        heading={copy.waitlistStep.heading}
+        lede={copy.waitlistStep.lede}
+        after="waitlist"
+      />
+    ) : (
+      <DetailsStep {...props} />
+    )
+  }
+  switch (params.step) {
+    case 'details':
+      return <DetailsStep {...props} />
+    // A code cannot be typed for a number nobody has submitted, so a bare `?step=otp` is the phone form.
+    case 'otp':
+      return data.session.kind === 'live' ? <OtpStep {...props} /> : <DetailsStep {...props} />
+    case 'confirm':
+      return <ConfirmStep {...props} />
+    case 'booked':
+      return <BookedStep {...props} />
+    case 'waitlist':
+      return <WaitlistJoinStep {...props} />
+    case 'waitlisted':
+      return <WaitlistedStep {...props} />
+    default:
+      return null
+  }
 }
 
 export function BookingPageBody(props: BookingPageProps) {
@@ -555,13 +1171,19 @@ export function BookingPageBody(props: BookingPageProps) {
                   {/* Always, and above everything else in the column: the strip is the one part of the
                       flow that is readable before any question has been answered. */}
                   <DayStrip {...props} />
-                  {params.step === 'waitlist' ? (
-                    <WaitlistStep {...props} />
-                  ) : (
+                  {/* The edge state ABOVE the step, always, and never instead of it. A panel that
+                      replaced the step would leave a reader who has been told their session expired with
+                      no field to do anything about it — and `decideBookingEdgeState` deliberately reports
+                      `double_submission` and `back_after_confirm` as good news, which belongs beside the
+                      confirmation rather than in place of it. */}
+                  <EdgeState {...props} />
+                  {params.step === 'choose' ? (
                     <>
                       <Availability {...props} />
                       <ChosenSlot {...props} />
                     </>
+                  ) : (
+                    <FlowStep {...props} />
                   )}
                 </div>
               </div>

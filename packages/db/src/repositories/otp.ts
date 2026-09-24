@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { AppError } from '@berelax/shared'
+import type { Sql } from '../connection.ts'
 import type { UnitOfWork } from '../tx.ts'
 
 /**
@@ -494,5 +495,81 @@ async function recordFailure(
     attemptsRemaining: remaining(failures),
     retryAfterSeconds:
       lockedUntilMs === null ? null : Math.max(1, Math.ceil((lockedUntilMs - nowMs) / 1000)),
+  }
+}
+
+/**
+ * How long before this number may ask for another code.
+ *
+ * Added for B-UI-02, whose acceptance asks the OTP step to carry *"a resend cooldown"* asserted in the
+ * rendered DOM. It lives here rather than in the web application because the answer is a function of the
+ * two limits declared above, and a cooldown computed anywhere else is a third number about the same
+ * question: {@link OTP_MAX_REQUESTS_PER_PHONE} in {@link OTP_PHONE_WINDOW_MINUTES} is what the endpoint
+ * really enforces, and a screen that offered a resend the endpoint then refused with a 429 would be a
+ * button that does nothing.
+ *
+ * Two clocks, and the LATER of the two wins:
+ *
+ *   - the courtesy cooldown, {@link OTP_RESEND_COOLDOWN_SECONDS} after the last code went out. It exists
+ *     because an SMS route can take twenty seconds, and a reader who presses resend at three seconds gets
+ *     a second code, invalidates the first (`issueOtpChallenge` supersedes it), and then receives the two
+ *     in an order nobody can predict;
+ *   - the rate limit itself, once the window is full. That one is not a courtesy, and its remaining time
+ *     is what a 429 would have said.
+ */
+export const OTP_RESEND_COOLDOWN_SECONDS = 45
+
+export interface OtpResendWindow {
+  /** When the newest code for this number and purpose was issued, or null when there is none. */
+  readonly lastIssuedAtIso: string | null
+  /** Issued challenges inside {@link OTP_PHONE_WINDOW_MINUTES}. Compare with the per-phone limit. */
+  readonly requestsInWindow: number
+  /** Null when a resend is available now; otherwise when it becomes available. */
+  readonly resendAvailableAtIso: string | null
+  /** True when the per-phone limit is used up, so the wait is the limit rather than a courtesy. */
+  readonly rateLimited: boolean
+}
+
+/**
+ * The resend window for one number and purpose, as data.
+ *
+ * A read on the connection rather than a unit of work: it writes nothing, and it is read on every render
+ * of the code step. Counted over ISSUED challenges, exactly as `rateLimitExceeded` counts them, so the
+ * screen and the endpoint cannot disagree about whether the window is full.
+ */
+export async function readOtpResendWindow(
+  sql: Sql,
+  args: {
+    readonly phoneE164: string
+    readonly purpose: OtpPurpose
+    readonly nowIso: string
+  },
+): Promise<OtpResendWindow> {
+  const nowMs = instantOf(args.nowIso, 'nowIso')
+  const windowStart = isoAt(nowMs - OTP_PHONE_WINDOW_MINUTES * MINUTE_MS)
+  const [row] = await sql<{ requests: string; oldest: Date | null; newest: Date | null }[]>`
+    select count(*)::text as requests, min(issued_at) as oldest, max(issued_at) as newest
+      from otp_challenge
+     where phone_e164 = ${args.phoneE164}
+       and purpose = ${args.purpose}
+       and issued_at > ${windowStart}
+  `
+  const requestsInWindow = Number(row?.requests ?? '0')
+  const newest = row?.newest ?? null
+  const oldest = row?.oldest ?? null
+  const rateLimited = requestsInWindow >= OTP_MAX_REQUESTS_PER_PHONE
+  const candidates: number[] = []
+  if (newest !== null) candidates.push(newest.getTime() + OTP_RESEND_COOLDOWN_SECONDS * 1000)
+  if (rateLimited && oldest !== null) {
+    candidates.push(oldest.getTime() + OTP_PHONE_WINDOW_MINUTES * MINUTE_MS)
+  }
+  // The LATER of the two, and only if it is still in the future. Sorted descending rather than compared
+  // pairwise so a third clock added later cannot be silently ignored by an `if` nobody extended.
+  const availableAt = candidates.filter((at) => at > nowMs).sort((a, b) => b - a)[0]
+  return {
+    lastIssuedAtIso: newest === null ? null : newest.toISOString(),
+    requestsInWindow,
+    resendAvailableAtIso: availableAt === undefined ? null : isoAt(availableAt),
+    rateLimited,
   }
 }

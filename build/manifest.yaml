@@ -2201,8 +2201,17 @@ units:
       answers null, and a due reminder is then SKIPPED with `content_unavailable` recorded on the row -
       visible in the table, countable in a report, and never a step left pending to be re-swept for ever.
       The itest drives both: a stub link proves the whole send path end to end (message row, provider call,
-      inbox entry), and the shipped `null` proves the skip. One line in `scheduledStepRuntimeFor` on the
+      `null` proves the skip. One line in `scheduledStepRuntimeFor` on the
       day B-UI-02 lands.'
+    - 'NOTE: B-UI-02 landed and did NOT wire that line, deliberately, and re-deferred it to B-UI-05.
+      Minting a link needs a token service (hashed, single-purpose, expiring at appointment end + 24h,
+      revoked on cancellation) and a page that resolves it, and both are B-UI-05''s own acceptance with
+      both files in its list - so a link minted in B-UI-02 would point at a route that 404s, which is the
+      exact failure this NOTE refused to ship. `MagicLinkBuilder` therefore still answers null and a due
+      reminder is still SKIPPED with `content_unavailable`. B-UI-02''s confirmation page renders the
+      manage-booking region as a named designed state with the desk telephone number instead of a link,
+      and its calendar file omits the `URL:` property rather than carrying one that goes nowhere. The one
+      line is B-UI-05''s.'
     - 'NOTE: found and RECORDED rather than fixed, because fixing it belongs to another unit''s acceptance.
       The shipped `booking.reminder` template reads "Reminder: your booking TOMORROW at {{time}}" (and the
       Arabic the same), so its words are true for the 24-hour step and not for the 2-hour one - and both
@@ -2483,6 +2492,14 @@ units:
       step it leads to as a named designed state carrying the desk telephone number from the premises row,
       and the chosen-slot summary says in so many words that nothing has been reserved. Neither is a dead
       button.'
+    - 'NOTE: both of those are DISCHARGED by B-UI-02, and this unit''s own suite was changed to say so
+      rather than to keep passing. `?step=waitlist` keeps its `data-book-state="waitlist-step"` marker and
+      now carries the phone form with `after=waitlist` behind it; the chosen-slot summary gained
+      `data-book-continue="details"`. book.itest.ts asserts both, and the join and the booking are
+      asserted end to end in apps/web/src/book-flow.itest.ts. The one-client-island assertion in that file
+      now names TWO first-party modules - slot-picker.client.tsx and details.client.tsx - because docs/09
+      SS3''s claim is about the site having one heavy island and not about a file count, and one module
+      would make every reader download the half of the flow they are not on. A THIRD boundary still fails.'
     - 'NOTE: SlotGrid in @berelax/ui/patterns gained a listbox mode (role=option, aria-selected, a roving
       tabindex and a submit value) rather than a second route-local slot grid, so the 3/4/6 container
       queries stay declared once. The manifest''s files list named apps/web/app/(public)/book/*; the route
@@ -2544,12 +2561,208 @@ units:
       job fails when either budget is breached
     - Steps 1-3 complete with JavaScript disabled; step 4 degrades to a named message with a phone fallback
       rather than a blank screen, asserted
+    - 'NOTE: steps 4 and 5 work with JavaScript OFF, which is more than the acceptance asks for and is the
+      shape the rest of the unit follows from. B-UI-01 put every choice in the URL so steps 1-3 need no
+      JavaScript; steps 4-5 cannot be GET (they send an SMS, verify a code, record a consent and take a
+      slot) but they do not have to be JavaScript either. Each is a plain `<form method="post">` to
+      `/api/v1/book` which answers **303 See Other** with the URL of the next state - so the URL is still
+      the state, every step is still restorable and shareable, and the island adds only what HTML cannot
+      express. 303 and not 302, because a 302 on a POST is re-issued as a POST by some clients and a reader
+      who reloaded the confirmation would submit the booking again. The acceptance line about step 4
+      "degrading to a named message with a phone fallback" is therefore satisfied by a `<noscript>` state
+      that says which conveniences are absent and carries the desk telephone number, asserted in
+      apps/web/src/book-flow.itest.ts, rather than by an apology for a blank screen. The whole flow is also
+      walked end to end with `fetch` and no browser at all, which is the stronger claim.'
+    - 'NOTE: the route now has TWO client modules and B-UI-01''s one-island assertion was changed to say so
+      rather than to keep passing. docs/09 SS3''s "the booking flow is the one heavy client island;
+      everything else is a server component" is a claim about the SITE, not a file count: the picker is
+      rendered only when there are times to pick and step 4''s fields only on the steps that have them, so
+      one module would make every reader download the other half. apps/web/src/book.itest.ts asserts the
+      route''s first-party client modules are EXACTLY slot-picker.client.tsx and details.client.tsx, with
+      /treatments as the control that names none - so a third boundary still fails.'
+    - 'NOTE: migration 0062_booking_session.sql and SCHEMA_VERSION is 62. One table, no enum and no
+      trigger, and it is the thing B-LIFE-02 stopped at and named: "a successful verification has to mint a
+      customer session or magic-link token and nothing in the system defines one yet - B-UI-02". A signed
+      cookie would have carried a verified phone without a table and is not enough, because three of the
+      nine edge states are decisions only a server row can make: `expires_at` is read on every request
+      (session expiry), the row''s id is what the idempotency key is derived from (double submission), and
+      `booking_id` is how the flow knows this attempt already produced a booking (browser back after
+      confirm). The token is 32 CSPRNG bytes in an httpOnly cookie and the row holds their SHA-256 - no
+      column holds the token, exactly as `otp_challenge` holds no code. SHA-256 rather than an HMAC under a
+      per-row salt is the one deliberate difference from 0019: a 256-bit random token has nothing to guess
+      and the lookup has to be BY hash. `customer_id` and `booking_id` are plain uuids with NO foreign key,
+      for 0056''s reason (a record outlives the erasure of the identity it is about) plus B-MSG-03''s
+      TRUNCATE finding - a key from here would break the four suites that truncate `appointment` and the
+      four that clear `customer`. No sweep job, and that is recorded rather than implied: the retention
+      pass docs/04 SS8 asks for is one pass over every table holding a personal identifier, and a private
+      sweep for this one would be the first of fourteen.'
+    - 'NOTE: the nine edge states are a NAMED vocabulary and a pure precedence rule in
+      packages/core/src/booking/edge-state.ts, because the thing that is wrong in a way no screenshot shows
+      is the ORDER. Three of the nine describe one symptom - the time you chose cannot be delivered - with
+      three different remedies, and the shortest implementation reports `slot_taken` for all three: it
+      renders every panel, passes every "is it reachable" assertion, and never shows the two useful ones.
+      So the decision is a pure function of stated facts whose test carries three MUTANT deciders that get
+      the order wrong, and the page separates the three causes by re-reading availability with the
+      therapist filter DROPPED (`recheckChosen` in src/book/read.ts) - the start comes back and the
+      therapist is absent from it, or the day''s `rejected` list names `no_room_available`, or neither, in
+      which case it really is just gone. Each of the nine has its own Playwright case in
+      apps/web/src/book-flow.itest.ts that puts the world into the state it is about (an appointment over
+      the chosen slot, one therapist''s period filled, the single wet room taken, a closing time moved, a
+      session expired in the table), plus the control that renders NO panel when nothing is wrong.'
+    - 'NOTE: two of the nine cannot be derived from anything the server can see - "OTP never arrives" and
+      "network drop mid-submit" are both statements about what happened outside this process - so each has
+      an ADDRESS: `?issue=code_not_received` and `?issue=interrupted`. That is what makes them states a
+      reader can reload, share with the desk and a test can drive with a plain fetch, rather than a
+      client-side flash. `BOOK_ISSUES` is closed at those two on purpose: everything else on docs/09 SS3''s
+      list is something the server works out, and a field a reader could set for one of those would let a
+      URL assert a state the page has not checked. The one server-reported member,
+      `error=already_booked`, is in the endpoint-to-page vocabulary instead and is turned into the
+      `double_submission` panel ONLY when the session really holds a booking.'
+    - 'NOTE: the idempotency key is DERIVED and not generated - `bookingIdempotencyKey(session, variant,
+      start)`, a sha256 prefix - so the same key is produced by the server-rendered form, by a reload of
+      it, and by a second tab on the same cookie. A generated key satisfies every assertion about a header
+      being present and produces two bookings on a double tap, which is the mistake that looks like more
+      care than the fix. Nothing about the booking itself is re-implemented: `actionConfirm` calls
+      B-AVAIL-06''s `handleBookingRequest` with that key, so the price resolution, the trading-date
+      resolution, the blocklist with its constant refusal body, `ensureCustomer`, the room lock and the
+      lifecycle event are all the code apps/web/src/bookings-route.itest.ts already tests. The code request
+      likewise goes through B-LIFE-02''s `handleOtpRequest`, so the per-number and per-IP limits, the
+      supersede-on-resend rule and the enumeration-resistance property have one implementation. The
+      adaptation is a synthesised `Request` per call, which is a real cost and buys the one thing that
+      matters.'
+    - 'NOTE: the delivery tuple is RE-READ from the availability engine at confirm time rather than taken
+      from the form. A form could carry the room and therapists it was rendered with, and a reader who left
+      the page open for ten minutes would then post a room that is now occupied - the booking transaction
+      would refuse it with `slot_taken` while the start was still perfectly deliverable in the room next
+      door. Re-reading means the refusal happens only when the START is gone, which is the failure docs/09
+      SS3 enumerates rather than an artefact of a stale form.'
+    - 'NOTE: the calendar file is `buildAppointmentIcs` in packages/core/src/calendar/ics.ts and the
+      discretion rule (docs/06 D2) is enforced by the FUNCTION rather than by a test: it is given the
+      values it must not emit - the treatment''s public name, its style, its treatment key and every
+      therapist id - and returns a refusal naming any that appear anywhere in the output. A check on the
+      SUMMARY alone passes a DESCRIPTION carrying the therapist''s name, which syncs to the same devices;
+      a check on the inputs passes a summary assembled from two fields neither of which contained the name.
+      `packages/messaging`''s `DISCRETION_FORBIDDEN_VARIABLES` could not be reused because `core` may not
+      import `messaging`, and a second copy of the words would drift - so the rule is expressed the other
+      way round, as a property of the produced file. The ICS is served by `GET /api/v1/book?ics=<id>`,
+      authorised by the session''s own customer id as a SQL predicate (`readBookingForCustomer`), and a
+      booking that is not this session''s gets the same 404 body as one that does not exist.'
+    - 'NOTE: DEFERRED, and re-deferred to B-UI-05 by name: the MAGIC LINK. B-MSG-03 asked this unit to wire
+      `scheduledStepRuntimeFor`''s one line if minting a link belonged here. It does not, and the reason is
+      not scope but the 404: a magic link needs a token service (hashed, single-purpose, expiring at
+      appointment end + 24h, revoked on cancellation) AND a page that resolves it, and both are B-UI-05''s
+      own acceptance lines with both files in its list
+      (packages/core/src/identity/booking-token.ts, packages/db/src/repositories/booking-token.ts,
+      apps/web/app/(public)/booking/[token]/page.tsx). Minting one here would implement that unit''s first
+      two criteria and point it at a route that 404s - which is exactly the failure B-MSG-03 refused to
+      ship ("a link to a 404 in a reminder is a customer who thinks the salon has lost their booking").
+      So `MagicLinkBuilder` still answers null, a due reminder is still SKIPPED with `content_unavailable`,
+      and the confirmation renders the manage region as a NAMED designed state carrying the desk telephone
+      number from the premises row - asserted in book-flow.itest.ts as `data-book-region="manage"` plus a
+      `tel:` link - with the ICS `URL:` property omitted entirely rather than pointing at nothing. B-UI-05
+      wires `scheduledStepRuntimeFor` and fills that region; B-MSG-03''s other open item, the
+      `booking.reminder` wording that says TOMORROW for a 2-hour step, is unchanged and still B-MSG-01''s.'
+    - 'NOTE: B-UI-01''s two deferrals are DISCHARGED. The waitlist JOIN: `?step=waitlist` keeps its
+      `data-book-state="waitlist-step"` marker and now carries the phone form with `after=waitlist`, so a
+      verified reader lands back on the list rather than on a booking, and `join_waitlist` calls
+      `joinWaitlist` with the window from the availability answer''s own `waitlistEligible.desiredWindow` -
+      those four fields are exactly that function''s arguments, which is what the read was shaped for. The
+      join is idempotent (`waitlist_one_row_per_window` is UNIQUE NULLS NOT DISTINCT) and the itest asserts
+      one row after two submissions. The continue-to-details step: the chosen-slot summary gained
+      `data-book-continue="details"`, a plain link because moving to the phone form writes nothing, and
+      B-UI-01''s own test follows it.'
+    - 'NOTE: C-CRM-03''s consent capture is DISCHARGED, on the confirm step, through `recordConsent` with
+      the wording version and its hash - never a boolean. The questions are driven by
+      `consent_purpose.is_send_gating`, which that unit named as the thing that "already decides which
+      purposes gate a send": `marketing` and `review_request` appear, `clinical_processing` and
+      `photography` do not, because they are lawful bases for holding a record and not permission to
+      message anybody. A purpose with no published wording is ABSENT rather than shown with no words, since
+      `consentRecordSchema` refuses a grant with no wording version. The box is unchecked and there is no
+      `defaultChecked` anywhere near it (a pre-ticked marketing box is not an opt-in under TDRA and the
+      record would claim it was), and an UNTICKED box writes NOTHING - "never asked is the absence of a row
+      and is never stored". The wording id and hash travel with the submission and `recordConsent` refuses
+      a hash that does not match the stored version, so the record is a claim about the words THIS reader
+      saw rather than about whatever is current at write time. Asserted as a DELTA, which `consent` being
+      append-only makes mandatory anyway.'
+    - 'NOTE: the Lighthouse CI the acceptance line names does not exist in this repository and is not added.
+      W-SITE-11 owns it - lighthouse/budget.json and lighthouserc.cjs are in that unit''s files list - and
+      W-SITE-04 recorded exactly this deferral for the home route''s five numbers. A second budget
+      mechanism for one route would leave the same page measured twice with two sets of numbers to keep in
+      step. So the budget is apps/web/src/book/budget.ts (the numbers plus a pure judgement with its own
+      unit test) measured in a real browser against a real `next start` by book-flow.itest.ts, and
+      `pnpm test:integration` - which is in `pnpm verify` and in CI - is the job that fails. INP is
+      measured twice and the worse taken: the Event Timing API is the faithful measure and reports nothing
+      when no interaction exceeds its 16ms threshold, so a click-to-paint is measured beside it and both
+      are printed. A THIRD metric is declared beyond the two the acceptance names: first-party JS at
+      docs/08 SS8''s 110KB gzip, because docs/09 SS3 allows this route the one heavy island and an island
+      with no number on it is an island that grows. It earned itself immediately - see the defect NOTE.'
+    - 'NOTE: one defect found in code this unit does not own, and FIXED because the unit''s own budget could
+      not otherwise be honest. apps/web/app/_book/slot-picker.client.tsx (B-UI-01) imported `SlotGrid` from
+      the `@berelax/ui/patterns` BARREL, which re-exports nap-block.tsx, which imports `@berelax/shared`,
+      whose barrel re-exports three zod schema modules - so the whole of zod was in the /book client chunk:
+      measured on the build, 408KB before compression against docs/08 SS8''s 110KB gzip for a route''s
+      entire first-party JS. Narrowing that import to `@berelax/ui/patterns/slot-grid` (a new subpath
+      export) took the booking island''s chunk to 6,574 bytes with no zod in it. The same hazard applied to
+      this unit''s own island, which normalises a phone number on blur through the ONE normaliser: it
+      imports `@berelax/core/phone` (a new subpath export for identity/normalise-phone.ts) rather than the
+      barrel, and that module''s last runtime import was changed to `import type` by moving
+      `PhoneNormalisationError` and `normalisePhone` to identity/phone-error.ts - so the rule now compiles
+      to a module with no runtime dependency at all, and `@berelax/core` exports exactly what it did
+      before. Gate 80y asserts both imports and that the rule module has no value import; the itest asserts
+      no `ZodError` reaches the browser on /book.'
+    - 'NOTE: one behaviour of React 19 worth recording because it wasted a measurement. React emits
+      `autoComplete`, `inputMode` and `maxLength` in their JSX spelling in the SSR output while lowercasing
+      `className`. HTML attribute names are ASCII case-insensitive so a browser parses all of them
+      correctly - but a byte-level assertion for `autocomplete="one-time-code"` fails. The suite therefore
+      matches those three case-insensitively over the served bytes AND asserts the PARSED attributes in a
+      browser, which is what actually decides whether iOS offers the code from the SMS. A second thing the
+      same shape: a copy FUNCTION may not be passed to a client component (Next refuses it, and is right
+      to - a closure cannot be serialised), so the resend cooldown''s sentence is rendered twice by the
+      server, once for one second and once with `RESEND_SECONDS_TOKEN`, and the island substitutes.'
+    - 'NOTE: one placement decision `pnpm boundaries` made rather than a reviewer. The vocabulary of what a
+      submission did wrong (`BOOK_FLOW_ERRORS`) started in src/book/flow.ts beside the POST endpoint''s own
+      constants, and the cruiser refused the cycle that made: state.ts needs the guard as a VALUE to
+      validate the `error` query field, and flow.ts needs `BookStep` and `BookAfter` from state.ts. It moved
+      to state.ts, which is where it belongs on reflection - `error` IS a query field, and state.ts is the
+      module that says what the URL is. A re-export would have satisfied the cruiser and left two modules
+      each needing the other, which is the version of this fix that looks smaller and is worse.'
+    - 'NOTE: files, against the five this list names. The route group on disk is (en)/(public) and (ar)/ar
+      with the shared body in app/_book/, exactly as B-UI-01 recorded, so there is no
+      app/(public)/book/details.client.tsx or confirm/page.tsx: the steps are states of ONE document
+      (`?step=details|otp|confirm|booked|waitlist|waitlisted`), because a path segment per step would make
+      each one a separate document in the hreflang set and the sitemap for what is one page in one state.
+      There is no apps/web/tests/ directory (W-SYS-07, W-SYS-09 and W-SITE-04 each recorded it), so the
+      Playwright assertions live in apps/web/src/book-flow.itest.ts beside the fetch-level and
+      database-level ones - a claim about a rendered pixel and the availability answer behind it come from
+      one fixture. The ICS is `GET /api/v1/book?ics=<id>` rather than app/api/v1/bookings/ics.ts, on the
+      same route as the flow''s POST because it needs exactly the same cookie resolved exactly the same
+      way, and a second route would be a second place that could be written differently. ADDED:
+      packages/core/src/booking/edge-state.ts and its test, packages/core/src/calendar/ics.ts and its test,
+      packages/core/src/identity/phone-error.ts, packages/db/migrations/0062_booking_session.sql,
+      packages/db/src/schema/booking-session.ts, packages/db/src/repositories/booking-session.ts,
+      apps/web/app/api/v1/book/{handler,route}.ts, apps/web/app/_book/details.client.tsx,
+      apps/web/src/book/{flow,flow.test,budget,budget.test}.ts and apps/web/src/book-flow.itest.ts.
+      CHANGED: apps/web/src/book/{state,state.test,read,copy,copy-en,copy-ar}.ts,
+      apps/web/app/_book/{booking-page,slot-picker.client,styles}.tsx, both book/page.tsx route files,
+      apps/web/src/book.itest.ts (B-UI-01''s two deferrals and the island count),
+      apps/web/src/routes/registry.ts (the new handler), packages/db/src/repositories/otp.ts (one reader,
+      `readOtpResendWindow`, so the cooldown is derived from the limits it is enforced by),
+      packages/db/src/queries/booking-page.ts (`readBookingForCustomer`), packages/db/src/index.ts
+      (barrels and SCHEMA_VERSION), packages/db/src/schema/index.ts, packages/core/src/index.ts and
+      identity/index.ts, packages/core/package.json and packages/ui/package.json (one subpath export
+      each), tsconfig.base.json and apps/web/tsconfig.json (the two paths), packages/harness/src/ports.ts
+      (band 9700), scripts/test-gates.mjs (block 80a-80z) and this manifest.'
     files:
-    - apps/web/app/(public)/book/details.client.tsx
-    - apps/web/app/(public)/book/confirm/page.tsx
-    - apps/web/tests/e2e/book-confirm.spec.ts
-    - apps/web/tests/e2e/book-edge-states.spec.ts
-    - apps/web/app/api/v1/bookings/ics.ts
+    - apps/web/app/_book/details.client.tsx
+    - apps/web/app/api/v1/book/handler.ts
+    - apps/web/app/api/v1/book/route.ts
+    - apps/web/src/book/flow.ts
+    - apps/web/src/book/budget.ts
+    - apps/web/src/book-flow.itest.ts
+    - packages/core/src/booking/edge-state.ts
+    - packages/core/src/calendar/ics.ts
+    - packages/db/migrations/0062_booking_session.sql
+    - packages/db/src/repositories/booking-session.ts
   - id: B-UI-03
     order: 39
     title: 'Admin calendar: room x time primary, therapist x time secondary, drag to reschedule'
@@ -4961,7 +5174,10 @@ units:
       packages/fixtures/src/consent.itest.ts. (1)
       There is NO consent capture surface. No booking form collects consent (B-UI-02 owns the customer
       flow), the preference centre a withdrawal really arrives through is C-CRM-04''s, and nothing
-      publishes a wording version through a screen. Capture is exercised through the repository
+      publishes a wording version through a screen. (B-UI-02 HAS SINCE LANDED one: its confirm step offers
+      one unchecked box per send-gating purpose with a published wording, and records a grant through
+      recordConsent with the wording id and hash the form was rendered with. See that unit''s consent NOTE;
+      the preference centre and the publishing screen are still C-CRM-04''s and W-SYS-01''s.) Capture is exercised through the repository
       (recordConsent, withdrawConsent, publishConsentWording) and through the seed, both of which go
       past the same zod contract and the same constraints a real capture would. The acceptance list
       asks for no page and none is built. (2) There is no PROMOTIONAL SEND PATH to wire the evaluator

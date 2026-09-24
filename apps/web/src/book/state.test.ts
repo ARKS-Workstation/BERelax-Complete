@@ -50,6 +50,13 @@ describe('parseBookingParams keeps what it can read and drops what it cannot', (
       gender: 'female',
       slot: at('2026-10-24', '19:45'),
       step: 'waitlist',
+      // B-UI-02's four fields. Asserted as part of the WHOLE object rather than beside it, because that is
+      // what makes a field added to `BookingParams` and not to the parser a failure here: `toEqual` on a
+      // partial shape would pass for ever.
+      issue: null,
+      booking: null,
+      after: null,
+      error: null,
     })
   })
 
@@ -62,7 +69,11 @@ describe('parseBookingParams keeps what it can read and drops what it cannot', (
       [BOOK_FIELDS.therapist]: `${uuid} or 1=1`,
       [BOOK_FIELDS.gender]: 'other',
       [BOOK_FIELDS.slot]: '19:45',
-      [BOOK_FIELDS.step]: 'confirm',
+      [BOOK_FIELDS.step]: 'checkout',
+      [BOOK_FIELDS.issue]: 'slot_taken',
+      [BOOK_FIELDS.booking]: 'not-a-uuid',
+      [BOOK_FIELDS.after]: 'somewhere',
+      [BOOK_FIELDS.error]: 'anything',
     })
     expect(parsed.variant).toBeNull()
     expect(parsed.date).toBeNull()
@@ -71,7 +82,16 @@ describe('parseBookingParams keeps what it can read and drops what it cannot', (
     // `Number.parseInt('19:45')` is 19, which is a valid instant in January 1970. The regex is what stops
     // a wall-clock string being read as an epoch, and this is the case that proves it.
     expect(parsed.slot).toBeNull()
+    // `checkout` is not a step this flow has. It used to be `confirm`, which B-UI-02 made a real one — so
+    // the control moved to a word no step will ever be rather than staying on one that had become valid,
+    // which is how a rejection case quietly turns into an acceptance case.
     expect(parsed.step).toBe('choose')
+    // `slot_taken` is a real edge state and deliberately NOT a readable issue: the server decides that one,
+    // and a URL that could assert it would put a designed panel on a page that had checked nothing.
+    expect(parsed.issue).toBeNull()
+    expect(parsed.booking).toBeNull()
+    expect(parsed.after).toBeNull()
+    expect(parsed.error).toBeNull()
   })
 
   it('takes the first value when a field arrives twice', () => {
@@ -89,6 +109,10 @@ describe('parseBookingParams keeps what it can read and drops what it cannot', (
       gender: null,
       slot: null,
       step: 'choose',
+      issue: null,
+      booking: null,
+      after: null,
+      error: null,
     })
     fc.assert(
       fc.property(fc.dictionary(fc.string(), fc.string()), (raw) => {
@@ -131,6 +155,10 @@ describe('bookHref spells one state one way', () => {
       gender: 'male',
       slot: at('2026-10-24', '11:15'),
       step: 'choose',
+      issue: null,
+      booking: null,
+      after: null,
+      error: null,
     })
   })
 })

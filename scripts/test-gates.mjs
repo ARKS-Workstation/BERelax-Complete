@@ -21294,6 +21294,523 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 80a-80z. (B-UI-02) Steps 4 and 5 of the booking flow: the nine enumerated edge states, the derived
+// idempotency key, the session that decides expiry, the discreet calendar file, and the boundary that
+// keeps zod out of a browser.
+//
+// The cases below break exactly the things whose being wrong is invisible on a rendered page. Every one of
+// them is a mechanism this unit had to get right rather than a preference:
+//
+//   * the PRECEDENCE of the nine edge states. Three of them describe one symptom — the time you chose
+//     cannot be delivered — with three different remedies, and the shortest implementation reports
+//     `slot_taken` for all three. That implementation renders every panel, passes every "is it reachable"
+//     assertion, and never shows the two useful ones;
+//   * the idempotency key being DERIVED. A generated key satisfies every assertion about a header being
+//     present and produces two bookings on a double tap;
+//   * the session being the authority on expiry, and `verified_at`/`customer_id` being one fact;
+//   * the calendar file refusing to name the treatment or the therapist (docs/06 D2);
+//   * the deep imports that keep `@berelax/shared`'s zod out of the booking island.
+//
+// `replaceOnce` throughout (brief rule 20): several of these anchors are lines whose shape repeats.
+{
+  const EDGE = 'packages/core/src/booking/edge-state.ts'
+  const EDGE_SUITE = 'packages/core/src/booking/edge-state.test.ts'
+  const ICS = 'packages/core/src/calendar/ics.ts'
+  const ICS_SUITE = 'packages/core/src/calendar/ics.test.ts'
+  const FLOW = 'apps/web/src/book/flow.ts'
+  const FLOW_SUITE = 'apps/web/src/book/flow.test.ts'
+  const BUDGET = 'apps/web/src/book/budget.ts'
+  const BUDGET_SUITE = 'apps/web/src/book/budget.test.ts'
+  const SESSION_SQL = 'packages/db/migrations/0062_booking_session.sql'
+  const ISLAND = 'apps/web/app/_book/details.client.tsx'
+  const PICKER = 'apps/web/app/_book/slot-picker.client.tsx'
+  const runUnit = (file) => run('pnpm', ['vitest', 'run', '-c', 'vitest.config.ts', file])
+
+  // 80a. `slot_taken` first is the shortest decider and the wrong one: the therapist, the room and the
+  // close all stop being reportable, and every panel stays reachable so nothing looks broken.
+  withEditedFile(
+    EDGE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  if (facts.requestedTherapistStillFree === false) return 'therapist_became_unavailable'\n  if (facts.compatibleRoomStillFree === false) return 'required_room_taken'\n  if (facts.startStillOffered === false) return 'slot_taken'",
+        "  if (facts.startStillOffered === false) return 'slot_taken'\n  if (facts.requestedTherapistStillFree === false) return 'therapist_became_unavailable'\n  if (facts.compatibleRoomStillFree === false) return 'required_room_taken'",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: slot_taken ahead of the three specific causes is rejected',
+        runUnit(EDGE_SUITE),
+        'names the therapist rather than the slot',
+      )
+    },
+  )
+
+  // 80b. The closing-time check is removed altogether, which is the mutant that looks most like a
+  // simplification: every one of its fact sets still produces a panel, and the panel is `slot_taken`. A
+  // reader whose closing time moved is then told their time has gone, and "choose an earlier time" — the
+  // one remedy that works — is never offered.
+  withEditedFile(
+    EDGE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  if (\n    facts.treatmentEndsAt !== null &&\n    facts.closesAt !== null &&\n    facts.treatmentEndsAt > facts.closesAt\n  ) {\n    return 'duration_no_longer_fits'\n  }\n",
+        '',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: removing the closing-time check is rejected',
+        runUnit(EDGE_SUITE),
+        'names the closing time rather than the slot',
+      )
+    },
+  )
+
+  // 80c. A replay reported as anything but good news tells a customer who IS booked that something failed.
+  withEditedFile(
+    EDGE,
+    (source) => replaceOnce(source, "  if (facts.replayed) return 'double_submission'\n", ''),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: dropping the replay check is rejected',
+        runUnit(EDGE_SUITE),
+        'reports good news before any diagnosis',
+      )
+    },
+  )
+
+  // 80d. `back_after_confirm` behind the session check: an expired session plus a committed booking would
+  // ask for a new code and then invite a second confirmation.
+  withEditedFile(
+    EDGE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  if (facts.existingBookingId !== null && facts.revisitingEarlierStep) return 'back_after_confirm'\n",
+        '',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: dropping the already-booked guard is rejected',
+        runUnit(EDGE_SUITE),
+        'refuses to render the confirm form again',
+      )
+    },
+  )
+
+  // 80e. The three-valued therapist fact collapsed to a boolean. `null` means nobody named a therapist and
+  // `false` means the one who was named has gone; a boolean reports `therapist_became_unavailable` on every
+  // booking taken with "any available therapist", which is every booking this business currently offers.
+  withEditedFile(
+    EDGE,
+    (source) =>
+      replaceOnce(
+        source,
+        "  if (facts.requestedTherapistStillFree === false) return 'therapist_became_unavailable'",
+        "  if (!facts.requestedTherapistStillFree) return 'therapist_became_unavailable'",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: treating an unasked therapist as an unavailable one is rejected',
+        runUnit(EDGE_SUITE),
+        'never reports the therapist when none was asked for',
+      )
+    },
+  )
+
+  // 80f. A treatment ending exactly at closing has ended. `>=` refuses the last bookable start of every day.
+  withEditedFile(
+    EDGE,
+    (source) =>
+      replaceOnce(
+        source,
+        '    facts.treatmentEndsAt > facts.closesAt',
+        '    facts.treatmentEndsAt >= facts.closesAt',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: refusing a treatment that ends at closing time is rejected',
+        runUnit(EDGE_SUITE),
+        'treats a treatment ending exactly at closing as fitting',
+      )
+    },
+  )
+
+  // 80g. A slot diagnosis without a chosen start puts "that time has gone" in front of every reader who has
+  // not picked one — which on a bare /book is every reader.
+  withEditedFile(
+    EDGE,
+    (source) => replaceOnce(source, '  if (facts.chosenStart === null) return null\n', ''),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: diagnosing a slot nobody chose is rejected',
+        runUnit(EDGE_SUITE),
+        'does not diagnose a slot nobody has chosen',
+      )
+    },
+  )
+
+  // 80h. The nine, against docs/09 §3's list. A tenth member with no copy is a blank panel; a missing one
+  // makes a `Record<BookingEdgeState, …>` compile with a hole.
+  withEditedFile(
+    EDGE,
+    (source) => replaceOnce(source, "  'back_after_confirm',\n", ''),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: dropping one of the nine edge states is rejected',
+        runUnit(EDGE_SUITE),
+        'declares exactly the nine',
+      )
+    },
+  )
+
+  // 80i. The idempotency key stops depending on the slot. Two bookings at two times would then share a
+  // key and the second would be answered with the first — which is worse than a duplicate.
+  withEditedFile(
+    FLOW,
+    (source) =>
+      replaceOnce(
+        source,
+        "  const canonical = [args.sessionId, args.serviceVariantId, String(args.startsAt)].join('|')",
+        "  const canonical = [args.sessionId, args.serviceVariantId].join('|')",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: an idempotency key that ignores the slot is rejected',
+        runUnit(FLOW_SUITE),
+        'differs for a different slot',
+      )
+    },
+  )
+
+  // 80j. The key carries the session id in clear. It is the primary key of a row holding a phone number,
+  // and this value is a column a support query pastes into a ticket.
+  withEditedFile(
+    FLOW,
+    (source) =>
+      replaceOnce(
+        source,
+        "  return `book:${createHash('sha256').update(canonical).digest('hex').slice(0, 32)}`",
+        '  return `book:${canonical}`',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: an idempotency key that carries the session id is rejected',
+        runUnit(FLOW_SUITE),
+        'carries neither the session id nor the number',
+      )
+    },
+  )
+
+  // 80k. The cooldown rounded down: 400ms of remaining wait reads as zero and the button enables itself
+  // into a 429.
+  withEditedFile(
+    FLOW,
+    (source) =>
+      replaceOnce(
+        source,
+        '  return Math.max(0, Math.ceil((at - args.now) / 1000))',
+        '  return Math.max(0, Math.floor((at - args.now) / 1000))',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a cooldown rounded down is rejected',
+        runUnit(FLOW_SUITE),
+        'rounds a part-second up',
+      )
+    },
+  )
+
+  // 80l. `SameSite=Strict` drops the session cookie on the navigation from Google Business Profile, which
+  // presents as "the flow forgets my number when I arrive from Google" and cannot be reproduced by typing
+  // the URL.
+  withEditedFile(
+    FLOW,
+    (source) => replaceOnce(source, "    'SameSite=Lax',", "    'SameSite=Strict',"),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a strict session cookie is rejected',
+        runUnit(FLOW_SUITE),
+        'SameSite=Lax',
+      )
+    },
+  )
+
+  // 80m. The cookie loses `HttpOnly`, which is the one thing that survives a scripting hole on this page.
+  withEditedFile(
+    FLOW,
+    (source) => replaceOnce(source, "    'HttpOnly',\n", ''),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a session cookie readable from script is rejected',
+        runUnit(FLOW_SUITE),
+        'HttpOnly',
+      )
+    },
+  )
+
+  // 80n. The cookie parser matches a prefix, so `berelax_booking_ref=…` is read as a session token.
+  withEditedFile(
+    FLOW,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (pair.slice(0, index).trim() !== BOOK_SESSION_COOKIE) continue',
+        '    if (!pair.trim().startsWith(BOOK_SESSION_COOKIE)) continue',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a cookie parser that matches a prefix is rejected',
+        runUnit(FLOW_SUITE),
+        'does not match a cookie whose name merely begins the same way',
+      )
+    },
+  )
+
+  // 80o. An unverified step joins the verified list's opposite: `otp` requires a session and not a
+  // verification, and a reader sent to a bare code box has no way to get a code.
+  withEditedFile(
+    'apps/web/src/book/state.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        "export const VERIFIED_STEPS: readonly BookStep[] = ['confirm',",
+        "export const VERIFIED_STEPS: readonly BookStep[] = ['otp', 'confirm',",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: requiring a verified phone before a code can be typed is rejected',
+        runUnit(FLOW_SUITE),
+        'never to the code',
+      )
+    },
+  )
+
+  // 80p. A step the parser cannot read is a step no link can reach, which presents as "the button goes
+  // back to the first screen".
+  withEditedFile(
+    'apps/web/src/book/state.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        '    step: isBookStep(step) ? step : ',
+        "    step: step === 'waitlist' ? 'waitlist' : ",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a step parser that knows only some of the steps is rejected',
+        runUnit(FLOW_SUITE),
+        'parses every step and every issue',
+      )
+    },
+  )
+
+  // 80q. A reader-settable field that can assert a state the server decides. `?issue=slot_taken` would put
+  // a designed panel on a page that had checked nothing.
+  withEditedFile(
+    'apps/web/src/book/state.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        "export const BOOK_ISSUES = ['code_not_received', 'interrupted'] as const",
+        "export const BOOK_ISSUES = ['code_not_received', 'interrupted', 'slot_taken'] as const",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-flow gate: a reader-assertable slot_taken issue is rejected',
+        runUnit(FLOW_SUITE),
+        'Only the two a reader can honestly report',
+      )
+    },
+  )
+
+  // 80r. The calendar file's discretion check moved off the OUTPUT and onto the inputs, which passes a
+  // summary assembled from two fields neither of which contained the name on its own — and passes anything
+  // the escaping changed.
+  withEditedFile(
+    ICS,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const leaked = icsDiscretionBreaches(ics, appointment.withhold)',
+        '  const leaked = icsDiscretionBreaches(appointment.summary, appointment.withhold)',
+      ),
+    () => {
+      checkRejectedBy(
+        'ics gate: a discretion check scoped to the summary is rejected',
+        runUnit(ICS_SUITE),
+        'refuses a leak in the DESCRIPTION and in the LOCATION',
+      )
+    },
+  )
+
+  // 80s. The check becomes case-SENSITIVE — the withheld value is compared as written against a file that
+  // has been lower-cased — so a copy string that lower-cased the treatment name passes. Lowering only one
+  // side of a comparison is the shape this mistake takes: it looks like a check, and it matches nothing.
+  withEditedFile(
+    ICS,
+    (source) =>
+      replaceOnce(
+        source,
+        '    const needle = value.trim().toLowerCase()',
+        '    const needle = value.trim()',
+      ),
+    () => {
+      checkRejectedBy(
+        'ics gate: a case-sensitive discretion check is rejected',
+        runUnit(ICS_SUITE),
+        'matches case-insensitively',
+      )
+    },
+  )
+
+  // 80t. The TEXT escaping loses its order, which produces a literal backslash and an unescaped comma —
+  // and a value that truncates at the comma in some clients and is accepted in others.
+  withEditedFile(
+    ICS,
+    (source) =>
+      replaceOnce(
+        source,
+        "    .replaceAll('\\\\', '\\\\\\\\')\n    .replaceAll(';', '\\\\;')",
+        "    .replaceAll(';', '\\\\;')\n    .replaceAll('\\\\\\\\', '\\\\\\\\\\\\\\\\')",
+      ),
+    () => {
+      checkRejectedBy(
+        'ics gate: escaping the backslash after the characters whose escapes contain one is rejected',
+        runUnit(ICS_SUITE),
+        'escapes backslash before',
+      )
+    },
+  )
+
+  // 80u. Folding counted in characters rather than octets leaves an Arabic description unfolded, and a
+  // client that enforces the 75-octet limit truncates the line.
+  withEditedFile(
+    ICS,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (encoder.encode(line).length <= 75) return line',
+        '  if (line.length <= 75) return line',
+      ),
+    () => {
+      checkRejectedBy(
+        'ics gate: folding counted in characters is rejected',
+        runUnit(ICS_SUITE),
+        'folds at 75 octets',
+      )
+    },
+  )
+
+  // 80v. A budget that fires on the number it declares is a budget somebody raises; one that fires one
+  // millisecond late is not a budget at all. The case makes it `>=`, which the boundary assertion catches.
+  withEditedFile(
+    BUDGET,
+    (source) =>
+      replaceOnce(
+        source,
+        '    if (value <= limit.limit) continue',
+        '    if (value < limit.limit) continue',
+      ),
+    () => {
+      checkRejectedBy(
+        'book-budget gate: a budget that fires at its own limit is rejected',
+        runUnit(BUDGET_SUITE),
+        'treats a measurement exactly at the limit as inside it',
+      )
+    },
+  )
+
+  // 80w. The two numbers this unit's acceptance names, against the acceptance rather than against
+  // themselves. A budget quietly raised to whatever the page measures is decoration.
+  withEditedFile(
+    BUDGET,
+    (source) =>
+      replaceOnce(
+        source,
+        "    metric: 'inp',\n    limit: 200,",
+        "    metric: 'inp',\n    limit: 2000,",
+      ),
+    () => {
+      checkRejectedBy(
+        'book-budget gate: raising the INP budget is rejected',
+        runUnit(BUDGET_SUITE),
+        'carries the two numbers the acceptance names',
+      )
+    },
+  )
+
+  // 80x. The session's two verification columns drift apart. `verified_at is not null` reads as "verified"
+  // everywhere, so a row with no customer id would pass that test and then book for nobody.
+  {
+    const sql = readFileSync(SESSION_SQL, 'utf8')
+    check(
+      'booking_session gate: verification and the customer it names are one fact',
+      sql.includes('booking_session_verification_names_a_customer') &&
+        sql.includes('check ((verified_at is null) = (customer_id is null))'),
+      'the CHECK tying verified_at to customer_id is gone from 0062',
+    )
+    check(
+      'booking_session gate: a booking can only belong to a verified attempt',
+      sql.includes('booking_session_booking_requires_verification'),
+      'the CHECK tying booking_id to verified_at is gone from 0062',
+    )
+    // No foreign key to `customer` or `booking`, for two reasons the migration states: a record has to
+    // outlive the erasure of the identity it is about, and PostgreSQL refuses a TRUNCATE on a table a
+    // foreign key points at — which is how B-MSG-03 turned 24 of another suite's 24 cases red.
+    check(
+      'booking_session gate: no foreign key to customer or booking',
+      !/references\s+customer/i.test(sql) && !/references\s+booking\b/i.test(sql),
+      'a foreign key from booking_session would break every suite that truncates appointment or clears customer',
+    )
+    // The token is stored as a digest and there is no column holding it.
+    check(
+      'booking_session gate: the token is a digest and no column holds it',
+      sql.includes('token_hash') && !/\btoken\s+text/i.test(sql),
+      'booking_session has a column that could hold a session token in clear',
+    )
+  }
+
+  // 80y. The booking island's two deep imports. Both were barrels, and both put the whole of zod in a
+  // browser chunk — 408KB before compression, over docs/08 §8's 110KB gzip for a route's entire
+  // first-party JS. A barrel here is a defect that no page looks different for.
+  {
+    const island = readFileSync(ISLAND, 'utf8')
+    const picker = readFileSync(PICKER, 'utf8')
+    check(
+      'book-island gate: the phone normaliser is imported from its own module, not the core barrel',
+      island.includes("from '@berelax/core/phone'") && !/from '@berelax\/core'/.test(island),
+      'apps/web/app/_book/details.client.tsx imports the @berelax/core barrel, which reaches zod',
+    )
+    check(
+      'book-island gate: SlotGrid is imported from its own module, not the patterns barrel',
+      picker.includes("from '@berelax/ui/patterns/slot-grid'") &&
+        !/from '@berelax\/ui\/patterns'/.test(picker),
+      'apps/web/app/_book/slot-picker.client.tsx imports the @berelax/ui/patterns barrel, which reaches zod',
+    )
+    // And the module the island imports really is free of runtime dependencies, which is what makes the
+    // deep import worth anything: a value import added to it would bring the graph back.
+    const rule = readFileSync('packages/core/src/identity/normalise-phone.ts', 'utf8')
+    const imports = [...rule.matchAll(/^import\s+(type\s+)?[^\n]*$/gm)].map((match) => match[0])
+    check(
+      'book-island gate: the phone rule has no runtime import',
+      imports.length > 0 && imports.every((line) => line.startsWith('import type ')),
+      `packages/core/src/identity/normalise-phone.ts has a value import, which a browser bundle then carries:\n${imports.join('\n')}`,
+    )
+  }
+
+  // 80z. The committed tree passes all four suites, so the cases above are about their fixtures and not
+  // about a suite that was already red.
+  {
+    const results = [EDGE_SUITE, ICS_SUITE, FLOW_SUITE, BUDGET_SUITE].map((file) => runUnit(file))
+    check(
+      'book-flow gate: the committed edge-state, ICS, flow and budget suites all pass',
+      results.every((result) => !result.failed),
+      `a committed suite failed:\n${results.map((result) => result.output).join('')}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

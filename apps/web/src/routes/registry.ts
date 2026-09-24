@@ -164,6 +164,24 @@ export const ROUTES = [
       'URL, and the payload carries both locales worth of nothing, because a fact has no language.',
   },
   {
+    id: 'book-flow',
+    path: '/api/v1/book',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-UI-02s steps 4 and 5. Every step of the booking flow past the slot picker is a POST here that ' +
+      'answers 303 with the URL of the next state, which is what makes them work with JavaScript off ' +
+      'without being GET requests that send an SMS or take a slot. Its GET serves the add-to-calendar ' +
+      'file for a booking the session cookie proves is the readers. Locale-neutral for the reason the ' +
+      'OTP route below gives — the locale is a field in the body, and the 303s Location is built from ' +
+      'it — and noindex because nothing here is a document: the POST writes and the GET needs a cookie ' +
+      'no crawler has.',
+  },
+  {
     id: 'bookings',
     path: '/api/v1/bookings',
     kind: 'handler',

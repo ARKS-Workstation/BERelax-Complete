@@ -97,7 +97,9 @@ export {
 } from './queries/availability.ts'
 export {
   type BookableVariantRow,
+  type BookedAppointmentRow,
   readBookableVariants,
+  readBookingForCustomer,
   readOpenTradingDays,
   readPublishableTherapists,
   readTherapistLabels,
@@ -204,6 +206,22 @@ export {
   transitionAppointmentTx,
   transitionRefusalOf,
 } from './repositories/appointment-transition.ts'
+export {
+  attachBookingToSession,
+  BOOKING_SESSION_TOKEN_BYTES,
+  BOOKING_SESSION_TTL_MINUTES,
+  type BookingSessionLookup,
+  type BookingSessionRow,
+  bookingSessionTokenMatches,
+  endBookingSession,
+  generateBookingSessionToken,
+  hashBookingSessionToken,
+  readBookingSession,
+  type StartBookingSessionInput,
+  type StartedBookingSession,
+  startBookingSession,
+  verifyBookingSession,
+} from './repositories/booking-session.ts'
 export {
   CANCELLATION_REFUSALS,
   CANCELLATION_STATUSES,
@@ -495,15 +513,18 @@ export {
   OTP_PHONE_WINDOW_MINUTES,
   OTP_PURPOSES,
   OTP_RATE_LIMITS,
+  OTP_RESEND_COOLDOWN_SECONDS,
   OTP_TTL_MINUTES,
   OTP_VERIFY_REJECTIONS,
   type OtpIssueRequest,
   type OtpIssueResult,
   type OtpPurpose,
   type OtpRateLimit,
+  type OtpResendWindow,
   type OtpVerifyRejection,
   type OtpVerifyRequest,
   type OtpVerifyResult,
+  readOtpResendWindow,
   verifyOtpCode,
 } from './repositories/otp.ts'
 export {
@@ -1041,9 +1062,29 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
+// 62 is 0062_booking_session.sql: the public booking flow's session (B-UI-02), which is the thing
+// B-LIFE-02 stopped at and named — *"a successful verification has to mint a customer session or
+// magic-link token and nothing in the system defines one yet"*. One table, no enum and no trigger.
+// The token is 32 CSPRNG bytes in a cookie and the row holds their SHA-256; there is no column holding
+// the token, exactly as `otp_challenge` holds no code. The one deliberate difference from 0019 is the
+// hash: SHA-256 rather than an HMAC under a per-row salt, because a 256-bit random token has nothing to
+// guess and the lookup has to be BY hash, which a per-row salt makes a full scan. `customer_id` and
+// `booking_id` are plain uuids with NO foreign key — 0056's reason (a record outlives the erasure of the
+// identity it is about, and a cascade makes `delete from customer` raise for every caller) plus
+// B-MSG-03's TRUNCATE finding, since a key from here would break the four suites that truncate
+// `appointment` and the four that clear `customer`. Three CHECKs carry the rules that matter:
+// `verified_at` and `customer_id` are null together or set together, because `verified_at is not null`
+// reads as "verified" everywhere and a row with no customer would pass that test and book for nobody;
+// `booking_id` may only be set on a verified row; and `expires_at > created_at`, which is also what makes
+// ending a session an UPDATE rather than a DELETE — `readBookingSession` distinguishes `expired` from
+// `unknown`, and a delete would collapse the enumerated edge state into a first arrival. No sweep job:
+// the retention pass docs/04 §8 asks for is one pass over every table holding a personal identifier, and
+// a private sweep for this one would be the first of fourteen. `booking_session_expires_at_idx` is the
+// index it will use.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
+// landed — 55 through 62 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 61 as const
+export const SCHEMA_VERSION = 62 as const

@@ -25,7 +25,9 @@
  * frozen instant by a test.
  */
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { BOOK_COPY_EN } from '../../../../src/book/copy-en.ts'
+import { BOOK_SESSION_COOKIE } from '../../../../src/book/flow.ts'
 import { bookingPageData } from '../../../../src/book/read.ts'
 import { parseBookingParams } from '../../../../src/book/state.ts'
 import { routeMetadata } from '../../../../src/routes/alternates.ts'
@@ -44,6 +46,12 @@ export default async function BookPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = parseBookingParams(await searchParams)
-  const data = await bookingPageData(params, { now: Date.now() })
+  // The flow session, read here and passed down. `bookingPageData` takes it as an argument for the
+  // same reason it takes `now`: a module that read the request context could only be exercised
+  // through a browser, and `apps/web/src/book-flow.itest.ts` drives it directly with a token it
+  // minted itself. `cookies()` is also what makes this route dynamic in Next's own terms, which is
+  // the honest spelling of the registry's claim.
+  const token = (await cookies()).get(BOOK_SESSION_COOKIE)?.value ?? null
+  const data = await bookingPageData(params, { now: Date.now(), sessionToken: token })
   return <BookingPageBody data={data} params={params} copy={BOOK_COPY_EN} locale="en" />
 }

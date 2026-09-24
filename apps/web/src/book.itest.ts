@@ -478,22 +478,35 @@ afterAll(async () => {
   }
 })
 
-describe('acceptance — the route carries exactly one client component boundary', () => {
-  it('names one first-party client module beyond the shared layout, in both locales', () => {
+describe('acceptance — the route carries exactly the booking flows client boundaries', () => {
+  /**
+   * The flow's client modules, and there are two of them since B-UI-02.
+   *
+   * docs/09 §3's *"the booking flow is the one heavy client island; everything else is a server
+   * component"* is a claim about the SITE — one heavy island, on this route — and not about a file count.
+   * The picker is rendered only when there are times to pick and the step-4 fields only on the steps that
+   * have them, so a single module would make every reader download the other half. What this assertion is
+   * really for is unchanged: a THIRD boundary, or a component that quietly became one, fails here.
+   */
+  const ISLANDS = [
+    'apps/web/app/_book/details.client.tsx',
+    'apps/web/app/_book/slot-picker.client.tsx',
+  ]
+
+  it('names the flows two client modules beyond the shared layout, in both locales', () => {
     // Read out of what `next build` produced, not out of the source: the claim is about the boundary the
     // build found, and an import added through a barrel is exactly the way a second one arrives unseen.
-    const island = 'apps/web/app/_book/slot-picker.client.tsx'
     const layout = [
       'packages/ui/src/primitives/direction.tsx',
       'packages/ui/src/theme/theme-provider.tsx',
     ]
     for (const route of ['(en)/(public)/book', '(ar)/ar/book']) {
       const modules = clientModulesOf(route)
-      expect(modules, route).toContain(island)
+      for (const island of ISLANDS) expect(modules, route).toContain(island)
       expect(
-        modules.filter((file) => !layout.includes(file)),
-        `${route}: more than one client island on the route — ${modules.join(', ')}`,
-      ).toEqual([island])
+        modules.filter((file) => !layout.includes(file)).sort(),
+        `${route}: an unexpected client boundary on the route — ${modules.join(', ')}`,
+      ).toEqual([...ISLANDS].sort())
     }
   })
 
@@ -502,7 +515,7 @@ describe('acceptance — the route carries exactly one client component boundary
     // that could not see the shared layout's two client components would make "beyond the layout"
     // meaningless. `/treatments` is the same shape of page with no island.
     const treatments = clientModulesOf('(en)/(public)/treatments')
-    expect(treatments).not.toContain('apps/web/app/_book/slot-picker.client.tsx')
+    for (const island of ISLANDS) expect(treatments).not.toContain(island)
     expect(treatments).toContain('packages/ui/src/theme/theme-provider.tsx')
     expect(treatments).toContain('packages/ui/src/primitives/direction.tsx')
     expect(clientModulesOf('(en)/(public)/book').length).toBeGreaterThan(treatments.length)
@@ -574,6 +587,8 @@ describe('acceptance — the initial HTML carries the day strip and the first da
     expect(html).toContain('data-book-state="chosen"')
     expect(html).toContain(wallClock(chosen))
     expect(html).toContain(variantName)
+    // And it now leads to step 4 (B-UI-02), which this unit deferred as "the continue-to-details step".
+    expect(html).toContain('data-book-continue="details"')
     // And a slot from another day is not honoured: the summary is absent rather than wrong.
     const wrongDay = await fetchHtml(
       bookUrl('en', freeFields({ [BOOK_FIELDS.slot]: chosen - 7 * 86_400_000 })),
@@ -632,12 +647,19 @@ describe('acceptance — the no-availability state is a designed state', () => {
       expect(html).toContain(`<span class="be-book__hidden">${reference}</span>`)
     }
 
-    // The waitlist CTA, and the step it leads to, which is a named state rather than a dead button.
+    // The waitlist CTA, and the step it leads to. B-UI-01 left that step as a named state with the desk
+    // telephone number and nothing behind it, because `joinWaitlist` needs a customer id; B-UI-02 put the
+    // phone form there and the join behind it, so the state keeps its name and now leads somewhere. The
+    // join itself is asserted end to end in `book-flow.itest.ts`.
     const cta = allMatches(html, /href="([^"]*step=waitlist[^"]*)"/g)
     expect(cta.length).toBeGreaterThan(0)
     const waitlist = await fetchHtml(`${BASE}${(cta[0] ?? '').replaceAll('&amp;', '&')}`)
     expect(waitlist).toContain('data-book-state="waitlist-step"')
     expect(waitlist).toContain('href="tel:')
+    // Not a dead end any more: the step carries the phone form, and `after=waitlist` is what brings a
+    // verified reader back to the list rather than to a booking.
+    expect(waitlist).toContain('name="phone"')
+    expect(waitlist).toContain('name="after" value="waitlist"')
   }, 180_000)
 
   it('renders the picker and no no-availability state on the day that has space', async () => {
