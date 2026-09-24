@@ -9,7 +9,7 @@
  * This covers: the unit runner, the typechecker, the linter, and the CI workflow's completeness.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 let failures = 0
 
@@ -22849,6 +22849,264 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 83a-83x. (P-HR-04) The reassignment: the candidate rule that must not offer what the booking path
+// refuses, the transaction that must change ONE column, the three exits from the queue, and the customer
+// notice's one class. Every case breaks something real and requires a NAMED test to go red (ADR 0003).
+//
+// Two of them are about a mistake that is invisible from the outside. A candidate finder that stops
+// applying the period checks returns MORE therapists, and a transaction that stops re-applying the rule
+// commits MORE reassignments — neither reads as a failure, and the consequence arrives when a customer
+// meets a therapist the booking page had already stopped offering. 83a and 83c are those two.
+//
+// Anchors go through `replaceOnce` (brief rule 20): three gate cases in this file have edited the wrong
+// construct because `String.replace` takes the first match, and every one then reported PASS about a file
+// that still contained what the case meant to remove.
+{
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  const RULE = 'packages/core/src/hr/reassignment.ts'
+  const REPO = 'packages/db/src/repositories/reassignment.ts'
+  const QUEUE_RENDER = 'apps/web/app/(admin)/hr/reassignment/render.ts'
+  const PAIR_TEST = integration('packages/fixtures/src/reassignment.itest.ts')
+  const RULE_TEST = unit('packages/core/src/hr/reassignment.test.ts')
+  const RENDER_TEST = unit('apps/web/src/hr-reassignment-render.test.ts')
+  const SWEEP_TEST = integration('apps/worker/src/jobs/credential-sweep.itest.ts')
+
+  // 83a. THE criterion, from the direction that hides. The buffered interval collapses to its first
+  //      INSTANT, so both period checks degrade to a question about one moment: a therapist whose shift
+  //      ends before the treatment does is "covered", and one holding an appointment later that evening is
+  //      "free". It is the off-by-one an interval rule actually fails by, and the answer stays a partition
+  //      — so what catches it is the property's oracle, written from the generated facts, rather than the
+  //      totality assertion. An assertion that the finder "returns candidates" would see nothing.
+  checkRejectedBy(
+    'the candidate property fails when the buffered interval collapses to an instant',
+    withEditedFile(
+      RULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      period: buffered,',
+          '      period: { startsAt: buffered.startsAt, endsAt: buffered.startsAt },',
+        ),
+      () => runExpectingFailure('pnpm', RULE_TEST),
+    ),
+    'who the facts say may not take it',
+  )
+
+  // 83b. The incumbent offered. "Reassign" to the therapist who already holds it is not a reassignment,
+  //      and the exclusion constraint would refuse the write anyway — so the finder offering them is a
+  //      candidate list with a dead entry on it, which a human clicks.
+  checkRejectedBy(
+    'the rule suite fails when the incumbent is no longer rejected by name',
+    withEditedFile(
+      RULE,
+      (source) =>
+        replaceOnce(
+          source,
+          "      rejected.push({ therapistId: therapist.therapistId, reason: 'already_assigned' })",
+          "      rejected.push({ therapistId: therapist.therapistId, reason: 'not_rostered' })",
+        ),
+      () => runExpectingFailure('pnpm', RULE_TEST),
+    ),
+    'already_assigned',
+  )
+
+  // 83c. The transaction trusting the tuple it was handed. This is the whole race: the list is a memo, and
+  //      between rendering it and clicking, a licence lapses, leave is approved and another booking is
+  //      taken. With the re-check gone the pair suite's race case commits the reassignment it must refuse.
+  checkRejectedBy(
+    'the pair suite fails when the transaction stops re-applying the rule it was given',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (!recheck.candidates.includes(input.toTherapistId)) {',
+          '  if (recheck.candidates.length < 0) {',
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'therapist_not_eligible',
+  )
+
+  // 83d. The thing the unit exists NOT to do, and 0058's whole argument: a reassignment that also moved
+  //      the status would satisfy every assertion about the therapist column, and `holds_resources` is
+  //      GENERATED from the status (0024) — so the room and the therapist are released and the customer is
+  //      told their booking is gone when the intention was to keep it.
+  checkRejectedBy(
+    'the pair suite fails when the reassignment touches the status as well',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          '       set therapist_id = ${input.toTherapistId}::uuid',
+          "       set therapist_id = ${input.toTherapistId}::uuid, status = 'cancelled_by_salon'",
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'cancelled_by_salon',
+  )
+
+  // 83e. The exit stops naming itself. 0065 makes `cleared_reason` NOT NULL exactly when `cleared_at` is,
+  //      so "it left the queue" cannot be recorded without saying how — which is the database half of the
+  //      acceptance line about a flagged appointment leaving only by reassignment or an audited
+  //      resolution. Without the label the clearance is refused, by name.
+  checkRejectedBy(
+    'the pair suite fails when a reassignment clears the flag without naming the exit',
+    withEditedFile(
+      REPO,
+      (source) => replaceOnce(source, "           cleared_reason = 'reassigned',\n", ''),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'appointment_reassignment_flag_clearance_is_whole',
+  )
+
+  // 83f. The notice's class, relaxed. A promotional class means the send is consent-gated, confined to
+  //      07:00-21:00 and leaves from the AD- identity, so a customer with no marketing grant would never
+  //      be told their appointment changed — and C-AUTO-01 built `message_class` immutability precisely
+  //      because a restated class skips every gate there is.
+  checkRejectedBy(
+    'the rule suite fails when a booking-change notice may be promotional',
+    withEditedFile(
+      RULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (resolved.messageClass !== REASSIGNMENT_NOTICE_CLASS) {',
+          '  if (resolved.messageClass === REASSIGNMENT_NOTICE_CLASS && false) {',
+        ),
+      () => runExpectingFailure('pnpm', RULE_TEST),
+    ),
+    'notice_not_transactional',
+  )
+
+  // 83g. The transaction committing without judging the notice at all — a therapist swapped and a customer
+  //      who finds out when a stranger opens the treatment-room door.
+  checkRejectedBy(
+    'the pair suite fails when the notice verdict stops blocking the commit',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          "  if (verdict.kind !== 'sendable' || template === undefined) {",
+          '  if (template === undefined) {',
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'notice_not_sendable',
+  )
+
+  // 83h. The attribution dropped on the floor. 0036's recorded failure is 8,202 history rows with three
+  //      NULLs in them, because the value was demanded of the operator, validated and then lost; 0046's
+  //      `attribution_is_whole` is what makes that unstorable rather than unnoticed — half an attribution
+  //      is always a defect — and this edit sends the reassignment into exactly that state, with the kind
+  //      still set and the role gone.
+  checkRejectedBy(
+    'the pair suite fails when the actor never reaches the history trigger',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          "           set_config('berelax.transition_actor_role', ${actor.role}, true),",
+          "           set_config('berelax.transition_actor_role', '', true),",
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'appointment_status_history_attribution_is_whole',
+  )
+
+  // 83i. The queue ordered by DISCOVERY instead of by the appointment. `readLiveReassignmentFlags` orders
+  //      by `flagged_at` and answers "what has the sweep found"; this reader answers "what has to be dealt
+  //      with first", and an appointment tomorrow evening buried under one next month whose flag is older
+  //      is a queue that teaches the desk to ignore it.
+  checkRejectedBy(
+    'the pair suite fails when the queue is ordered by when the flag was raised',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          '     order by lower(a.period), f.appointment_id',
+          '     order by f.flagged_at, f.appointment_id',
+        ),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    // By test name: what breaks is an index comparison, and two integers print nothing a rule could match.
+    'is ordered by the appointment start',
+  )
+
+  // 83j. The hand resolution without a reason. It is the one exit with no external fact behind it — a
+  //      renewal is a document and a reassignment is another therapist — so the note is the whole of the
+  //      audit trail, and 0065 refuses the row without it.
+  checkRejectedBy(
+    'the pair suite fails when a queue entry can be closed by hand with no reason',
+    withEditedFile(
+      REPO,
+      (source) => replaceOnce(source, "  if (note === '') {", "  if (note === 'never happens') {"),
+      () => runExpectingFailure('pnpm', PAIR_TEST),
+    ),
+    'nothing_to_resolve',
+  )
+
+  // 83k. P-HR-03's own exit, unnamed. The sweep's clearance is `credential_restored` and it is written in
+  //      the function rather than taken as an argument, so a caller cannot claim one of the other two —
+  //      and 0065 refuses a clearance that names none of the three. The CREDENTIAL SWEEP suite is what
+  //      must go red here, because that is the path this touches.
+  checkRejectedBy(
+    'the credential sweep suite fails when the sweep clearance stops naming its exit',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          "${args.clearedOn}::date,\n           cleared_reason = 'credential_restored'",
+          '${args.clearedOn}::date',
+        ),
+      () => runExpectingFailure('pnpm', SWEEP_TEST),
+    ),
+    'appointment_reassignment_flag_clearance_is_whole',
+  )
+
+  // 83l. The queue screen telling the reason by COLOUR alone, which docs/08 treats as a defect: a status a
+  //      colour-blind operator cannot read is a status the page did not report.
+  checkRejectedBy(
+    'the queue render suite fails when the reason is a colour and not a word',
+    withEditedFile(
+      QUEUE_RENDER,
+      (source) =>
+        replaceOnce(
+          source,
+          "    `${safeText(entry.reason.replaceAll('_', ' '))}</span>`",
+          '    `</span>`',
+        ),
+      () => runExpectingFailure('pnpm', RENDER_TEST),
+    ),
+    'credential expired',
+  )
+
+  // 83x. The control. Every file this block edits passes unedited — so each rejection above is about the
+  //      edit and not about a suite that had become unable to run at all.
+  {
+    const pair = run('pnpm', PAIR_TEST)
+    check('the reassignment pair suite passes on the committed tree', !pair.failed, pair.output)
+    const rules = run('pnpm', RULE_TEST)
+    check('the reassignment rule suite passes on the committed tree', !rules.failed, rules.output)
+    const render = run('pnpm', RENDER_TEST)
+    check('the queue render suite passes on the committed tree', !render.failed, render.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -23310,6 +23568,128 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'determinism gate: the committed consent, ports, server and perf suites all pass',
       clean.every((result) => !result.failed),
       `a committed suite failed:\n${clean.map((result) => String(result.output)).join('')}`,
+    )
+  }
+}
+
+// 90. The migration ledger must document an unbroken run of migrations ending at the newest one, and
+//     `SCHEMA_VERSION` must be that number. Not a mutation case — a structural one — and it exists because
+//     a MERGE silently deleted three paragraphs and nothing noticed.
+//
+//     Four units were integrated in one sitting, each branch based before the others' paragraphs existed.
+//     Git merged that region cleanly every time, taking the incoming side, so 0062's, 0063's and 0064's
+//     paragraphs went one at a time with no conflict to look at. Every other check passed: the migrations
+//     were all present, `db:migrate:dry` replayed them, `db:drift` matched the mirror, `SCHEMA_VERSION`
+//     was right. The only thing lost was the record of WHY each table is shaped as it is, which is what
+//     the ledger is for and what nothing had ever read.
+//
+//     An unbroken RUN rather than "every migration": 0001 to 0048 predate this convention and only 0045
+//     carries a paragraph, so demanding one everywhere would demand 43 essays nobody has the context to
+//     write. A run has the property that matters anyway — losing a paragraph in a merge punches a hole in
+//     it, and shortening it from the top fails the "reaches the newest migration" half.
+{
+  const LEDGER = 'packages/db/src/index.ts'
+  const ledger = readFileSync(LEDGER, 'utf8')
+  const migrationNumbers = readdirSync('packages/db/migrations')
+    .filter((name) => name.endsWith('.sql'))
+    .map((name) => Number.parseInt(name.slice(0, 4), 10))
+    .sort((a, b) => a - b)
+  const newest = migrationNumbers.at(-1) ?? 0
+
+  /** The paragraph openings, which name the number AND the file so one cannot drift onto another. */
+  const documentedIn = (text) =>
+    readdirSync('packages/db/migrations')
+      .filter((name) => name.endsWith('.sql'))
+      .filter((name) =>
+        new RegExp(`^// ${Number.parseInt(name.slice(0, 4), 10)} is ${name.replace(/\./g, '\\.')}`, 'm').test(
+          text,
+        ),
+      )
+      .map((name) => Number.parseInt(name.slice(0, 4), 10))
+      .sort((a, b) => a - b)
+
+  /** The longest unbroken run of documented numbers ending at `newest`, or [] if it does not reach it. */
+  const runEndingAtNewest = (documented) => {
+    if (!documented.includes(newest)) return []
+    const run = [newest]
+    for (let number = newest - 1; documented.includes(number); number -= 1) run.unshift(number)
+    return run
+  }
+
+  const documented = documentedIn(ledger)
+  const run = runEndingAtNewest(documented)
+
+  /**
+   * Where the convention starts.
+   *
+   * 0049 is the first migration the ledger documents as a matter of course. 0001 to 0048 predate it and
+   * only 0045 carries a paragraph, so the run is asserted to reach DOWN to here and UP to the newest
+   * migration — which is what makes a hole detectable: lose 0062's paragraph and the run starts at 63,
+   * which is above this floor. Without a floor, a shortened run is indistinguishable from a convention
+   * that simply started later.
+   *
+   * A new migration raises the ceiling and never this number. If it ever needs raising, that means a
+   * paragraph was deleted rather than that the convention moved.
+   */
+  const CONVENTION_STARTS_AT = 49
+
+  // 90a. The run reaches the newest migration and goes back to where the convention starts, so every
+  //      number in between has a paragraph naming its own file.
+  {
+    check(
+      'ledger gate: every migration since the convention began has a paragraph, up to the newest',
+      run.length > 0 && (run[0] ?? Number.POSITIVE_INFINITY) <= CONVENTION_STARTS_AT,
+      run.length === 0
+        ? `migration ${newest} has no paragraph naming its file. A merge that takes the incoming side of ` +
+            'this region deletes paragraphs without conflicting — check the merge, not the migration.'
+        : `the unbroken run is ${run[0]}..${newest} and it should reach back to ${CONVENTION_STARTS_AT}, ` +
+            `so a paragraph between them is missing. Documented: ${documented.join(', ')}.`,
+    )
+  }
+
+  // 90b. The control, in two halves. The run must be long enough to be worth asserting on, and the scan
+  //      must DISCRIMINATE — the early migrations predate the convention, so a scan that matched anything
+  //      would report them as documented and 90a would pass over a ledger with no paragraphs at all.
+  {
+    const undocumented = migrationNumbers.filter((number) => !documented.includes(number))
+    check(
+      'ledger gate: the run spans a real distance, and the scan tells documented from undocumented',
+      newest - CONVENTION_STARTS_AT >= 15 && run.length >= 15 && undocumented.length > 0,
+      `run of ${run.length} from ${CONVENTION_STARTS_AT} to ${newest}, ${documented.length} documented ` +
+        `and ${undocumented.length} not`,
+    )
+  }
+
+  // 90c. `SCHEMA_VERSION` is the newest migration. `db:drift` compares the mirror to the database and
+  //      would not notice a version a merge left behind.
+  {
+    const declared = Number.parseInt(
+      /export const SCHEMA_VERSION = (\d+) as const/.exec(ledger)?.[1] ?? '0',
+      10,
+    )
+    check(
+      'ledger gate: SCHEMA_VERSION is the newest migration on disk',
+      declared === newest,
+      `SCHEMA_VERSION is ${declared} and the newest migration is ${newest}`,
+    )
+  }
+
+  // 90d. The known-bad fixture, because a structural check still has to be shown to fail. Punch out the
+  //      paragraph in the MIDDLE of the run — the case a merge actually produced — and 90a must see the
+  //      hole. Removing the last one instead would fail the "reaches the newest" half and prove less.
+  {
+    const middle = run[Math.floor(run.length / 2)] ?? 0
+    const opening = readdirSync('packages/db/migrations').find(
+      (name) => name.endsWith('.sql') && Number.parseInt(name.slice(0, 4), 10) === middle,
+    )
+    const line = ledger.split('\n').find((text) => text.startsWith(`// ${middle} is ${opening}`))
+    const holed = line === undefined ? ledger : ledger.replace(line, '// (paragraph deleted by a merge)')
+    const holedRun = runEndingAtNewest(documentedIn(holed))
+    check(
+      'ledger gate: a paragraph deleted from the middle of the run is caught',
+      line !== undefined && holedRun.length > 0 && holedRun[0] === middle + 1,
+      `deleting ${middle}'s paragraph left a run of ${holedRun.length} starting at ` +
+        `${String(holedRun[0])}; expected it to start at ${middle + 1}`,
     )
   }
 }

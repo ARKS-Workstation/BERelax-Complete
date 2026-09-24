@@ -141,6 +141,49 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     body: 'تم إلغاء حجزك {{date}} الساعة {{time}}. لإعادة الحجز: {{link}}',
     variables: ['date', 'time', 'link'],
   },
+  /*
+    P-HR-04's. The customer notice a reassignment sends: their booking is intact and somebody else is
+    delivering it.
+
+    The discretion rule binds it twice over. It names no treatment, as none of these do — and it names
+    neither therapist, which is a second reason on top of the lock-screen one: a therapist has no display
+    name until an admin sets one (ADR 0020, brief rule 10), so a message naming the new one would either
+    invent a name or print an id. `مقدّم الجلسة` and "a different therapist" are ROLES rather than people,
+    which is also what makes one wording serve a Four Hands, where two of them changed.
+
+    It says the time and place are UNCHANGED, and that is the point of the message rather than padding:
+    the notification most like this one is a cancellation, and a customer who reads "something about your
+    booking has changed" assumes the worse of the two. The link is where the detail is.
+
+    The Arabic body drops `الساعة` — "at" — which its siblings carry. Nine characters of Arabic is not a
+    rounding error at 70 UCS-2 units per segment: with it this body measures 69 units against a link and
+    a date that are only as long as today's, and a template with one character of headroom is a template
+    that silently costs double the day a date is written out in full. Trimmed it measures 62.
+  */
+  {
+    key: 'booking.therapist_changed',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Sent when an appointment is reassigned to a different therapist (P-HR-04). Says the time and ' +
+      'place are unchanged; names no therapist and no treatment.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Your booking on {{date}} at {{time}} is unchanged. A different therapist will see you: {{link}}',
+    variables: ['date', 'time', 'link'],
+  },
+  {
+    key: 'booking.therapist_changed',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Sent when an appointment is reassigned to a different therapist (P-HR-04). Says the time and ' +
+      'place are unchanged; names no therapist and no treatment.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'حجزك {{date}} {{time}} كما هو. تغيّر مقدّم الجلسة: {{link}}',
+    variables: ['date', 'time', 'link'],
+  },
   {
     key: 'auth.otp',
     messageClass: 'transactional',

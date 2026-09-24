@@ -531,13 +531,43 @@ export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
   flagAppointmentsForReassignment,
+  type ListCandidatesInput,
   type LiveReassignmentFlagRow,
+  listReassignmentCandidates,
+  type NoticeRuleVerdict,
+  type NoticeTemplateRow,
   type RaisedReassignmentFlag,
+  REASSIGNED_EVENT,
+  REASSIGNMENT_NOTICE_EVENT,
+  REASSIGNMENT_REFUSALS,
+  REASSIGNMENT_RESOLVED_EVENT,
+  type ReassignInput,
+  type ReassignmentActor,
+  type ReassignmentCandidateList,
   type ReassignmentCandidateRow,
+  type ReassignmentCandidateRule,
+  type ReassignmentDeps,
   type ReassignmentFlagInput,
+  type ReassignmentNoticeRule,
+  type ReassignmentQueueRow,
+  type ReassignmentRefusal,
+  type ReassignmentResult,
+  type ReassignmentRuleAnswer,
+  type ReassignmentRuleAppointment,
+  type ReassignmentRuleInput,
+  type ReassignmentRulePool,
+  type ReassignmentTarget,
   type ReassignmentWindow,
+  type ResolvedFlag,
+  type ResolveFlagInput,
   readLiveReassignmentFlags,
   readReassignmentCandidates,
+  readReassignmentQueue,
+  reassignAppointment,
+  reassignAppointmentTx,
+  reassignmentError,
+  reassignmentRefusalOf,
+  resolveReassignmentFlag,
 } from './repositories/reassignment.ts'
 export {
   RESCHEDULE_REFUSALS,
@@ -1132,6 +1162,62 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the template version it points at, checked at INSERT and on an UPDATE of either column rather than
 // continuously, because a reclassification makes a NEW version the existing rows do not follow.
 //
+// 62 is 0062_booking_session.sql: the public booking flow's session (B-UI-02), which is the thing
+// B-LIFE-02 stopped at and named — *"a successful verification has to mint a customer session or
+// magic-link token and nothing in the system defines one yet"*. One table, no enum and no trigger.
+// The token is 32 CSPRNG bytes in a cookie and the row holds their SHA-256; there is no column holding
+// the token, exactly as `otp_challenge` holds no code. The one deliberate difference from 0019 is the
+// hash: SHA-256 rather than an HMAC under a per-row salt, because a 256-bit random token has nothing to
+// guess and the lookup has to be BY hash, which a per-row salt makes a full scan. `customer_id` and
+// `booking_id` are plain uuids with NO foreign key — 0056's reason (a record outlives the erasure of the
+// identity it is about, and a cascade makes `delete from customer` raise for every caller) plus
+// B-MSG-03's TRUNCATE finding, since a key from here would break the four suites that truncate
+// `appointment` and the four that clear `customer`. Three CHECKs carry the rules that matter:
+// `verified_at` and `customer_id` are null together or set together, because `verified_at is not null`
+// reads as "verified" everywhere and a row with no customer would pass that test and book for nobody;
+// `booking_id` may only be set on a verified row; and `expires_at > created_at`, which is also what makes
+// ending a session an UPDATE rather than a DELETE — `readBookingSession` distinguishes `expired` from
+// `unknown`, and a delete would collapse the enumerated edge state into a first arrival. No sweep job:
+// the retention pass docs/04 §8 asks for is one pass over every table holding a personal identifier, and
+// a private sweep for this one would be the first of fourteen. `booking_session_expires_at_idx` is the
+// index it will use.
+// 63 is 0063_checkout.sql: checkout finalisation (M-TILL-06). Three tables and one column, and every one
+// of them exists so that a till sale is one fact rather than five that usually arrive together.
+// `checkout_finalisation`'s PRIMARY KEY is on an idempotency key the CALLER supplies — a key generated
+// here could not deduplicate a retry, because the retry would generate a second one — and it is where two
+// concurrent finalisations SERIALISE: the second INSERT blocks on the index until the first commits (then
+// `checkout_finalisation_key_pk` refuses it, by name, which is what the test asserts) or rolls back (then
+// the retry gets a fresh attempt). `booking_idempotency`'s mechanism (0024) applied to the till, and
+// `request_fingerprint` is 0024's second column for 0024's reason: a replay with a DIFFERENT basket is a
+// caller bug, and answering it with the first invoice looks exactly like success. The claim is written
+// INSIDE the checkout's transaction, which is also what keeps the statutory range gap-free — the loser's
+// rollback returns its number to the counter (M-TILL-03) — and it is written BEFORE the appointment link
+// on purpose, so a retry trips the KEY and a genuinely different checkout billing an already-billed
+// treatment trips `invoice_appointment_appointment_once`; the other order answers a retry with "already
+// billed" and shows an error for a sale that went through. `invoice_appointment` is the wiring
+// M-TILL-04's NOTE deferred, as a table rather than a column on `invoice_line` because the constraint
+// that matters is UNIQUE on the APPOINTMENT and a column there would claim every invoice line is one;
+// `appointment_id`, `booking_id` and `customer_id` carry NO foreign key, which is 0055's decision, 0058's
+// and 0024's — PostgreSQL refuses `truncate appointment` while a referencing table is absent from the
+// statement and four suites truncate it, and `booking` with it, by an explicit list. `payment` is created
+// here because this unit's first acceptance line names it (an aborted finalisation must leave zero rows in
+// it) and is deliberately minimal: M-TILL-07 owns the tender-type registry that replaces
+// `payment_tender_kind_known` with a foreign key, plus refunds, over-tender change and the gateway
+// adapter, and it EXTENDS this table rather than adding a second one beside it, because two tables
+// recording money received is two answers to "what has this invoice been paid". `posting_account_code` is
+// snapshotted from `TENDER_ACCOUNT` in `@berelax/core` for the reason every money column here is
+// snapshotted: re-mapping `card_in_salon` from 1040 to 1020 must not restate a posting already filed —
+// and 1040 rather than 1020 in the first place because the terminal settles in a batch, net of fees, days
+// later. `invoice.booking_id` is the other half of the deferred wiring and the column the `invoice.issued`
+// payload reads its booking id from, because an id carried on an event and stored nowhere is a fact with
+// no record; `finaliseCheckout` DERIVES it from the appointments it is billing, so it cannot disagree with
+// `invoice_appointment`. There is deliberately no `billed` appointment status: `holds_resources` is
+// GENERATED from that enum (0024), so a tenth label would change what holds a room, and "billed" is
+// therefore the link row existing rather than a second column that could contradict it. The three tables
+// get INSERT and SELECT and no UPDATE or DELETE, and no refusal TRIGGER — 0018's distinction for `account`
+// and `period_lock`: the history is the invoice and the journal entry, these are records ABOUT it, and
+// dropping a trigger to fix a typed reference is how the trigger ends up dropped.
+//
 // 64 is 0064_suppression.sql: the suppression list and the opt-out grant (C-CRM-04). `suppression` keys on
 // HMAC-SHA256 of the NORMALISED recipient under a server-side pepper (`SUPPRESSION_PEPPER`), lower-case
 // hex, and `suppression_key_is_hmac_hex` is what makes "no plaintext" a fact rather than a promise: a
@@ -1162,15 +1248,40 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // that still binds without an address and this one has a single dimension, so the route refuses an
 // unattributable request by name rather than recording one it cannot count.
 //
-// 62, 63 and 65 are ALLOCATIONS held by units in flight, not gaps to be closed. 64 was taken while they were
-// open and landed first, which is the same arrangement the note below records for 55, 56 and 57: the number
-// is a high-water mark, not a count. Nothing here renumbers to tidy the sequence, for the reason that note
-// gives — renumbering is how two branches come to apply the same number to different SQL.
+//
+// 65 is 0065_appointment_reassignment.sql: the reassignment as a RECORDED change, and the three ways a
+// flag leaves the queue (P-HR-04). Two tables learn one thing each and neither of them is
+// `appointment`: a reassignment writes `appointment.therapist_id` and nothing else, which is what makes
+// "the customer's booking survives, only the therapist changes" a claim about one column.
+// `appointment_status_history` gains `from_therapist_id` / `to_therapist_id`, because the acceptance
+// asks for a history row carrying the actor and a reason from a closed set and the two ways of forcing
+// one in without a column are both worse: `from_status = to_status` is refused by
+// `appointment_status_history_is_a_change` (rightly — a row recording no change is a chain reading as
+// activity where none occurred), and a NULL `from_status` is the shape 0024 gives a CREATION, so
+// borrowing it would make "when was this booking taken" unanswerable for every reassigned appointment.
+// `is_a_change` therefore keeps its NAME and widens to "the status moved, or the therapist did", so the
+// self-transition control that asserts on that name still fails. `record_appointment_status()` gains a
+// third branch AND its trigger gains a column — 0024 declared it `after insert or update OF STATUS`, so
+// the branch alone would have been correct code that was never called, and the only symptom would have
+// been a reassignment with no history row. The branch is an `elsif`: an UPDATE moving the status and the
+// therapist at once would otherwise append two rows, and `transitionAppointment` refuses a transition
+// that appended anything but exactly one. On `appointment_reassignment_flag`, `cleared_reason` is NOT
+// NULL exactly when `cleared_at` is, which is the database half of "a flagged appointment cannot leave
+// the queue except by reassignment or an audited explicit resolution": there is no fourth exit, DELETE
+// stays revoked, and an UPDATE that stamped `cleared_at` without naming which exit it was is refused by
+// a constraint rather than by review. `resolved_by_hand` carries a mandatory note because it is the one
+// exit with no external fact behind it, and `reassigned_to_therapist_id` is the mirror of the
+// `therapist_id` 0058 copies — after one reassignment the join no longer answers who it was taken from,
+// and after a second it no longer answers who took it. Every pair test is spelled
+// `is not distinct from` rather than `=`, because a live flag's `cleared_reason` is NULL and
+// `null = 'reassigned'` is NULL, which a CHECK passes: the obvious operator would let a LIVE flag carry
+// a successor and a resolution note.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
-// come to apply the same number to different SQL. Every number allocated during that stretch has now
-// landed — 55 through 61 are all in use — so the only gaps left are the four permanent ones plus the three
-// allocations above. 55, 56 and 57 landed out of order and within an hour
-// of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
-// count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 64 as const
+// come to apply the same number to different SQL. 62, 63, 64 and 65 were the four allocations this note
+// recorded as open while their units were in flight, and all four have now landed — 55 through 65 are in
+// use, so the four permanent ones above are the only gaps left. 55, 56 and 57 landed out of order and
+// within an hour of one another, and 62 through 65 landed together in one integrating merge, which is the
+// arrangement this note exists for: the number is a high-water mark, not a count, and no gap was closed
+// to tidy the sequence.
+export const SCHEMA_VERSION = 65 as const

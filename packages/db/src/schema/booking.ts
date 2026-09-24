@@ -344,13 +344,42 @@ export const appointmentStatusHistory = pgTable(
     actorRole: text('actor_role'),
     /** Why, as the actor stated it. Mandatory for the transitions the table declares; never `''`. */
     reason: text('reason'),
+    /**
+     * The therapist pair, on the row recording a REASSIGNMENT (0065, P-HR-04).
+     *
+     * NULL on a status transition, which is about the appointment rather than about who delivers it.
+     * Present, they are what makes the row a reassignment — the status is deliberately unchanged on
+     * both sides, because `holds_resources` is GENERATED from it (0024) and the booking is being kept.
+     * Plain uuids for the two reasons `appointmentId` above is one: this table is append-only, and
+     * `appointment.therapist_id` is not a foreign key either.
+     */
+    fromTherapistId: uuid('from_therapist_id'),
+    toTherapistId: uuid('to_therapist_id'),
   },
   (t) => [
     index('appointment_status_history_appointment_idx').on(t.appointmentId, t.occurredAt, t.id),
     index('appointment_status_history_actor_idx').on(t.actorId, t.occurredAt),
+    index('appointment_status_history_reassignment_idx').on(t.toTherapistId, t.occurredAt.desc()),
+    // Widened by 0065 and deliberately NOT renamed: a row must record a change, and there are now two
+    // kinds of change it can record. The `<>` half is untouched, so a row from a state to itself with
+    // no therapist move is still refused — which is what `booking-constraints.itest.ts` asserts by name.
     check(
       'appointment_status_history_is_a_change',
-      sql`${t.fromStatus} is null or ${t.fromStatus} <> ${t.toStatus}`,
+      sql`(${t.fromStatus} is null or ${t.fromStatus} <> ${t.toStatus}) or ${t.toTherapistId} is not null`,
+    ),
+    check(
+      'appointment_status_history_reassignment_is_whole',
+      sql`(${t.fromTherapistId} is null) = (${t.toTherapistId} is null)`,
+    ),
+    check(
+      'appointment_status_history_reassignment_changes_therapist',
+      sql`${t.fromTherapistId} is null or ${t.fromTherapistId} <> ${t.toTherapistId}`,
+    ),
+    // The four reasons P-HR-04 declares. `reason is not null` is written out because `reason in (...)`
+    // is NULL for a NULL reason and a CHECK passes on NULL (0026, 0057).
+    check(
+      'appointment_status_history_reassignment_reason_known',
+      sql`${t.toTherapistId} is null or (${t.reason} is not null and ${t.reason} in ('credential_expiry', 'leave_approved', 'therapist_archived', 'manual'))`,
     ),
     check(
       'appointment_status_history_actor_kind_known',
@@ -427,6 +456,21 @@ export const appointmentReassignmentReason = pgEnum('appointment_reassignment_re
 ])
 
 /**
+ * How a live flag ended (0065).
+ *
+ * One of these must be named for `cleared_at` to be storable, which is what makes "a flagged
+ * appointment cannot leave the queue except by reassignment or an audited explicit resolution" a claim
+ * the database keeps rather than a convention. `credential_restored` is P-HR-03's sweep clearance and
+ * the only one that existed before P-HR-04; the other two are this unit's. A fourth way out would be a
+ * new label here and a new writer, both visible in review.
+ */
+export const appointmentReassignmentClearance = pgEnum('appointment_reassignment_clearance', [
+  'credential_restored',
+  'reassigned',
+  'resolved_by_hand',
+])
+
+/**
  * Drizzle mirror of `packages/db/migrations/0058_appointment_reassignment_flag.sql`.
  *
  * An appointment whose therapist may no longer take it — **never** a cancellation and never a silent
@@ -470,6 +514,18 @@ export const appointmentReassignmentFlag = pgTable(
     /** Stamped rather than deleted: the flag is the evidence the check ran and what it said. */
     clearedAt: timestamp('cleared_at', { withTimezone: true }),
     clearedOn: date('cleared_on'),
+    /**
+     * Which of the three exits ended this queue entry (0065). NOT NULL exactly when `clearedAt` is.
+     *
+     * The database half of P-HR-04's acceptance line that a flagged appointment leaves the queue only
+     * by reassignment, by an audited explicit resolution, or because the credential position was
+     * restored: without this column "it left the queue" and "somebody dealt with it" are one state.
+     */
+    clearedReason: appointmentReassignmentClearance('cleared_reason'),
+    /** Why a human closed it. Mandatory for `resolved_by_hand`, refused for the other two labels. */
+    resolutionNote: text('resolution_note'),
+    /** Who took the appointment. The mirror of `therapistId`, for the same reason that one is copied. */
+    reassignedToTherapistId: uuid('reassigned_to_therapist_id'),
     /** Generated in the database from `cleared_at`, so one column answers "is it in the queue". */
     needsReassignment: boolean('needs_reassignment').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
@@ -484,9 +540,30 @@ export const appointmentReassignmentFlag = pgTable(
       .on(t.appointmentTradingDate, t.therapistId)
       .where(sql`${t.clearedAt} is null`),
     index('appointment_reassignment_flag_therapist_idx').on(t.therapistId, t.flaggedAt.desc()),
+    // Whole in three columns since 0065: when it was cleared, which trading day's pass cleared it, and
+    // which of the three exits it was.
     check(
       'appointment_reassignment_flag_clearance_is_whole',
-      sql`(${t.clearedAt} is null) = (${t.clearedOn} is null)`,
+      sql`(${t.clearedAt} is null) = (${t.clearedOn} is null) and (${t.clearedAt} is null) = (${t.clearedReason} is null)`,
+    ),
+    // `is not distinct from` and not `=`: a live flag has a NULL `clearedReason`, and `null = 'x'` is
+    // NULL, which a CHECK passes — so the obvious operator would let a LIVE flag carry a successor
+    // therapist and a resolution note.
+    check(
+      'appointment_reassignment_flag_note_is_for_a_hand_resolution',
+      sql`(${t.clearedReason} is not distinct from 'resolved_by_hand') = (${t.resolutionNote} is not null)`,
+    ),
+    check(
+      'appointment_reassignment_flag_note_nonempty',
+      sql`${t.resolutionNote} is null or btrim(${t.resolutionNote}) <> ''`,
+    ),
+    check(
+      'appointment_reassignment_flag_reassignment_names_the_successor',
+      sql`(${t.clearedReason} is not distinct from 'reassigned') = (${t.reassignedToTherapistId} is not null)`,
+    ),
+    check(
+      'appointment_reassignment_flag_successor_is_not_the_incumbent',
+      sql`${t.reassignedToTherapistId} is null or ${t.reassignedToTherapistId} <> ${t.therapistId}`,
     ),
     check(
       'appointment_reassignment_flag_cleared_after_flagged',
