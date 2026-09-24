@@ -192,6 +192,17 @@ export interface IssueInvoiceInput {
   readonly vatTotalFils: number
   readonly grossTotalFils: number
   readonly notes?: string
+  /**
+   * The booking this document bills, or absent for a document raised outside a checkout.
+   *
+   * The wiring M-TILL-04's NOTE deferred to M-TILL-06, added by `0063_checkout.sql`. It is STORED, not
+   * merely carried: `invoice.issued` names it in its payload so A-FIRST can reach PAID, and an id
+   * carried on an event but recorded nowhere is a fact with no record.
+   *
+   * `finaliseCheckout` derives it from the appointments it is billing rather than accepting it, so
+   * `invoice.booking_id` cannot disagree with `invoice_appointment`.
+   */
+  readonly bookingId?: string | null
   /** The open question the field set stands in for, carried as data. Paired with `provisionalNote`. */
   readonly provisionalOpenQuestionId?: string
   readonly provisionalNote?: string
@@ -227,6 +238,8 @@ export interface IssuedInvoice {
   readonly issuerLegalNameAr: string | null
   readonly issuerAddressSnapshotAr: string | null
   readonly customerId: string | null
+  /** The booking this document bills, or `null` for a document raised outside a checkout (0063). */
+  readonly bookingId: string | null
   readonly customerNameSnapshot: string
   readonly customerTrn: string | null
   readonly customerAddressSnapshot: string | null
@@ -260,6 +273,7 @@ interface InvoiceRow {
   readonly issuer_legal_name_ar: string | null
   readonly issuer_address_snapshot_ar: string | null
   readonly customer_id: string | null
+  readonly booking_id: string | null
   readonly customer_name_snapshot: string
   readonly customer_trn: string | null
   readonly customer_address_snapshot: string | null
@@ -368,6 +382,7 @@ function toInvoice(row: InvoiceRow): Omit<IssuedInvoice, 'lines'> {
     issuerLegalNameAr: row.issuer_legal_name_ar,
     issuerAddressSnapshotAr: row.issuer_address_snapshot_ar,
     customerId: row.customer_id,
+    bookingId: row.booking_id,
     customerNameSnapshot: row.customer_name_snapshot,
     customerTrn: row.customer_trn,
     customerAddressSnapshot: row.customer_address_snapshot,
@@ -388,7 +403,8 @@ const INVOICE_COLUMNS = (sql: Sql) => sql`
   id, document_kind, series_code, period_key, number, display_number,
   issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate,
   issuer_phone, issuer_licence_number, issuer_legal_name_ar, issuer_address_snapshot_ar,
-  customer_id, customer_name_snapshot, customer_trn, customer_address_snapshot, customer_phone,
+  customer_id, booking_id, customer_name_snapshot, customer_trn, customer_address_snapshot,
+  customer_phone,
   issue_date::text as issue_date, issue_trading_date::text as issue_trading_date,
   tax_point_date::text as tax_point_date, issued_at, currency,
   net_total, vat_total, gross_total, notes
@@ -436,7 +452,8 @@ export async function issueInvoice(
       document_kind, series_code, period_key, number, display_number,
       issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate,
       issuer_phone, issuer_licence_number, issuer_legal_name_ar, issuer_address_snapshot_ar,
-      customer_id, customer_name_snapshot, customer_trn, customer_address_snapshot, customer_phone,
+      customer_id, booking_id, customer_name_snapshot, customer_trn, customer_address_snapshot,
+      customer_phone,
       issue_date, issue_trading_date, tax_point_date,
       net_total, vat_total, gross_total, notes,
       provisional_open_question_id, provisional_note
@@ -447,7 +464,8 @@ export async function issueInvoice(
       ${input.issuer.addressSnapshot}, ${input.issuer.emirate},
       ${input.issuer.phone ?? null}, ${input.issuer.licenceNumber ?? null},
       ${input.issuer.legalNameAr ?? null}, ${input.issuer.addressSnapshotAr ?? null},
-      ${input.customer.customerId ?? null}, ${input.customer.nameSnapshot},
+      ${input.customer.customerId ?? null}, ${input.bookingId ?? null},
+      ${input.customer.nameSnapshot},
       ${input.customer.trn ?? null}, ${input.customer.addressSnapshot ?? null},
       ${input.customer.phone ?? null},
       ${input.issueDate}::date, ${input.issueTradingDate ?? null}::date, ${input.taxPointDate}::date,
@@ -508,6 +526,13 @@ export async function issueInvoice(
       grossTotalFils: issued.grossTotalFils,
       vatTotalFils: issued.vatTotalFils,
       lineCount: issued.lines.length,
+      // Both ids read off the STORED row, not off the input: a payload that named a booking the
+      // document does not carry would be a claim nothing in the database supports. M-TILL-06's
+      // acceptance asks for the pair on this event so A-FIRST can take the booking to PAID; `null`
+      // for a document raised outside a checkout, and for a cash sale with no customer record
+      // (ADR 0014).
+      bookingId: issued.bookingId,
+      customerId: issued.customerId,
     },
     // Derived from the statutory identifier, which is unique by constraint, so a retry of the same
     // issue cannot enqueue twice.

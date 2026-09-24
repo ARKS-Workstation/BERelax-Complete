@@ -3276,11 +3276,190 @@ units:
       raises and the test asserts the error is the constraint, not an application check'
     - exactly one invoice.issued and one payment.recorded outbox event per finalisation, written in the
       same transaction, each carrying booking_id and customer_id, and each consumed exactly once per handler
+    - 'NOTE: the posting rule is a fourth file beyond the four listed here, and it is in packages/core.
+      packages/core/src/checkout/posting.ts turns a Basket and its tenders into the one balanced
+      JournalEntry a checkout produces, because that is arithmetic — which accounts move, in which
+      direction, by how much — and brief rule 4 puts calculations in core and writes in db. packages/db
+      may never import packages/core, so the service takes the structural mirrors journal.ts and
+      invoice.ts already define and the caller maps field for field; packages/fixtures/src/checkout.ts is
+      that mapping, which is where packages/fixtures/src/invoice.ts said it would live ("the right home
+      for that mapping until M-TILL-06 has a service layer to own it" — the service layer is in db, so it
+      cannot be that home). The journal posts Dr tender account(s), Cr 4010 at the price the treatment was
+      SOLD at, Cr 2030 for the VAT actually charged, Cr 2040 for gratuities, Dr 4095 for the discount and
+      Dr 2030 for the VAT it relieved. Debits equal credits by CONSTRUCTION rather than by a check,
+      because net + vat === gross holds on every basket line including a discount''s negative figures and
+      the tenders are required to equal basket.totals.grossTotal.'
+    - 'NOTE: finaliseCheckout takes (sql, actor, input) and owns its transaction, unlike every other
+      writer in packages/db. Two reasons, both structural. When the idempotency key is already claimed the
+      losing transaction is ABORTED — PostgreSQL accepts nothing further on it — so the winner''s invoice
+      can only be read in a NEW transaction, which a function taking a UnitOfWork cannot open; and the two
+      refusals that matter most (ZL003 unbalanced, ZI001 totals disagree) are DEFERRED constraint triggers
+      that fire at COMMIT, which is outside every function in repositories/ and is exactly why
+      journalError and invoiceError are exported for a caller to wrap a transaction with. This is that
+      caller. checkoutError falls through to both rather than restating their SQLSTATEs.'
+    - 'NOTE: `payment` is created by THIS unit, minimally, and M-TILL-07 extends it rather than adding a
+      second table. The first acceptance line names it — an aborted finalisation must leave zero rows in
+      `payment` — so the tender rows are part of the transaction this unit exists to prove. What is here
+      is invoice_id, tender_no, tender_kind (a CHECK over cash/card_in_salon/bank_transfer), a snapshotted
+      posting_account_code, a strictly positive amount_fils, a reference and the business-day
+      trading_date. Deferred to M-TILL-07: the tender-type REGISTRY table that replaces
+      payment_tender_kind_known with a foreign key, refunds, over-tender change, the Overpayment refusal
+      and the PaymentAdapter interface. Its listed schema mirror packages/db/src/schema/payment.ts is
+      created here for exactly that reason, so M-TILL-07 extends one mirror instead of shadowing it —
+      pnpm db:drift keys its map on the table name and a second file declaring `payment` would silently
+      win. posting_account_code is snapshotted from TENDER_ACCOUNT in core and not joined later: card
+      money goes to 1040 Card terminal clearing and NOT to 1020, because the terminal settles in a batch,
+      net of fees, days later.'
+    - 'NOTE: there is no `billed` appointment status, and the summary''s "transitions the appointment to
+      billed" is met as a DERIVED fact instead. appointment_status is B-LIFE-01''s nine states and
+      appointment.holds_resources is GENERATED from it (0024), so a tenth label would change what holds a
+      room and a therapist; core''s APPOINTMENT_STATUS_ACTIONS also declares emitsRevenue on exactly one
+      status. "Billed" is therefore the existence of an invoice_appointment row, which is the same row the
+      acceptance''s unique constraint lives on — one answer, not two that can disagree. The acceptance
+      line this satisfies is the one asserting the status is UNCHANGED by a failed finalisation, which the
+      itest checks before and after every injected failure.'
+    - 'NOTE: the appointment''s billable status is NOT re-checked in packages/db.
+      BILLABLE_APPOINTMENT_STATUSES in packages/core/src/checkout/basket.ts is the one statement of "only
+      a completed treatment may be charged for" and serviceLineFromAppointment refuses everything else; a
+      second list of statuses in the service would be a second list to keep in step with B-LIFE-01''s
+      nine, and db cannot import the first. The residual risk is a caller that assembles a basket past
+      that constructor, and it is stated here rather than papered over. What the service DOES refuse is
+      an appointment the diary does not have, and a checkout whose appointments span two bookings
+      (CheckoutAppointmentsNotOneBooking) — because the acceptance asks for one booking_id on the events
+      and a document that billed two could only name one of them. invoice.booking_id is DERIVED from
+      those appointments inside the transaction, so it cannot disagree with invoice_appointment.'
+    - 'NOTE: invoice.booking_id is a new nullable column on M-TILL-04''s table, and issueInvoice gained an
+      optional bookingId plus two payload fields. The acceptance asks for invoice.issued to carry
+      booking_id and customer_id; an id carried on an event and stored nowhere is a fact with no record,
+      so the column exists and the payload reads it off the STORED row. customer_id was already there
+      (0026). No foreign key on booking_id, which is 0055''s and 0058''s decision: four integration suites
+      `truncate appointment, booking` by an explicit list and PostgreSQL refuses a truncate while a
+      referencing table is absent from the statement. For the same reason invoice_appointment.appointment_id
+      and checkout_finalisation.booking_id/customer_id carry none either — the link may be orphaned by a
+      deleted diary row, which is the correct direction, and invoice_appointment_appointment_once still
+      bites because it constrains the id rather than the row.'
+    - 'NOTE: three suites that truncate `invoice` had to be updated, and this is the hazard 0063 creates
+      for anybody else who adds a table referencing it. `truncate invoice_line, invoice` now fails —
+      PostgreSQL refuses a truncate while a referencing table is missing from the statement — so
+      packages/db/src/repositories/invoice.itest.ts, packages/fixtures/src/invoice-document.itest.ts and
+      packages/fixtures/src/tax-document.itest.ts now name checkout_finalisation, payment and
+      invoice_appointment as well. Named rather than reached with CASCADE, so the NEXT table to reference
+      `invoice` fails loudly in those files instead of having its rows removed by a statement that never
+      mentioned it.'
+    - 'NOTE: a defect found in code this unit does not own, and worked around rather than changed.
+      `invoice.issued` and `payment.recorded` derive their outbox idempotency key from the statutory
+      DISPLAY NUMBER (M-TILL-04''s choice, and the right one: a retry of one issue cannot enqueue twice).
+      But three suites reset document_series.next_number to 1 in their own beforeEach, and every suite
+      that truncates `invoice` removes the documents while the events remain — so the same display number
+      is issued again on the next run, publishEvent''s `on conflict (idempotency_key) do nothing` treats it
+      as already recorded, and NO event row is written. It cost a real failure: the outbox cases in
+      checkout-finalise.itest.ts asserted on rows that were silently never inserted, and they were green
+      on a fresh database. The suite now sweeps, in beforeAll, only the invoice.issued and payment.recorded
+      rows whose aggregate_id names no invoice at all — orphans an invoice truncate left, which no handler
+      could usefully be told about. The durable fix belongs with whichever unit owns event retention, and
+      it is NOT "make the key random": the key must stay derived from the business fact.'
+    - 'NOTE: scoped out of this unit. Partial payment and over-tender change are refused outright
+      (TendersDoNotCoverBasket, in core) because a receivable and change given are M-TILL-07''s and
+      absorbing either here would post an entry that balances against the wrong cash. A checkout made
+      entirely of package redemptions is refused with NothingToPost rather than issuing a zero-value
+      document: the movement that should happen, 2050 released into 4020 at the value on the balance, is
+      M-TILL-09''s, and inventing a figure for it here would be a second opinion about what the package
+      was sold for. Re-billing after a full credit note is also not possible — invoice_appointment_appointment_once
+      is a plain UNIQUE on appointment_id, so a corrected treatment cannot be re-invoiced; M-TILL-08 owns
+      credit notes and is the unit that has to decide whether a credited appointment becomes billable
+      again, and which constraint shape says so.'
+    - 'NOTE: "for every seeded basket shape" is met by property tests over GENERATED baskets rather than
+      by the fixture salon, because the salon has no basket shapes to seed — packages/fixtures/src/salon.ts
+      predates the basket domain and holds appointments and invoices, not baskets. posting.test.ts asserts
+      all three identities (imbalance, revenue-net-of-contra against the document net, output VAT against
+      the document VAT) over 400 generated baskets of one to six treatments, up to six compounding
+      percentage discounts, an optional gratuity and up to two redemptions, plus the controls that stop the
+      property passing vacuously: the entry has at least two lines and the cash debit equals the basket.
+      The hand-computed worked example and the 11-fils probe pin the two documents where the two possible
+      derivations agree and disagree; checkout-finalise.itest.ts asserts the same three identities against
+      the rows PostgreSQL holds, from figures written out with their arithmetic in the file.'
+    - 'NOTE: a second defect found in code this unit does not own, and CORRECTED rather than worked around.
+      packages/fixtures/src/appointment-reschedule.itest.ts (B-LIFE-03) asserted that NO table whose name
+      matches %payment% or %fee% exists in `public` — "the business takes no card payments, so a fee that
+      charged anything would be inventing a capability rather than using one". Creating `payment` made that
+      assertion fail, and the assertion was over-broad rather than the table wrong: the claim the case is
+      about is that a late cancellation writes no money row, and `payment` records what a customer TENDERED
+      at checkout, which is a different capability (M-TILL-07''s manifest entry names the in-salon card
+      machine). So the negative schema assertion is now the %fee% half only — that capability still does
+      not exist — and the cancellation claim is carried by the DELTA, which `moneyRowCounts` now counts
+      over `payment` and `checkout_finalisation` as well as the four document and journal tables. A control
+      beside it asserts `payment` DOES exist, so the delta is a count of a real table rather than a query
+      that would have thrown. Asserting a table''s absence is only honest while nothing legitimate needs it.'
+    - 'NOTE: a third defect found in code this unit does not own, and the brief''s own hazard 1 arriving
+      for the fourth time. packages/core/src/hr/working-hours.property.test.ts (P-HR-05) declares no
+      per-test timeout, so it inherits the 5,000 ms default — vitest.config.ts declares no testTimeout —
+      and it does real work: 300 generated shifts, each split into four buckets and checked against every
+      invariant. Measured at 2.12s alone and 5,666ms with three worktrees building concurrently (load
+      average 13), so it timed out and failed two of this unit''s verify runs while passing in both of the
+      others. A `, 30_000` was added here with the measurement in a comment and then REVERTED, because
+      main had already fixed it the same way: commit 01847fc ("four checks that measured something other
+      than what they claimed") is merged into this branch and carries that timeout.'
+    - 'NOTE: a fourth pre-existing failure, in main and still open at the time this unit was written, so a
+      later run that goes red on it is NOT this unit''s. packages/fixtures/src/availability-perf.itest.ts
+      asserts `return a p95 under 300 ms with the memo disabled` against the WALL CLOCK, which measures the
+      machine as much as the query: it failed one of this unit''s verify runs at 315.7 ms with load average
+      14 (the three batches were 662.3, 467.3 and 315.7 ms, and the case already takes the best of three),
+      and the coordinator reports a further failure at 2,376 ms on another branch. 01847fc did NOT replace
+      that case — it ADDED three load-independent ones beside it (exactly one statement per uncached call,
+      one on a cache hit, and a constant answer size) and left the wall-clock budget in place because the
+      acceptance line demands it. The proper fix is the coordinator''s and is in progress: assert the
+      budget only when the sequential median shows the machine can hold it, and skip loudly with both
+      numbers when it cannot. Nothing about it was changed here.'
+    - 'NOTE: TWO further pre-existing flakes were
+      hit and NOT changed, because neither has a one-line remedy and neither is this unit''s to design:
+      (1) apps/web/src/breakpoint-preview.itest.ts failed once with `Bad port: "6665" is reserved for
+      ircu` — its TEST_PORT_BANDS band is {start: 6400, width: 300}, which spans 6400-6699 and therefore
+      contains the 6665-6669 range Next.js refuses outright, and packages/harness/src/server.ts only
+      redraws when ADDRESS_IN_USE matches, which `Bad port` does not, so roughly 5 draws in 300 are a hard
+      failure with no retry; packages/harness/src/ports.test.ts proves the bands are disjoint, below the
+      ephemeral range and wide enough, and has no assertion that a band avoids the unsafe-port list.
+      (2) gate case 72a (C-CRM-03) asserts its consent mutant is rejected by a rule name that lives in a
+      fast-check property; running the identical mutant eight times, the rule was named in 7 and absent in
+      1, so the case fails about one run in eight. The mutant ALWAYS fails the suite — what varies is
+      whether the NAMED test is among the failures, which is what the eight runs were for, because eight
+      lines of truncated detail are equally consistent with a killed child and a genuinely wrong gate. The
+      coordinator has since diagnosed it from that measurement as a GENERATOR defect rather than a seed
+      problem: about one generated record set in eight cannot exercise insertion-order dependence at all —
+      a single applicable record, or a tie — so no shuffle can tell first from newest and the property
+      passes under the mutant. The fix is to constrain the arbitrary to at least two applicable records
+      with distinct timestamps, with a control proving a degenerate set would have been vacuous.'
+    - 'NOTE: gate labels used: 81a-81x, in scripts/test-gates.mjs between blocks 78 and 84. Twelve psql
+      probes assert each 0063 constraint BY NAME against real PostgreSQL, with two controls (the correct
+      claim/tender/link set is accepted, and two appointments on one invoice are accepted, so the
+      billed-twice probe is about one appointment on two documents rather than about the link table
+      refusing a second row). Five edits to packages/core/src/checkout/posting.ts must make
+      posting.test.ts go red, one edit to checkout-finalise.ts turns the idempotency claim into
+      `on conflict do nothing` and must make checkout-finalise.itest.ts go red — the exact defect of an
+      idempotency key that is a claim the repository tolerates rather than a constraint the database
+      refuses — and 81w and 81x are the controls that both suites pass unedited. Every anchor goes through
+      replaceOnce (brief rule 20). No server-starting suite was added, so no port band was claimed.'
     files:
+    - packages/core/src/checkout/posting.ts
+    - packages/core/src/checkout/posting.test.ts
+    - packages/core/src/checkout/index.ts
+    - packages/db/migrations/0063_checkout.sql
+    - packages/db/src/schema/checkout-idempotency.ts
+    - packages/db/src/schema/payment.ts
+    - packages/db/src/schema/invoice.ts
+    - packages/db/src/schema/index.ts
     - packages/db/src/services/checkout-finalise.ts
     - packages/db/src/services/checkout-finalise.itest.ts
-    - packages/db/src/schema/checkout-idempotency.ts
-    - packages/db/migrations/00xx_checkout.sql
+    - packages/db/src/repositories/invoice.ts
+    - packages/db/src/repositories/invoice.itest.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/checkout.ts
+    - packages/fixtures/src/checkout.test.ts
+    - packages/fixtures/src/checkout-finalisation.itest.ts
+    - packages/fixtures/src/appointment-reschedule.itest.ts
+    - packages/fixtures/src/invoice-document.itest.ts
+    - packages/fixtures/src/tax-document.itest.ts
+    - packages/fixtures/src/index.ts
+    - scripts/test-gates.mjs
   - id: M-TILL-07
     order: 49
     title: Payments and refunds through the manual tender adapter

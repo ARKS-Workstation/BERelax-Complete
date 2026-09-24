@@ -705,6 +705,22 @@ export {
   therapistStyleSkill,
 } from './seed/therapists.ts'
 export {
+  AppointmentAlreadyBilled,
+  CHECKOUT_CONSTRAINT,
+  type CheckoutAppointmentInput,
+  CheckoutAppointmentsNotOneBooking,
+  type CheckoutTenderInput,
+  checkoutError,
+  type FinaliseCheckoutInput,
+  type FinalisedCheckout,
+  finaliseCheckout,
+  IdempotencyKeyReused,
+  isCheckoutAlreadyFinalised,
+  type RecordedTender,
+  readFinalisedCheckout,
+  TenderPostingDisagrees,
+} from './services/checkout-finalise.ts'
+export {
   completeObligationInstance,
   fileObligationEvidence,
   generateObligationInstances,
@@ -1081,10 +1097,49 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the retention pass docs/04 §8 asks for is one pass over every table holding a personal identifier, and
 // a private sweep for this one would be the first of fourteen. `booking_session_expires_at_idx` is the
 // index it will use.
+// 63 is 0063_checkout.sql: checkout finalisation (M-TILL-06). Three tables and one column, and every one
+// of them exists so that a till sale is one fact rather than five that usually arrive together.
+// `checkout_finalisation`'s PRIMARY KEY is on an idempotency key the CALLER supplies — a key generated
+// here could not deduplicate a retry, because the retry would generate a second one — and it is where two
+// concurrent finalisations SERIALISE: the second INSERT blocks on the index until the first commits (then
+// `checkout_finalisation_key_pk` refuses it, by name, which is what the test asserts) or rolls back (then
+// the retry gets a fresh attempt). `booking_idempotency`'s mechanism (0024) applied to the till, and
+// `request_fingerprint` is 0024's second column for 0024's reason: a replay with a DIFFERENT basket is a
+// caller bug, and answering it with the first invoice looks exactly like success. The claim is written
+// INSIDE the checkout's transaction, which is also what keeps the statutory range gap-free — the loser's
+// rollback returns its number to the counter (M-TILL-03) — and it is written BEFORE the appointment link
+// on purpose, so a retry trips the KEY and a genuinely different checkout billing an already-billed
+// treatment trips `invoice_appointment_appointment_once`; the other order answers a retry with "already
+// billed" and shows an error for a sale that went through. `invoice_appointment` is the wiring
+// M-TILL-04's NOTE deferred, as a table rather than a column on `invoice_line` because the constraint
+// that matters is UNIQUE on the APPOINTMENT and a column there would claim every invoice line is one;
+// `appointment_id`, `booking_id` and `customer_id` carry NO foreign key, which is 0055's decision, 0058's
+// and 0024's — PostgreSQL refuses `truncate appointment` while a referencing table is absent from the
+// statement and four suites truncate it, and `booking` with it, by an explicit list. `payment` is created
+// here because this unit's first acceptance line names it (an aborted finalisation must leave zero rows in
+// it) and is deliberately minimal: M-TILL-07 owns the tender-type registry that replaces
+// `payment_tender_kind_known` with a foreign key, plus refunds, over-tender change and the gateway
+// adapter, and it EXTENDS this table rather than adding a second one beside it, because two tables
+// recording money received is two answers to "what has this invoice been paid". `posting_account_code` is
+// snapshotted from `TENDER_ACCOUNT` in `@berelax/core` for the reason every money column here is
+// snapshotted: re-mapping `card_in_salon` from 1040 to 1020 must not restate a posting already filed —
+// and 1040 rather than 1020 in the first place because the terminal settles in a batch, net of fees, days
+// later. `invoice.booking_id` is the other half of the deferred wiring and the column the `invoice.issued`
+// payload reads its booking id from, because an id carried on an event and stored nowhere is a fact with
+// no record; `finaliseCheckout` DERIVES it from the appointments it is billing, so it cannot disagree with
+// `invoice_appointment`. There is deliberately no `billed` appointment status: `holds_resources` is
+// GENERATED from that enum (0024), so a tenth label would change what holds a room, and "billed" is
+// therefore the link row existing rather than a second column that could contradict it. The three tables
+// get INSERT and SELECT and no UPDATE or DELETE, and no refusal TRIGGER — 0018's distinction for `account`
+// and `period_lock`: the history is the invoice and the journal entry, these are records ABOUT it, and
+// dropping a trigger to fix a typed reference is how the trigger ends up dropped.
+//
+// 62, 64 and 65 are ALLOCATIONS, not gaps: three units were in flight beside this one and each holds its
+// number. They are not the four permanent gaps below and must not be reused to tidy the sequence.
 //
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. Every number allocated during that stretch has now
 // landed — 55 through 62 are all in use — so the only gaps left are the four permanent ones. 55, 56 and 57 landed out of order and within an hour
 // of one another, which is the arrangement this note exists for: the number is a high-water mark, not a
 // count, and no gap was closed to tidy the sequence.
-export const SCHEMA_VERSION = 62 as const
+export const SCHEMA_VERSION = 63 as const

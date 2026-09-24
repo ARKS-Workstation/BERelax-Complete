@@ -80,7 +80,9 @@ afterAll(async () => {
   // sequentially against one database in an order no file controls. That is hazard 12 in the
   // contributing brief, and it is why the truncate is here as well as in beforeEach: beforeEach leaves
   // the last test's rows standing.
-  await sql.unsafe('truncate invoice_line, invoice')
+  await sql.unsafe(
+    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+  )
   await sql`delete from customer where phone_e164 = ${PERSON.phone}`
   await renderer?.close()
   await sql.end({ timeout: 5 })
@@ -89,7 +91,13 @@ afterAll(async () => {
 beforeEach(async () => {
   // `truncate` as the owner: the one statement that fires no row-level DELETE trigger, which is how
   // journal.itest.ts resets an append-only table too. berelax_app holds no TRUNCATE.
-  await sql.unsafe('truncate invoice_line, invoice')
+  // Every table that references `invoice` is NAMED, because PostgreSQL refuses a truncate while a
+  // referencing table is absent from the statement, and 0063 added three of them. Named rather than
+  // reached with CASCADE, so the next table to reference `invoice` fails here loudly instead of having
+  // its rows removed by a statement that never mentioned it.
+  await sql.unsafe(
+    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+  )
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'
