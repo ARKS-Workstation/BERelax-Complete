@@ -2841,7 +2841,7 @@ units:
       expiring and revoked on cancellation. Customer-initiated reschedule and cancel run the same code path
       as staff so the constraints and the cancellation policy cannot diverge.
     owner: claude
-    status: todo
+    status: done
     size: M
     milestone: M1
     depends_on:
@@ -3599,7 +3599,7 @@ units:
       Y-PAY gateway will later implement. The manual adapter is real, not a fake, and the module is forbidden
       from making network calls.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-06
@@ -5323,7 +5323,7 @@ units:
       before they send it to 2,000 people. Arabic roughly triples SMS cost and that must be visible at authoring
       time, not on the invoice.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-AUTO-01
@@ -5532,7 +5532,7 @@ units:
       an edit creates a new immutable version; in-flight enrolments finish on the version they started under,
       referenced by an exact foreign key that cannot drift.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-AUTO-01
@@ -5978,7 +5978,7 @@ units:
       tables exist, it owns a participant registry plus a completeness test, and later units register into
       it.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-CRM-02

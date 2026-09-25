@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**96 / 207 units complete.**
+**101 / 207 units complete.**
 
 ## Next up
 
 1. **B-UI-03 — Admin calendar: room x time primary, therapist x time secondary, drag to reschedule**
-1. **B-UI-05 — Magic-link token service and the manage-booking page**
-1. **M-TILL-07 — Payments and refunds through the manual tender adapter**
+1. **M-TILL-08 — Credit notes as the only correction mechanism**
+1. **M-TILL-09 — Versioned package templates and package sale as deferred revenue**  — **needs owner input:** Y9-package-policy, Y11-vat-package
 
 ## All units
 
@@ -55,7 +55,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 38 | `B-UI-02` | Public booking flow: details, OTP, confirm and the nine enumerated edge states | `B-LIFE-01`, `B-LIFE-02`, `B-UI-01` | M1 | — |
 | [ ] | 39 | `B-UI-03` | Admin calendar: room x time primary, therapist x time secondary, drag to reschedule | `B-LIFE-03`, `B-UI-01` | M1 | — |
 | [ ] | 40 | `B-UI-04` | Quick-book, walk-in entry and the WhatsApp ref field | `B-LIFE-02`, `B-UI-03` | M1 | Y12-ref-loop |
-| [ ] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
+| [x] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
@@ -63,7 +63,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 46 | `M-TILL-04` | Invoice document model: immutable per-line tax derivation and issuer snapshot | `F05`, `M-TILL-02`, `M-TILL-03` | — | Y11-vat-invoice, Y1-trn |
 | [x] | 47 | `M-TILL-05` | Checkout basket: snapshotted pricing, discounts with reasons, tips, package lines | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01` | — | — |
 | [x] | 48 | `M-TILL-06` | Checkout finalisation: one transaction, idempotent, invoice plus journal plus tender | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F06`, `M-TILL-04`, `M-TILL-05` | — | — |
-| [ ] | 49 | `M-TILL-07` | Payments and refunds through the manual tender adapter | `M-TILL-06` | — | — |
+| [x] | 49 | `M-TILL-07` | Payments and refunds through the manual tender adapter | `M-TILL-06` | — | — |
 | [ ] | 50 | `M-TILL-08` | Credit notes as the only correction mechanism | `M-TILL-03`, `M-TILL-06` | — | — |
 | [ ] | 51 | `M-TILL-09` | Versioned package templates and package sale as deferred revenue | `F09`, `M-TILL-06` | — | Y9-package-policy, Y11-vat-package |
 | [ ] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
@@ -84,14 +84,14 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
 | [x] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
-| [ ] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
+| [x] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
 | [x] | 71 | `C-CRM-01` | Client record: preferences, tags, lifecycle, source, VIP and a blocklist that actually blocks | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F09` | — | — |
-| [ ] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
+| [x] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
 | [ ] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
 | [x] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
 | [x] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
 | [x] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
-| [ ] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
+| [x] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
 | [ ] | 78 | `C-AUTO-03` | Frequency ledger and a global cap across every flow and campaign | `C-AUTO-01`, `C-CRM-05` | — | Y6-sender-ids |
 | [ ] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
 | [ ] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
