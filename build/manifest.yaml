@@ -360,7 +360,7 @@ units:
     - 'packages/core/src/business-day contains no clock access: Date.now and new Date() are absent and the
       F05 lint rule fails a fixture that adds one'
     files:
-    - packages/db/src/schema/premises.ts
+    - packages/db/src/schema/identity.ts
     - packages/db/migrations/
     - packages/core/src/business-day/resolve.ts
     - packages/core/src/business-day/windows.ts
@@ -1182,7 +1182,7 @@ units:
     files:
     - packages/db/src/repositories/create-booking.ts
     - apps/web/app/api/v1/bookings/route.ts
-    - packages/db/src/repositories/create-booking.concurrency.test.ts
+    - packages/fixtures/src/booking-concurrency.itest.ts
     - packages/db/src/repositories/create-booking.test.ts
   - id: B-CAT-05
     order: 27
@@ -1266,9 +1266,9 @@ units:
     - packages/db/src/repositories/catalogue.test.ts
     - packages/db/src/repositories/catalogue.itest.ts
     - packages/fixtures/src/catalogue-compliance.itest.ts
-    - apps/web/app/(en)/(public)/treatments/[slug]/handler.ts
-    - apps/web/app/(en)/(public)/treatments/[slug]/route.ts
-    - apps/web/src/treatment-path.itest.ts
+    - apps/web/app/(en)/(public)/treatments/[slug]/page.tsx
+    - apps/web/app/(ar)/ar/treatments/[slug]/page.tsx
+    - apps/web/src/treatments.itest.ts
   - id: B-CAT-06
     order: 28
     title: Catalogue, premises and room seed from the real business profile
@@ -3224,7 +3224,7 @@ units:
     - packages/db/migrations/0013_document_series.sql
     - packages/db/src/repositories/numbering.ts
     - packages/db/src/repositories/numbering.itest.ts
-    - docs/adr/00xx-gapless-numbering-row-locked-counter.md
+    - docs/adr/0023-gapless-numbering-row-locked-counter.md
   - id: M-TILL-04
     order: 46
     title: 'Invoice document model: immutable per-line tax derivation and issuer snapshot'
@@ -3742,7 +3742,7 @@ units:
       random". Second: nothing in packages/harness was touched, and no `Bad port` failure was seen.'
     files:
     - packages/db/src/schema/payment.ts
-    - packages/db/migrations/00xx_payment.sql
+    - packages/db/migrations/0068_payment_tender.sql
     - packages/core/src/money/tender.ts
     - packages/db/src/adapters/manual-payment.ts
     - packages/db/src/adapters/manual-payment.itest.ts
@@ -5311,7 +5311,7 @@ units:
       accident. The editor C-AUTO-02 builds should create at `draft` and reach `approved` through
       `setTemplateApproval`, which is the path 0061 fences.'
     files:
-    - packages/db/src/schema/message-template.ts
+    - packages/db/src/schema/messaging.ts
     - packages/messaging/src/template.ts
     - packages/messaging/src/sender-identity.ts
     - apps/web/app/(admin)/messaging/templates/
@@ -6968,7 +6968,8 @@ units:
     - packages/db/src/schema/hr.ts
     - packages/core/src/hr/credentials.ts
     - packages/core/src/hr/credentials.test.ts
-    - apps/web/app/(admin)/hr/credentials/page.tsx
+    - apps/web/app/(admin)/hr/credentials/route.ts
+    - apps/web/app/(admin)/hr/credentials/render.ts
   - id: P-HR-03
     order: 92
     title: Expired credential removes a therapist from availability and flags their appointments
@@ -8942,10 +8943,11 @@ units:
     files:
     - apps/web/package.json
     - apps/web/next.config.ts
-    - apps/web/app/layout.tsx
+    - apps/web/app/(en)/layout.tsx
+    - apps/web/app/(ar)/layout.tsx
     - apps/web/app/globals.css
     - apps/web/app/_fonts/index.ts
-    - packages/ui/src/theme/tokens.css
+    - packages/ui/src/tokens/tokens.css
     - packages/ui/src/theme/theme-provider.tsx
     - apps/web/app/_document/shell.tsx
     - apps/web/app/(en)/layout.tsx
@@ -9480,7 +9482,7 @@ units:
     - apps/web/app/llms.txt/route.ts
     - apps/web/app/robots.txt/route.ts
     - packages/ui/src/patterns/nap-block.tsx
-    - scripts/test-nap-grep.mjs
+    - packages/db/src/seed/premises.test.ts
     - scripts/test-gates.mjs
   - id: W-SITE-03
     order: 134
@@ -10383,11 +10385,11 @@ units:
       pause choice is `localStorage` on their own device, and the island''s budget is a chunk in a build. The
       media row itself is Payload''s own, in the `payload` schema, which `pnpm db:drift` never sees.'
     files:
-    - packages/ui/src/media/hero-media.tsx
-    - packages/ui/src/media/attach-video.island.ts
+    - apps/web/src/components/media/hero-media.tsx
+    - packages/ui/src/media/attach-video.island.tsx
     - packages/ui/src/media/pause-control.tsx
-    - apps/web/app/(dev)/hero-demo/page.tsx
-    - tests/perf/hero-lcp.spec.ts
+    - apps/web/app/(en)/(dev)/hero-demo/page.tsx
+    - apps/web/src/hero-lcp.itest.ts
   - id: W-SITE-04
     order: 140
     title: 'Home route: the anchored page with a real LCP hero'
@@ -12401,7 +12403,7 @@ units:
     - packages/google/src/health/testing-expiry.test.ts
     - packages/google/src/health/liveness.ts
     - packages/google/src/health/liveness.test.ts
-    - packages/google/src/google-health.itest.ts
+    - apps/worker/src/jobs/google-connection-health.itest.ts
     - packages/google/src/connection-store.ts
     - packages/google/src/postgres-store.ts
     - packages/google/src/memory-store.ts
@@ -12690,10 +12692,10 @@ units:
       approves it (G-REV-04), and the routing verdict columns — matched rule id and lexicon version — belong to
       G-REV-03''s own migration. Adding either here would be a column no code writes'
     files:
-    - packages/db/migrations/0043_reviews.sql
+    - packages/db/migrations/0020_reviews.sql
     - packages/db/src/schema/reviews.ts
     - packages/db/src/repositories/reviews.ts
-    - packages/db/src/schema/reviews.schema.test.ts
+    - packages/db/src/schema/reviews.itest.ts
   - id: G-REV-02
     order: 162
     title: 'Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge'
@@ -13333,7 +13335,7 @@ units:
     files:
     - packages/core/src/access/principals/seo-agent.ts
     - packages/core/src/seo/target-allowlist.ts
-    - packages/db/migrations/0046_seo_target_allowlist.sql
+    - packages/db/migrations/0057_seo_target_allowlist.sql
     - packages/core/src/access/seo-agent.policy.test.ts
     - scripts/test-gates.mjs
   - id: G-SEO-03
