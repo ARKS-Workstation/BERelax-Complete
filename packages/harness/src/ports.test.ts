@@ -113,13 +113,23 @@ describe('test port bands', () => {
       } finally {
         random.mockRestore()
       }
+      /*
+       * SOFT, so both facts are reported from one run.
+       *
+       * Drawing a restricted port and losing a usable one are different defects with different causes, and
+       * a hard assertion on the first hides the second entirely. That is not a diagnostic nicety: gate case
+       * 89c asserts this test fails *by naming* the unreachability, and with a hard assertion above it that
+       * message was unreachable for every mutation that also made a restricted port drawable — so the gate
+       * reported its rule as missing while the test was failing correctly.
+       */
       const restricted = [...drawn].filter((port) => forbidden.has(port))
-      expect(
-        restricted,
-        `${suite} can draw ${restricted.join(', ')}, which a browser refuses`,
-      ).toEqual([])
+      expect
+        .soft(restricted, `${suite} can draw ${restricted.join(', ')}, which a browser refuses`)
+        .toEqual([])
       const unreachable = [...expected].filter((port) => !drawn.has(port))
-      expect(unreachable, `${suite} cannot reach ${unreachable.length} usable port(s)`).toEqual([])
+      expect
+        .soft(unreachable, `${suite} cannot reach ${unreachable.length} usable port(s)`)
+        .toEqual([])
       expect(drawn.size, `${suite} drew ${drawn.size} distinct ports over ${width} indices`).toBe(
         width,
       )

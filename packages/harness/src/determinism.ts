@@ -131,6 +131,38 @@ function alternates(digests: readonly string[]): boolean {
   return digests.every((digest, index) => index < 2 || digest === digests[index - 2])
 }
 
+/**
+ * The digest list's shape, so the diagnosis can be read off the data rather than guessed from two cases.
+ *
+ * `alternates` covers a page with exactly two states in strict rotation. Real renders are messier: the
+ * failure that prompted this had digests `A, B, A, C, A` — three distinct renderings, one of them in three
+ * of the five captures, and never twice in a row. That satisfied neither special case, so the message fell
+ * through to "every capture differed, which is what a clock, a fresh identifier or an unsettled animation
+ * produces. This one is not load." Every clause of that was wrong: the captures did not all differ, the
+ * dominant state recurred three times, and a clock cannot produce a repeat.
+ *
+ * So: count them. A digest that RECURS means the render returned to a state it had left, which no clock and
+ * no fresh identifier can do, and which settling cannot do either — settling is monotonic.
+ */
+function digestShape(digests: readonly string[]): {
+  readonly distinct: number
+  readonly modal: string
+  readonly modalCount: number
+  readonly anyRecurs: boolean
+} {
+  const counts = new Map<string, number>()
+  for (const digest of digests) counts.set(digest, (counts.get(digest) ?? 0) + 1)
+  let modal = digests[0] ?? ''
+  let modalCount = 0
+  for (const [digest, count] of counts) {
+    if (count > modalCount) {
+      modal = digest
+      modalCount = count
+    }
+  }
+  return { distinct: counts.size, modal, modalCount, anyRecurs: modalCount > 1 }
+}
+
 export async function captureUntilStable(
   take: () => Promise<Uint8Array | Capture>,
   options: { readonly label: string; readonly attempts?: number },
@@ -172,6 +204,7 @@ export async function captureUntilStable(
    * this was built for, because the settle step deliberately swallows a decode rejection (a broken frame is
    * a legitimate fixture) and so cannot tell "broken on purpose" from "broken this time".
    */
+  const shape = digestShape(digests)
   const distinctNotes = [...new Set(notes.filter((note) => note !== ''))]
   const noteChanged = distinctNotes.length > 1
   const diagnosis = noteChanged
@@ -183,8 +216,16 @@ export async function captureUntilStable(
         'than unfinished paint. No number of attempts can satisfy a consecutive-match rule against that. ' +
         'Look for a request that intermittently fails, a query returning rows in either order, or state ' +
         'that flips per load — and note that load can be what exposes it.'
-      : 'every capture differed, which is what a clock, a fresh identifier or an unsettled animation ' +
-        'reaching the render produces. This one is not load.'
+      : shape.anyRecurs
+        ? `there are ${shape.distinct} distinct renderings and ${shape.modal} accounts for ` +
+          `${shape.modalCount} of ${digests.length} captures, never twice in a row. A digest that RECURS ` +
+          'rules out a clock and a fresh identifier, which cannot repeat, and rules out unfinished paint, ' +
+          'which settles in one direction. One rendering is dominant and the others are transient, so look ' +
+          'for something that is USUALLY ready and occasionally is not — a font, an image decode, a lazy ' +
+          'chunk, a query whose row order is unstable. Load is what makes the transient states appear, so ' +
+          'a pass on a quiet machine does not clear it.'
+        : 'every capture differed, with no digest repeating, which is what a clock, a fresh identifier or ' +
+          'an unsettled animation reaching the render produces. This one is not load.'
 
   throw new Error(
     `[screenshot-never-stabilised] ${options.label}: ${attempts} captures and no two consecutive ones ` +

@@ -12877,12 +12877,26 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // 50q. The p95 budget must be able to fail the job. Asserted by setting the budget to zero, because the
   //      acceptance line says "failing the job when breached" and a threshold that has never been seen to
   //      fail is a threshold nobody has checked is wired up.
+  //
+  //      TWO edits, not one, and the second is not belt and braces. The budget is only asserted when the
+  //      sequential median shows this machine can hold it, so on a busy box the case SKIPS and a mutation
+  //      of the budget alone proves nothing. That is not hypothetical: this case reported its rule as
+  //      missing while the assertion it exists to test had never run, and the only thing that failed was
+  //      the memo control next door, which used to borrow the same constant.
+  //
+  //      `availMutant` takes one anchor, so this one goes through `withEditedFile` directly rather than
+  //      nesting a second `withEditedFile` over the same file — which restores correctly, LIFO, but reads
+  //      as though it might not.
   checkRejectedBy(
     'availability gate: the p95 budget fails the job when breached',
-    availMutant(
+    withEditedFile(
       AVAIL_PERF,
-      'const P95_BUDGET_MS = 300',
-      'const P95_BUDGET_MS = 0',
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, 'const P95_BUDGET_MS = 300', 'const P95_BUDGET_MS = 0'),
+          'const SEQUENTIAL_CEILING_MS = 15',
+          'const SEQUENTIAL_CEILING_MS = 100_000',
+        ),
       availIntegration(AVAIL_PERF),
     ),
     'breaches the',
@@ -24087,17 +24101,21 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'which a browser refuses',
   )
 
-  // 89c. And the off-by-one, because mapping an index over the usable ports is exactly the kind of
-  //      arithmetic that silently loses the port just above each restricted one.
+  // 89c. A port lost with NO restricted port drawn, which is a different defect from 89b and has to be a
+  //      different mutation. The obvious candidate — `>` for `>=` in the skip — makes a restricted port
+  //      drawable as well, so it fails on 89b's assertion and this case's rule name never appears; that is
+  //      exactly how this case came to report its rule as missing while the test failed correctly. Drawing
+  //      one index short instead skips every restricted port properly and simply never reaches the last
+  //      usable one.
   checkRejectedBy(
-    'determinism gate: a skip that loses a usable port is caught',
+    'determinism gate: a draw that loses a usable port is caught',
     withEditedFile(
       PORTS,
       (text) =>
         replaceOnce(
           text,
-          '  for (const restricted of blocked) if (port >= restricted) port += 1',
-          '  for (const restricted of blocked) if (port > restricted) port += 1',
+          '  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length))',
+          '  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length - 1))',
         ),
       () => runExpectingFailure('pnpm', unit(PORTS_SUITE)),
     ),
