@@ -149,6 +149,54 @@ describe('which record survives', () => {
     expect(planOf(low, high).survivorId).toBe(low.id)
     expect(planOf(high, low).survivorId).toBe(low.id)
   })
+
+  it('lets an operator nominate the LATER record, in either argument order', () => {
+    const review = oneDigitApart()
+    for (const [a, b] of [
+      [older, newer],
+      [newer, older],
+    ] as const) {
+      const decision = planCustomerMerge(a, b, review, 'operator_confirmed', {
+        nominatedSurvivorId: newer.id,
+      })
+      if (decision.kind !== 'plan') throw new Error(`expected a plan, got ${decision.refusal}`)
+      expect(decision.survivorId).toBe(newer.id)
+      expect(decision.loserId).toBe(older.id)
+    }
+    // The control: without the nomination the same pair keeps the earlier record, so the two
+    // assertions above are about the override rather than about a default that happens to agree.
+    expect(
+      planCustomerMerge(older, newer, review, 'operator_confirmed').kind === 'plan' &&
+        planCustomerMerge(older, newer, review, 'operator_confirmed'),
+    ).toMatchObject({ survivorId: older.id })
+  })
+
+  it('nominating the DEFAULT survivor is accepted and changes nothing', () => {
+    const review = oneDigitApart()
+    const nominated = planCustomerMerge(older, newer, review, 'operator_confirmed', {
+      nominatedSurvivorId: older.id,
+    })
+    const plain = planCustomerMerge(older, newer, review, 'operator_confirmed')
+    expect(nominated).toEqual(plain)
+  })
+
+  it('refuses a nominee that is neither record of the pair', () => {
+    const decision = planCustomerMerge(older, newer, oneDigitApart(), 'operator_confirmed', {
+      nominatedSurvivorId: '00000000-0000-7000-8000-00000000c5aa',
+    })
+    expect(mergePlanRefusalOf(decision)).toBe('merge_survivor_not_in_the_pair')
+    expect(decision.kind === 'refused' && decision.detail).toContain('neither of them')
+  })
+
+  it('refuses a nomination under `auto_merge`, because the score cannot have made it', () => {
+    const decision = planCustomerMerge(older, newer, identicalPhones(), 'auto_merge', {
+      nominatedSurvivorId: newer.id,
+    })
+    expect(mergePlanRefusalOf(decision)).toBe('merge_nomination_needs_an_operator')
+    // The control: the same pair and the same authority WITHOUT a nomination is a plan, so the refusal
+    // is about the nomination and not about the band.
+    expect(planCustomerMerge(older, newer, identicalPhones(), 'auto_merge').kind).toBe('plan')
+  })
 })
 
 describe('the scalar fields', () => {

@@ -6,6 +6,45 @@
  *   - MUST NOT import @berelax/core (dependency direction is core <- db, never db -> core)
  */
 
+/*
+  M-TILL-07's block, restored by C-CRM-06.
+
+  It was lost in a CLEAN auto-merge — the same failure the ledger region in this file's tail records three
+  times over: two branches based before each other's exports existed, git took one side, nothing conflicted
+  and no check reads a list of re-exports. The symptom was `pnpm typecheck` failing in
+  packages/fixtures/src/payment.itest.ts with "Module '@berelax/db' has no exported member
+  'manualPaymentAdapter'" — a file nobody had touched, naming a module that was present and complete on
+  disk. Recovered verbatim from 8a2d1c8, which is the last commit that held it.
+*/
+export {
+  type Authorisation,
+  type CapturedPayment,
+  type CapturePaymentInput,
+  type InvoiceSettlement,
+  isOverpayment,
+  isRefundExceedingPayments,
+  manualPaymentAdapter,
+  Overpayment,
+  PAYMENT_ADAPTER_MEMBERS,
+  PAYMENT_ADAPTER_MEMBERS_ARE_EXACT,
+  PAYMENT_CONSTRAINT,
+  PAYMENT_SQLSTATE,
+  type PaymentAdapter,
+  type PaymentAdapterMembersAreExact,
+  paymentError,
+  type RecordedPayment,
+  type RecordedRefund,
+  RefundExceedsPayments,
+  type RefundInput,
+  RefundRequiresCreditNote,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  type TenderToRecord,
+  TenderTypeNotRegistered,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+  type WebhookReconciliation,
+} from './adapters/manual-payment.ts'
 export {
   type Actor,
   type ActorKind,
@@ -428,6 +467,12 @@ export {
   findDuplicateCandidates,
 } from './repositories/duplicate-candidates.ts'
 export {
+  DUPLICATE_QUEUE_SUBJECT_LIMIT,
+  type DuplicateQueueScan,
+  type DuplicateQueueScanOptions,
+  scanDuplicateQueue,
+} from './repositories/duplicate-queue.ts'
+export {
   type EligibilityQueryInput,
   type EligibleTherapistRow,
   EXCLUSION_REASONS,
@@ -554,9 +599,19 @@ export {
   mergeRowCounts,
   mergeSurvivorOf,
   readCustomerMergeSubject,
+  readCustomerMergeSubjects,
+  readMergedAwayCustomerIds,
   readMergeRecordForLoser,
   readMergeTableReports,
 } from './repositories/merge.ts'
+export {
+  MERGE_UNDER_PREVIEW,
+  type MergePreview,
+  type MergePreviewPair,
+  type MergePreviewWrites,
+  PREVIEW_ROLLBACK_MESSAGE,
+  previewCustomerMerge,
+} from './repositories/merge-preview.ts'
 export {
   type CostByTemplate,
   type CostByTradingDate,

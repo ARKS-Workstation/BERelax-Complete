@@ -256,6 +256,33 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
+    table: 'flow_enrolment',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    // No unique key involves the customer: the primary key is `id` and the two indexes on this table are
+    // not unique, so no row can be refused and nothing can be retained.
+    conflictKey: null,
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason: null,
+    why:
+      'An enrolment is a process attached to a contact (0070), so it must follow the person: left on the ' +
+      'tombstone, a win-back sequence would go on sending to a record nothing else reads, resolving ' +
+      'consent and suppression against a log the survivor no longer owns. Registered by C-CRM-06 rather ' +
+      'than by C-CRM-05 because 0070 landed FIRST and nothing registered it: `mergeCoverage` enumerates ' +
+      'from information_schema, so the completeness case in merge.itest.ts went red the moment the two ' +
+      'branches met — which is exactly what that mechanism is for, and this is the first time it fired ' +
+      'on a real table. What is still C-AUTO-07’s is the half its own acceptance names: `flow_run`, the ' +
+      'step log and the (flow_run, node, channel, contact) idempotency keys do not exist yet, so a node ' +
+      'already executed for the loser cannot be prevented from executing again for the survivor here. ' +
+      'The pin (flow_id, definition_version) is immutable (ZF002) and is NOT touched: re-pointing the ' +
+      'customer leaves the version this enrolment is governed by exactly where it was.',
+    registeredBy: 'C-CRM-06',
+  }),
+  participant({
+    schema: 'public',
     table: 'consent',
     column: 'contact_customer_id',
     strategy: 'repoint_insert',

@@ -51,6 +51,10 @@ export const TEST_PORT_BANDS = {
   // `book-flow` is the one already in use, and 10000 is the next start with 300 clear ports below the
   // ephemeral floor and none a browser refuses.
   'template-editor': { start: 10_000, width: 300 },
+  // C-CRM-06's queue and preview. 10_900 rather than the next round number after 10_000: 10_300 and 10_600
+  // are allocations held by units in flight in other worktrees, and a band chosen from what this worktree
+  // can see is exactly how `template-editor` and `book-flow` came to share one.
+  duplicates: { start: 10_900, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

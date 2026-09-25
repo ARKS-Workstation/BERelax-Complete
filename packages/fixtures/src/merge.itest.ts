@@ -394,15 +394,22 @@ describe('the participant registry', () => {
     ).toBe('allowlisted')
   })
 
-  it('has no flow-run participant yet, which is the deferral to C-AUTO-07 stated as a test', async () => {
+  it('has no flow-RUN participant yet, which is the deferral to C-AUTO-07 stated as a test', async () => {
     const coverage = await mergeCoverage(sql)
-    // C-AUTO-07 owns `flow_run` and its (flow_run, node, channel, contact) idempotency key, and it
-    // depends on this unit. The day that table lands, the completeness case above turns red until it is
-    // registered — which is the whole point of enumerating from the catalogue. This assertion exists so
-    // the deferral is visible here and not only in the manifest.
-    expect(coverage.map((row) => row.table).filter((table) => table.startsWith('flow_'))).toEqual(
-      [],
-    )
+    // C-AUTO-07 owns `flow_run`, the step log and the (flow_run, node, channel, contact) idempotency key,
+    // and it depends on this unit. The day that table lands, the completeness case above turns red until
+    // it is registered — which is the whole point of enumerating from the catalogue. This assertion
+    // exists so the deferral is visible here and not only in the manifest.
+    expect(
+      coverage.map((row) => row.table).filter((table) => table.startsWith('flow_run')),
+    ).toEqual([])
+    // `flow_enrolment` is the half that DOES exist: 0070 (C-AUTO-06) landed before this unit and
+    // registered nothing, so the completeness case above went red the moment the two branches met —
+    // the first time the catalogue mechanism fired on a real table rather than on a fixture. C-CRM-06
+    // registered it; the entry's `why` says what is still C-AUTO-07's.
+    const enrolment = coverage.find((row) => row.table === 'flow_enrolment')
+    expect(enrolment?.status).toBe('participant')
+    expect(enrolment?.strategy).toBe('repoint_update')
   })
 })
 

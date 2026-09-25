@@ -31,6 +31,10 @@ import type { DuplicateScore, DuplicateVerdict } from './duplicate-score.ts'
  *     merges, and whichever ran first would win. `planCustomerMerge(a, b)` and `planCustomerMerge(b, a)`
  *     are asserted equal over generated pairs in `merge-plan.property.test.ts`.
  *
+ * A person may override it — {@link CustomerMergeOptions} says under what conditions and why — and the
+ * override is still order-independent: it names an id rather than a position, so the symmetry above holds
+ * with a nomination in hand exactly as it does without one.
+ *
  * ## A `distinct` pair is not mergeable under any authority
  *
  * `auto_merge` requires the score to be in the auto band, which C-CRM-02's table only ever reaches with
@@ -117,12 +121,40 @@ export const MERGE_PLAN_REFUSALS = [
   'merge_verdict_is_distinct',
   /** The score is in the review band and nobody confirmed it. */
   'merge_needs_an_operator',
+  /** A survivor was nominated that is neither record of the pair. */
+  'merge_survivor_not_in_the_pair',
+  /** A survivor was nominated under `auto_merge`. Only a person may override the default. */
+  'merge_nomination_needs_an_operator',
 ] as const
 export type MergePlanRefusal = (typeof MERGE_PLAN_REFUSALS)[number]
 
 /** Who is taking responsibility. `auto_merge` is the score alone; there is no third value. */
 export const MERGE_AUTHORITIES = ['auto_merge', 'operator_confirmed'] as const
 export type MergeAuthority = (typeof MERGE_AUTHORITIES)[number]
+
+/**
+ * What a caller may override, which is the survivor and nothing else.
+ *
+ * The earliest record surviving is a DEFAULT (`build/manifest.yaml`'s provisional line on C-CRM-05 says
+ * so, and C-CRM-05's NOTE (10) names the mechanism: "authority `operator_confirmed` nominates the
+ * survivor explicitly"). It was a default with no way to exercise it until C-CRM-06 put a review queue
+ * in front of it, and the reason a queue needs one is concrete: the default moves the larger set of rows
+ * onto the older record, and the older record is sometimes the one with the wrong number on it — a
+ * mistyped walk-in from two years ago against the record the customer has been booking on since.
+ *
+ * Two rules, and both of them are refusals rather than clamps:
+ *
+ *   - **The nominee has to be one of the two records.** A third id here is a caller that has muddled its
+ *     pair, and silently ignoring it would merge the wrong pair of records under a plan that read right.
+ *   - **`auto_merge` may not nominate.** An unattended merge acts on the score alone, and the score says
+ *     nothing about which record should survive. A nomination arriving without a person behind it is
+ *     either a bug or an operator's decision that has lost its operator, and neither is something to act
+ *     on unattended.
+ */
+export interface CustomerMergeOptions {
+  /** The record the operator wants to keep, when it is not the default. */
+  readonly nominatedSurvivorId?: string
+}
 
 export interface CustomerMergePlan {
   readonly kind: 'plan'
@@ -203,6 +235,7 @@ export function planCustomerMerge(
   b: CustomerMergeSubject,
   score: DuplicateScore,
   authority: MergeAuthority,
+  options: CustomerMergeOptions = {},
 ): CustomerMergeDecision {
   if (a.id === b.id) {
     return refused(
@@ -230,9 +263,34 @@ export function planCustomerMerge(
     )
   }
 
+  const nominated = options.nominatedSurvivorId
+  if (nominated !== undefined) {
+    if (nominated !== a.id && nominated !== b.id) {
+      return refused(
+        'merge_survivor_not_in_the_pair',
+        `Customer ${nominated} was nominated as the survivor of the merge of ${a.id} and ${b.id}, and ` +
+          'it is neither of them. A nomination that is ignored would merge this pair under a plan that ' +
+          'read as if the operator had been obeyed.',
+      )
+    }
+    if (authority !== 'operator_confirmed') {
+      return refused(
+        'merge_nomination_needs_an_operator',
+        `Customer ${nominated} was nominated as the survivor under authority \`${authority}\`. The ` +
+          'score says how alike two records are and nothing about which one should be kept, so an ' +
+          'unattended merge takes the default and a nomination needs the person who made it.',
+      )
+    }
+  }
+
   // The earlier record survives; a tie goes to the smaller id, never to the argument order. See the
-  // header — the symmetry is what stops one pair proposing two opposite merges.
-  const aFirst = a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id)
+  // header — the symmetry is what stops one pair proposing two opposite merges. A nomination overrides
+  // the comparison and nothing else: every field below still resolves from the survivor's side, so the
+  // two directions of one pair are two different plans rather than one plan with the labels swapped.
+  const aFirst =
+    nominated === undefined
+      ? a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id)
+      : nominated === a.id
   const survivor = aFirst ? a : b
   const loser = aFirst ? b : a
 

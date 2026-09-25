@@ -207,24 +207,61 @@ export interface MergeRecordRead {
 // Reads
 // ------------------------------------------------------------------------------------------------
 
+interface CustomerMergeSubjectRow {
+  readonly id: string
+  readonly created_at_ms: string
+  readonly phone_e164: string
+  readonly display_name: string | null
+  readonly name_match_key: string | null
+  readonly locale: string
+  readonly notes: string | null
+  readonly created_via: string
+  readonly phone_verified_at_ms: string | null
+}
+
+const toSubject = (row: CustomerMergeSubjectRow): CustomerMergeSubjectRead => ({
+  id: row.id,
+  createdAt: Number(row.created_at_ms),
+  phoneE164: row.phone_e164,
+  displayName: row.display_name,
+  nameMatchKey: row.name_match_key,
+  locale: row.locale,
+  notes: row.notes,
+  createdVia: row.created_via,
+  phoneVerifiedAt: row.phone_verified_at_ms === null ? null : Number(row.phone_verified_at_ms),
+})
+
+/**
+ * Several records at once, in the shape the pure plan takes, in id order.
+ *
+ * One query for a set rather than one per record: C-CRM-06's review queue reads every record its
+ * candidate scan named, and a loop over the singular read would be a round trip per candidate — the
+ * shape `readConsentLogs` exists to avoid, and the first symptom is a screen that takes seconds with
+ * nothing to point at. An id that is not a customer is simply absent from the answer; a caller that needs
+ * to tell "absent" from "present" compares the lengths, which is what the singular form below does.
+ */
+export async function readCustomerMergeSubjects(
+  sql: Sql,
+  customerIds: readonly string[],
+): Promise<readonly CustomerMergeSubjectRead[]> {
+  if (customerIds.length === 0) return []
+  const rows = await sql<CustomerMergeSubjectRow[]>`
+    select id,
+           (extract(epoch from created_at) * 1000)::bigint::text as created_at_ms,
+           phone_e164, display_name, name_match_key, locale, notes, created_via,
+           (extract(epoch from phone_verified_at) * 1000)::bigint::text as phone_verified_at_ms
+      from customer where id = any(${[...customerIds]}::uuid[])
+      order by id
+  `
+  return rows.map(toSubject)
+}
+
 /** Two records, in the shape the pure plan takes. Null for an id that is not a customer. */
 export async function readCustomerMergeSubject(
   sql: Sql,
   customerId: string,
 ): Promise<CustomerMergeSubjectRead | null> {
-  const rows = await sql<
-    {
-      id: string
-      created_at_ms: string
-      phone_e164: string
-      display_name: string | null
-      name_match_key: string | null
-      locale: string
-      notes: string | null
-      created_via: string
-      phone_verified_at_ms: string | null
-    }[]
-  >`
+  const rows = await sql<CustomerMergeSubjectRow[]>`
     select id,
            (extract(epoch from created_at) * 1000)::bigint::text as created_at_ms,
            phone_e164, display_name, name_match_key, locale, notes, created_via,
@@ -232,18 +269,31 @@ export async function readCustomerMergeSubject(
       from customer where id = ${customerId}
   `
   const row = rows[0]
-  if (row === undefined) return null
-  return {
-    id: row.id,
-    createdAt: Number(row.created_at_ms),
-    phoneE164: row.phone_e164,
-    displayName: row.display_name,
-    nameMatchKey: row.name_match_key,
-    locale: row.locale,
-    notes: row.notes,
-    createdVia: row.created_via,
-    phoneVerifiedAt: row.phone_verified_at_ms === null ? null : Number(row.phone_verified_at_ms),
-  }
+  return row === undefined ? null : toSubject(row)
+}
+
+/**
+ * The ids in a set that were merged away, as a set.
+ *
+ * `merge_record.loser_customer_id` is UNIQUE and IS the tombstone (0069 says why there is deliberately no
+ * column on `customer` saying so), which makes this one index lookup per id and no join. C-CRM-06's queue
+ * is what needs it: `findDuplicateCandidates` still returns a merged-away record as a candidate for its
+ * own survivor — C-CRM-05's NOTE (8c) — so without this the review queue shows every completed merge for
+ * ever, with a confirm button that answers `already_merged`.
+ *
+ * It answers about the ids ASKED, not about the whole table: a reader with three records in hand wants
+ * three answers, and a query returning every tombstone in the database would grow with the history.
+ */
+export async function readMergedAwayCustomerIds(
+  sql: Sql,
+  customerIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (customerIds.length === 0) return new Set()
+  const rows = await sql<{ loser_customer_id: string }[]>`
+    select loser_customer_id::text as loser_customer_id
+      from merge_record where loser_customer_id = any(${[...customerIds]}::uuid[])
+  `
+  return new Set(rows.map((row) => row.loser_customer_id))
 }
 
 /**
