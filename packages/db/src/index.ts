@@ -1055,6 +1055,23 @@ export {
   provisionalOpeningBalances,
 } from './services/opening-balances.ts'
 export {
+  type ClosedPeriod,
+  closeAccountingPeriod,
+  type DatedCorrectionInput,
+  earliestOpenDateFrom,
+  PERIOD_CLOSE_SQLSTATE,
+  type PeriodCloseInput,
+  type PeriodCloseReadiness,
+  type PeriodLockStatus,
+  type PostedCorrection,
+  periodCloseBlockers,
+  periodCloseError,
+  periodStatusOn,
+  postDatedCorrection,
+  trialBalanceHashAsAt,
+  type UnpostedDocument,
+} from './services/period-close.ts'
+export {
   BILL_SERIES_CODE,
   BILL_TAX_TREATMENTS,
   type BillLineToPost,
@@ -1611,14 +1628,42 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // allocated CR-NOTE as a separate counter row and said why. So nothing here re-argues that a credit note
 // is a separate document with its own series. Four things ARE this file's.
 //
-// 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
+// 73 is 0073_period_close.sql: the period close, its preconditions, and the evidence hash (M-VAT-06).
+// 0018 built the mechanism and said so in its own NOTE -- `period_lock` with a gist exclusion so two
+// overlapping locks cannot exist, `period_lock_for(date)` as the single definition of "is this date
+// closed", and BEFORE INSERT guards on both journal tables so every posting path meets the lock at one
+// choke point -- and left the preconditions to this unit. Four things are this file's. The close is
+// refused BY THE DATABASE and not only by the service: `period_lock` gains a BEFORE INSERT trigger
+// raising ZE001 when the trial balance as at `ends_on` does not balance and ZE002 when a document dated
+// in the period is not in the ledger, for EVERY role including the owner, because a close that only the
+// application checks is a close that `psql` performs and `lockAccountingPeriod` is not the only caller
+// of that table. `period_close_blocker(starts_on, ends_on)` returns the stragglers as ROWS rather than a
+// boolean, so ZE002 can name them and `periodCloseBlockers` can hand the whole list back as data -- one
+// definition with two readers, which is not the same as two statements of one rule.
+// `period_trial_balance_hash(as_at)` is sha256 over "tb1|<date>" and one line per account of
+// code|debits|credits ordered by code: in SQL so a psql session and a report written in five years both
+// reproduce it, and deliberately EXCLUDING account names, because `reclassify-account.ts` exists to
+// change one and a hash over the name would read as a restatement when no figure had moved. The version
+// tag makes a future canonical form incomparable rather than merely unequal. And
+// `raise_if_period_locked()` is REPLACED so ZL002 names the earliest OPEN date as well as the locked
+// period -- appended to the existing message, so every assertion on it stays true -- which gives all
+// five posting paths that refusal without five copies of it, M-VAT-05's argument for ZL004 restated.
+// What it does NOT add is a refusal trigger for UPDATE or DELETE on `period_lock`: 0018 weighed that and
+// decided against it ("dropping a trigger to fix a typo is how the trigger ends up dropped"), and two
+// suites have since come to reset themselves by deleting locks, so the trigger's first act would have
+// been to turn them red. Reopening is shut for every CODE path instead -- no grant for `berelax_app`, no
+// exported function, ADR 0026 -- and that is what `period-close.itest.ts` and block 98 assert.
+//
+// 22, 41, 44, 47 and 71 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
-// through 70 are in use and the four above are the only gaps left. 55, 56 and 57 landed out of order and
+// through 70 are in use. 71 was allocated to a unit that turned out to need no migration, which makes it
+// permanent rather than held, and 74 and 75 are held by units in flight as this is written. 55, 56 and 57
+// landed out of order and
 //
 // Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was
 // based before the others' paragraphs existed, so git took the incoming side of this region with nothing
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 72 as const
+export const SCHEMA_VERSION = 73 as const

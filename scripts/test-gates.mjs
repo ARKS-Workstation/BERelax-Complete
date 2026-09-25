@@ -26209,6 +26209,472 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 98a-98z. (M-VAT-06) The period close: the preconditions the DATABASE refuses, the evidence hash that
+// has to survive a chart tidy-up, and the edits that must make this unit's own suites go red.
+//
+// Three parts, because the unit's claims are of three kinds.
+//
+// The probes are known-bad fixtures against real PostgreSQL. Every rule `0073_period_close.sql` adds is
+// a DATABASE rule — a BEFORE INSERT trigger on `period_lock`, and three functions that two of 0018's
+// triggers call — and a constraint is only a gate once something has been seen to bounce off it (ADR
+// 0003). A case that proved only that a TypeScript guard refuses would leave the statement `psql` issues
+// untested, and that statement is what the whole unit is about: a close only `closeAccountingPeriod`
+// checks is a close a migration performs. Each probe asserts what must refuse it BY NAME, because a bare
+// non-zero exit is also what a typo in a column name produces.
+//
+// `VERBOSITY=verbose` so psql prints the SQLSTATE as well as the message, and every probe runs inside
+// `begin; … ; rollback;` — which is also the only way most of them can be written: `invoice` refuses
+// DELETE for every role (ZI003), so a probe document that committed could not be swept, and the two
+// balance triggers that one probe has to switch off must come back on.
+//
+// The second part breaks `packages/core/src/ledger/period.ts` and
+// `packages/db/src/services/period-close.ts` and watches the suites that cover them fail. The third is
+// the control that every suite and every probe passes unedited.
+//
+// Every source case edits a shipped file and restores it in a `finally`, and every anchor goes through
+// `replaceOnce` (brief rule 20).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'GATE-CLOSE'
+  /** Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the placeholder is refused. */
+  const GATE_TRN = '100123456700003'
+  /** A year no suite locks: journal.itest.ts uses 2088, credit-note 2097, checkout-finalise 2099. */
+  const YEAR = 2094
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  const CASH = '1010'
+  const REVENUE = '4010'
+  const OUTPUT_VAT = '2030'
+
+  /**
+   * Every lock in the gate's own year removed, inside the probe transaction that rolls back.
+   *
+   * `period-close.itest.ts` removes its own locks in `afterAll` and `journal.itest.ts` deletes every row
+   * of `period_lock` between cases, so what survives the integration stage depends on which file ran
+   * last. A leftover lock over this year would refuse the closes below by `period_lock_no_overlap` and
+   * every probe here would report a rule it is not about. Scoped to one year so it cannot remove a lock
+   * any suite relies on, and rolled back with the rest of the probe either way.
+   */
+  const NO_LOCKS = `delete from period_lock where starts_on >= '${YEAR}-01-01' and ends_on <= '${YEAR}-12-31'`
+
+  /** One unposted invoice: an `invoice` row with a line and no `checkout_finalisation`. */
+  const invoice = (n, day) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `values ('tax_invoice', 'TAX-INV', '${MARKER}', ${940_100 + n}, '${MARKER}-000${n}', ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'${YEAR}-08-${day}'::date, '${YEAR}-08-${day}'::date, 2857, 143, 3000, '${MARKER}-${n}')`
+
+  const invoiceLine = (n) =>
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    `vat_rate_bp, line_net_fils, line_vat_fils) values (${invoiceOf(n)}, 1, 'Gate probe treatment', ` +
+    '3, 1000, 500, 2857, 143)'
+
+  function invoiceOf(n) {
+    return `(select id from invoice where notes = '${MARKER}-${n}')`
+  }
+
+  /** A balanced three-line sale, so the trial balance is never the thing under test. */
+  const sale = (id, day, gross = 3000, vat = 143) =>
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${id}', '${YEAR}-08-${day}'::date, 'Gate probe sale', 'sale'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils) values ' +
+    `('${id}', 1, '${CASH}', ${gross}); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${id}', 2, '${REVENUE}', ${gross - vat}); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${id}', 3, '${OUTPUT_VAT}', ${vat})`
+
+  /** The `checkout_finalisation` row that is what "posted" MEANS for an invoice. */
+  const finalise = (n, id, day) =>
+    'insert into checkout_finalisation (idempotency_key, request_fingerprint, basket_id, invoice_id, ' +
+    'journal_entry_id, trading_date, tender_total_fils) values ' +
+    `('${MARKER}-K${n}', 'fp', 'basket', ${invoiceOf(n)}, '${id}', '${YEAR}-08-${day}'::date, 3000)`
+
+  const close = (month) =>
+    'insert into period_lock (period_id, starts_on, ends_on, reason, locked_by_actor_kind) values ' +
+    `('${MARKER}-${YEAR}-${month}', '${YEAR}-${month}-01', ` +
+    `(date '${YEAR}-${month}-01' + interval '1 month' - interval '1 day')::date, 'gate probe', 'system')`
+
+  const reopen = (month) => `delete from period_lock where period_id = '${MARKER}-${YEAR}-${month}'`
+
+  /** The two deferred balance triggers off, so an unbalanced ledger can be constructed at all. */
+  const NO_BALANCE_CHECK =
+    'alter table journal_line disable trigger journal_line_entry_balanced; ' +
+    'alter table journal_entry disable trigger journal_entry_balanced'
+
+  /** Seven fils of debit and no credit: the smallest ledger that does not add up. */
+  const OUT_OF_BALANCE =
+    `${NO_BALANCE_CHECK}; ` +
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${MARKER}-OOB', '${YEAR}-08-10'::date, 'Gate probe unbalanced', 'adjustment'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils) values ' +
+    `('${MARKER}-OOB', 1, '${CASH}', 7)`
+
+  const UNPOSTED = `${invoice(1, '15')}; ${invoiceLine(1)}`
+
+  /**
+   * `n` unposted invoices in one statement, so the truncation branch has something to truncate.
+   *
+   * ZE002 names ten and says so when there are more; a message that showed ten of forty without saying
+   * so reads as the whole answer, and somebody posts ten documents and tries the close again. That
+   * `case when` is a branch, so it needs a fixture like any other.
+   */
+  const manyUnposted = (n) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `select 'tax_invoice', 'TAX-INV', '${MARKER}-MANY', 940200 + g, '${MARKER}-M' || g, ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'${YEAR}-08-19'::date, '${YEAR}-08-19'::date, 2857, 143, 3000, '${MARKER}-M' || g ` +
+    `from generate_series(1, ${n}) as g; ` +
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    'vat_rate_bp, line_net_fils, line_vat_fils) ' +
+    "select id, 1, 'Gate probe treatment', 3, 1000, 500, 2857, 143 from invoice " +
+    `where period_key = '${MARKER}-MANY'`
+
+  const probes = [
+    {
+      // THE precondition. An invoice dated in the period that the ledger does not account for: filing
+      // the return would leave that supply out of it permanently, because the period it belongs to is
+      // shut afterwards and the correction has to go somewhere later.
+      name: 'period-close gate rejects a close whose period holds an unposted invoice',
+      rule: 'ZE002',
+      sql: `${NO_LOCKS}; ${UNPOSTED}; ${close('08')}`,
+    },
+    {
+      // The same refusal, asserted on the document id being IN the message. A count alone sends somebody
+      // through a month of invoices looking for the one that is missing.
+      name: 'period-close gate names the offending document, not just how many there are',
+      rule: `${MARKER}-0001`,
+      sql: `${NO_LOCKS}; ${UNPOSTED}; ${close('08')}`,
+    },
+    {
+      // The truncation notice. Eleven stragglers, ten named: the count has to be the real one and the
+      // message has to admit it is showing a prefix, or the person posts ten and tries again.
+      name: 'period-close gate says so when it names only the first ten unposted documents',
+      rule: '11 document(s) dated in it are not in the ledger (the first 10 shown)',
+      sql: `${NO_LOCKS}; ${manyUnposted(11)}; ${close('08')}`,
+    },
+    {
+      // The control for the notice: with exactly ten there is nothing to truncate and the message must
+      // NOT claim there is. A `case when` written with `>=` passes the case above and fails this one.
+      name: 'period-close gate does not claim truncation when it named every document',
+      rule: '10 document(s) dated in it are not in the ledger:',
+      sql: `${NO_LOCKS}; ${manyUnposted(10)}; ${close('08')}`,
+    },
+    {
+      // The backstop. Every committed entry balances, because `assert_entry_balanced` is a deferred
+      // constraint trigger per entry — so this is unreachable through any posting path, which is exactly
+      // why it has to be seen to fire. Switching the trigger off is the only honest fixture, and it
+      // needs the table owner: the role a migration and a psql session connect as.
+      name: 'period-close gate rejects a close whose trial balance does not balance',
+      rule: 'ZE001',
+      sql: `${NO_LOCKS}; ${OUT_OF_BALANCE}; ${close('08')}`,
+    },
+    {
+      // The difference in fils is in the message. "The books do not balance" without it is a day of
+      // somebody's time, and the figure is usually most of the diagnosis.
+      name: 'period-close gate names the imbalance in fils',
+      rule: 'out by 7 fils',
+      sql: `${NO_LOCKS}; ${OUT_OF_BALANCE}; ${close('08')}`,
+    },
+    {
+      // The balance is checked BEFORE the documents, and the order is asserted rather than left to
+      // whichever query the trigger happens to run first: an unbalanced ledger makes every figure in the
+      // period untrustworthy including the ones the documents would reconcile to, so reporting the
+      // stragglers first sends somebody to chase documents while the books do not add up.
+      name: 'period-close gate reports the imbalance first when both preconditions fail',
+      rule: 'ZE001',
+      sql: `${NO_LOCKS}; ${UNPOSTED}; ${OUT_OF_BALANCE}; ${close('08')}`,
+    },
+    {
+      // 0073 redefined `raise_if_period_locked` so ZL002 carries the earliest OPEN date as well as the
+      // locked period. August and September are both filed here, so a message naming only the lock sends
+      // the person to September — also shut.
+      name: 'period-close gate rejects a posting into a locked period, naming the earliest open date',
+      rule: `The earliest open date is ${YEAR}-10-01`,
+      sql:
+        `${NO_LOCKS}; ${close('08')}; ${close('09')}; ` +
+        'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('${MARKER}-INTO-LOCK', '${YEAR}-08-20'::date, 'Gate probe', 'sale')`,
+    },
+    {
+      // And the LINE guard, which is the case the entry guard cannot cover: a line appended to an entry
+      // posted while the period was still open. Both guards call the one function 0073 replaced, which
+      // is how all five posting paths carry this refusal without five copies of it.
+      name: 'period-close gate rejects a line appended into a period locked after its entry',
+      rule: `The earliest open date is ${YEAR}-10-01`,
+      sql:
+        `${NO_LOCKS}; ${sale(`${MARKER}-OPEN-THEN-SHUT`, '20')}; ${close('08')}; ${close('09')}; ` +
+        'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+        `('${MARKER}-OPEN-THEN-SHUT', 4, '${REVENUE}', 1)`,
+    },
+    {
+      // ADR 0026's load-bearing layer. `period_lock` carries no refusal trigger, deliberately — 0018
+      // decided that and two suites have since come to reset themselves by deleting locks — so the grant
+      // is the whole of "no code path reopens a period", and a grant is only a guarantee once a
+      // statement has bounced off it.
+      name: 'period-close gate refuses the application role a DELETE on period_lock',
+      rule: 'permission denied for table period_lock',
+      sql: `${NO_LOCKS}; ${close('08')}; set local role berelax_app; ${reopen('08')}`,
+    },
+    {
+      name: 'period-close gate refuses the application role an UPDATE on period_lock',
+      rule: 'permission denied for table period_lock',
+      sql:
+        `${NO_LOCKS}; ${close('08')}; set local role berelax_app; ` +
+        `update period_lock set ends_on = '${YEAR}-08-02' where period_id = '${MARKER}-${YEAR}-08'`,
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(probe.name, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The control for every probe above, in one psql run, because an ACCEPTED probe is a single exit code.
+  // Without it each case would also pass for a trigger that refused every close and for a `period_lock`
+  // nothing could be inserted into at all. Four accepted facts in order: a clean month closes; two
+  // ADJACENT months close, so the exclusion constraint is about overlap and not about neighbours; the
+  // OWNER can delete a lock, which is what makes the two 42501 probes about the ROLE rather than the row;
+  // and the same invoice that was refused above closes once a `checkout_finalisation` row references it.
+  {
+    const accepted = psqlProbe(
+      `${NO_LOCKS}; ${close('08')}; ${close('09')}; ${reopen('09')}; ${reopen('08')}; ` +
+        `${invoice(2, '17')}; ${invoiceLine(2)}; ${sale(`${MARKER}-POSTED`, '17')}; ` +
+        `${finalise(2, `${MARKER}-POSTED`, '17')}; ${close('08')}`,
+    )
+    check(
+      'period-close gate: a balanced period whose documents are all posted DOES close',
+      !accepted.failed,
+      'the control probe was refused, so every period-close probe above may be passing for the wrong ' +
+        `reason:\n${accepted.output}`,
+    )
+  }
+
+  // The evidence hash: sensitive to the figures, and INSENSITIVE to an account rename.
+  //
+  // The second of those is the decision worth a gate. `reclassify-account.ts` exists to change an
+  // account's name, and a hash taken over the name would move when a chart tidy-up renamed "Treatment
+  // revenue" — so a filed period would read as restated when not one figure had moved, and the person
+  // who noticed would go looking for a posting that does not exist.
+  {
+    const hash = `period_trial_balance_hash('${YEAR}-08-31'::date)`
+    /** The hash captured into a temp table, which the rollback drops with everything else. */
+    const captured = `create temporary table gate_hash as select ${hash} as h`
+    const raiseIf = (condition, marker) =>
+      `do $$ begin if ${condition} then raise exception '${marker}'; end if; end $$`
+
+    const stable = psqlProbe(
+      `${NO_LOCKS}; ${sale(`${MARKER}-HASH`, '20')}; ${captured}; ` +
+        `update account set name = name || ' (renamed by the gate)' where code = '${REVENUE}'; ` +
+        `${raiseIf(`(select h from gate_hash) <> ${hash}`, 'HASH-MOVED-ON-RENAME')}; ` +
+        `${raiseIf(
+          `(select h from gate_hash) = period_trial_balance_hash('${YEAR}-07-31'::date)`,
+          'HASH-IGNORES-THE-DATE',
+        )}`,
+    )
+    check(
+      'period-close gate: the trial balance hash survives an account rename and separates two dates',
+      !stable.failed,
+      'HASH-MOVED-ON-RENAME means the hash is over the account NAME, which a chart tidy-up changes; ' +
+        "HASH-IGNORES-THE-DATE means it is not over that date's figures at all:\n" +
+        stable.output,
+    )
+
+    // The other half: a posting dated inside the hashed window must move it. Written as a probe that
+    // raises only when the hash DID NOT move, so a hash that had degenerated to a constant fails here.
+    const moves = psqlProbe(
+      `${NO_LOCKS}; ${captured}; ${sale(`${MARKER}-HASH2`, '20')}; ` +
+        `${raiseIf(`(select h from gate_hash) = ${hash}`, 'HASH-IS-A-CONSTANT')}`,
+    )
+    check(
+      'period-close gate: a posting inside the hashed window moves the hash',
+      !moves.failed,
+      `an entry dated inside the window left the hash unchanged, so it is not a content hash of the ` +
+        `trial balance:\n${moves.output}`,
+    )
+    // And the control for THAT probe: with no posting in between, the same comparison must raise. A
+    // probe whose `raise` can never fire is a case that measures nothing, and this one is written the
+    // way round where that is easy to miss.
+    checkRejectedBy(
+      'period-close gate: the moves-the-hash probe can actually fire',
+      psqlProbe(
+        `${NO_LOCKS}; ${captured}; ${raiseIf(`(select h from gate_hash) = ${hash}`, 'HASH-IS-A-CONSTANT')}`,
+      ),
+      'HASH-IS-A-CONSTANT',
+    )
+  }
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+  const CORE = 'packages/core/src/ledger/period.ts'
+  const CORE_SUITE = 'packages/core/src/ledger/period.test.ts'
+  const SERVICE = 'packages/db/src/services/period-close.ts'
+  const SERVICE_SUITE = 'packages/db/src/services/period-close.itest.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/period-close.itest.ts'
+
+  // `planCorrection` stops refusing a date inside a closed period. The pure half of "corrections go to
+  // the next OPEN period" is that refusal; without it the function is `reverseEntry` with extra steps.
+  checkRejectedBy(
+    'period gate: a planCorrection that accepts a date inside a closed period is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'const closed = closedPeriodContaining(on, closedPeriods)\n  if (closed !== null) {',
+          'const closed = closedPeriodContaining(on, closedPeriods)\n  if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'CorrectionIntoClosedPeriod',
+  )
+
+  // The leap rule, deleted. `parsePeriodId('2028-02')` then ends on the 28th, and a period whose last
+  // day is wrong is a close that leaves the last day of the month open — the day the cash-up runs.
+  checkRejectedBy(
+    'period gate: a month-end that ignores the leap rule is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'month === 2 && isLeapYear(year) ? 29 : (DAYS_IN_MONTH[month - 1] ?? 0)',
+          '(DAYS_IN_MONTH[month - 1] ?? 0)',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    '2028-02-29',
+  )
+
+  // `closedPeriodContaining` returns the first match in array order rather than the earliest. The
+  // database cannot produce an overlapping list — `period_lock_no_overlap` refuses one — so the only
+  // thing that can is a caller assembling the array, and an answer that depends on assembly order is
+  // not an answer.
+  checkRejectedBy(
+    'period gate: a closedPeriodContaining whose answer depends on array order is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (found === null || period.startsOn < found.startsOn) found = period',
+          'if (found === null) found = period',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'is deterministic given a list that overlaps',
+  )
+
+  // `postDatedCorrection` dates the reversal on the entry it corrects instead of on the first open day.
+  // That is the one thing the function exists to get right, and what it produces in production is a
+  // refusal where a correct posting was available.
+  checkRejectedBy(
+    'period gate: a correction dated on the original entry rather than in the open period is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(text, 'const on = status.earliestOpenDate', 'const on = corrects.entryDate'),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'PeriodLocked',
+  )
+
+  // `closeAccountingPeriod` stops reading the blockers, so the refusal becomes the trigger's sentence and
+  // the offending ids stop being DATA. The whole reason the service reads them itself is that a screen
+  // offering "post these first" cannot parse them out of a message that names ten and counts the rest.
+  checkRejectedBy(
+    'period gate: a close whose refusal carries no document ids is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (readiness.unpostedDocuments.length > 0) {',
+          'if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'names every unposted document',
+  )
+
+  // `periodContains` stops including the last day of the period. `period_lock.ends_on` is the last day
+  // OF the period and the database's `period_lock_for()` compares `between`, so an exclusive end here
+  // makes core call a filed day open while the database calls it shut — and a correction planned on core's
+  // answer is then refused by ZL002 at the moment it is posted. The PAIR suite is what holds that
+  // agreement: it compares the two answers over nine days spanning both closed months and the open one,
+  // against the real rows, which neither half's own suite can do.
+  checkRejectedBy(
+    'period gate: a periodContains that excludes the last day of the period is caught by the pair',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'return date >= period.startsOn && date <= period.endsOn',
+          'return date >= period.startsOn && date < period.endsOn',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(PAIR_SUITE)),
+    ),
+    'the two halves state one rule',
+  )
+
+  // The ADR the acceptance asks for, and it has to say the thing rather than merely exist. A record that
+  // did not name what holds the rule would leave the next person to rediscover that `period_lock` has no
+  // refusal trigger and to add one, which is the change that turns two other suites red.
+  {
+    const ADR = 'docs/adr/0026-period-reopen-requires-migration.md'
+    const adr = existsSync(ADR) ? readFileSync(ADR, 'utf8') : ''
+    const says = ['- **Covers:**', 'period_lock', '42501', 'migration', 'export surface']
+    const missing = says.filter((phrase) => !adr.includes(phrase))
+    check(
+      'period-close gate: the reopen ADR exists and names the layers that hold the rule',
+      adr !== '' && missing.length === 0,
+      adr === ''
+        ? `${ADR} is missing; the acceptance asks for a record of why reopening requires a migration`
+        : `${ADR} does not mention: ${missing.join(', ')}`,
+    )
+    // The control: the phrase list is not one that arbitrary prose satisfies. Without this the case
+    // above would pass over an ADR that said nothing in particular.
+    check(
+      'period-close gate: that ADR check discriminates',
+      says.some((phrase) => !'# A record about something else entirely'.includes(phrase)),
+      'the phrase list matches arbitrary prose, so the case above measures nothing',
+    )
+  }
+
+  // The controls for the five source edits: both suites pass unedited. Without this, an anchor gone
+  // stale or a suite that had stopped running would make every one of them report a pass.
+  {
+    const core = run('pnpm', unitRun(CORE_SUITE))
+    const service = run('pnpm', itestRun(SERVICE_SUITE))
+    const pair = run('pnpm', itestRun(PAIR_SUITE))
+    check(
+      'the period-close suites pass unedited',
+      !core.failed && !service.failed && !pair.failed,
+      `core suite ${core.failed ? 'FAILED' : 'passed'}, service suite ` +
+        `${service.failed ? 'FAILED' : 'passed'}, pair suite ${pair.failed ? 'FAILED' : 'passed'}:\n` +
+        `${core.output}\n${service.output}\n${pair.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
