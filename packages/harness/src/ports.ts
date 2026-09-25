@@ -51,6 +51,10 @@ export const TEST_PORT_BANDS = {
   // `book-flow` is the one already in use, and 10000 is the next start with 300 clear ports below the
   // ephemeral floor and none a browser refuses.
   'template-editor': { start: 10_000, width: 300 },
+  // B-UI-03's diary. The next free start above `template-editor`, and 10_300 rather than 10_080 because
+  // 10080 is in Chromium's table: a band beginning there would contain a port the browser refuses, which
+  // `RESTRICTED_PORTS` does not list precisely because it falls outside every band — including this one.
+  'admin-calendar': { start: 10_300, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

@@ -1,5 +1,6 @@
 import type { Permission } from '../permissions.ts'
 import { CUSTOMER_LINK_GRANTS, CUSTOMER_LINK_PRINCIPAL } from './customer-link.ts'
+import { FRONT_DESK_DIARY_GRANTS, FRONT_DESK_DIARY_PRINCIPAL } from './front-desk-diary.ts'
 import { SEO_AGENT_GRANTS, SEO_AGENT_PRINCIPAL } from './seo-agent.ts'
 
 /**
@@ -10,6 +11,11 @@ import { SEO_AGENT_GRANTS, SEO_AGENT_PRINCIPAL } from './seo-agent.ts'
  * second one is the dangerous one: the review autoresponder and the campaign sender are also `system`
  * today, and the way an agent comes to hold a capability nobody granted it is by joining a role whose list
  * was written for somebody else.
+ *
+ * B-UI-03's is the third, and it is the first one that WRITES: the admin diary has no session until
+ * W-SYS-01, so the row recording who moved an appointment names the SCREEN rather than a member of staff
+ * nobody signed in as. `./front-desk-diary.ts` records why `receptionist` and `system` are both wrong there,
+ * and what W-SYS-01 replaces.
  *
  * B-UI-05's is the second, and it arrived exactly the way that comment predicted. A magic-link holder is
  * not a member of staff with a job title, and the shortest spelling available was `role: 'receptionist'` —
@@ -27,7 +33,11 @@ import { SEO_AGENT_GRANTS, SEO_AGENT_PRINCIPAL } from './seo-agent.ts'
  */
 
 /** Every declared agent principal id. Deny-by-default applies to an id that is not in this list. */
-export const AGENT_PRINCIPALS = [CUSTOMER_LINK_PRINCIPAL, SEO_AGENT_PRINCIPAL] as const
+export const AGENT_PRINCIPALS = [
+  CUSTOMER_LINK_PRINCIPAL,
+  FRONT_DESK_DIARY_PRINCIPAL,
+  SEO_AGENT_PRINCIPAL,
+] as const
 export type AgentPrincipalId = (typeof AGENT_PRINCIPALS)[number]
 
 /**
@@ -41,6 +51,7 @@ export type AgentPrincipalId = (typeof AGENT_PRINCIPALS)[number]
 export const AGENT_PRINCIPAL_GRANTS: Readonly<Record<AgentPrincipalId, readonly Permission[]>> =
   Object.freeze({
     [CUSTOMER_LINK_PRINCIPAL]: CUSTOMER_LINK_GRANTS,
+    [FRONT_DESK_DIARY_PRINCIPAL]: FRONT_DESK_DIARY_GRANTS,
     [SEO_AGENT_PRINCIPAL]: SEO_AGENT_GRANTS,
   })
 
