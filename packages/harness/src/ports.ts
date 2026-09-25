@@ -145,15 +145,32 @@ export function usableWidth(band: TestPortBand): number {
  * redrawing: a draw-and-retry loop has no bound, and a rejection this function cannot see the reason for
  * is what {@link RESTRICTED_PORTS} exists to stop. Every usable port stays equally likely.
  */
+/**
+ * The port at `index` within a band, skipping the ports a browser refuses.
+ *
+ * Separated from {@link testPort} so the arithmetic can be tested against a pathological band without
+ * inventing a suite to hold one. A test that reimplements this mapping to check it is testing its own copy,
+ * which is worth nothing; a test that calls it is testing the thing that runs.
+ *
+ * `index` is expected in `[0, usableWidth(band))`. Outside that it is clamped rather than trusted, because
+ * the failure a wrong index produces — a port outside the band — is the one outcome the registry exists to
+ * prevent, and a gate case deliberately constructs a band with nothing usable in it.
+ */
+export function portAtIndex(band: TestPortBand, index: number): number {
+  const blocked = restrictedPortsIn(band)
+  const usable = band.width - blocked.length
+  if (usable <= 0) return band.start
+  let port = band.start + Math.min(Math.max(index, 0), usable - 1)
+  // Ascending, so each skip can only push the answer past a port it has already accounted for.
+  for (const restricted of blocked) if (port >= restricted) port += 1
+  return port
+}
+
 export function testPort(suite: TestSuiteName): number {
   const band = TEST_PORT_BANDS[suite]
   const clashes = overlappingBands()
   if (clashes.length > 0) {
     throw new Error(`[test-port-bands-overlap] ${clashes.join('; ')}`)
   }
-  const blocked = restrictedPortsIn(band)
-  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length))
-  // Ascending, so each skip can only push the answer past a port it has already accounted for.
-  for (const restricted of blocked) if (port >= restricted) port += 1
-  return port
+  return portAtIndex(band, Math.floor(Math.random() * usableWidth(band)))
 }

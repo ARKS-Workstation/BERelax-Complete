@@ -3,6 +3,7 @@ import {
   bandsReachingEphemeralRange,
   EPHEMERAL_PORT_FLOOR,
   overlappingBands,
+  portAtIndex,
   RESTRICTED_PORTS,
   restrictedPortsIn,
   TEST_PORT_BANDS,
@@ -185,6 +186,39 @@ describe('test port bands', () => {
    * one. A hundred is the floor the registry already claims; the worst band after exclusion is
    * `breakpoint-preview` at 292 of 300.
    */
+  /**
+   * The pathological band, which a gate case constructs on purpose.
+   *
+   * A band with no usable port must yield its start rather than a number below itself: the draw's range is
+   * `width - restricted`, and for a negative range the arithmetic lands OUTSIDE the band, which is the one
+   * outcome this registry exists to prevent. The named band-width failure below is then what a reader sees,
+   * rather than a port that makes no sense.
+   */
+  it('yield the band start rather than a port below the band when nothing in it is usable', () => {
+    const empty = { start: 6665, width: 1 } as const
+    expect(restrictedPortsIn(empty)).toEqual([6665])
+    expect(usableWidth(empty)).toBe(0)
+    // Calling the real mapping, not a copy of it: index 0, and a negative and an over-large index too,
+    // because the guard is about an index the caller should not have produced.
+    for (const index of [0, -5, 99]) {
+      expect(portAtIndex(empty, index), `index ${index}`).toBe(6665)
+    }
+  })
+
+  /**
+   * And the band that is narrower than the restricted ports inside it, where the draw's range goes
+   * NEGATIVE. Without the guard the arithmetic lands below the band, which is the one outcome the registry
+   * exists to prevent.
+   */
+  it('never return a port below the band, even when restricted ports outnumber the width', () => {
+    const narrow = { start: 6665, width: 3 } as const
+    expect(restrictedPortsIn(narrow)).toEqual([6665, 6666, 6667])
+    expect(usableWidth(narrow)).toBe(0)
+    for (const index of [0, 1, 2, -1]) {
+      expect(portAtIndex(narrow, index), `index ${index}`).toBeGreaterThanOrEqual(narrow.start)
+    }
+  })
+
   it('keep at least 100 usable ports in every band', () => {
     for (const suite of Object.keys(TEST_PORT_BANDS) as readonly TestSuiteName[]) {
       const band = TEST_PORT_BANDS[suite]
