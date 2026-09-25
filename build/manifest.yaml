@@ -2791,11 +2791,107 @@ units:
     - An appointment can be rescheduled by keyboard alone, with a live region announcing the new time; axe
       reports zero serious or critical violations
     - Screenshots at 768 / 1440 in both themes with zero pixel diff on a repeat run
+    - 'NOTE: NOT a page.tsx, and there is no tests/e2e directory in this repository. The four files this
+      entry names do not exist; what is built is route.ts (the Next binding), handler.ts (everything
+      decidable, driven directly by the suite) and render.ts (pure HTML), which is the arrangement every
+      admin surface here already takes - the Messages inbox, the template editor, the credentials screen,
+      the reassignment queue and the compliance calendar each record the same reason: apps/web/src/routes/registry.ts
+      is in exact bijection with the filesystem and requires every DOCUMENT to be served in both locales, so
+      a page.tsx would need an Arabic admin document and the W-SYS-01 shell, and would join a screenshot
+      matrix whose RTL half has to be a real Arabic route. There is likewise no Playwright runner and no
+      `.spec.ts` convention: Playwright is a dependency of @berelax/harness and is driven from `.itest.ts`
+      files through startWebServer, so the browser half of this unit is apps/web/src/admin-calendar.itest.ts.
+      A `grid.client.tsx` island would also be the wrong shape - the interaction is ~120 lines of inline
+      script on a route-handler document, and a React island would have made the page a document.'
+    - 'NOTE: two files beyond the app, and they are where the claim about the two axes lives.
+      packages/core/src/calendar/day-grid.ts is pure and answers BOTH axes from one facts object, carrying it
+      as `source` and every appointment BY REFERENCE - which is what makes "both views are derived from one
+      query result object" assertable with `toBe` instead of by comparing two lists and hoping. Its bands are
+      `appointmentRoomPeriod` and `appointmentTherapistPeriod`, the two functions the availability solver
+      indexes occupancy with, so the turnaround the diary draws is the turnaround a booking is refused for
+      and there is no second opinion about a footprint. packages/db/src/queries/calendar-day.ts answers the
+      whole day - the business_day row, every bookable room, the appointments and their therapists - in ONE
+      statement as JSON, and the suite COUNTS the statements (one, with the navigation read as the control
+      that proves the counter works). The grid also emits its quarter-hour drop targets server-side, each
+      carrying the instant it means, so the inline script does no time arithmetic at all: a browser that
+      converted a pixel offset into a time would be a second implementation of the grid, disagreeing with
+      this one at exactly the two edges nobody drags onto while testing - the midnight crossing and the close.'
+    - 'NOTE: SCOPED - the therapist axis is READ-ONLY and a drop there is not offered, deferred to W-SYS-01.
+      Changing the therapist re-applies B-AVAIL-04 eligibility on the new date, and under strict same-gender
+      matching that needs the client gender, which no table holds (B-AVAIL-05: `customer` has no gender
+      column) - the same reason P-HR-04 reassignment queue gives for reporting the queue and not acting on
+      it. A lane that accepted a drop would accept a move the transaction then refuses. The room axis takes
+      both a time change and a room change, which is what the reschedule can honour without inventing a
+      fact. The therapist lanes are also the therapists with WORK on the day rather than the rostered ones:
+      the rota is P-HR-01 shift_assignment, a second question with a second answer, and nineteen empty lanes
+      none of which carries a name is a control nobody can use (the reasoning B-UI-01 records for its
+      therapist selector).'
+    - 'NOTE: this is the first admin surface in the application that WRITES, and it is not authenticated -
+      there is no admin session until W-SYS-01, exactly as the five read-only admin routes record. The actor
+      is therefore a THIRD declared agent principal, `system:front_desk_diary`
+      (packages/core/src/access/principals/front-desk-diary.ts, registered beside the customer link and the
+      SEO agent), holding `booking:read`, `calendar:read` and `booking:reschedule` and nothing else.
+      `role: receptionist` was the shortest spelling and is the wrong one - it would put a job title on the
+      history row when nothing proved one (brief rule 15) and would carry till:operate, invoice:issue and
+      customer:write into a surface that needs one capability; `role: system` fails closed, because the
+      system role does not hold booking:reschedule and widening it would hand the campaign sender the
+      ability to move appointments. `booking:cancel` is deliberately absent: a diary makes cancellation look
+      like dragging a card off the grid, and a cancellation is not a move. packages/core/src/access/front-desk-diary.policy.test.ts
+      enumerates the cage and asserts the lifecycle refuses the cancellation and the no-show by PERMISSION
+      rather than by the absence of a control on the page.'
+    - 'NOTE: no migration. The diary is a read plus B-LIFE-03 existing transaction, so SCHEMA_VERSION and the
+      ledger in packages/db/src/index.ts are untouched (0071 was allocated to this unit and is unused).
+      `@berelax/harness` TEST_PORT_BANDS gains one row, `admin-calendar` at 10_300 width 300, claimed by the
+      suite via startWebServer (brief rules 18 and 19); RESTRICTED_PORTS, portAtIndex and testPort are
+      untouched. The screenshot matrix is 2 viewports x 2 themes = 4 cells rather than twelve, which is what
+      the acceptance line asks for and for the reason B-MSG-04 gives: this is an English-only handler, so
+      there is no RTL half and no Arabic document to photograph.'
+    - 'NOTE: found broken on arrival and repaired here - packages/db/src/index.ts exported NONE of the seven
+      symbols packages/fixtures/src/payment.itest.ts imports from @berelax/db (manualPaymentAdapter,
+      readTenderTypes, readInvoiceSettlement, RegisteredTenderType, TRADE_RECEIVABLES_ACCOUNT_CODE and the
+      rest), so `pnpm typecheck` failed at HEAD 057bd6e before this unit touched anything: the M-TILL-07
+      merge landed the adapter, its pair suite and its migration and dropped the index paragraph. That is
+      exactly the hazard the contributing brief describes - a clean auto-merge deleting a paragraph nobody is
+      looking at - arriving in the one file that decides what the package IS, and the symptom named neither
+      the merge nor the unit (five TS2305s in a suite importing nothing new). The block is restored with that
+      history written above it. Nothing else about M-TILL-07 was changed.'
+    - 'NOTE: two behaviours worth recording because a reader will look for them. (1) A `completed`
+      treatment is DRAWN — it still holds its resources, so the room really was occupied — and is offered
+      as a move on neither path (no drag, and absent from the no-JavaScript form), because `completed` is
+      terminal in the lifecycle and every move from it is refused: offering the control would be offering
+      one known to fail, which is what P-HR-04 candidate list and B-UI-01 therapist selector each avoid the
+      same way. (2) The handler consults BOTH refusal translators, rescheduleRefusalOf and
+      transitionRefusalOf, because both vocabularies are reachable from one drag — with only the first, the
+      refusal a completed card produces reached the reader as words that claim nothing and the log as
+      `unknown`.'
+    - 'NOTE: `pnpm verify` FAILS at test:integration on this tree and BOTH causes are outside this unit.
+      (1) packages/fixtures/src/merge.itest.ts, two cases: "names every table carrying a customer or contact
+      id as a participant or an allowlisted exception" and "has no flow-run participant yet, which is the
+      deferral to C-AUTO-07 stated as a test". Migration 0070 (C-AUTO-06) creates `flow_enrolment` with a
+      `customer_id`, and C-CRM-05 registry does not know it — which is the collision the comment in C-CRM-05
+      predicts ("the day that table lands, the completeness case above turns red until it is registered").
+      It is deterministic, reproduces with the suite run alone, and is untouched by this unit: the inputs
+      are the schema and packages/db/src/merge-participants.ts. It is NOT repaired here because the fix is a
+      decision neither unit has taken — re-point the enrolment to the survivor (the table has no unique key
+      on the customer, so `repoint_update` would be legal) or end it, which is what a second ACTIVE
+      enrolment in one flow would otherwise mean: the same person sent the same automation twice. That
+      belongs to C-AUTO-07/C-CRM-05, and a guess made here would be a second opinion inside a registry this
+      unit does not own. (2) apps/web/src/home.itest.ts, one case: "/ar in the dark theme paints everything at once" —
+      the intermittent the standing brief names (three earlier sightings, two different assertions, passing
+      in isolation every time). It passed when re-run alone here, immediately after the failing run. Every
+      other verify step passes, including the five after test:integration run individually (db:migrate:dry,
+      db:drift, db:conventions, budgets, gate-registry) and pnpm gates:test.'
     files:
-    - apps/web/app/(admin)/calendar/page.tsx
-    - apps/web/app/(admin)/calendar/grid.client.tsx
-    - apps/web/tests/e2e/admin-calendar.spec.ts
-    - apps/web/app/(admin)/calendar/actions.ts
+    - apps/web/app/(admin)/calendar/route.ts
+    - apps/web/app/(admin)/calendar/handler.ts
+    - apps/web/app/(admin)/calendar/render.ts
+    - apps/web/src/admin-calendar.itest.ts
+    - apps/web/src/calendar-render.test.ts
+    - packages/core/src/calendar/day-grid.ts
+    - packages/core/src/calendar/day-grid.test.ts
+    - packages/core/src/access/principals/front-desk-diary.ts
+    - packages/core/src/access/front-desk-diary.policy.test.ts
+    - packages/db/src/queries/calendar-day.ts
   - id: B-UI-04
     order: 40
     title: Quick-book, walk-in entry and the WhatsApp ref field

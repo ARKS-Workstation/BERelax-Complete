@@ -6,6 +6,43 @@
  *   - MUST NOT import @berelax/core (dependency direction is core <- db, never db -> core)
  */
 
+/*
+  M-TILL-07's payment adapter, at the package boundary.
+
+  This block was absent when B-UI-03 ran `pnpm typecheck`: `packages/fixtures/src/payment.itest.ts` imports
+  seven of these from `@berelax/db` and none of them was exported, so the repository did not typecheck at
+  all — the M-TILL-07 merge landed the module, the pair suite and its migration and dropped the index
+  paragraph. It is the hazard the contributing brief names (a clean auto-merge deleting a paragraph nobody
+  is looking at) arriving in the one file that decides what this package IS, and the symptom names neither
+  the merge nor the unit: five TS2305s in a suite that imports nothing new.
+*/
+export {
+  type Authorisation,
+  type CapturedPayment,
+  type CapturePaymentInput,
+  type InvoiceSettlement,
+  isOverpayment,
+  isRefundExceedingPayments,
+  manualPaymentAdapter,
+  Overpayment,
+  PAYMENT_ADAPTER_MEMBERS,
+  PAYMENT_CONSTRAINT,
+  PAYMENT_SQLSTATE,
+  type PaymentAdapter,
+  paymentError,
+  type RecordedPayment,
+  type RecordedRefund,
+  RefundExceedsPayments,
+  type RefundInput,
+  RefundRequiresCreditNote,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  type TenderToRecord,
+  TenderTypeNotRegistered,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+  type WebhookReconciliation,
+} from './adapters/manual-payment.ts'
 export {
   type Authorisation,
   type CapturedPayment,
@@ -152,6 +189,16 @@ export {
   type TherapistLabelRow,
   type TradingDayRow,
 } from './queries/booking-page.ts'
+export {
+  type CalendarAppointmentRow,
+  type CalendarDayHoursRow,
+  type CalendarDayRead,
+  type CalendarRoomRow,
+  type CalendarTherapistRow,
+  readAdjacentTradingDates,
+  readCalendarDay,
+  readCalendarDayHours,
+} from './queries/calendar-day.ts'
 export {
   readArchivedTreatmentSlugs,
   readTreatmentPages,
