@@ -553,11 +553,13 @@ describe('acceptance — cost per day and per template match a literal expected 
   it('reports a send made outside every trading window rather than dropping it', async () => {
     const rows = await messageCostByTradingDate(sql, window())
     const outside = rows.find((row) => row.tradingDate === null)
-    // An inner join would omit this row entirely, and the day's total would be short by 9 fils with
+    // An inner join would omit this row entirely, and the day's total would be short by 12 fils with
     // nothing to show why.
-    expect(outside).toEqual({ tradingDate: null, messages: 1, segments: 1, costFils: 9 })
+    expect(outside).toEqual({ tradingDate: null, messages: 1, segments: 1, costFils: 12 })
     const total = rows.reduce((sum, row) => sum + row.costFils, 0)
-    expect(total).toBe(54)
+    // 126 and not six times one rate: three English segments at 12 fils and the Arabic body's three at
+    // 30 (C-AUTO-02's per-encoding price table). The same total the per-template grouping produces.
+    expect(total).toBe(126)
   })
 
   it('prices the Arabic body at three segments, the worked example B-MSG-01 states', async () => {
@@ -571,13 +573,14 @@ describe('acceptance — cost per day and per template match a literal expected 
     const arabic = (
       await listMessageInbox(sql, { templateKey: fixture.smsTemplateKey, limit: 200 })
     ).find((row) => row.locale === 'ar')
-    expect(arabic).toMatchObject({ encoding: 'UCS-2', segments: 3, costFils: 27 })
-    // The control: the English body on the same template is one segment at 9 fils, so 27 is about
-    // Arabic rather than about this template.
+    expect(arabic).toMatchObject({ encoding: 'UCS-2', segments: 3, costFils: 90 })
+    // The control: the English body on the same template is one segment at 12 fils, so 90 is about
+    // Arabic rather than about this template — three segments instead of one, each at the dearer
+    // unicode rate, which is the figure docs/04 §5 asks an author to see before they send.
     const english = (
       await listMessageInbox(sql, { templateKey: fixture.smsTemplateKey, limit: 200 })
     ).find((row) => row.locale === 'en')
-    expect(english).toMatchObject({ encoding: 'GSM-7', segments: 1, costFils: 9 })
+    expect(english).toMatchObject({ encoding: 'GSM-7', segments: 1, costFils: 12 })
   })
 
   it('groups by template key, so an email costs nothing and an SMS costs its segments', async () => {

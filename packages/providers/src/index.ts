@@ -86,12 +86,7 @@ export {
   type ProviderRegistryOptions,
   type Providers,
 } from './registry.ts'
-export {
-  createFakeSmsala,
-  PROVISIONAL_COST_PER_SEGMENT_FILS,
-  SMSALA,
-  UNDELIVERABLE_SUFFIX,
-} from './sms/fake-smsala.ts'
+export { createFakeSmsala, SMSALA, UNDELIVERABLE_SUFFIX } from './sms/fake-smsala.ts'
 export type {
   DeliveryReceipt,
   DeliveryStatus,

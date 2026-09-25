@@ -4702,6 +4702,111 @@ units:
     - 'Playwright: the template editor reports UCS-2, 3 segments and a non-zero fils cost for the docs/04
       section 5 worked example of a 150-character Arabic body, updating on input; that example is a committed
       test case'
+    - 'NOTE: the calculator is packages/core/src/messaging/encoding.ts (the GSM 03.38 alphabet, the
+      extension table, encoding detection and the unit counter) and segments.ts (the segment count, the
+      cluster-safe split and the price table). Both files the manifest names exist, and what was NOT done is
+      add them beside the module that already held this arithmetic: B-MSG-01 put `segmentSms` and the
+      alphabet in packages/core/src/text/sms.ts, so that file was MOVED here and deleted, with its suite''s
+      cases kept in encoding.test.ts. A second copy of the alphabet is not a tidiness question — the fake
+      vendor bills from one and the authoring preview would read the other, and they agree until somebody
+      adds a character to one of them, at which point the price an author is shown stops being the price on
+      the invoice for exactly the bodies nobody tested. Nothing imported the old path (both consumers take
+      it from the @berelax/core barrel), so the move changed no call site.'
+    - 'NOTE: the price table is SMS_SEGMENT_PRICES in packages/core/src/messaging/segments.ts, keyed by
+      provider and then by encoding, at the manifest''s provisional 12 fils per GSM-7 segment and 30 per
+      UCS-2 one, each built with `money(fils(12))` so a rate card quoting AED 0.125 is a TYPE error (F05''s
+      IntegerLiteral, probed both ways in price.test.ts and by gate 86d). It replaced THREE declarations of
+      one number: `PROVISIONAL_FILS_PER_SEGMENT = 9` in packages/messaging/src/encoding.ts,
+      `PROVISIONAL_COST_PER_SEGMENT_FILS = 9` in packages/providers/src/sms/fake-smsala.ts, and nothing at
+      all in the editor this unit builds. Both constants are deleted and both call sites now read the table,
+      because the fake is what fills in `message.cost_fils` — so leaving the vendor on 9 while the preview
+      quoted 12 would have shipped an authoring screen that disagreed with the inbox about the same body,
+      which is the one defect this whole unit exists to prevent. The two rates DIFFER on purpose beyond
+      being what the manifest allocated: with one rate, "the cost is priced per encoding" is unfalsifiable —
+      a calculator that looked the encoding up and then ignored it would produce identical totals and pass
+      every test (brief rule 3), and gate 86h watches that happen. Consequent expectation changes in units
+      already done, all of them a rate substitution and none of them a rule change:
+      packages/fixtures/src/message-lifecycle.ts (EXPECTED_COST_BY_TRADING_DATE 36/9/9 -> 102/12/12 and
+      EXPECTED_COST_BY_TEMPLATE 54 -> 126, which still agree across the two groupings), its itest,
+      apps/web/src/messages-inbox.itest.ts (27 -> 90 fils), packages/messaging/src/encoding.test.ts and
+      send.test.ts (both now read the rate from the table rather than repeating it), and
+      packages/providers/src/behaviour.test.ts. docs/OPEN-QUESTIONS.md Y6-sms-rate carries the new
+      provisional value and the sharpened question, and the row says what happens if the contract charges
+      one rate for both: the two entries become the same number and nothing else changes.'
+    - 'NOTE: one thing the manifest and docs/04 §5 do not agree about, stated rather than smoothed over. §5
+      says "Arabic doubles the cost" and means the CAPACITY: 70 characters a segment against 160, so the
+      worked example is 3 segments where English is 1. The manifest''s provisional table then prices a UCS-2
+      segment at 2.5x a GSM-7 one, so the same worked example comes out at 90 fils against 12 — seven and a
+      half times, not three. Both figures are asserted (price.test.ts pins the 7.5 explicitly) because the
+      multiple is the number the screen exists to show, and it is a multiple of two provisional inputs
+      rather than of one: if SMSala bills one rate per segment regardless of encoding, the worked example is
+      3x and the only edit is one entry in the table. Nothing in this build reads the multiple as a
+      constant.'
+    - 'NOTE: `segments` and `unitSegments` are both reported, and the second acceptance line is about the
+      first. Unit arithmetic says 67 astral emoji are 134 UTF-16 units and therefore two concatenated
+      segments of 67 — which cannot be done, because 67 is odd and the 34th emoji would be cut through its
+      surrogate pair and arrive as two replacement characters. So `segments` is the number of parts a
+      cluster-safe split actually produces, `unitSegments` is `ceil(units / perSegment)`, and
+      `clusterCostsAnExtraSegment` names the difference. They are equal for every body of single-unit
+      characters, which is every case the 1..1000 property generates, so "segments == ceil(length /
+      perSegment)" holds exactly as the acceptance line states it; where they differ the money follows
+      `segments`, because those are the parts that will be handed to the vendor, and a preview that
+      under-states is the one direction nobody checks. A grapheme cluster too long for any segment (a
+      combining sequence over 67 code units) is split by CODE POINT and named in `splitClusters` rather than
+      split quietly — a surrogate pair is still never broken, because a code point is atomic.'
+    - 'NOTE: SCOPED, not satisfied in full — the editor at apps/web/app/(admin)/messaging/templates/editor/
+      prices a body and CREATES NOTHING, so C-AUTO-01''s residual gap (a variant INSERT that names
+      `approval_state = ''approved''` starts there without passing through `pending`, because the state
+      machine governs transitions) is NOT closed by this unit and is deferred to W-SYS-01, which owns the
+      settings surface and the approve/reject controls. The reason is the one the inbox and the two Google
+      routes next door already record: a creation is a write, there is no admin session until W-SYS-01, and
+      a variant created here would have no author to record — an invented one being worse than a blank
+      (brief rule 15). What this unit does instead of closing it is state the rule on the screen''s own face
+      and in its route header: the create path must insert at `draft` and reach `approved` through
+      `setTemplateApproval`, which is what migration 0061 fences, and
+      apps/web/src/template-editor-render.test.ts asserts the page says so. GET renders and POST prices;
+      POST rather than GET because the body is customer-facing copy and a query string is written to every
+      access log it passes through. A handler rather than a document for the reason B-MSG-04''s inbox gives
+      one directory along (a document must be served in both locales, which needs an Arabic admin document
+      and the W-SYS-01 shell).'
+    - 'NOTE: files added: packages/core/src/messaging/encoding.ts, segments.ts,
+      packages/core/test/fixtures/encoding-cases.json (40 hand-authored cases, committed answers, no
+      --emit), five core suites (encoding.test.ts, segments.test.ts, segments.fixture.test.ts,
+      segments.property.test.ts, price.test.ts),
+      apps/web/app/(admin)/messaging/templates/editor/{route.ts,render.ts},
+      apps/web/src/template-editor-render.test.ts and apps/web/src/template-editor.itest.ts. Changed:
+      packages/core/src/index.ts and text/index.ts (the move), packages/messaging/src/encoding.ts (delegates
+      to the table) and its barrel, packages/providers/src/sms/fake-smsala.ts, its barrel and
+      llm/named-fakes.ts (a comment naming the deleted constant), the six expectation files listed above,
+      apps/web/src/routes/registry.ts (the `template-editor` entry plus `/messaging` in
+      ADMIN_GROUP_PREFIXES, so the approve and reject screens W-SYS-01 adds beside this one arrive noindex),
+      packages/harness/src/ports.ts (the `template-editor` band at 9700, claimed by the itest — brief rule
+      18), scripts/check-core-purity.mjs (a scoped no-Date rule for packages/core/src/messaging: what a body
+      costs is a function of the body, and `Intl` stays because the grapheme walk needs `Intl.Segmenter`),
+      docs/OPEN-QUESTIONS.md, scripts/test-gates.mjs (gate 86a-86m) and this manifest.'
+    - 'NOTE: three things this unit''s own `pnpm verify` runs found in files it does not own. Two were
+      already fixed in main and are merged rather than re-fixed here (01847fc, a fast-forward: no commit of
+      this unit''s work); the third is this unit''s own and is fixed in the shared harness. (1)
+      packages/core/src/hr/working-hours.property.test.ts timed out at 6,034 ms against vitest''s undeclared
+      5,000 ms default, and packages/fixtures/src/availability-perf.itest.ts failed a wall-clock p95 budget
+      — both correctness tests carrying an implicit performance budget, which on a machine running six
+      verifies at once fail and name the machine rather than the thing under test. 01847fc states the
+      timeout and replaces the clock with a statement count; this unit merged it instead of writing its own
+      version. The same hazard was designed out of this unit''s own suites from the start: both property
+      tests carry an explicit `}, 30_000)` with the reason beside it. (2) apps/web/src/seo/brand.test.ts
+      refuses a bare-brand `<title>` anywhere under apps/web and caught "Template editor — BE RELAX admin".
+      The gate is right and was NOT widened: the title now carries no brand at all, which the rule
+      explicitly permits, because the full trading name on an internal authoring tool would say something it
+      does not mean and an exemption is a hole the next screen falls through. (3) THE INTERESTING ONE:
+      `primitives.itest.ts` drew port 4045 and `next start` exited with `Bad port: "4045" is reserved for
+      npp` before binding anything. Chrome''s unsafe-port list blocks it, so no free-port probe and no
+      address-in-use retry can rescue that draw — it is a policy about the port, and it presents as the dead
+      child packages/harness/src/server.ts exists to explain. `RESERVED_PORTS` in
+      packages/harness/src/ports.ts now lists the twelve blocked ports that could fall inside a band and
+      `testPort` draws from the usable ones, so the distribution stays uniform and no suite can be handed
+      one. Three bands contain one today: `primitives` holds 4045 (one draw in 300, which is the one this
+      unit drew), `shell` holds 3659, and `breakpoint-preview` holds seven, which is a suite that died on
+      better than one run in fifty. Gate 86m empties the list and watches ports.test.ts fail by name.'
     files:
     - packages/core/src/messaging/encoding.ts
     - packages/core/src/messaging/segments.ts

@@ -65,6 +65,24 @@ const SCOPED = [
     ],
   },
   {
+    // The messaging estate's authoring-time figures take no instant at all. What an SMS body costs is a
+    // function of the body: its alphabet, its segment count and the rate per segment. A `Date` here
+    // could only be a second opinion about *when* the figure was computed, and a preview whose number
+    // depends on when it was asked for cannot be checked against the invoice it is supposed to predict —
+    // which is the whole of docs/04 §5's requirement. `Intl` is deliberately NOT banned, unlike the two
+    // scopes below: `segments.ts` walks grapheme clusters with `Intl.Segmenter` so a surrogate pair is
+    // never split across a segment boundary, and that is a table lookup over the argument and nothing
+    // else. The retry policy in this directory is a declared table of waits in seconds and needs no
+    // clock either, which is why the whole directory is in scope rather than the two new files.
+    root: join(ROOT, 'messaging'),
+    forbidden: [
+      {
+        re: /\bDate\b/g,
+        why: 'the cost of a body is a function of the body; a preview that reads an instant cannot be checked against the invoice it predicts',
+      },
+    ],
+  },
+  {
     root: join(ROOT, 'ledger'),
     forbidden: [
       {
@@ -113,6 +131,9 @@ if (violations > 0) {
 const scopedFiles = walk(ROOT).filter((f) => SCOPED.some((scope) => f.startsWith(`${scope.root}/`)))
 console.log(
   `packages/core is pure (${walk(ROOT).length} files checked, ` +
-    `${scopedFiles.length} of them under the no-Date/no-Intl rule for ` +
+    // "a scoped rule" rather than "the no-Date/no-Intl rule": messaging bans Date and keeps Intl, and a
+    // summary that named the other two scopes' rule for all three would be a line stating something
+    // untrue about a gate.
+    `${scopedFiles.length} of them under a scoped rule, for ` +
     `${SCOPED.map((scope) => scope.root).join(' and ')}).`,
 )

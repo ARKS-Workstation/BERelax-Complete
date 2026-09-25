@@ -45,6 +45,7 @@ export const TEST_PORT_BANDS = {
   book: { start: 7000, width: 300 },
   home: { start: 8500, width: 300 },
   compliance: { start: 9400, width: 300 },
+  'template-editor': { start: 9700, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
@@ -89,11 +90,59 @@ export function bandsReachingEphemeralRange(): readonly string[] {
 }
 
 /**
+ * The ports a browser refuses to open, and `next start` therefore refuses to bind.
+ *
+ * Not an availability question and not a collision: `next start --port 4045` exits immediately with
+ * `Bad port: "4045" is reserved for npp`, because Chrome's unsafe-port list blocks it — a page served
+ * there could never be opened, so Next declines to serve one. The failure arrives as a dead child and
+ * reads exactly like the port bug this module exists to prevent, while being a POLICY that no retry and no
+ * free-port probe can do anything about.
+ *
+ * Three bands contain one today, which is why this is a filter rather than a comment: `primitives`
+ * [3800, 4100) holds 4045 — one draw in three hundred, and C-AUTO-02's verify drew it — `shell` holds
+ * 3659, and `breakpoint-preview` [6400, 6700) holds seven of them, which is a suite that dies on better
+ * than one run in fifty.
+ *
+ * Listed rather than computed, and only the members that could fall inside a band, so the set is
+ * reviewable: 3659 (apple-sasl), 4045 (npp/lockd), 5060 and 5061 (SIP), 6000 (X11), 6566 (sane-port),
+ * 6665-6669 and 6697 (IRC). Chrome's list is longer; everything else on it is below 3200, where no band
+ * starts, or above 10000, where none reaches — and {@link reservedPortsIn} is what keeps that reviewable
+ * when a band moves.
+ */
+export const RESERVED_PORTS: readonly number[] = [
+  3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697,
+]
+
+const RESERVED = new Set(RESERVED_PORTS)
+
+/** The reserved ports inside one band, in order. Empty for a band nothing blocks. */
+export function reservedPortsIn(band: TestPortBand): readonly number[] {
+  return RESERVED_PORTS.filter((port) => port >= band.start && port < band.start + band.width).sort(
+    (left, right) => left - right,
+  )
+}
+
+/** Every port in a band that a browser will actually open, which is what a draw may return. */
+export function usablePortsIn(band: TestPortBand): readonly number[] {
+  const ports: number[] = []
+  for (let port = band.start; port < band.start + band.width; port += 1) {
+    if (!RESERVED.has(port)) ports.push(port)
+  }
+  return ports
+}
+
+/**
  * A port inside the suite's own band.
  *
  * Random within the band, because several worktrees usually run at once and a fixed port means the second
  * one reads the first one's build. Random *within a band this file owns*, because a band the suite picked
- * for itself is how the overlaps above happened.
+ * for itself is how the overlaps above happened. And random within the ports a browser will **open**,
+ * because the alternative is a suite that dies on a draw rather than on anything it did — see
+ * {@link RESERVED_PORTS}.
+ *
+ * Drawn from the usable list rather than redrawn until acceptable: the distribution stays uniform, and a
+ * loop that retried a random draw could in principle not terminate, which is a worse failure than the one
+ * being fixed.
  */
 export function testPort(suite: TestSuiteName): number {
   const band = TEST_PORT_BANDS[suite]
@@ -101,5 +150,12 @@ export function testPort(suite: TestSuiteName): number {
   if (clashes.length > 0) {
     throw new Error(`[test-port-bands-overlap] ${clashes.join('; ')}`)
   }
-  return band.start + Math.floor(Math.random() * band.width)
+  const usable = usablePortsIn(band)
+  // `band.start` when there is nothing to draw from — a band of width zero, or one narrow enough to be
+  // entirely reserved. Both are registry defects, and both are reported BY NAME by `ports.test.ts`: a band
+  // must be at least 100 wide, and a draw must vary between calls. Falling back rather than throwing is
+  // what keeps those two failures the ones a reader sees; a throw from the drawer would replace them with a
+  // stack trace out of a helper, and it would replace the width-zero case gate 61d watches — "a fixed port
+  // wearing the registry's clothes" — with an exception that says nothing about bands.
+  return usable[Math.floor(Math.random() * usable.length)] ?? band.start
 }

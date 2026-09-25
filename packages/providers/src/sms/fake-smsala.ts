@@ -20,15 +20,23 @@
  * **Idempotency.** The same key returns the same message id and does not bill twice.
  */
 import { createHash } from 'node:crypto'
-import { segmentSms } from '@berelax/core'
+import { smsCost } from '@berelax/core'
 import type { CallLog } from '../call-log.ts'
 import { type FailureScript, failureError } from '../failure.ts'
 import type { DeliveryReceipt, SmsAccepted, SmsProvider, SmsRequest } from './port.ts'
 
 export const SMSALA = 'smsala'
 
-/** Fils per segment. Provisional — the real rate is on the SMSala contract (docs/05). */
-export const PROVISIONAL_COST_PER_SEGMENT_FILS = 9
+/**
+ * Fils per segment is NOT declared here.
+ *
+ * It was — `PROVISIONAL_COST_PER_SEGMENT_FILS = 9`, and a second copy of the same figure in
+ * `@berelax/messaging`. C-AUTO-02 moved the rate into `SMS_SEGMENT_PRICES` in `@berelax/core`, where the
+ * authoring preview reads it too, because the fake is what fills in `cost_fils` on the message row: two
+ * rates would mean the figure an author was shown at authoring time and the figure stored against the
+ * send were different numbers, which is exactly the surprise the preview exists to prevent. `smsCost`
+ * also prices the two encodings separately, which a single constant could not.
+ */
 
 /**
  * A recipient ending in this fails delivery after being accepted.
@@ -97,12 +105,15 @@ export function createFakeSmsala(options: FakeSmsalaOptions): SmsProvider {
         throw failureError(SMSALA, 'rejected')
       }
 
-      const segmentation = segmentSms(request.body)
+      // One call for both, so the count the vendor reports and the money it is billed at cannot be
+      // computed from two different readings of the same body.
+      const cost = smsCost(SMSALA, request.body)
+      const segmentation = cost.segmentation
       const accepted: SmsAccepted = {
         providerMessageId: providerMessageIdFor(SMSALA, request.idempotencyKey),
         segments: segmentation.segments,
         encoding: segmentation.encoding,
-        estimatedCostFils: segmentation.segments * PROVISIONAL_COST_PER_SEGMENT_FILS,
+        estimatedCostFils: cost.total.fils,
       }
       byIdempotencyKey.set(request.idempotencyKey, accepted)
 
