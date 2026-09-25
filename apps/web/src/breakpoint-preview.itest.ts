@@ -322,6 +322,19 @@ interface Visit {
    * image that failed on one attempt and not the next, which is a different defect entirely.
    */
   readonly brokenImages: readonly string[]
+  /**
+   * What the fit loop converged ON, read after it declared itself settled.
+   *
+   * `data-preview-settled=1` says the loop stopped changing its mind, not that it reached one canonical
+   * fit, so two "settled" captures can differ. Recorded for the same reason as `brokenImages`: the same
+   * value every attempt is the fit, and a value that CHANGES is the defect the broken-image set cannot see.
+   */
+  readonly fit: {
+    readonly passes: string
+    readonly repaints: string
+    readonly cards: number
+    readonly boxes: string
+  }
 }
 
 async function open(
@@ -468,7 +481,58 @@ async function open(
       })
       .sort(),
   )
-  return { page, context, requested, foreign, brokenImages }
+  /*
+   * And what the page's fit loop actually CONVERGED ON.
+   *
+   * `data-preview-settled=1` means the loop stopped changing its mind, not that it reached one canonical
+   * fit — so two captures can both be "settled" and be different. That is the gap that was left after the
+   * broken-image note: at dark-768 the note was identical on every attempt, which rules out an
+   * intermittently-failing image, and yet three of five captures were byte-identical while two differed,
+   * and the two odd ones were SMALLER. A smaller full-page PNG at the same viewport is less laid out, not
+   * differently coloured.
+   *
+   * The loop's own outputs are observable, so record them: how many passes it took, how many focal
+   * repaints it made, and the resolved crop box of every card. A fit that differs between attempts then
+   * arrives as a CHANGED NOTE, and `captureUntilStable` already says "the page itself changed between
+   * captures, not just its pixels" and prints both — which names the cause instead of leaving a digest
+   * list to be interpreted.
+   */
+  const fit = await page.evaluate(() => {
+    const root = document.documentElement
+    const boxes = [...document.querySelectorAll('[data-crop-width]')]
+      .map(
+        (card) =>
+          `${card.getAttribute('data-crop-left') ?? '?'},${card.getAttribute('data-crop-top') ?? '?'},` +
+          `${card.getAttribute('data-crop-width') ?? '?'}x${card.getAttribute('data-crop-height') ?? '?'}`,
+      )
+      .sort()
+    return {
+      passes: root.getAttribute('data-preview-passes') ?? '?',
+      repaints: root.getAttribute('data-focal-repaints') ?? '?',
+      cards: boxes.length,
+      boxes: boxes.join(' '),
+    }
+  })
+
+  return { page, context, requested, foreign, brokenImages, fit }
+}
+
+/**
+ * A PNG's pixel dimensions, straight out of its header.
+ *
+ * Bytes 16..24 of an IHDR chunk are width then height, big-endian, which is why this needs no decoder.
+ *
+ * Recorded because it is the one thing that separates the two remaining explanations for a page that
+ * alternates between renderings. The HTML of all six cells is byte-identical, so the states do not differ
+ * in content; and `fullPage: true` means a different laid-out HEIGHT produces a different image entirely.
+ * A 77 KB swing in a 4.8 MB capture is far too large for rasterisation noise and exactly what a few hundred
+ * extra rows of pixels look like. If the two states differ here, the defect is layout height settling
+ * inconsistently — which the fit loop's own "settled" flag does not cover, because it watches the fit and
+ * not the document.
+ */
+function pngSize(png: Uint8Array): { readonly width: number; readonly height: number } {
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
+  return { width: view.getUint32(16), height: view.getUint32(20) }
 }
 
 /** One cell photographed, with the two facts that prove the render really was that cell. */
@@ -478,6 +542,16 @@ interface Shot {
   readonly backgroundLuminance: number
   /** Images that did not load, by basename. Stable between attempts is a fixture; changing is a defect. */
   readonly brokenImages: readonly string[]
+  /**
+   * What the page's fit loop settled ON, not merely that it settled. Stable between attempts is the fit;
+   * changing is the defect, and it is the one the broken-image note cannot see.
+   */
+  readonly fit: {
+    readonly passes: string
+    readonly repaints: string
+    readonly cards: number
+    readonly boxes: string
+  }
 }
 
 /**
@@ -499,6 +573,7 @@ async function shoot(path: string, cell: Cell): Promise<Shot> {
       }),
       png: await visit.page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
       brokenImages: visit.brokenImages,
+      fit: visit.fit,
     }
   } finally {
     await visit.context.close()
@@ -1086,7 +1161,12 @@ describe('acceptance — the screenshot harness captures 3 viewports x 2 themes'
             // The note is what turns "the bytes differ" into a diagnosis. See `open`'s closing comment:
             // a set that changes between attempts means an image failed on one of them, which is a
             // different defect from a clock in the render and needs a different fix.
-            note: `images that failed to load: ${s.brokenImages.length === 0 ? 'none' : s.brokenImages.join(', ')}`,
+            note:
+              `${pngSize(s.png).width}x${pngSize(s.png).height}px; ` +
+              `images that failed to load: ` +
+              `${s.brokenImages.length === 0 ? 'none' : s.brokenImages.join(', ')}; ` +
+              `fit: ${s.fit.passes} pass(es), ${s.fit.repaints} focal repaint(s), ` +
+              `${s.fit.cards} card(s) at ${s.fit.boxes || 'no crop boxes'}`,
           })),
         {
           label,
