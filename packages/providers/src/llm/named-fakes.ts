@@ -65,8 +65,8 @@ export const REJECTED_KEY_MARKER = '-REJECTED-BY-PROVIDER'
  * two providers distinguishable — MiniMax is dearer here so that switching provider visibly changes the
  * recorded cost, which is what the settings criterion asks to be observable.
  *
- * The same shape as `PROVISIONAL_COST_PER_SEGMENT_FILS` in the SMSala fake, and it is replaced the same
- * way: by the rate on the signed contract, in one constant, before the first real call.
+ * The same shape as `SMS_SEGMENT_PRICES` in `@berelax/core`, and replaced the same way: by the rate on
+ * the signed contract, in one table, before the first real call.
  */
 export const PROVISIONAL_DEEPSEEK_PRICING: LlmPricing = Object.freeze({
   inputFilsPerMillionTokens: 500,

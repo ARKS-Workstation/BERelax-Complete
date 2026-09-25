@@ -13,7 +13,6 @@ export {
   campaignCost,
   costOf,
   type MessageCost,
-  PROVISIONAL_FILS_PER_SEGMENT,
 } from './encoding.ts'
 export {
   asPromotionalWindow,

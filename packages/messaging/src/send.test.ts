@@ -8,7 +8,14 @@
  * suite worth nothing.
  */
 import { type AppEnv, getDefinition, parseConfig } from '@berelax/config'
-import { businessDayFor, fixedClock, instantFromIso, localTime, toLocal } from '@berelax/core'
+import {
+  businessDayFor,
+  fixedClock,
+  instantFromIso,
+  localTime,
+  smsSegmentPrice,
+  toLocal,
+} from '@berelax/core'
 import { describe, expect, it } from 'vitest'
 import { costOf } from './encoding.ts'
 import {
@@ -484,7 +491,11 @@ describe('encoding, cost and the campaign cap', () => {
   })
 
   it('stops a campaign at its cap rather than on the invoice', async () => {
-    const campaign = new CampaignSpend(18)
+    // Two messages' worth, expressed as two times the rate rather than as the figure it happens to be:
+    // the rate is provisional (Y6-sms-rate), and a literal cap silently becomes a one-message cap the
+    // day it is corrected — which would make this test assert the wrong thing while still passing.
+    const cap = 2 * smsSegmentPrice('smsala', 'GSM-7').fils
+    const campaign = new CampaignSpend(cap)
     const { ctx } = harness({ campaign })
 
     const first = await sendMessage(ctx, requestFor(OFFER))
@@ -493,7 +504,7 @@ describe('encoding, cost and the campaign cap', () => {
 
     expect([first.kind, second.kind]).toEqual(['sent', 'sent'])
     expect(third).toMatchObject({ kind: 'blocked', reason: 'campaign_cap_exceeded' })
-    expect(campaign.spentFils).toBe(18)
+    expect(campaign.spentFils).toBe(cap)
   })
 
   it('refuses a cap that is not whole fils', () => {

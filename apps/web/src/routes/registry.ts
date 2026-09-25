@@ -513,6 +513,26 @@ export const ROUTES = [
       'immutable and already public. Absent from the sitemap because a sitemap lists documents.',
   },
   {
+    id: 'template-editor',
+    path: '/messaging/templates/editor',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-02s authoring-time cost preview: the encoding, segment count and fils an SMS body will ' +
+      'cost, recomputed as it is typed. docs/04 section 5 asks for it by name, because a 150-character ' +
+      'Arabic body is three segments and an author who learns that from the invoice has already sent it. ' +
+      'A handler rather than a document for the reason B-MSG-04s inbox gives one directory along: a ' +
+      'document must be served in both locales, which needs an Arabic admin document and the W-SYS-01 ' +
+      'shell. GET renders and POST prices — it writes nothing, creates no template and is NOT ' +
+      'authenticated, exactly as the routes under /settings record. The /messaging prefix in ' +
+      'ADMIN_GROUP_PREFIXES is what makes it noindex, so the approve and reject screens that land beside ' +
+      'it arrive excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
     id: 'pricing',
     path: '/pricing',
     kind: 'document',
@@ -753,11 +773,18 @@ export type RouteId = Route['id']
  * under it today are the calendar, the open-questions dashboard and the private evidence download, and the
  * third serves the bytes of a municipality inspection report. A per-route rule would have to be remembered
  * for the fourth, and the fourth is the one that leaks.
+ *
+ * `/messaging` is the template estate's, and it holds one route today: C-AUTO-02's cost preview. It is a
+ * prefix rather than an entry because the screens that go beside it are already allocated — C-AUTO-01's
+ * NOTE hands the approve and reject controls to W-SYS-01, and those show the words of every message this
+ * business sends, with a body an operator has not approved among them. The second route under a prefix
+ * arrives noindex on the commit that creates it rather than on the commit that remembers to.
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/analytics',
   '/compliance',
   '/hr',
+  '/messaging',
   '/settings',
 ]
 

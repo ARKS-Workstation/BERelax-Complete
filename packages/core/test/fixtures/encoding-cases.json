@@ -1,0 +1,455 @@
+{
+  "note": "C-AUTO-02's committed encoding fixture: 40 bodies with the encoding, unit count, segment count and remaining budget each one must produce, hand authored case by case. The expectations are committed, so a change to the GSM-7 alphabet, to either capacity or to the cluster-safe split fails packages/core/src/messaging/segments.fixture.test.ts rather than changing a price quietly. `units` is septets for GSM-7 and UTF-16 code units for UCS-2; `unitSegments` is ceil(units / perSegment) and differs from `segments` only where keeping a grapheme whole costs a segment the arithmetic does not charge for. Invisible characters are written as \\u escapes so the file can be reviewed; no name of a person appears in any body (ADR 0020).",
+  "limits": {
+    "GSM-7": {
+      "single": 160,
+      "concatenated": 153
+    },
+    "UCS-2": {
+      "single": 70,
+      "concatenated": 67
+    }
+  },
+  "cases": [
+    {
+      "id": "gsm7-empty",
+      "why": "An empty body is zero segments and costs nothing; one would be a charge for a message nobody wrote.",
+      "body": "",
+      "encoding": "GSM-7",
+      "units": 0,
+      "unitSegments": 0,
+      "segments": 0,
+      "remaining": 160,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-one-character",
+      "why": "The smallest billable message: one septet of the 160 a single segment holds.",
+      "body": "A",
+      "encoding": "GSM-7",
+      "units": 1,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 159,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-plain-confirmation",
+      "why": "The most common transactional body in this system, entirely inside the default alphabet.",
+      "body": "Your appointment is confirmed for 8pm.",
+      "encoding": "GSM-7",
+      "units": 38,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 122,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-basic-head-of-alphabet",
+      "why": "The head of the GSM 03.38 default alphabet: currency marks, accents and Greek capitals, one septet each.",
+      "body": "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ",
+      "encoding": "GSM-7",
+      "units": 29,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 131,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-digits-and-punctuation",
+      "why": "Digits and the punctuation a reminder actually uses, all of it basic rather than extended.",
+      "body": "0123456789 !\"#¤%&'()*+,-./:;<=>?",
+      "encoding": "GSM-7",
+      "units": 32,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 128,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-lowercase-latin-and-accents",
+      "why": "Lowercase Latin plus the five accented lowercase letters the default alphabet carries.",
+      "body": "abcdefghijklmnopqrstuvwxyzäöñüà",
+      "encoding": "GSM-7",
+      "units": 31,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 129,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-uppercase-and-national",
+      "why": "Uppercase Latin with the national characters, which look like a UCS-2 risk and are not.",
+      "body": "ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿¡",
+      "encoding": "GSM-7",
+      "units": 33,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 127,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-newline-and-carriage-return",
+      "why": "A line break costs one septet like any other basic character, which is why a formatted body is not free.",
+      "body": "Line one\nLine two\r",
+      "encoding": "GSM-7",
+      "units": 18,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 142,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-160-exact-single-segment",
+      "why": "The single-segment boundary, exactly at capacity: 160 septets is one segment with nothing left.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 160,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 0,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-161-becomes-two-segments",
+      "why": "One septet past the boundary drops the capacity to 153 per segment, so 161 is two segments and 145 units are wasted.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 161,
+      "unitSegments": 2,
+      "segments": 2,
+      "remaining": 145,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-154-is-still-one-segment",
+      "why": "Above the concatenated limit of 153 and below the single limit of 160: one segment, because a lone segment carries no UDH header.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 154,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 6,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-306-exact-two-segments",
+      "why": "Two concatenated GSM-7 segments exactly full: 2 x 153 septets, with no capacity wasted.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 306,
+      "unitSegments": 2,
+      "segments": 2,
+      "remaining": 0,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-307-becomes-three",
+      "why": "One septet past two segments is three, and the third is almost entirely empty.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 307,
+      "unitSegments": 3,
+      "segments": 3,
+      "remaining": 152,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-1000-characters",
+      "why": "A body nobody should send as SMS, priced anyway: 1000 septets is seven concatenated segments.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encoding": "GSM-7",
+      "units": 1000,
+      "unitSegments": 7,
+      "segments": 7,
+      "remaining": 71,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-euro",
+      "why": "The euro sign is an extension character: one glyph, two septets.",
+      "body": "€",
+      "encoding": "GSM-7",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 158,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-braces",
+      "why": "Curly braces are extension characters, which is how a templated body costs more than it looks.",
+      "body": "{}",
+      "encoding": "GSM-7",
+      "units": 4,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 156,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-square-brackets",
+      "why": "Square brackets, the other pair a developer types into a template without thinking.",
+      "body": "[]",
+      "encoding": "GSM-7",
+      "units": 4,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 156,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-tilde",
+      "why": "A tilde is two septets, not one, which is enough to push a full body into a second segment.",
+      "body": "~",
+      "encoding": "GSM-7",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 158,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-backslash",
+      "why": "A backslash is two septets; it appears in a body by accident more often than on purpose.",
+      "body": "\\",
+      "encoding": "GSM-7",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 158,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-pipe",
+      "why": "A pipe is two septets, and it is the separator a batch import writes into a body by accident.",
+      "body": "|",
+      "encoding": "GSM-7",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 158,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-caret",
+      "why": "A caret is two septets; it reaches a body from a spreadsheet formula more often than from an author.",
+      "body": "^",
+      "encoding": "GSM-7",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 158,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-extended-all-nine",
+      "why": "Every extension character the table holds, once: nine characters and eighteen septets.",
+      "body": "^{}\\[~]|€",
+      "encoding": "GSM-7",
+      "units": 18,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 142,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-159-plus-one-brace-overflows",
+      "why": "The trap this fixture exists for: 160 characters, 161 septets, two segments. A body that looks like it fits and does not.",
+      "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{",
+      "encoding": "GSM-7",
+      "units": 161,
+      "unitSegments": 2,
+      "segments": 2,
+      "remaining": 145,
+      "forcedBy": []
+    },
+    {
+      "id": "gsm7-price-with-a-euro-sign",
+      "why": "A real body with one extension character in it, so the septet count is one more than the character count.",
+      "body": "Total: €120 for the 90 minute treatment.",
+      "encoding": "GSM-7",
+      "units": 41,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 119,
+      "forcedBy": []
+    },
+    {
+      "id": "ucs2-single-arabic-character",
+      "why": "One Arabic character forces the whole body to UCS-2, where a segment holds 70 rather than 160.",
+      "body": "م",
+      "encoding": "UCS-2",
+      "units": 1,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 69,
+      "forcedBy": ["م"]
+    },
+    {
+      "id": "ucs2-one-arabic-character-in-english",
+      "why": "Eleven ASCII characters and one Arabic one: the eleven are now billed at the UCS-2 rate too.",
+      "body": "Booking ok م",
+      "encoding": "UCS-2",
+      "units": 12,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 58,
+      "forcedBy": ["م"]
+    },
+    {
+      "id": "ucs2-typographic-apostrophe",
+      "why": "The invisible cause: an apostrophe pasted from a word processor costs 90 characters of capacity and looks identical to an ASCII one.",
+      "body": "Don’t forget your appointment",
+      "encoding": "UCS-2",
+      "units": 29,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 41,
+      "forcedBy": ["’"]
+    },
+    {
+      "id": "ucs2-70-exact-single-segment",
+      "why": "The UCS-2 single-segment boundary, exactly at capacity: 70 characters, nothing left over.",
+      "body": "تتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتت",
+      "encoding": "UCS-2",
+      "units": 70,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 0,
+      "forcedBy": ["ت"]
+    },
+    {
+      "id": "ucs2-71-becomes-two-segments",
+      "why": "One character past 70 drops the capacity to 67 per segment, so 71 characters is two segments.",
+      "body": "تتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتت",
+      "encoding": "UCS-2",
+      "units": 71,
+      "unitSegments": 2,
+      "segments": 2,
+      "remaining": 63,
+      "forcedBy": ["ت"]
+    },
+    {
+      "id": "ucs2-134-exact-two-segments",
+      "why": "Two concatenated UCS-2 segments exactly full: 2 x 67 code units, with no capacity wasted.",
+      "body": "تتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتت",
+      "encoding": "UCS-2",
+      "units": 134,
+      "unitSegments": 2,
+      "segments": 2,
+      "remaining": 0,
+      "forcedBy": ["ت"]
+    },
+    {
+      "id": "ucs2-135-becomes-three",
+      "why": "One character past two UCS-2 segments is three, with the third segment holding a single character.",
+      "body": "تتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتت",
+      "encoding": "UCS-2",
+      "units": 135,
+      "unitSegments": 3,
+      "segments": 3,
+      "remaining": 66,
+      "forcedBy": ["ت"]
+    },
+    {
+      "id": "ucs2-arabic-150-the-docs-04-worked-example",
+      "why": "docs/04 section 5, verbatim: a short 150-character Arabic message is three segments. The same 150 characters in English would be one.",
+      "body": "تتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتتت",
+      "encoding": "UCS-2",
+      "units": 150,
+      "unitSegments": 3,
+      "segments": 3,
+      "remaining": 51,
+      "forcedBy": ["ت"]
+    },
+    {
+      "id": "ucs2-arabic-confirmation",
+      "why": "The Arabic half of a real booking confirmation: shorter than its English twin in characters and dearer to send.",
+      "body": "تم تأكيد موعدك في بي ريلاكس.",
+      "encoding": "UCS-2",
+      "units": 28,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 42,
+      "forcedBy": ["ت", "م", "أ", "ك", "ي", "د", "و", "ع", "ف", "ب", "ر", "ل", "ا", "س"]
+    },
+    {
+      "id": "ucs2-single-emoji",
+      "why": "An emoji outside the BMP is a surrogate pair, so one character the author sees costs two units.",
+      "body": "😀",
+      "encoding": "UCS-2",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 68,
+      "forcedBy": ["😀"]
+    },
+    {
+      "id": "ucs2-emoji-at-the-end-of-english",
+      "why": "A sign-off emoji forces UCS-2 and costs two units on top of that, so fourteen characters bill as fifteen.",
+      "body": "See you soon 😀",
+      "encoding": "UCS-2",
+      "units": 15,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 55,
+      "forcedBy": ["😀"]
+    },
+    {
+      "id": "ucs2-regional-indicator-flag",
+      "why": "The UAE flag is two regional indicators, four UTF-16 units, and one thing a reader sees.",
+      "body": "🇦🇪",
+      "encoding": "UCS-2",
+      "units": 4,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 66,
+      "forcedBy": ["🇦", "🇪"]
+    },
+    {
+      "id": "ucs2-combining-acute",
+      "why": "A base letter and a combining mark: two units, one grapheme, and the mark is what forces UCS-2.",
+      "body": "e\u0301",
+      "encoding": "UCS-2",
+      "units": 2,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 68,
+      "forcedBy": ["\u0301"]
+    },
+    {
+      "id": "ucs2-zwj-family-cluster",
+      "why": "A zero-width joiner sequence: eight UTF-16 units that render as one glyph and must never be split.",
+      "body": "👨\u200d👩\u200d👧",
+      "encoding": "UCS-2",
+      "units": 8,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 62,
+      "forcedBy": ["👨", "\u200d", "👩", "👧"]
+    },
+    {
+      "id": "ucs2-67-emoji-needs-a-third-segment",
+      "why": "134 units is two segments of 67 by arithmetic and cannot be done: 67 is odd, so the 34th emoji would be cut through its surrogate pair. Three segments, and the extra one is real.",
+      "body": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "encoding": "UCS-2",
+      "units": 134,
+      "unitSegments": 2,
+      "segments": 3,
+      "remaining": 67,
+      "forcedBy": ["😀"]
+    },
+    {
+      "id": "ucs2-arabic-with-a-sign-off-emoji",
+      "why": "Both causes of UCS-2 in one body, an Arabic letter and an astral emoji, so the forced-by list names both and neither is double counted.",
+      "body": "تم تأكيد موعدك في بي ريلاكس. 😀",
+      "encoding": "UCS-2",
+      "units": 31,
+      "unitSegments": 1,
+      "segments": 1,
+      "remaining": 39,
+      "forcedBy": ["ت", "م", "أ", "ك", "ي", "د", "و", "ع", "ف", "ب", "ر", "ل", "ا", "س", "😀"]
+    }
+  ]
+}

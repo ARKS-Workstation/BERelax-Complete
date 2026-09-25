@@ -201,7 +201,8 @@ describe('acceptance — the route answers HTML, noindex, and shows the send', (
     // The fixture's own rows, and the numbers the acceptance criterion asks to be visible.
     expect(html).toContain(fixture.smsTemplateKey)
     expect(html).toContain('UCS-2')
-    expect(html).toContain('27 fils')
+    // 90 fils: the Arabic body's three UCS-2 segments at the unicode rate in C-AUTO-02's price table.
+    expect(html).toContain('90 fils')
     expect(html).toContain('Nothing here left the building')
     // The vendor's word and the mapping, both.
     expect(html).toContain('DELIVRD')

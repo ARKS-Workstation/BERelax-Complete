@@ -1,11 +1,11 @@
 import { parseConfig } from '@berelax/config'
-import { aed } from '@berelax/core'
+import { aed, smsSegmentPrice } from '@berelax/core'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { BOUNCE_MARKER, COMPLAINT_MARKER } from './email/fake-resend.ts'
 import { REVIEW_FIXTURES } from './google/fake-google.ts'
 import { REFERENCE_MARKERS } from './payments/fake-gateway.ts'
 import { createProviders, type Providers } from './registry.ts'
-import { PROVISIONAL_COST_PER_SEGMENT_FILS, UNDELIVERABLE_SUFFIX } from './sms/fake-smsala.ts'
+import { UNDELIVERABLE_SUFFIX } from './sms/fake-smsala.ts'
 
 /**
  * What each fake gets *right about its real counterpart*.
@@ -73,7 +73,10 @@ describe('SMSala — segment counting, which is what a campaign actually costs',
     const accepted = await send('a'.repeat(160), 'en-1')
     expect(accepted.encoding).toBe('GSM-7')
     expect(accepted.segments).toBe(1)
-    expect(accepted.estimatedCostFils).toBe(PROVISIONAL_COST_PER_SEGMENT_FILS)
+    // The rate from the one price table the preview also reads, rather than a constant of the fake's
+    // own: the fake is what fills in `cost_fils`, so a rate of its own would make the authoring preview
+    // and the stored figure two different numbers.
+    expect(accepted.estimatedCostFils).toBe(smsSegmentPrice('smsala', 'GSM-7').fils)
   })
 
   it('bills an Arabic message at 70, so the same campaign costs more in Arabic', async () => {

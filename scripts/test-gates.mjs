@@ -23459,6 +23459,303 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 86a-86n. (C-AUTO-02) GSM-7 versus UCS-2, the cluster-safe split, and the price a body is quoted at.
+//
+// docs/04 §5 is the requirement and it is a compliance requirement rather than a nicety: "a short
+// 150-character Arabic message is three segments. Compute encoding, segments and cost at authoring time
+// and show it to whoever writes the copy." Every case below breaks one part of that and watches the suite
+// written for it fail BY NAME, because each one of these is a wrong PRICE rather than a wrong number: a
+// preview that under-states by a third is indistinguishable from a correct one until the invoice arrives.
+//
+// Three of the mutants are the implementations somebody would reach for first, which is why they are here
+// rather than in a comment. One limit for both cases is the obvious segment formula and it is wrong for
+// the seven septets between 153 and 160. Packing code points instead of grapheme clusters is the obvious
+// split and it cuts a ZWJ sequence in half. Packing code UNITS is the obvious optimisation of that and it
+// cuts a surrogate pair in half, which arrives on a customer's handset as two replacement characters.
+{
+  const SEGMENTS = 'packages/core/src/messaging/segments.ts'
+  const FIXTURE_JSON = 'packages/core/test/fixtures/encoding-cases.json'
+  const EDITOR_RENDER = 'apps/web/app/(admin)/messaging/templates/editor/render.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+
+  const CORE_SUITE = 'packages/core/src/messaging'
+  const SEGMENTS_SUITE = 'packages/core/src/messaging/segments.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/messaging/segments.property.test.ts'
+  const PRICE_SUITE = 'packages/core/src/messaging/price.test.ts'
+  const FIXTURE_SUITE = 'packages/core/src/messaging/segments.fixture.test.ts'
+  const EDITOR_SUITE = 'apps/web/src/template-editor-render.test.ts'
+  const REGISTRY_SUITE = 'apps/web/src/routes/registry.test.ts'
+
+  const runUnit = (file) => run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file])
+  const purity = () => run('node', ['scripts/check-core-purity.mjs'])
+
+  // 86a. The acceptance line asks for the clock fixture by name: "the calculator is in packages/core with
+  //      no I/O and no clock; core-must-be-pure and the Date.now known-bad fixture both hold".
+  {
+    const fixture = 'packages/core/src/messaging/__gate_fixture__.ts'
+    const result = withFixture(fixture, 'export const pricedAt = () => Date.now()', purity)
+    checkRejectedBy(
+      'cauto02 gate: a clock read in packages/core/src/messaging is caught',
+      result,
+      'reading the clock',
+    )
+  }
+
+  // 86b. The scoped rule this unit ADDED, which the global one cannot catch: `new Date(iso)` reads no
+  //      clock, and an authoring preview still has no business taking an instant. What a body costs is a
+  //      function of the body, and a figure that depends on when it was computed cannot be checked against
+  //      the invoice it predicts.
+  {
+    const fixture = 'packages/core/src/messaging/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      'export const quotedAt = (iso: string) => new Date(iso).getTime()',
+      purity,
+    )
+    checkRejectedBy(
+      'cauto02 gate: any Date in packages/core/src/messaging is caught by the scoped rule',
+      result,
+      'the cost of a body is a function of the body',
+    )
+  }
+
+  // 86c. The other half of the same acceptance line. `pnpm purity` scans for ambient globals and would not
+  //      notice an import at all, which is why both fixtures exist rather than one.
+  {
+    const fixture = 'packages/core/src/messaging/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      [
+        "import postgres from 'postgres'",
+        'export const rates = (url: string) => postgres(url)`select 1`',
+      ].join('\n'),
+      () =>
+        run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages/core']),
+    )
+    checkRejectedBy(
+      'cauto02 gate: a database import in packages/core/src/messaging is caught by core-must-be-pure',
+      result,
+      'core-must-be-pure',
+    )
+  }
+
+  // 86d. "Constructing a price from a float is a type error." The fixture is the spelling somebody
+  //      actually writes when a rate card quotes AED 0.125 per segment, and `tsc` is the only thing that
+  //      can refuse it — `price.test.ts` states the same claim with `@ts-expect-error`, and a type-level
+  //      assertion nobody has seen fail may not be one (ADR 0003).
+  {
+    const fixture = 'packages/core/src/messaging/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      [
+        "import { fils, money } from '../money.ts'",
+        "import type { SmsProviderPrices } from './segments.ts'",
+        'export const rate: SmsProviderPrices = {',
+        "  perSegment: { 'GSM-7': money(fils(12.5)), 'UCS-2': money(fils(30)) },",
+        "  provisionalUntil: 'Y6-sms-rate',",
+        "  why: 'a rate card quoted in AED and pasted in without converting to fils',",
+        '}',
+      ].join('\n'),
+      () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'cauto02 gate: a fractional fils rate in a price table fails the typechecker',
+      result,
+      "Argument of type '12.5' is not assignable to parameter of type 'never'",
+    )
+  }
+
+  // 86e. One limit for both cases: the obvious formula, and wrong for every length between 154 and 160
+  //      septets — a 155-character English body billed as two segments rather than one. Both spellings of
+  //      the limit are moved, so the two counts still agree and the property fails about the COUNT rather
+  //      than about their disagreement.
+  withEditedFile(
+    SEGMENTS,
+    (source) =>
+      replaceOnce(
+        replaceOnce(
+          source,
+          'const unitSegments = units <= limits.single ? 1 : Math.ceil(units / limits.concatenated)',
+          'const unitSegments = units <= limits.concatenated ? 1 : Math.ceil(units / limits.concatenated)',
+        ),
+        '    units <= limits.single\n      ? { parts: [body], splitClusters: [] as readonly string[] }',
+        '    units <= limits.concatenated\n      ? { parts: [body], splitClusters: [] as readonly string[] }',
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: using the concatenated limit for a single segment fails the 1..1000 property',
+        runUnit(PROPERTY_SUITE),
+        'the segment count disagrees with ceil(length / perSegment)',
+      )
+    },
+  )
+
+  // 86f. Packing code points rather than grapheme clusters. A surrogate pair survives it — a code point is
+  //      atomic — so the emoji case would still pass, and a ZWJ family is cut between its members: the
+  //      recipient is sent a man, a joiner and a woman where one glyph was written. Asserted against the
+  //      FIXED body in `segments.test.ts` rather than the generator, so the case cannot be the one run in
+  //      a hundred where no boundary happens to land inside a cluster.
+  withEditedFile(
+    SEGMENTS,
+    (source) =>
+      replaceOnce(
+        source,
+        'return [...GRAPHEMES.segment(body)].map((piece) => piece.segment)',
+        'return [...body]',
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: packing code points rather than clusters cuts a ZWJ sequence in half',
+        runUnit(SEGMENTS_SUITE),
+        'a part ending in a joiner is a sequence cut in half',
+      )
+    },
+  )
+
+  // 86g. Packing code UNITS, which is what the billing arithmetic counts and therefore the tempting
+  //      optimisation. 67 is odd, so the 34th emoji is split down the middle of its surrogate pair and
+  //      both halves arrive as replacement characters.
+  withEditedFile(
+    SEGMENTS,
+    (source) =>
+      replaceOnce(
+        source,
+        'return [...GRAPHEMES.segment(body)].map((piece) => piece.segment)',
+        "return body.split('')",
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: packing code units splits a surrogate pair across a segment boundary',
+        runUnit(SEGMENTS_SUITE),
+        'a part ending in a high surrogate is a pair cut in half',
+      )
+    },
+  )
+
+  // 86h. One rate for both encodings. It is not an arithmetic error and every total it produces is
+  //      internally consistent — which is exactly why the price test asserts the two differ: with one rate
+  //      a calculator that looked the encoding up and then ignored it would pass every other assertion in
+  //      the file (brief rule 3).
+  withEditedFile(
+    SEGMENTS,
+    (source) => replaceOnce(source, "'UCS-2': money(fils(30))", "'UCS-2': money(fils(12))"),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: pricing both encodings the same makes the encoding lookup unfalsifiable',
+        runUnit(PRICE_SUITE),
+        'so the lookup is load-bearing',
+      )
+    },
+  )
+
+  // 86i. Pricing the unit arithmetic instead of the parts that will be sent. It under-states by one whole
+  //      segment for a body whose clusters do not divide the capacity — the one direction a cost preview
+  //      must never be wrong in, because nobody checks a bill that came in under the estimate.
+  withEditedFile(
+    SEGMENTS,
+    (source) =>
+      replaceOnce(
+        source,
+        'total: multiply(unitPrice, segmentation.segments),',
+        'total: multiply(unitPrice, segmentation.unitSegments),',
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: pricing unitSegments rather than the parts under-states a cluster-safe split',
+        runUnit(PRICE_SUITE),
+        'charges the extra segment a cluster-safe split needs',
+      )
+    },
+  )
+
+  // 86j. A copy of the rule in the browser. The inline script paints figures the server computed; the
+  //      moment it knows what 160 means, the author's preview and the vendor's bill are two
+  //      implementations that agree for every body anybody tested.
+  withEditedFile(
+    EDITOR_RENDER,
+    (source) =>
+      replaceOnce(source, '  let latest = 0\n', '  let latest = 0\n  const singleSegment = 160\n'),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: a segment capacity in the inline script fails the editor suite',
+        runUnit(EDITOR_SUITE),
+        'carries a script that paints figures and computes none',
+      )
+    },
+  )
+
+  // 86k. A committed expectation, changed. The fixture's forty answers are prices, and the golden file
+  //      exists so that changing one is a decision somebody made rather than a diff nobody read — which is
+  //      worth nothing unless a changed one fails.
+  withEditedFile(
+    FIXTURE_JSON,
+    (source) =>
+      replaceOnce(
+        source,
+        '"units": 150,\n      "unitSegments": 3,\n      "segments": 3,\n      "remaining": 51,',
+        '"units": 150,\n      "unitSegments": 3,\n      "segments": 3,\n      "remaining": 52,',
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: a changed answer in the committed 40-case fixture fails its suite',
+        runUnit(FIXTURE_SUITE),
+        'ucs2-arabic-150-the-docs-04-worked-example',
+      )
+    },
+  )
+
+  // 86l. The editor route, unregistered. A route the registry does not know about is absent from the
+  //      sitemap, carries no hreflang and is never screenshotted, and none of the three is a build error on
+  //      its own — which is what the bijection is for. The path is moved rather than the entry deleted, so
+  //      the case exercises both directions of it at once.
+  withEditedFile(
+    REGISTRY,
+    (source) =>
+      replaceOnce(
+        source,
+        "    path: '/messaging/templates/editor',",
+        "    path: '/messaging/templates/editor-renamed',",
+      ),
+    () => {
+      checkRejectedBy(
+        'cauto02 gate: the editor route missing from the registry fails the bijection',
+        runUnit(REGISTRY_SUITE),
+        'route-without-registry-entry',
+      )
+    },
+  )
+
+  // 86m. REMOVED at merge, deliberately, and the slot is kept so the numbering below still matches the
+  //      report this block was written with.
+  //
+  //      C-AUTO-02 hit `Bad port: "4045" is reserved for npp` on its own verify and excluded the ports a
+  //      browser refuses from the shared band registry. So did another unit, independently, and main kept
+  //      that one: a strict superset of these ports (4190 and 6679 as well), with the index arithmetic
+  //      extracted into `portAtIndex` so the guard is tested by calling the real mapping instead of a copy
+  //      of it. This case cannot survive that. It anchored on C-AUTO-02's own twelve-port line, which no
+  //      longer exists, and it asserted the rule name `never draw a port a browser refuses to open`, which
+  //      the suite main kept never emits.
+  //
+  //      The claim is not lost: emptying the list and removing the skip both end in a restricted port being
+  //      drawable, and case 89b mutates the skip and asserts the message the surviving suite actually
+  //      prints — `which a browser refuses`. Two cases asserting one string would not be twice the
+  //      coverage; it would be one claim with two names for it.
+
+  // 86n. The control, and the only case here that would notice if the twelve above were rejecting a tree
+  //      that was already red.
+  {
+    const core = runUnit(CORE_SUITE)
+    const editor = runUnit(EDITOR_SUITE)
+    const registry = runUnit(REGISTRY_SUITE)
+    const pure = purity()
+    check(
+      'cauto02 gate: the committed calculator, editor and registry all pass',
+      !core.failed && !editor.failed && !registry.failed && !pure.failed,
+      `a committed suite failed:\n${core.output}${editor.output}${registry.output}${pure.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -23836,9 +24133,16 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // 89c. A port lost with NO restricted port drawn, which is a different defect from 89b and has to be a
   //      different mutation. The obvious candidate — `>` for `>=` in the skip — makes a restricted port
   //      drawable as well, so it fails on 89b's assertion and this case's rule name never appears; that is
-  //      exactly how this case came to report its rule as missing while the test failed correctly. Drawing
+  //      exactly how this case came to report its rule as missing while the test failed correctly. Clamping
   //      one index short instead skips every restricted port properly and simply never reaches the last
   //      usable one.
+  //
+  //      This anchor was dead for three commits and the case would have THROWN rather than failed:
+  //      extracting `portAtIndex` moved the draw's arithmetic out of `testPort`, and the line this case
+  //      used to mutate — `band.start + Math.floor(Math.random() * (band.width - blocked.length))` — stopped
+  //      existing. `replaceOnce` refusing a missing anchor is what makes that recoverable rather than a
+  //      case that silently passes over nothing; the lesson is that a gate mutating a file by exact text is
+  //      a dependency of that file, and refactoring one is editing both.
   checkRejectedBy(
     'determinism gate: a draw that loses a usable port is caught',
     withEditedFile(
@@ -23846,8 +24150,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       (text) =>
         replaceOnce(
           text,
-          '  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length))',
-          '  let port = band.start + Math.floor(Math.random() * (band.width - blocked.length - 1))',
+          '  let port = band.start + Math.min(Math.max(index, 0), usable - 1)',
+          '  let port = band.start + Math.min(Math.max(index, 0), usable - 2)',
         ),
       () => runExpectingFailure('pnpm', unit(PORTS_SUITE)),
     ),

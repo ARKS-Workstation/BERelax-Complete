@@ -1,5 +1,18 @@
+import { smsSegmentPrice } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import { campaignCost, costOf, PROVISIONAL_FILS_PER_SEGMENT } from './encoding.ts'
+import { campaignCost, costOf } from './encoding.ts'
+
+/**
+ * The two rates, read from the one table rather than written down here.
+ *
+ * They used to be one constant in `encoding.ts`, `PROVISIONAL_FILS_PER_SEGMENT = 9`. C-AUTO-02 moved the
+ * rate into `SMS_SEGMENT_PRICES` in `@berelax/core` and gave the two encodings separate prices, because
+ * the authoring preview, this cost and the figure the fake vendor bills all have to be the same number —
+ * and a UCS-2 rate that cannot differ from the GSM-7 one is a table nobody can correct when the contract
+ * arrives. Read rather than repeated, so a corrected rate does not need an edit in this file.
+ */
+const GSM7_FILS = smsSegmentPrice('smsala', 'GSM-7').fils
+const UCS2_FILS = smsSegmentPrice('smsala', 'UCS-2').fils
 
 /** Table-driven, because the interesting cases are the boundaries and they are easy to miss one at a time. */
 const CASES: readonly {
@@ -68,7 +81,9 @@ describe('encoding, segments and cost', () => {
       expect(cost.encoding).toBe(testCase.encoding)
       expect(cost.segments).toBe(testCase.segments)
       expect(cost.units).toBe(testCase.units)
-      expect(cost.costFils).toBe(testCase.segments * PROVISIONAL_FILS_PER_SEGMENT)
+      expect(cost.costFils).toBe(
+        testCase.segments * (testCase.encoding === 'GSM-7' ? GSM7_FILS : UCS2_FILS),
+      )
     })
   }
 
@@ -78,7 +93,7 @@ describe('encoding, segments and cost', () => {
     const cost = costOf('sms', 'م'.repeat(150))
     expect(cost.segments).toBe(3)
     expect(cost.encoding).toBe('UCS-2')
-    expect(cost.costFils).toBe(27)
+    expect(cost.costFils).toBe(3 * UCS2_FILS)
   })
 })
 
@@ -86,7 +101,8 @@ describe('the asymmetry a campaign budget has to show', () => {
   it('makes a body that fits in English spill into a second segment in Arabic', () => {
     // The asymmetry at the length a real reminder actually is. Both are around a hundred characters;
     // the English one fits a 160-character segment and the Arabic one does not fit a 70-character
-    // one, so the same message costs twice as much to the Arabic half of the customer base.
+    // one, so the same message costs several times as much to the Arabic half of the customer base:
+    // twice the segments, and each of those segments at the dearer unicode rate.
     const english = costOf(
       'sms',
       'Reminder: your booking tomorrow at 20:00. Details or changes: brlx.ae/b/AbCdEf and thank you.',
@@ -98,7 +114,8 @@ describe('the asymmetry a campaign budget has to show', () => {
     expect(english.segments).toBe(1)
     expect(arabic.segments).toBe(2)
     expect(arabic.units).toBeLessThan(english.units)
-    expect(arabic.costFils).toBe(english.costFils * 2)
+    expect(english.costFils).toBe(GSM7_FILS)
+    expect(arabic.costFils).toBe(2 * UCS2_FILS)
   })
 
   it('names the character that forced UCS-2, because the usual cause is invisible', () => {
@@ -111,7 +128,7 @@ describe('the asymmetry a campaign budget has to show', () => {
 
   it('multiplies by recipients, which is the number a campaign screen shows', () => {
     const body = 'م'.repeat(150)
-    expect(campaignCost('sms', body, 400)).toBe(27 * 400)
+    expect(campaignCost('sms', body, 400)).toBe(3 * UCS2_FILS * 400)
   })
 })
 

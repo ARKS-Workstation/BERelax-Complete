@@ -130,9 +130,12 @@ export interface SeededMessagingFixture {
  * because the salon was shut — it is reported under a null trading date rather than dropped.
  */
 export const EXPECTED_COST_BY_TRADING_DATE = [
-  { tradingDate: FIXTURE_TRADING_DATE_ONE, messages: 2, segments: 4, costFils: 36 },
-  { tradingDate: FIXTURE_TRADING_DATE_TWO, messages: 2, segments: 1, costFils: 9 },
-  { tradingDate: null, messages: 1, segments: 1, costFils: 9 },
+  // 102 rather than 4 x one rate: the four segments on this date are one GSM-7 segment at 12 fils and
+  // the Arabic body's three at 30 each. The two encodings are priced separately (C-AUTO-02's
+  // SMS_SEGMENT_PRICES), so a cost cannot be recovered from a segment count without knowing which.
+  { tradingDate: FIXTURE_TRADING_DATE_ONE, messages: 2, segments: 4, costFils: 102 },
+  { tradingDate: FIXTURE_TRADING_DATE_TWO, messages: 2, segments: 1, costFils: 12 },
+  { tradingDate: null, messages: 1, segments: 1, costFils: 12 },
 ] as const
 
 /**
@@ -140,12 +143,14 @@ export const EXPECTED_COST_BY_TRADING_DATE = [
  *
  * Six and not four, which is the whole reason this total is stated rather than computed: three of the
  * four English-and-Arabic bodies are one segment each and the Arabic one is **three**, because a segment
- * holds 70 UCS-2 characters rather than 160 GSM-7 ones. 6 x 9 fils is 54, and the per-trading-date rows
- * above sum to the same 54 — two independent groupings of one set of rows, which is what makes either
- * literal worth asserting.
+ * holds 70 UCS-2 characters rather than 160 GSM-7 ones. The cost is 3 x 12 + 3 x 30 = 126 fils — the
+ * three English segments at the GSM-7 rate and the Arabic body's three at the dearer unicode one — and
+ * the per-trading-date rows above sum to the same 126. Two independent groupings of one set of rows,
+ * which is what makes either literal worth asserting; the ratio between them is also the figure docs/04
+ * §5 asks to be visible at authoring time, arriving here as seven and a half times the English body.
  */
 export const EXPECTED_COST_BY_TEMPLATE = {
-  sms: { messages: 4, segments: 6, costFils: 54 },
+  sms: { messages: 4, segments: 6, costFils: 126 },
   email: { messages: 1, segments: 0, costFils: 0 },
 } as const
 
