@@ -1,0 +1,44 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "tag_it"
+    },
+    {
+      "branch": "default",
+      "from": "no_show",
+      "to": "tag_it"
+    },
+    {
+      "branch": "default",
+      "from": "tag_it",
+      "to": "done"
+    }
+  ],
+  "key": "two_triggers",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "event": "appointment.no_show",
+      "id": "no_show",
+      "kind": "trigger"
+    },
+    {
+      "id": "tag_it",
+      "kind": "action_tag",
+      "tag": "visit_ended"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "Two ways in, which is two flows"
+}

@@ -1,0 +1,37 @@
+{
+  "description": "The laundering C-AUTO-01 exists to prevent, attempted from the flow editor: booking.confirmed is transactional, so this node would leave from the transactional sender identity with promotional intent and no opt-out route.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "offer"
+    },
+    {
+      "branch": "default",
+      "from": "offer",
+      "to": "done"
+    }
+  ],
+  "key": "promotional_on_transactional",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "channel": "sms",
+      "id": "offer",
+      "kind": "action_message",
+      "messageClass": "promotional",
+      "templateKey": "booking.confirmed"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A promotional node bound to a transactional template"
+}

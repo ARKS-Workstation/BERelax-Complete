@@ -1,0 +1,57 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "is_vip"
+    },
+    {
+      "branch": "true",
+      "from": "is_vip",
+      "to": "tag_visit"
+    },
+    {
+      "branch": "false",
+      "from": "is_vip",
+      "to": "not_vip"
+    },
+    {
+      "branch": "default",
+      "from": "tag_visit",
+      "to": "noted"
+    }
+  ],
+  "key": "vip_visit_tag",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "is_vip",
+      "kind": "condition",
+      "test": {
+        "fact": "is_vip",
+        "operator": "is_true"
+      }
+    },
+    {
+      "id": "tag_visit",
+      "kind": "action_tag",
+      "tag": "vip_visit"
+    },
+    {
+      "id": "noted",
+      "kind": "exit",
+      "reason": "goal_met"
+    },
+    {
+      "id": "not_vip",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Tag a VIP visit for the owner report"
+}

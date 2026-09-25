@@ -1,0 +1,37 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "is_vip"
+    },
+    {
+      "branch": "true",
+      "from": "is_vip",
+      "to": "done"
+    }
+  ],
+  "key": "condition_with_one_branch",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "is_vip",
+      "kind": "condition",
+      "test": {
+        "fact": "is_vip",
+        "operator": "is_true"
+      }
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A condition that answers only one way"
+}

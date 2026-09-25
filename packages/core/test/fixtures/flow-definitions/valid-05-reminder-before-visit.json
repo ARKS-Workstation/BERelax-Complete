@@ -1,0 +1,70 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "confirmed",
+      "to": "day_before"
+    },
+    {
+      "branch": "default",
+      "from": "day_before",
+      "to": "still_welcome"
+    },
+    {
+      "branch": "true",
+      "from": "still_welcome",
+      "to": "remind"
+    },
+    {
+      "branch": "false",
+      "from": "still_welcome",
+      "to": "blocked"
+    },
+    {
+      "branch": "default",
+      "from": "remind",
+      "to": "done"
+    }
+  ],
+  "key": "reminder_before_visit",
+  "nodes": [
+    {
+      "event": "appointment.confirmed",
+      "id": "confirmed",
+      "kind": "trigger"
+    },
+    {
+      "id": "day_before",
+      "kind": "delay",
+      "minutes": 1440
+    },
+    {
+      "id": "still_welcome",
+      "kind": "condition",
+      "test": {
+        "fact": "is_blocklisted",
+        "operator": "is_false"
+      }
+    },
+    {
+      "channel": "sms",
+      "id": "remind",
+      "kind": "action_message",
+      "messageClass": "transactional",
+      "note": "Transactional: a reminder is not consent-gated and is not confined to the promotional window.",
+      "templateKey": "booking.reminder"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    },
+    {
+      "id": "blocked",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Remind a confirmed booking"
+}

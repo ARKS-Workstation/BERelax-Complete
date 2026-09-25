@@ -1,0 +1,39 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "step"
+    },
+    {
+      "branch": "default",
+      "from": "step",
+      "to": "done"
+    }
+  ],
+  "key": "duplicate_node_id",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "step",
+      "kind": "action_tag",
+      "tag": "first_step"
+    },
+    {
+      "id": "step",
+      "kind": "action_tag",
+      "tag": "second_step"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "Two nodes sharing one id"
+}

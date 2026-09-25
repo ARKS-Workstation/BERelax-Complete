@@ -1,0 +1,88 @@
+{
+  "description": "Three sixty-day waits: 259,200 minutes, which is exactly the maximum accumulated path delay. The boundary case, valid — one minute more is invalid-07.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "first_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "first_sixty",
+      "to": "second_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "second_sixty",
+      "to": "third_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "third_sixty",
+      "to": "still_away"
+    },
+    {
+      "branch": "true",
+      "from": "still_away",
+      "to": "tag_dormant"
+    },
+    {
+      "branch": "false",
+      "from": "still_away",
+      "to": "came_back"
+    },
+    {
+      "branch": "default",
+      "from": "tag_dormant",
+      "to": "done"
+    }
+  ],
+  "key": "dormancy_at_the_delay_ceiling",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "first_sixty",
+      "kind": "delay",
+      "minutes": 86400
+    },
+    {
+      "id": "second_sixty",
+      "kind": "delay",
+      "minutes": 86400
+    },
+    {
+      "id": "third_sixty",
+      "kind": "delay",
+      "minutes": 86400
+    },
+    {
+      "id": "still_away",
+      "kind": "condition",
+      "test": {
+        "fact": "has_future_appointment",
+        "operator": "is_false"
+      }
+    },
+    {
+      "id": "tag_dormant",
+      "kind": "action_tag",
+      "tag": "dormant_six_months"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    },
+    {
+      "id": "came_back",
+      "kind": "exit",
+      "reason": "goal_met"
+    }
+  ],
+  "title": "Dormancy check at exactly the delay maximum"
+}

@@ -1,0 +1,106 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "quarters"
+    },
+    {
+      "branch": "first",
+      "from": "quarters",
+      "to": "tag_first"
+    },
+    {
+      "branch": "second",
+      "from": "quarters",
+      "to": "tag_second"
+    },
+    {
+      "branch": "third",
+      "from": "quarters",
+      "to": "tag_third"
+    },
+    {
+      "branch": "fourth",
+      "from": "quarters",
+      "to": "tag_fourth"
+    },
+    {
+      "branch": "default",
+      "from": "tag_first",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "tag_second",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "tag_third",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "tag_fourth",
+      "to": "done"
+    }
+  ],
+  "key": "four_way_split",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "branches": [
+        {
+          "label": "first",
+          "weightPerMille": 250
+        },
+        {
+          "label": "second",
+          "weightPerMille": 250
+        },
+        {
+          "label": "third",
+          "weightPerMille": 250
+        },
+        {
+          "label": "fourth",
+          "weightPerMille": 250
+        }
+      ],
+      "id": "quarters",
+      "kind": "split"
+    },
+    {
+      "id": "tag_first",
+      "kind": "action_tag",
+      "tag": "cohort_first"
+    },
+    {
+      "id": "tag_second",
+      "kind": "action_tag",
+      "tag": "cohort_second"
+    },
+    {
+      "id": "tag_third",
+      "kind": "action_tag",
+      "tag": "cohort_third"
+    },
+    {
+      "id": "tag_fourth",
+      "kind": "action_tag",
+      "tag": "cohort_fourth"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "Four-way split, the widest this DSL allows"
+}

@@ -1,0 +1,68 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "is_lapsed"
+    },
+    {
+      "branch": "true",
+      "from": "is_lapsed",
+      "to": "tag_it"
+    },
+    {
+      "branch": "false",
+      "from": "is_lapsed",
+      "to": "not_lapsed"
+    },
+    {
+      "branch": "default",
+      "from": "tag_it",
+      "to": "move_card"
+    },
+    {
+      "branch": "default",
+      "from": "move_card",
+      "to": "done"
+    }
+  ],
+  "key": "lifecycle_lapsed_confirmation",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "is_lapsed",
+      "kind": "condition",
+      "test": {
+        "fact": "lifecycle_state",
+        "operator": "equals",
+        "value": "lapsed"
+      }
+    },
+    {
+      "id": "tag_it",
+      "kind": "action_tag",
+      "tag": "lapsed_confirmed"
+    },
+    {
+      "id": "move_card",
+      "kind": "action_stage",
+      "stage": "lapsed"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    },
+    {
+      "id": "not_lapsed",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Confirm a lapsed record and move its card"
+}

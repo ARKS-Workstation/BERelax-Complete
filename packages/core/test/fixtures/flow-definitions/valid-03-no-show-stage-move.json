@@ -1,0 +1,45 @@
+{
+  "description": "No message at all: a no-show moves the card and tags the record, and nothing is sent.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "no_show",
+      "to": "move_card"
+    },
+    {
+      "branch": "default",
+      "from": "move_card",
+      "to": "tag_it"
+    },
+    {
+      "branch": "default",
+      "from": "tag_it",
+      "to": "done"
+    }
+  ],
+  "key": "no_show_stage_move",
+  "nodes": [
+    {
+      "event": "appointment.no_show",
+      "id": "no_show",
+      "kind": "trigger"
+    },
+    {
+      "id": "move_card",
+      "kind": "action_stage",
+      "stage": "lapsing"
+    },
+    {
+      "id": "tag_it",
+      "kind": "action_tag",
+      "tag": "no_show_recorded"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "Record a no-show on the pipeline"
+}

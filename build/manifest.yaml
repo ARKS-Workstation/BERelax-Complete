@@ -5198,6 +5198,81 @@ units:
       corpus, so a builder cannot silently drop a field'
     - The validator and static analyser live in packages/core; core-must-be-pure holds and the Date.now
       fixture fires on the package
+    - 'NOTE: migration 0070_flow_definition_and_enrolment.sql and SCHEMA_VERSION is 70. 67, 68 and 69 are HELD
+      rather than free - three units were in flight in other worktrees with those numbers allocated when this was
+      written - so the gap below 70 is a reservation and not an invitation to renumber, and the ledger paragraph
+      in packages/db/src/index.ts says so in a line gate case 90a now READS. That case previously required an
+      unbroken run of documented migration numbers up to the newest file on disk, which a held allocation makes
+      impossible in the worktree that holds the highest number: the run for this tree was exactly [70],
+      indistinguishable from the merge-deleted paragraph the case exists to catch. The walk now skips a number the
+      ledger declares HELD, and only while NO migration file carries it, so a paragraph deleted for a migration
+      that is present is still a hole; case 90e is the three-armed control that proves the skip cannot be used to
+      silence 90a. The alternative - renumbering to 0067 to close the gap - is the thing the ledger''s own note
+      says produces two branches applying one number to different SQL.'
+    - 'NOTE: three tables, and what each one deliberately does NOT hold. flow_definition holds PUBLISHED versions
+      only, so there is no draft row and no supersession column - both would be an UPDATE on a table whose whole
+      point is that UPDATE raises (ZF001) - and the builder''s work in progress stays in the builder (C-AUTO-09,
+      whose acceptance requires save to be disabled while the graph is invalid). The LIVE version is max(version)
+      rather than a flow.live_version column, because a column there is a second statement of a fact the rows
+      already carry. flow_enrolment carries the pin and the enrolment lifecycle and no interpreter state:
+      flow_run, the step log, the execution cap and the idempotency key are C-AUTO-07''s. The enrolment API proper
+      is C-AUTO-07''s too - the per-flow enrolment cap, the typed already_enrolled outcome and the idempotency of
+      a trigger are NOT implemented here, and enrolOnLiveVersion is the narrow writer they will build on: it
+      resolves max(version) once and writes it into the row. Deliberately no partial unique index on (flow_id,
+      customer_id) either, because the dedupe rule is that unit''s to state.'
+    - 'NOTE: the message-class rule is enforced at PUBLISH time against an injected registry of the current
+      templates, and the re-check at SEND time is deferred to C-AUTO-07. validateFlowDefinition takes {templates}
+      and refuses flow-dsl-message-class-mismatch when a node''s declared class is not the class message_template
+      holds for the key it names, plus flow-dsl-unknown-template for a key nobody registered and
+      flow-dsl-templates-not-checked when no registry was injected at all (fail closed - a class check that
+      silently did not run is ADR 0002 in the one area where the consequence is a TDRA breach). What this cannot
+      see is a RECLASSIFICATION after publication: C-AUTO-01''s reclassify_template creates a new template VERSION
+      with the other class, and a published flow node names a key rather than a (key, version) pair, so the
+      guarantee that an already-published flow cannot launder promotional copy rests on the send choke point
+      refusing the pair - which is C-AUTO-01''s routing table and C-AUTO-07''s step. Pinning the template version
+      into the node was considered and not taken: every template edit would then require republishing every flow
+      that names it, and the first response to that is a bulk republish, which is the bulk re-pin this unit exists
+      to refuse.'
+    - 'NOTE: the accumulated path delay is computed over the CONDENSATION of the graph - each strongly-connected
+      component contributes the delays inside it once, and the longest path is taken over the resulting DAG. The
+      longest SIMPLE path is the other reading and it is NP-hard: on a dense 60-node document it is a test that
+      hangs rather than fails, which brief rule 21 is about. So a permitted loop is counted as one pass and a
+      repeat is bounded by C-AUTO-07''s max node executions rather than by arithmetic here; both readings agree
+      for every acyclic document, and the corpus asserts the 180-day bound from both sides (valid-10 is exactly
+      259,200 minutes, invalid-07 is one minute more).'
+    - 'NOTE: FLOW_TRIGGER_EVENTS is pinned to events that exist rather than invented. Every member but manual is an
+      outbox event an appointment transition already publishes, and packages/core/src/automation/dsl.test.ts
+      asserts the set EQUALS eventTypeFor over APPOINTMENT_STATUSES in both directions - so a lifecycle event
+      added without deciding whether a flow may start on it fails the build. pipeline.stage_entered is therefore
+      ABSENT and is deferred to C-AUTO-08, which owns the pipeline and whose acceptance line about ''the same
+      enrolment API as any other trigger'' is what adds it. For the same reason the action_stage node''s stage and
+      the condition''s lifecycle_state value are NOT checked against pipeline_stage or customer_lifecycle_state:
+      the first table is C-AUTO-08''s and unbuilt, and packages/core may not read a database, so the publish path
+      gains that check when that unit lands.'
+    - 'NOTE: a cost preview inside the flow editor is not built and depends on C-AUTO-02''s SMS_SEGMENT_PRICES
+      (segmentation and cost), which is built and not yet merged. The seam is left rather than filled: an
+      action_message node carries its channel and its template key, which is everything a segment count and a
+      price need, and nothing here computes either. C-AUTO-09 owns the editor that would display it.'
+    - 'NOTE: what is NOT tested and why. There is no apps/web route and no Playwright pass - no acceptance line
+      here is about a page, and the node-graph builder is C-AUTO-09. The 400-enrolment pinning test creates its
+      own 400 synthetic contacts on the unallocated +971 59 prefix in band 60001-60400 (outside every band any
+      other suite uses) and removes them in afterAll; flow_definition refuses DELETE for every role, so the flows
+      and versions this suite publishes are permanent and every version number it asserts is RELATIVE to what it
+      read first, which is what makes a second run against the same database append rather than collide. One flow
+      key (cauto06_unpublished) exists solely to be version-less for ever, because ''has no published version'' is
+      true on the first run of a suite that publishes to the same key and false on every run after it.'
+    - 'NOTE: two acceptance lines are read slightly differently from their wording, and both readings are narrower
+      rather than wider. (1) ''executing one of them and observing version N''s node set'' is satisfied as far as
+      it can be without an interpreter: readEnrolmentPinnedDefinition resolves the document THROUGH the pin - the
+      join is on (flow_id, definition_version) and not on max(version) - and the test asserts the node the edit
+      added is absent from what the enrolment reads and present in the live version, in the same case. There is no
+      step to execute: the interpreter is C-AUTO-07 and does not exist, and gate case 94f is the known-bad fixture
+      that re-points that join at the newest version and watches this assertion fail. (2) ''the enrolment stores
+      definition id and version'' is stored as (flow_id, definition_version), because flow_definition has NO
+      surrogate id: its primary key IS (flow_id, version), which is what makes the foreign key point at the exact
+      version row. A uuid beside that key would be a second way to name one row and a second thing for a writer to
+      get right, and the composite key already gives the acceptance line what it asks for - a reference that
+      cannot silently follow the latest version.'
     files:
     - packages/core/src/automation/dsl.ts
     - packages/core/src/automation/static-analysis.ts

@@ -1,0 +1,34 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "hold_on"
+    },
+    {
+      "branch": "default",
+      "from": "hold_on",
+      "to": "done"
+    }
+  ],
+  "key": "unknown_node_kind",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "hold_on",
+      "kind": "wait_for_reply",
+      "minutes": 60
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A node kind this build does not implement"
+}

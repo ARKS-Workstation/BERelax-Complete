@@ -1,0 +1,72 @@
+{
+  "description": "A valued fact with equals, which is the other half of the condition vocabulary.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "in_arabic"
+    },
+    {
+      "branch": "true",
+      "from": "in_arabic",
+      "to": "settle"
+    },
+    {
+      "branch": "false",
+      "from": "in_arabic",
+      "to": "other_locale"
+    },
+    {
+      "branch": "default",
+      "from": "settle",
+      "to": "ask"
+    },
+    {
+      "branch": "default",
+      "from": "ask",
+      "to": "asked"
+    }
+  ],
+  "key": "arabic_locale_review",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "in_arabic",
+      "kind": "condition",
+      "test": {
+        "fact": "locale",
+        "operator": "equals",
+        "value": "ar"
+      }
+    },
+    {
+      "id": "settle",
+      "kind": "delay",
+      "minutes": 1440
+    },
+    {
+      "channel": "sms",
+      "id": "ask",
+      "kind": "action_message",
+      "messageClass": "promotional",
+      "note": "The Arabic variant is chosen by the template, not by the flow.",
+      "templateKey": "review.request"
+    },
+    {
+      "id": "asked",
+      "kind": "exit",
+      "reason": "goal_met"
+    },
+    {
+      "id": "other_locale",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Review request for an Arabic-speaking contact"
+}
