@@ -6529,6 +6529,84 @@ units:
     - axe reports zero serious or critical violations on the queue and the preview at 390/768/1440 in both
       themes and both directions; screenshots land in artifacts/screens/C-CRM-06 and two consecutive runs
       produce zero pixel diff
+    - 'NOTE: what was added beyond the three files, what was scoped, and two defects in the merged tree that
+      had to be fixed to make `pnpm verify` pass. Beyond the files this list names it adds
+      packages/core/src/crm/duplicate-queue.ts (+ its unit test),
+      packages/db/src/repositories/merge-preview.ts (+ merge-preview.test.ts),
+      packages/db/src/repositories/duplicate-queue.ts, packages/fixtures/src/duplicate-queue.ts,
+      packages/fixtures/src/merge-preview.itest.ts, apps/web/src/duplicates.itest.ts,
+      apps/web/src/duplicates-render.test.ts and
+      apps/web/app/(admin)/clients/duplicates/{params.ts,render.ts,preview/render.ts}, and it edits
+      packages/core/src/crm/merge-plan.ts, packages/db/src/merge-participants.ts, packages/db/src/index.ts,
+      apps/web/src/routes/registry.ts, packages/harness/src/ports.ts (one band, `duplicates` at 10_900),
+      packages/fixtures/src/merge.itest.ts and scripts/test-gates.mjs (block 95). (1) THE PREVIEW REUSES
+      `mergeCustomers` ITSELF, exported from packages/db/src/repositories/merge.ts, and the reuse is asserted
+      BY REFERENCE rather than by behaviour: merge-preview.ts exports `MERGE_UNDER_PREVIEW = mergeCustomers`
+      as the single call site, and both merge-preview.test.ts and merge-preview.itest.ts assert
+      `expect(MERGE_UNDER_PREVIEW).toBe(mergeCustomers)`. Two behaviours agreeing today is exactly the
+      evidence a preview that has drifted also produces, so the identity is the claim; gate case 95b turns
+      the alias into a WRAPPER, which is what drift looks like on day one, and requires the unit test to go
+      red. (2) HOW A PREVIEW IS KEPT FROM WRITING, given that 0069 inserts `merge_record` BEFORE it moves a
+      row. Nothing is skipped: every write happens, so every CHECK, trigger and unique index fires exactly
+      as it will when the merge is authorised. The transaction simply cannot commit - the only exit carrying
+      an answer is a thrown `PreviewRolledBack`, and `sql.begin` rolls back on a throw. Three things stop
+      that rotting. The module contains NO write statement of its own, asserted by a source scan with
+      merge.ts and crm.ts as the controls that the pattern matches something (gate 95a adds one and the unit
+      test fails). The transaction body contains no `return` at all and exactly two `throw new
+      PreviewRolledBack(`, asserted the same way, because turning a throw into a return is the one edit that
+      makes a preview commit (gate 95c). And the row counts are measured from INSIDE the transaction
+      (`wouldWrite` must be 1 merge_record, one report per participant, 1 audit row) and again from OUTSIDE
+      afterwards, where they must be unchanged - a preview that skipped the merge fails the first, one that
+      committed fails the second, and neither assertion can pass vacuously alone. No gate case MAKES a
+      preview commit, deliberately: the mutant would leave a real tombstone on the verify database and every
+      later run would answer `already_merged`, because merge_record refuses DELETE for every role (ZT001).
+      (3) THE SURVIVOR NOMINATION IS C-CRM-05''s NOTE (10) BUILT. planCustomerMerge takes an optional
+      `nominatedSurvivorId` and gains two refusals: `merge_survivor_not_in_the_pair`, and
+      `merge_nomination_needs_an_operator` because the score says how alike two records are and nothing about
+      which should be kept - so an unattended merge takes the default. The nomination names an id rather than
+      a position, so the symmetry property still holds. (4) THE DIRECTION AXIS IS SATISFIED AS A LAYOUT AXIS.
+      `?dir=rtl` re-renders the same ENGLISH document mirrored and axe audits 24 renders (2 screens x 3
+      viewports x 2 themes x 2 directions), with the `dir` attribute read back per cell so twelve identical
+      LTR renders cannot satisfy it. An Arabic admin document is still W-SYS-01''s, for the reason every
+      admin route handler here records: a registry DOCUMENT must be served in both locales, which needs the
+      admin shell. That is a narrower reading of "both directions" than an Arabic screen would be, and it is
+      the whole of what can be honest before W-SYS-01. (5) THE TOMBSTONE FILTER IS C-CRM-05''s NOTE (8c),
+      DISCHARGED IN THE QUEUE RATHER THAN IN THE SCAN. `findDuplicateCandidates` still returns a merged-away
+      record as a candidate for its own survivor; the pair is dropped by `buildDuplicateQueue` from
+      `readMergedAwayCustomerIds`, because C-CRM-02''s suite pins that query''s EXPLAIN plan and a `not
+      exists` against merge_record inside it changes the plan. (6) C-CRM-05''s NOTE (8b) IS RE-DEFERRED TO
+      C-CRM-07 BY NAME: a preference-centre link minted for a record later merged away writes its PDPL
+      withdrawal onto the tombstone''s log. The fix is to resolve the contact through `merge_survivor_of` at
+      that write, which is in C-CRM-04''s handler and on the page C-CRM-07 rebuilds; this unit did not reach
+      into it. The functional opt-out is unaffected either way (suppression keys on the hash). (7) C-CRM-02''s
+      DEFERRED DETERMINISTIC BLOCK (its NOTE 5, re-deferred by C-CRM-05''s NOTE 9) IS STILL NOT BUILT, and it
+      now has no owner in this manifest. Two expression btrees on left(key,4) and right(key,5) would find the
+      foreign-number near misses between 0.20 and 0.30 that the trigram floor cannot reach - but they belong
+      in the SCAN, and adding a third branch to that query breaks two things C-CRM-02 pins from both sides:
+      the EXPLAIN plan assertion and the measured boundary that those pairs are NOT candidates. Doing it
+      properly means editing C-CRM-02''s committed suite, which is a unit of work rather than a line, so it
+      needs allocating to one. (8) NO MIGRATION, so SCHEMA_VERSION is unchanged at 70 and the ledger is
+      untouched: the queue is computed from the scan and the scorer per request, and C-CRM-02 already refused
+      a duplicate_candidate table for the reason that it would be a second source of truth for a question the
+      rows answer. (9) TWO DEFECTS IN CODE THIS UNIT DOES NOT OWN, FIXED RATHER THAN WORKED AROUND, both
+      clean-merge casualties. `flow_enrolment.customer_id` (0070, C-AUTO-06) was registered nowhere, so
+      merge.itest.ts was RED on the merged tree in two cases: mergeCoverage enumerates from
+      information_schema, which is exactly the mechanism C-CRM-05 built for this, and this is the first time
+      it fired on a real table. It is now a `repoint_update` participant registered by C-CRM-06 - an
+      enrolment is a process attached to a contact and must follow the person - and merge.itest.ts''s flow
+      assertion now names `flow_run` (still C-AUTO-07''s, with the idempotency-key rewrite) instead of every
+      flow_ table. Separately, M-TILL-07''s whole export block had been dropped from packages/db/src/index.ts
+      by a clean merge, so `pnpm typecheck` failed in packages/fixtures/src/payment.itest.ts naming a module
+      that was complete on disk; it is restored verbatim from 8a2d1c8 with a comment saying so. (10) THE
+      CONFIRM CASE COMMITS A REAL MERGE over HTTP, because there is no transaction a separate process can
+      roll back. It mints its own pair per run in a band nothing else uses and deletes the two customer rows
+      afterwards; what necessarily remains is the merge_record row and its per-table reports, pointing at two
+      ids that no longer exist - an ordinary state for a table with deliberately no foreign key to customer,
+      and the same state customer-identity.itest.ts leaves whenever it clears that table. (11) THE QUEUE''s
+      PROBE SET IS BOUNDED at 100 records, newest first, because the scan is one query per record and a
+      review queue is read by a person. The bound is REPORTED on the page (`bounded`), because a window
+      nobody mentions reads as a guarantee. Every assertion in both suites narrows through `?customer=`,
+      which is brief rule 12''s instrument, and gate 95m is the mutant that removes the scope filter.'
     files:
     - apps/web/app/(admin)/clients/duplicates/
     - apps/web/app/(admin)/clients/duplicates/preview/

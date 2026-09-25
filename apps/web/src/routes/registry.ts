@@ -293,6 +293,46 @@ export const ROUTES = [
       'the page is one booking read under a capability, and a prerendered copy of it is a leaked credential.',
   },
   {
+    id: 'duplicate-queue',
+    path: '/clients/duplicates',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-06s duplicate review queue: the candidate pairs above the review threshold, ordered by score, ' +
+      'each linking to a preview. A handler rather than a document for the reason the Messages inbox and ' +
+      'the template editor give one directory along - a registry document must be served in BOTH locales, ' +
+      'which needs an Arabic admin document and the W-SYS-01 shell - and `?dir=rtl` re-renders this English ' +
+      'document mirrored so the direction half of the accessibility matrix is audited without inventing an ' +
+      'Arabic admin surface. Dynamic because every row is read per request and a prerendered copy would ' +
+      'offer a merge of a pair somebody has already merged. It WRITES NOTHING and is NOT authenticated, ' +
+      'exactly as the routes under /compliance, /hr and /settings record. The /clients prefix in ' +
+      'ADMIN_GROUP_PREFIXES is what makes it noindex, so the client screens the manifest puts beside it ' +
+      'arrive excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
+    id: 'duplicate-merge-preview',
+    path: '/clients/duplicates/preview',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-06s merge preview, and the one route in the admin group that WRITES. GET runs the real merge ' +
+      'inside a transaction that is rolled back and renders what it did, so the preview cannot disagree ' +
+      'with the outcome; POST performs it for real and redirects back here, where the pair then reads as ' +
+      '`already_merged`. Dynamic and never cached: a cached preview would show row counts from before ' +
+      'somebody elses merge. Not authenticated, like every route under /compliance, /hr and /settings - ' +
+      'there is no admin session until W-SYS-01 - so the authorisation it enforces is the databases: 0069 ' +
+      'refuses a merge_record with a placeholder actor or a placeholder reason, and both arrive from the ' +
+      'form. Covered by the /clients noindex prefix.',
+  },
+  {
     id: 'admin-calendar',
     path: '/calendar',
     kind: 'handler',
@@ -826,9 +866,16 @@ export type RouteId = Route['id']
  * NOTE hands the approve and reject controls to W-SYS-01, and those show the words of every message this
  * business sends, with a body an operator has not approved among them. The second route under a prefix
  * arrives noindex on the commit that creates it rather than on the commit that remembers to.
+ * `/clients` is the CRM's, and C-CRM-06's two routes are the first under it: the duplicate review queue and
+ * the merge preview. A prefix rather than two entries because the manifest already allocates the rest of the
+ * client estate there — C-CRM-08 puts the clinical intake screens at `/clients/[id]/intake` — and those show
+ * a person's clinical file. The second route under a prefix arrives noindex on the commit that creates it
+ * rather than on the commit that remembers to, and for that one the difference is a health record.
+ *
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/analytics',
+  '/clients',
   '/compliance',
   '/hr',
   '/messaging',

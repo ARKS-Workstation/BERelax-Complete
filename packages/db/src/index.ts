@@ -9,12 +9,16 @@
 /*
   M-TILL-07's payment adapter, at the package boundary.
 
-  This block was absent when B-UI-03 ran `pnpm typecheck`: `packages/fixtures/src/payment.itest.ts` imports
-  seven of these from `@berelax/db` and none of them was exported, so the repository did not typecheck at
-  all — the M-TILL-07 merge landed the module, the pair suite and its migration and dropped the index
-  paragraph. It is the hazard the contributing brief names (a clean auto-merge deleting a paragraph nobody
-  is looking at) arriving in the one file that decides what this package IS, and the symptom names neither
-  the merge nor the unit: five TS2305s in a suite that imports nothing new.
+  This paragraph was lost in a CLEAN auto-merge: the M-TILL-07 merge landed the module, its pair suite and
+  its migration, and dropped the one thing that says what this package exports. Nothing conflicted, and no
+  check reads a list of re-exports, so the symptom named neither the merge nor the unit — five TS2305s in
+  `packages/fixtures/src/payment.itest.ts`, a file nobody had touched, about a module that is present and
+  complete on disk.
+
+  FIVE units in two batches found it independently and restored it, which is the measurement worth keeping:
+  a file that decides what a package IS has no gate over it, so the only thing that catches a deletion here
+  is the next person to typecheck. That is the same hazard the ledger region in this file's tail records
+  three times over.
 */
 export {
   type Authorisation,
@@ -478,6 +482,12 @@ export {
   findDuplicateCandidates,
 } from './repositories/duplicate-candidates.ts'
 export {
+  DUPLICATE_QUEUE_SUBJECT_LIMIT,
+  type DuplicateQueueScan,
+  type DuplicateQueueScanOptions,
+  scanDuplicateQueue,
+} from './repositories/duplicate-queue.ts'
+export {
   type EligibilityQueryInput,
   type EligibleTherapistRow,
   EXCLUSION_REASONS,
@@ -604,9 +614,19 @@ export {
   mergeRowCounts,
   mergeSurvivorOf,
   readCustomerMergeSubject,
+  readCustomerMergeSubjects,
+  readMergedAwayCustomerIds,
   readMergeRecordForLoser,
   readMergeTableReports,
 } from './repositories/merge.ts'
+export {
+  MERGE_UNDER_PREVIEW,
+  type MergePreview,
+  type MergePreviewPair,
+  type MergePreviewWrites,
+  PREVIEW_ROLLBACK_MESSAGE,
+  previewCustomerMerge,
+} from './repositories/merge-preview.ts'
 export {
   type CostByTemplate,
   type CostByTradingDate,

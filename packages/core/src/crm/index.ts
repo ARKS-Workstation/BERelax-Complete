@@ -12,9 +12,14 @@
  * one thing it deliberately refuses: a number whose country code is not 971. `duplicate-score.ts` is the
  * deterministic pair scorer that reads those keys and the folded record label, and the two thresholds
  * that act on its answer.
+ *
+ * `duplicate-queue.ts` is C-CRM-06's: what sits between the candidate scan and the reviewer — one row per
+ * pair, nothing below the review threshold, no tombstone, and the survivor read off the plan rather than
+ * decided a second time.
  */
 export * from './blocklist.ts'
 export * from './client-record.ts'
+export * from './duplicate-queue.ts'
 export * from './duplicate-score.ts'
 export * from './lifecycle.ts'
 export * from './merge-plan.ts'

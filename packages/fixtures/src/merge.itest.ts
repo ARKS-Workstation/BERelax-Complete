@@ -408,10 +408,18 @@ describe('the participant registry', () => {
     // a REGISTERED participant here as well, because "the enrolment moves with the contact" is a decision
     // taken at that merge and this is where a reader of the deferral will look for it.
     expect(coverage.map((row) => row.table).filter((table) => table === 'flow_run')).toEqual([])
+    const enrolment = coverage.find((row) => row.table === 'flow_enrolment')
     expect(
-      coverage.find((row) => row.table === 'flow_enrolment')?.status,
+      enrolment?.status,
       'flow_enrolment is registered, not merely absent from the deferral',
     ).toBe('participant')
+    // And the STRATEGY, not just the registration: "it moves with the contact" is the decision, and an
+    // entry switched to `union_dedupe` or to an allowlist would satisfy "registered" while changing what
+    // happens to a person's automations. C-CRM-06 asserted this from its own worktree, which is how the
+    // stronger of the two assertions survived the merge.
+    expect(enrolment?.strategy, 'the enrolment is RE-POINTED, not deduped or left behind').toBe(
+      'repoint_update',
+    )
   })
 })
 

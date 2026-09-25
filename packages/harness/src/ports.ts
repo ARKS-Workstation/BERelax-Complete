@@ -55,6 +55,10 @@ export const TEST_PORT_BANDS = {
   // 10080 is in Chromium's table: a band beginning there would contain a port the browser refuses, which
   // `RESTRICTED_PORTS` does not list precisely because it falls outside every band — including this one.
   'admin-calendar': { start: 10_300, width: 300 },
+  // C-CRM-06's queue and preview. 10_900 rather than the next round number after 10_000: 10_300 and 10_600
+  // are allocations held by units in flight in other worktrees, and a band chosen from what this worktree
+  // can see is exactly how `template-editor` and `book-flow` came to share one.
+  duplicates: { start: 10_900, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
