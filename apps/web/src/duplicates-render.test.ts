@@ -67,6 +67,9 @@ const scope = (over: Partial<QueueScopeView> = {}): QueueScopeView => ({
 })
 
 const queueView = (over: Partial<DuplicateQueueView> = {}): DuplicateQueueView => ({
+  // No banner: this business's Google connection is fine, which is the state that must not change
+  // what the queue prints. G-CONN-08's own suite asserts the banner's branches.
+  chrome: { googleReauth: null, returnTo: '/clients/duplicates' },
   queue: buildDuplicateQueue({
     records: [
       { subject: SURVIVOR, isMergedAway: false },
@@ -206,6 +209,7 @@ describe('the preview document', () => {
     atIso: '2094-04-18T12:00:00.000Z',
     direction: 'ltr' as const,
     survivorWasNominated: false,
+    chrome: { googleReauth: null, returnTo: '/clients/duplicates/preview' },
   }
 
   it('prints what moves, what is retained and why, and the consent state either side', () => {
@@ -245,6 +249,7 @@ describe('the preview document', () => {
   it('renders the already-merged state with no form on it at all', () => {
     const html = renderMergePreviewHtml({
       kind: 'already_merged',
+      chrome: { googleReauth: null, returnTo: '/clients/duplicates/preview' },
       mergeRecordId: '00000000-0000-7000-8000-00000000d6ff',
       survivorCustomerId: SURVIVOR.id,
       loserCustomerId: LOSER.id,

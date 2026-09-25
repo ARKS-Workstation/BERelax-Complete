@@ -84,3 +84,33 @@ export function manageBookingPath(token: string): string {
 export function manageBookingLink(origin: string, token: string): string {
   return `${origin}${manageBookingPath(token)}`
 }
+
+/**
+ * The screen a re-auth notice sends the owner to: Settings → Integrations, where the card and its
+ * *Reconnect this account* button are.
+ *
+ * Spelled once, for `MANAGE_BOOKING_PATH_PREFIX`'s reason turned up one notch. G-CONN-08's emails go out
+ * on the day the Google connection has already stopped working, so a link to the wrong path is a 404 in
+ * the one message whose whole purpose is to get somebody to press a button — and the owner's next move
+ * after a dead link is to ignore the next email. `apps/web/src/routes/registry.ts` declares the route and
+ * `apps/web/src/google-reauth-banner.test.ts` asserts the registry and this constant agree.
+ *
+ * Not `/settings/integrations/google`, which the consent callback redirected to until G-CONN-08 and which
+ * is not a route at all: that directory holds `connect`, `picker` and `health` and has no document of its
+ * own, so the redirect at the end of a successful consent was a 404.
+ */
+export const RECONNECT_SCREEN_PATH = '/settings/integrations'
+
+/**
+ * The absolute link a re-auth notice carries, optionally narrowed to one connection.
+ *
+ * The `connectionId` matters when there are two: the card lists every connection, and an email about the
+ * one that died should not open a page where the owner has to work out which. It is the same narrowing the
+ * card's own `?connectionId=` does, so nothing new is being introduced to serve an email.
+ */
+export function reconnectLink(origin: string, connectionId?: string): string {
+  const base = `${origin}${RECONNECT_SCREEN_PATH}`
+  return connectionId === undefined || connectionId === ''
+    ? base
+    : `${base}?connectionId=${encodeURIComponent(connectionId)}`
+}

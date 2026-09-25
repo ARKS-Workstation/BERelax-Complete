@@ -12,6 +12,11 @@ import {
 } from '@berelax/core'
 import { escapeHtml, renderTestingExpiry, type TestingExpiryView } from '@berelax/google'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * Settings → Integrations: the Google connection card, as HTML.
@@ -96,6 +101,14 @@ const CARD_CSS = `
     cursor: pointer;
   }
   .empty { color: var(--color-ink-2); }
+  .outcome {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-2);
+    background: var(--color-surface-sand);
+    padding: var(--space-4) var(--space-5);
+    margin: 0 0 var(--space-6);
+  }
+  .outcome p:last-child { margin-bottom: 0; }
   [data-tone='urgent'] .headline { font-weight: 600; }
 `
 
@@ -147,7 +160,39 @@ export interface ConnectionCardView {
   readonly pendingApproval: PendingApprovalView | null
 }
 
+/**
+ * What the page was reached FROM, when it was reached from an action rather than a link.
+ *
+ * This is the return trip G-CONN-07 deferred to G-CONN-08: *Test connection* and the consent callback both
+ * used to answer JSON, and an operator who pressed a button got a JSON blob instead of their screen back.
+ * Both now redirect here with a reason in the query, and this is where the reason becomes a sentence.
+ *
+ * Reasons and never prose in the query string, for the reason the consent callback already gave: a message
+ * is words somebody will improve, and a URL that carries them is a URL that outlives them in a bookmark.
+ */
+export interface RoundTripView {
+  /** `ok`, or the reason a Test connection reported. Null when nothing was tested. */
+  readonly tested: string | null
+  /** The consent callback's outcome kind, or null. */
+  readonly consent: string | null
+  /** The consent callback's warning reason, or null. */
+  readonly warning: string | null
+  /** The connection an outcome named, so the sentence can say which account it is about. */
+  readonly connectionId: string | null
+}
+
 export interface IntegrationsView {
+  /**
+   * The re-auth banner and the page to come back to (G-CONN-08).
+   *
+   * Required, and on this document as much as on the other nine: the card says *Needs re-authorising*
+   * beside the account it is about, and the banner says it about the BUSINESS with one button. A page that
+   * left it out because “the card already says so” would be the one admin page where the non-dismissible
+   * warning is absent, which is the page an operator is on when they are trying to fix it.
+   */
+  readonly chrome: AdminChrome
+  /** The outcome of whatever brought the operator here, or an all-null view when they just opened it. */
+  readonly roundTrip: RoundTripView
   readonly connections: readonly ConnectionCardView[]
   /** True when the caller narrowed the page to one connection, which the screenshots do. */
   readonly narrowed: boolean
@@ -227,6 +272,85 @@ function pendingApproval(view: ConnectionCardView): string {
 }
 
 /**
+ * Every verdict a round trip can arrive with, as a sentence.
+ *
+ * A lookup rather than a chain of `if`s, and it deliberately covers MORE than `TestConnectionReason`: the
+ * route can also redirect with `connection_id_required` (a form that named nothing) or with the reason code
+ * of a deployment that could not run the check at all. A reason with no sentence here renders as itself
+ * rather than as nothing, because an unfamiliar code an operator can quote at somebody is worth more than a
+ * blank box — and `google-connection-card.test.ts` asserts every `TestConnectionReason` has a sentence, so
+ * the fallback is for codes from outside that union only.
+ */
+const TESTED_SENTENCE: Readonly<Record<string, string>> = Object.freeze({
+  ok: 'The connection was tested just now and Google answered. Everything this account is used for was reachable.',
+  connection_not_found: 'That connection no longer exists, so there was nothing to test.',
+  connection_disconnected:
+    'That connection was disconnected on purpose, so nothing was tested. Reconnecting the account is what brings it back.',
+  nothing_was_checked:
+    'Nothing was asked of Google, because nothing has been chosen for this account to read yet. Choose a listing and a Search Console property first.',
+  no_call_reached_google:
+    'Every call was attempted and none was answered. This is not a permission problem: something between here and Google is not working, and trying again later may be all it needs.',
+  grant_needs_reauth:
+    'The grant is dead, so no call could be made at all. Reconnecting this account is the only thing that fixes it.',
+  capability_failing:
+    'The connection works and at least one of the things it reads does not. The list below names which.',
+  connection_id_required:
+    'The test named no connection, so nothing was tested. Use the button on the card for the account you mean.',
+})
+
+const CONSENT_SENTENCE: Readonly<Record<string, string>> = Object.freeze({
+  connected:
+    'The Google account is connected. Nothing has been read from it yet, so the nightly check is what will confirm it works.',
+  reconnected:
+    'The same Google account was reconnected. The selected listing, the Search Console property and this connection’s history are unchanged.',
+  additional_account:
+    'A DIFFERENT Google account signed in, so a second connection was created rather than the first one replaced. Nothing about the original was changed — see the warning below.',
+})
+
+/**
+ * The outcome banner, or nothing.
+ *
+ * `role="status"` rather than `role="alert"`: this is the result of something the operator just did, so it
+ * is announced when the page loads rather than interrupting whatever they are reading — and an `alert` on
+ * every successful test would train them to dismiss the assertive region the re-auth banner needs.
+ */
+function roundTrip(view: RoundTripView): string {
+  const parts: string[] = []
+  if (view.tested !== null) {
+    parts.push(
+      `<p data-tested="${escapeHtml(view.tested)}">${escapeHtml(
+        TESTED_SENTENCE[view.tested] ??
+          `The test reported ${view.tested}, which this screen has no sentence for. Quote that word if you ` +
+            'ask for help with it.',
+      )}</p>`,
+    )
+  }
+  if (view.consent !== null) {
+    parts.push(
+      `<p data-consent-outcome="${escapeHtml(view.consent)}">${escapeHtml(
+        CONSENT_SENTENCE[view.consent] ??
+          `The consent reported ${view.consent}, which this screen has no sentence for.`,
+      )}</p>`,
+    )
+  }
+  if (view.warning !== null) {
+    parts.push(
+      `<p data-consent-warning="${escapeHtml(view.warning)}">The account that signed in is not the one ` +
+        'this business was set up under. The original connection is untouched; the card for it is below, ' +
+        'and so is the card for the new one.</p>',
+    )
+  }
+  if (parts.length === 0) return ''
+  return (
+    '<section class="outcome" data-round-trip="true" role="status"' +
+    (view.connectionId === null
+      ? ''
+      : ` data-round-trip-connection="${escapeHtml(view.connectionId)}"`) +
+    `>${parts.join('')}</section>`
+  )
+}
+
+/**
  * One card.
  *
  * The headline and the recency are emitted by the same expression on purpose: there is no branch here
@@ -282,6 +406,10 @@ function card(view: ConnectionCardView, page: IntegrationsView): string {
     // refresh quota.
     `<form method="post" action="${escapeHtml(page.testConnectionPath)}">`,
     `<input type="hidden" name="connectionId" value="${escapeHtml(view.connectionId)}">`,
+    // Where the 303 comes back to. A hidden field rather than the `Referer` header: a referrer is stripped
+    // by a proxy, a privacy setting and a `noreferrer` link, and the one thing this button must not do is
+    // leave the operator somewhere they did not start.
+    `<input type="hidden" name="returnTo" value="${escapeHtml(page.chrome.returnTo)}">`,
     '<button type="submit" data-action="test-connection">Test connection</button>',
     '</form>',
     '</div>',
@@ -314,11 +442,13 @@ export function renderIntegrationsPage(view: IntegrationsView): string {
     // something it does not mean. The compliance calendar and the template editor title themselves the
     // same way; the Messages inbox is exempt instead, which is the arrangement this avoids extending.
     '<title>Integrations — admin</title>',
-    `<style>${tokensCss()}${CARD_CSS}</style>`,
+    `<style>${tokensCss()}${CARD_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Integrations</h1>',
+    roundTrip(view.roundTrip),
     '<p class="lede">What this business has connected to Google, whether it is working, and when it was ' +
       'last checked. Everything below is read from what has already been recorded: opening this page ' +
       'makes no call to Google, so it still says what is wrong on the day the connection has stopped ' +

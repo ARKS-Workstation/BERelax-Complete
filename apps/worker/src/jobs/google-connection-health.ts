@@ -27,6 +27,7 @@ import {
   type SearchConsoleProvider,
 } from '@berelax/providers/google'
 import { AppError } from '@berelax/shared'
+import { reauthNotifyLogLine, SCHEDULED_REAUTH_NOTIFY } from './google-reauth-notify.ts'
 
 /**
  * The two Google health passes, as agent runs.
@@ -322,7 +323,22 @@ async function withOwnConnection<T>(config: Config, run: (sql: Sql) => Promise<T
   }
 }
 
-/** The 03:00 handler. Thin: the wiring is above and the pass itself is in `@berelax/google`. */
+/**
+ * The 03:00 handler. Thin: the wiring is above and the pass itself is in `@berelax/google`.
+ *
+ * The re-auth notice ladder runs on the back of it (G-CONN-08) rather than on a cron of its own, and that
+ * is a decision with three parts. This pass has just derived every connection's health, so a second cron
+ * would wake up to ask a question this one had answered minutes earlier. A second cron would need its own
+ * `agent_definition` row for the watchdog's "no success within twice the interval" to mean anything. And
+ * the ladder's cadence after its first rung IS daily, so "once a day until the cap" is "once per deep
+ * check".
+ *
+ * The notify pass is invoked AFTER the health pass has committed what it found, and its failure is
+ * deliberately NOT allowed to fail this handler: the health record is the product of the 03:00 run, and
+ * re-running the whole deep check — three forced token refreshes among other things — because an email
+ * could not be built would spend Google's refresh quota to retry something that is not a Google problem.
+ * The failure is logged with the reason and the next pass tries the same rungs, which are still unsent.
+ */
 export async function googleHealthHandler(
   config: Config,
   atIso: string,
@@ -340,6 +356,27 @@ export async function googleHealthHandler(
       `google-connection.health ${atIso}: ${result.connections.length} connection(s), ` +
         `${degraded} not healthy, ${findings} finding(s)`,
     )
+    try {
+      const notified = await SCHEDULED_REAUTH_NOTIFY(
+        sql,
+        config,
+        result.connections.map((connection) => ({
+          connectionId: connection.connectionId,
+          googleEmail: connection.googleEmail,
+          health: connection.health,
+        })),
+        instantFromIso(atIso),
+      )
+      console.log(reauthNotifyLogLine(notified))
+    } catch (error) {
+      // Named rather than swallowed, and on stderr: a ladder that stopped climbing is exactly the silent
+      // failure this unit exists to remove, so it has to be visible in the log even though it does not fail
+      // the run.
+      console.error(
+        `google-reauth.notify ${atIso}: the pass failed and no rung was recorded — ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   })
 }
 

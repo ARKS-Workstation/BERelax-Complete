@@ -32,6 +32,7 @@ const ENTRY: ReassignmentQueueEntryView = {
 }
 
 const view = (entries: readonly ReassignmentQueueEntryView[]): ReassignmentQueueView => ({
+  chrome: { googleReauth: null, returnTo: '/hr/reassignment' },
   entries,
   readAtIso: '2026-09-30T20:00:00.000Z',
 })

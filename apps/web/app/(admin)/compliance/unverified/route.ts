@@ -3,6 +3,7 @@ import {
   type ComplianceQuestionRow,
   complianceQuestionRows,
   complianceQuestionSections,
+  type Instant,
   instantFromIso,
   localDate,
 } from '@berelax/core'
@@ -17,6 +18,7 @@ import {
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { complianceAsOf } from '../../../../src/compliance/as-of.ts'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import {
   type ComplianceQuestionsView,
   type NoDeadlineRow,
@@ -180,6 +182,7 @@ export async function GET(request: Request): Promise<Response> {
       const sections = complianceQuestionSections(rows)
       const byKey = new Map(definitions.map((definition) => [definition.key, definition]))
       return {
+        chrome: await adminChromeFor({ sql, now: instant as Instant, request }),
         asOf,
         unconfirmed: present(sections.unconfirmed, byKey, unverifiedRow),
         noDeadline: present(sections.noDeadline, byKey, noDeadlineRow),

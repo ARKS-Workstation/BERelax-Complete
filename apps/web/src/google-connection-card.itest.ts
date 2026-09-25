@@ -186,7 +186,14 @@ async function setSetting(key: string, value: unknown): Promise<void> {
 }
 
 async function cardHtml(options: { readonly now?: Instant } = {}): Promise<string> {
-  const view = await integrationsView({ sql, now: options.now ?? NOW, connectionId })
+  const view = await integrationsView({
+    sql,
+    now: options.now ?? NOW,
+    connectionId,
+    // No banner, so this file's screenshots do not diff when another suite leaves a broken connection
+    // behind (brief rule 12). `google-reauth-banner.itest.ts` photographs the banner itself.
+    chrome: { googleReauth: null, returnTo: '/settings/integrations' },
+  })
   return renderIntegrationsPage(view)
 }
 
@@ -419,9 +426,26 @@ describe('acceptance — Test connection refuses rather than reporting a success
   it('answers 400 when no connection is named', async () => {
     // "Whichever connection sorts first" is how a second account gets tested and the first one reported —
     // the failure mode `with-google.itest.ts` records for `resolveTarget`.
-    const response = await post('connectionId=', 'application/x-www-form-urlencoded')
+    //
+    // JSON, because G-CONN-08 gave the two envelopes different answers: a JSON caller branches on a status
+    // and a reason, and a FORM post is a browser that gets its screen back. The form half is the case below.
+    const response = await post(JSON.stringify({ connectionId: '' }), 'application/json')
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({ ok: false, reason: 'connection_id_required' })
+  })
+
+  it('answers a form post with a 303 back to the page, carrying the reason', async () => {
+    // G-CONN-08's return trip, and the half this unit's own NOTE deferred to it: an operator who pressed a
+    // button gets their screen back with the outcome on it rather than a JSON blob. 303 and not 302 because
+    // this POST spends a forced token refresh and some clients re-POST a 302 on reload.
+    const response = await post(
+      'connectionId=&returnTo=%2Fcalendar',
+      'application/x-www-form-urlencoded',
+    )
+    expect(response.status).toBe(303)
+    const location = new URL(response.headers.get('location') ?? '', 'http://localhost')
+    expect(location.pathname).toBe('/calendar')
+    expect(location.searchParams.get('tested')).toBe('connection_id_required')
   })
 
   it('answers 503 by name when no key is available to open the stored token', async () => {
@@ -431,14 +455,24 @@ describe('acceptance — Test connection refuses rather than reporting a success
     const before = process.env['GOOGLE_TOKEN_KEK']
     delete process.env['GOOGLE_TOKEN_KEK']
     try {
-      const response = await post(
-        `connectionId=${connectionId}`,
-        'application/x-www-form-urlencoded',
-      )
+      const response = await post(JSON.stringify({ connectionId }), 'application/json')
       expect(response.status).toBe(503)
       const body = (await response.json()) as { ok: boolean; reason: string }
       expect(body.ok).toBe(false)
       expect(body.reason).toBe('google_token_kek_absent')
+      // And the same failure through the form envelope: a browser is redirected with the reason rather than
+      // handed a JSON body it cannot render. The reason is the same word in both, which is the point of
+      // carrying a code rather than prose.
+      const redirected = await post(
+        `connectionId=${connectionId}`,
+        'application/x-www-form-urlencoded',
+      )
+      expect(redirected.status).toBe(303)
+      const location = new URL(redirected.headers.get('location') ?? '', 'http://localhost')
+      // No `returnTo` was posted, so it falls back to the card rather than guessing.
+      expect(location.pathname).toBe('/settings/integrations')
+      expect(location.searchParams.get('tested')).toBe('google_token_kek_absent')
+      expect(location.searchParams.get('connection')).toBe(connectionId)
     } finally {
       if (before === undefined) delete process.env['GOOGLE_TOKEN_KEK']
       else process.env['GOOGLE_TOKEN_KEK'] = before

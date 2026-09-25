@@ -291,6 +291,122 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     body: 'فاتورتك الضريبية {{invoice_number}} بتاريخ {{date}} مرفقة. المجموع {{total}}.',
     variables: ['invoice_number', 'date', 'total'],
   },
+  /*
+    G-CONN-08's three keys. The re-auth ladder's words, and the only shipped templates whose subject is a
+    CREDENTIAL rather than a booking.
+
+    The reassurance clause is `REAUTH_REASSURANCE_SENTENCE` in `@berelax/shared`, verbatim, and it is the
+    load-bearing part of the body rather than politeness. docs/10 §4 puts it in the banner and on the
+    settings card for a reason — the owner's first question on being told the Google connection is dead is
+    whether work has been lost — and an email that reworded it would be a second promise about the same
+    fact. `template-corpus.test.ts` asserts the constant appears in every English re-auth body, so the
+    three surfaces cannot drift apart.
+
+    `{{link}}` is an ABSOLUTE link built from `reconnectLink` and the validated site origin, never a URL
+    written here: the email arrives on the day the connection has already stopped working, so a link to the
+    wrong path is a dead end in the one message whose whole purpose is to get somebody to press a button.
+
+    The Arabic variants exist for M-VAT-11's reason and carry its caveat: no table in this build records
+    which language a member of staff reads, so the selector asks for `en`, and picking a locale per ROLE
+    would be a guess about a person (ADR 0020). Seeding the Arabic half now means the day a staff locale
+    exists the words are already approved, rather than the day somebody notices they were never written.
+
+    Only the REACTIVE key has an SMS variant, and that is a decision rather than an omission. An SMS about
+    a deadline nothing has hit yet is noise on a lock screen, and the predictive notice is precisely the
+    one that says nothing is wrong yet. The SMS carries no link either: the body has to fit one segment in
+    Arabic at 70 UCS-2 units against English's 160, and the email beside it is where a link belongs.
+  */
+  {
+    key: 'google.reauth_required',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells the owner and the manager that the Google connection has stopped working and needs ' +
+      'reconnecting (G-CONN-08). Names no credential and no scope URL: the connection and the screen.',
+    channel: 'email',
+    locale: 'en',
+    subject: 'The Google connection needs reconnecting',
+    body:
+      'The Google connection for this business stopped working on {{since}}. Open {{link}} and press ' +
+      'Reconnect this account to fix it. Until that is done, review replies will keep being drafted for ' +
+      'you to post by hand; nothing is lost.',
+    variables: ['since', 'link'],
+  },
+  {
+    key: 'google.reauth_required',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells the owner and the manager that the Google connection has stopped working and needs ' +
+      'reconnecting (G-CONN-08). Names no credential and no scope URL: the connection and the screen.',
+    channel: 'email',
+    locale: 'ar',
+    subject: 'يحتاج الاتصال بحساب جوجل إلى إعادة ربط',
+    body:
+      'توقف الاتصال بحساب جوجل الخاص بالمنشأة بتاريخ {{since}}. افتح {{link}} واضغط على إعادة ربط ' +
+      'الحساب. حتى ذلك الحين ستظل ردود التقييمات تُصاغ لك لنشرها يدوياً، ولن يضيع شيء.',
+    variables: ['since', 'link'],
+  },
+  {
+    key: 'google.reauth_required',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The same fact by SMS, for the owner who is not at a screen. OFF by default ' +
+      '(google.reauth_sms_enabled). Transactional and immutably so, which is what stops the marketing ' +
+      'kill switch suppressing it and stops it leaving from the AD- promotional identity.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'The Google connection stopped working on {{since}}. Reconnect it in Settings.',
+    variables: ['since'],
+  },
+  {
+    key: 'google.reauth_required',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The same fact by SMS, for the owner who is not at a screen. OFF by default ' +
+      '(google.reauth_sms_enabled). Transactional and immutably so, which is what stops the marketing ' +
+      'kill switch suppressing it and stops it leaving from the AD- promotional identity.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'توقف الاتصال بجوجل بتاريخ {{since}}. أعد الربط من الإعدادات.',
+    variables: ['since'],
+  },
+  {
+    key: 'google.reauth_expiring',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The predictive half of G-CONN-08: the Google connection is about to stop working, either because ' +
+      'a Testing consent screen expires inside 48 hours or because nothing has been read successfully ' +
+      'for 48 hours. Sent once per expiry instant and never repeated for it.',
+    channel: 'email',
+    locale: 'en',
+    subject: 'The Google connection is due to stop working',
+    body:
+      'The Google connection for this business is due to stop working on {{expires}}. Open {{link}} and ' +
+      'press Reconnect this account before then. Nothing is wrong yet, and if it does lapse, review ' +
+      'replies will keep being drafted for you to post by hand; nothing is lost.',
+    variables: ['expires', 'link'],
+  },
+  {
+    key: 'google.reauth_expiring',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The predictive half of G-CONN-08: the Google connection is about to stop working, either because ' +
+      'a Testing consent screen expires inside 48 hours or because nothing has been read successfully ' +
+      'for 48 hours. Sent once per expiry instant and never repeated for it.',
+    channel: 'email',
+    locale: 'ar',
+    subject: 'الاتصال بحساب جوجل على وشك التوقف',
+    body:
+      'الاتصال بحساب جوجل الخاص بالمنشأة على وشك التوقف بتاريخ {{expires}}. افتح {{link}} واضغط على ' +
+      'إعادة ربط الحساب قبل ذلك. لا يوجد خطأ حتى الآن، وإن توقف ستظل ردود التقييمات تُصاغ لك لنشرها ' +
+      'يدوياً، ولن يضيع شيء.',
+    variables: ['expires', 'link'],
+  },
   {
     key: 'review.request',
     messageClass: 'promotional',

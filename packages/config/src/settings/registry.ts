@@ -2,15 +2,19 @@ import {
   AppError,
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   credentialExpiringSoonDaysSchema,
+  DEFAULT_GOOGLE_REAUTH_REPEAT_CAP,
   DEFAULT_LLM_PROVIDER,
   DEFAULT_OBLIGATION_ESCALATION_OFFSETS_DAYS,
   DEFAULT_OBLIGATION_REMINDER_OFFSETS_DAYS,
   DEFAULT_REMINDER_OFFSETS_HOURS,
   DETECTABLE_REVIEW_LANGUAGES,
   GENDER_MATCHING_SETTING_KEY,
+  GOOGLE_REAUTH_REPEAT_CAP_SETTING_KEY,
+  GOOGLE_REAUTH_SMS_SETTING_KEY,
   genderMatchingModeSchema,
   LLM_PROVIDER_SETTING_KEY,
   llmProviderSchema,
+  MAX_GOOGLE_REAUTH_LADDER_STEPS,
   MAX_OBLIGATION_NOTICE_OFFSET_DAYS,
   MAX_OBLIGATION_NOTICE_OFFSETS,
   MAX_REMINDER_OFFSET_HOURS,
@@ -448,6 +452,61 @@ export const SETTINGS = [
       openQuestionId: 'Y2-gbp-status',
       note: 'Empty, because the Cloud project is not known to this build and a console URL written from memory is a link that opens the wrong project or nothing at all.',
     },
+  }),
+  define({
+    /**
+     * How many notices one unresolved re-auth incident may produce before the ladder stops.
+     *
+     * The setting that stops *escalating* meaning *for ever*. G-CONN-08's ladder is one notice on
+     * discovery, one a day later and then daily; this is the total, so five reaches the fourth day.
+     *
+     * A setting rather than a constant because it is a judgement about one business's habits — how long
+     * before the owner reads an email, and how many identical ones before they stop — and the correction
+     * should be a screen rather than a deploy. Bounded at both ends, and both bounds are decisions: zero
+     * is refused because a dead Google connection nobody is told about is the silent failure docs/10
+     * exists to remove, and the ceiling is refused because the sixth identical email teaches the owner
+     * that these emails do not need reading, which costs the NEXT incident its attention.
+     *
+     * The same ceiling is a CHECK constraint on `google_reauth_notice.rung_index` in migration 0075. The
+     * duplication is deliberate for 0051's reason: the database cannot import this registry, and a cap
+     * that lives only here is a cap one bad row removes.
+     */
+    key: GOOGLE_REAUTH_REPEAT_CAP_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(1).max(MAX_GOOGLE_REAUTH_LADDER_STEPS),
+    defaultValue: DEFAULT_GOOGLE_REAUTH_REPEAT_CAP,
+    label: 'Google re-auth reminders per incident',
+    help: 'How many times the owner and the manager are emailed about one broken Google connection: one straight away, one a day later, then one a day until this many have been sent. Lower it if the reminders are noise; it cannot be set to zero, because a Google connection that has stopped working fails silently.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+  }),
+  define({
+    /**
+     * Whether a re-auth notice also goes by SMS.
+     *
+     * Off, and the default is the decision rather than a starting point. Three reasons, in order of
+     * weight. It is a message to a member of STAFF about a credential, and docs/04 §5's discretion rule
+     * binds a staff message as hard as a customer one — an SMS arrives on a lock screen. It costs money
+     * per segment for a fact that is already in an email and on every admin page as a banner. And there
+     * is no table in this build that holds a staff phone number, so the honest state of the channel is
+     * off rather than configured-and-unreachable.
+     *
+     * When it IS switched on the message is transactional and cannot be anything else: the template's
+     * `message_class` is immutable (0015), so the marketing kill switch cannot suppress it and it cannot
+     * leave from the promotional AD- identity. That is the property the acceptance line names, and it is
+     * a property of the template rather than of this switch — which is why turning the switch on cannot
+     * turn a service message into a marketing one.
+     */
+    key: GOOGLE_REAUTH_SMS_SETTING_KEY,
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: false,
+    label: 'Also send Google re-auth reminders by SMS',
+    help: 'Off by default. The email and the banner on every admin page already say it; an SMS adds a per-segment cost and puts a note about a business credential on somebody’s lock screen. If it is switched on the message is transactional, so the marketing kill switch cannot stop it.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
   }),
   define({
     key: REVIEW_AUTOSEND_SETTING_KEY,

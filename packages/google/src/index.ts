@@ -202,6 +202,27 @@ export {
   type MemoryConnectionStore,
 } from './memory-store.ts'
 export {
+  createMemoryReauthNoticeStore,
+  REAUTH_NOTICE_CHANNELS,
+  type ReauthNoticeChannel,
+  type ReauthNoticeDecision,
+  type ReauthNoticeStore,
+} from './notify/notice-store.ts'
+export { createPostgresReauthNoticeStore } from './notify/postgres-notice-store.ts'
+export {
+  type ReauthLadderDeps,
+  type ReauthLadderOutcome,
+  type ReauthPassResult,
+  type ReauthRecipientResolver,
+  type ReauthSender,
+  type ReauthSendOutcome,
+  type ReauthSendRequest,
+  type ReauthSubject,
+  reauthIncidentFor,
+  runReauthLadder,
+  runReauthLadderFor,
+} from './notify/reauth-ladder.ts'
+export {
   type AuthorizationRequest,
   buildAuthorizationRequest,
   CONSENT_WINDOW_MINUTES,

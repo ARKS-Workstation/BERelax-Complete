@@ -13,6 +13,9 @@ import {
  * against the built application, which is the only place the inline script can be proved.
  */
 
+/** No banner: this file's subject is the pricing, and the banner is asserted by its own suite. */
+const CHROME = { googleReauth: null, returnTo: '/messaging/templates/editor' } as const
+
 describe('the worked example', () => {
   it('is docs/04 section 5s 150-character Arabic body', () => {
     expect(WORKED_EXAMPLE_BODY).toHaveLength(150)
@@ -60,7 +63,7 @@ describe('the figures', () => {
 })
 
 describe('the document', () => {
-  const html = renderEditorHtml(WORKED_EXAMPLE_BODY)
+  const html = renderEditorHtml(WORKED_EXAMPLE_BODY, CHROME)
 
   it('carries the figures, the body and the noindex directive', () => {
     expect(html).toContain('<meta name="robots" content="noindex, nofollow, noarchive">')
@@ -105,7 +108,7 @@ describe('the document', () => {
   it('escapes a body that contains markup, in the box and in the split list', () => {
     // The body is the author's own input and is echoed twice. A script tag in it must be text.
     const nasty = `<script>alert(1)</script>${'ت'.repeat(150)}`
-    const rendered = renderEditorHtml(nasty)
+    const rendered = renderEditorHtml(nasty, CHROME)
     expect(rendered).not.toContain('<script>alert(1)</script>')
     expect(rendered).toContain('&lt;script&gt;')
   })
@@ -113,7 +116,9 @@ describe('the document', () => {
   it('renders identically twice, because nothing in it reads a clock', () => {
     // The pure-render claim, asserted rather than trusted: a document carrying "as of now" could not
     // produce two identical screenshots, and the figures would change without the body changing.
-    expect(renderEditorHtml(WORKED_EXAMPLE_BODY)).toBe(renderEditorHtml(WORKED_EXAMPLE_BODY))
+    expect(renderEditorHtml(WORKED_EXAMPLE_BODY, CHROME)).toBe(
+      renderEditorHtml(WORKED_EXAMPLE_BODY, CHROME),
+    )
   })
 
   it('carries a script that paints figures and computes none', () => {

@@ -37,7 +37,9 @@ import {
   transitionRefusalOf,
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import type { AdminChrome } from '../../../src/components/admin/google-reauth-banner.ts'
 import {
+  type CalendarGridView,
   type CalendarOutcome,
   type CalendarView,
   calendarAnnouncement,
@@ -254,10 +256,11 @@ function factsFrom(read: CalendarDayRead): CalendarDayFacts {
 }
 
 /** The day, as a view. `null` when the premises does not trade on it. */
+// The chrome is NOT read here and is added by the caller, so this function stays a reading of the day.
 async function viewFor(
   deps: CalendarDeps,
   args: { readonly tradingDate: string; readonly outcome: CalendarOutcome },
-): Promise<CalendarView | null> {
+): Promise<Omit<CalendarView, 'chrome'> | null> {
   const read = await readCalendarDay(deps.sql, args.tradingDate)
   if (read === null) return null
   const adjacent = await readAdjacentTradingDates(deps.sql, args.tradingDate)
@@ -283,7 +286,7 @@ async function viewFor(
  * not happen. `?refused=` carries a refusal NAME, whose shape is checked here and whose words come from a
  * closed table in `render.ts`.
  */
-function outcomeFrom(params: URLSearchParams, view: CalendarView): CalendarOutcome {
+function outcomeFrom(params: URLSearchParams, view: CalendarGridView): CalendarOutcome {
   const moved = params.get('moved')
   if (moved !== null && UUID.test(moved)) return movedOutcome(view, moved)
   const refused = params.get('refused')
@@ -293,7 +296,7 @@ function outcomeFrom(params: URLSearchParams, view: CalendarView): CalendarOutco
 }
 
 /** Where an appointment now is, in words. `none` when this day does not hold it. */
-function movedOutcome(view: CalendarView, appointmentId: string): CalendarOutcome {
+function movedOutcome(view: CalendarGridView, appointmentId: string): CalendarOutcome {
   for (const lane of view.axes.rooms) {
     for (const card of lane.cards) {
       if (card.appointment.id !== appointmentId) continue
@@ -310,7 +313,7 @@ function movedOutcome(view: CalendarView, appointmentId: string): CalendarOutcom
 }
 
 export async function handleCalendarRead(
-  input: { readonly searchParams: URLSearchParams },
+  input: { readonly searchParams: URLSearchParams; readonly chrome: AdminChrome },
   deps: CalendarDeps,
 ): Promise<Response> {
   const requested = input.searchParams.get('date')
@@ -318,9 +321,16 @@ export async function handleCalendarRead(
   const tradingDate = requested !== null && TRADING_DATE.test(requested) ? requested : current
   const view = await viewFor(deps, { tradingDate, outcome: { kind: 'none' } })
   if (view === null) {
-    return page(renderClosedDayHtml({ tradingDate, currentTradingDate: current }), 200)
+    return page(
+      renderClosedDayHtml({ tradingDate, currentTradingDate: current, chrome: input.chrome }),
+      200,
+    )
   }
-  const withOutcome: CalendarView = { ...view, outcome: outcomeFrom(input.searchParams, view) }
+  const withOutcome: CalendarView = {
+    ...view,
+    chrome: input.chrome,
+    outcome: outcomeFrom(input.searchParams, view),
+  }
   // The grid alone, for the inline script's repaint after a move. The same renderer the document uses, so
   // there is no second opinion about what the "after" state looks like.
   if (input.searchParams.get('fragment') === 'grid') {
@@ -492,7 +502,7 @@ export async function handleCalendarWrite(
   if (after === null) {
     return json({ ok: true, announcement: calendarAnnouncement({ kind: 'none' }), grid: '' })
   }
-  const announced: CalendarView = { ...after, outcome: movedOutcome(after, outcome.movedId) }
+  const announced: CalendarGridView = { ...after, outcome: movedOutcome(after, outcome.movedId) }
   return json({
     ok: true,
     movedId: outcome.movedId,

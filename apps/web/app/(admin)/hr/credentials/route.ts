@@ -1,5 +1,11 @@
 import { loadConfig } from '@berelax/config'
-import { evaluateCredentials, type HeldCredential, instantFromIso, localDate } from '@berelax/core'
+import {
+  evaluateCredentials,
+  type HeldCredential,
+  type Instant,
+  instantFromIso,
+  localDate,
+} from '@berelax/core'
 import {
   createConnection,
   readCredentialPolicy,
@@ -8,6 +14,7 @@ import {
   type Sql,
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { type CredentialRow, renderCredentialsHtml } from './render.ts'
 
 /**
@@ -107,6 +114,7 @@ export async function GET(request: Request): Promise<Response> {
         }
       })
       return {
+        chrome: await adminChromeFor({ sql, now: instant as Instant, request }),
         rows,
         profileVersion: policy.profileVersion,
         mandatoryTypes: policy.mandatoryTypes,

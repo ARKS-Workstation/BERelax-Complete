@@ -1,4 +1,9 @@
+import { loadConfig } from '@berelax/config'
+import type { Instant } from '@berelax/core'
+import { createConnection } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import type { AdminChrome } from '../../../../../src/components/admin/google-reauth-banner.ts'
+import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
 import { previewFigures, renderEditorHtml, WORKED_EXAMPLE_BODY } from './render.ts'
 
 /**
@@ -29,8 +34,14 @@ import { previewFigures, renderEditorHtml, WORKED_EXAMPLE_BODY } from './render.
  * the inline script that repaints them on every keystroke; anything else is treated as the form and gets
  * the whole page back, so the editor works with JavaScript off.
  *
- * **Not authenticated**, exactly as the routes next door record, and it reads no row: there is nothing
- * here to authorise until W-SYS-01, and nothing it can disclose that the caller did not send.
+ * **Not authenticated**, exactly as the routes next door record, and nothing it can disclose that the
+ * caller did not send: there is nothing here to authorise until W-SYS-01.
+ *
+ * It DOES now read one row, and the sentence this replaces said it read none. G-CONN-08 puts the
+ * non-dismissible Google re-auth banner on every admin document, and this is one — an author pricing copy
+ * on the day the Google grant died is exactly the operator the banner is for. The read is the same
+ * `adminChromeFor` the other nine documents make, on a connection of its own, and a failure to make it is
+ * a 503 rather than a page with the warning quietly missing.
  */
 export const dynamic = 'force-dynamic'
 
@@ -48,8 +59,39 @@ function bodyFrom(value: unknown): string {
   throw new TypeError('a message body must be a string')
 }
 
-export function GET(): Response {
-  return new Response(renderEditorHtml(WORKED_EXAMPLE_BODY), { headers: HTML_HEADERS })
+/**
+ * The banner, on a connection opened and closed for this page.
+ *
+ * `max: 1`: this is one settings read and one connection scan, and the integration suite opens a
+ * 64-connection pool of its own to prove a row lock (brief rule 12) — a tool page holding a larger pool
+ * would make `sorry, too many clients already` a property of somebody else's test run.
+ */
+async function chromeFor(request: Request): Promise<AdminChrome> {
+  const sql = createConnection({ url: loadConfig().DATABASE_URL, max: 1 })
+  try {
+    return await adminChromeFor({ sql, now: Date.now() as Instant, request })
+  } finally {
+    await sql.end({ timeout: 5 })
+  }
+}
+
+/** A read that failed is a 503, never a page with the banner missing. */
+function unavailable(error: unknown): Response {
+  const message = isAppError(error) || error instanceof Error ? error.message : 'Unexpected'
+  return new Response(`The editor could not be read: ${message}\n`, {
+    status: 503,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  })
+}
+
+export async function GET(request: Request): Promise<Response> {
+  try {
+    return new Response(renderEditorHtml(WORKED_EXAMPLE_BODY, await chromeFor(request)), {
+      headers: HTML_HEADERS,
+    })
+  } catch (error) {
+    return unavailable(error)
+  }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -63,7 +105,8 @@ export async function POST(request: Request): Promise<Response> {
       })
     }
     const form = await request.formData()
-    return new Response(renderEditorHtml(bodyFrom(form.get('body') ?? '')), {
+    const body = bodyFrom(form.get('body') ?? '')
+    return new Response(renderEditorHtml(body, await chromeFor(request)), {
       headers: HTML_HEADERS,
     })
   } catch (error) {

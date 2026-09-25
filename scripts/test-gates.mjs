@@ -26936,6 +26936,303 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 100. (G-CONN-08) The banner a person cannot dismiss, and the ladder that cannot climb for ever.
+//
+//       Two claims, and both of them are the kind that a green test suite is happy to be wrong about.
+//
+//       **Non-dismissible.** The obvious implementation is a dismiss control the broken state does not
+//       render plus somewhere to remember a click, and every available *somewhere* — script, cookie, query
+//       parameter, a CSS rule — is wrong here, because the thing being warned about is a Google grant that
+//       has expired: a dismissed banner means review replies stop being posted and nobody is told. So 100a
+//       to 100d are the four dismissals, each injected into the shipped code and each required to be caught
+//       BY NAME.
+//
+//       **Escalating.** A ladder with a loop in it is a ladder that mails somebody every fifteen minutes
+//       the day a cron interval changes, and a ladder that escalates on a healthy connection is the same
+//       defect pointed the other way. 100e to 100h are the four: an unbounded run, a rung the compiler must
+//       refuse, a rung the compiler CANNOT refuse and the suite must, and a notice on a connection that is
+//       fine.
+{
+  const BANNER = 'apps/web/src/components/admin/google-reauth-banner.ts'
+  const LADDER = 'packages/core/src/google/reauth.ts'
+  const DISPLAY_STATES = 'packages/core/src/google/connection.ts'
+  const INBOX_DOCUMENT = 'apps/web/app/(admin)/settings/messages/render.ts'
+  const HEALTH_JOB = 'apps/worker/src/jobs/google-connection-health.ts'
+  const TEMPLATES = 'packages/messaging/src/templates.ts'
+  const BANNER_SUITE = 'apps/web/src/google-reauth-banner.test.ts'
+  const LADDER_SUITE = 'packages/core/src/google/reauth.test.ts'
+  const PASS_SUITE = 'packages/google/src/notify/reauth-ladder.test.ts'
+  const NOTIFY_SUITE = 'apps/worker/src/jobs/google-reauth-notify.test.ts'
+  const CORPUS_SUITE = 'packages/messaging/src/template-corpus.test.ts'
+  const unit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const unitExpectingFailure = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+
+  // 100a. A dismiss control on the BROKEN banner. The mutation is the one somebody would make while
+  //       tidying — the two branches emit almost the same thing, so why have two — and it hands the
+  //       operator a way to make the warning about a dead Google grant go away.
+  {
+    const result = withEditedFile(
+      BANNER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      )}</summary>${body}</details>`\n    : body\n',
+          '      )}</summary>${body}</details>`\n' +
+            '    : `<details open><summary data-action="dismiss-google-reauth">' +
+            '${escapeHtml(view.headline)}</summary>${body}</details>`\n',
+        ),
+      () => unitExpectingFailure(BANNER_SUITE),
+    )
+    checkRejectedBy(
+      'reauth banner: a dismiss control on the broken banner is caught',
+      result,
+      'contains no control, no script and nothing addressable by name',
+    )
+  }
+
+  // 100b. The same dismissal by STYLESHEET. An element in the document with `display: none` on it is
+  //       dismissed as thoroughly as one that was removed, and no assertion over the markup can see it.
+  {
+    const result = withEditedFile(
+      BANNER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  .google-reauth {\n    border: 1px solid var(--color-border);',
+          '  .google-reauth[data-dismissible="false"]:target { display: none; }\n' +
+            '  .google-reauth {\n    border: 1px solid var(--color-border);',
+        ),
+      () => unitExpectingFailure(BANNER_SUITE),
+    )
+    checkRejectedBy(
+      'reauth banner: a CSS rule that could collapse it is caught',
+      result,
+      'carries no CSS that could collapse it',
+    )
+  }
+
+  // 100c. The same dismissal by QUERY PARAMETER — the version that survives a bookmark and a shared link,
+  //       and the one that looks most like a feature when it is written.
+  {
+    const result = withEditedFile(
+      BANNER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (view === null) return ''\n  const account =",
+          "  if (view === null) return ''\n" +
+            "  if (returnTo.includes('dismiss')) return ''\n" +
+            '  const account =',
+        ),
+      () => unitExpectingFailure(BANNER_SUITE),
+    )
+    checkRejectedBy(
+      'reauth banner: a banner switched off by a query parameter is caught',
+      result,
+      'cannot be turned off by anything the render is given',
+    )
+  }
+
+  // 100d. An admin DOCUMENT that renders no banner. The acceptance line samples three routes; the claim is
+  //       every one of them, read off the filesystem, so a document that forgets it fails by name and there
+  //       is no list to add it to and none to forget.
+  {
+    const result = withEditedFile(
+      INBOX_DOCUMENT,
+      (text) =>
+        replaceOnce(
+          text,
+          "    renderAdminBanner(view.chrome),\n    '<h1>Messages</h1>',",
+          "    '<h1>Messages</h1>',",
+        ),
+      () => unitExpectingFailure(BANNER_SUITE),
+    )
+    checkRejectedBy(
+      'reauth banner: an admin document that renders no banner is caught',
+      result,
+      'calls renderAdminBanner in every one of them',
+    )
+  }
+
+  // 100e. The ladder made unbounded. The cap stops being the loop's bound and becomes a suggestion, which
+  //       is the shape every "escalating" notifier that emails somebody for ever has had.
+  {
+    const result = withEditedFile(
+      LADDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    while (notices.length < cap) {',
+          '    while (afterHours < 10_000) {',
+        ),
+      () => unitExpectingFailure(LADDER_SUITE),
+    )
+    checkRejectedBy(
+      'reauth ladder: a ladder that ignores the cap is caught',
+      result,
+      'produces exactly the cap for the reactive ladder, at every cap',
+    )
+  }
+
+  // 100f. A rung added to the union with no timing. `REAUTH_LADDER` is a `Record` over it, so this must not
+  //       compile — the enumeration is the enforcement rather than a convention, and a rung nobody has
+  //       decided a time for would otherwise be a rung the planner skips in silence.
+  {
+    const result = withEditedFile(
+      LADDER,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const REAUTH_LADDER_RUNGS = ['on_discovery', 'after_one_day', 'daily_thereafter'] as const",
+          "export const REAUTH_LADDER_RUNGS = [\n  'on_discovery',\n  'after_one_day',\n  'daily_thereafter',\n  '__gate_rung__',\n] as const",
+        ),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'reauth ladder: a rung with no declared timing fails to compile',
+      result,
+      '__gate_rung__',
+    )
+  }
+
+  // 100g. The half the compiler CANNOT do, and the reason 100f is not enough on its own. Give the new rung
+  //       a timing as well: `REAUTH_LADDERS` is a `Record` over the KIND union, not over the rungs, so a
+  //       rung no ladder stands on compiles perfectly and is dead code somebody trusts. The suite must be
+  //       what refuses it.
+  {
+    const withRung = (text) =>
+      replaceOnce(
+        replaceOnce(
+          text,
+          "export const REAUTH_LADDER_RUNGS = ['on_discovery', 'after_one_day', 'daily_thereafter'] as const",
+          "export const REAUTH_LADDER_RUNGS = [\n  'on_discovery',\n  'after_one_day',\n  'daily_thereafter',\n  '__gate_rung__',\n] as const",
+        ),
+        '  daily_thereafter: {\n    firstAfterHours: 2 * HOURS_PER_DAY_RUNG,',
+        '  __gate_rung__: {\n    firstAfterHours: 999,\n    repeatEveryHours: null,\n' +
+          "    because:\n      'A rung with a declared timing that no ladder stands on, which the compiler cannot see " +
+          "and the suite must.',\n  },\n" +
+          '  daily_thereafter: {\n    firstAfterHours: 2 * HOURS_PER_DAY_RUNG,',
+      )
+    const compiles = withEditedFile(LADDER, withRung, () =>
+      run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check(
+      'reauth ladder: a rung with a timing and no ladder DOES compile, which is why 100g exists',
+      !compiles.failed,
+      `expected tsc to accept a rung that has a timing but stands on no ladder:\n${compiles.output}`,
+    )
+    const result = withEditedFile(LADDER, withRung, () => unitExpectingFailure(LADDER_SUITE))
+    checkRejectedBy(
+      'reauth ladder: a declared rung that no ladder reaches is caught',
+      result,
+      'reaches every declared rung, so a rung nothing plans fails here',
+    )
+  }
+
+  // 100h. The other direction, and the control the whole ladder rests on: a notice on a connection that is
+  //       FINE. `health.notify` is the one derivation every surface reads, and the mutation is a plausible
+  //       tidy — collapse the null guard into the lookup and give it a default.
+  {
+    const result = withEditedFile(
+      LADDER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (notification === null) return { kind: 'skip', reason: 'connection_is_healthy' }\n" +
+            '  const noticeKind = NOTICE_KIND_FOR_NOTIFICATION[notification]',
+          "  const noticeKind =\n    notification === null ? 'reactive' : NOTICE_KIND_FOR_NOTIFICATION[notification]",
+        ),
+      () => unitExpectingFailure(LADDER_SUITE, PASS_SUITE),
+    )
+    checkRejectedBy(
+      'reauth ladder: a notice on a healthy connection is caught',
+      result,
+      'sends NOTHING for a healthy connection',
+    )
+  }
+
+  // 100i. The notice pass detached from the 03:00 check. Calling the underlying function instead of the
+  //       exported reference is exactly the "simplification" the indirection exists to prevent: the
+  //       identity the suite asserts stops being about what the handler runs.
+  {
+    const result = withEditedFile(
+      HEALTH_JOB,
+      (text) =>
+        replaceOnce(
+          text,
+          '      const notified = await SCHEDULED_REAUTH_NOTIFY(',
+          '      const notified = await runReauthNotifyPass(',
+        ),
+      () => unitExpectingFailure(NOTIFY_SUITE),
+    )
+    checkRejectedBy(
+      'reauth ladder: a handler that does not invoke the declared pass is caught',
+      result,
+      'is invoked by the 03:00 handler',
+    )
+  }
+
+  // 100j. docs/10 §4's promise, reworded in one template. The sentence is one constant in
+  //       `@berelax/shared` and it is in the banner, on the settings card and in every re-auth email; three
+  //       spellings of it would make the owner decide which one is true.
+  {
+    const result = withEditedFile(
+      TEMPLATES,
+      (text) =>
+        replaceOnce(
+          text,
+          "      'Reconnect this account to fix it. Until that is done, review replies will keep being drafted for ' +",
+          "      'Reconnect this account to fix it. Until that is done, we will keep drafting review replies for ' +",
+        ),
+      () => unitExpectingFailure(CORPUS_SUITE),
+    )
+    checkRejectedBy(
+      'reauth ladder: a reworded reassurance sentence is caught',
+      result,
+      'carries the reassurance sentence in every English EMAIL body, verbatim',
+    )
+  }
+
+  // 100k. A seventh presentation state with no BANNER decision. G-CONN-07's gates 96a and 96b prove the
+  //       sentence table and the transition matrix are two separate obligations; this is the third, and it
+  //       is the one that decides whether a state a person can be shown puts a warning on every admin page.
+  {
+    const result = withEditedFile(
+      DISPLAY_STATES,
+      (text) =>
+        replaceOnce(
+          text,
+          "  | 'pending_gbp_approval'\n",
+          "  | 'pending_gbp_approval'\n  | '__gate_state__'\n",
+        ),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'reauth banner: a presentation state with no banner decision fails to compile',
+      result,
+      '__gate_state__',
+    )
+    check(
+      'reauth banner: and the error names the module that decides',
+      result.output.includes('reauth.ts'),
+      `tsc rejected the state without naming ${LADDER}:\n${result.output}`,
+    )
+  }
+
+  // 100l. The control on all eleven. A mutation test whose base is red proves nothing about the mutation
+  //       (ADR 0003), and five suites are being mutated here rather than one.
+  {
+    const result = unit(BANNER_SUITE, LADDER_SUITE, PASS_SUITE, NOTIFY_SUITE, CORPUS_SUITE)
+    check(
+      'reauth banner and ladder: the five suites pass on this tree',
+      !result.failed,
+      `the base is red, so the mutations above prove nothing:\n${result.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

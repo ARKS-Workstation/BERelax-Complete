@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Instant } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../src/components/admin/google-reauth-source.ts'
 import { handleCalendarRead, handleCalendarWrite } from './handler.ts'
 
 /**
@@ -52,8 +53,14 @@ function unavailable(error: unknown): Response {
 export async function GET(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url)
-    return await withSql((sql) =>
-      handleCalendarRead({ searchParams: url.searchParams }, { sql, now }),
+    return await withSql(async (sql) =>
+      handleCalendarRead(
+        {
+          searchParams: url.searchParams,
+          chrome: await adminChromeFor({ sql, now: now(), request }),
+        },
+        { sql, now },
+      ),
     )
   } catch (error) {
     return unavailable(error)

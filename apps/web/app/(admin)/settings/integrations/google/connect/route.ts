@@ -1,6 +1,6 @@
 import { type Kek, parseKek } from '@berelax/clinical'
 import { type Config, loadConfig } from '@berelax/config'
-import type { Clock, Instant } from '@berelax/core'
+import { type Clock, type Instant, parseReturnPath } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import {
   buildAuthorizationRequest,
@@ -12,7 +12,7 @@ import {
 import { createCallLog } from '@berelax/providers/call-log'
 import { FailureScript } from '@berelax/providers/failure'
 import { createFakeGoogleOAuth, type GoogleOAuthProvider } from '@berelax/providers/google'
-import { AppError, isAppError } from '@berelax/shared'
+import { AppError, isAppError, RECONNECT_SCREEN_PATH } from '@berelax/shared'
 
 /**
  * The owner's Google consent, start and callback, on one URL.
@@ -41,8 +41,15 @@ export const dynamic = 'force-dynamic'
  */
 const CONSENT_COOKIE = 'berelax_google_consent'
 
-/** Where the owner lands afterwards. The card that reads the outcome is G-CONN-07. */
-const SETTINGS_PATH = '/settings/integrations/google'
+/**
+ * Where the owner lands when the consent did not say where it started.
+ *
+ * It was `/settings/integrations/google` until G-CONN-08, and that was a DEFECT rather than a choice: that
+ * directory holds `connect`, `picker` and `health` and has no document of its own, so the redirect at the
+ * end of every successful consent was a 404. `RECONNECT_SCREEN_PATH` is the card, spelled once in
+ * `@berelax/shared` so the banner's link, the email's deep link and this landing cannot be three strings.
+ */
+const SETTINGS_PATH = RECONNECT_SCREEN_PATH
 
 /**
  * The real clock, read here because this is an app.
@@ -161,6 +168,9 @@ function startConsent(config: Config, url: URL): Response {
       // Google account coming back be reported against the row they were looking at.
       reconnectingConnectionId: url.searchParams.get('connectionId'),
       redirectUri: redirectUriFor(url),
+      // The page the owner pressed *Reconnect Google* on. Validated HERE, before it is stored, and read
+      // back out of the cookie rather than out of the callback's query — see `PendingConsent.returnTo`.
+      returnTo: parseReturnPath(url.searchParams.get('returnTo')),
     },
   )
   return new Response(null, {
@@ -188,7 +198,9 @@ async function completeConsent(config: Config, request: Request, url: URL): Prom
       },
       { redirectUri: redirectUriFor(url) },
     )
-    const destination = new URL(SETTINGS_PATH, url.origin)
+    // The page the consent started from, re-validated on the way out. A path that was storable and is no
+    // longer acceptable lands on the card instead of in a `Location` header.
+    const destination = new URL(parseReturnPath(pending.returnTo) ?? SETTINGS_PATH, url.origin)
     destination.searchParams.set('outcome', outcome.kind)
     destination.searchParams.set('connection', outcome.connectionId)
     if (outcome.warning !== null) destination.searchParams.set('warning', outcome.warning.reason)

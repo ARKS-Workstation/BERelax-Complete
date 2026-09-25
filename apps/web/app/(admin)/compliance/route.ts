@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import {
   escalationRoleFor,
+  type Instant,
   instantFromIso,
   obligationNoticeOffsetsFrom,
   ROLES,
@@ -21,6 +22,7 @@ import {
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { complianceAsOf } from '../../../src/compliance/as-of.ts'
+import { adminChromeFor } from '../../../src/components/admin/google-reauth-source.ts'
 import {
   type CalendarObligationRow,
   type CalendarOccurrenceRow,
@@ -157,6 +159,7 @@ export async function GET(request: Request): Promise<Response> {
         anchorOn: row.anchorOn ?? null,
       }))
       return {
+        chrome: await adminChromeFor({ sql, now: instant as Instant, request }),
         asOf,
         obligations,
         occurrences,

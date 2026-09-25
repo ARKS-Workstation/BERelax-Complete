@@ -1,6 +1,11 @@
 import type { DuplicateQueue, DuplicateQueueRow } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The duplicate review queue, as HTML (C-CRM-06).
@@ -57,6 +62,15 @@ export interface QueueScopeView extends ScopeLink {
 }
 
 export interface DuplicateQueueView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   readonly queue: DuplicateQueue
   readonly scope: QueueScopeView
   /** The review threshold in force, in per mille, so the page states the band it filtered on. */
@@ -232,10 +246,11 @@ export function renderDuplicateQueueHtml(view: DuplicateQueueView): string {
     // brand appears, and an internal review queue naming it would be citing the wrong entity. The rule is
     // about how the brand is written, so not writing it is compliant.
     '<title>Duplicate review queue — admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}</style>`,
+    `<style>${tokensCss()}${QUEUE_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Duplicate review queue</h1>',
     '<div class="lede">',
     '<p><strong>Nothing on this page merges anything.</strong> Every row links to a preview, and the ' +

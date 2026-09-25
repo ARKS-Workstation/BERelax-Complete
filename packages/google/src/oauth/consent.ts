@@ -68,6 +68,20 @@ export interface PendingConsent {
    * indistinguishable, and only one of them deserves a warning.
    */
   readonly reconnectingConnectionId: string | null
+  /**
+   * The admin page the owner pressed *Reconnect Google* on, so the round trip ends where it started.
+   *
+   * In the COOKIE and not in the redirect Google is handed, which is the whole of why it is safe: the
+   * callback's query string is attacker-controllable — anybody can construct a callback URL — and a return
+   * path read from it would be an open redirect on a route whose only output is a redirect. The cookie is
+   * HttpOnly, SameSite=Lax and ten minutes, so the value that decides where the browser lands is one this
+   * server wrote at the start of the same consent.
+   *
+   * Null when the consent was started from somewhere that did not say, and the caller then lands on the
+   * settings card. Validated by `parseReturnPath` in `@berelax/core` before it is stored and again before
+   * it is used.
+   */
+  readonly returnTo: string | null
 }
 
 export interface AuthorizationRequest {
@@ -112,6 +126,8 @@ export function buildAuthorizationRequest(
     readonly scopes?: readonly GoogleRequestedScope[]
     readonly reconnectingConnectionId?: string | null
     readonly redirectUri?: string
+    /** Already validated by the caller; stored verbatim and validated again on the way out. */
+    readonly returnTo?: string | null
   } = {},
 ): AuthorizationRequest {
   const random = deps.randomBytes ?? nodeRandomBytes
@@ -145,6 +161,7 @@ export function buildAuthorizationRequest(
     scopes,
     startedAt: deps.clock.now(),
     reconnectingConnectionId: args.reconnectingConnectionId ?? null,
+    returnTo: args.returnTo ?? null,
   }
 
   return {
@@ -212,5 +229,8 @@ export function parsePendingConsent(raw: string | null | undefined): PendingCons
     scopes: candidate.scopes,
     startedAt: candidate.startedAt,
     reconnectingConnectionId: candidate.reconnectingConnectionId ?? null,
+    // `parseReturnPath` is applied by the reader rather than here, so a cookie written by an older build
+    // (which carried no `returnTo`) parses rather than failing the whole consent.
+    returnTo: typeof candidate.returnTo === 'string' ? candidate.returnTo : null,
   }
 }

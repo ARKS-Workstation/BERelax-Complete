@@ -1,5 +1,10 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The reassignment queue, as HTML.
@@ -49,6 +54,15 @@ export interface ReassignmentQueueEntryView {
 }
 
 export interface ReassignmentQueueView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   /** In working order: soonest appointment first. Ordered by the reader, printed as given. */
   readonly entries: readonly ReassignmentQueueEntryView[]
   /** The instant the page was read at, as ISO 8601. */
@@ -171,10 +185,11 @@ export function renderReassignmentQueueHtml(view: ReassignmentQueueView): string
     // `apps/web/src/seo/brand.test.ts` scans every title-bearing line in `apps/web` for it. An internal
     // back-office screen has no reason to name the business at all.
     '<title>Reassignment queue — HR admin</title>',
-    `<style>${tokensCss()}${QUEUE_CSS}</style>`,
+    `<style>${tokensCss()}${QUEUE_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Reassignment queue</h1>',
     '<div class="policy">',
     `<p><strong>Read at ${safeText(DUBAI.format(new Date(view.readAtIso)))} Dubai.</strong> ` +
