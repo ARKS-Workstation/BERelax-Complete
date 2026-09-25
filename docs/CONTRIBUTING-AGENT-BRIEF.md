@@ -236,6 +236,35 @@ caught a real defect in this repository.
     another unit's run mid-`withEditedFile` and left a mutated shipped file behind in its worktree — the
     exact hazard rule 13 is about, inflicted from outside.
 
+27. **Never take a commit while `pnpm gates:test` is running in the same worktree, and never trust a
+    fixture scan to tell you whether one is.** Three commits in one batch captured a gate fixture: the
+    design-tokens byte budget frozen at the fixture's 256 bytes instead of 6144 (twice, in two different
+    units), and a `{ name: 'price', type: 'text' }` field left in a CMS collection — the very thing the
+    catalogue boundary forbids, so the gate that the fixture proves works was about to fire on the
+    repository. None of the three was noticed by the guard in use at the time, which looked for
+    `__gate_fixture__*` files, and that guard could not have worked: `withEditedFile` creates nothing. It
+    edits a tracked file in place and restores it in a `finally`, so a deliberately broken line in a
+    shipped source file is invisible to any scan for new files.
+
+    A fixture scan answers "did a case leave a file behind". It cannot answer "is a case holding a file
+    open right now". Only the process list can:
+
+        for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+          grep -qa test-gates.mjs "/proc/$pid/cmdline" 2>/dev/null || continue
+          [ "$(git -C "$(readlink /proc/$pid/cwd)" rev-parse --show-toplevel 2>/dev/null)" = "$PWD" ] &&
+            echo "UNSAFE: gate run live as pid $pid"
+        done
+
+    Two traps in writing that check, both of which produced a wrong answer before this wording:
+    matching the script name as a SUBSTRING of the command line flags a watcher shell spawned as
+    `bash -c "until pgrep -f 'scripts/test-gates.mjs'; do sleep 10; done"`, which runs nothing but
+    `sleep`; and comparing the process's cwd by path PREFIX flags every worktree, because the agent
+    worktrees live under the main checkout. Ask git which worktree the process is standing in, and match
+    the script as its own argument.
+
+    The damage is cheap to find once you know to look: `git show <commit>:<file>` against
+    `git show origin/main:<file>` for every file in the commit you did not deliberately change.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy

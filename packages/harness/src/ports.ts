@@ -46,6 +46,11 @@ export const TEST_PORT_BANDS = {
   home: { start: 8500, width: 300 },
   compliance: { start: 9400, width: 300 },
   'book-flow': { start: 9700, width: 300 },
+  // C-AUTO-02 allocated this band at 9700, which `book-flow` already held on main: two units picked
+  // the next round number after the last band each could see. Moved rather than renumbered because
+  // `book-flow` is the one already in use, and 10000 is the next start with 300 clear ports below the
+  // ephemeral floor and none a browser refuses.
+  'template-editor': { start: 10_000, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
