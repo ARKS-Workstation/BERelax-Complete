@@ -290,6 +290,23 @@ caught a real defect in this repository.
     failure a selector invites and gate case 3c is what holds it shut. The full suite still runs in
     `pnpm verify` at the integrating merge, and that remains the only arbiter for an integrated tree.
 
+30. **One waiter per thing waited on, and stop it when the wait ends.** Measured, not guessed: a unit
+    agent found **238 orphaned thirty-minute poll shells** left behind by earlier sentinel checks, all
+    sleeping and waking against the same handful of log files, and killing the 236 that referenced its own
+    log took the gate suite from roughly **3 cases a minute to 14**. On four cores, a few hundred shells
+    waking on a timer is not free, and the thing they slow down most is the two-hour step everyone is
+    waiting for.
+
+    So: do not spawn a new poller each time you want to know whether a run has finished. Check the
+    sentinel once, do something else, and check again later — and if you do arm a waiter, arm ONE, and stop
+    it as soon as it fires or you stop caring. A waiter whose sentinel can never appear is worse than a
+    slow one: six shells in this build polled for a `.done` file belonging to a run that had already been
+    superseded, and they would have waited for ever, holding the whole session's completion check open.
+
+    When you clean up, filter by the log your OWN run writes — never `pkill` by a pattern that matches
+    another worktree's processes (rule 26), and never kill a `node scripts/test-gates.mjs` you did not
+    start (rule 13).
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy
