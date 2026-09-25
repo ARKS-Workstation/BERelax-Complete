@@ -1033,12 +1033,12 @@ describe('a repeated merge, and the tombstone', () => {
     await probe(async ({ tx, uow }) => {
       // Inserted with SQL rather than through `publishFlowDefinition`, which takes a validator injected
       // from @berelax/core: what is under test is the participant, not the publish path.
-      const [flow] = await tx`
+      const [flow] = await tx<{ id: string }[]>`
         insert into flow (flow_key, title, created_by)
         values ('merge_itest_enrolment', 'A flow the merge suite enrols a losing record in', 'merge.itest.ts')
         returning id
       `
-      const flowId = flow?.id as string
+      const flowId = flow?.id ?? ''
       await tx`
         insert into flow_definition (flow_id, version, dsl_version, definition, published_by)
         values (
@@ -1048,12 +1048,12 @@ describe('a repeated merge, and the tombstone', () => {
         )
       `
       const enrol = async (customerId: string): Promise<string> => {
-        const [row] = await tx`
+        const [row] = await tx<{ id: string }[]>`
           insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
           values (${flowId}::uuid, 1, ${customerId}::uuid, 'merge.itest.ts')
           returning id
         `
-        return row?.id as string
+        return row?.id ?? ''
       }
       const losers = await enrol(loserId)
       // The control, and it is the one that matters: "the loser's enrolment moved" is also true of a
@@ -1064,20 +1064,24 @@ describe('a repeated merge, and the tombstone', () => {
       const outcome = await mergeCustomers(uow, { ...MERGE_ARGS, plan: await planned(tx) })
       if (outcome.kind !== 'merged') throw new Error(outcome.kind)
 
-      const [moved] = await tx`select customer_id from flow_enrolment where id = ${losers}::uuid`
-      expect(moved?.customer_id, "the loser's enrolment now names the survivor").toBe(survivorId)
-      const [other] = await tx`select customer_id from flow_enrolment where id = ${untouched}::uuid`
-      expect(other?.customer_id, "a third record's enrolment is left alone").toBe(thirdId)
+      const owner = async (enrolmentId: string): Promise<string | undefined> => {
+        const [row] = await tx<{ customerId: string }[]>`
+          select customer_id as "customerId" from flow_enrolment where id = ${enrolmentId}::uuid
+        `
+        return row?.customerId
+      }
+      expect(await owner(losers), "the loser's enrolment now names the survivor").toBe(survivorId)
+      expect(await owner(untouched), "a third record's enrolment is left alone").toBe(thirdId)
 
       // And the merge's own record says one row moved, so the count and the rows agree.
-      const [counted] = await tx`
-        select rows_moved, rows_retained_on_loser
+      const [counted] = await tx<{ moved: number; retained: number }[]>`
+        select rows_moved as "moved", rows_retained_on_loser as "retained"
         from merge_record_table
         where merge_record_id = ${outcome.mergeRecordId}::uuid
           and participant = 'public.flow_enrolment'
       `
-      expect(Number(counted?.rows_moved), 'one enrolment moved').toBe(1)
-      expect(Number(counted?.rows_retained_on_loser), 'none retained').toBe(0)
+      expect(Number(counted?.moved), 'one enrolment moved').toBe(1)
+      expect(Number(counted?.retained), 'none retained').toBe(0)
     })
   })
 })
