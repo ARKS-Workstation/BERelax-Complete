@@ -1,6 +1,7 @@
 export * from './agents.ts'
 export * from './bill.ts'
 export * from './booking.ts'
+export * from './booking-manage-grant.ts'
 export * from './booking-session.ts'
 export * from './catalogue.ts'
 export * from './checkout-idempotency.ts'

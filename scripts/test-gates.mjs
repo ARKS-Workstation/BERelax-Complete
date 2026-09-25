@@ -23445,6 +23445,274 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 91. B-UI-05 — the magic-link token service and the manage-booking page.
+//
+//     Every mutation here produces a working page. That is what the block is about: a token stored in the
+//     clear still resolves, an expiry anchored to the wrong instant still opens for most of a day, a
+//     revocation that takes one link still reports a cancellation, and a `datetime-local` read in the
+//     server's zone still books a real slot. None of them fails anything except the assertion written for
+//     it, and four of them would reach a customer.
+//
+//     The two worth reading twice are 91d and 91j. 91d takes the expiry from the appointment's START
+//     instead of its END — 45 minutes' difference, on a page nobody would look at twice — and 91j parses the
+//     form's local time in the server's zone, which is correct on a container set to Asia/Dubai and four
+//     hours wrong on the UTC one CI runs. Neither raises anything: the first is a link that dies while the
+//     customer is in the building, the second is a customer who arrives at 15:00 for a 19:00 treatment.
+{
+  const CORE = 'packages/core/src/identity/booking-token.ts'
+  const REPO = 'packages/db/src/repositories/booking-token.ts'
+  const CANCEL = 'packages/db/src/repositories/cancel.ts'
+  const HANDLER = 'apps/web/app/(public)/booking/[token]/handler.ts'
+  const RENDER = 'apps/web/app/(public)/booking/[token]/render.ts'
+  const PRINCIPAL = 'packages/core/src/access/principals/customer-link.ts'
+
+  const CORE_SUITE = 'packages/core/src/identity/booking-token.test.ts'
+  const POLICY_SUITE = 'packages/core/src/access/customer-link.policy.test.ts'
+  const REPO_SUITE = 'packages/db/src/repositories/booking-token.test.ts'
+  const PAIR_SUITE = 'apps/web/src/manage-booking.itest.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const pair = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const linkMutant = (path, anchor, replacement, suite, runner = unit) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 91a. The token stored in the clear. The page goes on working — the lookup is by whatever is in the
+  //      column, and a 64-character lower-case hex token satisfies the column's own CHECK — so nothing
+  //      fails except the pair suite's comparison of the column against a digest PostgreSQL computes. A
+  //      database dump would then be a dump of live credentials.
+  checkRejectedBy(
+    'manage-booking gate: storing the token instead of its digest is caught',
+    linkMutant(
+      REPO,
+      'export const bookingTokenDigest = (token: string): string =>\n' +
+        "  createHash('sha256').update(token, 'utf8').digest('hex')",
+      'export const bookingTokenDigest = (token: string): string => token',
+      PAIR_SUITE,
+      pair,
+    ),
+    'stores no column that could hold a token',
+  )
+
+  // 91b. Upper-case hex accepted as well as lower. It reads like generosity and it is the one mutation that
+  //      cannot be caught downstream: the token is a PATH segment, `canonicalPath` lower-cases every path
+  //      and 301s to the result, so a mixed-case token works exactly until the site's own redirect touches
+  //      it — and then fails for every customer, with a 404 two modules from its cause.
+  checkRejectedBy(
+    'manage-booking gate: a case-insensitive token shape is caught',
+    linkMutant(
+      CORE,
+      'const BOOKING_TOKEN_SHAPE = /^[0-9a-f]{64}$/',
+      'const BOOKING_TOKEN_SHAPE = /^[0-9a-fA-F]{64}$/',
+      CORE_SUITE,
+    ),
+    'deliberately NOT the opt-out token shape',
+  )
+
+  // 91c. A shape test that accepts a minimum length rather than an exact one, which is what a truncated
+  //      paste produces. It would then be looked up, miss, and be indistinguishable from a forgery.
+  checkRejectedBy(
+    'manage-booking gate: a token length that is a minimum rather than exact is caught',
+    linkMutant(
+      CORE,
+      'const BOOKING_TOKEN_SHAPE = /^[0-9a-f]{64}$/',
+      'const BOOKING_TOKEN_SHAPE = /^[0-9a-f]{32,}$/',
+      CORE_SUITE,
+    ),
+    'refuses a truncated paste rather than accepting a prefix',
+  )
+
+  // 91d. The expiry anchored to the appointment's START rather than its END. For a 45-minute treatment the
+  //      two differ by 45 minutes, so the link works all day and dies 45 minutes early on the one evening it
+  //      matters — while the customer is in the building.
+  checkRejectedBy(
+    'manage-booking gate: an expiry measured from the start instead of the end is caught',
+    linkMutant(
+      CORE,
+      'export function bookingTokenExpiry(endsAtMs: number): number {\n' +
+        '  return endsAtMs + BOOKING_TOKEN_GRACE_SECONDS * 1000\n' +
+        '}',
+      'export function bookingTokenExpiry(endsAtMs: number): number {\n' +
+        '  return endsAtMs - 45 * 60_000 + BOOKING_TOKEN_GRACE_SECONDS * 1000\n' +
+        '}',
+      CORE_SUITE,
+    ),
+    'is 24 hours after the appointment ENDS',
+  )
+
+  // 91e. Expiry made EXCLUSIVE of its own boundary, so a link is alive at the instant it expires. One
+  //      character, and the kind of off-by-one nothing downstream notices — which is why the acceptance
+  //      criterion names the boundary.
+  checkRejectedBy(
+    'manage-booking gate: an expiry that is not inclusive of its own boundary is caught',
+    linkMutant(
+      CORE,
+      'if (grant.expiresAt <= input.at) {',
+      'if (grant.expiresAt < input.at) {',
+      CORE_SUITE,
+    ),
+    'treats expiry as inclusive of the boundary',
+  )
+
+  // 91f. A malformed token looked up anyway, which is the generous version: it costs a query and an INSERT
+  //      into an append-only table per request, on a page anybody may fetch. The refusal is unchanged, so
+  //      only the audit delta says so.
+  checkRejectedBy(
+    'manage-booking gate: a malformed token that is looked up and audited is caught',
+    linkMutant(
+      HANDLER,
+      '  if (!shape.ok) return null\n  const digestHex = bookingTokenDigest(shape.token)',
+      '  const digestHex = bookingTokenDigest(shape.ok ? shape.token : String(token))',
+      PAIR_SUITE,
+      pair,
+    ),
+    'costs no query and writes no audit row for a token that is not a token',
+  )
+
+  // 91g. One clinical field printed on the page. Every declared field is still there and the page still
+  //      renders, which is why the criterion is a NEGATIVE assertion over the response body as well as a
+  //      positive one over the allowlist.
+  checkRejectedBy(
+    'manage-booking gate: a clinical field printed on the page is caught',
+    linkMutant(
+      RENDER,
+      "    '<dl class=\"facts\">',",
+      "    '<dl class=\"facts\"><dt>Contraindication</dt><dd>none recorded</dd>',",
+      PAIR_SUITE,
+      pair,
+    ),
+    'prints every declared field and no clinical, contraindication or intake field name',
+  )
+
+  // 91h. The allowlist's STRUCTURAL half, which is a type-level assertion and therefore a typecheck failure
+  //      rather than a test failure. A field on the view that the allowlist does not declare is how a column
+  //      read out of the database reaches the page, and the positive test cannot see it — every declared
+  //      field would still be printed.
+  checkRejectedBy(
+    'manage-booking gate: a view field the allowlist does not declare fails the typecheck',
+    withEditedFile(
+      RENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  readonly linkExpiresAtIso: string\n}',
+          '  readonly linkExpiresAtIso: string\n  readonly contraindicationNote: string\n}',
+        ),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'apps/web/tsconfig.json']),
+    ),
+    RENDER,
+  )
+
+  // 91i. The revocation removed from the cancellation, by pointing it at a booking that does not exist —
+  //      the shape of a caller that revoked the wrong one. Every other assertion about a cancellation still
+  //      passes: the status moves, the late flag is set, the steps settle. What survives is a working link
+  //      offering to reschedule a cancelled booking.
+  checkRejectedBy(
+    'manage-booking gate: a cancellation that leaves the magic link live is caught',
+    linkMutant(
+      CANCEL,
+      '        bookingId: row.booking_id,',
+      "        bookingId: '00000000-0000-4000-8000-000000000000',",
+      PAIR_SUITE,
+      pair,
+    ),
+    'is revoked by a cancellation, in the same transaction, for every link on the booking',
+  )
+
+  // 91j. The revocation narrowed to ONE grant. A reminder mints a link per send, so a booking with a
+  //      24-hour and a 2-hour reminder has two live links — and this is the version that looks correct in
+  //      review.
+  checkRejectedBy(
+    'manage-booking gate: revoking one link instead of every link on the booking is caught',
+    linkMutant(
+      REPO,
+      '    delete from booking_manage_grant\n     where booking_id = ${args.bookingId}::uuid\n    returning id::text as id',
+      '    delete from booking_manage_grant\n     where id = (select g.id from booking_manage_grant g\n                  where g.booking_id = ${args.bookingId}::uuid\n                  order by g.expires_at desc limit 1)\n    returning id::text as id',
+      PAIR_SUITE,
+      pair,
+    ),
+    'is revoked by a cancellation, in the same transaction, for every link on the booking',
+  )
+
+  // 91k. The `datetime-local` value read as the SERVER's local time. It books a real slot at the wrong
+  //      time, four hours out on a container set to UTC — which is what CI runs and what a production
+  //      container usually is. Nothing raises.
+  checkRejectedBy(
+    'manage-booking gate: a local time parsed in the server zone is caught',
+    linkMutant(
+      HANDLER,
+      '    return fromLocal(localDate(date), localTime(time))',
+      '    return Date.parse(`${date}T${time}`) as Instant',
+      PAIR_SUITE,
+      pair,
+    ),
+    'moves the booking, supersedes the old steps and builds the successors',
+  )
+
+  // 91l. The audit row dropped from a REFUSED redemption. The response is unchanged — it cannot carry a
+  //      reason — so that row is the only record that a link was presented and refused, and its absence is
+  //      invisible from every other assertion in the unit.
+  checkRejectedBy(
+    'manage-booking gate: a refused redemption that writes no audit_event is caught',
+    linkMutant(
+      REPO,
+      '      action: BOOKING_TOKEN_AUDIT_ACTIONS.refused,',
+      "      action: 'booking_manage_grant.gate_fixture_not_the_refusal',",
+      PAIR_SUITE,
+      pair,
+    ),
+    'answers a token with one character altered exactly as it answers an unknown one',
+  )
+
+  // 91m. The link holder given the front desk's grant list instead of its own. It works — `receptionist`
+  //      holds both booking capabilities — and it also holds `customer:write`, `till:operate` and
+  //      `invoice:issue`, so anybody with a URL out of an SMS is a member of staff to every check that asks.
+  checkRejectedBy(
+    'manage-booking gate: a link holder resolving through the front-desk role is caught',
+    linkMutant(
+      PRINCIPAL,
+      "export const CUSTOMER_LINK_GRANTS: readonly Permission[] = Object.freeze([\n  'booking:read',\n  'booking:reschedule',\n  'booking:cancel',\n])",
+      "export const CUSTOMER_LINK_GRANTS: readonly Permission[] = Object.freeze([\n  'booking:read',\n  'booking:reschedule',\n  'booking:cancel',\n  'customer:write',\n  'till:operate',\n  'invoice:issue',\n])",
+      POLICY_SUITE,
+    ),
+    'is NARROWER than the role it would otherwise have been',
+  )
+
+  // 91n. The fail-closed guard on the injected access decision. `packages/db` may not import
+  //      `packages/core`, so the decision is a PORT — and an absent one defaulting to granted is a page
+  //      served to whoever asked, with nothing to say so.
+  checkRejectedBy(
+    'manage-booking gate: a redemption that grants without a decision is caught',
+    linkMutant(
+      REPO,
+      "  if (typeof deps?.decide !== 'function') {",
+      '  if (deps === null) {',
+      REPO_SUITE,
+    ),
+    'refuses to resolve a token with no access decision injected',
+  )
+
+  // 91o. And the committed tree passes all four suites, so the fourteen cases above are about their
+  //      fixtures and not about a unit that was already red.
+  {
+    const coreClean = run('pnpm', unit(CORE_SUITE))
+    const policyClean = run('pnpm', unit(POLICY_SUITE))
+    const repoClean = run('pnpm', unit(REPO_SUITE))
+    const pairClean = run('pnpm', pair(PAIR_SUITE))
+    check(
+      'manage-booking gate: the committed core, policy, repository and pair suites all pass',
+      !coreClean.failed && !policyClean.failed && !repoClean.failed && !pairClean.failed,
+      `a committed suite failed:\n${coreClean.output}${policyClean.output}${repoClean.output}` +
+        `${pairClean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

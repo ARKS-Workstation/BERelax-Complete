@@ -1,14 +1,21 @@
 import type { Permission } from '../permissions.ts'
+import { CUSTOMER_LINK_GRANTS, CUSTOMER_LINK_PRINCIPAL } from './customer-link.ts'
 import { SEO_AGENT_GRANTS, SEO_AGENT_PRINCIPAL } from './seo-agent.ts'
 
 /**
  * The agent principals, as data.
  *
  * One row per non-interactive caller that needs its own, narrower grant set than the `system` role
- * carries. There is exactly one today — G-SEO-02's, the unit that needed the mechanism — and the registry
- * exists rather than the single constant because the second one is the dangerous one: the review
- * autoresponder and the campaign sender are also `system` today, and the way an agent comes to hold a
- * capability nobody granted it is by joining a role whose list was written for somebody else.
+ * carries. G-SEO-02's was the first, and this registry existed rather than a single constant because the
+ * second one is the dangerous one: the review autoresponder and the campaign sender are also `system`
+ * today, and the way an agent comes to hold a capability nobody granted it is by joining a role whose list
+ * was written for somebody else.
+ *
+ * B-UI-05's is the second, and it arrived exactly the way that comment predicted. A magic-link holder is
+ * not a member of staff with a job title, and the shortest spelling available was `role: 'receptionist'` —
+ * which holds `customer:write`, `till:operate` and `invoice:issue` beside the two booking moves the link
+ * needs. `./customer-link.ts` records that and the two other spellings considered. Both principals resolve
+ * through `resolvedPermissionsOf`, which reads the list below and nothing else.
  *
  * ## Why this file is separate from the policy that reads it
  *
@@ -20,7 +27,7 @@ import { SEO_AGENT_GRANTS, SEO_AGENT_PRINCIPAL } from './seo-agent.ts'
  */
 
 /** Every declared agent principal id. Deny-by-default applies to an id that is not in this list. */
-export const AGENT_PRINCIPALS = [SEO_AGENT_PRINCIPAL] as const
+export const AGENT_PRINCIPALS = [CUSTOMER_LINK_PRINCIPAL, SEO_AGENT_PRINCIPAL] as const
 export type AgentPrincipalId = (typeof AGENT_PRINCIPALS)[number]
 
 /**
@@ -33,6 +40,7 @@ export type AgentPrincipalId = (typeof AGENT_PRINCIPALS)[number]
  */
 export const AGENT_PRINCIPAL_GRANTS: Readonly<Record<AgentPrincipalId, readonly Permission[]>> =
   Object.freeze({
+    [CUSTOMER_LINK_PRINCIPAL]: CUSTOMER_LINK_GRANTS,
     [SEO_AGENT_PRINCIPAL]: SEO_AGENT_GRANTS,
   })
 

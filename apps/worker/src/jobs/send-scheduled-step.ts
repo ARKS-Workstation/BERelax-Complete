@@ -47,6 +47,8 @@
  */
 import { loadConfig } from '@berelax/config'
 import {
+  BOOKING_TOKEN_PURPOSES,
+  bookingTokenExpiry,
   decideScheduledStep,
   type Instant,
   reminderOffsetsFrom,
@@ -60,6 +62,7 @@ import {
   createConnection,
   createPostgresMessageStore,
   dueScheduledSteps,
+  mintBookingManageGrant,
   type PlannedStep,
   readCurrentTemplate,
   readReminderOffsets,
@@ -68,6 +71,7 @@ import {
   recordStepSkipped,
   type ScheduledStepPlanner,
   type Sql,
+  type UnitOfWork,
   withUnitOfWork,
 } from '@berelax/db'
 import {
@@ -82,7 +86,13 @@ import {
   TDRA_PROMOTIONAL_WINDOW,
 } from '@berelax/messaging'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
-import { AppError, REBUILD_SCHEDULED_STEPS_JOB as REBUILD_JOB_NAME } from '@berelax/shared'
+import {
+  AppError,
+  manageBookingLink,
+  REBUILD_SCHEDULED_STEPS_JOB as REBUILD_JOB_NAME,
+  SITE_ORIGIN_ENV,
+  siteOriginFrom,
+} from '@berelax/shared'
 import type { JobContext, JobDefinition } from '../job.ts'
 
 /**
@@ -101,17 +111,36 @@ const templateKeyFor = (stepType: string): string | null =>
  * `booking.reminder` declares `{{time}}` and `{{link}}`, and B-MSG-01's renderer refuses a blank for a
  * declared variable — deliberately, because "Reminder: your booking tomorrow at 19:00. Details or changes:
  * " sends successfully and is reported as delivered. The link is a per-booking expiring magic link
- * (docs/06 D2), and **B-UI-02 owns magic links**: nothing in this build can mint one.
+ * (docs/06 D2).
  *
- * So this is an injected seam whose shipped value is absent, and a step whose link cannot be built is
- * SKIPPED with `content_unavailable` recorded on the row. Inventing a URL would be brief rule 15 exactly —
- * a plausible value indistinguishable from a configured one — and it would be worse than a blank, because
- * a link to a 404 in a reminder is a customer who thinks the salon has lost their booking.
+ * **B-UI-05 wired it.** The seam stayed and its shipped value was `() => null` for as long as the page did
+ * not exist: B-UI-02 and B-MSG-03 both refused to mint a link to a 404, because "a link to a 404 in a
+ * reminder is a customer who thinks the salon has lost their booking". `scheduledStepRuntimeFor` now mints
+ * one, and a step whose link cannot be built is still SKIPPED with `content_unavailable` — the seam is what
+ * makes that state reachable in a test, and it is what keeps a mint failure from sending a blank.
+ *
+ * ## Why it takes the unit of work, and why it is async
+ *
+ * Minting a link WRITES: `booking_manage_grant` holds the sha256 of 32 CSPRNG bytes and no column holds the
+ * token, so the only way to have a token is to insert its digest. Taking the drain's own `UnitOfWork` rather
+ * than a pool connection is what makes the grant durable with the send or not at all — a link minted for a
+ * reminder that rolled back is a live credential for a message nobody received, and a link that committed
+ * while the message did not is worse: the customer never learns it exists and it stays valid until the
+ * appointment ends.
+ *
+ * `endsAtMs` is here because the expiry is a property of the APPOINTMENT: `bookingTokenExpiry` is the
+ * treatment's end plus 24 hours (B-UI-05). Passing the period rather than letting the builder re-read it
+ * keeps the value the one the drain already read under the step's row lock.
  */
 export type MagicLinkBuilder = (input: {
+  readonly uow: UnitOfWork
   readonly bookingId: string
   readonly appointmentId: string
-}) => string | null
+  /** The treatment's end, epoch milliseconds, as the step row carries it. */
+  readonly endsAtMs: number
+  /** The instant the drain is running at, so the grant's `issued_at` is the drain's clock and not `now()`. */
+  readonly atIso: string
+}) => Promise<string | null>
 
 export interface ScheduledStepRuntime {
   readonly sql: Sql
@@ -156,9 +185,10 @@ const ACTOR: Actor = { kind: 'system', label: 'messaging.send-scheduled-step' }
  * `messaging.rebuild-scheduled-steps`, which is the same pass a timing change runs — not by editing rows.
  */
 async function reminderContentFor(
-  sql: Sql,
+  uow: UnitOfWork,
   step: ClaimedStep,
   magicLink: MagicLinkBuilder,
+  atIso: string,
 ): Promise<{
   readonly templateId: string
   readonly recipient: string
@@ -179,9 +209,18 @@ async function reminderContentFor(
   const key = templateKeyFor(step.stepType)
   if (key === null) return null
   const locale = step.locale === 'ar' ? 'ar' : 'en'
-  const template = await readCurrentTemplate(sql, { key, channel: 'sms', locale })
+  const template = await readCurrentTemplate(uow.sql, { key, channel: 'sms', locale })
   if (template === undefined) return null
-  const link = magicLink({ bookingId: step.bookingId, appointmentId: step.appointmentId })
+  // The template is read BEFORE the link is minted, and the order is load-bearing: a step with no approved
+  // template is skipped with `content_unavailable`, and minting first would leave a live credential behind
+  // for a message that was never going to be sent.
+  const link = await magicLink({
+    uow,
+    bookingId: step.bookingId,
+    appointmentId: step.appointmentId,
+    endsAtMs: step.endsAtMs,
+    atIso,
+  })
   if (link === null || link.trim() === '') return null
 
   // The treatment start as wall-clock time in the business zone. `Intl` rather than string arithmetic,
@@ -240,7 +279,7 @@ export async function drainScheduledStep(
     }
 
     const atMs = Date.parse(input.atIso)
-    const content = await reminderContentFor(uow.sql, step, runtime.magicLink)
+    const content = await reminderContentFor(uow, step, runtime.magicLink, input.atIso)
     const verdict = decideScheduledStep({
       step: {
         appointmentId: step.appointmentId,
@@ -537,12 +576,47 @@ export const REBUILD_SCHEDULED_STEPS_JOB: JobDefinition<RebuildScheduledStepsDat
 }
 
 /**
+ * The magic link, as the shipped builder mints it (B-UI-05).
+ *
+ * Inside the drain's own transaction, so the grant and the message are durable together — see
+ * {@link MagicLinkBuilder} for what each of the two half-failures would cost.
+ *
+ * The expiry is `bookingTokenExpiry(endsAtMs)` from `@berelax/core` and is NOT computed here: it is the
+ * appointment's end plus 24 hours, and a second copy of that rule in the worker would be the copy nobody
+ * tested under a frozen clock. `mintBookingManageGrant` refuses an expiry at or before the issue by name,
+ * which is what an appointment that has already finished produces — so a step somehow drained after its
+ * treatment ended is SKIPPED with `content_unavailable` rather than sent with a dead link.
+ *
+ * The origin is `SITE_ORIGIN` through `siteOriginFrom`, the same rule `apps/web/src/routes/alternates.ts`
+ * reads: `packages/shared/src/site-origin.ts` records why one rule in the leaf rather than two readers with
+ * two fallbacks. A malformed `SITE_ORIGIN` therefore THROWS here rather than sending a broken link, and the
+ * throw is a pg-boss retry on a condition a deploy fixes — which is the right direction for a value that
+ * would otherwise reach a customer.
+ */
+export const shippedMagicLink: MagicLinkBuilder = async (input) => {
+  const purpose = BOOKING_TOKEN_PURPOSES[0]
+  if (purpose === undefined) return null
+  const expiresAt = bookingTokenExpiry(input.endsAtMs)
+  // A grant that would be born dead is not minted at all. The repository refuses it by name and a refusal
+  // would abort the drain's transaction, turning "this reminder is too late to be useful" into "the
+  // reminder job is broken".
+  if (expiresAt <= Date.parse(input.atIso)) return null
+  const grant = await mintBookingManageGrant(input.uow, {
+    bookingId: input.bookingId,
+    purpose,
+    issuedAtIso: input.atIso,
+    expiresAtIso: new Date(expiresAt).toISOString(),
+  })
+  return manageBookingLink(siteOriginFrom(process.env[SITE_ORIGIN_ENV]), grant.token)
+}
+
+/**
  * The shipped runtime, built from the environment.
  *
- * `magicLink` answers null, and that is the honest shipped value rather than an oversight: see
- * {@link MagicLinkBuilder}. Until B-UI-02 mints a magic link, a due reminder is SKIPPED with
- * `content_unavailable` recorded on its row — visible in the table, countable in a report, and not a
- * message sent with a link to nothing.
+ * `magicLink` is {@link shippedMagicLink} since B-UI-05. It answered `null` for as long as
+ * `/booking/[token]` did not exist, and a due reminder was SKIPPED with `content_unavailable` recorded on
+ * its row — which is still what happens when a link cannot be minted, so the honest state did not go away
+ * when the page landed.
  */
 export function scheduledStepRuntimeFor(sql: Sql): ScheduledStepRuntime {
   const config = loadConfig()
@@ -588,7 +662,7 @@ export function scheduledStepRuntimeFor(sql: Sql): ScheduledStepRuntime {
       // hands it back, which is the same wait without a held lock.
       waitUntil: async () => {},
     }),
-    magicLink: () => null,
+    magicLink: shippedMagicLink,
     planner: plannerFrom,
   }
 }

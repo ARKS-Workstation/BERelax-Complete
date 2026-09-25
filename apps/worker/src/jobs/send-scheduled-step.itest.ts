@@ -1,5 +1,7 @@
 import { parseConfig } from '@berelax/config'
 import {
+  BOOKING_TOKEN_LENGTH,
+  bookingTokenExpiry,
   type Clock,
   cancellationVerdictFor,
   decideAppointmentTransition,
@@ -42,7 +44,11 @@ import {
   TDRA_PROMOTIONAL_WINDOW,
 } from '@berelax/messaging'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
-import { REBUILD_SCHEDULED_STEPS_JOB, REMINDER_OFFSETS_SETTING_KEY } from '@berelax/shared'
+import {
+  REBUILD_SCHEDULED_STEPS_JOB,
+  REMINDER_OFFSETS_SETTING_KEY,
+  siteOriginFrom,
+} from '@berelax/shared'
 import type { PgBoss } from 'pg-boss'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createBoss, shutdown } from '../boss.ts'
@@ -53,6 +59,8 @@ import {
   plannerFrom,
   type ScheduledStepRuntime,
   SEND_SCHEDULED_STEP_JOB,
+  scheduledStepRuntimeFor,
+  shippedMagicLink,
   sweepDueSteps,
 } from './send-scheduled-step.ts'
 
@@ -158,7 +166,15 @@ const roomId = (code: string): string => rooms.get(code) as string
  * and a diverted send produces none.
  */
 function runtimeWith(options: {
-  readonly magicLink: boolean
+  /**
+   * `false` answers null, `true` is a short fake, and `'shipped'` is the real builder.
+   *
+   * Three values and not two since B-UI-05: the fake is right for every case about the step row and the
+   * message row (a real mint would add a grant row to each of them and a dependency on `SITE_ORIGIN`), and
+   * exactly one case needs the real one, because the drain is the only place the worker's builder and the
+   * page's grant can be proved to meet.
+   */
+  readonly magicLink: boolean | 'shipped'
   readonly nowIso: string
   /** `staging` exercises F03's guard, which diverts to the local outbox and writes no message row. */
   readonly appEnv?: 'production' | 'staging'
@@ -195,9 +211,24 @@ function runtimeWith(options: {
         send,
         waitUntil: async () => {},
       }),
-      magicLink: options.magicLink
-        ? ({ bookingId }) => `https://be.relax/b/${bookingId}`
-        : () => null,
+      /*
+        B-UI-05 made this seam async and gave it the drain's own `UnitOfWork`, because minting a link is a
+        WRITE — `booking_manage_grant` holds only the digest, so having a token means inserting one. This
+        file keeps a FAKE rather than calling `shippedMagicLink`: every case here is about the step row, the
+        message row and the staleness note, and a real mint would add a grant row to each of them plus a
+        dependency on `SITE_ORIGIN`. What the real builder does is asserted by
+        `apps/web/src/manage-booking.itest.ts`, which owns the grant.
+
+        `magicLink: false` still answers null, and that is the case below: a link that cannot be built is a
+        step SKIPPED with `content_unavailable`, which is reachable in production too — an appointment whose
+        end has already passed mints nothing.
+      */
+      magicLink:
+        options.magicLink === 'shipped'
+          ? shippedMagicLink
+          : options.magicLink
+            ? async ({ bookingId }) => `https://be.relax/b/${bookingId}`
+            : async () => null,
       planner: plannerFrom,
     },
     calls: () =>
@@ -219,6 +250,14 @@ interface StepRow {
 
 const stepsOf = (appointmentId: string): Promise<readonly StepRow[]> =>
   scheduledStepsFor(sql, appointmentId)
+
+/** How many manage-booking grants a booking holds. Counted in SQL, narrowed to one booking. */
+async function grantsFor(bookingId: string): Promise<number> {
+  const [row] = await sql<{ count: string }[]>`
+    select count(*)::text as count from booking_manage_grant where booking_id = ${bookingId}::uuid
+  `
+  return Number(row?.count ?? '0')
+}
 
 /** The appointment's period as the key derivation needs it. Read back, never remembered. */
 async function periodOf(
@@ -986,10 +1025,12 @@ describe('acceptance — the drain refuses a stale key, and every drained step i
     expect(Number(messages?.n ?? -1)).toBe(1)
   })
 
-  it('skips with a reason when the message cannot be built, which is the shipped behaviour today', async () => {
-    // `magicLink: false` is what `scheduledStepRuntimeFor` ships: B-UI-02 owns magic links and this build
-    // cannot mint one, so a due reminder is SKIPPED and says so rather than being sent with a link to
-    // nothing. A step left pending would be re-swept every fifteen minutes for ever.
+  it('skips with a reason when the message cannot be built, which is a link that cannot be minted', async () => {
+    // `magicLink: false` is no longer what `scheduledStepRuntimeFor` ships — B-UI-05 wired
+    // `shippedMagicLink` — and the case is kept because the STATE is still reachable and still the right
+    // one: a step whose link cannot be minted (an appointment whose end has already passed, so the grant
+    // would be born dead) is SKIPPED and says so rather than being sent with a link to nothing. A step left
+    // pending would be re-swept every fifteen minutes for ever.
     const startsAt = at(TRADING_DATE, '19')
     const { appointmentId } = await bookConfirmed({
       key: 'no-link',
@@ -1007,6 +1048,99 @@ describe('acceptance — the drain refuses a stale key, and every drained step i
     expect((await stepsOf(appointmentId)).find((s) => s.id === step.id)?.skippedReason).toBe(
       'content_unavailable',
     )
+  })
+
+  it('wires the shipped builder into the shipped runtime, by reference', () => {
+    // The ONE LINE B-UI-02 and B-MSG-03 both deferred, asserted as a reference rather than as behaviour.
+    // The case below proves `shippedMagicLink` works; this proves it is what production uses. Without it,
+    // the builder could be perfect and `scheduledStepRuntimeFor` could still ship `() => null` — which is
+    // exactly the state this unit inherited, and it had no assertion against it.
+    //
+    // The ONE case in this file that reads the real environment: `scheduledStepRuntimeFor` calls
+    // `loadConfig()`, where every other case builds its config with `parseConfig({ APP_ENV, DATABASE_URL })`
+    // so it cannot depend on one. That is deliberate and it is safe here — `.github/workflows/ci.yml` sets
+    // both `APP_ENV` and `DATABASE_URL`, and the brief's local recipe exports both — but it is worth naming,
+    // because the failure is an `Invalid configuration` AppError that reads like a broken runtime rather than
+    // like an unset variable.
+    const shipped = scheduledStepRuntimeFor(sql)
+    expect(shipped.magicLink).toBe(shippedMagicLink)
+    // The control: identity is being asserted, not truthiness. A builder that answered null would be a
+    // different function, and `() => null` was the shipped value until B-UI-05.
+    expect(shipped.magicLink).not.toBe(plannerFrom)
+  })
+
+  it('sends with the link the SHIPPED builder mints, which is the one B-UI-05 wired', async () => {
+    /*
+      The one case in this file that uses `shippedMagicLink` rather than the fake, and it is here because it
+      can be nowhere else: `.dependency-cruiser.cjs` forbids one app importing another, so
+      `apps/web/src/manage-booking.itest.ts` — which owns the grant — cannot reach the worker's builder, and
+      this file cannot reach the page. What meets in the middle is the DRAIN, so this is where "the wired
+      line works" is assertable at all.
+
+      It asserts the three things the fake cannot: that a grant ROW exists after the send, that the body
+      carries the token from it rather than any string, and that only the DIGEST is stored. The expiry is the
+      appointment's end plus 24 hours, computed by `bookingTokenExpiry` in @berelax/core and compared here
+      against the period read back from the row — so the worker and the page cannot disagree about when the
+      link dies.
+    */
+    const startsAt = at(TRADING_DATE, '23')
+    const { bookingId, appointmentId } = await bookConfirmed({
+      key: 'shipped-link',
+      startsAt,
+      endsAt: startsAt + 45 * 60_000,
+      room: SECOND_ROOM,
+      therapist: 4,
+    })
+    const step = (await stepsOf(appointmentId)).find(
+      (candidate) => candidate.stepType === 'reminder_2h',
+    ) as StepRow
+    const nowIso = step.sendAtIso
+    const before = await grantsFor(bookingId)
+    expect(before).toBe(0)
+
+    const { runtime, calls } = runtimeWith({ magicLink: 'shipped', nowIso })
+    const outcome = await drainScheduledStep(runtime, { stepId: step.id, atIso: nowIso })
+    expect(outcome).toMatchObject({ kind: 'sent' })
+    expect(calls()).toBe(1)
+
+    // Exactly one grant, on this booking, expiring at the appointment's end plus 24 hours.
+    const [grant] = await sql<{ token_sha256: string; expires_at: Date; purpose: string }[]>`
+      select token_sha256, expires_at, purpose from booking_manage_grant
+       where booking_id = ${bookingId}::uuid
+    `
+    expect(grant).toBeDefined()
+    expect(grant?.purpose).toBe('manage_booking')
+    const period = await periodOf(appointmentId)
+    expect(grant?.expires_at.getTime()).toBe(bookingTokenExpiry(period.endsAtMs))
+
+    // The body carries a link whose token hashes to the stored digest — which is the whole chain: the
+    // builder minted it, the renderer put it in the words, and the column holds only the sha256.
+    // Every message this RUN sent to this recipient, scanned for a manage-booking link rather than reading
+    // the newest entry: `message` rows cannot be deleted (the receipt table refuses it and protects them
+    // with ON DELETE RESTRICT), so earlier cases in this file have left theirs behind — with the FAKE link.
+    // Exactly one carries a real one, which is the assertion.
+    const inbox = await listMessageInbox(sql, { recipient: PHONE, limit: 50 })
+    const links = inbox
+      .map((entry) => /\/booking\/([0-9a-f]{64})/.exec(entry.body ?? '')?.[1])
+      .filter((found): found is string => found !== undefined)
+    expect(links, 'expected exactly one real manage-booking link in this run').toHaveLength(1)
+    const token = links[0]
+    expect(token).toBeDefined()
+    expect(token).toHaveLength(BOOKING_TOKEN_LENGTH)
+    const [check] = await sql<{ matches: boolean }[]>`
+      select token_sha256 = encode(sha256(${token as string}::bytea), 'hex') as matches
+        from booking_manage_grant where booking_id = ${bookingId}::uuid
+    `
+    expect(check?.matches).toBe(true)
+    expect(grant?.token_sha256).not.toBe(token)
+    // The link is absolute, because it goes in an SMS. The origin is `siteOriginFrom`'s, which is the same
+    // rule apps/web reads — a second fallback would be a second spelling of the live domain.
+    const body = inbox.find((entry) => (entry.body ?? '').includes(token as string))?.body ?? ''
+    expect(body).toContain(`${siteOriginFrom(process.env['SITE_ORIGIN'])}/booking/${token}`)
+
+    // Cleaned up by hand: `booking_manage_grant.booking_id` is a plain uuid with no foreign key (0067), so
+    // nothing removes the row when this file's `afterEach` deletes the booking.
+    await sql`delete from booking_manage_grant where booking_id = ${bookingId}::uuid`
   })
 
   it('records a staging diversion as send_refused, not as a rendering failure', async () => {

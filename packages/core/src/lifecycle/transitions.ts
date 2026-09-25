@@ -1,4 +1,10 @@
 import { can, type Permission, ROLES, type Role } from '../access/permissions.ts'
+import {
+  agentPrincipal,
+  type Principal,
+  principalCan,
+  staffPrincipal,
+} from '../access/principal-policy.ts'
 
 /**
  * The appointment lifecycle, as data.
@@ -473,6 +479,32 @@ const KNOWN_STATUS: ReadonlySet<string> = new Set(APPOINTMENT_STATUSES)
 const KNOWN_ROLE: ReadonlySet<string> = new Set(ROLES)
 
 /**
+ * Who is asking, from the one string the caller supplies — a role, or a declared agent principal id.
+ *
+ * `null` for anything else, which is what makes the refusal below deny-by-default in both directions.
+ *
+ * The second branch is B-UI-05's and it is the reason this is a function rather than `can(role, …)` inline.
+ * A magic-link holder is a caller with no job title: `ROLES` is eight staff roles plus `system`, and the
+ * three spellings available for "the customer's own move, made through a link" are recorded in
+ * `../access/principals/customer-link.ts` — `receptionist` (which also holds `customer:write` and
+ * `till:operate`), a ninth ROLE (which would let a statutory obligation be owned by "customer", because
+ * 0052 restates `ROLES` as a CHECK), and a principal. It resolves through `principalCan`, which is
+ * `resolvedPermissionsOf` — the same single matrix `can()` reads — so this adds a kind of CALLER and not a
+ * second authorisation policy. `permittedRolesFor` is untouched and still lists roles, because a principal
+ * is not a role and a refusal that offered one as somebody who could have acted would be a lie.
+ */
+function callerOf(role: string): Principal | null {
+  if (KNOWN_ROLE.has(role)) return staffPrincipal(role as Role)
+  return agentPrincipal(role)
+}
+
+/** Whether the caller holds the permission. Deny by default for an unresolvable caller. */
+function callerMay(role: string, permission: Permission): boolean {
+  const caller = callerOf(role)
+  return caller !== null && principalCan(caller, permission)
+}
+
+/**
  * The one decision function. A lookup in the table, then the policy layer, then the reason.
  *
  * **Strings in, and deny by default.** The `from` status arrives from a database column and the role
@@ -506,7 +538,7 @@ export function decideAppointmentTransition(
       permittedRoles: [],
     }
   }
-  if (!KNOWN_ROLE.has(role)) {
+  if (callerOf(role) === null) {
     return {
       kind: 'refused',
       refusal: 'transition_forbidden',
@@ -514,19 +546,21 @@ export function decideAppointmentTransition(
       permittedRoles: permittedRolesFor(to as AppointmentStatus),
     }
   }
-  return decideKnownTransition(
-    from as AppointmentStatus,
-    to as AppointmentStatus,
-    role as Role,
-    reason,
-  )
+  return decideKnownTransition(from as AppointmentStatus, to as AppointmentStatus, role, reason)
 }
 
 /** The decision itself, over values this build has already recognised. */
 function decideKnownTransition(
   from: AppointmentStatus,
   to: AppointmentStatus,
-  role: Role,
+  /**
+   * A role or a declared principal id, as `callerOf` resolves it.
+   *
+   * `string` rather than `Role`, and the widening is the point: B-UI-05's magic-link holder reaches here as
+   * `system:customer_booking_link`, which is not a `Role` and must not be cast into one. Every read of it
+   * goes through `callerMay`, so there is no branch left that assumes a job title.
+   */
+  role: string,
   reason: string | null,
 ): AppointmentTransitionVerdict {
   const action = APPOINTMENT_STATUS_ACTIONS[to]
@@ -540,7 +574,7 @@ function decideKnownTransition(
         permittedRoles: [],
       }
     }
-    if (!can(role, action.permission)) {
+    if (!callerMay(role, action.permission)) {
       return {
         kind: 'refused',
         refusal: 'transition_forbidden',
@@ -571,7 +605,7 @@ function decideKnownTransition(
       permittedRoles: [],
     }
   }
-  if (!can(role, transition.permission)) {
+  if (!callerMay(role, transition.permission)) {
     return {
       kind: 'refused',
       refusal: 'transition_forbidden',
