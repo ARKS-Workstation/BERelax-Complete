@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
@@ -335,6 +336,8 @@ interface Visit {
     readonly cards: number
     readonly boxes: string
   }
+  /** A digest of the settled document, so a content difference between two states is visible. */
+  readonly htmlDigest: string
 }
 
 async function open(
@@ -497,6 +500,25 @@ async function open(
    * captures, not just its pixels" and prints both — which names the cause instead of leaving a digest
    * list to be interpreted.
    */
+  /*
+   * A digest of the settled document, so "the two states differ in content" is a question the note ANSWERS
+   * rather than one a reader has to take on trust.
+   *
+   * I got this wrong once and the mistake is worth recording. A probe dumped the settled HTML of all six
+   * cells and found them byte-identical, and I concluded the alternating states could not differ in
+   * content. They can: that probe ran on a run which PASSED, so it wrote one document per cell and compared
+   * six different cells to each other — never the two states of one cell to each other, which is the only
+   * comparison that bears on the question. Theme and viewport are CSS, so of course the markup matched.
+   *
+   * With the digest in the note, a content difference between the two states arrives as a CHANGED NOTE and
+   * `captureUntilStable` says "the page itself changed between captures, not just its pixels". A digest
+   * rather than the document because the note goes in a failure message.
+   */
+  const htmlDigest = createHash('sha256')
+    .update(await page.evaluate(() => document.documentElement.outerHTML))
+    .digest('hex')
+    .slice(0, 12)
+
   const fit = await page.evaluate(() => {
     const root = document.documentElement
     const boxes = [...document.querySelectorAll('[data-crop-width]')]
@@ -514,7 +536,7 @@ async function open(
     }
   })
 
-  return { page, context, requested, foreign, brokenImages, fit }
+  return { page, context, requested, foreign, brokenImages, fit, htmlDigest }
 }
 
 /**
@@ -552,6 +574,8 @@ interface Shot {
     readonly cards: number
     readonly boxes: string
   }
+  /** A digest of the settled document, so a content difference between two states is visible. */
+  readonly htmlDigest: string
 }
 
 /**
@@ -574,6 +598,7 @@ async function shoot(path: string, cell: Cell): Promise<Shot> {
       png: await visit.page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
       brokenImages: visit.brokenImages,
       fit: visit.fit,
+      htmlDigest: visit.htmlDigest,
     }
   } finally {
     await visit.context.close()
@@ -1158,11 +1183,29 @@ describe('acceptance — the screenshot harness captures 3 viewports x 2 themes'
         () =>
           shoot(previewPath(heroFixture), cell).then((s) => ({
             png: s.png,
+            /*
+             * The note is only PRINTED when it changes between attempts, so on every passing run the fields
+             * in it go unread — and an instrument nobody reads is an instrument nobody knows is broken. Two
+             * of these were added specifically to answer questions about a failure that happens once in
+             * five runs, which means the first time they would be read is the one moment they have to be
+             * right.
+             *
+             * So they are asserted here, on every attempt of every run: a 12-character hex digest and a
+             * plausible pixel size. Cheap, and it turns "the field is surely populated" into something the
+             * suite has actually checked.
+             */
+            ...(() => {
+              const size = pngSize(s.png)
+              expect(s.htmlDigest, `${label}: the note's html digest`).toMatch(/^[0-9a-f]{12}$/)
+              expect(size.width, `${label}: the note's captured width`).toBeGreaterThan(0)
+              expect(size.height, `${label}: the note's captured height`).toBeGreaterThan(0)
+              return {}
+            })(),
             // The note is what turns "the bytes differ" into a diagnosis. See `open`'s closing comment:
             // a set that changes between attempts means an image failed on one of them, which is a
             // different defect from a clock in the render and needs a different fix.
             note:
-              `${pngSize(s.png).width}x${pngSize(s.png).height}px; ` +
+              `${pngSize(s.png).width}x${pngSize(s.png).height}px; html ${s.htmlDigest}; ` +
               `images that failed to load: ` +
               `${s.brokenImages.length === 0 ? 'none' : s.brokenImages.join(', ')}; ` +
               `fit: ${s.fit.passes} pass(es), ${s.fit.repaints} focal repaint(s), ` +
