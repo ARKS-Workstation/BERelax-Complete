@@ -512,9 +512,33 @@ describe('50 concurrent availability queries', () => {
   })
 
   it('the memo makes the same fifty cheaper, which is what it is for', async () => {
-    // Not a second budget — a control on the first. If the cached path were not measurably cheaper than
-    // the uncached one, the memo would be doing nothing and the figure above would be the only figure
-    // there is. Asserted as an ORDERING rather than as a ratio: a ratio on a loaded CI box is a flake.
+    /*
+     * Not a second budget — a control on the first. If the cached path were not measurably cheaper than
+     * the uncached one, the memo would be doing nothing and the figure above would be the only figure
+     * there is. Asserted as an ORDERING rather than as a ratio: a ratio on a loaded box is a flake.
+     *
+     * It USED TO assert `cachedP95 < P95_BUDGET_MS`, which is the budget a second time rather than an
+     * ordering — the comment above described the right test and the code did a different one. Two things
+     * followed. The name was not what it measured, so a cached path that had become slower than the
+     * uncached one would still pass as long as both fitted the budget. And it borrowed a constant it has
+     * no business depending on, which is how gate case 50q came to report a rule as missing: 50q sets the
+     * budget to 0 to prove the budget can fail the job, the p95 case above now SKIPS on a machine that
+     * cannot hold it, and the only thing left to fail was this test — the wrong one, with the wrong
+     * message.
+     *
+     * Both figures are measured here, in one test, moments apart, so contention lands on both equally and
+     * the comparison is about the memo rather than about the machine.
+     */
+    const uncached = await Promise.all(
+      Array.from({ length: CONCURRENT_QUERIES }, async () => {
+        const startedAt = performance.now()
+        const answer = await queryAvailability(sql, request(), { solve, now: NOW })
+        expect(answer.cached).toBe(false)
+        return performance.now() - startedAt
+      }),
+    )
+    const uncachedP95 = percentile(uncached, 0.95)
+
     const cache = createAvailabilityCache()
     const options = { solve, now: NOW, cache }
     await queryAvailability(sql, request(), options)
@@ -528,7 +552,15 @@ describe('50 concurrent availability queries', () => {
       }),
     )
     const cachedP95 = percentile(cached, 0.95)
-    console.log(`[B-AVAIL-07] the same fifty through the memo — p95 ${cachedP95.toFixed(1)} ms`)
-    expect(cachedP95).toBeLessThan(P95_BUDGET_MS)
+    console.log(
+      `[B-AVAIL-07] the same fifty — p95 ${uncachedP95.toFixed(1)} ms uncached, ` +
+        `${cachedP95.toFixed(1)} ms through the memo`,
+    )
+    expect(
+      cachedP95,
+      `the memo made the same fifty queries no cheaper: ${cachedP95.toFixed(1)} ms cached against ` +
+        `${uncachedP95.toFixed(1)} ms uncached. Either the cache is not being consulted or it costs more ` +
+        'than the query it replaces.',
+    ).toBeLessThan(uncachedP95)
   })
 })
