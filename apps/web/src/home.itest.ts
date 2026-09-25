@@ -438,6 +438,26 @@ describe('acceptance — the LCP element on / is the hero img', () => {
   for (const width of [PHONE, DESKTOP]) {
     it(`records the hero poster as the largest contentful paint at ${width}px`, async () => {
       const entries = await withPage({ width }, async (page) => {
+        /*
+         * Wait for the observer to DELIVER, then read. Reading straight away was a timing assumption
+         * dressed as an assertion.
+         *
+         * `largest-contentful-paint` arrives through a `PerformanceObserver`, and under load it is the
+         * delivery of the entry that is late, not the paint — the same distinction that bit the first-paint
+         * case in this file. That case already waits, on `__firstPaint !== null`; this one did not, which is
+         * an asymmetry inside one file rather than a subtlety. It cost five verify runs across five agents,
+         * each about two and a half hours, always reported as "no largest-contentful-paint entry was
+         * recorded" — which is true, and says nothing about the page.
+         *
+         * The assertion below stays. It is no longer load-bearing against the clock, but it is the guard
+         * that this wait actually held: remove the wait and an empty list fails it, which is what the
+         * comment under it has always claimed.
+         */
+        await page.waitForFunction(
+          () => ((globalThis as unknown as { __lcp?: LcpEntry[] }).__lcp ?? []).length > 0,
+          undefined,
+          { timeout: 30_000 },
+        )
         return await page.evaluate(() => (globalThis as unknown as { __lcp: LcpEntry[] }).__lcp)
       })
       // The control on the observer: an empty list satisfies every assertion below, and is exactly what a page
