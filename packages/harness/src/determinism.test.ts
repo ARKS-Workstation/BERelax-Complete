@@ -63,6 +63,28 @@ describe('captureUntilStable', () => {
   })
 
   /** And the opposite branch, which is the one the original message was written for. */
+  /*
+   * The fourth shape, and the one the first two special cases missed.
+   *
+   * `A, B, A, C, A` is neither all-different nor a strict two-state rotation, so it fell through to the
+   * all-different message — which asserted three things its own data contradicted: that every capture
+   * differed (three of five were identical), that a clock or fresh identifier was reaching the render
+   * (neither can produce a repeat), and that this was not load. It cost a verify on the five-unit merge at
+   * dark-768.
+   */
+  it('names a dominant rendering with transient variants, and does not blame a clock', async () => {
+    const failure = await captureUntilStable(sequence(['a', 'b', 'a', 'c', 'a']), {
+      label: 'dominant',
+    }).catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
+    expect(failure).toContain('3 distinct renderings')
+    expect(failure).toContain('3 of 5 captures')
+    expect(failure).toContain('never twice in a row')
+    // The control that matters: the wrong diagnosis must be ABSENT, or the case passes on a message that
+    // merely happens to mention the right words somewhere.
+    expect(failure).not.toContain('every capture differed')
+    expect(failure).not.toContain('two stable states')
+  })
+
   it('names all-different captures as something reaching the render', async () => {
     const failure = await captureUntilStable(sequence(['a', 'b', 'c', 'd', 'e']), {
       label: 'clocked',
