@@ -214,6 +214,25 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // M-TILL-07 asks dependency-cruiser to prove the payment adapters reach no HTTP client. Both halves
+  // of the rule's `to` alternation are asserted separately, because it is a single expression and a typo
+  // in one branch is invisible while the other still fires — which is the defect the ledger fixture
+  // above caught for `core-must-be-pure`. The pull is real: a gateway adapter is the natural next file
+  // in this directory, and the boundary this keeps is that it does NOT go here.
+  {
+    rule: 'payments-must-not-reach-the-network',
+    file: 'packages/db/src/adapters/__boundary_fixture__.ts',
+    source: ["import { request } from 'node:https'", 'export const illegal = request', ''].join(
+      '\n',
+    ),
+  },
+  {
+    rule: 'payments-must-not-reach-the-network',
+    // A socket rather than an HTTP client: the same hazard one layer down, and the shape a "just check
+    // the terminal is reachable" probe arrives in.
+    file: 'packages/db/src/adapters/__boundary_fixture__.ts',
+    source: ["import { connect } from 'node:net'", 'export const illegal = connect', ''].join('\n'),
+  },
 ]
 
 let failures = 0
@@ -243,7 +262,7 @@ for (const { rule, file, source } of CASES) {
   // scope in the line the output cannot say which of them ran.
   const scope =
     /packages\/core\/src\/(ledger|pricing|availability|checkout)\//.exec(file)?.[1] ??
-    /packages\/db\/src\/(repositories)\//.exec(file)?.[1]
+    /packages\/db\/src\/(repositories|adapters)\//.exec(file)?.[1]
   console.log(
     `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${scope === undefined ? '' : `${scope}: `}` +
       `${what} ${caught ? 'rejected' : 'NOT rejected'}`,

@@ -323,7 +323,7 @@ afterAll(async () => {
   // reached with CASCADE, so the next one to reference `invoice` fails loudly here instead of having
   // its rows removed by a statement that never mentioned it.
   await sql?.unsafe(
-    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
@@ -669,7 +669,9 @@ describe('one transaction: a failure injected between the writes leaves nothing 
    *
    *   - **after the invoice and five journal lines**: a sixth line on an account the chart does not
    *     contain, so `journal_line`'s foreign key refuses it with everything before it inserted;
-   *   - **after the whole journal entry**: a tender kind the CHECK refuses;
+   *   - **after the whole journal entry**: a tender kind the tender-type REGISTRY does not hold.
+   *     0063 made that a CHECK and 0068 replaced it with a foreign key into `tender_type`, keeping the
+   *     constraint's name — so the seam is unchanged and the SQLSTATE moved from 23514 to 23503;
    *   - **at COMMIT**: an entry one fils out, which every statement accepts and the DEFERRED trigger
    *     refuses at COMMIT. The strongest of the three, because nothing failed until the transaction
    *     did.
@@ -695,8 +697,12 @@ describe('one transaction: a failure injected between the writes leaves nothing 
     },
     {
       key: 'abort-tender',
-      name: 'a tender kind the CHECK refuses, after the whole journal entry is posted',
-      code: '23514',
+      // `payment_tender_kind_known` is a FOREIGN KEY into `tender_type` since 0068 — under the same
+      // name, because the name is the contract — so the refusal arrives as 23503 rather than 23514. The
+      // injection point is the same one: the tender insert is the first statement after the whole
+      // journal entry has been posted.
+      name: 'a tender kind the tender-type registry does not hold, after the whole journal entry is posted',
+      code: '23503',
       options: (): Pick<CheckoutOptions, 'tenders'> => ({
         tenders: [
           { tenderKind: 'gift_card', postingAccountCode: CASH_IN_DRAWER, amountFils: TENDERED },

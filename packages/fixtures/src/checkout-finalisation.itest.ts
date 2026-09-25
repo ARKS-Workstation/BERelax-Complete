@@ -172,7 +172,7 @@ afterAll(async () => {
   // `invoice.customer_id` is ON DELETE RESTRICT. Every referencing table is NAMED rather than reached
   // with CASCADE, so the next one to reference `invoice` fails loudly here.
   await sql?.unsafe(
-    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`

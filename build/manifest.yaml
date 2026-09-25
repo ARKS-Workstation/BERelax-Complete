@@ -3617,6 +3617,129 @@ units:
     - the PaymentAdapter interface is defined by what a card gateway needs (authorise, capture, refund,
       webhook reconcile) and the manual adapter implements it; a test asserts the interface has no cash-specific
       member
+    - 'NOTE: the migration is 0068_payment_tender.sql and SCHEMA_VERSION is 68, with the ledger paragraph
+      in packages/db/src/index.ts in numeric order. 0067 is a LIVE allocation held by another unit in
+      flight, so this tree has a hole at 67 — and gate case 90a walked migration numbers by `number -= 1`,
+      which stops dead at the absent 67 and reports a complete ledger as a deleted paragraph. 90a now walks
+      the migrations that EXIST ON DISK instead, and 90d''s expectation moves with it (the shortened run
+      starts at the next real file, not at middle + 1). Nothing is weakened: a paragraph deleted from the
+      middle of the run still ends the run early, which is what 90d proves. The permanent gaps at 22, 41,
+      44 and 47 are the same fact one convention earlier, so this is the shape the gate should always have
+      had. If 0067 never lands it becomes the fifth permanent gap and nothing needs changing.'
+    - 'NOTE: `payment` was EXTENDED and no second money-received table was created, as 0063 required.
+      payment_tender_kind_known changed from a CHECK to a FOREIGN KEY into the new `tender_type` registry
+      and KEPT ITS NAME: a constraint cannot be both, so 0068 drops and re-adds it under the same name
+      rather than renaming, because the name is what lets a caller — and gate 81''s probe, which has
+      asserted on it since 0063 — tell "that is not a tender type we take" from every other refusal in the
+      same transaction. `payment` also gains change_given_fils beside amount_fils (never one net figure:
+      a drawer is counted against the notes that went in and the notes that came out) and applied_fils,
+      GENERATED as their difference. applied_fils carries the `fils` domain and NOT `fils_nonneg`, which is
+      measured rather than reasoned: a generated column''s DOMAIN is checked before the table''s CHECKs, so
+      with fils_nonneg an over-large change was refused by `fils_nonneg_check` and
+      payment_change_not_more_than_tendered never fired at all. The measurement is in the column comment.'
+    - 'NOTE: the Overpayment ceiling (ZT001) caps what may be applied to a document at its gross PLUS the
+      gratuity the document''s own journal entry credited to 2040, and that second term is not optional.
+      A gratuity is not consideration for a supply, so it is on no tax invoice and absent from
+      invoice.gross_total — while M-TILL-06''s tenders sum to the basket''s gross INCLUDING the tip. A
+      ceiling of gross_total alone would therefore make every tipped checkout an overpayment. The gratuity
+      is read from the entry rather than carried in a new column, so the two cannot disagree, and it is
+      reached through checkout_finalisation.journal_entry_id. `2040` appears in SQL exactly once, in
+      tips_payable_account_code(), and packages/fixtures/src/payment.itest.ts holds it equal to
+      ACCOUNTS.tipsPayable with a control. Both ceilings are DEFERRED constraint triggers (0018''s and
+      0026''s pattern) because the tenders of one checkout are inserted a statement at a time inside one
+      transaction: a per-statement check would refuse the second tender before the first had finished
+      paying. Nothing in M-TILL-06''s files was changed to make this work.'
+    - 'NOTE: scoped rather than satisfied in full — partial payment and change are implemented as a payment
+      path against an ISSUED invoice, and `TendersDoNotCoverBasket` in packages/core/src/checkout/posting.ts
+      still refuses an under- or over-tender AT CHECKOUT. What exists now is the whole mechanism: a document
+      may be partly paid, invoice_settlement.outstanding_fils is gross minus applied exact to the fils, an
+      over-tender records change beside the payment rather than inside it, and ZT001 bounds both. What is
+      NOT done is relaxing checkoutPosting so one transaction can finalise a checkout with a shortfall.
+      Deferred, with the reason stated rather than narrowed silently: a partial tender at checkout changes
+      the entry M-TILL-06''s one transaction posts (the shortfall has to be debited to 1050 by whoever
+      issues the document, which no path does yet) and it would rewrite posting.test.ts and gate cases
+      81m-81q, which are another unit''s known-bad fixtures. Whichever unit gives the till a "pay later"
+      button owns that change; M-TILL-11''s cash-up is the first consumer of the settlement view.'
+    - 'NOTE: TENDER_ACCOUNT and TENDER_KINDS stay in packages/core/src/checkout/posting.ts and are IMPORTED
+      by packages/core/src/money/tender.ts rather than moved into it. Two reasons. The posting rule is the
+      thing that has to be right about which account a tender debits, and gate case 81m anchors on the
+      literal line `card_in_salon: ACCOUNTS.cardTerminalClearing,` in that file — moving it would make
+      another unit''s gate throw on a stale anchor. So the registry adds the facts a posting rule does not
+      need (gives_change, requires_reference, settles_immediately, adapter, sort_order) and takes the
+      account FROM that map, which keeps one statement of it. The import direction is money/ -> checkout/,
+      which is unusual inside packages/core and creates no module cycle.'
+    - 'NOTE: deferred to M-TILL-08 — refund.credit_note_id is NOT NULL and carries NO FOREIGN KEY, because
+      `credit_note` does not exist yet. So the requirement is enforced today (no path writes a refund
+      without a credit note id, and RefundRequiresCreditNote refuses before the database is reached), and
+      three things are M-TILL-08''s to add: the foreign key, the check that the note is for THIS invoice,
+      and the check that its value covers the refund. Also M-TILL-08''s: whether refunds should be
+      subtracted from invoice_settlement.outstanding_fils. They are reported BESIDE it today, because the
+      honest figure after a refund is gross - credited - applied + refunded and `credited` is that unit''s.
+      Subtracting refunds alone would state a receivable for a supply that had been credited in full.
+      Separately, a refund of a partially-redeemed package is M-TILL-09''s and nothing here reaches into
+      it: `refund` records money going back against a document, and what a redemption was worth is a figure
+      on a package balance.'
+    - 'NOTE: files beyond the five listed. packages/db/src/schema/payment.ts gained the `tender_type` and
+      `refund` mirrors as well as payment''s new columns, deliberately in ONE file: pnpm db:drift keys its
+      map on the table name, and 0063''s NOTE asked for one mirror rather than a second file. Added:
+      packages/core/src/money/tender.test.ts (the table-driven registry test and the settlement units),
+      packages/core/src/money/tender.property.test.ts (the generated tender/change property, with counted
+      coverage floors measured over eight runs), packages/db/src/adapters/manual-payment.test.ts (the
+      export surface, the interface members, and the refund refusal proved to happen before any I/O), and
+      packages/fixtures/src/payment.itest.ts — the pair, because only packages/fixtures may depend on core
+      and db at once. Edited: .dependency-cruiser.cjs (the new rule), scripts/test-boundaries.mjs (two
+      known-bad fixtures for it), scripts/test-gates.mjs (block 92, and the 90a walk above),
+      packages/db/src/index.ts, packages/core/src/index.ts, and the five suites that truncate the invoice
+      family — packages/db/src/repositories/invoice.itest.ts, packages/db/src/services/checkout-finalise.itest.ts,
+      packages/fixtures/src/{invoice-document,tax-document,checkout-finalisation}.itest.ts — because
+      `refund` is the FOURTH table to reference `invoice` and PostgreSQL refuses a truncate while a
+      referencing table is missing from the statement. That is exactly the loud failure 0063''s own NOTE
+      predicted for the next unit; it is named in each file rather than reached with CASCADE.'
+    - 'NOTE: the network prohibition is TWO halves, because neither is complete alone.
+      `payments-must-not-reach-the-network` in .dependency-cruiser.cjs forbids http, https, net, tls, dgram,
+      dns, http2 and seven HTTP clients from packages/db/src/adapters, in both the bare-name and the
+      node_modules spelling (core-must-be-pure''s trap, which left no-lucide-outside-the-icon-wrapper
+      configured, green and dead) — and it cannot see `fetch`, which is a global with no import edge. So
+      manual-payment.itest.ts also runs the adapter with fetch, http.request and https.request replaced by
+      throwing stubs, asserts the stubs bite FIRST, and requires capture, authorise, refund and
+      reconcileWebhook to succeed anyway. node:net is deliberately NOT stubbed: the PostgreSQL driver uses
+      it, so stubbing it would test the harness rather than the adapter. Known-bad fixtures for the rule are
+      in BOTH scripts/test-boundaries.mjs (where its nineteen siblings live) and gate block 92, since this
+      session''s brief asks every added gate for a fixture in scripts/test-gates.mjs. The rule EXEMPTS the
+      test files, and the exemption is the point rather than a hole: the first version condemned
+      manual-payment.itest.ts itself — two errors against the file that exists to demonstrate the rule —
+      because replacing node:http''s `request` with a throwing stub requires importing it. Nothing imports
+      a test file, vitest would run anything named like one, and all three known-bad fixtures are ordinary
+      modules, so the exemption cannot smuggle shipped code past it.'
+    - 'NOTE: the PaymentAdapter interface has four members and no implementation of it exists but the manual
+      one — the Y-PAY gateway adapter is a later unit''s, and `tender_type.adapter` is the column it
+      attaches to (all three seeded types are `manual` today, which is the honest answer). "The interface
+      has no cash-specific member" is asserted over PAYMENT_ADAPTER_MEMBERS, a value, because a TypeScript
+      interface does not exist at run time; PaymentAdapterMembersAreExact is a type-level assertion holding
+      that list equal to keyof PaymentAdapter in both directions, so a stale list fails tsc rather than
+      being checked in place of the interface, and gate case 92s proves that by dropping a name.
+      reconcileWebhook ANSWERS `not_mine` rather than throwing: a gateway webhook mis-routed to the manual
+      adapter has to get a usable answer, not a 500 that is retried for a day.'
+    - 'NOTE: gate labels used: 92a-92y, in scripts/test-gates.mjs immediately before block 79. Twelve psql
+      probes assert each 0068 rule BY NAME against real PostgreSQL — including the two DEFERRED ceilings,
+      which are forced with `set constraints all immediate` before the rollback because a deferred trigger
+      otherwise fires at a COMMIT that never comes (and which is why every probe document carries a LINE:
+      ZI002 is deferred too and fires at the same point). Two controls: the correct rows are accepted, and a
+      tender applying exactly the payable total is accepted, so the ZT001 probe is about the one fils over
+      rather than about a ceiling that refuses everything. Four edits to packages/core/src/money/tender.ts
+      must make its suites go red, one edit to the adapter removes the credit-note requirement and must
+      make manual-payment.test.ts go red, and two edits must fail the TYPECHECKER: a fourth entry in
+      TENDER_KINDS with no registry mapping, and a member dropped from the adapter''s enumerated list. 92x
+      and 92y are the controls that all three suites pass unedited. Every anchor goes through replaceOnce
+      (brief rule 20). No server-starting suite was added, so no port band was claimed.'
+    - 'NOTE: two things NOT changed, and neither is this unit''s. packages/db/src/services/checkout-finalise.ts
+      still derives its outbox idempotency key from the statutory display number, which is right, and the
+      hazard M-TILL-06''s NOTE recorded still applies to this unit''s `payment.recorded` and
+      `payment.refunded` events: a suite that truncates `invoice` and resets document_series re-issues the
+      same display number, so publishEvent treats the event as already recorded and writes no row. This
+      unit''s itests therefore assert on the `payment` and `refund` rows and the journal, never on outbox
+      rows — the durable fix belongs with whichever unit owns event retention, and it is not "make the key
+      random". Second: nothing in packages/harness was touched, and no `Bad port` failure was seen.'
     files:
     - packages/db/src/schema/payment.ts
     - packages/db/migrations/00xx_payment.sql

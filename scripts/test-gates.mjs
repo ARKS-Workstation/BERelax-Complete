@@ -24703,6 +24703,434 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 92a-92y. (M-TILL-07) Payments and refunds: the registry the tender kinds became, the two figures an
+// over-tender is recorded as, the two DEFERRED ceilings, and the edits that must make this unit's own
+// suites go red.
+//
+// Four parts, because the unit's claims are of four kinds. The twelve probes are known-bad fixtures against real
+// PostgreSQL: every rule `0068_payment_tender.sql` adds is a DATABASE rule — a foreign key that replaced
+// a CHECK under the same name, three table CHECKs, a NOT NULL, two per-row triggers and two deferred
+// constraint triggers — and a constraint is only a gate once something has been seen to bounce off it
+// (ADR 0003). Each probe asserts what must refuse it BY NAME, because a bare non-zero exit is also what a
+// typo in a column name produces.
+//
+// `VERBOSITY=verbose` so psql prints the constraint name as well as the SQLSTATE, and every probe runs
+// inside `begin; … ; rollback;` — which is also the only way they can be written at all: `invoice`
+// refuses DELETE for every role including the owner (ZI003), so a probe row that committed could not be
+// swept. The two DEFERRED ceilings are forced with `set constraints all immediate` before the rollback,
+// because a deferred trigger otherwise fires at a COMMIT that never comes; that also makes the probe
+// invoices carry a LINE, since `assert_invoice_totals_match_lines` (ZI002) is deferred too and fires at
+// the same point.
+//
+// 92l is the network prohibition: a payment adapter that imports an HTTP client must fail `pnpm
+// boundaries` by rule name. The third part breaks `packages/core/src/money/tender.ts` four ways
+// (92m-92p) and the adapter once (92q), and watches the suites that cover them fail. The fourth is the
+// pair of `tsc` cases (92r, 92s): adding a tender type without a registry entry, and dropping a member
+// from the adapter's member list, must each fail the TYPECHECKER — which is the acceptance line "adding
+// a tender type without a mapping fails the build", and the guard that stops the runtime member list
+// going stale. 92x and 92y are the controls: every suite, unedited, passes.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'GATE-TENDER'
+  // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is refused
+  // by two CHECKs on `invoice` (0026).
+  const GATE_TRN = '100123456700003'
+  const CREDIT_NOTE = '00000000-0000-4000-8000-0000000c0d01'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      // `set constraints all immediate` fires the DEFERRED ceilings at a point the probe can see. Without
+      // it ZT001 and ZT004 would be checked at a COMMIT that the rollback replaces, and both probes would
+      // report that nothing was rejected.
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /** One accepted invoice header, numbered in the gate's own period so it collides with nothing. */
+  const invoice = (n) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `values ('tax_invoice', 'TAX-INV', '${MARKER}', ${910_100 + n}, '${MARKER}-000${n}', ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'2026-09-19'::date, '2026-09-18'::date, 20, 2, 22, '${MARKER}-${n}')`
+
+  /**
+   * The document's one line. Present because `assert_invoice_totals_match_lines` is DEFERRED and
+   * `set constraints all immediate` fires it as well — a headerless document would be refused by ZI002
+   * and every probe below would report the wrong rule.
+   */
+  const line = (n) =>
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    `vat_rate_bp, line_net_fils, line_vat_fils) values (${idOf(n)}, 1, 'Gate probe treatment', 1, 22, ` +
+    '500, 20, 2)'
+
+  function idOf(n) {
+    return `(select id from invoice where notes = '${MARKER}-${n}')`
+  }
+
+  /** One tender. Every field overridable, and the defaults are a tender that is accepted. */
+  const tender = (overrides = {}) => {
+    const v = {
+      invoice: idOf(1),
+      no: '1',
+      kind: "'cash'",
+      account: "'1010'",
+      amount: '22',
+      change: '0',
+      reference: 'null',
+      ...overrides,
+    }
+    return (
+      'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, amount_fils, ' +
+      `change_given_fils, reference, trading_date) values (${v.invoice}, ${v.no}, ${v.kind}, ` +
+      `${v.account}, ${v.amount}, ${v.change}, ${v.reference}, '2026-09-19'::date)`
+    )
+  }
+
+  /** One refund. Every field overridable, and the defaults are a refund that is accepted. */
+  const refund = (overrides = {}) => {
+    const v = {
+      invoice: idOf(1),
+      note: `'${CREDIT_NOTE}'`,
+      no: '1',
+      kind: "'cash'",
+      account: "'1010'",
+      amount: '22',
+      reference: 'null',
+      ...overrides,
+    }
+    return (
+      'insert into refund (invoice_id, credit_note_id, refund_no, tender_kind, ' +
+      `posting_account_code, amount_fils, reference, trading_date) values (${v.invoice}, ${v.note}, ` +
+      `${v.no}, ${v.kind}, ${v.account}, ${v.amount}, ${v.reference}, '2026-09-19'::date)`
+    )
+  }
+
+  /** One registry row. The defaults are a tender type that is accepted. */
+  const tenderType = (overrides = {}) => {
+    const v = {
+      code: `'${'gate_probe_kind'}'`,
+      label: "'Gate probe'",
+      account: "'1010'",
+      change: 'false',
+      reference: 'false',
+      immediate: 'true',
+      adapter: "'manual'",
+      order: '99',
+      ...overrides,
+    }
+    return (
+      'insert into tender_type (code, label, posting_account_code, gives_change, ' +
+      `requires_reference, settles_immediately, adapter, sort_order) values (${v.code}, ${v.label}, ` +
+      `${v.account}, ${v.change}, ${v.reference}, ${v.immediate}, ${v.adapter}, ${v.order})`
+    )
+  }
+
+  /** One document with its line, so a probe about ONE rule can trip only that one. */
+  const ONE = `${invoice(1)}; ${line(1)}`
+
+  const probes = [
+    {
+      // 0063's CHECK is now a foreign key and it KEPT the name. That is the contract the probe asserts:
+      // a caller tells "that is not a tender type we take" from every other refusal in the same
+      // transaction by this name, and gate 81 has asserted on it since 0063.
+      name: 'tender gate rejects a tender kind the registry does not hold',
+      rule: 'payment_tender_kind_known',
+      sql: `${ONE}; ${tender({ kind: "'gift_card'" })}`,
+    },
+    {
+      name: 'tender gate rejects change greater than what was handed over',
+      rule: 'payment_change_not_more_than_tendered',
+      sql: `${ONE}; ${tender({ amount: '22', change: '23' })}`,
+    },
+    {
+      // A card is authorised for an amount. A surplus on one is a mis-keyed figure, and paying change
+      // against it takes money out of the drawer that nobody over-paid.
+      name: 'tender gate rejects change against a tender type that gives none',
+      rule: 'ZT002',
+      sql: `${ONE}; ${tender({ kind: "'card_in_salon'", account: "'1040'", change: '2', reference: "'APPROVAL-1'" })}`,
+    },
+    {
+      // 0063 could refuse a BLANK reference and had no way to refuse a MISSING one, so a disputed card
+      // payment with nothing to settle it was a storable row.
+      name: 'tender gate rejects a card tender carrying no reference',
+      rule: 'ZT003',
+      sql: `${ONE}; ${tender({ kind: "'card_in_salon'", account: "'1040'" })}`,
+    },
+    {
+      // THE ceiling. A document payable for 22 fils cannot have 23 applied to it, and the refusal is
+      // deferred so that the tenders of one checkout may be inserted a statement at a time.
+      name: 'tender gate rejects payments above what the document is payable for',
+      rule: 'ZT001',
+      sql: `${ONE}; ${tender({ amount: '23' })}`,
+    },
+    {
+      name: 'tender gate rejects a refund above what was applied',
+      rule: 'ZT004',
+      sql: `${ONE}; ${tender({ amount: '10' })}; ${refund({ amount: '11' })}`,
+    },
+    {
+      // A refund from an invoice alone is money leaving the business with no document behind it, which
+      // is the invoice-void path under another name (docs/04 §4).
+      name: 'tender gate rejects a refund naming no credit note',
+      rule: 'credit_note_id',
+      sql: `${ONE}; ${tender({ amount: '22' })}; ${refund({ note: 'null' })}`,
+    },
+    {
+      name: 'tender gate rejects a refund of zero fils',
+      rule: 'refund_amount_positive',
+      sql: `${ONE}; ${tender({ amount: '22' })}; ${refund({ amount: '0' })}`,
+    },
+    {
+      name: 'tender gate rejects a second refund under one number',
+      rule: 'refund_one_row_per_number',
+      sql: `${ONE}; ${tender({ amount: '22' })}; ${refund({ amount: '10' })}; ${refund({ amount: '10' })}`,
+    },
+    {
+      // Change cannot be handed back out of money that has not arrived.
+      name: 'tender gate rejects a tender type that gives change before it settles',
+      rule: 'tender_type_change_needs_immediate_settlement',
+      sql: tenderType({ change: 'true', immediate: 'false' }),
+    },
+    {
+      name: 'tender gate rejects two tender types in one position',
+      rule: 'tender_type_one_row_per_position',
+      sql: tenderType({ order: '1' }),
+    },
+    {
+      // The account has to be a real one, or a tender of that type posts nowhere and the drawer cannot be
+      // reconciled to the ledger at all.
+      name: 'tender gate rejects a tender type posting to an account the chart does not contain',
+      rule: 'tender_type_posting_account_code_fkey',
+      sql: tenderType({ account: "'9999'" }),
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'the payment constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statements } of probes) {
+      checkRejectedBy(name, psqlProbe(statements), rule)
+    }
+
+    // The control, and the reason the twelve probes above mean anything: the correct set of rows — a
+    // document, a partial payment, an over-tender giving change, and a refund inside what was applied —
+    // is ACCEPTED. Without it a renamed column or a broken connection string would reject every probe
+    // and this gate would report twelve passes while examining nothing.
+    const accepted = psqlProbe(
+      `${ONE}; ${tender({ no: '1', amount: '10' })}; ` +
+        `${tender({ no: '2', amount: '20', change: '8' })}; ${refund({ amount: '22' })}`,
+    )
+    check(
+      'tender gate accepts a partial payment, an over-tender with change and a refund within it',
+      !accepted.failed,
+      `rejected the rows this unit exists to write:\n${accepted.output}`,
+    )
+
+    // The second control: exactly the payable total is accepted, so the ZT001 probe is about the one
+    // fils over rather than about the ceiling refusing every payment. 10 + 20 - 8 = 22.
+    const exact = psqlProbe(`${ONE}; ${tender({ amount: '30', change: '8' })}`)
+    check(
+      'tender gate accepts a tender applying exactly the payable total',
+      !exact.failed,
+      `a document paid in full was refused:\n${exact.output}`,
+    )
+  }
+
+  // --- the network prohibition ------------------------------------------------------------------
+  //
+  // 92l. A payment adapter that reaches an HTTP client must fail `pnpm boundaries` BY RULE NAME. The
+  //      rule's nineteen siblings have their fixtures in scripts/test-boundaries.mjs and two more for
+  //      this rule are there; this one is here as well because a gate added in this session needs a
+  //      known-bad fixture in THIS file. The fixture is an ordinary module and not a `.test.ts`, which
+  //      matters: the rule exempts the test files, because manual-payment.itest.ts imports node:http and
+  //      node:https precisely in order to replace them with throwing stubs.
+  {
+    const fixture = 'packages/db/src/adapters/__gate_fixture__.ts'
+    const result = withFixture(
+      fixture,
+      ["import { request } from 'node:https'", 'export const illegal = request'].join('\n'),
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'depcruise',
+          '--config',
+          '.dependency-cruiser.cjs',
+          'packages',
+          'apps',
+        ]),
+    )
+    checkRejectedBy(
+      'a payment adapter reaching an HTTP client fails the boundary gate',
+      result,
+      'payments-must-not-reach-the-network',
+    )
+  }
+
+  // --- the settlement rule, broken four ways, and the adapter once -------------------------------
+  //
+  // Every case edits a shipped file and restores it in a `finally`, and every anchor goes through
+  // `replaceOnce` (brief rule 20): `String.replace` takes the first match silently, and three cases in
+  // this file have edited the wrong construct and then reported PASS about a file that still contained
+  // exactly what they meant to remove.
+  const TENDER = 'packages/core/src/money/tender.ts'
+  const TENDER_SUITE = 'packages/core/src/money/tender.test.ts'
+  const TENDER_PROPERTY = 'packages/core/src/money/tender.property.test.ts'
+  const POSTING_MODULE = 'packages/core/src/checkout/posting.ts'
+  const ADAPTER = 'packages/db/src/adapters/manual-payment.ts'
+  const ADAPTER_SUITE = 'packages/db/src/adapters/manual-payment.test.ts'
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // 92m. A tender applying its whole amount instead of at most the balance. The defect the acceptance
+  //      line "recorded payment_fils never exceeds the invoice outstanding" is about, and it arrives as
+  //      an invoice recorded as over-paid rather than as change handed back.
+  {
+    const result = withEditedFile(
+      TENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const appliedFils = Math.min(tender.amount.fils, remaining)',
+          '    const appliedFils = tender.amount.fils',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(TENDER_PROPERTY)),
+    )
+    check('a tender that applies more than the balance fails the tender property', result.failed)
+  }
+
+  // 92n. The change netted into the payment: `changeGiven` recorded as zero while `applied` swallows the
+  //      surplus. This is the exact shape the acceptance forbids, and a counted drawer can no longer be
+  //      reconciled against either figure.
+  {
+    const result = withEditedFile(
+      TENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '        changeGiven: money(filsFrom(changeFils), currency),',
+          '        changeGiven: money(filsFrom(0), currency),',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(TENDER_SUITE)),
+    )
+    check('change netted into the payment fails the tender tests', result.failed)
+  }
+
+  // 92o. The surplus on a card absorbed rather than refused. It balances perfectly and pays change out of
+  //      a drawer nobody over-paid.
+  {
+    const result = withEditedFile(
+      TENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      throw new ChangeNotAvailable(tender.kind, changeFils, remaining)',
+          '      // removed by gate 92o',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(TENDER_SUITE)),
+    )
+    check('a surplus absorbed by a tender that gives no change fails the tender tests', result.failed)
+  }
+
+  // 92p. The registry's card account pointed at the bank. The same failure gate 81m breaks the posting
+  //      rule for, one layer along: the entry balances and the bank reconciliation is permanently out by
+  //      every unsettled batch and every processing fee. Broken HERE rather than in `TENDER_ACCOUNT`,
+  //      because what this case is about is that the registry READS that map rather than restating it.
+  {
+    const result = withEditedFile(
+      TENDER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    account: TENDER_ACCOUNT.card_in_salon,',
+          '    account: TENDER_ACCOUNT.bank_transfer,',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(TENDER_SUITE)),
+    )
+    check('card money registered against the bank fails the tender tests', result.failed)
+  }
+
+  // 92q. THE case for the refund path: the credit-note requirement removed. Money then leaves the
+  //      business against an invoice alone, which is the invoice-void path under another name — and it is
+  //      the one defect a green suite would never notice, because every other assertion about a refund
+  //      still holds.
+  {
+    const result = withEditedFile(
+      ADAPTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "      if (creditNoteId === '') throw new RefundRequiresCreditNote(input.invoiceId)",
+          '      // removed by gate 92q',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(ADAPTER_SUITE)),
+    )
+    check('a refund that needs no credit note fails the adapter tests', result.failed)
+  }
+
+  // --- the two typechecker cases ----------------------------------------------------------------
+
+  // 92r. The acceptance line, literally: "adding a tender type without a mapping fails the build". A
+  //      fourth kind in `TENDER_KINDS` and nothing else must fail `tsc`, because both `TENDER_ACCOUNT`
+  //      and `TENDER_TYPES` are `Record<TenderKind, …>`. A runtime test could not make this claim: the
+  //      build is what has to refuse it.
+  {
+    const result = withEditedFile(
+      POSTING_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const TENDER_KINDS = ['cash', 'card_in_salon', 'bank_transfer'] as const",
+          "export const TENDER_KINDS = ['cash', 'card_in_salon', 'bank_transfer', 'gift_card'] as const",
+        ),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check('a tender type with no declared posting account fails the typechecker', result.failed)
+  }
+
+  // 92s. The guard on the adapter's member list. `PAYMENT_ADAPTER_MEMBERS` is what a runtime test reads
+  //      to assert the interface carries no cash-specific member, and a list that had gone stale would be
+  //      checked instead of the interface — a passing check that examined nothing. Dropping one name must
+  //      therefore fail `tsc`, through `PaymentAdapterMembersAreExact`.
+  {
+    const result = withEditedFile(
+      ADAPTER,
+      (text) => replaceOnce(text, "\n  'refund',\n", '\n'),
+      () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    check('an adapter member missing from the enumerated list fails the typechecker', result.failed)
+  }
+
+  // 92x. The control for 92m-92p: the same runners, on the same files, with nothing edited, must pass.
+  //      Four cases above assert that a broken settlement rule fails; if either suite failed for an
+  //      unrelated reason — a missing dependency, a renamed path — all four would report PASS and none of
+  //      them would be about the settlement rule.
+  {
+    const suite = run('pnpm', unitRun(TENDER_SUITE))
+    check('the tender tests pass with nothing edited', !suite.failed, suite.output)
+    const property = run('pnpm', unitRun(TENDER_PROPERTY))
+    check('the tender property passes with nothing edited', !property.failed, property.output)
+  }
+
+  // 92y. And the control for 92q and 92s, for the same reason.
+  {
+    const result = run('pnpm', unitRun(ADAPTER_SUITE))
+    check('the adapter tests pass with nothing edited', !result.failed, result.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
