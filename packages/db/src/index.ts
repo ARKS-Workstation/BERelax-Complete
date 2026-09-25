@@ -7,6 +7,35 @@
  */
 
 export {
+  type Authorisation,
+  type CapturedPayment,
+  type CapturePaymentInput,
+  type InvoiceSettlement,
+  isOverpayment,
+  isRefundExceedingPayments,
+  manualPaymentAdapter,
+  Overpayment,
+  PAYMENT_ADAPTER_MEMBERS,
+  PAYMENT_ADAPTER_MEMBERS_ARE_EXACT,
+  PAYMENT_CONSTRAINT,
+  PAYMENT_SQLSTATE,
+  type PaymentAdapter,
+  type PaymentAdapterMembersAreExact,
+  paymentError,
+  type RecordedPayment,
+  type RecordedRefund,
+  RefundExceedsPayments,
+  type RefundInput,
+  RefundRequiresCreditNote,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  type TenderToRecord,
+  TenderTypeNotRegistered,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+  type WebhookReconciliation,
+} from './adapters/manual-payment.ts'
+export {
   type Actor,
   type ActorKind,
   type AuditOperation,
@@ -1322,10 +1351,58 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
 // visible.
 //
+// 68 is 0068_payment_tender.sql: payments and refunds (M-TILL-07). It creates no second table for money
+// received, which is the decision 0063 recorded for it — "two tables recording money received is two
+// answers to what has this invoice been paid" — so `payment` is EXTENDED instead. `tender_type` is the
+// registry 0063's `payment_tender_kind_known` CHECK became a foreign key into, and the constraint keeps
+// its NAME on purpose: the name is what lets a caller, and the gate probe that has asserted on it since
+// 0063, tell "that is not a tender type we take" from every other refusal in the same transaction. A
+// constraint cannot be both a CHECK and a foreign key, so it is dropped and re-added rather than renamed.
+// The registry carries the three facts a CHECK on `payment` could not express: `gives_change` (cash only —
+// a card is authorised for an amount and a transfer arrives for one, so a surplus on either is a mis-keyed
+// figure and paying change against it takes money out of the drawer nobody over-paid),
+// `requires_reference` (0063 could refuse a BLANK reference and had no way to refuse a MISSING one, so a
+// card payment with nothing to settle a dispute with was a storable row) and `settles_immediately`, whose
+// consequence is `tender_type_change_needs_immediate_settlement`: change cannot be handed back out of
+// money that has not arrived. `posting_account_code` lives here AND in `TENDER_ACCOUNT` in @berelax/core,
+// which is not a second opinion but the thing a snapshot is taken FROM — `packages/db` may never import
+// `packages/core`, and `packages/fixtures/src/payment.itest.ts` holds the two equal with a control.
+// `payment` gains `change_given_fils` beside `amount_fils` rather than one net figure, which is the whole
+// of "change recorded separately rather than netted into the payment": a drawer is counted against the
+// notes that went in and the notes that came out, and one figure reconciles against neither.
+// `applied_fils` is GENERATED (`amount_fils - change_given_fils`) so the settlement view and the ZT001
+// ceiling read a column instead of each subtracting for themselves — and its domain is `fils` and not
+// `fils_nonneg`, which is measured rather than reasoned: a generated column's DOMAIN is checked before the
+// table's CHECKs, so `fils_nonneg` there refused an over-large change with `fils_nonneg_check` and
+// `payment_change_not_more_than_tendered` never fired at all. `refund` is a new table whose
+// `credit_note_id` is NOT NULL and carries NO foreign key, because `credit_note` is M-TILL-08's: the
+// requirement — money does not leave against an invoice alone, or "an issued invoice is never edited or
+// voided" stops being true — is enforceable today and the reference is not. It is the FOURTH table to
+// reference `invoice`, so the five suites that truncate the invoice family name it, which is the loud
+// failure 0063's own note predicted. The two ceilings are DEFERRED constraint triggers for 0018's and
+// 0026's reason: `ZT001` caps what may be applied to a document at its gross PLUS the gratuity its own
+// journal entry credited to 2040 — a tip is not consideration for a supply, so it is on no tax invoice and
+// absent from `gross_total`, and M-TILL-06's tenders sum to the basket INCLUDING it, so a ceiling of
+// `gross_total` alone would make every tipped checkout an overpayment — and `ZT004` caps refunds at what
+// was applied. Deferred also because the tenders of one checkout are inserted a statement at a time inside
+// one transaction, and a per-statement check would refuse the second before the first had finished paying.
+// `ZT002` and `ZT003` are the per-row rules that need the registry, and both are IMMEDIATE because a
+// caller reading them wants the row named. `invoice_settlement` is a VIEW, for the reason `leave_balance`
+// is one (0066): there is no `invoice.paid_total` to drift, and `outstanding_fils` is exactly the quantity
+// ZT001 refuses to let go negative, so the view and the ceiling cannot disagree about whether one more
+// payment is allowed. Refunds are reported BESIDE it rather than subtracted, because a refund follows a
+// credit note and the credited amount is M-TILL-08's. `refund` gets INSERT and SELECT and no UPDATE or
+// DELETE, `tender_type` gets SELECT alone — adding a way of taking money needs a posting account chosen by
+// somebody who knows what a clearing account is for, so it is a migration and not a form.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and all five have now landed in one integrating merge — 55 through 66 are in
-// use, so the four permanent ones above are the only gaps left. 55, 56 and 57 landed out of order and
+// use, so the four permanent ones above were the only gaps left until 67, which is a LIVE allocation held
+// by another unit in flight while 68 landed. That is why gate case 90a walks the migrations that exist on
+// disk rather than consecutive integers: a walk by `number -= 1` stops at the absent 67 and reports a
+// complete ledger as a deleted paragraph. If 67 never lands it becomes the fifth permanent gap and
+// nothing needs changing; renumbering 68 down into it would be the mistake this paragraph is about. 55, 56 and 57 landed out of order and
 // within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
 // exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
 //
@@ -1334,4 +1411,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 66 as const
+export const SCHEMA_VERSION = 68 as const

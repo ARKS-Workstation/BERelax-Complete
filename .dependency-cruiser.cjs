@@ -288,6 +288,45 @@ module.exports = {
       },
     },
     {
+      name: 'payments-must-not-reach-the-network',
+      comment:
+        'The payment adapters in packages/db/src/adapters may not reach an HTTP client, a socket or a ' +
+        'name resolver. M-TILL-07 asks for a manual tender adapter that is "real, not a fake" and for ' +
+        'the module to be "forbidden from making network calls", and the reason is narrower than ' +
+        'tidiness: this is the code that records money received, inside a transaction, and a module ' +
+        'that can reach out over the network has a failure mode where the payment is recorded in one ' +
+        'place and not the other — and a request that hangs on a socket holds the row lock on the ' +
+        'invoice while it does. Cash, a card terminal and a bank transfer are all keyed in by a person ' +
+        'standing at the till: there is nothing to call. ' +
+        'The Y-PAY gateway WILL make network calls. It implements the same PaymentAdapter interface ' +
+        'and it will live behind a port in packages/providers, which is where the retry taxonomy, the ' +
+        'correlation id and the declared degraded mode already are — so this rule is what keeps that ' +
+        'boundary somewhere it can be seen rather than in a comment. ' +
+        "Two alternations, for core-must-be-pure's reason, which is the trap that left " +
+        'no-lucide-outside-the-icon-wrapper configured, green and dead: a Node builtin and an ' +
+        'UNINSTALLED package both resolve to their bare name, while an installed one resolves into ' +
+        'node_modules. `fetch` is a global and therefore invisible to dependency-cruiser at all, ' +
+        'which is why manual-payment.itest.ts also runs the adapter with fetch, http.request and ' +
+        'https.request replaced by throwing stubs — a module-graph rule cannot see a global, and the ' +
+        'two halves together are the claim. ' +
+        'THE TEST FILES ARE EXEMPT, and the exemption is the point rather than a hole. ' +
+        'manual-payment.itest.ts imports node:http and node:https in order to REPLACE their `request` ' +
+        'with a throwing stub — the opposite of using them — and it is the file that proves the adapter ' +
+        'succeeds with no network at all. A rule that condemned it would leave the claim unprovable, and ' +
+        'the first version of this rule did exactly that: two errors against the test that exists to ' +
+        'demonstrate the rule. Nothing imports a test file, vitest would run anything named like one, and ' +
+        'the fixtures in scripts/test-boundaries.mjs and gate block 92 are ordinary modules, so the ' +
+        'exemption cannot be used to smuggle shipped code past this.',
+      severity: 'error',
+      from: { path: '^packages/db/src/adapters/', pathNot: '\\.(test|itest)\\.ts$' },
+      to: {
+        path:
+          '^(node:)?(http|https|net|tls|dgram|dns|http2)$|' +
+          '(^|/)node_modules/(undici|axios|node-fetch|got|superagent|ky|request|form-data)/|' +
+          '^(undici|axios|node-fetch|got|superagent|ky|request|form-data)(/|$)',
+      },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',

@@ -137,14 +137,15 @@ afterAll(async () => {
  * something the application cannot.
  *
  * Every table that references `invoice` is NAMED. PostgreSQL refuses a truncate while a referencing
- * table is missing from the statement, and `0063_checkout.sql` added three — `invoice_appointment`,
- * `payment` and `checkout_finalisation`. Named rather than reached with CASCADE, so the next table to
+ * table is missing from the statement. `0063_checkout.sql` added three — `invoice_appointment`,
+ * `payment` and `checkout_finalisation` — and `0068_payment_tender.sql` added `refund`, which arrived
+ * here as exactly the loud failure the next sentence predicts. Named rather than reached with CASCADE, so the next table to
  * reference `invoice` fails here loudly instead of having its rows removed by a statement that never
  * mentioned it.
  */
 beforeEach(async () => {
   await sql.unsafe(
-    'truncate checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )
   await sql`
     update document_series

@@ -227,7 +227,13 @@ export function isCheckoutAlreadyFinalised(err: unknown): boolean {
 
 /** One tender, as the till records it, with the account the posting put it in. */
 export interface CheckoutTenderInput {
-  /** 'cash', 'card_in_salon' or 'bank_transfer'. The CHECK in 0063 is the closed list. */
+  /**
+   * A code from the `tender_type` registry — 'cash', 'card_in_salon' or 'bank_transfer' today.
+   *
+   * 0063 made this a CHECK over three literals and 0068 replaced it with a foreign key under the
+   * same constraint name, `payment_tender_kind_known`, so the refusal a caller recognises is
+   * unchanged and the SQLSTATE moved from 23514 to 23503.
+   */
   readonly tenderKind: string
   /** Snapshotted onto the row, from `TENDER_ACCOUNT` in `@berelax/core`. */
   readonly postingAccountCode: string
