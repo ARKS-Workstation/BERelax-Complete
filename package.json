@@ -39,6 +39,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "media": "node scripts/check-media.mjs",
+    "no-invoice-mutation": "node scripts/test-no-invoice-mutation.mjs",
     "media:emit": "node scripts/emit-media-manifest.mjs",
     "palette": "python3 scripts/palette.py",
     "palette:emit": "python3 scripts/palette.py --emit",
@@ -59,7 +60,7 @@
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm structured-data && pnpm chokepoint && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gate-registry && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm structured-data && pnpm chokepoint && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm budgets && pnpm gate-registry && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

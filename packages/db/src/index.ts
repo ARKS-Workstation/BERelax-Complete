@@ -49,7 +49,6 @@ export {
   TRADE_RECEIVABLES_ACCOUNT_CODE,
   type WebhookReconciliation,
 } from './adapters/manual-payment.ts'
-
 export {
   type Actor,
   type ActorKind,
@@ -975,6 +974,22 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  assertReversalMatches,
+  CREDIT_NOTE_SQLSTATE,
+  type CreditNoteLineInput,
+  creditNoteError,
+  type IssueCreditNoteInput,
+  type IssuedCreditNote,
+  type IssuedCreditNoteLine,
+  isCreditNoteAppendOnly,
+  isCreditNotePeriodLocked,
+  isOverCredited,
+  issueCreditNote,
+  readCreditNote,
+  readCreditNoteByDisplayNumber,
+  readCreditNotesForInvoice,
+} from './services/issue-credit-note.ts'
+export {
   completeObligationInstance,
   fileObligationEvidence,
   generateObligationInstances,
@@ -1591,6 +1606,11 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // import core — and with no validator injected the publish is refused by name rather than performed.
 // `flow_run`, the step log and the execution cap are C-AUTO-07's and are deliberately absent here.
 //
+// 72 is 0072_credit_note.sql: the credit note, and the reference 0068 could not make (M-TILL-08). 0026
+// created `invoice` append-only and named the correction path in its own comment; 0013 had already
+// allocated CR-NOTE as a separate counter row and said why. So nothing here re-argues that a credit note
+// is a separate document with its own series. Four things ARE this file's.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
@@ -1601,4 +1621,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 70 as const
+export const SCHEMA_VERSION = 72 as const

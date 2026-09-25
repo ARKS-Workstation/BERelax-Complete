@@ -166,32 +166,6 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
-    table: 'flow_enrolment',
-    column: 'customer_id',
-    strategy: 'repoint_update',
-    conflictKey: null,
-    activePredicate: null,
-    dedupeKey: null,
-    backReference: null,
-    excludeColumns: [],
-    retainedReason: null,
-    why:
-      'An automation enrolment is a process attached to a CONTACT, which is the reason 0070 gives for ' +
-      'cascading it from `customer` in the first place. After a merge the contact is the survivor, so an ' +
-      'enrolment left on the loser is a flow still running against a tombstone: the interpreter would ' +
-      'resolve a recipient that no longer exists as a contact, and the frequency cap would count sends ' +
-      'against a record nobody reads. Re-pointed rather than ended, because a merge is a correction to ' +
-      'the customer record and not an event in the flow — ending the enrolment would write an exit ' +
-      'reason into a log that says the person dropped out. No unique key involves the customer (the pin ' +
-      'is on (flow_id, definition_version) and there is deliberately no one-enrolment-per-flow ' +
-      'constraint), so no row can be refused and nothing is retained. UPDATE is granted on this table ' +
-      'and only the pin columns are immutable, so `customer_id` is movable; DELETE is revoked, which is ' +
-      'the other reason the strategy has to be a re-point.',
-    registeredBy:
-      'C-AUTO-06 landed 0070 after C-CRM-05 wrote this registry; registered at the merge',
-  }),
-  participant({
-    schema: 'public',
     table: 'customer_blocklist',
     column: 'customer_id',
     strategy: 'repoint_update',
@@ -382,6 +356,18 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
       'issued, and those columns are what the FTA reads: an invoice re-attributed to another record is ' +
       'a different document. A history read that wants one person’s invoices resolves the tombstone.',
     registeredBy: 'C-CRM-05',
+  }),
+  Object.freeze({
+    schema: 'public',
+    table: 'credit_note',
+    column: 'customer_id',
+    reason:
+      'The `invoice` entry above, for the document that corrects one. A credit note is append-only ' +
+      '(credit_note_no_update raises ZD009 for every role) and the application role holds no UPDATE ' +
+      'privilege on it; it snapshots the customer\u2019s name, phone and TRN as they were when the ' +
+      'correction was issued, and it is filed with the same return the invoice is. A note re-attributed ' +
+      'to another record is a different document, and a merge may not make one.',
+    registeredBy: 'M-TILL-08',
   }),
   Object.freeze({
     schema: 'public',

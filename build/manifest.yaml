@@ -2771,7 +2771,7 @@ units:
       the B-LIFE-03 transaction, turnaround renders as a distinct room band separate from the therapist
       buffer, and 'today' means the business day, not the calendar date.
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M1
     depends_on:
@@ -3849,7 +3849,7 @@ units:
       issuer snapshot rules, and a reversing journal entry dated on the credit note's own date. Proves by
       construction that no invoice edit or void path exists anywhere in the codebase.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-03
@@ -3866,9 +3866,137 @@ units:
     - a credit note dated in a locked period is refused and the error names the earliest open period
     - credit notes draw from the CR-NOTE series with the same gap-free guarantee (the gap-detection query
       returns zero rows) and carry the same non-null issuer snapshot constraints as invoices
+    - 'NOTE: migration 0072, not the next free number. 0071, 0073 and 0074 were held by units in flight
+      in other worktrees, and the run of ledger paragraphs is therefore 49..70 plus 72 — which gate case
+      90a accepts, because it walks the migrations that EXIST on disk rather than consecutive integers.
+      Renumbering down to close the gap is how two branches come to apply one number to different SQL.'
+    - 'NOTE: files beyond the five listed. packages/core/src/checkout/credit-note.ts is the posting rule
+      and it is in core because brief rule 4 puts calculations there and packages/db may never import it —
+      the service takes the reversing entry as a structural mirror, exactly as finaliseCheckout takes one.
+      packages/fixtures/src/credit-note.ts is the mapping between the two halves (checkout.ts''s
+      arrangement for M-TILL-06, and packages/fixtures is the one package allowed to depend on both), with
+      credit-note.test.ts for the arithmetic and credit-note.itest.ts for the pair against real rows.
+      Added: packages/core/src/checkout/credit-note.{ts,test.ts}, packages/db/src/schema/credit-note.ts,
+      packages/db/src/services/issue-credit-note.{ts,itest.ts}, packages/db/migrations/0072_credit_note.sql,
+      packages/fixtures/src/credit-note.{ts,test.ts,itest.ts}, scripts/test-no-invoice-mutation.mjs.
+      Edited: packages/db/src/index.ts (the ledger paragraph, SCHEMA_VERSION = 72, and the export block),
+      packages/core/src/checkout/index.ts, packages/db/src/schema/index.ts, packages/fixtures/src/index.ts,
+      packages/db/src/adapters/manual-payment.ts (invoice_settlement''s two new columns), package.json,
+      .github/workflows/ci.yml, scripts/test-gates.mjs (block 93, case 29, and block 92''s refund probes),
+      and packages/db/src/adapters/manual-payment.itest.ts.'
+    - 'NOTE: credit_note.invoice_id and credit_note_line.invoice_line_no carry NO foreign key, and that is
+      a decision rather than an omission. A key buys one thing an INSERT-time check does not — it keeps the
+      reference true against a later DELETE of the parent — and invoice and invoice_line refuse DELETE for
+      EVERY role including the owner (ZI003, from a BEFORE trigger rather than a grant). The one statement
+      that removes an invoice row is TRUNCATE by the owner, which is precisely what a key would break:
+      SEVEN integration suites across six units truncate the invoice family by an explicit list, and
+      `refund` arriving as the fourth referencing table in 0068 turned all of them red at once. ZD001 and
+      ZD004 raise by NAME instead, which a foreign key would not. The cost is stated rather than left to be
+      discovered: a suite that truncates invoice without also truncating credit_note leaves a note about a
+      document that is gone. credit_note.journal_entry_id DOES carry a real key, because nothing truncates
+      the journal, and it is DEFERRED — which is what lets the note be written BEFORE its entry, so ZD003
+      (the locked-period refusal that names the earliest open date) is the refusal a caller sees rather
+      than 0018''s ZL002 about a journal entry.'
+    - 'NOTE: 0068''s two questions, answered. (1) Which of ZT004 and invoice_settlement.outstanding_fils is
+      authoritative once a document has been credited: BOTH of 0068''s ceilings are, unchanged, and
+      invoice_payable_fils() is not touched. Subtracting the credited amount there would lower the ceiling
+      under payments ALREADY applied — an invoice paid in September and credited in October would read as
+      an overpayment in a figure reconciled against a counted drawer, and the cash in that drawer would
+      stop being explainable by any row. So the view gains credited_fils and receivable_fils (0068''s
+      `gross - credited - applied + refunded`; NEGATIVE means the business holds money it owes back) and
+      outstanding_fils keeps its definition as exactly the quantity ZT001 refuses to let go negative.
+      A THIRD ceiling — no further payment against a credited supply — was written, tested and then
+      REMOVED, because neither shape is sound: immediate, its condition with no credit note IS ZT001''s and
+      it would steal ZT001''s refusal (0068''s gate probe asserts that name); deferred, it refuses any
+      transaction that pays a document and credits it together, which is the ordinary end state reached in
+      one transaction by a fixture, an import, or 0068''s own accepted-rows control. The hole it leaves is
+      that the database will accept a payment against a fully credited document; what makes it visible is
+      receivable_fils going negative, and the till reading that before offering to take payment is
+      DEFERRED TO M-TILL-13. issue-credit-note.itest.ts asserts the absence and the figure, so the
+      decision is recorded as a test rather than as a comment. (2) The three things 0068 named: the foreign
+      key refund.credit_note_id -> credit_note(id) is added, ZD010 checks the note corrects THIS invoice
+      (immediate, and reached before the key so a caller gets a sentence rather than `violates foreign key
+      constraint`; it returns early on a NULL so 0068''s own 23502 probe still fires), and ZD012 caps the
+      refunds against one note at what it credits (deferred, and NAMED to sort after
+      refund_not_more_than_was_paid so a refund breaking both ceilings still reports ZT004).'
+    - 'NOTE: the credit note credits 1050 Trade receivables and not 2085 Customer refunds payable, and it
+      is 0068''s choice rather than this unit''s. manual-payment.ts states the whole shape — a payment posts
+      Dr tender / Cr 1050, a refund posts Dr 1050 / Cr tender, and "the credit note that authorises it
+      posts the other half of the correction (Dr revenue and output VAT, Cr 1050), which is M-TILL-08''s".
+      Following it makes an invoice, a full credit note and a full refund net to zero in EVERY account any
+      of the three touched, which is what the acceptance asks for. 2085 is the better NAME for a
+      credited-but-unrefunded amount — a liability, not a negative receivable — and choosing it here alone
+      would leave 2085 and 1050 each carrying a balance nothing clears, because the refund''s side is
+      0068''s. Moving BOTH halves to 2085 is one decision across three files and is DEFERRED: no unit owns
+      it, and the first that needs the presentation should take it.'
+    - 'NOTE: "nets to zero in every affected account and in every VAT201 box" is met, and the shape of the
+      proof is worth stating because the literal reading is not reachable with two documents. An invoice
+      and a full credit note net every REVENUE account, the output VAT account and every VAT201 box to
+      zero, exact to the fils, over the rows journal_line holds. What they cannot net is the settlement
+      pair: the cash is still in the drawer and 1050 carries the same figure the other way, because money
+      is owed back and has not gone back. packages/fixtures/src/credit-note.itest.ts asserts the pair is
+      equal and opposite, then posts the refund and asserts that EVERY account — not a chosen subset —
+      nets to zero. The discounted case is asserted separately, because it is the one a note built from the
+      invoice''s own figures cannot get right: the reversal debits the LIST net and credits the discount
+      back, because that is what the sale posted, which is why it is built from the ENTRY and not from the
+      note.'
+    - 'NOTE: SCOPED. A PARTIAL credit of an invoice whose sale moved more than one revenue account — in
+      practice a discounted line — is REFUSED by name (PartialCreditNeedsApportionment) rather than
+      apportioned. Splitting part of a credit between 4010 Treatment revenue and 4095 Discounts and
+      allowances is a decision about whether a discount is clawed back pro rata, and nobody has made it; a
+      rule invented here would be indistinguishable from a confirmed one for as long as it produced
+      plausible numbers (brief rule 15). A FULL credit of the same document is always available, needs no
+      apportionment, and nets every account to zero. DEFERRED TO M-TILL-13, the unit that would offer a
+      partial credit at the till and therefore the first that has to ask. Gate case 93t is the known-bad
+      fixture: removing the refusal must make the suite go red.'
+    - 'NOTE: a defect found in code this unit does not own, and CORRECTED rather than worked around.
+      `pnpm typecheck` was RED on main when this unit started: packages/db/src/index.ts carried no export
+      block for packages/db/src/adapters/manual-payment.ts, so packages/fixtures/src/payment.itest.ts —
+      which imports manualPaymentAdapter, readTenderTypes, RegisteredTenderType and
+      TRADE_RECEIVABLES_ACCOUNT_CODE from @berelax/db — produced thirteen TS2305/TS2724 errors, and they
+      were the only symptom. M-TILL-07''s own NOTE records packages/db/src/index.ts as edited, so the block
+      existed on that branch and did not survive the merge: the same class of silent loss gate case 90a
+      exists for, one directory along. The block is restored with a comment saying so. Nothing else about
+      M-TILL-07 was changed except what 0072 required.'
+    - 'NOTE: a second and a third defect in code this unit does not own, both CORRECTED. C-CRM-05''s merge
+      registry enumerates every base table carrying a customer or contact id from the catalogue and fails
+      until each is registered as a participant or an allowlisted exception, so `credit_note.customer_id`
+      had to be declared: it is ALLOWLISTED, with `invoice`''s own reason restated — a credit note is
+      append-only, snapshots the customer as they were when the correction was issued, and is filed with
+      the same return, so a note re-attributed to another record is a different document. But
+      packages/fixtures/src/merge.itest.ts was ALREADY red before this unit touched anything, on
+      `flow_enrolment.customer_id`: C-AUTO-06 added that column in migration 0070 and registered it
+      nowhere, and the case that says "has no flow-run participant yet" asserted no `flow_` table appears
+      in the catalogue at all — which `mergeCoverage` reports regardless of registration, so the assertion
+      became unconditionally false the day 0070 landed. Registered as a `repoint_update` participant (an
+      enrolment must follow the person, for booking_session''s reason; 0070 declares no unique involving
+      the customer, so no row can be refused) and the case rewritten to assert the truth: the one flow
+      table carrying a customer id is registered, and C-AUTO-07''s `flow_run` is still absent, so the
+      deferral it exists to state is still stated. C-AUTO-07 should revisit the strategy when `flow_run`
+      and its idempotency key arrive.'
+    - 'NOTE: readInvoiceSettlement stayed ONE reader. The credit-note service first exported its own, which
+      would have been a second answer to "what has this document been paid" — the thing 0063 refused a
+      second money-received table for — and it collided with the adapter''s export at the barrel. The
+      adapter''s InvoiceSettlement gained credited_fils and receivable_fils instead.'
+    - 'NOTE: gate labels used: 93a-93z, in scripts/test-gates.mjs immediately before the numbered
+      CI-completeness case. Twenty-four psql probes assert each 0072 rule BY NAME against real PostgreSQL,
+      with three controls: the correct rows (document, payment, full note, refund of it) are accepted, three
+      partial credits that together credit the whole line are accepted so the ZD006 probe is about the
+      fourth unit of three, and a note dated in a later OPEN period is accepted so the ZD003 probe is about
+      the lock. The probe builder inserts the NOTE before its entry, which is the order issueCreditNote
+      uses: entry-first made two probes report the wrong rule (ZL002 instead of ZD003, and
+      journal_line_exactly_one_side instead of credit_note_gross_positive). Four edits to
+      packages/core/src/checkout/credit-note.ts must make credit-note.test.ts go red, one edit to
+      packages/fixtures/src/credit-note.ts must make its own suite go red, and two fixtures must make
+      `pnpm no-invoice-mutation` fire. 93z is the control that both suites and the gate pass unedited.
+      Every anchor goes through replaceOnce (brief rule 20). Block 92''s refund probes were EDITED: they
+      wrote an invented uuid into refund.credit_note_id, which the new foreign key and ZD010 refuse, so
+      they now insert a real credit note — verified probe by probe to still fire by their original rule
+      names, ZT004 included. No server-starting suite was added, so no port band was claimed and
+      packages/harness/src/ports.ts is untouched.'
     files:
     - packages/db/src/schema/credit-note.ts
-    - packages/db/migrations/00xx_credit_note.sql
+    - packages/db/migrations/0072_credit_note.sql
     - packages/db/src/services/issue-credit-note.ts
     - packages/db/src/services/issue-credit-note.itest.ts
     - scripts/test-no-invoice-mutation.mjs
@@ -6509,7 +6637,7 @@ units:
       choice, and a preview that shows exactly which rows will move and what consent state results - computed
       by a rolled-back dry run of the real merge function, so the preview cannot disagree with the outcome.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-05
@@ -12610,7 +12738,7 @@ units:
       location, granted scopes in English, last successful call with its recency, next scheduled run and
       Reconnect. Test connection runs the same code path as the cron.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-CONN-06
@@ -12745,8 +12873,11 @@ units:
       reason: apps/web cannot seal a token either.'
     files:
     - packages/core/src/google/connection-state.ts
-    - apps/web/app/(admin)/settings/integrations/page.tsx
-    - apps/web/app/(admin)/settings/integrations/connection-card.tsx
+    - apps/web/app/(admin)/settings/integrations/route.ts
+    - apps/web/app/(admin)/settings/integrations/handler.ts
+    - apps/web/app/(admin)/settings/integrations/connection-card.ts
+    - apps/web/app/(admin)/settings/integrations/test-connection/route.ts
+    - apps/web/app/(admin)/settings/integrations/test-connection/handler.ts
     - apps/web/app/(admin)/settings/integrations/test-connection/route.ts
   - id: G-AGT-02
     order: 158

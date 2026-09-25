@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
 import { type IssueInvoiceInput, issueInvoice } from '../repositories/invoice.ts'
+import { issueCreditNote } from '../services/issue-credit-note.ts'
 import { withUnitOfWork } from '../tx.ts'
 import {
   isOverpayment,
@@ -84,8 +85,61 @@ const GROSS = 26_250
 const NET = 25_000
 const VAT = 1_250
 
-/** A credit note id. A uuid this test invents, because `credit_note` is M-TILL-08's table. */
-const CREDIT_NOTE = '00000000-0000-4000-8000-0000000cn001'.replace('cn', 'c0')
+/**
+ * A credit note for `invoiceId`, crediting the whole of its one line.
+ *
+ * This used to be an invented uuid, because `credit_note` did not exist: 0068 gave `refund` a NOT NULL
+ * `credit_note_id` and no foreign key, and recorded that the key was M-TILL-08's to add. 0072 added it,
+ * plus `ZD010` — the note must correct THIS document — so a refund can no longer name a note nobody
+ * issued, and every probe below now issues a real one. That is the loud failure 0068's NOTE predicted
+ * for this unit, arriving in the file it predicted it in.
+ *
+ * The whole line, at the line's OWN net and VAT: `ZD005` refuses a full credit whose figures are a
+ * re-derivation, and the note's gross is what `ZD012` caps the refunds below at.
+ */
+async function creditNoteFor(invoiceId: string, label: string): Promise<string> {
+  const entryId = `je-mtill08-cn-${label}-${RUN}-${nonce}`
+  const note = await withUnitOfWork(sql, TILL, (uow) =>
+    issueCreditNote(uow, {
+      invoiceId,
+      seriesCode: 'CR-NOTE',
+      issuer: ISSUER,
+      customer: { nameSnapshot: 'Customer 0042' },
+      issueDate: TRADING_DATE,
+      issueTradingDate: TRADING_DATE,
+      taxPointDate: TRADING_DATE,
+      reason: 'The treatment was not delivered as described',
+      lines: [
+        {
+          invoiceLineNo: 1,
+          descriptionEn: 'Asian Normal Massage, 60 minutes',
+          quantity: 1,
+          unitGrossFils: GROSS,
+          vatRateBp: 500,
+          netFils: NET,
+          vatFils: VAT,
+        },
+      ],
+      netTotalFils: NET,
+      vatTotalFils: VAT,
+      grossTotalFils: GROSS,
+      // Dr 4010 the net, Dr 2030 the VAT, Cr 1050 the gross. What `creditNoteReversal` in
+      // @berelax/core builds; written out here because packages/db may not import it.
+      reversal: {
+        entryId,
+        entryDate: TRADING_DATE,
+        narrative: 'Credit note reversal',
+        source: 'reversal',
+        lines: [
+          { accountCode: '4010', debitFils: NET, creditFils: 0 },
+          { accountCode: '2030', debitFils: VAT, creditFils: 0 },
+          { accountCode: '1050', debitFils: 0, creditFils: GROSS },
+        ],
+      },
+    }),
+  )
+  return note.id
+}
 
 function oneTreatment(overrides: Partial<IssueInvoiceInput> = {}): IssueInvoiceInput {
   return {
@@ -138,17 +192,22 @@ afterAll(async () => {
  * `truncate` as the OWNER, which fires no row-level DELETE trigger — `invoice` refuses DELETE for every
  * role including the owner (ZI003), so there is no other way to clear it. Every table that references
  * `invoice` is NAMED: PostgreSQL refuses a truncate while a referencing table is missing from the
- * statement, and `refund` is the fourth such table (0068).
+ * statement, and `refund` is the fourth such table (0068). `credit_note_line` and `credit_note` are here since 0072
+ * and come first, because `refund.credit_note_id` is now a real key into the second of them.
  */
 beforeEach(async () => {
   await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
+      'invoice_appointment, invoice_line, invoice',
   )
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'
      where code = 'TAX-INV'
   `
+  // The credit-note counter too, since 0072: `refund.credit_note_id` is a real foreign key now, so the
+  // refund probes below issue real notes and the display number is UNIQUE across runs.
+  await sql`update document_series set next_number = 1, period_key = '' where code = 'CR-NOTE'`
   nonce += 1
 })
 
@@ -534,10 +593,11 @@ describe('a refund', () => {
 
   it('posts a new entry crediting the tender account, never an edit of the sale', async () => {
     const invoice = await paidInFull()
+    const creditNote = await creditNoteFor(invoice.id, 'posts')
     const refunded = await withUnitOfWork(sql, TILL, (uow) =>
       manualPaymentAdapter().refund(uow, {
         invoiceId: invoice.id,
-        creditNoteId: CREDIT_NOTE,
+        creditNoteId: creditNote,
         tradingDate: TRADING_DATE,
         entryId: `je-mtill07-refund-${RUN}-${nonce}`,
         tenderKind: 'cash',
@@ -545,7 +605,7 @@ describe('a refund', () => {
         amountFils: 10_000,
       }),
     )
-    expect(refunded.creditNoteId).toBe(CREDIT_NOTE)
+    expect(refunded.creditNoteId).toBe(creditNote)
     expect(refunded.refundNo).toBe(1)
 
     const settlement = await readInvoiceSettlement(sql, invoice.id)
@@ -579,11 +639,12 @@ describe('a refund', () => {
 
   it('is refused above what was applied, by the adapter and by the database', async () => {
     const invoice = await paidInFull()
+    const creditNote = await creditNoteFor(invoice.id, 'toomuch')
     await expect(
       withUnitOfWork(sql, TILL, (uow) =>
         manualPaymentAdapter().refund(uow, {
           invoiceId: invoice.id,
-          creditNoteId: CREDIT_NOTE,
+          creditNoteId: creditNote,
           tradingDate: TRADING_DATE,
           entryId: `je-mtill07-toomuch-${RUN}-${nonce}`,
           tenderKind: 'cash',
@@ -598,7 +659,7 @@ describe('a refund', () => {
       sql`
         insert into refund (invoice_id, credit_note_id, refund_no, tender_kind,
                             posting_account_code, amount_fils, trading_date)
-        values (${invoice.id}, ${CREDIT_NOTE}, 1, 'cash', '1010', ${GROSS + 1},
+        values (${invoice.id}, ${creditNote}, 1, 'cash', '1010', ${GROSS + 1},
                 ${TRADING_DATE}::date)
       `,
     )
@@ -608,16 +669,17 @@ describe('a refund', () => {
     await sql`
       insert into refund (invoice_id, credit_note_id, refund_no, tender_kind,
                           posting_account_code, amount_fils, trading_date)
-      values (${invoice.id}, ${CREDIT_NOTE}, 1, 'cash', '1010', ${GROSS}, ${TRADING_DATE}::date)
+      values (${invoice.id}, ${creditNote}, 1, 'cash', '1010', ${GROSS}, ${TRADING_DATE}::date)
     `
   })
 
   it('numbers refunds per document, and refuses a repeated number', async () => {
     const invoice = await paidInFull()
+    const creditNote = await creditNoteFor(invoice.id, 'numbers')
     const first = await withUnitOfWork(sql, TILL, (uow) =>
       manualPaymentAdapter().refund(uow, {
         invoiceId: invoice.id,
-        creditNoteId: CREDIT_NOTE,
+        creditNoteId: creditNote,
         tradingDate: TRADING_DATE,
         entryId: `je-mtill07-r1-${RUN}-${nonce}`,
         tenderKind: 'cash',
@@ -628,7 +690,7 @@ describe('a refund', () => {
     const second = await withUnitOfWork(sql, TILL, (uow) =>
       manualPaymentAdapter().refund(uow, {
         invoiceId: invoice.id,
-        creditNoteId: CREDIT_NOTE,
+        creditNoteId: creditNote,
         tradingDate: TRADING_DATE,
         entryId: `je-mtill07-r2-${RUN}-${nonce}`,
         tenderKind: 'cash',
@@ -642,7 +704,7 @@ describe('a refund', () => {
       sql`
         insert into refund (invoice_id, credit_note_id, refund_no, tender_kind,
                             posting_account_code, amount_fils, trading_date)
-        values (${invoice.id}, ${CREDIT_NOTE}, 1, 'cash', '1010', 1, ${TRADING_DATE}::date)
+        values (${invoice.id}, ${creditNote}, 1, 'cash', '1010', 1, ${TRADING_DATE}::date)
       `,
     )
     expect(repeated.code).toBe('23505')
@@ -683,6 +745,10 @@ describe('the manual adapter needs no network', () => {
       )
       expect(captured.appliedFils).toBe(GROSS)
 
+      // After the capture, which is the order production uses — and inside the stubbed region on
+      // purpose: issuing a credit note reaches no network either.
+      const creditNote = await creditNoteFor(invoice.id, 'offline')
+
       const authorised = await manualPaymentAdapter().authorise(sql, {
         invoiceId: invoice.id,
         offeredFils: 1,
@@ -693,7 +759,7 @@ describe('the manual adapter needs no network', () => {
       const refunded = await withUnitOfWork(sql, TILL, (uow) =>
         manualPaymentAdapter().refund(uow, {
           invoiceId: invoice.id,
-          creditNoteId: CREDIT_NOTE,
+          creditNoteId: creditNote,
           tradingDate: TRADING_DATE,
           entryId: `je-mtill07-offline-refund-${RUN}-${nonce}`,
           tenderKind: 'cash',

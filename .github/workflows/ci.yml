@@ -147,6 +147,13 @@ jobs:
       - name: Tax document rules
         run: pnpm documents
 
+      # An issued document is never edited, voided or deleted: a correction is a credit note (docs/04 SS4).
+      # Two scans no per-module test can do — the export surface of every money module read from SOURCE, so
+      # a module nothing imports is still covered, and `update invoice` / `delete from credit_note` anywhere
+      # in the tree, which is otherwise refused at run time by a trigger rather than by the build.
+      - name: No invoice mutation
+        run: pnpm no-invoice-mutation
+
       # Every JSON-LD block this site serves is built by one function, and an invalid graph fails the build
       # rather than warning. The rules a review does not catch: a plausible coordinate nothing stands behind,
       # an aggregateRating with no reviews, a Service with no price, and an OpeningHoursSpecification that

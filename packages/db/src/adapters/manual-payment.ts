@@ -276,8 +276,24 @@ export interface InvoiceSettlement {
   readonly changeGivenFils: number
   readonly appliedFils: number
   readonly refundedFils: number
-  /** `payableFils - appliedFils`. Exactly the figure `ZT001` refuses to let go negative. */
+  /**
+   * `payableFils - appliedFils`. Exactly the figure `ZT001` refuses to let go negative.
+   *
+   * Deliberately NOT reduced by credit notes, which is the question 0068 left to M-TILL-08 and the
+   * answer 0072 gave: lowering this under payments that have already been applied would make a payment
+   * reconciled against a counted drawer read as an overpayment, and the cash in that drawer would stop
+   * being explainable by any row. What a credit note changes is {@link receivableFils}.
+   */
   readonly outstandingFils: number
+  /** 0072. What the credit notes against this document take off it, positive fils. */
+  readonly creditedFils: number
+  /**
+   * `payableFils - creditedFils - appliedFils + refundedFils`: what the customer still owes.
+   *
+   * NEGATIVE when the business holds money it owes back — a document paid in full and then credited in
+   * full — which is the honest reading rather than a defect.
+   */
+  readonly receivableFils: number
 }
 
 /** One tender to record, already settled against the outstanding figure by `settleTenders` in core. */
@@ -531,10 +547,12 @@ export async function readInvoiceSettlement(
       applied_fils: string
       refunded_fils: string
       outstanding_fils: string
+      credited_fils: string
+      receivable_fils: string
     }[]
   >`
     select invoice_id, display_number, gross_fils, payable_fils, tendered_fils, change_given_fils,
-           applied_fils, refunded_fils, outstanding_fils
+           applied_fils, refunded_fils, outstanding_fils, credited_fils, receivable_fils
       from invoice_settlement where invoice_id = ${invoiceId}
   `
   if (!row) return null
@@ -548,6 +566,11 @@ export async function readInvoiceSettlement(
     appliedFils: Number(row.applied_fils),
     refundedFils: Number(row.refunded_fils),
     outstandingFils: Number(row.outstanding_fils),
+    // 0072's two columns. One reader of one view: a second `readInvoiceSettlement` in the credit-note
+    // service would have been a second answer to "what has this document been paid", which is the
+    // whole reason 0063 refused a second money-received table.
+    creditedFils: Number(row.credited_fils),
+    receivableFils: Number(row.receivable_fils),
   }
 }
 
