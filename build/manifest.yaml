@@ -4849,7 +4849,7 @@ units:
       posting path refuses it, corrections go to the next open period as dated reversals, and reopening
       is impossible without a migration.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-08
@@ -4866,11 +4866,145 @@ units:
       requires a migration
     - closing writes an audit_event naming the closer and a content hash of the period's trial balance;
       recomputing that trial balance later reproduces the same hash byte for byte
+    - 'NOTE: migration 0073, and the gaps. 0071 was allocated to a unit that turned out to need no
+      migration, so it is a PERMANENT gap and was not reused; 0074 and 0075 are held by units in flight in
+      other worktrees. Gate case 90a walks the migrations that EXIST on disk rather than consecutive
+      integers, so a worktree holding 0072 and 0073 with 0071 absent passes with a paragraph for each file
+      present. Renumbering down into a gap is how two branches come to apply one number to different SQL.
+      The ledger paragraph in packages/db/src/index.ts is added in numeric order, SCHEMA_VERSION = 73, and
+      the 22/41/44/47 gap paragraph now records 71 as permanent rather than held.'
+    - 'NOTE: SQLSTATE class ZE, not ZP. ZP is 0056''s (consent) and ZP001-ZP003 are all in use there, so
+      the mnemonic class was unavailable; a second meaning for one class is how a caller comes to handle a
+      consent defect as a period-close defect. ZE001 is PeriodWillNotBalance and ZE002 is
+      PeriodHasUnpostedDocuments.'
+    - 'NOTE: the close is refused by the DATABASE and not only by the service, and that is the shape of the
+      whole unit. `period_lock` gains a BEFORE INSERT trigger (period_lock_is_closeable) raising ZE001 and
+      ZE002 for EVERY role including the owner, because lockAccountingPeriod is not the only caller of that
+      table -- a migration, an import and a psql session are three more, and a precondition only the
+      application checks is a precondition psql skips. closeAccountingPeriod adds the good error message
+      rather than the rule: ZE002''s message names ten documents and counts the rest, because an error
+      string has to be bounded, so the service reads period_close_blocker() FIRST and puts the whole list
+      in the AppError''s details as rows. That is one definition with two readers, not two statements of
+      one rule -- the distinction journal.ts draws when it refuses to pre-check the balance invariant in
+      TypeScript.'
+    - 'NOTE: "the trial balance balances" is a BACKSTOP and is unreachable through any posting path today,
+      stated rather than left to be discovered. assert_entry_balanced is a deferred constraint trigger per
+      ENTRY, so every committed entry balances and therefore any sum over whole entries does too. ZE001 is
+      still enforced and still proved to fire: the only honest fixture is to remove what makes it
+      unreachable, so both the itest case and gate probe disable journal_line_entry_balanced and
+      journal_entry_balanced inside a transaction that rolls back -- which needs the table owner, which is
+      the role a migration connects as. The itest additionally asserts the triggers came back enabled
+      afterwards, because a leftover would make every later suite in the run pass for the wrong reason.'
+    - 'NOTE: SCOPED, and nothing is deferred. period_close_blocker() enumerates invoice, credit_note and
+      bill by one rule, and only the INVOICE branch can fire: credit_note.journal_entry_id and
+      bill.entry_id are NOT NULL and carry foreign keys, so an unposted one of those is unrepresentable.
+      They are enumerated anyway so the check judges the SCHEMA rather than restating today''s version of
+      it -- a later migration making either column nullable is already covered -- and the unreachability is
+      asserted as unreachability (a NOT NULL read from information_schema) rather than claimed as a tested
+      branch. An invoice is posted when a checkout_finalisation row references it, which is reachable
+      because issueInvoice (M-TILL-04) is the primitive finaliseCheckout (M-TILL-06) calls.'
+    - 'NOTE: the five posting paths are asserted through the one choke point they all reach, which is
+      M-VAT-05''s argument for ZL004 restated. 0073 REPLACES raise_if_period_locked() so ZL002 names the
+      earliest OPEN date as well as the locked period, and 0018''s BEFORE INSERT guards on journal_entry
+      and journal_line both call it -- so the invoice through finaliseCheckout, the credit note through
+      issueCreditNote, the bill through postBill, the payment through the manual-payment adapter and the
+      package redemption carry that refusal without five copies of it. The itest posts through
+      postJournalEntry with each path''s own `source` and asserts the message for all five, plus the LINE
+      guard, which is the case the entry guard cannot cover. The new sentence is APPENDED to the existing
+      message, so every existing assertion on it (the period id in journal.itest.ts, periodId in
+      checkout-finalise.itest.ts) stays true; reordering it would not have.'
+    - 'NOTE: reopening gets NO refusal trigger on period_lock, and that is a decision rather than a gap.
+      0018 weighed it and decided against it -- "a mis-typed lock range must be correctable by a migration
+      without someone having to drop a trigger first, and dropping a trigger to fix a typo is how the
+      trigger ends up dropped" -- and two pieces of evidence have arrived since that point the same way:
+      journal.itest.ts resets between its period-lock cases by deleting every period_lock row, and block 97
+      of scripts/test-gates.mjs clears its own year before each credit-note probe. A BEFORE DELETE refusal
+      binding the owner would have turned both red the day it landed. What is shut for every CODE path
+      instead is the grant: berelax_app holds no UPDATE and no DELETE on period_lock (0018), the itest and
+      gate block both issue those statements as that role and assert 42501, and the export surface of
+      @berelax/db is asserted to carry no reopening name. ADR 0026 records the trade, what it costs, and
+      what a reopening migration has to do.'
+    - 'NOTE: the export-surface predicate splits identifiers on camelCase boundaries rather than matching
+      substrings, and the first version did not. /reopen/i matches isBeforeOpeningBalance -- "befoREOPENing"
+      -- so the case reported a reopening path in the barrel that does not exist. A substring pattern over
+      identifiers will eventually find one, and the third control asserts the predicate does NOT match
+      that name, alongside the two that assert it does match five fabricated ones.'
+    - 'NOTE: the evidence hash is period_trial_balance_hash(as_at) in SQL, not TypeScript, and it
+      deliberately EXCLUDES the account name. In SQL because evidence only one program can reproduce is
+      evidence about the program: a psql session and a report written in five years by something that is
+      not this codebase both reproduce this one. Excluding the name because reclassify-account.ts exists to
+      change one, and a hash over it would move when a chart tidy-up renamed "Treatment revenue" -- a filed
+      period would read as restated with not one figure moved, and whoever noticed would go looking for a
+      posting that does not exist. The preimage is "tb1|<date>" then one line per account of
+      code|debits|credits ordered by code; the version tag makes a future canonical form incomparable
+      rather than merely unequal. Gate probes assert all three properties: stable under a rename, different
+      for a different date, and moved by a posting inside the window -- that last one written as a probe
+      that raises when the hash did NOT move, with its own control proving the raise can fire.'
+    - 'NOTE: closing writes TWO audit rows, deliberately. lockAccountingPeriod''s ledger.period.lock says a
+      lock row was inserted; closeAccountingPeriod adds ledger.period.closed carrying the trial balance
+      hash, the as-at date and the difference. Two different facts -- a row''s provenance, and the evidence
+      a return was filed against -- and folding the hash into the first would put this unit''s evidence on
+      every lock ever taken including the ones no close produced, such as a migration correcting a range.
+      The closer is named by the AuditWriter itself from the Actor the unit of work was opened with
+      (actor_kind, actor_id, actor_label are columns on audit_event), so nothing restates who it was.'
+    - 'NOTE: a change to another unit''s file, made rather than worked around, and it is the one thing in
+      this unit a reviewer should look at first. packages/db/src/repositories/journal.itest.ts locked 2026-07,
+      2026-08 and 2026-Q3 (2026-07-01..2026-09-30); invoice.itest.ts issues invoices with a tax point of
+      2026-09-18 through issueInvoice, which posts no journal entry, and leaves its last one behind. Under
+      ZE002 the overlapping-locks case therefore became a close of a period holding an unposted invoice,
+      and whether it passed depended on which file vitest reached first -- MEASURED green in one order and
+      red in the other, on the same commit and the same database. The describe(''period locks'') block is
+      moved wholesale to 2088 with a comment saying why. The alternative fixes were both worse: invoice
+      refuses DELETE for every role (ZI003) so clearing the rows means TRUNCATE of the whole document
+      family, which seven suites across six units rely on the shape of, and relying on that suite gaining
+      an afterAll trades one ordering dependence for another.'
+    - 'NOTE: the PAIR is proved in packages/fixtures/src/period-close.itest.ts, which the four listed files
+      cannot reach. packages/db may not import packages/core, so core''s reversal is a structural mirror of
+      postDatedCorrection''s JournalLineInput and nothing compiles the two against each other: core has
+      `account: AccountCode` and branded Fils, the repository has `accountCode: string` and integer
+      debitFils. A mapping that swapped the sides or dropped a memo is invisible to both halves'' own
+      suites, so fixtures -- the one package allowed to depend on both -- posts a reversal core BUILT and
+      asserts every line came back with its side, account and memo, and that the pair nets every account it
+      touched to zero over journal_line rather than over either writer''s return value. It also asserts the
+      claim the module header rests on: core''s closedPeriodContaining and the database''s period_lock_for()
+      give the same answer for every one of nine days spanning both closed periods and the open month after
+      them, with a counted control (five closed, four open) so a comparison that had degenerated to
+      null-against-null fails instead of passing nine times. The same arrangement credit-note.itest.ts has
+      for M-TILL-08. Its periods are in 2091.'
+    - 'NOTE: files beyond the four listed. Added: packages/db/migrations/0073_period_close.sql,
+      packages/core/src/ledger/period.test.ts, packages/fixtures/src/period-close.itest.ts, and the ADR as
+      docs/adr/0026-period-reopen-requires-migration.md
+      (0025 was the highest on disk; the manifest''s 00xx placeholder allocates no number). Edited:
+      packages/db/src/index.ts (the export block, the ledger paragraph for 73, SCHEMA_VERSION = 73),
+      packages/core/src/ledger/index.ts, docs/adr/README.md (the index, which pnpm adr checks),
+      scripts/test-gates.mjs (block 98a-98z, 21 cases) and packages/db/src/repositories/journal.itest.ts.
+      Two names had to change to avoid a barrel collision that pnpm typecheck caught: core''s periodsOverlap
+      became accountingPeriodsOverlap (availability/index.ts exports periodsOverlap) and the db service''s
+      PeriodStatus became PeriodLockStatus (recurring-cost.ts exports PeriodStatus). No server-starting
+      suite was added, so no port band was claimed and packages/harness/src/ports.ts is untouched.'
+    - 'NOTE: the seam later units call. "Is this period closed?" is periodStatusOn(sql, date) from
+      @berelax/db, which returns {closed, periodId, earliestOpenDate} in one round trip from
+      period_lock_for() and earliest_open_date_from() -- the same two functions the BEFORE INSERT guards
+      call, so a screen cannot answer differently from the refusal a posting would get.
+      earliestOpenDateFrom(sql, date) is the one-value form. "Can this period be closed?" is
+      periodCloseBlockers(sql, {startsOn, endsOn}). Closing is closeAccountingPeriod(uow, input).
+      "Post a correction" is postDatedCorrection(uow, {reversesEntryId, entryId, narrative, lines}): it
+      reads the original, computes the date as the first OPEN day at or after it (and at or after an
+      optional notBefore), and posts through postJournalEntry with source ''reversal'' -- so no second
+      write path into the journal exists. The reversal LINES are built by the caller from core''s
+      reverseEntry, because packages/db may not import packages/core; core''s planCorrection(entry, on,
+      closedPeriods) is the pure half and REFUSES a date inside a closed period rather than computing the
+      open one, which is deliberate -- earliest_open_date_from() is the single definition and a pure mirror
+      would be a second answer. Recomputing the evidence is trialBalanceHashAsAt(sql, asAt).'
+    - 'NOTE: what the manifest got wrong. (1) The ADR file is listed as docs/adr/00xx-, which allocates no
+      number -- 0026 was taken here and M-VAT-09 and M-VAT-13 still carry 00xx placeholders that will
+      collide if two of them land in one batch. (2) The four listed files are not the whole unit; see the
+      files NOTE above. Nothing in the acceptance list itself was wrong.'
     files:
     - packages/db/src/services/period-close.ts
     - packages/db/src/services/period-close.itest.ts
     - packages/core/src/ledger/period.ts
-    - docs/adr/00xx-period-reopen-requires-migration.md
+    - docs/adr/0026-period-reopen-requires-migration.md
   - id: M-VAT-07
     order: 62
     title: VAT201 box mapping and working papers with drill-down

@@ -544,6 +544,27 @@ describe('the balance invariant is deferred to COMMIT', () => {
   })
 })
 
+/**
+ * Every period here is in 2088, and the far-future year is load-bearing rather than whimsical.
+ *
+ * M-VAT-06's migration 0073 gave `period_lock` a BEFORE INSERT trigger: a period containing a document
+ * the ledger does not account for cannot be closed (ZE002). These cases are about the LOCK — what it
+ * refuses to let be posted, that two of them cannot overlap, that the application role cannot reopen
+ * one — and not about what happens to be dated inside it, so they need a range no document suite can
+ * reach into.
+ *
+ * They used to say 2026, and so does `invoice.itest.ts`, which issues invoices with a tax point of
+ * 2026-09-18 through `issueInvoice` — the primitive `finaliseCheckout` calls, which posts no journal
+ * entry — and leaves its last one behind. `2026-Q3` spans that date, so the overlapping-locks case
+ * became a close of a period with an unposted invoice in it, and whether it passed depended on which of
+ * the two files vitest reached first: measured green in one order and red in the other, on the same
+ * commit and the same database. That is brief rule 12's failure exactly, and the fix it asks for is to
+ * narrow what the code under test can see rather than to delete another suite's rows — `invoice` refuses
+ * DELETE for every role (ZI003), so the only way to clear them is a TRUNCATE of the whole document
+ * family, which seven suites across six units rely on the shape of.
+ *
+ * Nothing in the file's other blocks moves: they post entries and never close a period.
+ */
 describe('period locks', () => {
   const lock = (periodId: string, startsOn: string, endsOn: string) =>
     withUnitOfWork(sql, TILL, (uow) =>
@@ -560,8 +581,8 @@ describe('period locks', () => {
   it('refuses a journal_line whose entry_date falls inside a locked period, naming the period', async () => {
     // The entry is posted while the period is open, so the LINE is what meets the lock. That is the
     // acceptance criterion exactly: a line appended to an entry after the period closed.
-    await post(saleOf('JE-LOCKED', 10_500, '2026-08-31'))
-    await lock('2026-08', '2026-08-01', '2026-08-31')
+    await post(saleOf('JE-LOCKED', 10_500, '2088-08-31'))
+    await lock('2088-08', '2088-08-01', '2088-08-31')
 
     const refused = await stateOf(
       sql`insert into journal_line (entry_id, line_no, account_code, credit_fils)
@@ -571,8 +592,8 @@ describe('period locks', () => {
     expect(refused.message).toContain('PeriodLocked')
     // The period identifier is in the message. Without it the person reading the failure goes looking
     // in the wrong month, and the entry they then chase is usually the correct one.
-    expect(refused.message).toContain('"2026-08"')
-    expect(refused.message).toContain('2026-08-31')
+    expect(refused.message).toContain('"2088-08"')
+    expect(refused.message).toContain('2088-08-31')
 
     // It failed at the INSERT, not at COMMIT: the guard is immediate, so the balance check never got
     // the chance to report a different problem for the same statement.
@@ -581,7 +602,7 @@ describe('period locks', () => {
     // Control: with the period reopened, the identical append succeeds. Without this the case would
     // pass just as happily against a journal_line that had stopped accepting inserts altogether. The
     // pair of lines keeps the entry balanced, so the deferred check at COMMIT is satisfied too.
-    await sql`delete from period_lock where period_id = '2026-08'`
+    await sql`delete from period_lock where period_id = '2088-08'`
     await expect(
       sql.begin(async (tx) => {
         await tx`insert into journal_line (entry_id, line_no, account_code, credit_fils)
@@ -595,16 +616,16 @@ describe('period locks', () => {
   })
 
   it('refuses a whole posting into a locked period, as a translated AppError', async () => {
-    await lock('2026-07', '2026-07-01', '2026-07-31')
-    const refused = await stateOf(post(saleOf('JE-INTO-LOCKED', 10_500, '2026-07-15')))
+    await lock('2088-07', '2088-07-01', '2088-07-31')
+    const refused = await stateOf(post(saleOf('JE-INTO-LOCKED', 10_500, '2088-07-15')))
     expect(refused.code).toBe(JOURNAL_SQLSTATE.periodLocked)
-    expect(refused.message).toContain('"2026-07"')
+    expect(refused.message).toContain('"2088-07"')
 
     // Refused at the INSERT, so postJournalEntry saw it and translated it already: what the caller
     // catches is an AppError carrying the SQLSTATE, not a driver error it has to classify itself.
     let caught: unknown
     try {
-      await post(saleOf('JE-INTO-LOCKED-2', 10_500, '2026-07-15'))
+      await post(saleOf('JE-INTO-LOCKED-2', 10_500, '2088-07-15'))
     } catch (err) {
       caught = err
     }
@@ -620,20 +641,20 @@ describe('period locks', () => {
 
     // Control: the day after the lock ends posts normally, so the refusal is the range and not the
     // posting path. A lock that closed every date would satisfy the assertions above.
-    await expect(post(saleOf('JE-AFTER-LOCK', 10_500, '2026-08-01'))).resolves.toBeDefined()
+    await expect(post(saleOf('JE-AFTER-LOCK', 10_500, '2088-08-01'))).resolves.toBeDefined()
   })
 
   it('a reversal dated in an open period corrects an entry inside a locked one', async () => {
     // The reason reverseEntry() takes the date as an argument instead of reading a clock: a correction
     // found in September for an August entry is dated in September because August is closed. Only the
     // caller, which knows the locks, can decide.
-    await post(saleOf('JE-AUGUST', 10_500, '2026-08-20'))
-    await lock('2026-08', '2026-08-01', '2026-08-31')
+    await post(saleOf('JE-AUGUST', 10_500, '2088-08-20'))
+    await lock('2088-08', '2088-08-01', '2088-08-31')
 
     const original = await readJournalEntry(sql, 'JE-AUGUST')
     const reversal: JournalEntryInput = {
       entryId: 'JE-AUGUST-R',
-      entryDate: '2026-09-01',
+      entryDate: '2088-09-01',
       narrative: 'Reversal of JE-AUGUST',
       source: 'reversal',
       reverses: 'JE-AUGUST',
@@ -648,19 +669,19 @@ describe('period locks', () => {
     // Control: the same reversal dated INSIDE the locked period is refused, which is the whole reason
     // the date is an argument.
     const backdated = await stateOf(
-      post({ ...reversal, entryId: 'JE-AUGUST-R2', entryDate: '2026-08-31' }),
+      post({ ...reversal, entryId: 'JE-AUGUST-R2', entryDate: '2088-08-31' }),
     )
     expect(backdated.code).toBe(JOURNAL_SQLSTATE.periodLocked)
   })
 
   it('refuses two overlapping locks, so the named period is never ambiguous', async () => {
-    await lock('2026-Q3', '2026-07-01', '2026-09-30')
-    const overlapping = await stateOf(lock('2026-09', '2026-09-01', '2026-09-30'))
+    await lock('2088-Q3', '2088-07-01', '2088-09-30')
+    const overlapping = await stateOf(lock('2088-09', '2088-09-01', '2088-09-30'))
     expect(overlapping.code).toBe('23P01')
 
     let caught: unknown
     try {
-      await lock('2026-08-again', '2026-08-01', '2026-08-31')
+      await lock('2088-08-again', '2088-08-01', '2088-08-31')
     } catch (err) {
       caught = err
     }
@@ -670,30 +691,30 @@ describe('period locks', () => {
 
     // Control: an adjacent, non-overlapping period locks fine. ends_on is the last day OF the period,
     // so Q4 starts the day after Q3 ends and the inclusive ranges do not touch.
-    await expect(lock('2026-Q4', '2026-10-01', '2026-12-31')).resolves.toBeDefined()
-    expect((await listPeriodLocks(sql)).map((l) => l.periodId)).toEqual(['2026-Q3', '2026-Q4'])
+    await expect(lock('2088-Q4', '2088-10-01', '2088-12-31')).resolves.toBeDefined()
+    expect((await listPeriodLocks(sql)).map((l) => l.periodId)).toEqual(['2088-Q3', '2088-Q4'])
   })
 
   it('periodLockFor answers with the same range the trigger uses', async () => {
-    await lock('2026-08', '2026-08-01', '2026-08-31')
-    expect(await periodLockFor(sql, '2026-08-01')).toBe('2026-08')
-    expect(await periodLockFor(sql, '2026-08-31')).toBe('2026-08')
+    await lock('2088-08', '2088-08-01', '2088-08-31')
+    expect(await periodLockFor(sql, '2088-08-01')).toBe('2088-08')
+    expect(await periodLockFor(sql, '2088-08-31')).toBe('2088-08')
     // Inclusive at both ends: an exclusive ends_on would leave the last day of every filed period
     // open, which is the day the cash-up runs.
-    expect(await periodLockFor(sql, '2026-07-31')).toBeNull()
-    expect(await periodLockFor(sql, '2026-09-01')).toBeNull()
-    await expect(periodLockFor(sql, '31/08/2026')).rejects.toThrow(/ISO business day/)
+    expect(await periodLockFor(sql, '2088-07-31')).toBeNull()
+    expect(await periodLockFor(sql, '2088-09-01')).toBeNull()
+    await expect(periodLockFor(sql, '31/08/2088')).rejects.toThrow(/ISO business day/)
   })
 
   it('the application role cannot reopen a period it closed', async () => {
-    await lock('2026-08', '2026-08-01', '2026-08-31')
+    await lock('2088-08', '2088-08-01', '2088-08-31')
     const reopened = await stateOf(
-      asApplicationRole((tx) => tx`delete from period_lock where period_id = '2026-08'`),
+      asApplicationRole((tx) => tx`delete from period_lock where period_id = '2088-08'`),
     )
     expect(reopened.code).toBe('42501')
     const shortened = await stateOf(
       asApplicationRole(
-        (tx) => tx`update period_lock set ends_on = '2026-08-01' where period_id = '2026-08'`,
+        (tx) => tx`update period_lock set ends_on = '2088-08-01' where period_id = '2088-08'`,
       ),
     )
     expect(shortened.code).toBe('42501')
@@ -704,7 +725,7 @@ describe('period locks', () => {
         (
           tx,
         ) => tx`insert into period_lock (period_id, starts_on, ends_on, reason, locked_by_actor_kind)
-                   values ('2026-06', '2026-06-01', '2026-06-30', 'filed', 'staff')`,
+                   values ('2088-06', '2088-06-01', '2088-06-30', 'filed', 'staff')`,
       ),
     ).resolves.toBeDefined()
   })
