@@ -5,6 +5,9 @@
  * `blocklist.ts` is what a contact key is, how a match is decided and who may change the list;
  * `client-record.ts` closes the record and classifies every field by the widest audience it may reach.
  *
+ * `merge-plan.ts` is C-CRM-05's pure half: which of two records survives a merge, how each scalar field
+ * resolves, and the de-duplicating union a ledger's rows take when two records become one.
+ *
  * `phone.ts` is the contact key C-CRM-02 added — B-LIFE-02's normaliser for every UAE number, plus the
  * one thing it deliberately refuses: a number whose country code is not 971. `duplicate-score.ts` is the
  * deterministic pair scorer that reads those keys and the folded record label, and the two thresholds
@@ -14,4 +17,5 @@ export * from './blocklist.ts'
 export * from './client-record.ts'
 export * from './duplicate-score.ts'
 export * from './lifecycle.ts'
+export * from './merge-plan.ts'
 export * from './phone.ts'

@@ -24205,6 +24205,504 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 93a-93z. (C-CRM-05) The merge: the registry that has to notice a table nobody registered, the copy
+//     that must not leave a row behind, and the tombstone.
+//
+//     A merge is the operation whose defects are invisible, and every case below is one of them. Re-point
+//     eight tables out of nine and the ninth one's rows stay on a record nothing reads: the tag is still
+//     on the tombstone, the consent log is still attached to an id the send path stopped resolving. No
+//     statement fails, no row count looks odd, and the symptom arrives months later as a promotional
+//     message to somebody who opted out. So the claims here are proved by BREAKING them and naming the
+//     suite that must notice.
+//
+//     Three of the mutants are the ones the unit exists for. 93a takes a table out of the registry's
+//     coverage and requires the catalogue — `information_schema`, not the registry — to report it; 93c
+//     stops the append-only copy carrying anything and requires the left-rows-behind refusal; and 93d
+//     does the same with the refusal itself removed, so the defect has to be caught by `resolveConsent`
+//     over the merged log instead. The last one is the whole point: a guard that were the only thing
+//     noticing would be a guard nobody could trust.
+//
+//     The database half is the other shape of the same problem. `merge_record_table`'s three balance
+//     constraints are the unit's central claim expressed as SQL — every row that was on the loser is
+//     re-pointed or retained with a stated reason — and a constraint is only a gate once something has
+//     been seen to bounce off it (ADR 0003). Every probe states the rule it must trip and
+//     `checkRejectedBy` fails if the rejection came from anything else; `VERBOSITY=verbose` so the
+//     SQLSTATE and the constraint name are both in psql's output, and every probe runs inside
+//     `begin; … ; rollback;`, which is also the only way most of them can be written at all —
+//     `merge_record` refuses DELETE for every role including the owner, so a probe row that committed
+//     could never be swept.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const REPO = 'packages/db/src/repositories/merge.ts'
+  const REGISTRY = 'packages/db/src/merge-participants.ts'
+  const MIGRATION = 'packages/db/migrations/0069_customer_merge.sql'
+  const ITEST = 'packages/fixtures/src/merge.itest.ts'
+  const CORE_SUITE = 'packages/core/src/crm/merge-plan.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/crm/merge-plan.property.test.ts'
+
+  /** One anchored edit to a shipped file. `replaceOnce` refuses an ambiguous or stale anchor (rule 20). */
+  const mergeMutant = (path, anchor, replacement, body) =>
+    withEditedFile(path, (text) => replaceOnce(text, anchor, replacement), body)
+
+  /** Two anchored edits to one file, for the case that has to remove a guard AND the thing it guards. */
+  const mergeMutants = (path, edits, body) =>
+    withEditedFile(
+      path,
+      (text) => edits.reduce((carried, [anchor, into]) => replaceOnce(carried, anchor, into), text),
+      body,
+    )
+
+  // 93a. A table taken out of the registry's coverage. The catalogue enumerates from
+  //      `information_schema`, so it still sees `public.consent` — and a registry that no longer accounts
+  //      for it is the exact state a later unit's new table leaves the build in.
+  checkRejectedBy(
+    'merge gate: a table carrying a customer id that the registry does not account for is caught',
+    mergeMutant(
+      REGISTRY,
+      "    table: 'consent',",
+      "    table: 'consent_unregistered_by_the_gate',",
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    // The whole test name rather than a fragment: `checkRejectedBy` searches the runner's output, and
+    // vitest prints the name of a failing case and not the matcher inside it.
+    'names every table carrying a customer or contact id as a participant or an allowlisted exception',
+  )
+
+  // 93b. The coverage query's classification flattened, so an unknown table reads as allowlisted. This is
+  //      what a registry check that examined nothing would look like from the outside: green, for ever.
+  checkRejectedBy(
+    'merge gate: a coverage report that calls an unregistered table allowlisted is caught',
+    mergeMutant(
+      REGISTRY,
+      "      status: allowed === undefined ? ('unregistered' as const) : ('allowlisted' as const),",
+      "      status: 'allowlisted' as const,",
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'reports a table nobody registered, and stops reporting it once it is registered',
+  )
+
+  // 93c. The append-only copy carries nothing. Every row count still balances — the copy did what it was
+  //      told — so the only thing that can see it is the check that every row on the loser has a
+  //      counterpart on the survivor.
+  checkRejectedBy(
+    'merge gate: an append-only copy that carries no rows is caught',
+    mergeMutant(
+      REPO,
+      '`   where l.${p.column} = $1\\n` +',
+      '`   where l.${p.column} = $1 and false\\n` +',
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'refuses by name when a copy leaves rows behind, whatever the key said',
+  )
+
+  // 93d. The same mutant with the guard itself removed, so the defect has to be caught somewhere else —
+  //      and it is, by `resolveConsent` over the merged log, which is the function the send path reads
+  //      through. A guard that were the only thing noticing would be a guard nobody could trust.
+  checkRejectedBy(
+    'merge gate: a copy that drops rows is caught by the send path’s resolver even with the guard gone',
+    mergeMutants(
+      REPO,
+      [
+        ['`   where l.${p.column} = $1\\n` +', '`   where l.${p.column} = $1 and false\\n` +'],
+        ['if (orphaned > 0) {', 'if (false) {'],
+      ],
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'lets a withdrawal on the loser govern the survivor when it is the newest thing either said',
+  )
+
+  // 93e. `consent` re-pointed by UPDATE, which is the obvious way to write a merge and is refused by the
+  //      database for every role (0056, ZP003). The mutant is worth a case because the alternative — a
+  //      copy — reads as a workaround until you know the record has to outlive the identity it is about.
+  checkRejectedBy(
+    'merge gate: an append-only table re-pointed by UPDATE is caught',
+    mergeMutant(REGISTRY, "    strategy: 'repoint_insert',", "    strategy: 'repoint_update',", () =>
+      runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'lets a withdrawal on the loser govern the survivor when it is the newest thing either said',
+  )
+
+  // 93f. The idempotency read removed, so a repeated merge tries to do the work again. An at-least-once
+  //      queue and a double-clicked button both produce one, and the second attempt copying an
+  //      append-only log a second time is not recoverable.
+  checkRejectedBy(
+    'merge gate: a repeated merge that does the work again is caught',
+    mergeMutant(REPO, 'if (existing !== null) {', 'if (false && existing !== null) {', () =>
+      runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'answers already_merged and mutates nothing',
+  )
+
+  // 93g. The tombstone lookup answering with its own argument. Every call still returns a uuid and every
+  //      caller still works — for a record that was never merged, which is almost all of them.
+  checkRejectedBy(
+    'merge gate: a tombstone lookup that resolves to itself is caught',
+    mergeMutant(REPO, '  return row.survivor', '  return customerId', () =>
+      runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'deletes nothing: the loser survives as a tombstone that resolves to the survivor',
+  )
+
+  // 93h. `rank()` swapped for `row_number()` in the newest-per-group CTE. Identical for every detail whose
+  //      newest entry is unique, which is almost all of them; for a detail whose newest entries TIE — a
+  //      suppression and a lift at one instant, which 0064 says the resolver fails closed on — it settles
+  //      the ambiguity by accident, and half the time the row it settles on reads as "not suppressed".
+  checkRejectedBy(
+    'merge gate: a back-reference that settles a tied suppression instant is caught',
+    mergeMutant(REPO, 'rank() over (partition by', 'row_number() over (partition by', () =>
+      runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'back-references one row per detail and leaves every resolved state exactly as it was',
+  )
+
+  // 93i. The check that the registry and the database agree about which rows are the same row, disabled.
+  //      Nothing else can see a dedupe key that does not match a real unique index: the copy does what it
+  //      is told and every row count balances, so a key one column too coarse silently leaves the loser's
+  //      withdrawal behind and reports success.
+  checkRejectedBy(
+    'merge gate: a dedupe key that no unique index backs is caught',
+    mergeMutant(REPO, '  if (matched === undefined) {', '  if (false) {', () =>
+      runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'refuses a dedupe key no unique index backs, because "already there" would mean nothing',
+  )
+
+  // 93j. The identifier check at the `sql.unsafe` boundary, disabled. A dynamic table name, a dynamic
+  //      column list and a partial-index predicate cannot all be bound as parameters, so this is the only
+  //      thing standing between a registry entry and a statement — and a registry entry is source
+  //      somebody edits.
+  checkRejectedBy(
+    'merge gate: a participant identifier reaching sql.unsafe unchecked is caught',
+    mergeMutant(
+      REGISTRY,
+      '    if (!SQL_IDENTIFIER.test(identifier)) {',
+      '    if (false && !SQL_IDENTIFIER.test(identifier)) {',
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    ),
+    'refuses a table name that is not an identifier, before any statement is issued',
+  )
+
+  // 93k. The append-only pair, half kept. `merge_record`'s comment says UPDATE and DELETE raise, and the
+  //      conventions gate is what makes that a fact rather than a sentence.
+  checkRejectedBy(
+    'merge gate: a merge_record with no UPDATE refusal fails the conventions gate',
+    mergeMutant(
+      MIGRATION,
+      'create trigger merge_record_no_update before update on merge_record\n' +
+        '  for each row execute function refuse_merge_record_change();',
+      '-- mutant: the UPDATE refusal trigger is gone',
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  checkRejectedBy(
+    'merge gate: a merge_record with no DELETE refusal fails the conventions gate',
+    mergeMutant(
+      MIGRATION,
+      'create trigger merge_record_no_delete before delete on merge_record\n' +
+        '  for each row execute function refuse_merge_record_change();',
+      '-- mutant: the DELETE refusal trigger is gone',
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  // 93l-93z. The database's own rules, as known-bad fixtures against real PostgreSQL.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    const psqlProbe = (statements) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${statements}; rollback;`,
+      ])
+
+    const SURVIVOR = "'00000000-0000-7000-8000-00000000d501'::uuid"
+    const LOSER = "'00000000-0000-7000-8000-00000000d502'::uuid"
+    const THIRD = "'00000000-0000-7000-8000-00000000d503'::uuid"
+
+    /** The merge_record insert, with any field overridden. The defaults are a row the database accepts. */
+    const recordRow = (overrides = {}) => {
+      const v = {
+        survivor: SURVIVOR,
+        loser: LOSER,
+        mergedAt: "'2099-09-25T10:00:00Z'",
+        actorKind: "'staff'",
+        actorLabel: "'Manager'",
+        authority: "'auto_merge'",
+        reason: "'One person, two records: the same handset was entered twice.'",
+        score: '980',
+        phone: "'identical'",
+        label: "'near'",
+        fields: "'[]'::jsonb",
+        ...overrides,
+      }
+      return (
+        'insert into merge_record (survivor_customer_id, loser_customer_id, merged_at, actor_kind, ' +
+        'actor_label, authority, reason, score_per_mille, phone_agreement, label_agreement, ' +
+        `field_resolutions) values (${v.survivor}, ${v.loser}, ${v.mergedAt}::timestamptz, ` +
+        `${v.actorKind}, ${v.actorLabel}, ${v.authority}, ${v.reason}, ${v.score}, ${v.phone}, ` +
+        `${v.label}, ${v.fields})`
+      )
+    }
+
+    /**
+     * The per-table row, with any field overridden, hung off a parent inserted in the same statement.
+     *
+     * The defaults BALANCE: one row moved off the loser and onto the survivor, nothing retained. Every
+     * probe below is that row with one figure changed, so a rejection is about the constraint named and
+     * not about a row that was never storable.
+     */
+    const tableRow = (overrides = {}) => {
+      const v = {
+        participant: "'public.customer_tag'",
+        idColumn: "'customer_id'",
+        strategy: "'repoint_update'",
+        beforeSurvivor: '1',
+        beforeLoser: '1',
+        afterSurvivor: '2',
+        afterLoser: '0',
+        moved: '1',
+        inserted: '0',
+        retained: '0',
+        retainedReason: 'null',
+        ...overrides,
+      }
+      return (
+        `${recordRow()}; insert into merge_record_table (merge_record_id, participant, id_column, ` +
+        'strategy, rows_before_survivor, rows_before_loser, rows_after_survivor, rows_after_loser, ' +
+        'rows_moved, rows_inserted, rows_retained_on_loser, retained_reason) values ' +
+        `((select id from merge_record where loser_customer_id = ${LOSER}), ${v.participant}, ` +
+        `${v.idColumn}, ${v.strategy}, ${v.beforeSurvivor}, ${v.beforeLoser}, ${v.afterSurvivor}, ` +
+        `${v.afterLoser}, ${v.moved}, ${v.inserted}, ${v.retained}, ${v.retainedReason})`
+      )
+    }
+
+    const probes = [
+      {
+        // 93l. The positive control, first, because every probe below is a refusal and a database that
+        //      refused everything would satisfy all of them. If this one fails, none of the rest means
+        //      anything.
+        name: 'merge gate: a whole merge_record row is ACCEPTED, so the refusals below are the fault',
+        accept: true,
+        sql: recordRow(),
+      },
+      {
+        // 93m. A record merged into itself. Every count in the report would then be doubled by the same
+        //      row, and nothing would have moved.
+        name: 'merge gate: a record merged into itself is refused',
+        rule: 'merge_record_survivor_is_not_the_loser',
+        sql: recordRow({ loser: SURVIVOR }),
+      },
+      {
+        // 93n. THE constraint the tombstone is: a record is merged away exactly once, and a second
+        //      attempt is `already_merged` read off this index rather than a second row saying something
+        //      slightly different.
+        name: 'merge gate: a second merge of one loser is refused',
+        rule: 'merge_record_one_merge_per_loser',
+        sql: `${recordRow()}; ${recordRow({ survivor: THIRD })}`,
+      },
+      {
+        // 93o. An edge INTO a tombstone, which is also what makes a cycle impossible: every edge's head
+        //      is live when it is written and a head never becomes live again.
+        name: 'merge gate: merging into a record that is itself a tombstone is refused',
+        rule: 'MergeSurvivorIsATombstone',
+        sql: `${recordRow()}; ${recordRow({ survivor: LOSER, loser: THIRD })}`,
+      },
+      {
+        // 93p. And the control for it: merging the SURVIVOR onward into a third record is allowed, which
+        //      is the ordinary sequence of events the chain-following lookup exists for.
+        name: 'merge gate: merging the survivor onward into a third record is ACCEPTED',
+        accept: true,
+        sql: `${recordRow()}; ${recordRow({ survivor: THIRD, loser: SURVIVOR })}`,
+      },
+      {
+        // 93q. The chain, asserted by a probe that RAISES unless the lookup follows it. An accept-style
+        //      probe, because the thing being checked is an answer rather than a refusal.
+        name: 'merge gate: merge_survivor_of follows a chain to its end, or this probe raises',
+        accept: true,
+        sql:
+          `${recordRow()}; ${recordRow({ survivor: THIRD, loser: SURVIVOR })}; ` +
+          `do $$ begin if merge_survivor_of(${LOSER}) is distinct from ${THIRD} then ` +
+          `raise exception 'MergeChainProbe: merge_survivor_of stopped at %', ` +
+          `merge_survivor_of(${LOSER}); end if; end $$`,
+      },
+      {
+        name: 'merge gate: a merge attributed to the customer themselves is refused',
+        rule: 'merge_record_actor_kind_known',
+        sql: recordRow({ actorKind: "'customer'" }),
+      },
+      {
+        name: 'merge gate: a merge with a placeholder actor is refused',
+        rule: 'merge_record_actor_is_stated',
+        sql: recordRow({ actorLabel: "'TBC'" }),
+      },
+      {
+        name: 'merge gate: a merge with a placeholder reason is refused',
+        rule: 'merge_record_reason_is_stated',
+        sql: recordRow({ reason: "'pending'" }),
+      },
+      {
+        // 93r. An authority outside the two. There is deliberately no third value, and a merge stored
+        //      under one nobody declared is a merge nobody can say who authorised.
+        name: 'merge gate: a merge under an undeclared authority is refused',
+        rule: 'merge_record_authority_known',
+        sql: recordRow({ authority: "'looked_about_right'" }),
+      },
+      {
+        name: 'merge gate: a score outside 0..1000 per mille is refused',
+        rule: 'merge_record_score_is_per_mille',
+        sql: recordRow({ score: '1200' }),
+      },
+      {
+        // 93s. An agreement label @berelax/core does not declare. The vocabulary is pinned from the other
+        //      side too — the integration suite inserts all thirty cells — so the two cannot drift apart.
+        name: 'merge gate: a phone-agreement label core does not declare is refused',
+        rule: 'merge_record_phone_agreement_known',
+        sql: recordRow({ phone: "'nearly'" }),
+      },
+      {
+        name: 'merge gate: a label-agreement label core does not declare is refused',
+        rule: 'merge_record_label_agreement_known',
+        sql: recordRow({ label: "'sort_of'" }),
+      },
+      {
+        // 93t. The discarded half of a resolved conflict has to be a list. An object or a string here is
+        //      a `field_resolutions` nothing can read back.
+        name: 'merge gate: field_resolutions that is not an array is refused',
+        rule: 'merge_record_field_resolutions_is_an_array',
+        sql: recordRow({ fields: `'{"phoneE164": "x"}'::jsonb` }),
+      },
+      {
+        // 93u. The per-table control: a balanced report is storable, so the four refusals below are about
+        //      their constraints and not about a child row the database never accepts.
+        name: 'merge gate: a balanced per-table report is ACCEPTED',
+        accept: true,
+        sql: tableRow(),
+      },
+      {
+        // 93v. The loser's side of the arithmetic. A row that left the loser without being counted as
+        //      moved is a row the report cannot account for.
+        name: 'merge gate: a report whose loser count does not balance is refused',
+        rule: 'merge_record_table_loser_balances',
+        sql: tableRow({ afterLoser: '1' }),
+      },
+      {
+        // 93w. And the survivor's. This is the direction a double count shows up in.
+        name: 'merge gate: a report whose survivor count does not balance is refused',
+        rule: 'merge_record_table_survivor_balances',
+        sql: tableRow({ afterSurvivor: '3' }),
+      },
+      {
+        // 93x. THE constraint this unit exists for: a row left on the tombstone with nothing saying why.
+        //      Expressed as a CHECK rather than as a test, so a participant that silently left rows
+        //      behind cannot store its own report and the refusal rolls the merge back.
+        name: 'merge gate: a retained row with no stated reason is refused',
+        rule: 'merge_record_table_retention_is_explained',
+        sql: tableRow({ beforeLoser: '2', afterLoser: '1', retained: '1' }),
+      },
+      {
+        // And its mirror, which is the one a copy-paste produces: a reason given for nothing retained.
+        name: 'merge gate: a retention reason with nothing retained is refused',
+        rule: 'merge_record_table_retention_is_explained',
+        sql: tableRow({ retainedReason: "'Nothing was retained.'" }),
+      },
+      {
+        // 93y. Every row that was on the loser is re-pointed or retained. A report that accounts for
+        //      neither is the silent loss the registry exists to prevent.
+        name: 'merge gate: a moving strategy that does not account for every loser row is refused',
+        rule: 'merge_record_table_every_moved_row_is_accounted_for',
+        sql: tableRow({ beforeLoser: '3', afterLoser: '2', moved: '1', retained: '0' }),
+      },
+      {
+        // The same rule satisfied, so the refusal above is about the arithmetic and not about the count.
+        name: 'merge gate: a moving strategy that retains the rest WITH a reason is ACCEPTED',
+        accept: true,
+        sql: tableRow({
+          beforeLoser: '3',
+          afterLoser: '2',
+          moved: '1',
+          retained: '2',
+          retainedReason: "'The survivor already carries that tag.'",
+        }),
+      },
+      {
+        // 93z. A copying strategy that claims to have moved a row. An append-only table's originals stay
+        //      where they are, so this is arithmetic nobody could have performed.
+        name: 'merge gate: a copying strategy that claims to have moved a row is refused',
+        rule: 'merge_record_table_a_copied_row_did_not_move',
+        sql: tableRow({ strategy: "'repoint_insert'", participant: "'public.consent'" }),
+      },
+      {
+        name: 'merge gate: a participant that is not schema-qualified is refused',
+        rule: 'merge_record_table_participant_is_qualified',
+        sql: tableRow({ participant: "'customer_tag'" }),
+      },
+      {
+        name: 'merge gate: two reports for one participant on one merge are refused',
+        rule: 'merge_record_table_one_row_per_participant',
+        sql: `${tableRow()}; insert into merge_record_table (merge_record_id, participant, id_column, strategy, rows_before_survivor, rows_before_loser, rows_after_survivor, rows_after_loser, rows_moved, rows_inserted, rows_retained_on_loser, retained_reason) values ((select id from merge_record where loser_customer_id = ${LOSER}), 'public.customer_tag', 'customer_id', 'repoint_update', 1, 1, 2, 0, 1, 0, 0, null)`,
+      },
+      {
+        // The append-only pair, from the database's side and for the OWNER: psql does not connect as the
+        //      application role, so the revoked privileges are not what refuses these.
+        name: 'merge gate: UPDATE on merge_record is refused for the owner',
+        rule: 'ZT001',
+        sql: `${recordRow()}; update merge_record set reason = 'edited' where loser_customer_id = ${LOSER}`,
+      },
+      {
+        name: 'merge gate: DELETE on merge_record is refused for the owner',
+        rule: 'ZT001',
+        sql: `${recordRow()}; delete from merge_record where loser_customer_id = ${LOSER}`,
+      },
+      {
+        name: 'merge gate: UPDATE on merge_record_table is refused for the owner',
+        rule: 'ZT001',
+        sql: `${tableRow()}; update merge_record_table set rows_moved = 9 where participant = 'public.customer_tag'`,
+      },
+    ]
+
+    for (const probe of probes) {
+      const result = psqlProbe(probe.sql)
+      if (probe.accept === true) {
+        check(probe.name, !result.failed, String(result.output))
+      } else {
+        checkRejectedBy(probe.name, result, probe.rule)
+      }
+    }
+  }
+
+  // The controls on the whole block: the committed pure suites pass, so the mutants above are about the
+  // fixtures and not about a unit that was already red.
+  {
+    const core = run('pnpm', unit(CORE_SUITE))
+    check('merge gate: the committed merge-plan suite passes', !core.failed, String(core.output))
+    const property = run('pnpm', unit(PROPERTY_SUITE))
+    check(
+      'merge gate: the committed merge-plan property suite passes',
+      !property.failed,
+      String(property.output),
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -24717,11 +25215,27 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       .map((name) => Number.parseInt(name.slice(0, 4), 10))
       .sort((a, b) => a - b)
 
-  /** The longest unbroken run of documented numbers ending at `newest`, or [] if it does not reach it. */
-  const runEndingAtNewest = (documented) => {
+  /**
+   * The longest unbroken run of documented migrations ending at `newest`, or [] if it does not reach it.
+   *
+   * Walked over the migrations that EXIST — `numbers`, from the directory — and not over consecutive
+   * integers, and the difference is a false failure this gate produced for every unit holding a
+   * non-contiguous allocation. Migration numbers are handed out in advance to units in flight in
+   * separate worktrees, so the branch holding 0069 has no 0067 or 0068 on disk. An integer walk stops at
+   * 68, reports the run as [69], and says a paragraph was deleted — about two numbers nobody has written
+   * a migration for yet. The check loses nothing: a paragraph deleted for a migration that IS on disk
+   * still breaks the run, which is what 90d proves, and the four permanent gaps (22, 41, 44, 47) stop
+   * depending on being below the floor to be tolerated.
+   */
+  const runEndingAtNewest = (documented, numbers = migrationNumbers) => {
     if (!documented.includes(newest)) return []
+    const existing = [...numbers].sort((a, b) => a - b)
     const run = [newest]
-    for (let number = newest - 1; documented.includes(number); number -= 1) run.unshift(number)
+    for (let i = existing.indexOf(newest) - 1; i >= 0; i -= 1) {
+      const number = existing[i]
+      if (!documented.includes(number)) break
+      run.unshift(number)
+    }
     return run
   }
 
@@ -24794,11 +25308,39 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     const line = ledger.split('\n').find((text) => text.startsWith(`// ${middle} is ${opening}`))
     const holed = line === undefined ? ledger : ledger.replace(line, '// (paragraph deleted by a merge)')
     const holedRun = runEndingAtNewest(documentedIn(holed))
+    // The next migration that EXISTS above `middle`, which is where the holed run must now start. Not
+    // `middle + 1`: the run is walked over the migrations on disk, so the number immediately above a
+    // hole is not necessarily one of them.
+    const nextExisting = migrationNumbers.find((number) => number > middle)
     check(
       'ledger gate: a paragraph deleted from the middle of the run is caught',
-      line !== undefined && holedRun.length > 0 && holedRun[0] === middle + 1,
+      line !== undefined && holedRun.length > 0 && holedRun[0] === nextExisting,
       `deleting ${middle}'s paragraph left a run of ${holedRun.length} starting at ` +
-        `${String(holedRun[0])}; expected it to start at ${middle + 1}`,
+        `${String(holedRun[0])}; expected it to start at ${String(nextExisting)}`,
+    )
+  }
+
+  // 90e. The control for the walk itself, and it is not a formality: 90a is now tolerant of a number
+  //      nobody has used, so something has to prove it is tolerant of THAT and of nothing else. Both
+  //      halves are asserted over a synthetic on-disk list, because the real one cannot be given a hole
+  //      to order.
+  {
+    const synthetic = [49, 50, 51, 53]
+    const documentedAll = [49, 50, 51, 53]
+    const holed = [49, 50, 53]
+    const realNewest = newest
+    // `runEndingAtNewest` reads `newest` from the outer scope, so the synthetic list has to end there.
+    const shifted = synthetic.map((number) => number + (realNewest - 53))
+    const shiftedAll = documentedAll.map((number) => number + (realNewest - 53))
+    const shiftedHoled = holed.map((number) => number + (realNewest - 53))
+    const tolerant = runEndingAtNewest(shiftedAll, shifted)
+    const caught = runEndingAtNewest(shiftedHoled, shifted)
+    check(
+      'ledger gate: the run steps over an unused number and still stops at a missing paragraph',
+      tolerant.length === shifted.length && caught.length === 1,
+      `a fully documented list with a gap in the numbers gave a run of ${tolerant.length} ` +
+        `(expected ${shifted.length}); the same list missing the newest-but-one paragraph gave ` +
+        `${caught.length} (expected 1)`,
     )
   }
 }
