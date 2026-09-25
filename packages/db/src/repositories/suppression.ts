@@ -1,13 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import {
-  AppError,
-  SEND_GATING_CONSENT_PURPOSES,
-  type SuppressionEntryInput,
-  suppressionEntrySchema,
-} from '@berelax/shared'
+import { AppError, type SuppressionEntryInput, suppressionEntrySchema } from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 import type { UnitOfWork } from '../tx.ts'
-import { readCurrentConsentWording, recordConsent, withdrawConsent } from './consent.ts'
 
 /**
  * The suppression list's writes and reads, and the opt-out token service (C-CRM-04), over 0064.
@@ -68,7 +62,13 @@ export const SUPPRESSION_REFUSALS = [
   'optout_not_decided',
   /** A revoke names a grant that is not there. A second revoke is an error, not a no-op. */
   'optout_grant_not_found',
-  /** A resubscribe needs the wording it is being given under, and no version is published. */
+  /**
+   * A resubscribe needs the wording it is being given under, and no version is published.
+   *
+   * Raised by `./preference-centre.ts` since C-CRM-07 moved the write there, and kept in THIS list so
+   * `suppressionRefusalOf` goes on recognising it: `/api/v1/preferences` branches on that translator, and
+   * a refusal name that moved module would have become an unnamed 500 on the one path that produces it.
+   */
   'preference_centre_wording_absent',
 ] as const
 export type SuppressionRefusal = (typeof SUPPRESSION_REFUSALS)[number]
@@ -1020,175 +1020,13 @@ export async function pruneOptOutVerificationAttempts(
 // ------------------------------------------------------------------------------------------------
 // The preference centre's write
 // ------------------------------------------------------------------------------------------------
-
-/** What the preference centre can do. Two actions, and they are exact opposites. */
-export const PREFERENCE_CENTRE_ACTIONS = ['unsubscribe', 'resubscribe'] as const
-export type PreferenceCentreAction = (typeof PREFERENCE_CENTRE_ACTIONS)[number]
-
-export interface PreferenceCentreChange {
-  readonly contactCustomerId: string
-  readonly action: PreferenceCentreAction
-  /** The recipient the link was reached through, raw. The only detail that can be suppressed. */
-  readonly recipient: string
-  readonly keyKind: string
-  /** The locale the wording was shown in, which is part of the consent capture context. */
-  readonly locale: 'en' | 'ar'
-  readonly decidedAtIso: string
-}
-
-export interface PreferenceCentreResult {
-  readonly action: PreferenceCentreAction
-  /** How many consent rows the change wrote. Every send-gating purpose × every channel. */
-  readonly consentRows: number
-  readonly suppressionRecorded: boolean
-  readonly suppressionId: string
-}
-
-/**
- * Applies what somebody clicked in the preference centre. Both halves, in one transaction.
- *
- * ## Why an unsubscribe writes a consent withdrawal AND a suppression
- *
- * They answer different questions and dropping either one leaves a hole somebody walks through:
- *
- *   - the **consent withdrawal** is the record that this person changed their mind, per channel and per
- *     purpose, carrying the capture context PDPL asks for. It is what `resolveConsent` reads, and it is
- *     the row a regulator would want to see;
- *   - the **suppression** is the instruction that outlives a later grant. Somebody who unsubscribes and
- *     then fills in a booking form again has a NEW consent row, newer than the withdrawal, and consent
- *     alone would start messaging them. The suppression is what makes that not happen, and it is exactly
- *     why the precedence rule is "suppression beats consent with no exceptions".
- *
- * ## Why the withdrawal covers every channel and the suppression covers one detail
- *
- * Consent is keyed on the CONTACT, so a withdrawal can cover every channel and every send-gating
- * purpose — which is what "stop messaging me" means, and anything narrower would be this system deciding
- * that the person only meant SMS. A suppression is keyed on a hashed contact DETAIL, so it can only cover
- * the detail the link was reached through. That asymmetry is not a compromise, it is the two keys doing
- * what each is for, and it is why an email address with no `customer` row can still be suppressed
- * (C-CRM-01's NOTE 3: `customer` has no email column, so such an address resolves to no contact at all).
- *
- * ## A resubscribe is the symmetric pair and needs a wording version
- *
- * It records a GRANT, which `consent_grant_carries_its_wording` refuses without the version shown, and an
- * `unsuppressed` row from `preference_centre`. If no wording is published there is nothing to grant
- * against and the change is refused by name rather than recorded against words nobody showed.
- */
-export async function applyPreferenceCentreChange(
-  uow: UnitOfWork,
-  keying: SuppressionKeying,
-  change: PreferenceCentreChange,
-): Promise<PreferenceCentreResult> {
-  const channels = ['sms', 'email', 'whatsapp'] as const
-  let consentRows = 0
-
-  if (change.action === 'unsubscribe') {
-    for (const channel of channels) {
-      for (const purpose of SEND_GATING_CONSENT_PURPOSES) {
-        const written = await withdrawConsent(uow, {
-          contactCustomerId: change.contactCustomerId,
-          channel,
-          purpose,
-          // No wording on a withdrawal. `consentRecordSchema` says why a grant needs one and a
-          // withdrawal does not: a system that refused to record an opt-out until an operator produced a
-          // wording version would be easier to opt into than out of.
-          wordingId: null,
-          wordingHashHex: null,
-          recordedAtIso: change.decidedAtIso,
-          capture: {
-            source: 'preference_centre',
-            actorKind: 'customer',
-            actorLabel: 'Preference centre (link holder)',
-            locale: change.locale,
-          },
-        })
-        if (written.recorded) consentRows += 1
-      }
-    }
-    const suppressed = await recordSuppression(uow, keying, {
-      keyKind: change.keyKind,
-      recipient: change.recipient,
-      source: 'preference_centre',
-      reason: 'Unsubscribed through the preference centre link.',
-      actorKind: 'customer',
-      actorLabel: 'Preference centre (link holder)',
-      recordedAtIso: change.decidedAtIso,
-      contactCustomerId: change.contactCustomerId,
-    })
-    await auditPreferenceChange(uow, change, suppressed.row.id)
-    return {
-      action: change.action,
-      consentRows,
-      suppressionRecorded: suppressed.recorded,
-      suppressionId: suppressed.row.id,
-    }
-  }
-
-  for (const purpose of SEND_GATING_CONSENT_PURPOSES) {
-    const wording = await readCurrentConsentWording(uow.sql, purpose)
-    if (wording === null) {
-      refuse(
-        'preference_centre_wording_absent',
-        `No consent wording is published for '${purpose}', so there is nothing to grant against. A ` +
-          'grant with no record of the words shown is not an opt-in proof, and the database refuses one.',
-        { purpose },
-      )
-    }
-    for (const channel of channels) {
-      const written = await recordConsent(uow, {
-        contactCustomerId: change.contactCustomerId,
-        channel,
-        purpose,
-        kind: 'granted',
-        recordedAtIso: change.decidedAtIso,
-        wordingId: wording.id,
-        wordingHashHex: wording.contentHashHex,
-        capture: {
-          source: 'preference_centre',
-          actorKind: 'customer',
-          actorLabel: 'Preference centre (link holder)',
-          locale: change.locale,
-        },
-      })
-      if (written.recorded) consentRows += 1
-    }
-  }
-  const lifted = await unsuppressKey(uow, keying, {
-    keyKind: change.keyKind,
-    recipient: change.recipient,
-    source: 'preference_centre',
-    reason: 'Resubscribed through the preference centre link.',
-    actorKind: 'customer',
-    actorLabel: 'Preference centre (link holder)',
-    recordedAtIso: change.decidedAtIso,
-    contactCustomerId: change.contactCustomerId,
-  })
-  await auditPreferenceChange(uow, change, lifted.row.id)
-  return {
-    action: change.action,
-    consentRows,
-    suppressionRecorded: lifted.recorded,
-    suppressionId: lifted.row.id,
-  }
-}
-
-async function auditPreferenceChange(
-  uow: UnitOfWork,
-  change: PreferenceCentreChange,
-  suppressionId: string,
-): Promise<void> {
-  await uow.audit.record({
-    action: SUPPRESSION_AUDIT_ACTIONS.preferenceChanged,
-    entityType: 'suppression',
-    entityId: suppressionId,
-    operation: 'create',
-    // No recipient. The key kind says which detail was acted on and the suppression row holds its HMAC.
-    after: {
-      contact_customer_id: change.contactCustomerId,
-      action: change.action,
-      key_kind: change.keyKind,
-      locale: change.locale,
-      decided_at: change.decidedAtIso,
-    },
-  })
-}
+// It moved to `./preference-centre.ts` (C-CRM-07), which owns the scoped version this one is now the
+// `everything` case of. `applyPreferenceCentreChange` and its two types are re-exported from
+// `packages/db/src/index.ts` from there, so every caller imports the same names from the same barrel
+// and nothing outside this package could tell.
+//
+// Moved rather than duplicated because C-CRM-07 has to draw the grid one cell at a time, and a write
+// as coarse as this one cannot serve a page that fine. Two implementations of "what an unsubscribe
+// writes" would have had to agree about the consent rows, about the suppression that outlives a later
+// grant, and about the merge chain C-CRM-05 NOTE (8b) deferred here — three chances to disagree, in
+// the one place where disagreeing means a message sent to somebody who asked us to stop.

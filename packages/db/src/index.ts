@@ -696,6 +696,33 @@ export {
   readOtpResendWindow,
   verifyOtpCode,
 } from './repositories/otp.ts'
+/*
+  C-CRM-07's preference centre. `applyPreferenceCentreChange` and its two types moved here from
+  `./repositories/suppression.ts` with the write itself, so C-CRM-04's endpoint keeps importing the same
+  names from this barrel and nothing outside the package changed. See that module's header for why the
+  coarse action is now the scoped write's `everything` case.
+*/
+export {
+  applyPreferenceCentreChange,
+  applyPreferenceSelection,
+  PHONE_CHANNELS,
+  PREFERENCE_CENTRE_ACTIONS,
+  PREFERENCE_CENTRE_ACTOR_LABEL,
+  PREFERENCE_CENTRE_REFUSALS,
+  PREFERENCE_GRID,
+  type PreferenceCentreAction,
+  type PreferenceCentreChange,
+  type PreferenceCentreRefusal,
+  type PreferenceCentreResult,
+  type PreferenceGridCell,
+  type PreferenceScope,
+  type PreferenceSelection,
+  type PreferenceSelectionResult,
+  type PreferenceSubject,
+  preferenceCentreRefusalOf,
+  type RenderedWording,
+  readPreferenceSubject,
+} from './repositories/preference-centre.ts'
 export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
@@ -833,7 +860,6 @@ export {
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
 export {
-  applyPreferenceCentreChange,
   type IssuedOptOutGrant,
   issueOptOutGrant,
   loadSuppressionPeppers,
@@ -848,10 +874,6 @@ export {
   type OptOutVerifyResult,
   optOutTokenDigest,
   type PlaintextLeak,
-  PREFERENCE_CENTRE_ACTIONS,
-  type PreferenceCentreAction,
-  type PreferenceCentreChange,
-  type PreferenceCentreResult,
   pruneOptOutVerificationAttempts,
   readSuppressionHistory,
   readSuppressionLogs,

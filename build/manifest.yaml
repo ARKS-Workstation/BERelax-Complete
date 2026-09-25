@@ -6770,10 +6770,131 @@ units:
     - Grep test over the whole template corpus asserts no template contains the string 'Reply STOP' or 'STOP
       to' in any locale - the opt-out is the link, because an alphanumeric sender ID cannot receive inbound
       SMS
+    - 'NOTE: what was built, the two inherited deferrals and how each is discharged, and three things the
+      manifest got wrong. Beyond the one file this list names it adds
+      apps/web/app/(public)/preferences/{route,handler,render}.ts, packages/core/src/consent/optout-copy.ts
+      (+ its unit test), apps/web/src/preference-centre-render.test.ts,
+      apps/web/src/preference-centre.itest.ts and apps/web/src/preference-centre-browser.itest.ts, and it
+      edits packages/db/src/repositories/suppression.ts, packages/db/src/index.ts,
+      packages/core/src/consent/index.ts, packages/shared/src/site-origin.ts, packages/shared/src/index.ts,
+      apps/web/src/routes/registry.ts, packages/harness/src/ports.ts (one band, `preference-centre` at
+      11_500) and scripts/test-gates.mjs (block 99). (1) THE FILES LIST IS WRONG IN BOTH ITS WEB PATHS and
+      the reason is the TOKEN, not scope. There is no `[token]` segment because `canonicalPath` lower-cases
+      every path and the proxy 301s to the result, and C-CRM-04''s token is 43 characters of MIXED-CASE
+      base64url - so a token in a path segment is destroyed by this site''s own canonicalisation, for every
+      customer, every time, with a 404 whose cause is two modules away. B-UI-05 lives with that by minting
+      lower-case hex; this unit cannot, because the exactness of `optOutTokenShape` is what C-CRM-04''s
+      property test over a thousand forged and mutated tokens rests on, and widening it to a second alphabet
+      is not a smaller change than this one. So the route is unparameterised at `/preferences` with
+      `?c=&t=&lang=`, which is the URL shape C-CRM-04''s endpoint already publishes - one capability, one
+      link format - and the query survives a redirect untouched. It buys two more things. A registry
+      DOCUMENT must declare `sampleParams` and carry a reciprocal hreflang set in both locales, which for a
+      bearer credential means a live link committed to the registry and the token published in the head of
+      the page for every crawler (B-UI-05''s NOTE argues both at length); so the entry is `kind: handler`,
+      `indexable: false`, and there is no `actions.ts` - every control is a plain `<form method="post">` with
+      no `action`, which is what makes the page work with JavaScript off. And `/preferences` is a URL that
+      ALWAYS exists, which is what lets an unknown token answer the same 200 and the same page shell as a
+      valid one; a 404 on `/preferences/{token}` would be the oracle the fifth acceptance line forbids.
+      Gate 99k is that mutant. (2) C-CRM-04''s DEFERRED RENDERED HALF IS DISCHARGED IN FULL. Its NOTE (3)
+      built `/api/v1/preferences` and deferred "the bilingual SCREEN: the RTL page, the buttons and the
+      tokens". All of it is here, and the screen is FINER than the endpoint it sits beside: the coarse
+      unsubscribe/resubscribe pair is now one case of a scoped write, so a reader can stop review requests
+      and keep offers. `applyPreferenceSelection` in packages/db/src/repositories/preference-centre.ts is
+      that write, `applyPreferenceCentreChange` MOVED there from suppression.ts and is now a wrapper over it
+      with `scope: everything` and `wording: null` - byte-for-byte the rows 0064 wrote - and the move rather
+      than a second implementation is the point: two spellings of "what an unsubscribe writes" would have
+      had to agree about the consent rows, the suppression that outlives a later grant, and the merge chain
+      in (3). Nothing outside packages/db can tell, because both names are re-exported from the same barrel.
+      Two things the screen states that the endpoint did not have to: a suppression names a hashed DETAIL and
+      there is no per-purpose suppression, so stopping ANY handset row puts the number on the list and stops
+      every promotional message to it - printed on the page rather than left to be discovered (gate 99e) -
+      and an email row records the decision and nothing else, because `customer` has no email column
+      (C-CRM-01''s NOTE 3). (3) C-CRM-05''s NOTE (8b) IS DISCHARGED, AND THE TWO ACTIONS ARE DELIBERATELY
+      NOT SYMMETRIC. C-CRM-05 recorded that a link minted for a record later merged away still verifies and
+      still suppresses the detail, but writes its PDPL withdrawal onto the TOMBSTONE''s log; C-CRM-06''s NOTE
+      (6) re-deferred it here by name. `applyPreferenceSelection` resolves the contact through
+      `merge_survivor_of()` INSIDE its own transaction, so a merge committing between the render and the
+      submission cannot land half the rows on each record, and `readPreferenceSubject` resolves the same way
+      on the read - so the page shows the survivor''s preferences and the survivor''s number. A WITHDRAWAL
+      therefore follows the chain and is never refused: this link is the only functional opt-out this
+      business has (docs/04 SS5), a 404 in front of somebody who has finally had enough drops an opt-out on
+      the floor, and a merge is an operator-confirmed assertion that the two records are one person
+      (C-CRM-06 ships no unattended auto-merge), so the survivor IS the person who tapped the link. A GRANT
+      does NOT follow it: a resubscribe through a tombstone link is refused `preference_grant_on_a_tombstone`
+      and writes nothing, because a withdrawal applied too widely stops messages nobody will miss while a
+      grant applied to a record the link was not minted for is marketing consent that nobody gave - which is
+      the one thing `consent` exists to be evidence of. The fix reaches BOTH surfaces rather than only the
+      new one, which is why the wrapper in (2) had to be a delegation: `/api/v1/preferences` is the URL a
+      customer''s link opens today, so fixing only the page would have discharged the deferral on the
+      surface nobody uses yet. Gates 99g and 99h are the two mutants, and the third case is the control that
+      a record never merged still resolves to itself. (4) NO MIGRATION, so SCHEMA_VERSION is unchanged at 72
+      and the ledger is untouched: 0074 was allocated to this unit and is not needed. Everything here is
+      0056 (consent and its wording), 0064 (suppression, `optout_grant`, the attempt log) and 0069
+      (`merge_survivor_of`, already granted to berelax_app). The one thing worth recording is that a
+      withdrawal now CARRIES the wording version the page rendered, which 0056 permits and does not require
+      - `consent_grant_carries_its_wording` is about grants - so the third acceptance line is satisfied by a
+      row that is evidence of the words somebody was reading when they decided, and
+      `assert_consent_wording_hash()` refuses a snapshot that disagrees with the stored version. A caller
+      that rendered nothing passes `wording: null` and gets 0064''s behaviour unchanged. (5) ONE PORT BAND,
+      `preference-centre` at 11_500 width 300, and it is taken for exactly one claim: a document loaded with
+      JavaScript DISABLED whose form then submits. That cannot be driven through a handler - a form
+      submission is the browser turning `<form method="post">` into a request and following the 303 - so
+      apps/web/src/preference-centre-browser.itest.ts starts the built application through `startWebServer`
+      (brief rules 18, 19) and is the band''s only claimant. Everything about rows and refusals is in
+      apps/web/src/preference-centre.itest.ts, which starts nothing. The split is not tidiness: every gate
+      mutant that breaks a row-level claim has to re-run the suite that proves it, and a suite carrying a
+      production build, twelve axe audits and twelve screenshots costs minutes each to re-prove something
+      none of them touches. 11_500 rather than the next round number after 10_900 because 11_200 is an
+      allocation held by a unit in flight. (6) "THE AR ROUTE IS dir=rtl" IS SATISFIED AS A QUERY FIELD AND
+      NOT AS A SECOND URL, and the reason is the oracle again. The rendered language comes from `lang` in
+      the link, never from `customer.locale`: taking it from the record would make the response''s direction
+      a FACT about the contact readable by anybody holding the link, and it would make the shell of a valid
+      page differ from the shell of a refused one at the `<html dir>` attribute - which is the equality the
+      fifth line asks for. The sender knows the locale and puts it in the link
+      (`preferenceCentrePath` in packages/shared), the page offers the other language as a link, and what
+      the reader was actually shown is what `consent.capture_locale` records. Both documents are rendered,
+      audited at 390/768/1440 in both themes and photographed - twelve images in artifacts/screens/C-CRM-07
+      - and the RTL cells are the Arabic document rather than the English one with an attribute flipped.
+      (7) THE SHELL EQUALITY COST ONE REAL DEFECT IN THIS UNIT''S OWN FIRST DRAFT, and it is why the
+      language switch sits inside `<main>`. The footer held it, the href carries the capability, and the
+      capability differs between a valid token and a forged one - so the shells were NOT byte-identical and
+      the suite said so. It is inside `<main>` now, a refused document''s switch carries no capability at
+      all, and the consequence is stronger than the criterion: every refusal - malformed, absent, unknown,
+      expired, revoked, another contact''s, a non-uuid id - is the SAME document, byte for byte, because it
+      is built from the locale and the `premises` singleton alone. The rate limit is the one distinguishable
+      answer (429 with `Retry-After`, a fact about the caller), and an unattributable request is the other
+      (400 by name), both for C-CRM-04''s reasons. (8) THE FORBIDDEN-PHRASE RULE IS IN packages/core, not in
+      packages/messaging, because both the shipped corpus and the seeded rows are scanned against it and only
+      a leaf both can see could hold one copy. The scan covers `DEFAULT_TEMPLATES` and every
+      `message_template_variant` body AND subject in both locales - the manifest line says "the whole
+      template corpus", and the corpus at run time is the rows rather than the constant. Two counts are
+      asserted before the scan so it cannot pass over an empty set, and the same predicate over the same
+      corpus with one body broken finds it. (9) TWO DEFECTS IN CODE THIS UNIT DOES NOT OWN. First,
+      apps/web/src/routes/registry.test.ts has been RED on the merged tree: C-CRM-06 added
+      `/clients/duplicates` and `/clients/duplicates/preview` above `/calendar`, and that file asserts the
+      entries are in path order, so three of its cases failed before this unit touched anything. The
+      `/calendar` entry is moved back into order; nothing else about it changed. Second, C-CRM-04''s NOTE (3)
+      deferred the rendered preference centre to B-UI-02 BY NAME - a unit at order 38 that was already
+      `done`, where this one is order 86 - so that deferral pointed backwards and could never have been
+      picked up. It is this unit''s entry that describes the page, and it is this unit that built it. (10)
+      ONE FIXTURE DEFECT FOUND BY RE-RUNNING, recorded because the symptom named the wrong thing.
+      `consent_one_record_per_instant` is (contact, channel, purpose, kind, recorded_at) and the repository
+      inserts `on conflict do nothing`, so the row-level suite''s second run wrote nothing and three
+      assertions read "expected 1 consent row, got 0" with nothing pointing at the instant. Every instant it
+      writes at is now derived from the pid, so the assertions stay EXACT rather than being weakened to
+      "either count" the way preferences-route.itest.ts had to. The same run found the rate limit''s edge
+      from the other side: nine reads at one address inside one sixty-second window left exactly one
+      verification of headroom, so every request now draws a fresh address unless the case is about the
+      address itself.'
     files:
-    - apps/web/app/(public)/preferences/[token]/
-    - apps/web/app/(public)/preferences/actions.ts
+    - apps/web/app/(public)/preferences/route.ts
+    - apps/web/app/(public)/preferences/handler.ts
+    - apps/web/app/(public)/preferences/render.ts
     - packages/db/src/repositories/preference-centre.ts
+    - packages/core/src/consent/optout-copy.ts
+    - apps/web/src/preference-centre.itest.ts
+    - apps/web/src/preference-centre-browser.itest.ts
+    - apps/web/src/preference-centre-render.test.ts
   - id: C-CRM-08
     order: 87
     title: Clinical intake templates and encrypted submissions behind the boundary

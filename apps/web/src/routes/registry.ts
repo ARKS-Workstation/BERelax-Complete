@@ -293,6 +293,29 @@ export const ROUTES = [
       'the page is one booking read under a capability, and a prerendered copy of it is a leaked credential.',
   },
   {
+    id: 'admin-calendar',
+    path: '/calendar',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-UI-03s front-desk diary: room x time as the primary axis because rooms are the scarce resource, ' +
+      'therapist x time as a second reading of the same query result, and drag-to-reschedule through ' +
+      'B-LIFE-03s transaction. A handler answering text/html rather than a document, for the reason the ' +
+      'Messages inbox, the template editor and the compliance calendar give: a document must be served in ' +
+      'both locales, which would need an Arabic admin document and the W-SYS-01 shell, and would join a ' +
+      'screenshot matrix whose RTL half has to be a real Arabic route. It is the first admin surface that ' +
+      'WRITES — its POST is the reschedule — and it is NOT authenticated until W-SYS-01, so the actor it ' +
+      'records is the declared principal system:front_desk_diary rather than a job title nobody signed in ' +
+      'as. Not indexable and covered by NOINDEX_PATTERNS rather than a prefix, because `/calendar` claims ' +
+      'no other route and a prefix would be a claim on paths nothing serves. Dynamic because the page is a ' +
+      'claim about which trading date it is: a prerendered copy would be wrong from the next close of ' +
+      'trading, and would show appointments that have since moved.',
+  },
+  {
     id: 'duplicate-queue',
     path: '/clients/duplicates',
     kind: 'handler',
@@ -331,29 +354,6 @@ export const ROUTES = [
       'there is no admin session until W-SYS-01 - so the authorisation it enforces is the databases: 0069 ' +
       'refuses a merge_record with a placeholder actor or a placeholder reason, and both arrive from the ' +
       'form. Covered by the /clients noindex prefix.',
-  },
-  {
-    id: 'admin-calendar',
-    path: '/calendar',
-    kind: 'handler',
-    rendering: 'dynamic',
-    locales: [],
-    indexable: false,
-    sitemap: false,
-    changefreq: null,
-    why:
-      'B-UI-03s front-desk diary: room x time as the primary axis because rooms are the scarce resource, ' +
-      'therapist x time as a second reading of the same query result, and drag-to-reschedule through ' +
-      'B-LIFE-03s transaction. A handler answering text/html rather than a document, for the reason the ' +
-      'Messages inbox, the template editor and the compliance calendar give: a document must be served in ' +
-      'both locales, which would need an Arabic admin document and the W-SYS-01 shell, and would join a ' +
-      'screenshot matrix whose RTL half has to be a real Arabic route. It is the first admin surface that ' +
-      'WRITES — its POST is the reschedule — and it is NOT authenticated until W-SYS-01, so the actor it ' +
-      'records is the declared principal system:front_desk_diary rather than a job title nobody signed in ' +
-      'as. Not indexable and covered by NOINDEX_PATTERNS rather than a prefix, because `/calendar` claims ' +
-      'no other route and a prefix would be a claim on paths nothing serves. Dynamic because the page is a ' +
-      'claim about which trading date it is: a prerendered copy would be wrong from the next close of ' +
-      'trading, and would show appointments that have since moved.',
   },
   {
     id: 'compliance-calendar',
@@ -618,6 +618,36 @@ export const ROUTES = [
       'authenticated, exactly as the routes under /settings record. The /messaging prefix in ' +
       'ADMIN_GROUP_PREFIXES is what makes it noindex, so the approve and reject screens that land beside ' +
       'it arrive excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
+    id: 'preference-centre',
+    path: '/preferences',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-07s preference centre: the RENDERED half of what C-CRM-04 built the endpoint for, and the ' +
+      'page a promotional message links to. It renders a DOCUMENT and is declared a handler, which is the ' +
+      'second entry here where that reads oddly, and the reasons are B-UI-05s two plus one of its own. A ' +
+      'registry document must declare `sampleParams`, so the sample would be a live opt-out link committed ' +
+      'to this file; and it must carry a reciprocal hreflang set in both locales, which publishes the ' +
+      'capability in the head of the page for every crawler and proxy. The third is why there is no ' +
+      '`[token]` segment at all: `canonicalPath` lower-cases every path and 301s to the result, and ' +
+      'C-CRM-04s token is 43 characters of mixed-case base64url - so a token in a path is destroyed by ' +
+      'this sites own canonicalisation, for every customer, every time. The query string survives that ' +
+      'redirect untouched, which is why the contact, the capability and the language are all query ' +
+      'fields. Unparameterised also buys the acceptance criterion that a valid token and an unknown one ' +
+      'answer the same status and the same page shell: /preferences is a URL that always exists, so a 200 ' +
+      'saying the link is not available is true about the resource, where a 404 on /preferences/{token} ' +
+      'would be the oracle. Locale-neutral for /api/v1/preferences reason - one capability, one URL - and ' +
+      'the language comes from the `lang` field rather than from `customer.locale`, so the rendered ' +
+      'document is a function of the URL and not a fact about the record. Not indexable and covered by ' +
+      'NOINDEX_PATTERNS rather than a prefix, because `/preferences` claims no other route. Dynamic: the ' +
+      'page is one contacts preferences read under a capability, and a prerendered copy of it is a leaked ' +
+      'credential.',
   },
   {
     id: 'pricing',
