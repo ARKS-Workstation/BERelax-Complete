@@ -266,3 +266,11 @@ export {
   unansweredFactSchema,
   whatsappSchema,
 } from './schemas/facts.ts'
+export {
+  MANAGE_BOOKING_PATH_PREFIX,
+  manageBookingLink,
+  manageBookingPath,
+  SITE_ORIGIN_ENV,
+  SITE_ORIGIN_FALLBACK,
+  siteOriginFrom,
+} from './site-origin.ts'

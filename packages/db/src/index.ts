@@ -223,6 +223,21 @@ export {
   verifyBookingSession,
 } from './repositories/booking-session.ts'
 export {
+  BOOKING_TOKEN_AUDIT_ACTIONS,
+  BOOKING_TOKEN_WRITE_REFUSALS,
+  type BookingTokenDecider,
+  type BookingTokenWriteRefusal,
+  bookingTokenDigest,
+  bookingTokenWriteRefusalOf,
+  type MintedBookingGrant,
+  mintBookingManageGrant,
+  type RedeemedBookingToken,
+  readBookingManageGrant,
+  redeemBookingManageToken,
+  revokeBookingManageGrants,
+  type StoredBookingGrantRow,
+} from './repositories/booking-token.ts'
+export {
   CANCELLATION_REFUSALS,
   CANCELLATION_STATUSES,
   type CancelAppointmentInput,
@@ -1348,6 +1363,31 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
 // visible.
 //
+// 67 is 0067_booking_manage_grant.sql: the magic link a reminder carries, as a stored capability
+// (B-UI-05). The third table of the shape `booking_session` (0062) and `optout_grant` (0064) already
+// established — 32 CSPRNG bytes handed out once, only their sha256 stored, expiry on the row, revocation
+// by DELETE — and nothing about that shape is re-argued here. Two things ARE this table's own. Its
+// `expires_at` is computed from the APPOINTMENT rather than from the issue: 24 hours after the treatment
+// ends, because a fixed TTL long enough for a booking taken six weeks out would be a credential valid for
+// six weeks, and one short enough to be safe would be dead before the customer read the reminder. And
+// `booking_id` is a plain uuid with NO foreign key, and it is worth recording that it was a real
+// `ON DELETE CASCADE` key first: a grant is a live capability rather than a record, so a cascade is the
+// right semantics, and the argument rested on the claim that no suite truncates `booking`. Four do —
+// `booking-constraints.itest.ts` (three sites), `catalogue.itest.ts`, `catalogue-compliance.itest.ts` and
+// `repositories/catalogue.itest.ts` — and the key turned all 24 of the first file's cases red in a file
+// this unit never touched. That is B-MSG-03's `scheduled_step` finding a second time, from the other
+// table, and the answer here is the one `invoice.booking_id` and `checkout_idempotency` already wrote
+// down rather than B-MSG-03's: no key, because four call sites in four other units' files is the wrong
+// side of the trade for one column. The cost is stated in 0067's header — a deleted booking leaves a dead
+// grant row, which grants nothing because the page answers the same 404 when the booking is absent.
+// The token is 64 lower-case HEX characters and not
+// 0064's 43-character base64url, and that is the one decision a reader is most likely to think is
+// carelessness: the token is a PATH segment (`/booking/[token]`), `apps/web/src/routes/canonical.ts`
+// lower-cases every path and 301s to the result, so a mixed-case token would be destroyed by the site's
+// own canonicalisation — for every customer, every time, with a 404 whose cause is two modules away.
+// UPDATE is revoked as well as TRUNCATE, because a different expiry or a different booking is a
+// different grant and an UPDATE would move a live link onto somebody else's booking in one statement.
+//
 // 70 is 0070_flow_definition_and_enrolment.sql: the flow, its immutable versions, and the enrolment pin
 // (C-AUTO-06). Three tables, and the whole unit is in the shape of the second and third. `flow_definition`
 // holds PUBLISHED versions only, keyed `(flow_id, version)`, append-only with UPDATE and DELETE raising
@@ -1377,19 +1417,10 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // import core — and with no validator injected the publish is refused by name rather than performed.
 // `flow_run`, the step log and the execution cap are C-AUTO-07's and are deliberately absent here.
 //
-// HELD: 67, 68, 69 — numbers allocated to units in flight in other worktrees at the time 0070 was
-// written, so this tree has 66 and then 70 with nothing between them. Stated as a declaration rather than
-// as prose because gate case 90a READS it: the run of documented paragraphs may skip a held number, and
-// only while no migration file carries it. When 0067 to 0069 land, each arrives with its own paragraph,
-// the run closes, and this line becomes inert — it is not a licence to leave a real hole undocumented, and
-// 90e is the case that proves it cannot become one.
-//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
-// flight in five worktrees, and all five have now landed in one integrating merge — 55 through 66 are in
-// use, so those four were the only permanent gaps at that point; 67, 68 and 69 are the HELD reservation
-// above, which is a gap that closes rather than one that stays. 55, 56 and 57 landed out of order and
-// within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
+// flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
+// through 70 are in use and the four above are the only gaps left. 55, 56 and 57 landed out of order and// within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
 // exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
 //
 // Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was

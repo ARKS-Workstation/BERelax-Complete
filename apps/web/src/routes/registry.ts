@@ -269,6 +269,30 @@ export const ROUTES = [
       'copy change when the catalogue does.',
   },
   {
+    id: 'manage-booking',
+    path: '/booking/[token]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-UI-05s magic-link self-service manage-booking page (docs/09 §1). It renders a DOCUMENT and it is ' +
+      'declared a handler, which is the one entry here where that reads oddly, so the three reasons are ' +
+      'worth stating. A registry document must declare `sampleParams`, and the screenshot harness, the ' +
+      'normalisation walk and the header assertions each open that path and require a 200 - so the sample ' +
+      'would be a live, permanently valid magic link committed to this file. A registry document must carry ' +
+      'a reciprocal hreflang set in both locales, which would publish the token in the head of the page for ' +
+      'every crawler and proxy and make two URLs for one capability. And a document must be served in both ' +
+      'locales, where this is one URL whose language comes from `customer.locale` - the language that ' +
+      'customers reminder was sent in. The Messages inbox, the HR credentials screen and the compliance ' +
+      'calendar are the precedents for a document served by a handler; this one has a security reason on top ' +
+      'of their shell reason. Not indexable and covered by NOINDEX_PATTERNS rather than a prefix, because ' +
+      '`/booking/` claims no other route and a prefix would be a claim on paths nothing serves. Dynamic: ' +
+      'the page is one booking read under a capability, and a prerendered copy of it is a leaked credential.',
+  },
+  {
     id: 'compliance-calendar',
     path: '/compliance',
     kind: 'handler',

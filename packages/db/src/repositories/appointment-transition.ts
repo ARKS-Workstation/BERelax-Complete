@@ -92,8 +92,34 @@ export type TransitionRefusal = (typeof TRANSITION_REFUSALS)[number]
  */
 export interface TransitionActor {
   readonly kind: ActorKind
-  /** The F07 role, e.g. `owner`, `manager`, `receptionist`. Validated by the injected decider. */
+  /**
+   * The F07 role STORED on the history row — `owner`, `manager`, `receptionist`. One of the eight.
+   *
+   * `appointment_status_history_actor_role_known` (0046) restates `ROLES` as a CHECK, and
+   * `packages/fixtures/src/appointment-lifecycle.itest.ts` asserts the accepted set equals `ROLES` exactly
+   * in both directions — so this column cannot hold anything else, whatever a caller believes about who it
+   * is. A non-interactive surface therefore records `system`, which is what that role is for:
+   * "Background workers and agents. No interactive login exists for this role."
+   */
   readonly role: string
+  /**
+   * The PRINCIPAL the permission check consults instead of the role, when the caller is not a member of
+   * staff. B-UI-05's magic-link holder is the first.
+   *
+   * Two fields and not one, because they answer two questions and the database has room only for the
+   * first. The role is what is RECORDED; the principal is what was AUTHORISED. Sending a principal id
+   * through `role` was the first draft and it failed at the CHECK above — which was the constraint being
+   * right: a history row is read by somebody asking which of the eight roles did this, and a ninth value in
+   * that column would break every reader of it in order to record something the audit trail already
+   * carries.
+   *
+   * `packages/core/src/access/principals/customer-link.ts` records why a magic-link holder is a principal
+   * rather than a ninth role, and `decideAppointmentTransition` resolves either through the one
+   * `principalCan` — so this adds a kind of CALLER and not a second authorisation policy. The principal
+   * stays out of the history row deliberately: it belongs in {@link TransitionActor.label}, which is free
+   * text, and in the `audit_event` row the same transaction writes.
+   */
+  readonly principal?: string
   readonly id?: string
   readonly label?: string
 }
@@ -459,13 +485,17 @@ export async function transitionAppointment(
     )
   }
 
-  const decision = deps.decide(appointment.status, input.to, input.actor.role, reason)
+  // The PRINCIPAL where there is one, the role otherwise. See {@link TransitionActor.principal}: the role
+  // is what the history row stores and the principal is what the policy layer judges, and for a staff
+  // caller they are the same string.
+  const caller = input.actor.principal ?? input.actor.role
+  const decision = deps.decide(appointment.status, input.to, caller, reason)
   if (decision.kind === 'refused') {
     throw refusal(REFUSAL_KIND[decision.refusal], decision.refusal, decision.why, {
       appointmentId: input.appointmentId,
       from: appointment.status,
       to: input.to,
-      role: input.actor.role,
+      role: caller,
       ...(decision.permittedRoles === undefined
         ? {}
         : { permittedRoles: [...decision.permittedRoles] }),

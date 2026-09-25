@@ -10,6 +10,7 @@
 
 export * from './access/permissions.ts'
 export * from './access/principal-policy.ts'
+export * from './access/principals/customer-link.ts'
 export * from './access/principals/registry.ts'
 export * from './access/principals/seo-agent.ts'
 export * from './access/publication.ts'

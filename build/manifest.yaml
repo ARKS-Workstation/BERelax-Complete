@@ -2862,11 +2862,142 @@ units:
       end to end through scheduled_step row states
     - axe reports zero serious or critical violations; screenshots at 3 viewports x 2 themes x 2 directions
       with zero pixel diff on a repeat run
+    - 'NOTE: the page is a route HANDLER with a pure renderer, not the `page.tsx` this files list names, and
+      the three reasons are about the TOKEN rather than about scope. A registry *document* must declare
+      `sampleParams`, and the screenshot harness, the normalisation walk and the header assertions each open
+      that path and require a 200 - so the declared sample would be a live, permanently valid magic link
+      committed to apps/web/src/routes/registry.ts. A document must carry a reciprocal self-referential
+      hreflang set in BOTH locales, which publishes the token in the head of the page for every crawler and
+      proxy and makes two URLs for one capability. And a document must be served in both locales, where this
+      is one URL whose language comes from `customer.locale` - the language that customer''s reminder was
+      sent in. The Messages inbox, the HR credentials screen and the compliance calendar are the precedents
+      for a document served by a handler (their reason is the absent admin shell); this one has a security
+      reason on top of theirs. So the files are
+      apps/web/app/(public)/booking/[token]/{route.ts,handler.ts,render.ts} and the registry entry is
+      `kind: handler`, `indexable: false`. One consequence worth naming: the token is 64 lower-case HEX
+      characters and not `optout_grant`''s 43-character base64url, because `canonicalPath` lower-cases every
+      path and 301s to the result - a mixed-case token in a path segment is destroyed by the site''s own
+      canonicalisation, for every customer, every time, with a 404 whose cause is two modules away. Gate
+      91b mutates the shape to case-insensitive and watches the core suite fail.'
+    - 'NOTE: `apps/web/tests/e2e/manage-booking.spec.ts` was NOT written and there is no `apps/web/tests`
+      directory: this repository has no Playwright test-runner project, and every browser assertion in it
+      runs through `playwright` as a library from a vitest `.itest.ts`. The equivalent claims are in
+      `apps/web/src/manage-booking.itest.ts`, which drives the handlers directly against a real PostgreSQL
+      and renders the pure document with `page.setContent` for axe and the twelve screenshots. That file
+      starts NO server and takes no port band, which is deliberate: brief rule 18 forbids a suite picking a
+      port for itself, `packages/harness/src/ports.ts` is the file this session was told not to touch
+      (two units left rival fixes to reconcile), and `preferences-route.itest.ts` and `otp-route.itest.ts`
+      already establish calling the handler directly - what is asserted is the shape of a refusal and the
+      rows a write leaves, and a `next start` in front of them would add a router and a form parser to
+      every case without changing one of them.'
+    - 'NOTE: B-UI-02''s and B-MSG-03''s deferral is DISCHARGED. `scheduledStepRuntimeFor`''s `magicLink` is
+      `shippedMagicLink`, so a due reminder now renders `booking.reminder` with a real link instead of being
+      SKIPPED with `content_unavailable`. Wiring it needed the seam to change shape, and the shape is the
+      finding: minting a link WRITES (only the digest is stored, so having a token means inserting one), so
+      `MagicLinkBuilder` is now async and takes the drain''s own `UnitOfWork` plus the appointment''s end.
+      Inside that transaction on purpose - a link minted for a reminder that rolled back is a live credential
+      for a message nobody received, and one that committed while the message did not is worse, because the
+      customer never learns it exists. The `content_unavailable` state is still REACHABLE and still tested:
+      an appointment whose end has already passed would mint a grant that is born dead, which
+      `mintBookingManageGrant` refuses by name, so the step is skipped rather than sent with a link to
+      nothing. B-MSG-03''s itest keeps a FAKE builder for every case about the step row and the message row
+      (a real mint would add a grant row to each of them plus a dependency on SITE_ORIGIN) and its comment
+      saying "this build cannot mint one" is corrected. TWO cases were added to it, and they are there
+      because they can be nowhere else: `nothing-imports-an-app` forbids one app importing another, so the
+      page''s suite cannot reach the worker''s builder and the worker''s cannot reach the page - what meets in
+      the middle is the DRAIN. One asserts the wiring by REFERENCE (`scheduledStepRuntimeFor(sql).magicLink`
+      is `shippedMagicLink`), because a perfect builder beside a runtime still shipping `() => null` is
+      exactly the state this unit inherited and nothing asserted against it; the other drains a step with the
+      real builder and asserts the grant row, the token in the body hashing to the stored digest, and the
+      expiry being the appointment''s end plus 24 hours.'
+    - 'NOTE: P-HR-04''s `appointment.therapist_changed_notice` is NOT discharged, and the reason is that it
+      is a different unit''s vendor hand-off rather than a link. What this unit removes is the OBSTACLE: the
+      `booking.therapist_changed` template''s `{{link}}` now has something to be, and `shippedMagicLink` is
+      exported from `apps/worker/src/jobs/send-scheduled-step.ts` for any sender to call. What is still
+      missing is what P-HR-04''s NOTE actually describes - the notice is published and resolved and nothing
+      hands it to a vendor - and that is a send path, not a link: it needs a recipient read, a
+      `deliverMessage` call and the transaction that owns both. Wiring it from here would be implementing
+      P-HR-04''s acceptance. Recorded here because the next person to look will find the link already
+      minted and should know the remaining half is the vendor call.'
+    - 'NOTE: two things this unit changed in other units'' code, both forced and both recorded because the
+      failure looked nothing like its cause. (1) `TransitionActor` gained an optional `principal`, and the
+      permission check now consults it where there is one. A magic-link holder is a caller with no job
+      title, and the first draft sent the principal id through `role` - which
+      `appointment_status_history_actor_role_known` (0046) refuses, because that CHECK accepts exactly the
+      eight F07 roles and `packages/fixtures/src/appointment-lifecycle.itest.ts` pins the accepted set to
+      `ROLES` in both directions. Every reschedule and every cancellation from the page failed at the
+      history-row INSERT, and because the handler turns an unnamed refusal into `?refused=unknown` rather
+      than a 500, the symptom named nothing: a redirect with the wrong query parameter. The handler now logs
+      an unrecognised refusal to stderr, which is how the constraint was found and is why it stays. The CHECK
+      is right - a history row is read by somebody asking which of the eight roles did this - so the role is
+      what is RECORDED (`system`, the role for a caller with no interactive login) and the principal is what
+      is AUTHORISED, and `decideAppointmentTransition` resolves either through the one `principalCan` rather
+      than growing a second matrix. (2) The same file''s `can(role, ...)` calls became
+      `callerMay(role, ...)`, which is that resolution; `permittedRolesFor` is untouched and still lists
+      roles, because a refusal offering `system:customer_booking_link` as somebody who could have acted
+      would be a lie. G-SEO-02 built the principal mechanism and its registry''s own comment predicted this:
+      "the second one is the dangerous one ... the way an agent comes to hold a capability nobody granted it
+      is by joining a role whose list was written for somebody else". The two alternatives are recorded in
+      packages/core/src/access/principals/customer-link.ts: `receptionist` (which also holds
+      `customer:write`, `till:operate` and `invoice:issue`) and a ninth ROLE (which needs a migration
+      widening 0052''s `owner_role` CHECK, after which a statutory obligation may be owned by "customer").'
+    - 'NOTE: `SITE_ORIGIN`''s fallback, environment name and validation moved from
+      apps/web/src/routes/alternates.ts to packages/shared/src/site-origin.ts, which now also spells the
+      `/booking/` prefix and builds the absolute link. `alternates.ts` re-exports the names and keeps the
+      one line that reads `process.env`, so W-SITE-01''s own assertions are unchanged. The move is forced:
+      `apps/worker` mints the link and needs the origin, `nothing-imports-an-app` forbids it importing
+      apps/web, and a second reader with its own fallback would be a second spelling of the live domain -
+      with the wrong one in the message a customer taps. A `@berelax/config` key was the other candidate and
+      is wrong for the same file: `alternates.ts` is imported by `registry.test.ts` and by page metadata, and
+      `loadConfig()` throws without a validated APP_ENV.'
+    - 'NOTE: migration 0067_booking_manage_grant.sql, SCHEMA_VERSION 67, and one correction worth reading.
+      `booking_id` was a real foreign key with ON DELETE CASCADE first, argued from the shape of the row - a
+      live capability rather than a record, so a grant naming an erased booking is a credential pointing at
+      nothing. The argument rested on the claim that no suite truncates `booking`. FOUR do
+      (booking-constraints.itest.ts at three sites, catalogue.itest.ts, catalogue-compliance.itest.ts and
+      repositories/catalogue.itest.ts), and the key turned all 24 of the first file''s cases red - B-MSG-03''s
+      `scheduled_step` finding arriving a second time from the other table. B-MSG-03 answered it by naming
+      the new table in each truncate list; this does not, because `invoice.booking_id`,
+      `checkout_idempotency` and 0051''s `appointmentId` have each already made the opposite decision and
+      written down why. So the column is a plain uuid, and the cost is stated rather than hidden: a deleted
+      booking leaves a dead grant row, which grants nothing because the page answers the same 404 when the
+      booking is absent. UPDATE is revoked as well as TRUNCATE - a different expiry or a different booking is
+      a different grant, and an UPDATE would move a live link onto somebody else''s booking in one statement.'
+    - 'NOTE: two things this unit deliberately did NOT build, scoped rather than narrowed. (1) There is no
+      SLOT PICKER on the page: the reschedule form takes a time and the salon''s answer to "is that time
+      free" is the booking transaction''s, arriving as a named refusal the page has words for in both
+      languages. A picker here would be B-UI-01''s availability read rendered a second time, in a second
+      component, over the same rows - and the two would disagree about a slot the moment either changed. The
+      acceptance line is about the reschedule going through the same function and the same constraints, and
+      it does. (2) B-UI-02''s confirmation page still renders `data-book-region="manage"` with the desk
+      telephone number and no link. Filling it needs a mint during a GET render, so every reload of the
+      confirmation would insert a grant row; the honest fix is a mint inside `createBooking`''s transaction
+      with the token handed to the confirmation, which changes that unit''s return shape and its itest''s
+      assertions. The reminder - the surface B-UI-02 and B-MSG-03 actually deferred, and the one that
+      reaches a customer - IS wired.'
+    - 'NOTE: two defects this unit''s own suites found in its own first draft, recorded because the tests
+      that caught them are why they cannot come back. (1) The booking reference printed on the page was the
+      FIRST eight characters of `booking.id`, and `uuid_generate_v7()` puts a millisecond timestamp in the
+      leading twelve hex digits - so two bookings taken in the same second had the same "reference", and the
+      assertion that each page names only its own booking failed. It is the last eight, which is the random
+      half. (2) `readManagedBooking` selected `s.name_en`, a column no version of `service` has ever had;
+      the projection is `public_display_name`. Both were caught by the pair suite rather than by review,
+      which is the argument for a projection written for the page rather than a row handed to it.'
     files:
     - packages/core/src/identity/booking-token.ts
+    - packages/core/src/identity/booking-token.test.ts
+    - packages/core/src/access/principals/customer-link.ts
+    - packages/core/src/access/customer-link.policy.test.ts
     - packages/db/src/repositories/booking-token.ts
-    - apps/web/app/(public)/booking/[token]/page.tsx
-    - apps/web/tests/e2e/manage-booking.spec.ts
+    - packages/db/src/repositories/booking-token.test.ts
+    - packages/db/src/schema/booking-manage-grant.ts
+    - packages/db/migrations/0067_booking_manage_grant.sql
+    - packages/shared/src/site-origin.ts
+    - packages/shared/src/site-origin.test.ts
+    - apps/web/app/(public)/booking/[token]/route.ts
+    - apps/web/app/(public)/booking/[token]/handler.ts
+    - apps/web/app/(public)/booking/[token]/render.ts
+    - apps/web/src/manage-booking.itest.ts
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'
@@ -6897,6 +7028,16 @@ units:
       reassignment until somebody approves it, which is right, because the appointment stays in the queue
       where it already was and the alternative is a customer who finds out when a stranger opens the
       treatment-room door.'
+    - 'NOTE: B-UI-05 removed the BLOCKER above and not the deferral. The magic link exists: migration 0067''s
+      `booking_manage_grant`, the page at /booking/[token], and `shippedMagicLink` exported from
+      apps/worker/src/jobs/send-scheduled-step.ts, which mints one inside the caller''s own transaction from a
+      booking id and the appointment''s end. `booking.therapist_changed`''s `{{link}}` therefore has something
+      to be, and the sentence above - "that needs the per-booking magic link B-UI-02 owns and nothing in this
+      build can mint" - is no longer true. What is still missing is what the rest of that NOTE describes and
+      it is a SEND rather than a link: a consumer for appointment.therapist_changed_notice that reads the
+      recipient, calls deliverMessage and owns the transaction both belong to. That is still P-HR-14''s, and
+      wiring it from B-UI-05 would have been implementing this unit''s acceptance. Recorded here because the
+      next person to look will find the link already minted.'
     - 'NOTE: the screen is a route handler and a READ, and both halves are scope rather than omission. It is
       apps/web/app/(admin)/hr/reassignment/route.ts plus a pure render.ts, not the page.tsx this entry
       listed, for the reason P-HR-02 records for its own page and the credentials screen one directory

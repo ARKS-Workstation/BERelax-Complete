@@ -11,6 +11,7 @@ import {
   type TransitionResult,
   transitionAppointment,
 } from './appointment-transition.ts'
+import { revokeBookingManageGrants } from './booking-token.ts'
 import type { ScheduledStepMaintainer } from './scheduled-step.ts'
 
 /**
@@ -319,6 +320,40 @@ export async function cancelAppointment(
           'no figure cannot be accounted for, which is why 0049 makes the pair whole-or-nothing.',
         { stored, expected: { late: true, hours: verdict.windowHours } },
       )
+    }
+  }
+
+  /*
+    B-UI-05. Every live magic link on the booking is revoked, in this transaction.
+
+    A DELETE and not a flag, for 0064's reason: the row goes and the `audit_event` for the minting stays.
+    EVERY grant on the booking rather than the one somebody presented, because a reminder mints a link per
+    send — a booking with a 24-hour and a 2-hour reminder has two live links, and revoking one leaves the
+    customer who cancelled by telephone still able to reschedule from the older SMS.
+
+    Called directly rather than injected as a dep, unlike `classify` and `steps` above. Those two are
+    injected because they are `packages/core`'s rules and this package may not import them; this is a write
+    in this package, so an optional dependency would buy nothing and would mean a link that stays live
+    whenever a caller forgets. It is inside the transaction, so the revocation commits with the status
+    change or not at all: a cancellation that rolled back must not leave the booking unmanageable, and a
+    committed one must not leave it manageable.
+
+    It is on `cancelAppointment` rather than on `cancelBooking`, which composes it, because the front desk
+    cancels one row of a couples booking deliberately — and the link is per BOOKING, so the second row's
+    cancellation finds nothing left to revoke and answers zero. That is the right shape: a booking with any
+    appointment cancelled has had its self-service link withdrawn, and a customer who wants to move the
+    other half telephones the desk. Widening the link to survive a partial cancellation would mean a page
+    offering to reschedule an appointment that may not exist.
+  */
+  if (transition.kind === 'transitioned') {
+    const [row] = await uow.sql<{ booking_id: string }[]>`
+      select booking_id::text as booking_id from appointment where id = ${input.appointmentId}
+    `
+    if (row !== undefined) {
+      await revokeBookingManageGrants(uow, {
+        bookingId: row.booking_id,
+        reason: `appointment ${input.appointmentId} moved to ${input.to}`,
+      })
     }
   }
 

@@ -17,6 +17,8 @@
  * redirected `/kitchen-sink/` to `/kitchen-sink`, every page would announce a canonical URL that 301s,
  * which is the most confident way to tell a crawler to ignore what you said.
  */
+
+import { SITE_ORIGIN_ENV, siteOriginFrom } from '@berelax/shared'
 import type { Metadata } from 'next'
 import {
   DEFAULT_LOCALE,
@@ -29,44 +31,24 @@ import { canonicalPath } from './canonical.ts'
 import { fillParams, isParameterised, type RouteId, routeById } from './registry.ts'
 
 /**
- * The origin the site is served from, when the environment does not say.
+ * The origin, the environment variable that sets it and the validation — from `@berelax/shared`.
  *
- * `berelaxmassage.com` is the live domain (docs/13 §5): it is the one with the ranking category pages
- * and the inbound links, and the relaunch takes it over rather than moving to a new name — moving would
- * throw away the only SEO asset this business already has. It is a fallback rather than a constant
- * because a preview deployment that announced this origin as canonical would ask Google to index
- * production copies of unreviewed pages.
+ * Re-exported rather than re-declared, and the move is B-UI-05's: `apps/worker` mints the magic link a
+ * reminder carries and needs the same origin, `nothing-imports-an-app` forbids it importing this file, and
+ * a second fallback would be a second spelling of the live domain — with the wrong one in the message a
+ * customer taps. `packages/shared/src/site-origin.ts` records why it is not a `@berelax/config` key
+ * instead. The names stay exported here because this is where every route consumer reads them.
  */
-export const SITE_ORIGIN_FALLBACK = 'https://berelaxmassage.com'
-
-/** The environment variable that overrides it. Read at render time, so a build can be promoted. */
-export const SITE_ORIGIN_ENV = 'SITE_ORIGIN'
+export { SITE_ORIGIN_ENV, SITE_ORIGIN_FALLBACK } from '@berelax/shared'
 
 /**
- * The origin, validated.
+ * The origin, read from the environment at render time so a build can be promoted.
  *
- * It throws rather than falling back on a malformed value, for the reason `@berelax/config` gives: a
- * canonical URL built from `https:/berelax` is not a smaller problem than no canonical URL, it is the
- * same problem with nothing to alert on. Statically rendered routes read this at build, so a typo fails
- * the build — which is where it should surface.
+ * The rule is `siteOriginFrom`'s; this is the one line that reads the environment. `packages/shared` reads
+ * none, deliberately, which is why the raw value is passed in rather than looked up there.
  */
 export function siteOrigin(): string {
-  const configured = process.env[SITE_ORIGIN_ENV]
-  if (configured === undefined || configured.trim() === '') return SITE_ORIGIN_FALLBACK
-  const trimmed = configured.trim().replace(/\/+$/, '')
-  let url: URL
-  try {
-    url = new URL(trimmed)
-  } catch {
-    throw new Error(`${SITE_ORIGIN_ENV} is not an absolute URL: '${configured}'`)
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error(`${SITE_ORIGIN_ENV} must be http or https: '${configured}'`)
-  }
-  if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
-    throw new Error(`${SITE_ORIGIN_ENV} must be an origin with no path: '${configured}'`)
-  }
-  return `${url.protocol}//${url.host}`
+  return siteOriginFrom(process.env[SITE_ORIGIN_ENV])
 }
 
 /**
