@@ -396,13 +396,19 @@ describe('the participant registry', () => {
 
   it('has no flow-run participant yet, which is the deferral to C-AUTO-07 stated as a test', async () => {
     const coverage = await mergeCoverage(sql)
+    const flows = coverage.filter((row) => row.table.startsWith('flow_'))
+
+    // This case read `flows` as EMPTY until C-AUTO-06 landed `flow_enrolment.customer_id` in migration
+    // 0070 — the day it predicted, arriving from `flow_enrolment` rather than from the `flow_run` it was
+    // written for. Enumerating from the catalogue is exactly what made that visible, and the assertion is
+    // now the truth rather than the hope: the one flow table carrying a customer id is registered, and
+    // C-AUTO-07's is still absent. Rewritten by M-TILL-08, which found it red.
+    expect(flows.map((row) => row.table)).toEqual(['flow_enrolment'])
+    expect(flows[0]?.status).toBe('participant')
     // C-AUTO-07 owns `flow_run` and its (flow_run, node, channel, contact) idempotency key, and it
-    // depends on this unit. The day that table lands, the completeness case above turns red until it is
-    // registered — which is the whole point of enumerating from the catalogue. This assertion exists so
-    // the deferral is visible here and not only in the manifest.
-    expect(coverage.map((row) => row.table).filter((table) => table.startsWith('flow_'))).toEqual(
-      [],
-    )
+    // depends on this unit. The day THAT table lands, the completeness case above turns red until it is
+    // registered. This assertion exists so the deferral is visible here and not only in the manifest.
+    expect(coverage.map((row) => row.table)).not.toContain('flow_run')
   })
 })
 

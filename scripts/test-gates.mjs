@@ -24735,7 +24735,6 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is refused
   // by two CHECKs on `invoice` (0026).
   const GATE_TRN = '100123456700003'
-  const CREDIT_NOTE = '00000000-0000-4000-8000-0000000c0d01'
 
   const psqlProbe = (statements) =>
     run('psql', [
@@ -24796,11 +24795,45 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 
+  /**
+   * A credit note for document `n`, crediting the whole of its one line, with its reversing entry.
+   *
+   * It used to be enough to write an invented uuid into `refund.credit_note_id`, because `credit_note`
+   * did not exist and 0068 gave the column a NOT NULL and no key. 0072 added the key and `ZD010` — the
+   * note must correct THIS document — so every refund probe below needs a real note, and the note has to
+   * survive `set constraints all immediate`: its totals must equal its lines (ZD007) and its reversal must
+   * be dated on it, classified as a reversal, and credit the settlement account exactly its gross (ZD011).
+   */
+  const creditNote = (n) =>
+    // Every lock covering the date this entry is posted on, removed inside the probe transaction that
+    // rolls back: `journal.itest.ts` leaves whatever its last period-lock case created, and a lock over
+    // 2026-09 would refuse the entry below by ZL002 and make every refund probe report that instead.
+    "delete from period_lock where starts_on <= '2026-09-20' and ends_on >= '2026-09-20'; " +
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values (' +
+    `'${MARKER}-CN${n}', '2026-09-20'::date, 'Gate probe credit note', 'reversal'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+    `('${MARKER}-CN${n}', 1, '4010', 20, 0), ('${MARKER}-CN${n}', 2, '2030', 2, 0), ` +
+    `('${MARKER}-CN${n}', 3, '1050', 0, 22); ` +
+    'insert into credit_note (invoice_id, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, reason, ' +
+    `journal_entry_id) values (${idOf(n)}, 'CR-NOTE', '${MARKER}', ${920_100 + n}, ` +
+    `'${MARKER}-CN000${n}', 'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', ` +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', '2026-09-20'::date, ` +
+    `'2026-09-20'::date, 20, 2, 22, 'Gate probe', '${MARKER}-CN${n}'); ` +
+    'insert into credit_note_line (credit_note_id, line_no, invoice_line_no, description_en, ' +
+    `quantity, unit_gross_fils, vat_rate_bp, line_net_fils, line_vat_fils) values (${noteOf(n)}, ` +
+    "1, 1, 'Gate probe treatment', 1, 22, 500, 20, 2)"
+
+  function noteOf(n) {
+    return `(select id from credit_note where display_number = '${MARKER}-CN000${n}')`
+  }
+
   /** One refund. Every field overridable, and the defaults are a refund that is accepted. */
   const refund = (overrides = {}) => {
     const v = {
       invoice: idOf(1),
-      note: `'${CREDIT_NOTE}'`,
+      note: noteOf(1),
       no: '1',
       kind: "'cash'",
       account: "'1010'",
@@ -24837,6 +24870,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 
   /** One document with its line, so a probe about ONE rule can trip only that one. */
   const ONE = `${invoice(1)}; ${line(1)}`
+  /** The same, plus the credit note a refund now has to name (0072). */
+  const ONE_CREDITED = `${ONE}; ${creditNote(1)}`
 
   const probes = [
     {
@@ -24876,7 +24911,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     {
       name: 'tender gate rejects a refund above what was applied',
       rule: 'ZT004',
-      sql: `${ONE}; ${tender({ amount: '10' })}; ${refund({ amount: '11' })}`,
+      sql: `${ONE_CREDITED}; ${tender({ amount: '10' })}; ${refund({ amount: '11' })}`,
     },
     {
       // A refund from an invoice alone is money leaving the business with no document behind it, which
@@ -24888,12 +24923,12 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     {
       name: 'tender gate rejects a refund of zero fils',
       rule: 'refund_amount_positive',
-      sql: `${ONE}; ${tender({ amount: '22' })}; ${refund({ amount: '0' })}`,
+      sql: `${ONE_CREDITED}; ${tender({ amount: '22' })}; ${refund({ amount: '0' })}`,
     },
     {
       name: 'tender gate rejects a second refund under one number',
       rule: 'refund_one_row_per_number',
-      sql: `${ONE}; ${tender({ amount: '22' })}; ${refund({ amount: '10' })}; ${refund({ amount: '10' })}`,
+      sql: `${ONE_CREDITED}; ${tender({ amount: '22' })}; ${refund({ amount: '10' })}; ${refund({ amount: '10' })}`,
     },
     {
       // Change cannot be handed back out of money that has not arrived.
@@ -24931,7 +24966,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // is ACCEPTED. Without it a renamed column or a broken connection string would reject every probe
     // and this gate would report twelve passes while examining nothing.
     const accepted = psqlProbe(
-      `${ONE}; ${tender({ no: '1', amount: '10' })}; ` +
+      `${ONE_CREDITED}; ${tender({ no: '1', amount: '10' })}; ` +
         `${tender({ no: '2', amount: '20', change: '8' })}; ${refund({ amount: '22' })}`,
     )
     check(
@@ -25773,6 +25808,549 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 93a-93z. (M-TILL-08) The credit note: the only correction to an issued document, the ceiling on how
+// much of a line may be credited, the reference 0068 could not make, and the edits that must make this
+// unit's own suites go red.
+//
+// Three parts, because the unit's claims are of three kinds.
+//
+// The eighteen probes are known-bad fixtures against real PostgreSQL. Every rule
+// `0072_credit_note.sql` adds is a DATABASE rule — two composite foreign keys, six table CHECKs, three
+// per-row triggers and three deferred constraint triggers — and a constraint is only a gate once
+// something has been seen to bounce off it (ADR 0003). Each probe asserts what must refuse it BY NAME,
+// because a bare non-zero exit is also what a typo in a column name produces.
+//
+// `VERBOSITY=verbose` so psql prints the constraint name as well as the SQLSTATE, and every probe runs
+// inside `begin; … ; rollback;` — which is also the only way they can be written at all: `invoice` and
+// `credit_note` both refuse DELETE for every role including the owner, so a probe row that committed
+// could not be swept. The DEFERRED rules are forced with `set constraints all immediate` before the
+// rollback, because a deferred trigger otherwise fires at a COMMIT that never comes; that is also why
+// every probe document carries a LINE and every probe note carries a balanced reversal, since ZI002,
+// ZD007, ZD008 and ZD011 are deferred too and fire at the same point.
+//
+// The second part breaks `packages/core/src/checkout/credit-note.ts` four ways (93s-93v) and the
+// fixtures mapping once (93w), and watches the suites that cover them fail. The third is the two
+// known-bad fixtures for `pnpm no-invoice-mutation` (93x, 93y) — one module exporting a mutating name,
+// one containing a mutating statement — and 93z is the control that every suite and the gate itself pass
+// unedited.
+//
+// Every source case edits a shipped file and restores it in a `finally`, and every anchor goes through
+// `replaceOnce` (brief rule 20).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const MARKER = 'GATE-CREDIT'
+  // Fifteen digits. A gate value: the real TRN is unknown (Y1-trn) and the seeded placeholder is refused
+  // by two CHECKs on `credit_note` as well as on `invoice`.
+  const GATE_TRN = '100123456700003'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /**
+   * One accepted invoice header, numbered in the gate's own period so it collides with nothing.
+   *
+   * Three units at 1000 fils gross: 3000 gross, net = 3000 - round(3000 * 5 / 105) = 3000 - 143 = 2857,
+   * VAT 143. A quantity of THREE and not one, because the cumulative ceiling is about part of a line: at
+   * a quantity of one "credited more than invoiced" and "credited twice" are the same statement.
+   */
+  const invoice = (n) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `values ('tax_invoice', 'TAX-INV', '${MARKER}', ${930_100 + n}, '${MARKER}-000${n}', ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'2097-09-19'::date, '2097-09-18'::date, 2857, 143, 3000, '${MARKER}-${n}')`
+
+  const line = (n) =>
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    `vat_rate_bp, line_net_fils, line_vat_fils) values (${idOf(n)}, 1, 'Gate probe treatment', 3, ` +
+    '1000, 500, 2857, 143)'
+
+  function idOf(n) {
+    return `(select id from invoice where notes = '${MARKER}-${n}')`
+  }
+  function noteOf(n) {
+    return `(select id from credit_note where display_number = '${MARKER}-CN000${n}')`
+  }
+
+  /**
+   * A credit note with its reversing entry and one credited line. Every field overridable, and the
+   * defaults are a FULL credit of document `n` that is accepted.
+   *
+   * The NOTE is inserted first and its entry after it, which is the order `issueCreditNote` uses and the
+   * reason `credit_note_reversal_fk` is DEFERRED. Ordering the entry first is what the first version of
+   * this block did, and it made two probes report the wrong rule: a note dated in a locked period was
+   * refused by 0018's `ZL002` on the journal entry before `ZD003` could name the earliest open date, and
+   * a zero-value note was refused by `journal_line_exactly_one_side` on a zero-fils reversal line before
+   * `credit_note_gross_positive` could see the header. Production has the same property for the same
+   * reason, which is why the order here is the service's rather than the convenient one.
+   */
+  const note = (overrides = {}) => {
+    const v = {
+      n: 1,
+      document: 1,
+      documentId: null,
+      date: "'2097-09-20'::date",
+      // The entry's own date and its own figures, so a probe can make the ENTRY disagree with the note
+      // without also making the note disagree with its lines — otherwise ZD007 or ZD005 fires first and
+      // the probe reports a rule it is not about.
+      entryDate: null,
+      entryNet: null,
+      entryVat: null,
+      source: "'reversal'",
+      series: "'CR-NOTE'",
+      net: '2857',
+      vat: '143',
+      gross: '3000',
+      liability: null,
+      reason: "'Gate probe correction'",
+      trn: `'${GATE_TRN}'`,
+      legalName: "'BE RELAX SPA - L.L.C - O.P.C'",
+      quantity: '3',
+      unit: '1000',
+      rate: '500',
+      lineNet: '2857',
+      lineVat: '143',
+      invoiceLine: '1',
+      withLine: true,
+      ...overrides,
+    }
+    const entry = `'${MARKER}-CN${v.n}'`
+    const liability = v.liability ?? v.gross
+    const entryDate = v.entryDate ?? v.date
+    const entryNet = v.entryNet ?? v.net
+    const entryVat = v.entryVat ?? v.vat
+    const document = v.documentId ?? idOf(v.document)
+    const reversal =
+      `insert into journal_entry (entry_id, entry_date, narrative, source) values (${entry}, ` +
+      `${entryDate}, 'Gate probe reversal', ${v.source}); ` +
+      'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+      `(${entry}, 1, '4010', ${entryNet}, 0), (${entry}, 2, '2030', ${entryVat}, 0), ` +
+      `(${entry}, 3, '1050', 0, ${liability})`
+    const header =
+      'insert into credit_note (invoice_id, series_code, period_key, number, display_number, ' +
+      'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, ' +
+      'issuer_emirate, customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, ' +
+      `gross_total, reason, journal_entry_id) values (${document}, ${v.series}, ` +
+      `'${MARKER}', ${940_100 + v.n}, '${MARKER}-CN000${v.n}', ` +
+      `${v.legalName}, 'BE RELAX - Massage Center and Spa', ` +
+      `${v.trn}, '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ${v.date}, ${v.date}, ` +
+      `${v.net}, ${v.vat}, ${v.gross}, ${v.reason}, ${entry})`
+    if (!v.withLine) return `${header}; ${reversal}`
+    return (
+      `${header}; ${reversal}; insert into credit_note_line (credit_note_id, line_no, invoice_line_no, ` +
+      `description_en, quantity, unit_gross_fils, vat_rate_bp, line_net_fils, line_vat_fils) values ` +
+      `(${noteOf(v.n)}, 1, ${v.invoiceLine}, 'Gate probe treatment', ${v.quantity}, ${v.unit}, ` +
+      `${v.rate}, ${v.lineNet}, ${v.lineVat})`
+    )
+  }
+
+  /** One unit of the three: 1000 gross, net = 1000 - round(1000 * 5 / 105) = 952, VAT 48. */
+  const partial = (overrides = {}) =>
+    note({
+      net: '952',
+      vat: '48',
+      gross: '1000',
+      quantity: '1',
+      lineNet: '952',
+      lineVat: '48',
+      ...overrides,
+    })
+
+  const tender = (amount, no = '1', document = 1) =>
+    'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, amount_fils, ' +
+    `trading_date) values (${idOf(document)}, ${no}, 'cash', '1010', ${amount}, '2097-09-19'::date)`
+
+  const refund = (overrides = {}) => {
+    const v = { document: 1, note: 1, no: '1', amount: '3000', ...overrides }
+    return (
+      'insert into refund (invoice_id, credit_note_id, refund_no, tender_kind, ' +
+      `posting_account_code, amount_fils, trading_date) values (${idOf(v.document)}, ` +
+      `${noteOf(v.note)}, ${v.no}, 'cash', '1010', ${v.amount}, '2097-09-20'::date)`
+    )
+  }
+
+  /**
+   * Every lock in the gate's own YEAR removed, inside the probe transaction that rolls back.
+   *
+   * `journal.itest.ts` locks and unlocks real periods and its `beforeEach` deletes every row of
+   * `period_lock`, so whatever its last period-lock case created survives the integration stage and is
+   * still there when this file runs. A leftover lock over 2097 would refuse the notes below by ZL002 or
+   * ZD003 and every probe here would report a rule it is not about. Scoped to 2097 so it cannot remove a
+   * lock any suite relies on, and rolled back with the rest of the probe either way.
+   */
+  const NO_LOCKS = "delete from period_lock where starts_on >= '2097-01-01' and ends_on <= '2097-12-31'"
+
+  /** One document with its line, so a probe about ONE rule can trip only that one. */
+  const ONE = `${NO_LOCKS}; ${invoice(1)}; ${line(1)}`
+  /** A locked October, plus a locked November, so the earliest open date is neither of them. */
+  const LOCKED =
+    "insert into period_lock (period_id, starts_on, ends_on, reason, locked_by_actor_kind) values " +
+    `('${MARKER}-2097-10', '2097-10-01', '2097-10-31', '${MARKER}', 'system'), ` +
+    `('${MARKER}-2097-11', '2097-11-01', '2097-11-30', '${MARKER}', 'system')`
+
+  const probes = [
+    {
+      // A correction of nothing is not a document. There is deliberately no foreign key here (the
+      // ledger paragraph for 0072 says why), so the refusal is this trigger's or it is nobody's.
+      name: 'credit note gate rejects a note naming an invoice that does not exist',
+      rule: 'ZD001',
+      sql: `${ONE}; ${note({ documentId: "'00000000-0000-4000-8000-000000000001'" })}`,
+    },
+    {
+      name: 'credit note gate rejects a note dated before the supply it corrects',
+      rule: 'ZD002',
+      sql: `${ONE}; ${note({ date: "'2097-09-17'::date" })}`,
+    },
+    {
+      // The acceptance line asks for a refusal that names the earliest OPEN period.
+      // `raise_if_period_locked` (0018) names the locked one, which sends the person to November — also
+      // shut. So the message has to carry both, and this probe asserts the open DATE.
+      name: 'credit note gate rejects a note dated in a locked period, naming the earliest open date',
+      rule: 'The earliest open date is 2097-12-01',
+      sql: `${ONE}; ${LOCKED}; ${note({ date: "'2097-10-20'::date" })}`,
+    },
+    {
+      name: 'credit note gate rejects a line the invoice does not have',
+      rule: 'ZD004',
+      sql: `${ONE}; ${partial({ invoiceLine: '2' })}`,
+    },
+    {
+      // A credit at another price is a repricing, which is a new supply rather than a correction.
+      name: 'credit note gate rejects a credit at a unit price the line was not sold at',
+      rule: 'ZD005',
+      sql: `${ONE}; ${partial({ unit: '999', lineNet: '951', lineVat: '48', gross: '999', net: '951', vat: '48' })}`,
+    },
+    {
+      // 0026's 11-fils case from the other end: a FULL credit of three units at 1000 carries the LINE's
+      // VAT of 143, not 3 x 48 = 144.
+      name: 'credit note gate rejects a full credit whose VAT is re-derived per unit',
+      rule: 'ZD005',
+      sql: `${ONE}; ${note({ net: '2856', vat: '144', lineNet: '2856', lineVat: '144' })}`,
+    },
+    {
+      // THE ceiling. Three units invoiced, three credited, and a fourth refused.
+      name: 'credit note gate rejects a cumulative credited quantity above the invoiced quantity',
+      rule: 'ZD006',
+      sql: `${ONE}; ${note({ quantity: '4', net: '3809', vat: '191', gross: '4000', lineNet: '3809', lineVat: '191' })}`,
+    },
+    {
+      name: 'credit note gate rejects a header whose totals disagree with its lines',
+      rule: 'ZD007',
+      sql: `${ONE}; ${partial({ net: '951', vat: '48', gross: '999', liability: '999' })}`,
+    },
+    {
+      // A note with no lines states nothing and consumes a statutory number. It fires no line trigger at
+      // all, so only the header's deferred trigger can see it.
+      name: 'credit note gate rejects a note with no lines',
+      rule: 'ZD008',
+      sql: `${ONE}; ${note({ withLine: false })}`,
+    },
+    {
+      name: 'credit note gate rejects an UPDATE of an issued note',
+      rule: 'ZD009',
+      sql: `${ONE}; ${note()}; update credit_note set reason = 'a better reason' where id = ${noteOf(1)}`,
+    },
+    {
+      name: 'credit note gate rejects a DELETE of an issued note',
+      rule: 'ZD009',
+      sql: `${ONE}; ${note()}; delete from credit_note where id = ${noteOf(1)}`,
+    },
+    {
+      name: 'credit note gate rejects an UPDATE of a credited line',
+      rule: 'ZD009',
+      sql: `${ONE}; ${note()}; update credit_note_line set quantity = 1 where credit_note_id = ${noteOf(1)}`,
+    },
+    {
+      // A note authorises money leaving against the document it corrects and no other. This is the
+      // first of the three things 0068's paragraph left to this unit.
+      name: 'credit note gate rejects a refund whose note corrects another document',
+      rule: 'ZD010',
+      sql:
+        `${ONE}; ${invoice(2)}; ${line(2)}; ${note({ n: 2, document: 2 })}; ` +
+        `${tender('3000', '1', 1)}; ${refund({ document: 1, note: 2 })}`,
+    },
+    {
+      // A correction posts in the period the NOTE falls in, or a filed period gets restated.
+      name: 'credit note gate rejects a reversal dated on any date but the note’s',
+      rule: 'ZD011',
+      sql: `${ONE}; ${note({ entryDate: "'2097-09-21'::date" })}`,
+    },
+    {
+      // A refund and a credited sale produce identical lines and are answered differently when a
+      // customer asks, which is why `journal_entry.source` is carried rather than inferred.
+      name: 'credit note gate rejects a reversal classified as anything but a reversal',
+      rule: 'ZD011',
+      sql: `${ONE}; ${note({ source: "'adjustment'" })}`,
+    },
+    {
+      // The note's gross and the entry's credit to the settlement account are two statements of one
+      // amount. 2999 there and 3000 on the note, with the entry still balanced because 4010 takes the
+      // fils, so the imbalance trigger cannot be what fires.
+      name: 'credit note gate rejects a reversal crediting an amount the note does not state',
+      rule: 'ZD011',
+      sql: `${ONE}; ${note({ entryNet: '2856', liability: '2999' })}`,
+    },
+    {
+      // The second of 0068's three. Deferred, and NAMED to sort after `refund_not_more_than_was_paid`,
+      // so a refund breaking both ceilings reports the one about money — which is why this probe leaves
+      // room under ZT004: 1001 refunded against 3000 applied and 1000 credited.
+      name: 'credit note gate rejects refunds above what one note credits',
+      rule: 'ZD012',
+      sql:
+        `${ONE}; ${tender('3000')}; ${partial()}; ${refund({ amount: '600', no: '1' })}; ` +
+        `${refund({ amount: '401', no: '2' })}`,
+    },
+    {
+      // 0013 made CR-NOTE a separate counter row so 'CN-00042' is the forty-second credit note. This is
+      // 0026's composite key pointed the other way: a note cannot be numbered out of TAX-INV.
+      name: 'credit note gate rejects a note numbered out of the invoice series',
+      rule: 'credit_note_series_kind_fk',
+      sql: `${ONE}; ${note({ series: "'TAX-INV'" })}`,
+    },
+    {
+      name: 'credit note gate rejects a zero-value note',
+      rule: 'credit_note_gross_positive',
+      sql: `${ONE}; ${note({ net: '0', vat: '0', gross: '0', lineNet: '0', lineVat: '0', unit: '0' })}`,
+    },
+    {
+      name: 'credit note gate rejects a note with no stated reason',
+      rule: 'credit_note_reason_present',
+      sql: `${ONE}; ${note({ reason: "'  '" })}`,
+    },
+    {
+      // The issuer snapshot must be real on a correction too: blank is visibly unanswered and plausible
+      // is indistinguishable from configured (brief rule 15).
+      // The TRN column cannot carry a marker AND fifteen digits, so the reachable half of that pair is
+      // the legal name — which is the arrangement 0026 records for `invoice`.
+      name: 'credit note gate rejects a placeholder issuer name on a note',
+      rule: 'credit_note_issuer_name_not_placeholder',
+      sql: `${ONE}; ${note({ legalName: "'[confirm] legal name'" })}`,
+    },
+  ]
+
+  if (!dbUrl) {
+    check(
+      'the credit-note constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    for (const { name, rule, sql: statements } of probes) {
+      checkRejectedBy(name, psqlProbe(statements), rule)
+    }
+
+    // The control, and the reason the probes above mean anything: the correct set of rows — a document,
+    // its payment, a FULL credit note with its reversal, and a refund of what was credited — is
+    // ACCEPTED. Without it a renamed column or a broken connection string would reject every probe and
+    // this gate would report twenty-two passes while examining nothing.
+    const accepted = psqlProbe(`${ONE}; ${tender('3000')}; ${note()}; ${refund()}`)
+    check(
+      'credit note gate accepts a document, a full credit note and a refund of it',
+      !accepted.failed,
+      `rejected the rows this unit exists to write:\n${accepted.output}`,
+    )
+
+    // The second control: crediting PART of a line is accepted, so the ZD006 probe is about the fourth
+    // unit of three rather than about the ceiling refusing every credit. Three of them, which is exactly
+    // the invoiced quantity and the last row the ceiling may allow.
+    const partialAccepted = psqlProbe(
+      `${ONE}; ${partial({ n: 1 })}; ${partial({ n: 2, invoiceLine: '1' })}; ${partial({ n: 3 })}`,
+    )
+    check(
+      'credit note gate accepts three partial credits that together credit the whole line',
+      !partialAccepted.failed,
+      `a partial credit inside the invoiced quantity was refused:\n${partialAccepted.output}`,
+    )
+
+    // The third control: the note may be dated in a LATER period than the supply, which is the
+    // acceptance line about the reversal's date. December, after both locked months.
+    const laterPeriod = psqlProbe(
+      `${ONE}; ${LOCKED}; ${note({ date: "'2097-12-01'::date" })}`,
+    )
+    check(
+      'credit note gate accepts a note dated in a later, open period',
+      !laterPeriod.failed,
+      `a note dated after a locked period was refused:\n${laterPeriod.output}`,
+    )
+  }
+
+  // --- the posting rule, broken four ways, and the mapping once ----------------------------------
+  const RULE_MODULE = 'packages/core/src/checkout/credit-note.ts'
+  const RULE_SUITE = 'packages/core/src/checkout/credit-note.test.ts'
+  const MAPPING = 'packages/fixtures/src/credit-note.ts'
+  const MAPPING_SUITE = 'packages/fixtures/src/credit-note.test.ts'
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // 93s. A full credit that mirrors every movement in the same direction. The defect it produces is the
+  //      one the acceptance line about netting is for: a discounted document whose contra account ends up
+  //      twice as far from zero rather than at it.
+  {
+    const result = withEditedFile(
+      RULE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    return movement.netFils > 0\n      ? debit(movement.account, amount, 'Supply credited by a credit note')\n      : credit(movement.account, amount, 'Discount reversed with the supply it reduced')",
+          "    return debit(movement.account, amount, 'Supply credited by a credit note')",
+        ),
+      () => runExpectingFailure('pnpm', unitRun(RULE_SUITE)),
+    )
+    checkRejectedBy(
+      'a reversal that mirrors a contra account the wrong way is caught',
+      result,
+      'nets a DISCOUNTED invoice to zero in the contra account as well',
+    )
+  }
+
+  // 93t. A partial credit apportioned between two revenue accounts by silence: the refusal removed, so
+  //      the note's own net lands on whichever account the sort happened to put first. The apportionment
+  //      of a discount across a partial credit is an undecided policy, and inventing one is exactly what
+  //      brief rule 15 is about.
+  {
+    const result = withEditedFile(
+      RULE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (revenue.length !== 1) {\n    throw new PartialCreditNeedsApportionment(',
+          '  if (revenue.length < 1) {\n    throw new PartialCreditNeedsApportionment(',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(RULE_SUITE)),
+    )
+    checkRejectedBy(
+      'a partial credit of a discounted document that is silently apportioned is caught',
+      result,
+      'is refused against a discounted sale, naming both revenue accounts',
+    )
+  }
+
+  // 93u. The settlement account changed to the gratuity account. It balances, it posts, and it says the
+  //      business owes the therapist rather than the customer — which no balance check can see.
+  {
+    const result = withEditedFile(
+      RULE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const CREDIT_NOTE_SETTLEMENT_ACCOUNT: AccountCode = ACCOUNTS.tradeReceivables',
+          'export const CREDIT_NOTE_SETTLEMENT_ACCOUNT: AccountCode = ACCOUNTS.tipsPayable',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(RULE_SUITE)),
+    )
+    checkRejectedBy(
+      'a reversal parking the credit in the wrong account is caught',
+      result,
+      'parks the credit in 1050, pinned by a literal',
+    )
+  }
+
+  // 93v. The ceiling on the note's own gross widened by one fils. A credit note for more than the
+  //      document supplied is the invoice-void path wearing a correction's clothes.
+  {
+    const result = withEditedFile(
+      RULE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (gross.fils > supply) throw new CreditNoteExceedsDocument(entryId, gross.fils, supply)',
+          'if (gross.fils > supply + 1) throw new CreditNoteExceedsDocument(entryId, gross.fils, supply)',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(RULE_SUITE)),
+    )
+    checkRejectedBy('a credit note above the document it corrects is caught', result, 'a gross above the document')
+  }
+
+  // 93w. The mapping treating every credit as a FULL one, so a PARTIAL credit copies the whole line's
+  //      net and VAT against a fraction of its gross. The note it produces states 3143 + 157 = 3300
+  //      against a gross of 1100 — a document whose own three figures do not reconcile, which is ZD007's
+  //      shape, and the arithmetic has to be caught here rather than at COMMIT.
+  //
+  //      The obvious mutation — making a full credit DERIVE instead of copy — is not a mutation at all on
+  //      this fixture: the invoice line's stored net and VAT are themselves `splitGross` of its line
+  //      gross, so the two agree to the fils and the suite would report a pass about a real change. The
+  //      distinction is load-bearing in the other direction, which is the one broken here.
+  {
+    const result = withEditedFile(
+      MAPPING,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const full = quantity === line.quantity',
+          '    const full = quantity >= 1',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(MAPPING_SUITE)),
+    )
+    checkRejectedBy(
+      'a mapping that copies a whole line’s tax onto a partial credit is caught',
+      result,
+      'derives its tax on the credited gross',
+    )
+  }
+
+  // --- the no-invoice-mutation gate, both halves -------------------------------------------------
+  //
+  // 93x. An exported name carrying a mutating verb, in a money module no test imports. That is the hole
+  //      the per-module export test in `invoice.test.ts` cannot close, and the reason this gate reads
+  //      SOURCE rather than importing.
+  {
+    const result = withFixture(
+      'packages/core/src/money/__gate_fixture__.ts',
+      ['export function voidInvoice(id: string): string {', '  return id', '}'].join('\n'),
+      () => runExpectingFailure('node', ['scripts/test-no-invoice-mutation.mjs']),
+    )
+    checkRejectedBy(
+      'a money module exporting voidInvoice fails the no-invoice-mutation gate',
+      result,
+      'no-invoice-mutation',
+    )
+  }
+
+  // 93y. A mutating statement against a document table, in an ordinary source file. Refused at run time
+  //      by ZI003 — which means it is found by whoever runs that path rather than by the build.
+  {
+    const result = withFixture(
+      'packages/db/src/repositories/__gate_fixture__.ts',
+      [
+        'export const correction = (id: string) =>',
+        "  `update invoice set notes = 'corrected' where id = '${id}'`",
+      ].join('\n'),
+      () => runExpectingFailure('node', ['scripts/test-no-invoice-mutation.mjs']),
+    )
+    checkRejectedBy(
+      'an UPDATE against invoice anywhere in the tree fails the no-invoice-mutation gate',
+      result,
+      'no-invoice-mutation',
+    )
+  }
+
+  // 93z. The controls for 93s-93y: both suites and the gate pass unedited. Without these, an anchor gone
+  //      stale or a suite that had stopped running would make every case above report a pass.
+  {
+    const rule = run('pnpm', unitRun(RULE_SUITE))
+    const mapping = run('pnpm', unitRun(MAPPING_SUITE))
+    const gate = run('node', ['scripts/test-no-invoice-mutation.mjs'])
+    check(
+      'the credit-note suites and the no-invoice-mutation gate pass unedited',
+      !rule.failed && !mapping.failed && !gate.failed,
+      `rule suite ${rule.failed ? 'FAILED' : 'passed'}, mapping suite ` +
+        `${mapping.failed ? 'FAILED' : 'passed'}, gate ${gate.failed ? 'FAILED' : 'passed'}:\n` +
+        `${rule.output}\n${mapping.output}\n${gate.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
@@ -25798,6 +26376,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm licences',
     'pnpm container',
     'pnpm documents',
+    // M-TILL-08's. The export surface of the money modules plus a tree-wide scan for a mutating statement
+    // against a document table — the half of "an issued invoice is never edited" that is a rule about the
+    // repository rather than a rule in the database.
+    'pnpm no-invoice-mutation',
     'pnpm structured-data',
     'pnpm audit:online',
     'pnpm palette',

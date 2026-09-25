@@ -6,6 +6,45 @@
  *   - MUST NOT import @berelax/core (dependency direction is core <- db, never db -> core)
  */
 
+/**
+ * M-TILL-07's payment adapter surface.
+ *
+ * This block was MISSING when M-TILL-08 was written, and `pnpm typecheck` was red because of it:
+ * `packages/fixtures/src/payment.itest.ts` imports `manualPaymentAdapter`, `readTenderTypes`,
+ * `RegisteredTenderType` and `TRADE_RECEIVABLES_ACCOUNT_CODE` from `@berelax/db`, and thirteen errors
+ * in that one file were the only symptom. M-TILL-07's own NOTE records this file as edited, so the
+ * block existed on that branch and did not survive the merge — the same class of loss gate case 90a
+ * exists for, one directory along. Restored rather than worked around.
+ */
+export {
+  type Authorisation,
+  type CapturedPayment,
+  type CapturePaymentInput,
+  type InvoiceSettlement,
+  isOverpayment,
+  isRefundExceedingPayments,
+  manualPaymentAdapter,
+  Overpayment,
+  PAYMENT_ADAPTER_MEMBERS,
+  PAYMENT_ADAPTER_MEMBERS_ARE_EXACT,
+  PAYMENT_CONSTRAINT,
+  PAYMENT_SQLSTATE,
+  type PaymentAdapter,
+  type PaymentAdapterMembersAreExact,
+  paymentError,
+  type RecordedPayment,
+  type RecordedRefund,
+  RefundExceedsPayments,
+  type RefundInput,
+  RefundRequiresCreditNote,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  type TenderToRecord,
+  TenderTypeNotRegistered,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+  type WebhookReconciliation,
+} from './adapters/manual-payment.ts'
 export {
   type Actor,
   type ActorKind,
@@ -905,6 +944,22 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  assertReversalMatches,
+  CREDIT_NOTE_SQLSTATE,
+  type CreditNoteLineInput,
+  creditNoteError,
+  type IssueCreditNoteInput,
+  type IssuedCreditNote,
+  type IssuedCreditNoteLine,
+  isCreditNoteAppendOnly,
+  isCreditNotePeriodLocked,
+  isOverCredited,
+  issueCreditNote,
+  readCreditNote,
+  readCreditNoteByDisplayNumber,
+  readCreditNotesForInvoice,
+} from './services/issue-credit-note.ts'
+export {
   completeObligationInstance,
   fileObligationEvidence,
   generateObligationInstances,
@@ -1521,14 +1576,95 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // import core — and with no validator injected the publish is refused by name rather than performed.
 // `flow_run`, the step log and the execution cap are C-AUTO-07's and are deliberately absent here.
 //
+// 72 is 0072_credit_note.sql: the credit note, and the reference 0068 could not make (M-TILL-08). 0026
+// created `invoice` append-only and named the correction path in its own comment; 0013 had already
+// allocated CR-NOTE as a separate counter row and said why. So nothing here re-argues that a credit note
+// is a separate document with its own series. Four things ARE this file's.
+//
+// `credit_note.invoice_id` and `credit_note_line.invoice_line_no` carry NO foreign key, which is 0067's
+// trade made for a different reason and the decision a reader is most likely to think is an oversight. A
+// key buys exactly one thing an INSERT-time check does not: it keeps the reference true against a later
+// DELETE of the parent. `invoice` and `invoice_line` refuse DELETE for EVERY role including the owner —
+// `refuse_invoice_change()` raises ZI003 from a BEFORE trigger, not from a grant — so there is no DELETE
+// for a key to guard. The one statement that removes an invoice row is TRUNCATE by the owner, and that is
+// precisely the statement a key would break: SEVEN integration suites across six units truncate the
+// invoice family by an explicit list, and `refund` arriving as the fourth referencing table in 0068
+// turned all of them red at once. Paying that again for a guard against a statement the database already
+// refuses is the wrong side of the trade; `credit_note_corrects_a_real_invoice()` (ZD001) and
+// `credit_note_line_credits_a_real_line()` (ZD004) raise by NAME instead, which a foreign key would not.
+// The cost is stated rather than discovered: a suite that truncates `invoice` without also truncating
+// `credit_note` leaves a note about a document that is gone. `journal_entry_id` DOES carry a real key,
+// because nothing truncates the journal — and it is DEFERRED, which is what fixes the ORDER of the two
+// inserts. The note is written FIRST so that its own trigger is what refuses a locked period; post the
+// entry first and 0018's `ZL002` gets there instead, with a message about a journal entry on a request
+// that was about a document.
+//
+// The cumulative quantity ceiling (ZD006) takes a `pg_advisory_xact_lock` on the invoice line's identity
+// and NOT `select ... for update` on the row, and that is measured rather than stylistic: 0026 revoked
+// UPDATE on `invoice_line` from `berelax_app`, PostgreSQL requires UPDATE for `FOR UPDATE`, so the row
+// lock raises `permission denied for table invoice_line` for every caller that matters. A SECURITY
+// DEFINER wrapper would work and would hand the write path a privilege it has no other reason to hold; an
+// advisory lock needs none, releases at COMMIT, and a hash collision costs two unrelated lines a moment
+// of serialisation rather than correctness, because the sum still reads the real rows. Without a lock the
+// sum is not a ceiling at all: two transactions each see none of the other's uncommitted lines and both
+// commit, which is exactly what the acceptance's "two parallel credit notes, exactly one succeeds" is
+// about. `ZD005` also holds a credited line's unit price and rate equal to the invoiced line's — a credit
+// at another price is a repricing, which is a new supply — and requires a FULL credit to carry the line's
+// own net and VAT rather than a re-derivation, which is 0026's 11-fils case from the other end: three
+// partial credits of one unit against a line of three legitimately carry one fils more VAT than the line
+// does, so the equality can only be demanded where the two must agree.
+//
+// The reversal is dated on the NOTE (`tax_point_date`), and `credit_note_reversal_is_dated_on_the_note()`
+// (ZD011) is what makes that a property of the schema rather than of the caller: it holds the entry's
+// date, its `source` and its credit to the settlement account equal to what the note states. The
+// settlement account is `1050 Trade receivables` and that is 0068's choice, not this migration's —
+// `manual-payment.ts` states the whole shape, "a payment posts Dr tender / Cr 1050 … the credit note that
+// authorises it posts the other half of the correction (Dr revenue and output VAT, Cr 1050), which is
+// M-TILL-08's". Following it makes an invoice, a full credit note and a full refund net to zero in EVERY
+// account any of the three touched. `2085 Customer refunds payable` is the better NAME for a
+// credited-but-unrefunded amount — a liability, not a negative receivable — and choosing it here alone
+// would leave 2085 and 1050 each carrying a balance nothing clears, because the refund's side is 0068's.
+// Moving both halves is one decision for one unit and is named in M-TILL-08's NOTE rather than taken
+// here. The locked-period refusal (ZD003) names the earliest OPEN date as well as the shut period, and
+// `earliest_open_date_from()` returns a DATE and not a period id for a reason worth recording:
+// `period_lock` holds the CLOSED periods, so an open period is the ABSENCE of a row and has no identifier
+// to name.
+//
+// And `refund.credit_note_id` gets the real key 0068 deferred here, plus the two checks its paragraph
+// promised: `ZD010` (the note corrects THIS document, immediate, and reached BEFORE the key so a caller
+// gets a sentence instead of `violates foreign key constraint` — and returning early on a NULL, because a
+// BEFORE trigger runs before the column constraints and 0068's own probe asserts 23502 on that statement)
+// and `ZD012` (the refunds against one note do not exceed what it credits, deferred for ZT004's reason).
+// `refund_within_its_credit_note` is NAMED to sort after `refund_not_more_than_was_paid`, because
+// PostgreSQL fires one event's AFTER triggers in alphabetical order and a refund breaking both ceilings
+// should report the one about money rather than the one about paperwork — which is what keeps 0068's gate
+// probe true. On 0068's other question — which of ZT004 and `invoice_settlement.outstanding_fils` is
+// authoritative once a document is credited — BOTH of 0068's ceilings are left exactly as they are and
+// `invoice_payable_fils()` is not touched. Subtracting the credited amount there would lower the ceiling
+// under payments ALREADY applied: an invoice paid in September and credited in October would read as an
+// overpayment in a figure that is reconciled against a counted drawer, and the cash in that drawer would
+// stop being explainable by any row. Money honestly taken is not un-taken by a document; it is owed back.
+// So the view gains `credited_fils` and `receivable_fils` (negative means the business holds money it
+// owes back, which is 0068's `gross - credited - applied + refunded`), `outstanding_fils` keeps its
+// definition as exactly the quantity ZT001 refuses to let go negative, and what a credit note DOES stop —
+// collecting more against a credited supply — is `ZD013`, a new ceiling on a payment INSERT and nowhere
+// else, so issuing a note can never fire retroactively against a payment that is already reconciled.
+// SQLSTATE class 'ZD', because 'ZC' is 0029's and one class with two meanings is how a caller comes to
+// handle a redirect defect as a credit-note defect.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
-// through 70 are in use and the four above are the only gaps left. 55, 56 and 57 landed out of order and
+// through 70 are in use and the four above are the only gaps left. 71, 73 and 74 are held right now by
+// three units in other worktrees, which is why this branch jumps from 70 to 72 and why that is not a
+// hole to close: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers,
+// so the run 49..70 plus 72 is unbroken as far as it can see, and renumbering 72 down to 71 to make the
+// list look tidy is how two branches come to apply one number to different SQL.
+// 55, 56 and 57 landed out of order and
 //
 // Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was
 // based before the others' paragraphs existed, so git took the incoming side of this region with nothing
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 70 as const
+export const SCHEMA_VERSION = 72 as const

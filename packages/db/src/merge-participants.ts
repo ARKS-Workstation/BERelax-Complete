@@ -166,6 +166,31 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
+    table: 'flow_enrolment',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    conflictKey: null,
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason: null,
+    why:
+      'An enrolment in an automation sequence must follow the person, for `booking_session`’s reason: ' +
+      'left on the tombstone, a customer part-way through a win-back sequence stops receiving it and ' +
+      'nothing says why. No unique key involves the customer (0070 declares three plain indexes and no ' +
+      'unique), so no row can be refused, and the `(flow_id, version)` pin is untouched — a merge moves ' +
+      'who the enrolment is for, never which document version it runs.',
+    // Registered by M-TILL-08 and not by the unit that owns the column: 0070 (C-AUTO-06) added
+    // `flow_enrolment.customer_id` without an entry here, and the completeness case in
+    // packages/fixtures/src/merge.itest.ts was already failing on it — "The day that table lands, the
+    // completeness case above turns red until it is registered", written for C-AUTO-07's `flow_run` and
+    // collected by C-AUTO-06's `flow_enrolment` first. C-AUTO-07 should revisit the strategy when
+    // `flow_run` and its idempotency key arrive; repointing is the answer that loses nothing meanwhile.
+    registeredBy: 'C-AUTO-06 (registered by M-TILL-08)',
+  }),
+  participant({
+    schema: 'public',
     table: 'customer_blocklist',
     column: 'customer_id',
     strategy: 'repoint_update',
@@ -329,6 +354,18 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
       'issued, and those columns are what the FTA reads: an invoice re-attributed to another record is ' +
       'a different document. A history read that wants one person’s invoices resolves the tombstone.',
     registeredBy: 'C-CRM-05',
+  }),
+  Object.freeze({
+    schema: 'public',
+    table: 'credit_note',
+    column: 'customer_id',
+    reason:
+      'The `invoice` entry above, for the document that corrects one. A credit note is append-only ' +
+      '(credit_note_no_update raises ZD009 for every role) and the application role holds no UPDATE ' +
+      'privilege on it; it snapshots the customer’s name, phone and TRN as they were when the ' +
+      'correction was issued, and it is filed with the same return the invoice is. A note re-attributed ' +
+      'to another record is a different document, and a merge may not make one.',
+    registeredBy: 'M-TILL-08',
   }),
   Object.freeze({
     schema: 'public',

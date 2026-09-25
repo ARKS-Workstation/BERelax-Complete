@@ -7,6 +7,7 @@
  */
 export * from './checkout.ts'
 export * from './clock.ts'
+export * from './credit-note.ts'
 export * from './load.ts'
 export * from './media.ts'
 export * from './message-lifecycle.ts'

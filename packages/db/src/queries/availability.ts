@@ -1034,7 +1034,7 @@ export async function queryAvailability(
       const epochs = await readAvailabilityEpochs(sql, [request.tradingDate])
       const current = epochs.get(request.tradingDate) ?? null
       const fresh = now - held.computedAt < ttlMs
-      if (fresh && held.epoch === current) {
+      if (fresh) {
         return { ...held.answer, cached: true }
       }
       // Dropped rather than left to expire. A tag whose epoch has moved is wrong for the rest of its
