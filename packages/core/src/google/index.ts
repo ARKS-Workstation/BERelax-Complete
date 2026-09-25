@@ -6,4 +6,5 @@
  * and docs/07 §6.
  */
 export * from './connection.ts'
+export * from './connection-state.ts'
 export * from './health.ts'

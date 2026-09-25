@@ -6,6 +6,28 @@
  *   - MUST NOT import @berelax/core (dependency direction is core <- db, never db -> core)
  */
 
+/*
+  M-TILL-07's manual tender adapter, which the barrel did not export.
+
+  A defect found by G-CONN-07 rather than introduced by it, and it is a `pnpm typecheck` failure at HEAD:
+  `packages/fixtures/src/payment.itest.ts` imports these five names from `@berelax/db`, nothing else
+  imports the module at all, and the barrel never named it — so the file cannot compile, which is 14 of
+  the 15 errors `tsc -p tsconfig.json` reports on a clean tree. The integration suite never said so,
+  because vitest transpiles per file and does not typecheck.
+
+  Those five plus `InvoiceSettlement`, which is `readInvoiceSettlement`'s return type and cannot be named
+  by a caller otherwise — and no more. Widening a barrel to "everything the module happens to export" is
+  how a package's public surface becomes whatever was convenient, and `PaymentAdapter` in particular is a
+  seam whose only implementation is chosen inside `packages/db`.
+*/
+export {
+  type InvoiceSettlement,
+  manualPaymentAdapter,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+} from './adapters/manual-payment.ts'
 export {
   type Actor,
   type ActorKind,

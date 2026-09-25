@@ -25773,6 +25773,156 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 95a-95f. (G-CONN-07) The connection's presentation states: a state a human is shown must have a
+//          sentence, every (state x event) pair must carry a decision, and *Test connection* must not be
+//          able to report success without having established anything.
+//
+//          The first two are enforced by the TYPE — `CONNECTION_STATE_COPY` and `CONNECTION_TRANSITIONS`
+//          are `Record`s over the state union — so 95a and 95b are the only way to watch that enforcement
+//          fire: add a seventh state and require `tsc` to name it, twice, because the copy table and the
+//          machine are two separate obligations and satisfying one must not satisfy the other.
+{
+  const DISPLAY_STATES = 'packages/core/src/google/connection.ts'
+  const STATE_MODULE = 'packages/core/src/google/connection-state.ts'
+  const TEST_CONNECTION = 'packages/google/src/health/test-connection.ts'
+  const STATE_SUITE = 'packages/core/src/google/connection-state.test.ts'
+  const CARD_SUITE = 'apps/web/src/google-connection-card.test.ts'
+  const TEST_CONNECTION_SUITE = 'packages/google/src/health/test-connection.test.ts'
+  const unit = (...files) => run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const unitExpectingFailure = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const seventhState = (text) =>
+    replaceOnce(
+      text,
+      "  | 'pending_gbp_approval'\n",
+      "  | 'pending_gbp_approval'\n  | '__gate_state__'\n",
+    )
+
+  // 95a. A seventh presentation state with no sentence must not compile. This is the whole of "plain
+  //      English states": the set a human is shown is enumerated in one place, and a state the machine can
+  //      enter that is missing from it is a build error rather than an enum member rendered to a person.
+  {
+    const result = withEditedFile(DISPLAY_STATES, seventhState, () =>
+      runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'connection states: a presentation state with no plain-English sentence fails to compile',
+      result,
+      '__gate_state__',
+    )
+    check(
+      'connection states: and the error names the module that holds the sentences',
+      result.output.includes('connection-state.ts'),
+      `tsc rejected the state without naming ${STATE_MODULE}:\n${result.output}`,
+    )
+  }
+
+  // 95b. The control on what 95a proves. Give the new state a sentence and nothing else: the transition
+  //      matrix and the tone switch are still incomplete, so it must STILL fail. Without this, one entry
+  //      in the copy table would be enough to add a state nothing has decided anything about.
+  {
+    const result = withEditedFile(DISPLAY_STATES, seventhState, () =>
+      withEditedFile(
+        STATE_MODULE,
+        (text) =>
+          replaceOnce(
+            text,
+            "  broken: {\n    headline: 'Needs re-authorising',",
+            "  __gate_state__: {\n    headline: 'A state with a sentence and no decisions',\n" +
+              "    detail: 'A sentence long enough to satisfy the length assertion in the suite.',\n" +
+              "    tone: 'neutral',\n    requiresRecency: false,\n  },\n" +
+              "  broken: {\n    headline: 'Needs re-authorising',",
+          ),
+        () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+      ),
+    )
+    checkRejectedBy(
+      'connection states: a state with a sentence but no transitions still fails to compile',
+      result,
+      '__gate_state__',
+    )
+    check(
+      'connection states: and that failure is about the matrix rather than the sentence',
+      result.output.includes('connection-state.ts') && !result.output.includes('CONNECTION_STATE_COPY'),
+      `expected the transition matrix and the tone switch to be what refuses it:\n${result.output}`,
+    )
+  }
+
+  // 95c. The rule that *Connected* may never be shown without a recency, mutated away. `stateShownFor` is
+  //      one line, and the mutation is the one somebody would make while tidying: return the derivation.
+  {
+    const result = withEditedFile(
+      STATE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (health.displayState === 'healthy' && health.hoursSinceLastSuccess === null) return 'degraded'\n",
+          '',
+        ),
+      () => unitExpectingFailure(STATE_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: showing Connected with no recency is caught',
+      result,
+      'Connected cannot be shown without a recency',
+    )
+  }
+
+  // 95d. docs/10 §4's other prohibition: never a scope string. The mutation is a plausible one — render
+  //      what Google returned rather than the English sentence for it — and the card suite must name it.
+  {
+    const result = withEditedFile(
+      STATE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (known !== undefined) return { recognised: true, label: known, token: '' }",
+          "    if (known !== undefined) return { recognised: true, label: scope, token: '' }",
+        ),
+      () => unitExpectingFailure(CARD_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: a scope URL rendered on the card is caught',
+      result,
+      'no scope string reaches the card',
+    )
+  }
+
+  // 95e. The one that matters most, and the reason ADR 0005 exists: a *Test connection* that reports
+  //      success without having established anything. The pass it runs throws nothing — it records what it
+  //      finds — so an early `return null` here is exactly the mutation that would ship, and it makes the
+  //      button answer `ok` for a connection where no call was made at all.
+  {
+    const result = withEditedFile(
+      TEST_CONNECTION,
+      (text) =>
+        replaceOnce(
+          text,
+          'function failureReason(check: ConnectionCheck): TestConnectionReason | null {',
+          'function failureReason(check: ConnectionCheck): TestConnectionReason | null {\n' +
+            '  if (check.connectionId !== undefined) return null',
+        ),
+      () => unitExpectingFailure(TEST_CONNECTION_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: a Test connection that reports success having done nothing is caught',
+      result,
+      'a broken provider reports failure by name',
+    )
+  }
+
+  // 95f. The control on all four mutations: the tree as it stands passes every one of those suites. A
+  //      mutation test whose base is red proves nothing about the mutation (ADR 0003).
+  {
+    const result = unit(STATE_SUITE, CARD_SUITE, TEST_CONNECTION_SUITE)
+    check(
+      'connection states: the three suites pass on this tree',
+      !result.failed,
+      `the base is red, so the four mutations above prove nothing:\n${result.output}`,
+    )
+  }
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')
