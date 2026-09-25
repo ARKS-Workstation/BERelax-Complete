@@ -265,6 +265,31 @@ caught a real defect in this repository.
     The damage is cheap to find once you know to look: `git show <commit>:<file>` against
     `git show origin/main:<file>` for every file in the commit you did not deliberately change.
 
+28. **A green test suite says nothing about types, because vitest does not typecheck.** It transpiles.
+    Twenty-one passing integration cases sat on top of six TS4111 errors in the file that had just been
+    written, and `pnpm verify` died at step 2 of 37 on code whose tests were green. So after editing any
+    `.ts` file, run `pnpm typecheck` before believing a suite — and prefer typing a raw query's rows over
+    reading them loosely:
+
+        const [row] = await tx<{ customerId: string }[]>`
+          select customer_id as "customerId" from flow_enrolment where id = ${id}::uuid
+        `
+
+    `noPropertyAccessFromIndexSignature` is on, so `row.customer_id` off an untyped `postgres.js` result
+    is an error rather than a style question, and the typed version also makes a renamed column a type
+    error instead of an `undefined` at runtime.
+
+29. **Run YOUR gate block, not the whole suite.** `pnpm gates:test` takes about two hours and spawns
+    roughly 1,250 children, and almost all of it is re-proving other units' cases. Run your own block and
+    the four harness blocks instead:
+
+        pnpm gates:only --only '// 92.' --only '// 79a' --only '// 88.' --only '// 89.' --only '// 90.'
+
+    Each `--only` must resolve to exactly ONE block opening. A prefix matching none, or several, exits
+    non-zero rather than running fewer cases than you asked for and reporting success — which is the
+    failure a selector invites and gate case 3c is what holds it shut. The full suite still runs in
+    `pnpm verify` at the integrating merge, and that remains the only arbiter for an integrated tree.
+
 ## Working
 
 - Read the unit's entry in `build/manifest.yaml`. Its `acceptance` list is the specification: satisfy

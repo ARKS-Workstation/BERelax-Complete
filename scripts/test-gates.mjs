@@ -349,6 +349,52 @@ check(
   )
 }
 
+// 3c. The gate SELECTOR must refuse a name it cannot resolve, rather than running nothing.
+//
+//      `scripts/gate-slice.mjs` runs one unit's block instead of all 1,250 cases, which is what makes an
+//      agent's loop minutes rather than hours. It is also, by construction, a way to run FEWER cases — so
+//      the failure it introduces is running ZERO of them and exiting 0, which is this suite reporting
+//      success over an empty set (ADR 0002). Three refusals, and the third is the one nobody thinks of:
+//      a prefix that matches SEVERAL blocks is as bad as one that matches none, because the caller then
+//      gets a block they did not ask for and believes they tested the one they named.
+{
+  const slicer = ['scripts/gate-slice.mjs']
+  const refusals = [
+    { name: 'no selector at all', args: slicer, needle: 'to run all of it use' },
+    {
+      name: 'a block that does not exist',
+      args: [...slicer, '--only', '// 9999.'],
+      needle: 'matched 0 block openings',
+    },
+    {
+      name: 'a prefix matching several blocks',
+      args: [...slicer, '--only', '// 8'],
+      needle: 'has to match exactly one',
+    },
+  ]
+  for (const refusal of refusals) {
+    const result = runExpectingFailure(process.execPath, refusal.args)
+    check(
+      `gate selector refuses ${refusal.name}`,
+      result.failed && result.output.includes(refusal.needle),
+      result.failed
+        ? `it exited non-zero but did not say why:\n${result.output}`
+        : `it exited ZERO, so a caller would read "no cases failed" as "the cases passed":\n${result.output}`,
+    )
+  }
+  // And the control: a selector that DOES resolve must run the block and say which one, or the three
+  // refusals above are satisfied by a script that refuses everything. Block 90 is the cheapest in the
+  // file — it reads the ledger and the migration directory and starts no child.
+  const resolved = run(process.execPath, [...slicer, '--only', '// 90.'])
+  check(
+    'gate selector runs the block it resolves, and names it',
+    !resolved.failed &&
+      resolved.output.includes('// 90.') &&
+      resolved.output.includes('ledger gate'),
+    `a resolvable selector did not run block 90:\n${resolved.output}`,
+  )
+}
+
 // 4. A clock read in packages/core must fail the purity gate.
 check(
   'purity gate rejects a clock read in packages/core',

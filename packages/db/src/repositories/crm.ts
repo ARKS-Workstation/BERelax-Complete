@@ -956,12 +956,30 @@ export const CRM_AUDIT_COVERAGE: Readonly<
 })
 
 /**
- * What counts as the CRM area: `customer` and everything named beneath it.
+ * What counts as the CRM VOCABULARY area: the `customer` table and the tables named beneath it.
  *
- * A prefix rather than a list, so the next CRM table is in the area the moment it is created — which is
- * what makes the coverage test able to fail for a table nobody registered. It is stated as a POSIX
+ * A prefix rather than a list, so a table added under that name is in the area the moment it is created
+ * — which is what makes the coverage test able to fail for one nobody registered. It is stated as a POSIX
  * pattern because the enumeration runs in SQL: the area has to be read from the database, not from a
  * TypeScript array that a new table would not appear in.
+ *
+ * ## What it does NOT cover, and why that is not a hole
+ *
+ * This comment used to say "the next CRM table is in the area the moment it is created", and that is not
+ * what a name prefix can promise. Nine base tables carry a customer id and are outside it — `booking`,
+ * `booking_session`, `checkout_finalisation`, `consent`, `flow_enrolment`, `invoice`, `optout_grant`,
+ * `suppression`, `waitlist` — and none of them carries `record_crm_vocabulary_change`. They are audited
+ * on their own units' repository paths, which is right: this register is about the CRM VOCABULARY, the
+ * tables whose rows are what the front desk says about a person, and a booking is not vocabulary.
+ *
+ * So the boundary is the NAME and it is deliberate. What stops that becoming a way to escape the
+ * register is that the name is also the thing a new CRM vocabulary table will have. A table about a
+ * customer under any other name is somebody else's to audit, and the completeness question for
+ * customer-bearing tables in general is asked with no name pattern at all, from `information_schema`, by
+ * C-CRM-05's merge participant registry in `packages/db/src/merge-participants.ts`: every such table
+ * must be a registered merge participant or an allowlisted exception with a reason. Two registers, two
+ * questions — "is this vocabulary audited" and "does this table follow the person" — and neither is a
+ * substitute for the other.
  */
 export const CRM_TABLE_PATTERN = '^customer(_|$)'
 
