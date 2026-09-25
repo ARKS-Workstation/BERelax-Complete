@@ -37,6 +37,22 @@ export {
   type WriteOptions,
 } from './jobs/generate-business-days.ts'
 export {
+  assertParticipantIsWellFormed,
+  MERGE_ALLOWLIST,
+  MERGE_CATALOGUE_EXCLUDED_SCHEMAS,
+  MERGE_ID_COLUMN_PATTERN,
+  MERGE_PARTICIPANTS,
+  MERGE_STRATEGIES,
+  type MergeAllowlistEntry,
+  type MergeCoverageRow,
+  type MergeParticipant,
+  type MergeStrategy,
+  mergeCoverage,
+  participantName,
+  SQL_IDENTIFIER,
+  SQL_PREDICATE,
+} from './merge-participants.ts'
+export {
   type DomainEvent,
   type DrainResult,
   drainOutbox,
@@ -479,6 +495,27 @@ export {
   type LeaveOpeningBalanceRow,
   readLeaveOpeningBalances,
 } from './repositories/leave-opening-balance.ts'
+export {
+  applyMergeParticipant,
+  assertParticipantKeyIsAUniqueIndex,
+  type CustomerMergePlanInput,
+  type CustomerMergeSubjectRead,
+  MERGE_AUDIT_ACTIONS,
+  MERGE_REFUSALS,
+  MERGE_SQLSTATE,
+  type MergeCustomersArgs,
+  type MergeOutcome,
+  type MergeRecordRead,
+  type MergeRefusal,
+  type MergeTableReport,
+  mergeCustomers,
+  mergeRefusalOf,
+  mergeRowCounts,
+  mergeSurvivorOf,
+  readCustomerMergeSubject,
+  readMergeRecordForLoser,
+  readMergeTableReports,
+} from './repositories/merge.ts'
 export {
   type CostByTemplate,
   type CostByTradingDate,
@@ -1322,16 +1359,45 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
 // visible.
 //
+// 69 is 0069_customer_merge.sql: the merge as a RECORD, and the tombstone (C-CRM-05). `merge_record` is
+// one row per completed merge with `loser_customer_id` UNIQUE, which makes it BOTH the tombstone index
+// and the place two concurrent merges of one pair serialise — the argument 0063 makes for
+// `checkout_finalisation_key_pk`, and the reason the repository inserts it before it moves a single row.
+// There is deliberately no `merged_into_customer_id` column on `customer`: the pair would then exist
+// twice and the first disagreement would be silent, and a merge has evidence (who, under what authority,
+// on which score, and what the two records disagreed about) that does not fit in a column. Neither
+// customer id is a foreign key, which is 0056's decision for an append-only log restated — a cascade
+// would fire the refusal trigger and make `delete from customer` raise for the four suites that clear
+// that table. `merge_record_table` holds the per-table before/after counts, and its three CHECKs are the
+// unit's whole claim rather than a report about it: `rows_after_loser = rows_before_loser - rows_moved`,
+// `rows_after_survivor = rows_before_survivor + rows_moved + rows_inserted`, and — for a strategy that
+// moves rows — `rows_before_loser = rows_moved + rows_retained_on_loser` with a stated reason whenever
+// anything was retained. A participant that quietly left rows behind cannot store its own report, and
+// the refusal rolls the merge back. `merge_survivor_of(uuid)` follows the chain (A into B, later B into
+// C, is an ordinary sequence of events and each row is unalterable), and `assert_merge_survivor_is_live`
+// refuses an edge INTO a tombstone (ZT002) — which is also why a cycle cannot be constructed at all, so
+// the depth bound raising ZT003 would mean that trigger had been dropped. Both tables are append-only
+// for every role (ZT001). What it does NOT do is touch the `clinical` schema: 0009 revokes every
+// privilege on it from the application role, and 0043's AAD binds a ciphertext to its `customer_id`, so
+// a re-pointed clinical row would be a record nothing can decrypt — the clinical side resolves the
+// tombstone on READ instead, which is what `merge_survivor_of` is granted to `berelax_clinical` for.
+//
+// 67 and 68 are ALLOCATIONS held by units in flight and are not gaps to be closed, the same arrangement
+// 62 through 65 were in when 0064 was written. The gap is above the ledger gate's floor of 49, which
+// 0069 is the first migration to do — see the note in scripts/test-gates.mjs case 90a about why the run
+// is walked over the migrations that EXIST rather than over consecutive integers.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
-// flight in five worktrees, and all five have now landed in one integrating merge — 55 through 66 are in
-// use, so the four permanent ones above are the only gaps left. 55, 56 and 57 landed out of order and
-// within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
-// exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
+// flight in five worktrees, and all five have now landed in one integrating merge, so 55 through 66 are
+// in use; 67 and 68 are allocations held by units still in flight and are gaps only until they land.
+// 55, 56 and 57 landed out of order and within an hour of one another, and 62 through 66 landed
+// together, which is the arrangement this note exists for: the number is a high-water mark, not a count,
+// and no gap was closed to tidy the sequence.
 //
 // Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was
 // based before the others' paragraphs existed, so git took the incoming side of this region with nothing
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 66 as const
+export const SCHEMA_VERSION = 69 as const

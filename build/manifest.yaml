@@ -5573,6 +5573,111 @@ units:
       hard deletes occurred'
     - 'Audit: one append-only merge_record stores per-table before/after row counts plus an audit_event;
       UPDATE and DELETE on merge_record raise'
+    - 'NOTE: what was scoped, what the two dependencies answered differently, and the decisions this unit
+      had to make. Beyond the four files this list names it adds
+      packages/db/migrations/0069_customer_merge.sql, packages/core/src/crm/merge-plan.test.ts,
+      packages/core/src/crm/merge-plan.property.test.ts and packages/fixtures/src/merge.itest.ts, and it
+      edits scripts/test-gates.mjs (block 93, plus a fix to case 90a - see (11)). (1) TWO ACCEPTANCE LINES
+      ARE DEFERRED BY NAME, both to units that depend on this one. The FLOW_RUN line is not satisfiable: no
+      flow_run table exists, C-AUTO-07 owns packages/db/src/schema/flow-run.ts and the (flow_run, node,
+      channel, contact) idempotency key, and its own acceptance already says "a contact merged mid-run
+      continues on the survivor exactly once, sharing the worked example with C-CRM-05". What this unit
+      leaves it is the mechanism and a test that will fail until it is used: mergeCoverage() enumerates
+      every table carrying a customer or contact id from information_schema and refuses one that is neither
+      a registered participant nor an allowlisted exception, so the day flow_run lands the completeness case
+      turns red until C-AUTO-07 registers it - and merge.itest.ts asserts today that no flow_ table exists,
+      so the deferral is visible in the suite and not only here. The FREQUENCY LEDGER half of the
+      suppression/ledger line is deferred to C-AUTO-03 for the same reason (it owns frequency_ledger and
+      depends on this unit), but the RULE is built and proved: the union_dedupe strategy is implemented,
+      driven in merge.itest.ts against a ledger-shaped table created inside a rolled-back transaction, and
+      the worked example the line asks for is asserted from both sides - 2 from 1+1 with different messages,
+      1 from one message recorded against both, never 4 - together with unionByNaturalKey in @berelax/core
+      as the pure statement of the same rule. C-AUTO-03 registers one participant and inherits all of it.
+      (2) STRICTEST-WINS IS THE UNION, RESOLVED BY resolveConsent, AND A WITHDRAWAL CAN NEVER BE DROPPED.
+      C-CRM-03 says a merge must re-point consent by INSERT because the log is append-only, so the survivor
+      ends up holding both logs with every recorded_at preserved, and the state is whatever resolveConsent -
+      the same function the send path reads through - makes of that. The acceptance''s worked example
+      follows: loser withdrew at T2, survivor granted at T1, merged state withdrawn. What this unit
+      deliberately does NOT do is manufacture a withdrawal. Where the withdrawal is the OLDER decision and
+      the person opted back in, the merged state is granted, and merge.itest.ts asserts that mirror case as
+      the control - a merge that withdrew everything would satisfy the headline assertion and would be
+      recording a decision nobody made, which is the failure 0064''s own comment names about attributing a
+      preference_centre row to staff. The strictness that IS enforced is structural: after the copy, every
+      row on the loser must have a counterpart on the survivor, or the merge is refused
+      merge_left_rows_behind and rolls back. (3) SUPPRESSION IS RE-POINTED NOWHERE, which is C-CRM-04''s
+      NOTE (2) taken as given. The one thing a merge owes it is the contact_customer_id back-reference, and
+      the shape of that needed a decision C-CRM-04 did not make: the table''s unique key is (key_kind,
+      key_hmac, kind, recorded_at), so a copy has to carry a NEW instant, and a row copied carelessly would
+      change what the list resolves to. So the merge restates the NEWEST entry per DETAIL at the merge
+      instant, carrying that entry''s kind, source, reason and actor trio verbatim - which means a LIFTED
+      detail stays lifted rather than being silently re-suppressed, and a detail whose newest entry already
+      names the survivor is owed nothing (that is the de-duplication the acceptance asks for: one row per
+      hashed key, not one per loser row). Where the newest entries TIE - a suppression and a lift at one
+      instant, which 0064 says the resolver deliberately fails closed on - BOTH are restated, so the tie
+      survives and the state is unchanged; rank() rather than row_number() is what does it, and gate case
+      93h is that mutant. merge.itest.ts asserts that not one resolved state changed across the merge, which
+      is the whole claim. (4) THE TOMBSTONE IS A ROW AND NOT A COLUMN. merge_record has loser_customer_id
+      UNIQUE and there is deliberately no merged_into_customer_id on customer: the pair would then exist
+      twice and the first disagreement would be silent. That row is also where two concurrent merges of one
+      pair serialise, which is why the repository inserts it BEFORE it moves anything (0063''s argument for
+      checkout_finalisation_key_pk). A into B and later B into C is an ordinary sequence of events, so
+      merge_survivor_of() FOLLOWS the chain; an edge INTO a tombstone is refused (ZT002), which is also what
+      makes a cycle unconstructible, so the depth bound raising ZT003 would mean that trigger had been
+      dropped. (5) THE REGISTRY''S CLAIM IS A CHECK, NOT A TEST. merge_record_table carries per-table
+      before/after counts behind three constraints: rows_after_loser = rows_before_loser - rows_moved,
+      rows_after_survivor = rows_before_survivor + rows_moved + rows_inserted, and - for a strategy that
+      moves rows - rows_before_loser = rows_moved + rows_retained_on_loser with retained_reason required
+      whenever anything was retained. Every count is read from the database on both sides of the work rather
+      than derived from the statement''s own answer, so a participant that lost or doubled a row cannot
+      store its report and the refusal rolls the merge back inside its own transaction. A fourth constraint
+      refuses a non-zero rows_moved on a copying strategy. (6) A DEDUPE OR CONFLICT KEY MUST BE A REAL
+      UNIQUE INDEX, checked against pg_index before any statement is issued. This is the defect a row count
+      cannot see: a key COARSER than the real index makes the copy skip rows it should carry - the loser''s
+      withdrawal looks "already there" because the survivor has some other row on the same channel - and a
+      finer one makes the copy attempt a row the index refuses. Both are silent, and the registry and the
+      database drifting apart is exactly what happens when a later migration changes an index. (7) THE
+      ALLOWLIST IS NOT AN EXEMPTION LIST, and three of its entries are structural rather than preferential.
+      The four clinical tables are unreachable: 0009 revokes every privilege on the clinical schema from the
+      application role, and 0043 binds a ciphertext to its customer_id through the AAD, so a re-pointed
+      intake submission or treatment note would be a record nothing can decrypt. invoice and
+      checkout_finalisation have UPDATE revoked from the application role and both snapshot the customer as
+      the document was issued. optout_grant is left alone because 0064 puts the contact in the opt-out URL
+      as well as the token and refuses the request unless the two agree - re-pointing the grant would kill a
+      live link, and a link that has stopped working is an opt-out this business does not have. The read
+      side follows the tombstone instead, which is why merge_survivor_of(uuid) is a SQL function granted to
+      berelax_clinical as well: the clinical schema cannot call TypeScript. (8) THREE CONSEQUENCES OF THE
+      ALLOWLIST ARE DEFERRED, each named. (a) Nothing in the build reads
+      public.customer_contraindication_flags yet; the first unit that does must resolve the tombstone
+      through merge_survivor_of, or a merge will hide a contraindication from the front desk. (b) A
+      preference-centre link minted for a record that is later merged away still verifies and still
+      suppresses the DETAIL, so the functional opt-out is unaffected (suppression keys on the hash and beats
+      consent with no exceptions), but the PDPL consent withdrawal it writes lands on the tombstone''s log
+      rather than the survivor''s. Deferred to C-CRM-06, which owns the staff merge surface; fixing it means
+      resolving the contact through merge_survivor_of at that write, and this unit did not reach into
+      C-CRM-04''s handler to do it. (c) findDuplicateCandidates still returns a tombstone as a candidate for
+      its own survivor, so the review queue would show the merged pair for ever. Not fixed here because
+      C-CRM-02''s integration suite asserts that query''s EXPLAIN plan contains a trigram index scan and a
+      tombstone filter changes the plan; deferred to C-CRM-06, which owns the queue. (9) C-CRM-02''S
+      DEFERRED DETERMINISTIC BLOCK IS RE-DEFERRED. Its NOTE (5) hands this unit the two expression btrees on
+      left(key,4) and right(key,5) that would find every single-character typo the 0.30 trigram floor
+      misses. It belongs in the candidate SCAN, not in the merge: C-CRM-02 pins that query''s plan and its
+      per-signal caps from both sides, and the queue the extra candidates feed is C-CRM-06''s. This unit
+      touched no part of the scan, so the block is re-deferred to C-CRM-06 with the boundary C-CRM-02
+      measured left exactly as it pinned it. (10) THE THRESHOLDS ARE INJECTED as Y9-dedup-thresholds
+      promised: planCustomerMerge takes a DuplicateScore, whose verdict was computed by scoreDuplicatePair
+      under whichever thresholds the caller passed, so the owner''s figures reach the merge without either
+      module changing. No new OPEN-QUESTIONS id was added: the provisional line here is a DEFAULT an
+      operator overrides per merge (authority operator_confirmed nominates the survivor explicitly), not a
+      value stored anywhere, and a pair the scorer calls distinct is refused under both authorities. No new
+      secret, and no port band (brief rule 18): nothing here starts a server. (11) A DEFECT IN CODE THIS
+      UNIT DOES NOT OWN, fixed rather than worked around. Gate case 90a walked the migration ledger over
+      CONSECUTIVE INTEGERS, so the first unit to hold a non-contiguous allocation fails it: with 0069 on
+      disk and 0067 and 0068 still held by units in flight, the run computed as [69] and the gate reported a
+      deleted paragraph about two migrations nobody has written. It now walks the migrations that EXIST,
+      which loses nothing - 90d still proves a deleted paragraph breaks the run - and case 90e is the new
+      control, asserting over a synthetic list that the walk steps over an unused number and still stops at
+      a missing paragraph. (12) SCHEMA_VERSION is 69. 67 and 68 are ALLOCATIONS held by units in flight and
+      are not gaps to be closed; the ledger paragraph in packages/db/src/index.ts says so in numeric order.'
     files:
     - packages/core/src/crm/merge-plan.ts
     - packages/db/src/repositories/merge.ts

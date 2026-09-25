@@ -35,6 +35,7 @@ export const SERVICE_NARRATIVE = {
       required: true,
       help: 'The UUID of the service in the catalogue. There is no foreign key across the schema boundary; see the note on this collection.',
     },
+    { name: 'price', type: 'text', label: 'Price' },
     { name: 'slug', type: 'slug', label: 'URL slug', required: true },
     { name: 'headline', type: 'text', label: 'Headline', required: true },
     {
