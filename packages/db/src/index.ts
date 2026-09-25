@@ -7,6 +7,36 @@
  */
 
 export {
+  type Authorisation,
+  type CapturedPayment,
+  type CapturePaymentInput,
+  type InvoiceSettlement,
+  isOverpayment,
+  isRefundExceedingPayments,
+  manualPaymentAdapter,
+  Overpayment,
+  PAYMENT_ADAPTER_MEMBERS,
+  PAYMENT_ADAPTER_MEMBERS_ARE_EXACT,
+  PAYMENT_CONSTRAINT,
+  PAYMENT_SQLSTATE,
+  type PaymentAdapter,
+  type PaymentAdapterMembersAreExact,
+  paymentError,
+  type RecordedPayment,
+  type RecordedRefund,
+  RefundExceedsPayments,
+  type RefundInput,
+  RefundRequiresCreditNote,
+  type RegisteredTenderType,
+  readInvoiceSettlement,
+  readTenderTypes,
+  type TenderToRecord,
+  TenderTypeNotRegistered,
+  TRADE_RECEIVABLES_ACCOUNT_CODE,
+  type WebhookReconciliation,
+} from './adapters/manual-payment.ts'
+
+export {
   type Actor,
   type ActorKind,
   type AuditOperation,

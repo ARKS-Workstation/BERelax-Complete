@@ -268,109 +268,144 @@ const checkRejectedBy = (name, result, rule) => {
 }
 
 // 1. A failing unit test must fail the runner.
-{
-  const f = 'packages/core/src/__gate_fixture__.test.ts'
-  writeFileSync(
-    f,
+//
+//    Cases 1 to 8 all go through `withFixture`, which removes the file in a `finally`. They used to
+//    `rmSync` on the line after the run, which leaves a deliberately broken module in a real source
+//    directory whenever anything in between throws — and the next `tsc`, `biome` or `depcruise` to read
+//    that directory fails in a package nobody touched. Cheaper to diagnose than case 22's class, because
+//    the litter is a NEW file a scan can see, but the same defect.
+check(
+  'vitest fails the build on a failing test',
+  withFixture(
+    'packages/core/src/__gate_fixture__.test.ts',
     [
       "import { expect, it } from 'vitest'",
       "it('deliberately fails', () => {",
       '  expect(1).toBe(2)',
       '})',
-      '',
     ].join('\n'),
-  )
-  const { failed } = runExpectingFailure('pnpm', [
-    'exec',
-    'vitest',
-    'run',
-    '-c',
-    'vitest.config.ts',
-  ])
-  rmSync(f, { force: true })
-  check('vitest fails the build on a failing test', failed)
-}
+    () => runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts']).failed,
+  ),
+)
 
 // 2. A type error must fail the typechecker.
-{
-  const f = 'packages/core/src/__gate_fixture__.ts'
-  writeFileSync(f, ['export const broken: number = "not a number"', ''].join('\n'))
-  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
-  rmSync(f, { force: true })
-  check('tsc fails the build on a type error', failed)
-}
+check(
+  'tsc fails the build on a type error',
+  withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    'export const broken: number = "not a number"',
+    () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']).failed,
+  ),
+)
 
-// 3. A lint error must fail the linter.
+// 3. A lint error must fail the linter. noExplicitAny is configured as an error in biome.json.
+check(
+  'biome fails the build on an explicit any',
+  withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    ['export function bad(x: any) {', '  return x', '}'].join('\n'),
+    () =>
+      runExpectingFailure('pnpm', [
+        'exec',
+        'biome',
+        'check',
+        'packages/core/src/__gate_fixture__.ts',
+      ]).failed,
+  ),
+)
+
+// 3b. The linter must have READ every file it claims to check, which is not the same thing as passing.
+//
+//     Biome skips a file over `files.maxSize` and reports the skip as a WARNING, so `pnpm lint` exits 0
+//     while the file goes unlinted and unformatted. `scripts/test-gates.mjs` crossed the 1 MiB default in
+//     one batch of four gate blocks and stopped being checked at all — the most safety-critical file in
+//     the build, silently exempt, with a green tick over it. That is ADR 0002 exactly: a passing check
+//     that examined nothing is worse than a failing one.
+//
+//     The ceiling is now 4 MiB and this case is what stops the same thing happening again at 4 MiB. The
+//     known-bad fixture lowers the ceiling to a value the gate file certainly exceeds and watches the
+//     skip appear, so the case cannot pass by the message having been reworded.
 {
-  const f = 'packages/core/src/__gate_fixture__.ts'
-  // noExplicitAny is configured as an error in biome.json.
-  writeFileSync(f, ['export function bad(x: any) {', '  return x', '}', ''].join('\n'))
-  const { failed } = runExpectingFailure('pnpm', ['exec', 'biome', 'check', f])
-  rmSync(f, { force: true })
-  check('biome fails the build on an explicit any', failed)
+  const SKIPPED = 'exceeds the configured maximum'
+  const clean = run('pnpm', ['exec', 'biome', 'check', '.'])
+  check(
+    'the linter reads every file it reports on, and skips none for size',
+    !clean.output.includes(SKIPPED),
+    `biome skipped at least one file for its size, so lint passed over it:\n${clean.output
+      .split('\n')
+      .filter((line) => line.includes(SKIPPED) || line.endsWith('check ━'.padEnd(7, '━')))
+      .join('\n')}`,
+  )
+  const withLowCeiling = withEditedFile(
+    'biome.json',
+    (text) => replaceOnce(text, '"maxSize": 4194304,', '"maxSize": 1024,'),
+    () => run('pnpm', ['exec', 'biome', 'check', 'scripts/test-gates.mjs']),
+  )
+  check(
+    'the size-skip check can fail: a ceiling below the gate file makes biome report the skip',
+    withLowCeiling.output.includes(SKIPPED),
+    `a 1024-byte ceiling did not make biome report a skipped file, so the assertion above proves ` +
+      `nothing:\n${withLowCeiling.output}`,
+  )
 }
 
 // 4. A clock read in packages/core must fail the purity gate.
-{
-  const f = 'packages/core/src/__gate_fixture__.ts'
-  writeFileSync(f, ['export const now = () => Date.now()', ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-core-purity.mjs'])
-  rmSync(f, { force: true })
-  check('purity gate rejects a clock read in packages/core', failed)
-}
+check(
+  'purity gate rejects a clock read in packages/core',
+  withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    'export const now = () => Date.now()',
+    () => runExpectingFailure('node', ['scripts/check-core-purity.mjs']).failed,
+  ),
+)
 
 // 5. A Drizzle column with no database counterpart must fail the drift gate.
-{
-  const f = 'packages/db/src/schema/__gate_fixture__.ts'
-  writeFileSync(
-    f,
+check(
+  'drift gate rejects a Drizzle table the database does not have',
+  withFixture(
+    'packages/db/src/schema/__gate_fixture__.ts',
     [
       "import { pgTable, text } from 'drizzle-orm/pg-core'",
       "export const ghost = pgTable('ghost_table', { phantom: text('phantom') })",
-      '',
     ].join('\n'),
-  )
-  const { failed } = runExpectingFailure('node', ['scripts/check-schema-drift.mjs'])
-  rmSync(f, { force: true })
-  check('drift gate rejects a Drizzle table the database does not have', failed)
-}
+    () => runExpectingFailure('node', ['scripts/check-schema-drift.mjs']).failed,
+  ),
+)
 
 // 6. A naive timestamp column must fail the conventions gate.
-{
-  const f = 'packages/db/src/schema/__gate_fixture__.ts'
-  writeFileSync(
-    f,
+check(
+  'conventions gate rejects a timestamp without withTimezone',
+  withFixture(
+    'packages/db/src/schema/__gate_fixture__.ts',
     [
       "import { pgTable, timestamp } from 'drizzle-orm/pg-core'",
       "export const naive = pgTable('naive_table', { at: timestamp('at') })",
-      '',
     ].join('\n'),
-  )
-  const { failed } = runExpectingFailure('node', ['scripts/check-schema-conventions.mjs'])
-  rmSync(f, { force: true })
-  check('conventions gate rejects a timestamp without withTimezone', failed)
-}
+    () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']).failed,
+  ),
+)
 
-// 7. A literal bidi override in source must fail the invisible-character gate.
-{
-  const f = 'packages/core/src/__gate_fixture__.ts'
-  // A Trojan Source specimen. The override is built from its codepoint rather than typed, because
-  // this file is itself scanned by the gate it is testing.
-  const override = String.fromCodePoint(0x202e)
-  writeFileSync(f, [`export const label = "Ahmed${override}"`, ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-invisible-chars.mjs'])
-  rmSync(f, { force: true })
-  check('invisible-character gate rejects a literal bidi override in source', failed)
-}
+// 7. A literal bidi override in source must fail the invisible-character gate. A Trojan Source
+//    specimen, and the override is built from its codepoint rather than typed, because this file is
+//    itself scanned by the gate it is testing.
+check(
+  'invisible-character gate rejects a literal bidi override in source',
+  withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    `export const label = "Ahmed${String.fromCodePoint(0x202e)}"`,
+    () => runExpectingFailure('node', ['scripts/check-invisible-chars.mjs']).failed,
+  ),
+)
 
 // 8. A zero-width space must fail the same gate. Different hazard, same scan.
-{
-  const f = 'packages/core/src/__gate_fixture__.ts'
-  writeFileSync(f, [`export const sneaky = "a${String.fromCodePoint(0x200b)}b"`, ''].join('\n'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-invisible-chars.mjs'])
-  rmSync(f, { force: true })
-  check('invisible-character gate rejects a zero-width space in source', failed)
-}
+check(
+  'invisible-character gate rejects a zero-width space in source',
+  withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    `export const sneaky = "a${String.fromCodePoint(0x200b)}b"`,
+    () => runExpectingFailure('node', ['scripts/check-invisible-chars.mjs']).failed,
+  ),
+)
 
 // 9. A hand-edited palette token must fail the palette gate.
 //
@@ -380,35 +415,28 @@ const checkRejectedBy = (name, result, rule) => {
 //    was a no-op, `palette.py` was handed an unedited file and reported success, and the case failed —
 //    loudly, which is the one good thing about it. A known-bad fixture pinned to a value the build is
 //    allowed to change is a fixture with an expiry date on it.
-{
-  const f = 'packages/ui/src/tokens/palette.generated.ts'
-  const original = readFileSync(f, 'utf8')
-  // The failure this guards is a designer nudging a hex by eye. The value still looks like gold; it no
-  // longer meets its stated ratio, and nothing else in the system would notice.
-  const edited = original.replace(/'accent-gold': '#[0-9A-Fa-f]{6}'/, "'accent-gold': '#C08A43'")
-  // And the guard that stops this case rotting again: if the edit changed nothing, the run below proves
-  // nothing, and a green tick on an unedited file is worse than a red one (ADR 0003).
-  if (edited === original) {
-    throw new Error(
-      `${f} no longer contains an 'accent-gold' hex for case 9 to break, so the case would pass without ` +
-        'testing anything. Fix the pattern rather than the expectation.',
-    )
-  }
-  writeFileSync(f, edited)
-  const { failed } = runExpectingFailure('python3', ['scripts/palette.py'])
-  writeFileSync(f, original)
-  check('palette gate rejects a hand-edited token', failed)
-}
+// The failure this guards is a designer nudging a hex by eye. The value still looks like gold; it no
+// longer meets its stated ratio, and nothing else in the system would notice. The hand-written
+// "did the edit change anything" guard this case used to carry is now `withEditedFile`'s, which also
+// puts the restore in a `finally` — see the note above case 22.
+check(
+  'palette gate rejects a hand-edited token',
+  withEditedFile(
+    'packages/ui/src/tokens/palette.generated.ts',
+    (original) => original.replace(/'accent-gold': '#[0-9A-Fa-f]{6}'/, "'accent-gold': '#C08A43'"),
+    () => runExpectingFailure('python3', ['scripts/palette.py']).failed,
+  ),
+)
 
 // 10. A stale generated stylesheet must fail the tokens gate.
-{
-  const f = 'packages/ui/src/tokens/tokens.css'
-  const original = readFileSync(f, 'utf8')
-  writeFileSync(f, `${original}\n:root { --color-ink: #000000; }\n`)
-  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/emit-tokens.mjs'])
-  writeFileSync(f, original)
-  check('tokens gate rejects a hand-edited generated stylesheet', failed)
-}
+check(
+  'tokens gate rejects a hand-edited generated stylesheet',
+  withEditedFile(
+    'packages/ui/src/tokens/tokens.css',
+    (original) => `${original}\n:root { --color-ink: #000000; }\n`,
+    () => runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/emit-tokens.mjs']).failed,
+  ),
+)
 
 const COLOURS = ['scripts/check-colour-tokens.mjs']
 
@@ -571,58 +599,59 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
 }
 
 // 14. A locked decision with no ADR must fail the coverage gate.
-{
-  const f = 'docs/01-scope-and-decisions.md'
-  const original = readFileSync(f, 'utf8')
-  // Inserted into the decisions table itself, not appended to the file: a row after the table is a
-  // row the parser correctly ignores, and a fixture that tests the parser's blind spot tests nothing.
-  const anchor = '| 1 | Repo shape'
-  writeFileSync(
-    f,
-    original.replace(anchor, `| 99 | Gate fixture | A decision nobody recorded | — |\n${anchor}`),
-  )
-  const { failed } = runExpectingFailure('node', ['scripts/check-adr-coverage.mjs'])
-  writeFileSync(f, original)
-  check('ADR gate rejects a locked decision with no record', failed)
-}
+// Inserted into the decisions table itself, not appended to the file: a row after the table is a
+// row the parser correctly ignores, and a fixture that tests the parser's blind spot tests nothing.
+check(
+  'ADR gate rejects a locked decision with no record',
+  withEditedFile(
+    'docs/01-scope-and-decisions.md',
+    (original) =>
+      replaceOnce(
+        original,
+        '| 1 | Repo shape',
+        '| 99 | Gate fixture | A decision nobody recorded | — |\n| 1 | Repo shape',
+      ),
+    () => runExpectingFailure('node', ['scripts/check-adr-coverage.mjs']).failed,
+  ),
+)
 
 // 15. An ADR the index does not link must fail the same gate.
-{
-  const f = 'docs/adr/README.md'
-  const original = readFileSync(f, 'utf8')
-  writeFileSync(f, original.replace('(0021-catalogue-shape-and-packages-only.md)', '(missing.md)'))
-  const { failed } = runExpectingFailure('node', ['scripts/check-adr-coverage.mjs'])
-  writeFileSync(f, original)
-  check('ADR gate rejects a record the index does not link', failed)
-}
+check(
+  'ADR gate rejects a record the index does not link',
+  withEditedFile(
+    'docs/adr/README.md',
+    (original) =>
+      replaceOnce(original, '(0021-catalogue-shape-and-packages-only.md)', '(missing.md)'),
+    () => runExpectingFailure('node', ['scripts/check-adr-coverage.mjs']).failed,
+  ),
+)
 
 // 16. A stale progress ledger must fail.
-{
-  const f = 'docs/PROGRESS.md'
-  const original = readFileSync(f, 'utf8')
-  writeFileSync(f, original.replace('units complete', 'units complete (edited by hand)'))
-  const { failed } = runExpectingFailure('python3', ['scripts/progress.py', '--check'])
-  writeFileSync(f, original)
-  check('progress gate rejects a hand-edited ledger', failed)
-}
+check(
+  'progress gate rejects a hand-edited ledger',
+  withEditedFile(
+    'docs/PROGRESS.md',
+    (original) => replaceOnce(original, 'units complete', 'units complete (edited by hand)'),
+    () => runExpectingFailure('python3', ['scripts/progress.py', '--check']).failed,
+  ),
+)
 
 // 17. A changed fixture salon must fail the fixture gate.
-{
-  const f = 'packages/fixtures/src/salon.ts'
-  const original = readFileSync(f, 'utf8')
-  // One digit. Every committed screenshot was taken against the old dataset, and without this gate
-  // the only symptom would be a gallery that diffs everywhere for no apparent reason.
-  writeFileSync(
-    f,
-    original.replace(
-      'export const DEFAULT_SEED = 20260918',
-      'export const DEFAULT_SEED = 20260919',
-    ),
-  )
-  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/fixture-digest.mjs'])
-  writeFileSync(f, original)
-  check('fixture gate rejects a changed fixture salon', failed)
-}
+// One digit. Every committed screenshot was taken against the old dataset, and without this gate
+// the only symptom would be a gallery that diffs everywhere for no apparent reason.
+check(
+  'fixture gate rejects a changed fixture salon',
+  withEditedFile(
+    'packages/fixtures/src/salon.ts',
+    (original) =>
+      replaceOnce(
+        original,
+        'export const DEFAULT_SEED = 20260918',
+        'export const DEFAULT_SEED = 20260919',
+      ),
+    () => runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/fixture-digest.mjs']).failed,
+  ),
+)
 
 // 18. A design defect must fail the critique pass.
 {
@@ -654,20 +683,28 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
 }
 
 // 19. A media asset without a focal point must fail the media gate.
-{
-  const f = 'assets/media/manifest.json'
-  const original = readFileSync(f, 'utf8')
-  const manifest = JSON.parse(original)
-  // The portraits are full-length at ratios from 0.461 to 0.799. Without a focal point a 4:5 crop
-  // takes the torso and leaves the face out of frame — a defect that is invisible in code.
-  const portrait = manifest.assets.find((asset) => asset.slot === 'therapist-portrait')
-  delete portrait.focalX
-  delete portrait.focalY
-  writeFileSync(f, `${JSON.stringify(manifest, null, 2)}\n`)
-  const { failed } = runExpectingFailure('node', ['scripts/check-media.mjs'])
-  writeFileSync(f, original)
-  check('media gate rejects a cropped asset with no focal point', failed)
-}
+// The portraits are full-length at ratios from 0.461 to 0.799. Without a focal point a 4:5 crop
+// takes the torso and leaves the face out of frame — a defect that is invisible in code.
+check(
+  'media gate rejects a cropped asset with no focal point',
+  withEditedFile(
+    'assets/media/manifest.json',
+    (original) => {
+      const manifest = JSON.parse(original)
+      const portrait = manifest.assets.find((asset) => asset.slot === 'therapist-portrait')
+      if (portrait === undefined) {
+        throw new Error(
+          'assets/media/manifest.json has no therapist-portrait asset for case 19 to strip a focal ' +
+            'point from, so the case would prove nothing. Fix the slot name, not the expectation.',
+        )
+      }
+      delete portrait.focalX
+      delete portrait.focalY
+      return `${JSON.stringify(manifest, null, 2)}\n`
+    },
+    () => runExpectingFailure('node', ['scripts/check-media.mjs']).failed,
+  ),
+)
 
 // 20. An accessibility violation must fail the axe gate.
 {
@@ -726,20 +763,26 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
     CHILD,
   )
   const uncoveredNeeded = Math.max(80, Math.ceil(Number(coreLines.trim()) / 90))
-  const f = 'packages/core/src/__gate_fixture__.ts'
   const lines = ['export function uncovered(n: number): number {', '  let total = 0']
   for (let i = 0; i < uncoveredNeeded; i += 1) lines.push(`  if (n > ${i}) total += ${i}`)
-  lines.push('  return total', '}', '')
-  writeFileSync(f, lines.join('\n'))
-  const { failed, output } = runExpectingFailure('pnpm', [
-    'exec',
-    'vitest',
-    'run',
-    '-c',
-    'vitest.config.ts',
-    '--coverage.enabled',
-  ])
-  rmSync(f, { force: true })
+  lines.push('  return total', '}')
+  // Through `withFixture` for cases 1 to 8's reason: this run is the longest in the file — the whole
+  // unit suite under coverage, scrypt included — so it is the likeliest of all of them to be interrupted,
+  // and an interrupted `rmSync` on the next line leaves an uncovered module in `packages/core` that
+  // fails the NEXT run's coverage floor in a package nobody touched.
+  const { failed, output } = withFixture(
+    'packages/core/src/__gate_fixture__.ts',
+    lines.join('\n'),
+    () =>
+      runExpectingFailure('pnpm', [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.config.ts',
+        '--coverage.enabled',
+      ]),
+  )
   /*
     Three outcomes, not two, because the middle one used to be reported as the third.
 
@@ -772,18 +815,36 @@ const COLOURS = ['scripts/check-colour-tokens.mjs']
 }
 
 // 22. A breached byte budget must fail.
-{
-  const f = 'build/budgets.json'
-  const original = readFileSync(f, 'utf8')
-  const config = JSON.parse(original)
-  // Payload weight never regresses in one visible step. It regresses eight kilobytes at a time.
-  const tokens = config.budgets.find((budget) => budget.id === 'tokens-css')
-  tokens.maxBytes = 256
-  writeFileSync(f, `${JSON.stringify(config, null, 2)}\n`)
-  const { failed } = runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/check-budgets.mjs'])
-  writeFileSync(f, original)
-  check('byte budgets reject an oversized artifact', failed)
-}
+//
+//     Through `withEditedFile`, like every other case that breaks a shipped file, and that is not a
+//     tidy-up. This case used to write the mutated file, run the child, and restore on the next line,
+//     with no `finally`. Anything that threw in between — or any interruption — left
+//     `build/budgets.json` on disk with the design-tokens ceiling at 256 bytes, and THREE commits in
+//     one batch captured exactly that. It is the quietest possible damage: `pnpm budgets` still
+//     passes, because the stylesheet is comfortably under both numbers, so the budget simply stops
+//     meaning anything (ADR 0002). `withEditedFile` restores the original BUFFER in a `finally`, so
+//     the file comes back byte for byte rather than re-serialised.
+//
+//     Payload weight never regresses in one visible step. It regresses eight kilobytes at a time.
+check(
+  'byte budgets reject an oversized artifact',
+  withEditedFile(
+    'build/budgets.json',
+    (original) => {
+      const config = JSON.parse(original)
+      const tokens = config.budgets.find((budget) => budget.id === 'tokens-css')
+      if (tokens === undefined) {
+        throw new Error(
+          'build/budgets.json has no tokens-css budget for case 22 to breach, so the case would pass ' +
+            'without testing anything. Fix the id, not the expectation.',
+        )
+      }
+      tokens.maxBytes = 256
+      return `${JSON.stringify(config, null, 2)}\n`
+    },
+    () => runExpectingFailure('pnpm', ['exec', 'tsx', 'scripts/check-budgets.mjs']).failed,
+  ),
+)
 
 // 23. The business-day suite must pass under a hostile process timezone.
 {
@@ -23852,7 +23913,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'flow gate: an accumulated-delay figure that ignores the delays is caught',
     flowMutant(
       ANALYSIS,
-      '      return node !== undefined && node.kind === \'delay\' ? total + node.minutes : total',
+      "      return node !== undefined && node.kind === 'delay' ? total + node.minutes : total",
       '      return total',
       () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
     ),
@@ -24073,8 +24134,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'manage-booking gate: a clinical field printed on the page is caught',
     linkMutant(
       RENDER,
-      "    '<dl class=\"facts\">',",
-      "    '<dl class=\"facts\"><dt>Contraindication</dt><dd>none recorded</dd>',",
+      '    \'<dl class="facts">\',',
+      '    \'<dl class="facts"><dt>Contraindication</dt><dd>none recorded</dd>\',',
       PAIR_SUITE,
       pair,
     ),
@@ -24325,8 +24386,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   //      copy — reads as a workaround until you know the record has to outlive the identity it is about.
   checkRejectedBy(
     'merge gate: an append-only table re-pointed by UPDATE is caught',
-    mergeMutant(REGISTRY, "    strategy: 'repoint_insert',", "    strategy: 'repoint_update',", () =>
-      runExpectingFailure('pnpm', integration(ITEST)),
+    mergeMutant(
+      REGISTRY,
+      "    strategy: 'repoint_insert',",
+      "    strategy: 'repoint_update',",
+      () => runExpectingFailure('pnpm', integration(ITEST)),
     ),
     'lets a withdrawal on the loser govern the survivor when it is the newest thing either said',
   )
@@ -25041,7 +25105,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         ),
       () => runExpectingFailure('pnpm', unitRun(TENDER_SUITE)),
     )
-    check('a surplus absorbed by a tender that gives no change fails the tender tests', result.failed)
+    check(
+      'a surplus absorbed by a tender that gives no change fails the tender tests',
+      result.failed,
+    )
   }
 
   // 92p. The registry's card account pointed at the bank. The same failure gate 81m breaks the posting
@@ -25636,9 +25703,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     readdirSync('packages/db/migrations')
       .filter((name) => name.endsWith('.sql'))
       .filter((name) =>
-        new RegExp(`^// ${Number.parseInt(name.slice(0, 4), 10)} is ${name.replace(/\./g, '\\.')}`, 'm').test(
-          text,
-        ),
+        new RegExp(
+          `^// ${Number.parseInt(name.slice(0, 4), 10)} is ${name.replace(/\./g, '\\.')}`,
+          'm',
+        ).test(text),
       )
       .map((name) => Number.parseInt(name.slice(0, 4), 10))
       .sort((a, b) => a - b)
@@ -25685,18 +25753,18 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   const CONVENTION_STARTS_AT = 49
 
   // 90a. The run reaches the newest migration and goes back to where the convention starts, so every
-  //      number in between has a paragraph naming its own file.
-  {
-    check(
-      'ledger gate: every migration since the convention began has a paragraph, up to the newest',
-      run.length > 0 && (run[0] ?? Number.POSITIVE_INFINITY) <= CONVENTION_STARTS_AT,
-      run.length === 0
-        ? `migration ${newest} has no paragraph naming its file. A merge that takes the incoming side of ` +
-            'this region deletes paragraphs without conflicting — check the merge, not the migration.'
-        : `the unbroken run is ${run[0]}..${newest} and it should reach back to ${CONVENTION_STARTS_AT}, ` +
-            `so a paragraph between them is missing. Documented: ${documented.join(', ')}.`,
-    )
-  }
+  //      number in between has a paragraph naming its own file. No wrapping block, unlike its siblings:
+  //      this case declares nothing of its own, and a lone block that scopes no binding is what
+  //      `noUselessLoneBlockStatements` is for.
+  check(
+    'ledger gate: every migration since the convention began has a paragraph, up to the newest',
+    run.length > 0 && (run[0] ?? Number.POSITIVE_INFINITY) <= CONVENTION_STARTS_AT,
+    run.length === 0
+      ? `migration ${newest} has no paragraph naming its file. A merge that takes the incoming side of ` +
+          'this region deletes paragraphs without conflicting — check the merge, not the migration.'
+      : `the unbroken run is ${run[0]}..${newest} and it should reach back to ${CONVENTION_STARTS_AT}, ` +
+          `so a paragraph between them is missing. Documented: ${documented.join(', ')}.`,
+  )
 
   // 90b. The control, in two halves. The run must be long enough to be worth asserting on, and the scan
   //      must DISCRIMINATE — the early migrations predate the convention, so a scan that matched anything
@@ -25734,7 +25802,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       (name) => name.endsWith('.sql') && Number.parseInt(name.slice(0, 4), 10) === middle,
     )
     const line = ledger.split('\n').find((text) => text.startsWith(`// ${middle} is ${opening}`))
-    const holed = line === undefined ? ledger : ledger.replace(line, '// (paragraph deleted by a merge)')
+    const holed =
+      line === undefined ? ledger : ledger.replace(line, '// (paragraph deleted by a merge)')
     const holedRun = runEndingAtNewest(documentedIn(holed))
     // The next migration that EXISTS above `middle`, which is where the holed run must now start. Not
     // `middle + 1`: the run is walked over the migrations on disk, so the number immediately above a
