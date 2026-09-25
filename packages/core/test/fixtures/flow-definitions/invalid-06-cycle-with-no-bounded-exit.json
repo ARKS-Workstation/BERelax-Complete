@@ -1,0 +1,63 @@
+{
+  "description": "The delay and the tag point at each other and nothing leaves the pair, so an enrolment that takes the true branch can never finish. Contrast valid-04, where the condition leaves the loop.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "is_vip"
+    },
+    {
+      "branch": "true",
+      "from": "is_vip",
+      "to": "month"
+    },
+    {
+      "branch": "false",
+      "from": "is_vip",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "month",
+      "to": "touch"
+    },
+    {
+      "branch": "default",
+      "from": "touch",
+      "to": "month"
+    }
+  ],
+  "key": "cycle_with_no_bounded_exit",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "is_vip",
+      "kind": "condition",
+      "test": {
+        "fact": "is_vip",
+        "operator": "is_true"
+      }
+    },
+    {
+      "id": "month",
+      "kind": "delay",
+      "minutes": 43200
+    },
+    {
+      "id": "touch",
+      "kind": "action_tag",
+      "tag": "nurture_touch"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A loop with no way out of it"
+}

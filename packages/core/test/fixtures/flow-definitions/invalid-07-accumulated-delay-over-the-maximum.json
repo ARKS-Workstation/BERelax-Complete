@@ -1,0 +1,55 @@
+{
+  "description": "valid-10 with a single extra minute: 259,201 against a maximum of 259,200.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "by_hand",
+      "to": "first_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "first_sixty",
+      "to": "second_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "second_sixty",
+      "to": "third_sixty"
+    },
+    {
+      "branch": "default",
+      "from": "third_sixty",
+      "to": "done"
+    }
+  ],
+  "key": "accumulated_delay_over_maximum",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "first_sixty",
+      "kind": "delay",
+      "minutes": 86400
+    },
+    {
+      "id": "second_sixty",
+      "kind": "delay",
+      "minutes": 86400
+    },
+    {
+      "id": "third_sixty",
+      "kind": "delay",
+      "minutes": 86401
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "One minute over the accumulated delay maximum"
+}

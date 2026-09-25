@@ -1,0 +1,24 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "settle",
+      "to": "done"
+    }
+  ],
+  "key": "missing_trigger",
+  "nodes": [
+    {
+      "id": "settle",
+      "kind": "delay",
+      "minutes": 60
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A flow with no way in"
+}

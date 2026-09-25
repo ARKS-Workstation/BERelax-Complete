@@ -1,0 +1,44 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "tag_it"
+    },
+    {
+      "branch": "default",
+      "from": "tag_it",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "orphan",
+      "to": "done"
+    }
+  ],
+  "key": "unreachable_node",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "tag_it",
+      "kind": "action_tag",
+      "tag": "visit_ended"
+    },
+    {
+      "id": "orphan",
+      "kind": "action_tag",
+      "tag": "never_applied"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "A step nothing leads to"
+}

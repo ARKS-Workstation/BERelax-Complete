@@ -1,0 +1,105 @@
+{
+  "description": "The same ask at twelve hours and at two days, split evenly, to see which is answered.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "visit_completed",
+      "to": "timing"
+    },
+    {
+      "branch": "same_evening",
+      "from": "timing",
+      "to": "wait_short"
+    },
+    {
+      "branch": "two_days",
+      "from": "timing",
+      "to": "wait_long"
+    },
+    {
+      "branch": "default",
+      "from": "wait_short",
+      "to": "may_we_ask"
+    },
+    {
+      "branch": "default",
+      "from": "wait_long",
+      "to": "may_we_ask"
+    },
+    {
+      "branch": "true",
+      "from": "may_we_ask",
+      "to": "ask"
+    },
+    {
+      "branch": "false",
+      "from": "may_we_ask",
+      "to": "no_consent"
+    },
+    {
+      "branch": "default",
+      "from": "ask",
+      "to": "done"
+    }
+  ],
+  "key": "review_request_timing_test",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "visit_completed",
+      "kind": "trigger"
+    },
+    {
+      "branches": [
+        {
+          "label": "same_evening",
+          "weightPerMille": 500
+        },
+        {
+          "label": "two_days",
+          "weightPerMille": 500
+        }
+      ],
+      "id": "timing",
+      "kind": "split"
+    },
+    {
+      "id": "wait_short",
+      "kind": "delay",
+      "minutes": 720
+    },
+    {
+      "id": "wait_long",
+      "kind": "delay",
+      "minutes": 2880
+    },
+    {
+      "id": "may_we_ask",
+      "kind": "condition",
+      "test": {
+        "fact": "has_marketing_consent",
+        "operator": "is_true"
+      }
+    },
+    {
+      "channel": "email",
+      "id": "ask",
+      "kind": "action_message",
+      "messageClass": "promotional",
+      "note": "Email, so the body may carry the link and the SMS segment cost does not double.",
+      "templateKey": "review.request"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "goal_met"
+    },
+    {
+      "id": "no_consent",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Review request, two timings"
+}

@@ -1,0 +1,64 @@
+{
+  "description": "A LOOP that is allowed: every pass waits thirty days and the condition leaves the loop the moment a future appointment exists, so an enrolment can always finish.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "enrolled_by_hand",
+      "to": "month"
+    },
+    {
+      "branch": "default",
+      "from": "month",
+      "to": "booked_yet"
+    },
+    {
+      "branch": "true",
+      "from": "booked_yet",
+      "to": "touch"
+    },
+    {
+      "branch": "false",
+      "from": "booked_yet",
+      "to": "booked"
+    },
+    {
+      "branch": "default",
+      "from": "touch",
+      "to": "month"
+    }
+  ],
+  "key": "lapsing_nurture_loop",
+  "nodes": [
+    {
+      "event": "manual",
+      "id": "enrolled_by_hand",
+      "kind": "trigger"
+    },
+    {
+      "id": "month",
+      "kind": "delay",
+      "minutes": 43200,
+      "note": "The delay that makes the loop a schedule."
+    },
+    {
+      "id": "booked_yet",
+      "kind": "condition",
+      "test": {
+        "fact": "has_future_appointment",
+        "operator": "is_false"
+      }
+    },
+    {
+      "id": "touch",
+      "kind": "action_tag",
+      "tag": "nurture_touch"
+    },
+    {
+      "id": "booked",
+      "kind": "exit",
+      "reason": "goal_met"
+    }
+  ],
+  "title": "Nurture a lapsing contact until they book"
+}

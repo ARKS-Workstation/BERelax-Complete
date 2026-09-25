@@ -415,6 +415,32 @@ export {
   therapistPoolCtes,
 } from './repositories/eligibility.ts'
 export {
+  countEnrolmentsOnVersion,
+  type EndEnrolmentInput,
+  type EnrolInput,
+  type Enrolment,
+  endFlowEnrolment,
+  enrolOnLiveVersion,
+  FLOW_AUDIT_ACTIONS,
+  FLOW_REFUSALS,
+  FLOW_SQLSTATE,
+  type FlowDefinitionRow,
+  type FlowDefinitionValidator,
+  type FlowDeps,
+  type FlowRow,
+  type FlowWriteRefusal,
+  flowRefusalOf,
+  type PinnedEnrolmentRead,
+  type PublishedFlowVersion,
+  type PublishFlowInput,
+  publishFlowDefinition,
+  readEnrolmentPinnedDefinition,
+  readFlowByKey,
+  readFlowDefinition,
+  readLiveFlowVersion,
+  setFlowActive,
+} from './repositories/flow.ts'
+export {
   type CustomerSnapshotInput,
   INVOICE_DOCUMENT_KINDS,
   INVOICE_SQLSTATE,
@@ -1322,10 +1348,47 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // conflict, and 0066's header states the conflict and why not-expiring is the direction whose error is
 // visible.
 //
+// 70 is 0070_flow_definition_and_enrolment.sql: the flow, its immutable versions, and the enrolment pin
+// (C-AUTO-06). Three tables, and the whole unit is in the shape of the second and third. `flow_definition`
+// holds PUBLISHED versions only, keyed `(flow_id, version)`, append-only with UPDATE and DELETE raising
+// ZF001 for every role including the owner — so an edit is version N+1 and there is no draft state and no
+// supersession column, both of which would be an UPDATE on a row this table refuses to update. Which
+// version is LIVE is `max(version)`, deliberately NOT a `flow.live_version` column: a column there is a
+// second statement of a fact the rows already carry, and the first half-failed publish makes the two
+// disagree about which document the next enrolment gets. `flow_enrolment.definition_version` is NOT NULL
+// and pinned by `flow_enrolment_pins_a_definition_version`, a COMPOSITE foreign key to `(flow_id,
+// version)`: that is the "reference that cannot drift" the acceptance asks for, and the NOT NULL is what
+// stops "not pinned yet" being expressible — a nullable column there would have every reader deciding what
+// to do with it, and the convenient decision is to read `max(version)`, which is the drift this migration
+// exists to prevent. The pin is also IMMUTABLE (ZF002) while `status`, `ended_at` and `ended_reason` stay
+// writable, because the statement this design has to refuse is the bulk "upgrade everyone to the latest"
+// and the statement it has to permit is an enrolment finishing; `flow_definition`'s append-only pair would
+// have made the second impossible, which is why the two tables carry different rules. `node_count` is
+// GENERATED from `jsonb_array_length(definition -> 'nodes')` so the 60-node bound holds where the row is
+// written and cannot disagree with the document — a plain integer column would be a second opinion the
+// first stray UPDATE breaks, and a document with no `nodes` array raises on INSERT rather than storing a
+// flow with no steps. `flow.is_active` defaults to FALSE, which is the rule rather than a default:
+// publishing a version is drawing a flow and enabling it is a separate decision, and a default of true
+// makes the first publish of a win-back sequence start messaging the lapsed list.
+// `flow_enrolment.customer_id` CASCADES, which is 0053's choice for every satellite table about a customer
+// and also what keeps `delete from customer` working for the suites that clear the table (0063's recorded
+// hazard about truncating `appointment`). No validation is in SQL beyond what a CHECK can state: the DSL's
+// rules live in `@berelax/core` and are INJECTED into `publishFlowDefinition`, because this package may not
+// import core — and with no validator injected the publish is refused by name rather than performed.
+// `flow_run`, the step log and the execution cap are C-AUTO-07's and are deliberately absent here.
+//
+// HELD: 67, 68, 69 — numbers allocated to units in flight in other worktrees at the time 0070 was
+// written, so this tree has 66 and then 70 with nothing between them. Stated as a declaration rather than
+// as prose because gate case 90a READS it: the run of documented paragraphs may skip a held number, and
+// only while no migration file carries it. When 0067 to 0069 land, each arrives with its own paragraph,
+// the run closes, and this line becomes inert — it is not a licence to leave a real hole undocumented, and
+// 90e is the case that proves it cannot become one.
+//
 // 22, 41, 44 and 47 are unused and will stay unused: renumbering to close a gap is how two branches
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and all five have now landed in one integrating merge — 55 through 66 are in
-// use, so the four permanent ones above are the only gaps left. 55, 56 and 57 landed out of order and
+// use, so those four were the only permanent gaps at that point; 67, 68 and 69 are the HELD reservation
+// above, which is a gap that closes rather than one that stays. 55, 56 and 57 landed out of order and
 // within an hour of one another, and 62 through 66 landed together, which is the arrangement this note
 // exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
 //
@@ -1334,4 +1397,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 66 as const
+export const SCHEMA_VERSION = 70 as const

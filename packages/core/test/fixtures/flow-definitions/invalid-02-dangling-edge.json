@@ -1,0 +1,29 @@
+{
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "completed",
+      "to": "done"
+    },
+    {
+      "branch": "default",
+      "from": "done",
+      "to": "thank_them"
+    }
+  ],
+  "key": "dangling_edge",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "An edge to a node that is not there"
+}

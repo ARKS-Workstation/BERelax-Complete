@@ -1,0 +1,37 @@
+{
+  "description": "Three nodes, no delay, no condition: the shortest flow this DSL can express.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "rescheduled",
+      "to": "notice"
+    },
+    {
+      "branch": "default",
+      "from": "notice",
+      "to": "done"
+    }
+  ],
+  "key": "therapist_change_notice",
+  "nodes": [
+    {
+      "event": "appointment.rescheduled",
+      "id": "rescheduled",
+      "kind": "trigger"
+    },
+    {
+      "channel": "sms",
+      "id": "notice",
+      "kind": "action_message",
+      "messageClass": "transactional",
+      "templateKey": "booking.therapist_changed"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "completed"
+    }
+  ],
+  "title": "Tell the customer the therapist changed"
+}

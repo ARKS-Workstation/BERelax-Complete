@@ -23756,6 +23756,187 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 94. C-AUTO-06 — the flow DSL, the version that cannot be edited, and the pin that cannot drift.
+//
+//     Eight of these mutations produce a system that still works. That is the whole reason they are here:
+//     a flow validator that has stopped checking one rule publishes the flows it is given, a pinned read
+//     that follows `max(version)` answers every query with a perfectly good document, and a capped count
+//     returns a smaller number rather than an error. None of them fails until the flow runs — days later,
+//     for the enrolments that were pinned to it — and by then the evidence is a message somebody received.
+//
+//     The two mutations to `packages/db` are the ones this unit exists for. 94f re-points the pinned read
+//     at the newest version, which is the single line that would make every guarantee here ornamental
+//     while leaving the row counts, the foreign key and the immutability triggers exactly as they are.
+//     94g caps the enrolment count, which is `settings-store.itest.ts`'s recorded failure (brief rule 12)
+//     applied to the figure C-AUTO-09 shows an operator before they save an edit.
+//
+//     94i is the control: every one of those files, unedited, passes both suites. Without it each case
+//     above is satisfied by a suite that cannot pass at all.
+{
+  const DSL = 'packages/core/src/automation/dsl.ts'
+  const ANALYSIS = 'packages/core/src/automation/static-analysis.ts'
+  const FLOW_REPO = 'packages/db/src/repositories/flow.ts'
+
+  const AUTOMATION_SUITE = 'packages/core/src/automation'
+  const VERSIONING_ITEST = 'packages/fixtures/src/flow-versioning.itest.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /** One anchored edit, refusing an anchor that is missing or repeated (rule 20 / `replaceOnce`). */
+  const flowMutant = (path, anchor, replacement, body) =>
+    withEditedFile(path, (text) => replaceOnce(text, anchor, replacement), body)
+
+  // 94a. The class comparison dropped. Every other assertion about a message node still passes, and a
+  //      promotional node bound to `booking.confirmed` publishes — which sends an offer from the
+  //      transactional sender identity, outside the promotional window, with no opt-out route.
+  checkRejectedBy(
+    'flow gate: a validator that stops comparing a node’s class with its template is caught',
+    flowMutant(
+      DSL,
+      '    if (actual !== node.messageClass) {',
+      '    if (actual !== node.messageClass && false) {',
+      () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
+    ),
+    'flow-dsl-message-class-mismatch',
+  )
+
+  // 94b. The fail-closed arm turned into a pass. A publish path that forgot to inject the registry then
+  //      publishes every flow with no class checked at all, and nothing anywhere reports it — ADR 0002's
+  //      subject, in the one area of this system where the consequence is a regulatory breach.
+  checkRejectedBy(
+    'flow gate: a class check that silently does not run is caught',
+    flowMutant(
+      DSL,
+      `  if (templates === undefined) {
+    return [
+      refusal(
+        'flow-dsl-templates-not-checked',`,
+      `  if (templates === undefined) {
+    return []
+  }
+  if (templates === undefined) {
+    return [
+      refusal(
+        'flow-dsl-templates-not-checked',`,
+      () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
+    ),
+    'flow-dsl-templates-not-checked',
+  )
+
+  // 94c. The canonical form stops sorting keys, and comes out in the SCHEMA's key order instead — zod
+  //      builds its result by walking its own shape, so every parse is self-consistent and only a
+  //      comparison against an independently sorted form can tell. `nodes` before `edges` is what it
+  //      produces, and a stored document then no longer serialises to the bytes that were published.
+  checkRejectedBy(
+    'flow gate: a canonical form that depends on the key order it was given is caught',
+    flowMutant(
+      DSL,
+      '    for (const key of Object.keys(source).sort()) {',
+      '    for (const key of Object.keys(source)) {',
+      () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
+    ),
+    'sorts keys at every level',
+  )
+
+  // 94d. The accumulated delay stops counting delays. It then reports zero for every flow, which passes
+  //      the 180-day bound for ever — a bound that can never be exceeded is not a bound.
+  checkRejectedBy(
+    'flow gate: an accumulated-delay figure that ignores the delays is caught',
+    flowMutant(
+      ANALYSIS,
+      '      return node !== undefined && node.kind === \'delay\' ? total + node.minutes : total',
+      '      return total',
+      () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
+    ),
+    'reports the longer branch',
+  )
+
+  // 94e. "Bounded" weakened to "has an edge leaving it". The committed corpus does NOT catch this: its bad
+  //      loop has no escape at all, so every fixture still fails and passes as before. Only a loop that
+  //      escapes into a second closed loop tells the two implementations apart.
+  checkRejectedBy(
+    'flow gate: a cycle check that accepts an escape leading nowhere is caught',
+    flowMutant(
+      ANALYSIS,
+      `    const bounded = escapes.some((target) =>
+      breadthFirst(target, outgoing).some((id) => {
+        const node = nodes.get(id)
+        return node !== undefined && isTerminal(node)
+      }),
+    )`,
+      '    const bounded = escapes.length > 0',
+      () => runExpectingFailure('pnpm', unit(AUTOMATION_SUITE)),
+    ),
+    'refuses a loop whose only escape leads into another loop with no exit',
+  )
+
+  // 94f. THE mutation. The pinned read follows `max(version)` instead of the pin, which is one line and
+  //      makes the composite foreign key, the NOT NULL, the ZF002 trigger and all four hundred row counts
+  //      ornamental: every enrolment would answer with the newest document while the rows still say
+  //      otherwise. Nothing else in the suite moves.
+  checkRejectedBy(
+    'flow gate: a pinned read that follows the latest version is caught',
+    flowMutant(
+      FLOW_REPO,
+      '        on d.flow_id = e.flow_id and d.version = e.definition_version',
+      `        on d.flow_id = e.flow_id
+       and d.version = (select max(l.version) from flow_definition l where l.flow_id = e.flow_id)`,
+      () => runExpectingFailure('pnpm', integration(VERSIONING_ITEST)),
+    ),
+    'the node added by the edit is not in the pinned document',
+  )
+
+  // 94g. The enrolment count read through a cap. It is the figure C-AUTO-09 states before saving an edit,
+  //      and a capped one reads as a smaller number rather than as an error — `settings-store.itest.ts`'s
+  //      recorded failure, which was green for weeks.
+  checkRejectedBy(
+    'flow gate: an enrolment count read through a cap is caught',
+    flowMutant(
+      FLOW_REPO,
+      `    select count(*)::text as n
+      from flow_enrolment`,
+      `    select least(count(*), 100)::text as n
+      from flow_enrolment`,
+      () => runExpectingFailure('pnpm', integration(VERSIONING_ITEST)),
+    ),
+    'leaves all 400 on version N',
+  )
+
+  // 94h. The document-key check dropped. `flow_definition` holds no key column — the flow row is the key —
+  //      so this is the one integrity rule the database cannot catch, and its absence publishes a document
+  //      that says it is a different flow.
+  checkRejectedBy(
+    'flow gate: publishing a document whose own key is another flow is caught',
+    flowMutant(
+      FLOW_REPO,
+      '  if (verdict.facts.key !== input.flowKey) {',
+      '  if (verdict.facts.key !== input.flowKey && false) {',
+      () => runExpectingFailure('pnpm', integration(VERSIONING_ITEST)),
+    ),
+    'refuses a document whose own key is another flow',
+  )
+
+  // 94i. The control. Every file above, unedited, passes both suites — without which each case is
+  //      satisfied by a suite that cannot pass at all.
+  {
+    const unitClean = run('pnpm', unit(AUTOMATION_SUITE))
+    const integrationClean = run('pnpm', integration(VERSIONING_ITEST))
+    check(
+      'flow gate: the committed DSL, analyser and repository pass both suites',
+      !unitClean.failed && !integrationClean.failed,
+      `a committed check failed:\n${unitClean.output}${integrationClean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

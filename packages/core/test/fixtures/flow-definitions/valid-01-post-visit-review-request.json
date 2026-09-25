@@ -1,0 +1,81 @@
+{
+  "description": "The flow docs/07 describes: a day after a completed treatment, ask for a review — but only from a contact who has given marketing consent, because review.request is promotional.",
+  "dslVersion": 1,
+  "edges": [
+    {
+      "branch": "default",
+      "from": "visit_completed",
+      "to": "settle"
+    },
+    {
+      "branch": "default",
+      "from": "settle",
+      "to": "may_we_ask"
+    },
+    {
+      "branch": "true",
+      "from": "may_we_ask",
+      "to": "ask"
+    },
+    {
+      "branch": "false",
+      "from": "may_we_ask",
+      "to": "no_consent"
+    },
+    {
+      "branch": "default",
+      "from": "ask",
+      "to": "mark_asked"
+    },
+    {
+      "branch": "default",
+      "from": "mark_asked",
+      "to": "done"
+    }
+  ],
+  "key": "post_visit_review_request",
+  "nodes": [
+    {
+      "event": "appointment.completed",
+      "id": "visit_completed",
+      "kind": "trigger"
+    },
+    {
+      "id": "settle",
+      "kind": "delay",
+      "minutes": 1440,
+      "note": "A day, so the ask does not arrive at the door."
+    },
+    {
+      "id": "may_we_ask",
+      "kind": "condition",
+      "test": {
+        "fact": "has_marketing_consent",
+        "operator": "is_true"
+      }
+    },
+    {
+      "channel": "sms",
+      "id": "ask",
+      "kind": "action_message",
+      "messageClass": "promotional",
+      "templateKey": "review.request"
+    },
+    {
+      "id": "mark_asked",
+      "kind": "action_tag",
+      "tag": "review_requested"
+    },
+    {
+      "id": "done",
+      "kind": "exit",
+      "reason": "goal_met"
+    },
+    {
+      "id": "no_consent",
+      "kind": "exit",
+      "reason": "not_eligible"
+    }
+  ],
+  "title": "Ask for a review after a visit"
+}
