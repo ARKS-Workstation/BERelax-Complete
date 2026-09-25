@@ -1,6 +1,7 @@
 import { getDefinition, validateSetting } from '@berelax/config'
 import {
   ASIA_DUBAI,
+  DAILY_HEALTH_CHECK_LOCAL_HOUR,
   fromLocal,
   instantToIso,
   localDate,
@@ -8,7 +9,7 @@ import {
   offsetMinutes,
   toLocal,
 } from '@berelax/core'
-import { GOOGLE_PUBLISHING_STATUSES } from '@berelax/google'
+import { GOOGLE_PUBLISHING_STATUSES, runDeepCheck, TEST_CONNECTION_PASS } from '@berelax/google'
 import { describe, expect, it } from 'vitest'
 import { cronRegistrations, isValidCron, JOB_REGISTRY, SCHEDULE_TIMEZONE } from '../registry.ts'
 import {
@@ -16,6 +17,7 @@ import {
   GOOGLE_HEALTH_AGENT,
   GOOGLE_LIVENESS_AGENT,
   PUBLISHING_STATUS_SETTING,
+  SCHEDULED_DEEP_CHECK,
 } from './google-connection-health.ts'
 
 /**
@@ -106,6 +108,34 @@ describe('acceptance — the deep check is at 03:00 Asia/Dubai and the probe is 
         cron.name !== 'google-connection.liveness',
     )
     expect(sharing).toEqual([])
+  })
+})
+
+describe('acceptance — Test connection and this cron are one implementation (G-CONN-07)', () => {
+  it('runs the same exported function reference the button runs', () => {
+    // The cron's end of the identity. `@berelax/google` asserts the other end — that
+    // `TEST_CONNECTION_PASS` is `runDeepCheck` — and neither package can assert both, because `apps/web`
+    // may not import `apps/worker`. Together they say: the button and the 03:00 job invoke one function.
+    expect(SCHEDULED_DEEP_CHECK).toBe(runDeepCheck)
+    expect(SCHEDULED_DEEP_CHECK).toBe(TEST_CONNECTION_PASS)
+  })
+
+  it('and a lookalike of the same type is not that reference', () => {
+    // The control. `toBe` between two functions is only evidence if a different function fails it, which
+    // is what a "just for the cron" wrapper would be.
+    const lookalike: typeof runDeepCheck = async (_deps, now) => ({
+      checkedAt: now,
+      connections: [],
+      retryWorthwhile: false,
+    })
+    expect(lookalike).not.toBe(SCHEDULED_DEEP_CHECK)
+  })
+
+  it('declares the hour the settings card promises the owner', () => {
+    // The card renders "next check at 03:00" from `DAILY_HEALTH_CHECK_LOCAL_HOUR` in `@berelax/core`,
+    // because `apps/web` cannot import this registry. This is the pin that stops the card promising an
+    // hour the cron no longer runs at — a disagreement nothing else in the system could notice.
+    expect(health?.cron?.split(/\s+/)[1]).toBe(String(DAILY_HEALTH_CHECK_LOCAL_HOUR))
   })
 })
 

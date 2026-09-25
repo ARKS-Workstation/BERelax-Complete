@@ -391,6 +391,65 @@ export const SETTINGS = [
     },
   }),
   define({
+    /**
+     * The date the Business Profile API access application was submitted.
+     *
+     * docs/10 §4 asks the amber state to carry a **submission date**, and it is the one thing that makes
+     * *pending approval* actionable rather than something to wait out: an application submitted last week
+     * is normal, and one submitted in March is a chase. Nothing in the system can compute it — Google
+     * does not expose the application, and the first refused read is not the day it was filed.
+     *
+     * So it is recorded by a human, and the default is the **empty string** rather than a plausible date.
+     * That is brief rule 15 exactly: blank is visibly unanswered and a plausible date is
+     * indistinguishable from a recorded one, on a screen whose whole job is to be trusted. The card says
+     * the date has not been recorded, which is a sentence somebody can act on.
+     */
+    key: 'google.business_profile_application_submitted_on',
+    tier: 'operational',
+    // A date or nothing. The regex is the constraint rather than `z.string()`, because "March" and
+    // "last week" are the two values a free-text box would actually receive.
+    schema: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]),
+    defaultValue: '',
+    label: 'Business Profile access application submitted on',
+    help: 'The date the Google Business Profile API access application was sent, as YYYY-MM-DD. It is shown beside "access pending Google approval" so an application nobody has chased is visible as one. Leave it empty until an application has actually been submitted.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y2-gbp-status',
+      note: 'Empty, because no application has been submitted. A placeholder date here would be indistinguishable from a real submission on the one screen that exists to be believed.',
+    },
+  }),
+  define({
+    /**
+     * The Cloud console page where the Business Profile quota is visible.
+     *
+     * docs/10 §4 asks the amber state to link to *"the Cloud quota page where 0 to 300 is visible"*, and
+     * approval is observable in exactly one place: the quota for this project moving from 0 to 300 QPM.
+     * Which URL that is depends on the Cloud project — the console's quota pages are per project and per
+     * API — and this build does not know the project. So the link is configured rather than guessed
+     * (brief rule 15): a URL written from memory here would be a link that 404s, or worse, one that opens
+     * somebody else's project and shows a quota that is not ours.
+     *
+     * Empty until somebody pastes it, and the card then names the console page in words instead. The
+     * words are navigation rather than a URL, which is the one form of this instruction that cannot be
+     * wrong.
+     */
+    key: 'google.cloud_quota_page_url',
+    tier: 'operational',
+    schema: z.union([z.literal(''), z.string().url().max(500)]),
+    defaultValue: '',
+    label: 'Cloud console quota page',
+    help: 'The Google Cloud console page showing the Business Profile API quota for this project, which is where approval appears as the quota moving from 0 to 300 QPM. Paste the URL from the console; while it is empty the settings card names the page to open instead of linking to it.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y2-gbp-status',
+      note: 'Empty, because the Cloud project is not known to this build and a console URL written from memory is a link that opens the wrong project or nothing at all.',
+    },
+  }),
+  define({
     key: REVIEW_AUTOSEND_SETTING_KEY,
     tier: 'compliance_locked',
     /**

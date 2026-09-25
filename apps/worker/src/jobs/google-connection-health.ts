@@ -55,6 +55,17 @@ import { AppError } from '@berelax/shared'
  * at all.
  */
 
+/**
+ * The pass this cron runs, named so G-CONN-07's *Test connection* can be asserted to be the same one.
+ *
+ * docs/10 §4 asks for the daily cron **plus** an on-demand button, and a button with its own code path
+ * would report a health this job does not agree with. The identity is checked from both ends, because
+ * neither end can see the other: `TEST_CONNECTION_PASS` in `@berelax/google` is asserted equal to
+ * `runDeepCheck` there, and this constant is asserted equal to it here. `apps/web` may not import
+ * `apps/worker` — that is what `pnpm boundaries` is for — so one test could not do it.
+ */
+export const SCHEDULED_DEEP_CHECK: typeof runDeepCheck = runDeepCheck
+
 /** The `agent_definition` rows these passes report to. 0021 seeds the first, 0033 the second. */
 export const GOOGLE_HEALTH_AGENT = 'google_health'
 export const GOOGLE_LIVENESS_AGENT = 'google_liveness'
@@ -236,7 +247,7 @@ export async function runGoogleHealthCheck(
       ...(options.jobId === undefined ? {} : { jobId: options.jobId }),
     },
     async () => {
-      result = await runDeepCheck(deps, instantFromIso(atIso))
+      result = await SCHEDULED_DEEP_CHECK(deps, instantFromIso(atIso))
     },
     createRunBudget,
   )

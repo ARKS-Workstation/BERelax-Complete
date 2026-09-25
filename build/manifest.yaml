@@ -12640,6 +12640,109 @@ units:
       scheduled job invoke the same exported function reference, so the two cannot drift'
     - axe reports zero violations on Settings to Integrations, and Playwright captures it at 3 viewports
       x 2 themes x 2 directions with zero pixel diff on an unchanged rerun
+    - 'NOTE: NO migration and SCHEMA_VERSION is untouched. 0074 was allocated to this unit and is not
+      needed: nothing here is a new column. The two facts the amber state renders are SETTINGS
+      (packages/config/src/settings/registry.ts), which is code rather than schema, exactly as G-CONN-06''s
+      two settings were, and everything else is read from rows 0016 and 0033 already created. The newest
+      migration on disk is still 0070.'
+    - 'NOTE: the presentation states are SIX, not the five this entry''s first acceptance line lists.
+      pending_gbp_approval is missing from it and is required by this entry''s own fourth line — the amber
+      state IS a presentation state, and deriveConnectionHealth has returned it since G-CONN-01. So the
+      matrix is 6 states x 13 events = 78 pairs, each carrying either a declared transition or an explicit
+      refusal with a reason, in CONNECTION_TRANSITIONS: a Record over BOTH unions, so a state or an event
+      added without 13 or 6 decisions fails to compile. That is stronger than assertNever, which cannot see
+      a missing event; assertNever is still there, in connectionToneFor, because the compile error it
+      produces names the new state and the function rather than an object literal three files away.
+      Gates 95a and 95b are the two halves: a seventh state fails tsc, and a seventh state WITH a sentence
+      still fails tsc — so satisfying the copy table cannot satisfy the machine.'
+    - 'NOTE: the machine is a closure claim and NOT a second derivation, and the distinction is enforced by
+      a test rather than by a comment. Nothing renders from CONNECTION_TRANSITIONS; what a card shows is
+      stateShownFor(deriveConnectionHealth(...)) and nothing else. connection-state.test.ts then checks the
+      matrix AGAINST the derivation over eleven hand-built (before, event, after) fixtures and counts them
+      against a floor, because a matrix that could disagree with the one derivation would be the exact
+      defect docs/10 SS2 arranges everything else to avoid.'
+    - 'NOTE: ''Connected cannot render without recency'' is a rule in @berelax/core — stateShownFor — and it
+      deliberately DIVERGES from deriveConnectionHealth for one case. A connection consented ten minutes ago
+      with last_ok_at NULL derives healthy, correctly: it is not stale (staleness falls back to consent_at),
+      nothing has failed, and nothing should email anybody. The CARD must not print a green tick beside
+      ''No successful call has been made yet'', so it shows degraded with cause never_verified. The
+      alternatives were a seventh state every consumer would have to decide about, or suppressing the tick
+      while leaving the affordance keyed to a state that says everything is fine. G-CONN-08''s banner should
+      read stateShownFor rather than displayState for the same reason, and that is this unit''s one
+      instruction to it.'
+    - 'NOTE: files differ from the list below, which is recorded rather than quietly done. There is no
+      page.tsx and no .tsx at all: apps/web/src/routes/registry.ts is in exact bijection with the filesystem
+      and requires every DOCUMENT in both locales, so a page here would need an Arabic admin document and
+      the admin shell. The Messages inbox, the compliance calendar, the HR credentials screen, the
+      breakpoint preview and the three Google routes under this prefix are all handlers for that reason. So:
+      route.ts (GET), handler.ts (the reading), connection-card.ts (the pure renderer of a whole document,
+      tokens inline via tokensCss), and test-connection/{route.ts,handler.ts} for the POST. Both new paths
+      are declared in the registry as handlers covered by the /settings noindex prefix.'
+    - 'NOTE scoped — the capture matrix is 3 viewports x 2 themes = SIX cells, not twelve. The direction axis
+      needs a real Arabic admin route, which does not exist (the (admin) layout is locale=''en''), and
+      M-VAT-11 recorded the same scoping for the same reason: an RTL cell must be the Arabic document, not
+      the English one with an attribute flipped. Deferred to whichever unit builds the Arabic admin shell;
+      until then the twelfth cell would be a screenshot of a document that is not served. axe audits all six
+      renders with a known-bad control that must report button-name and color-contrast by id, the dark cell
+      is asserted to resolve a darker ground at every width, and each cell is photographed twice through two
+      browser contexts and compared byte for byte, with a control proving a changed card differs.'
+    - 'NOTE scoped — the submission date and the Cloud quota link are two new OPERATIONAL settings, both
+      EMPTY by default: google.business_profile_application_submitted_on and google.cloud_quota_page_url,
+      each provisional against Y2-gbp-status. Neither is computable — Google does not expose the application
+      and the console''s quota pages are per project, which this build does not know — so brief rule 15
+      applies: the card says the date has not been recorded, and names the console page in words instead of
+      linking to a URL written from memory. Both branches are asserted against the DOM, including that the
+      unconfigured branch renders NO anchor. The line is satisfied once an operator pastes the URL and can
+      be satisfied no earlier.'
+    - 'NOTE scoped — the Disconnect control G-CONN-09 deferred here is NOT shipped, and neither is the
+      transactional enqueue for announceRevokeRetry. There is still no admin session (principalForRequest
+      reads Payload''s CMS session, and its user table is not the staff table), and an unauthenticated POST
+      that revoked the business''s Google grant would be an off switch for anybody who found the URL —
+      M-VAT-11 refused the same thing for the same reason. Deferred to the unit that brings a staff session;
+      the card ships Reconnect (a GET to G-CONN-03''s consent route) and Test connection.'
+    - 'NOTE scoped — the POST answers JSON rather than redirecting back to the card with the result rendered
+      on it, exactly as G-CONN-05''s picker POST answers JSON. The round trip back to the screen the operator
+      started from, with the outcome shown, is G-CONN-08''s (it owns the return path and the location
+      preservation); this unit''s card links there rather than pretending to own it.'
+    - 'NOTE: one implementation, asserted from both ends. testConnection narrows the health store to one
+      connection and calls TEST_CONNECTION_PASS, which IS runDeepCheck — so the button runs the 03:00 pass''s
+      own entry point rather than the same inner function. Identity is asserted in
+      packages/google/src/health/test-connection.test.ts and, for the cron, against a new exported
+      SCHEDULED_DEEP_CHECK in apps/worker/src/jobs/google-connection-health.ts; two halves rather than one,
+      because apps/web may not import apps/worker and no single test can see both. Each has a lookalike
+      control that must NOT be the reference. The store is narrowed by explicit delegation rather than a
+      spread, so a method added to GoogleHealthStore is a compile error here instead of silently escaping the
+      narrowing — and only listAll is overridden, because load must still re-read the row the forced refresh
+      may have moved to needs_reauth.'
+    - 'NOTE: the button cannot report success without evidence, and that is the whole of ADR 0005 here. The
+      pass it runs THROWS NOTHING by design — it catches what withGoogle raises and records it — so a
+      handler wrapping it in a try and answering ok would report success for a connection where no call was
+      made at all. ok is true only when at least one authenticated call was ANSWERED, and every other case
+      names a reason: nothing_was_checked (no resource selected, so the pass had nothing to ask),
+      no_call_reached_google, grant_needs_reauth, capability_failing, connection_not_found,
+      connection_disconnected. Ordered cause before symptom: a dead grant also satisfies
+      no_call_reached_google, and reporting the symptom would send the owner to Google''s status page for a
+      problem whose fix is one button on this screen. expiring_soon and pending_gbp_approval are deliberately
+      PASSES. Seven failure cases assert their reason by name and four controls prove the success path is
+      reachable; gate 95e mutates the verdict to always-ok and watches the suite name the rule.'
+    - 'NOTE: packages/harness/src/ports.ts was NOT touched and this suite draws NO band. The card renderer is
+      pure and the handler takes its instant as an argument, so page.setContent renders the exact bytes the
+      route serves at a frozen clock — no next start, no port, no temp root (brief rules 18 and 19), the
+      arrangement manage-booking.itest.ts already uses. A band declared and unused would fail
+      apps/web/src/test-ports.test.ts by name, so the 11_200 allocation was deliberately left free.'
+    - 'NOTE: a DEFECT in existing code, found by this unit and fixed here because pnpm typecheck cannot pass
+      without it. packages/db/src/index.ts never exported ./adapters/manual-payment.ts, and
+      packages/fixtures/src/payment.itest.ts imports five names from @berelax/db that live only there — so
+      tsc -p tsconfig.json reports 14 errors in that file on a clean tree at 057bd6e, and the integration
+      suite never said so because vitest transpiles per file and does not typecheck. Five names are exported,
+      not the module: exactly what the declared consumer imports. M-TILL-07 is marked done and its barrel
+      entry is missing; nothing else in the tree imports that module at all.'
+    - 'NOTE: a manifest inaccuracy in G-CONN-06, which two of its own NOTEs depend on:
+      packages/google/src/google-health.itest.ts does not exist on disk. Its claims live in
+      apps/worker/src/jobs/google-connection-health.itest.ts, so the note that says "every claim needing a
+      token that DOES open lives in packages/google/src/google-health.itest.ts" points at a file that was
+      never written. This unit''s equivalent claims are unit tests against the memory store for the same
+      reason: apps/web cannot seal a token either.'
     files:
     - packages/core/src/google/connection-state.ts
     - apps/web/app/(admin)/settings/integrations/page.tsx

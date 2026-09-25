@@ -25244,6 +25244,390 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 95a-95n. (C-CRM-06) The review queue and the merge preview: the preview that must be the merge itself,
+//     and the rollback that must not become a commit.
+//
+//     A preview has one defect worth having a gate for, and it is not visible from the outside: a preview
+//     computed by a SECOND piece of code that describes what a merge would do agrees with the merge on
+//     every pair anybody tests and disagrees on the one that matters. So the agreement is structural —
+//     `MERGE_UNDER_PREVIEW` IS `mergeCustomers`, the function object — and 95b is the mutant that turns it
+//     into a wrapper, which is what drift looks like on its first day.
+//
+//     The other half is the rollback. 0069's repository inserts `merge_record` BEFORE it moves a row, so a
+//     preview that reused the merge path without rolling back would tombstone a customer nobody approved
+//     merging — and that row cannot be deleted by anybody (ZT001). Which is also why no case here MAKES a
+//     preview commit: the mutant would leave a real tombstone on the verify database and every later run of
+//     this suite would answer `already_merged`. The property is guarded where it can be broken safely —
+//     the only exit from the transaction is a throw, and the module issues no write of its own — and 95a
+//     and 95c are those two mutants against the unit test that reads the source.
+//
+//     95d-95g are the queue's own rules, each one a pair that would be silently wrong: a pair asked about
+//     twice, an order that shuffles under a reviewer, a tombstone offered for ever, and a survivor the
+//     screen names differently from the merge. 95k-95m need real PostgreSQL. 95j is the escaping, which
+//     only the render test can see: every label in the suites is `Customer NNNN`, so a stored `<script>`
+//     in a `display_name` would reach an admin page carrying an irreversible form and nothing would notice.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const PREVIEW = 'packages/db/src/repositories/merge-preview.ts'
+  const PREVIEW_UNIT = 'packages/db/src/repositories/merge-preview.test.ts'
+  const QUEUE = 'packages/core/src/crm/duplicate-queue.ts'
+  const QUEUE_UNIT = 'packages/core/src/crm/duplicate-queue.test.ts'
+  const PLAN = 'packages/core/src/crm/merge-plan.ts'
+  const PLAN_UNIT = 'packages/core/src/crm/merge-plan.test.ts'
+  const SCAN = 'packages/db/src/repositories/duplicate-queue.ts'
+  const MERGE_REPO = 'packages/db/src/repositories/merge.ts'
+  const RENDER = 'apps/web/app/(admin)/clients/duplicates/render.ts'
+  const RENDER_UNIT = 'apps/web/src/duplicates-render.test.ts'
+  const PREVIEW_ITEST = 'packages/fixtures/src/merge-preview.itest.ts'
+
+  /** One anchored edit to a shipped file. `replaceOnce` refuses an ambiguous or stale anchor (rule 20). */
+  const mutant = (path, anchor, replacement, body) =>
+    withEditedFile(path, (text) => replaceOnce(text, anchor, replacement), body)
+
+  // 95a. The preview module issues a write of its own. Every write a preview performs must be the merge's,
+  //      or the preview is describing an operation nobody will perform — and a module that started doing
+  //      its own bookkeeping would be invisible from the outside, because the numbers would still balance.
+  checkRejectedBy(
+    'preview gate: a write statement in the preview module is caught',
+    mutant(
+      PREVIEW,
+      'async function writeCounts(sql: Sql, pair: MergePreviewPair): Promise<MergePreviewWrites> {',
+      'async function writeCounts(sql: Sql, pair: MergePreviewPair): Promise<MergePreviewWrites> {\n' +
+        "  await sql`insert into audit_event (action) values ('mutant')`",
+      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
+    ),
+    'contains no write statement',
+  )
+
+  // 95b. The merge reached through a WRAPPER rather than by reference. It behaves identically today, which
+  //      is the whole problem: `toBe` is the only assertion that can tell the two apart.
+  checkRejectedBy(
+    'preview gate: a preview that wraps the merge instead of being it is caught',
+    mutant(
+      PREVIEW,
+      'export const MERGE_UNDER_PREVIEW = mergeCustomers',
+      'export const MERGE_UNDER_PREVIEW = (...args: Parameters<typeof mergeCustomers>) =>\n' +
+        '  mergeCustomers(...args)',
+      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
+    ),
+    'names the merge function BY REFERENCE',
+  )
+
+  // 95c. The rollback turned into a return, which is the one edit that makes a preview COMMIT. It is
+  //      caught here rather than by running it, because running it would leave a tombstone this repository
+  //      cannot remove — see the block header.
+  checkRejectedBy(
+    'preview gate: an exit from the preview transaction that is not a throw is caught',
+    mutant(
+      PREVIEW,
+      "        throw new PreviewRolledBack({\n          kind: 'already_merged',",
+      "        return void ({\n          kind: 'already_merged',",
+      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
+    ),
+    'leaves the transaction only by throwing',
+  )
+
+  // 95d. The tombstone filter removed. `findDuplicateCandidates` still returns a merged-away record as a
+  //      candidate for its own survivor (C-CRM-05's NOTE 8c), so without this the queue shows every
+  //      completed merge for ever, with a confirm button that answers `already_merged`.
+  checkRejectedBy(
+    'queue gate: a queue that offers a pair already merged away is caught',
+    mutant(QUEUE, 'if (left.isMergedAway || right.isMergedAway) {', 'if (false) {', () =>
+      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
+    ),
+    'excludes a pair either side of which was merged away',
+  )
+
+  // 95e. The pair de-duplication removed. The scan probes per record, so a duplicate pair is found twice —
+  //      and a queue that asked the same question twice would let the second answer act on a record the
+  //      first had already merged away.
+  checkRejectedBy(
+    'queue gate: a queue that asks about one pair twice is caught',
+    mutant(QUEUE, 'if (seen.has(pairKey)) continue', 'if (false) continue', () =>
+      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
+    ),
+    'asks the same question once when the scan found the pair from both sides',
+  )
+
+  // 95f. The ordering made a no-op. A capped, unordered queue returns a different set on two identical
+  //      calls, and a reviewer working down a list that reshuffles loses their place and re-reviews what
+  //      they have already dismissed.
+  checkRejectedBy(
+    'queue gate: a queue that does not order by score is caught',
+    mutant(QUEUE, '  rows.sort(', '  ;[...rows].sort(', () =>
+      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
+    ),
+    'is descending score, then the survivor id, then the loser id',
+  )
+
+  // 95g. The survivor chosen by the queue instead of read off the plan. The screen would then name one
+  //      record and the merge would keep the other, and both would look right on their own.
+  checkRejectedBy(
+    'queue gate: a survivor the queue decided for itself is caught',
+    mutant(
+      QUEUE,
+      'const survivor = decision.survivorId === left.subject.id ? left.subject : right.subject',
+      'const survivor = left.subject',
+      () => runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
+    ),
+    'survivor, which is the earlier record',
+  )
+
+  // 95h. An operator's nomination ignored. The default survivor is the earlier record and the earlier
+  //      record is sometimes the one with the mistyped number on it, so the override is the reason the
+  //      screen has a choice at all — and one that silently did nothing would read as if it had worked.
+  checkRejectedBy(
+    'plan gate: a nominated survivor that is ignored is caught',
+    mutant(PLAN, '      : nominated === a.id', '      : a.createdAt < b.createdAt', () =>
+      runExpectingFailure('pnpm', unit(PLAN_UNIT)),
+    ),
+    'lets an operator nominate the LATER record',
+  )
+
+  // 95i. A nomination accepted under `auto_merge`. The score says how alike two records are and nothing
+  //      about which should be kept, so an unattended merge acting on a nomination is acting on a decision
+  //      whose maker has been lost.
+  checkRejectedBy(
+    'plan gate: a survivor nominated with no operator behind it is caught',
+    mutant(PLAN, "    if (authority !== 'operator_confirmed') {", '    if (false) {', () =>
+      runExpectingFailure('pnpm', unit(PLAN_UNIT)),
+    ),
+    'refuses a nomination under',
+  )
+
+  // 95j. The label on the screen not escaped. `display_name` is whatever the front desk typed, and this
+  //      page carries a form that performs an irreversible write — so a stored `<script>` would run in the
+  //      admin origin. No suite would notice: every fixture label is `Customer NNNN` (ADR 0020).
+  checkRejectedBy(
+    'queue gate: an unescaped record label on the review screen is caught',
+    mutant(
+      RENDER,
+      "${safeText(record.displayName ?? 'no label recorded')}",
+      "${record.displayName ?? 'no label recorded'}",
+      () => runExpectingFailure('pnpm', unit(RENDER_UNIT)),
+    ),
+    'escapes a hostile label rather than rendering it',
+  )
+
+  // 95k. The previewed consent state read BEFORE the merge instead of after — the exact shape of a preview
+  //      that reports the current state and calls it the outcome. Every row count on the page would still
+  //      be right, and the one figure a reviewer acts on would be wrong.
+  checkRejectedBy(
+    'preview gate: a previewed consent state that is really the current one is caught',
+    mutant(
+      PREVIEW,
+      'survivorConsentAfter: await readConsentLog(uow.sql, outcome.survivorCustomerId),',
+      'survivorConsentAfter: survivorConsentBefore,',
+      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
+    ),
+    'equals what resolveConsent says after the real merge',
+  )
+
+  // 95l. The tombstone read answering with nothing. Every caller still gets a set and every record reads
+  //      as live — which is right for almost all of them, and wrong for exactly the pairs this filter
+  //      exists for.
+  checkRejectedBy(
+    'queue gate: a tombstone read that reports no tombstones is caught',
+    mutant(
+      MERGE_REPO,
+      '  return new Set(rows.map((row) => row.loser_customer_id))',
+      '  return new Set()',
+      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
+    ),
+    'drops a pair whose record was merged away',
+  )
+
+  // 95m. The scope filter removed from the scan. Every assertion in both suites narrows through
+  //      `customerIds` for brief rule 12's reason, so a scope that quietly admitted the whole table would
+  //      make those assertions depend on what every other unit had seeded.
+  checkRejectedBy(
+    'queue gate: a scoped scan that admits a candidate outside the scope is caught',
+    mutant(
+      SCAN,
+      'if (inScope !== null && !inScope.has(candidate.customerId)) continue',
+      'if (false) continue',
+      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
+    ),
+    // The scope test and not the ordering one, which this mutant does NOT break: the extra pairs it admits
+    // are cross-pairs scoring 640 and 300, so they are excluded by the threshold and the listed rows are
+    // unchanged. Measured rather than assumed — the first version of this case named the ordering test and
+    // reported FAIL against a mutant the suite had caught.
+    'keeps a scoped queue scoped',
+  )
+
+  // 95n. The controls on the whole block: the committed suites pass, so every mutant above is about its own
+  //      fixture and not about a unit that was already red.
+  for (const [name, file] of [
+    ['the committed duplicate-queue suite', QUEUE_UNIT],
+    ['the committed merge-preview unit suite', PREVIEW_UNIT],
+    ['the committed review-screen render suite', RENDER_UNIT],
+  ]) {
+    const result = run('pnpm', unit(file))
+    check(`queue gate: ${name} passes`, !result.failed, String(result.output))
+  }
+}
+
+// 96a-96f. (G-CONN-07) The connection's presentation states: a state a human is shown must have a
+//          sentence, every (state x event) pair must carry a decision, and *Test connection* must not be
+//          able to report success without having established anything.
+//
+//          The first two are enforced by the TYPE — `CONNECTION_STATE_COPY` and `CONNECTION_TRANSITIONS`
+//          are `Record`s over the state union — so 96a and 96b are the only way to watch that enforcement
+//          fire: add a seventh state and require `tsc` to name it, twice, because the copy table and the
+//          machine are two separate obligations and satisfying one must not satisfy the other.
+{
+  const DISPLAY_STATES = 'packages/core/src/google/connection.ts'
+  const STATE_MODULE = 'packages/core/src/google/connection-state.ts'
+  const TEST_CONNECTION = 'packages/google/src/health/test-connection.ts'
+  const STATE_SUITE = 'packages/core/src/google/connection-state.test.ts'
+  const CARD_SUITE = 'apps/web/src/google-connection-card.test.ts'
+  const TEST_CONNECTION_SUITE = 'packages/google/src/health/test-connection.test.ts'
+  const unit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const unitExpectingFailure = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const seventhState = (text) =>
+    replaceOnce(
+      text,
+      "  | 'pending_gbp_approval'\n",
+      "  | 'pending_gbp_approval'\n  | '__gate_state__'\n",
+    )
+
+  // 96a. A seventh presentation state with no sentence must not compile. This is the whole of "plain
+  //      English states": the set a human is shown is enumerated in one place, and a state the machine can
+  //      enter that is missing from it is a build error rather than an enum member rendered to a person.
+  {
+    const result = withEditedFile(DISPLAY_STATES, seventhState, () =>
+      runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+    )
+    checkRejectedBy(
+      'connection states: a presentation state with no plain-English sentence fails to compile',
+      result,
+      '__gate_state__',
+    )
+    check(
+      'connection states: and the error names the module that holds the sentences',
+      result.output.includes('connection-state.ts'),
+      `tsc rejected the state without naming ${STATE_MODULE}:\n${result.output}`,
+    )
+  }
+
+  // 96b. The control on what 96a proves. Give the new state a sentence and nothing else: the transition
+  //      matrix and the tone switch are still incomplete, so it must STILL fail. Without this, one entry
+  //      in the copy table would be enough to add a state nothing has decided anything about.
+  {
+    const result = withEditedFile(DISPLAY_STATES, seventhState, () =>
+      withEditedFile(
+        STATE_MODULE,
+        (text) =>
+          replaceOnce(
+            text,
+            "  broken: {\n    headline: 'Needs re-authorising',",
+            "  __gate_state__: {\n    headline: 'A state with a sentence and no decisions',\n" +
+              "    detail: 'A sentence long enough to satisfy the length assertion in the suite.',\n" +
+              "    tone: 'neutral',\n    requiresRecency: false,\n  },\n" +
+              "  broken: {\n    headline: 'Needs re-authorising',",
+          ),
+        () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json']),
+      ),
+    )
+    checkRejectedBy(
+      'connection states: a state with a sentence but no transitions still fails to compile',
+      result,
+      '__gate_state__',
+    )
+    check(
+      'connection states: and that failure is about the matrix rather than the sentence',
+      result.output.includes('connection-state.ts') &&
+        !result.output.includes('CONNECTION_STATE_COPY'),
+      `expected the transition matrix and the tone switch to be what refuses it:\n${result.output}`,
+    )
+  }
+
+  // 96c. The rule that *Connected* may never be shown without a recency, mutated away. `stateShownFor` is
+  //      one line, and the mutation is the one somebody would make while tidying: return the derivation.
+  {
+    const result = withEditedFile(
+      STATE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (health.displayState === 'healthy' && health.hoursSinceLastSuccess === null) return 'degraded'\n",
+          '',
+        ),
+      () => unitExpectingFailure(STATE_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: showing Connected with no recency is caught',
+      result,
+      'Connected cannot be shown without a recency',
+    )
+  }
+
+  // 96d. docs/10 §4's other prohibition: never a scope string. The mutation is a plausible one — render
+  //      what Google returned rather than the English sentence for it — and the card suite must name it.
+  {
+    const result = withEditedFile(
+      STATE_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (known !== undefined) return { recognised: true, label: known, token: '' }",
+          "    if (known !== undefined) return { recognised: true, label: scope, token: '' }",
+        ),
+      () => unitExpectingFailure(CARD_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: a scope URL rendered on the card is caught',
+      result,
+      'no scope string reaches the card',
+    )
+  }
+
+  // 96e. The one that matters most, and the reason ADR 0005 exists: a *Test connection* that reports
+  //      success without having established anything. The pass it runs throws nothing — it records what it
+  //      finds — so an early `return null` here is exactly the mutation that would ship, and it makes the
+  //      button answer `ok` for a connection where no call was made at all.
+  {
+    const result = withEditedFile(
+      TEST_CONNECTION,
+      (text) =>
+        replaceOnce(
+          text,
+          'function failureReason(check: ConnectionCheck): TestConnectionReason | null {',
+          'function failureReason(check: ConnectionCheck): TestConnectionReason | null {\n' +
+            '  if (check.connectionId !== undefined) return null',
+        ),
+      () => unitExpectingFailure(TEST_CONNECTION_SUITE),
+    )
+    checkRejectedBy(
+      'connection states: a Test connection that reports success having done nothing is caught',
+      result,
+      'a broken provider reports failure by name',
+    )
+  }
+
+  // 96f. The control on all four mutations: the tree as it stands passes every one of those suites. A
+  //      mutation test whose base is red proves nothing about the mutation (ADR 0003).
+  {
+    const result = unit(STATE_SUITE, CARD_SUITE, TEST_CONNECTION_SUITE)
+    check(
+      'connection states: the three suites pass on this tree',
+      !result.failed,
+      `the base is red, so the four mutations above prove nothing:\n${result.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -25885,238 +26269,6 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         `(expected ${shifted.length}); the same list missing the newest-but-one paragraph gave ` +
         `${caught.length} (expected 1)`,
     )
-  }
-}
-
-// 95a-95n. (C-CRM-06) The review queue and the merge preview: the preview that must be the merge itself,
-//     and the rollback that must not become a commit.
-//
-//     A preview has one defect worth having a gate for, and it is not visible from the outside: a preview
-//     computed by a SECOND piece of code that describes what a merge would do agrees with the merge on
-//     every pair anybody tests and disagrees on the one that matters. So the agreement is structural —
-//     `MERGE_UNDER_PREVIEW` IS `mergeCustomers`, the function object — and 95b is the mutant that turns it
-//     into a wrapper, which is what drift looks like on its first day.
-//
-//     The other half is the rollback. 0069's repository inserts `merge_record` BEFORE it moves a row, so a
-//     preview that reused the merge path without rolling back would tombstone a customer nobody approved
-//     merging — and that row cannot be deleted by anybody (ZT001). Which is also why no case here MAKES a
-//     preview commit: the mutant would leave a real tombstone on the verify database and every later run of
-//     this suite would answer `already_merged`. The property is guarded where it can be broken safely —
-//     the only exit from the transaction is a throw, and the module issues no write of its own — and 95a
-//     and 95c are those two mutants against the unit test that reads the source.
-//
-//     95d-95g are the queue's own rules, each one a pair that would be silently wrong: a pair asked about
-//     twice, an order that shuffles under a reviewer, a tombstone offered for ever, and a survivor the
-//     screen names differently from the merge. 95k-95m need real PostgreSQL. 95j is the escaping, which
-//     only the render test can see: every label in the suites is `Customer NNNN`, so a stored `<script>`
-//     in a `display_name` would reach an admin page carrying an irreversible form and nothing would notice.
-{
-  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
-  const integration = (file) => [
-    'exec',
-    'vitest',
-    'run',
-    '-c',
-    'vitest.integration.config.ts',
-    file,
-  ]
-
-  const PREVIEW = 'packages/db/src/repositories/merge-preview.ts'
-  const PREVIEW_UNIT = 'packages/db/src/repositories/merge-preview.test.ts'
-  const QUEUE = 'packages/core/src/crm/duplicate-queue.ts'
-  const QUEUE_UNIT = 'packages/core/src/crm/duplicate-queue.test.ts'
-  const PLAN = 'packages/core/src/crm/merge-plan.ts'
-  const PLAN_UNIT = 'packages/core/src/crm/merge-plan.test.ts'
-  const SCAN = 'packages/db/src/repositories/duplicate-queue.ts'
-  const MERGE_REPO = 'packages/db/src/repositories/merge.ts'
-  const RENDER = 'apps/web/app/(admin)/clients/duplicates/render.ts'
-  const RENDER_UNIT = 'apps/web/src/duplicates-render.test.ts'
-  const PREVIEW_ITEST = 'packages/fixtures/src/merge-preview.itest.ts'
-
-  /** One anchored edit to a shipped file. `replaceOnce` refuses an ambiguous or stale anchor (rule 20). */
-  const mutant = (path, anchor, replacement, body) =>
-    withEditedFile(path, (text) => replaceOnce(text, anchor, replacement), body)
-
-  // 95a. The preview module issues a write of its own. Every write a preview performs must be the merge's,
-  //      or the preview is describing an operation nobody will perform — and a module that started doing
-  //      its own bookkeeping would be invisible from the outside, because the numbers would still balance.
-  checkRejectedBy(
-    'preview gate: a write statement in the preview module is caught',
-    mutant(
-      PREVIEW,
-      'async function writeCounts(sql: Sql, pair: MergePreviewPair): Promise<MergePreviewWrites> {',
-      'async function writeCounts(sql: Sql, pair: MergePreviewPair): Promise<MergePreviewWrites> {\n' +
-        "  await sql`insert into audit_event (action) values ('mutant')`",
-      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
-    ),
-    'contains no write statement',
-  )
-
-  // 95b. The merge reached through a WRAPPER rather than by reference. It behaves identically today, which
-  //      is the whole problem: `toBe` is the only assertion that can tell the two apart.
-  checkRejectedBy(
-    'preview gate: a preview that wraps the merge instead of being it is caught',
-    mutant(
-      PREVIEW,
-      'export const MERGE_UNDER_PREVIEW = mergeCustomers',
-      'export const MERGE_UNDER_PREVIEW = (...args: Parameters<typeof mergeCustomers>) =>\n' +
-        '  mergeCustomers(...args)',
-      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
-    ),
-    'names the merge function BY REFERENCE',
-  )
-
-  // 95c. The rollback turned into a return, which is the one edit that makes a preview COMMIT. It is
-  //      caught here rather than by running it, because running it would leave a tombstone this repository
-  //      cannot remove — see the block header.
-  checkRejectedBy(
-    'preview gate: an exit from the preview transaction that is not a throw is caught',
-    mutant(
-      PREVIEW,
-      "        throw new PreviewRolledBack({\n          kind: 'already_merged',",
-      "        return void ({\n          kind: 'already_merged',",
-      () => runExpectingFailure('pnpm', unit(PREVIEW_UNIT)),
-    ),
-    'leaves the transaction only by throwing',
-  )
-
-  // 95d. The tombstone filter removed. `findDuplicateCandidates` still returns a merged-away record as a
-  //      candidate for its own survivor (C-CRM-05's NOTE 8c), so without this the queue shows every
-  //      completed merge for ever, with a confirm button that answers `already_merged`.
-  checkRejectedBy(
-    'queue gate: a queue that offers a pair already merged away is caught',
-    mutant(QUEUE, 'if (left.isMergedAway || right.isMergedAway) {', 'if (false) {', () =>
-      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
-    ),
-    'excludes a pair either side of which was merged away',
-  )
-
-  // 95e. The pair de-duplication removed. The scan probes per record, so a duplicate pair is found twice —
-  //      and a queue that asked the same question twice would let the second answer act on a record the
-  //      first had already merged away.
-  checkRejectedBy(
-    'queue gate: a queue that asks about one pair twice is caught',
-    mutant(QUEUE, 'if (seen.has(pairKey)) continue', 'if (false) continue', () =>
-      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
-    ),
-    'asks the same question once when the scan found the pair from both sides',
-  )
-
-  // 95f. The ordering made a no-op. A capped, unordered queue returns a different set on two identical
-  //      calls, and a reviewer working down a list that reshuffles loses their place and re-reviews what
-  //      they have already dismissed.
-  checkRejectedBy(
-    'queue gate: a queue that does not order by score is caught',
-    mutant(QUEUE, '  rows.sort(', '  ;[...rows].sort(', () =>
-      runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
-    ),
-    'is descending score, then the survivor id, then the loser id',
-  )
-
-  // 95g. The survivor chosen by the queue instead of read off the plan. The screen would then name one
-  //      record and the merge would keep the other, and both would look right on their own.
-  checkRejectedBy(
-    'queue gate: a survivor the queue decided for itself is caught',
-    mutant(
-      QUEUE,
-      'const survivor = decision.survivorId === left.subject.id ? left.subject : right.subject',
-      'const survivor = left.subject',
-      () => runExpectingFailure('pnpm', unit(QUEUE_UNIT)),
-    ),
-    'survivor, which is the earlier record',
-  )
-
-  // 95h. An operator's nomination ignored. The default survivor is the earlier record and the earlier
-  //      record is sometimes the one with the mistyped number on it, so the override is the reason the
-  //      screen has a choice at all — and one that silently did nothing would read as if it had worked.
-  checkRejectedBy(
-    'plan gate: a nominated survivor that is ignored is caught',
-    mutant(PLAN, '      : nominated === a.id', '      : a.createdAt < b.createdAt', () =>
-      runExpectingFailure('pnpm', unit(PLAN_UNIT)),
-    ),
-    'lets an operator nominate the LATER record',
-  )
-
-  // 95i. A nomination accepted under `auto_merge`. The score says how alike two records are and nothing
-  //      about which should be kept, so an unattended merge acting on a nomination is acting on a decision
-  //      whose maker has been lost.
-  checkRejectedBy(
-    'plan gate: a survivor nominated with no operator behind it is caught',
-    mutant(PLAN, "    if (authority !== 'operator_confirmed') {", '    if (false) {', () =>
-      runExpectingFailure('pnpm', unit(PLAN_UNIT)),
-    ),
-    'refuses a nomination under',
-  )
-
-  // 95j. The label on the screen not escaped. `display_name` is whatever the front desk typed, and this
-  //      page carries a form that performs an irreversible write — so a stored `<script>` would run in the
-  //      admin origin. No suite would notice: every fixture label is `Customer NNNN` (ADR 0020).
-  checkRejectedBy(
-    'queue gate: an unescaped record label on the review screen is caught',
-    mutant(
-      RENDER,
-      "${safeText(record.displayName ?? 'no label recorded')}",
-      "${record.displayName ?? 'no label recorded'}",
-      () => runExpectingFailure('pnpm', unit(RENDER_UNIT)),
-    ),
-    'escapes a hostile label rather than rendering it',
-  )
-
-  // 95k. The previewed consent state read BEFORE the merge instead of after — the exact shape of a preview
-  //      that reports the current state and calls it the outcome. Every row count on the page would still
-  //      be right, and the one figure a reviewer acts on would be wrong.
-  checkRejectedBy(
-    'preview gate: a previewed consent state that is really the current one is caught',
-    mutant(
-      PREVIEW,
-      'survivorConsentAfter: await readConsentLog(uow.sql, outcome.survivorCustomerId),',
-      'survivorConsentAfter: survivorConsentBefore,',
-      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
-    ),
-    'equals what resolveConsent says after the real merge',
-  )
-
-  // 95l. The tombstone read answering with nothing. Every caller still gets a set and every record reads
-  //      as live — which is right for almost all of them, and wrong for exactly the pairs this filter
-  //      exists for.
-  checkRejectedBy(
-    'queue gate: a tombstone read that reports no tombstones is caught',
-    mutant(
-      MERGE_REPO,
-      '  return new Set(rows.map((row) => row.loser_customer_id))',
-      '  return new Set()',
-      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
-    ),
-    'drops a pair whose record was merged away',
-  )
-
-  // 95m. The scope filter removed from the scan. Every assertion in both suites narrows through
-  //      `customerIds` for brief rule 12's reason, so a scope that quietly admitted the whole table would
-  //      make those assertions depend on what every other unit had seeded.
-  checkRejectedBy(
-    'queue gate: a scoped scan that admits a candidate outside the scope is caught',
-    mutant(
-      SCAN,
-      'if (inScope !== null && !inScope.has(candidate.customerId)) continue',
-      'if (false) continue',
-      () => runExpectingFailure('pnpm', integration(PREVIEW_ITEST)),
-    ),
-    // The scope test and not the ordering one, which this mutant does NOT break: the extra pairs it admits
-    // are cross-pairs scoring 640 and 300, so they are excluded by the threshold and the listed rows are
-    // unchanged. Measured rather than assumed — the first version of this case named the ordering test and
-    // reported FAIL against a mutant the suite had caught.
-    'keeps a scoped queue scoped',
-  )
-
-  // 95n. The controls on the whole block: the committed suites pass, so every mutant above is about its own
-  //      fixture and not about a unit that was already red.
-  for (const [name, file] of [
-    ['the committed duplicate-queue suite', QUEUE_UNIT],
-    ['the committed merge-preview unit suite', PREVIEW_UNIT],
-    ['the committed review-screen render suite', RENDER_UNIT],
-  ]) {
-    const result = run('pnpm', unit(file))
-    check(`queue gate: ${name} passes`, !result.failed, String(result.output))
   }
 }
 

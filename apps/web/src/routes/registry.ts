@@ -690,6 +690,23 @@ export const ROUTES = [
       'the (admin) group, so the /settings noindex prefix covers it.',
   },
   {
+    id: 'google-integrations',
+    path: '/settings/integrations',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-CONN-07s connection card: the connected account, the selected listing, what the grant is ' +
+      'allowed to do in English, how recently it was verified, when the next automatic check runs, and ' +
+      'Reconnect. A handler rather than a document for the reason the four surfaces under this prefix ' +
+      'give — a document must be served in both locales, which needs an Arabic admin document and the ' +
+      'admin shell — and read-only: it makes no Google call, so it still says what is wrong on the day ' +
+      'the grant died. Covered by the /settings noindex prefix.',
+  },
+  {
     id: 'google-connect',
     path: '/settings/integrations/google/connect',
     kind: 'handler',
@@ -734,6 +751,21 @@ export const ROUTES = [
       'than a document because a document has to be served in both locales and needs the admin shell ' +
       'W-SYS-01 builds; the settings card that will call this is G-CONN-07. Covered by the /settings ' +
       'noindex prefix, like the consent route beside it.',
+  },
+  {
+    id: 'google-test-connection',
+    path: '/settings/integrations/test-connection',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-CONN-07s Test connection: the POST that runs the 03:00 passs own implementation over one ' +
+      'connection and answers what it established. POST only, because it forces a token refresh and ' +
+      'makes one authenticated read per capability — a GET would let a crawler spend the Google ' +
+      'accounts refresh quota on every visit. Covered by the /settings noindex prefix.',
   },
   {
     id: 'media-breakpoint-preview',

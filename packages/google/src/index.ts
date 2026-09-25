@@ -164,6 +164,13 @@ export {
   runLiveness,
 } from './health/liveness.ts'
 export {
+  TEST_CONNECTION_PASS,
+  type TestConnectionOutcome,
+  type TestConnectionReason,
+  type TestedCapability,
+  testConnection,
+} from './health/test-connection.ts'
+export {
   type ConnectionHealthCard,
   connectionHealthCards,
   connectionSnapshot,
