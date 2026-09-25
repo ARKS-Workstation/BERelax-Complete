@@ -166,6 +166,32 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
+    table: 'flow_enrolment',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    conflictKey: null,
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason: null,
+    why:
+      'An automation enrolment is a process attached to a CONTACT, which is the reason 0070 gives for ' +
+      'cascading it from `customer` in the first place. After a merge the contact is the survivor, so an ' +
+      'enrolment left on the loser is a flow still running against a tombstone: the interpreter would ' +
+      'resolve a recipient that no longer exists as a contact, and the frequency cap would count sends ' +
+      'against a record nobody reads. Re-pointed rather than ended, because a merge is a correction to ' +
+      'the customer record and not an event in the flow — ending the enrolment would write an exit ' +
+      'reason into a log that says the person dropped out. No unique key involves the customer (the pin ' +
+      'is on (flow_id, definition_version) and there is deliberately no one-enrolment-per-flow ' +
+      'constraint), so no row can be refused and nothing is retained. UPDATE is granted on this table ' +
+      'and only the pin columns are immutable, so `customer_id` is movable; DELETE is revoked, which is ' +
+      'the other reason the strategy has to be a re-point.',
+    registeredBy:
+      'C-AUTO-06 landed 0070 after C-CRM-05 wrote this registry; registered at the merge',
+  }),
+  participant({
+    schema: 'public',
     table: 'customer_blocklist',
     column: 'customer_id',
     strategy: 'repoint_update',

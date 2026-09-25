@@ -400,9 +400,18 @@ describe('the participant registry', () => {
     // depends on this unit. The day that table lands, the completeness case above turns red until it is
     // registered — which is the whole point of enumerating from the catalogue. This assertion exists so
     // the deferral is visible here and not only in the manifest.
-    expect(coverage.map((row) => row.table).filter((table) => table.startsWith('flow_'))).toEqual(
-      [],
-    )
+    //
+    // It used to assert that NO table starting with `flow_` was catalogued, and that was true when it was
+    // written and false a few hours later: C-AUTO-06 landed 0070 with `flow_enrolment.customer_id`, and
+    // this case reported the arrival of a table it had no opinion about as the deferral breaking. The
+    // deferral is about `flow_run` specifically, so it names it — and `flow_enrolment` is asserted to be
+    // a REGISTERED participant here as well, because "the enrolment moves with the contact" is a decision
+    // taken at that merge and this is where a reader of the deferral will look for it.
+    expect(coverage.map((row) => row.table).filter((table) => table === 'flow_run')).toEqual([])
+    expect(
+      coverage.find((row) => row.table === 'flow_enrolment')?.status,
+      'flow_enrolment is registered, not merely absent from the deferral',
+    ).toBe('participant')
   })
 })
 
@@ -1008,6 +1017,67 @@ describe('a repeated merge, and the tombstone', () => {
         attempt(uow, (inner) => mergeCustomers(inner, { ...MERGE_ARGS, plan: intoTombstone })),
       )
       expect(mergeRefusalOf(error)).toBe('merge_survivor_is_a_tombstone')
+    })
+  })
+
+  /*
+    The registry entry for `flow_enrolment` says the enrolment moves with the contact. This is that
+    sentence measured, and it exists because the entry was written at an integrating merge rather than by
+    the unit that owns either table: C-AUTO-06 landed 0070 while C-CRM-05 was in another worktree, so the
+    completeness case found a column nobody had an opinion about and nothing exercised the opinion taken.
+
+    A row-level case rather than the arithmetic in `merge_record_table`: a table with no rows balances
+    trivially, so the counts case is satisfied by a participant that moves nothing.
+  */
+  it('moves an automation enrolment onto the survivor, because a flow follows the contact', async () => {
+    await probe(async ({ tx, uow }) => {
+      // Inserted with SQL rather than through `publishFlowDefinition`, which takes a validator injected
+      // from @berelax/core: what is under test is the participant, not the publish path.
+      const [flow] = await tx`
+        insert into flow (flow_key, title, created_by)
+        values ('merge_itest_enrolment', 'A flow the merge suite enrols a losing record in', 'merge.itest.ts')
+        returning id
+      `
+      const flowId = flow?.id as string
+      await tx`
+        insert into flow_definition (flow_id, version, dsl_version, definition, published_by)
+        values (
+          ${flowId}::uuid, 1, 1,
+          '{"dslVersion":1,"nodes":[{"id":"n1","kind":"exit","reason":"probe"}]}'::jsonb,
+          'merge.itest.ts'
+        )
+      `
+      const enrol = async (customerId: string): Promise<string> => {
+        const [row] = await tx`
+          insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
+          values (${flowId}::uuid, 1, ${customerId}::uuid, 'merge.itest.ts')
+          returning id
+        `
+        return row?.id as string
+      }
+      const losers = await enrol(loserId)
+      // The control, and it is the one that matters: "the loser's enrolment moved" is also true of a
+      // statement that re-points every row in the table, and a third record's enrolment is how the two
+      // are told apart.
+      const untouched = await enrol(thirdId)
+
+      const outcome = await mergeCustomers(uow, { ...MERGE_ARGS, plan: await planned(tx) })
+      if (outcome.kind !== 'merged') throw new Error(outcome.kind)
+
+      const [moved] = await tx`select customer_id from flow_enrolment where id = ${losers}::uuid`
+      expect(moved?.customer_id, "the loser's enrolment now names the survivor").toBe(survivorId)
+      const [other] = await tx`select customer_id from flow_enrolment where id = ${untouched}::uuid`
+      expect(other?.customer_id, "a third record's enrolment is left alone").toBe(thirdId)
+
+      // And the merge's own record says one row moved, so the count and the rows agree.
+      const [counted] = await tx`
+        select rows_moved, rows_retained_on_loser
+        from merge_record_table
+        where merge_record_id = ${outcome.mergeRecordId}::uuid
+          and participant = 'public.flow_enrolment'
+      `
+      expect(Number(counted?.rows_moved), 'one enrolment moved').toBe(1)
+      expect(Number(counted?.rows_retained_on_loser), 'none retained').toBe(0)
     })
   })
 })
