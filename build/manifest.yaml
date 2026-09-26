@@ -9702,9 +9702,15 @@ units:
     - P-HR-06
     blocked_on_owner:
     - Y9-attendance
-    provisional: 'Y9-attendance is NEW and must be added to OPEN-QUESTIONS.md. Provisional: manual clock-in/out
-      recorded by the front desk on the admin device, no biometric or device integration; 5-minute grace
-      window each side'
+    provisional: 'Y9-attendance is NEW and has been added to OPEN-QUESTIONS.md. Provisional and none of it
+      confirmed: manual clock-in/out recorded by the front desk on the admin device, no biometric or device
+      integration; a 5-minute grace window each side; a clock-in and clock-out more than 12 HOURS apart are
+      not believed to be one presence and contribute zero payable minutes until an audited correction; a punch
+      up to 2 HOURS outside its trading day''s window still belongs to that day; and UNROSTERED minutes are
+      payable and flagged. The last three are figures this unit had to add, because the acceptance criteria
+      demand a plausibility ceiling, an attribution for a punch before opening, and a payable total - and none
+      of the three has a number in the handover. All are VERSIONED rows of attendance_grace_rule (0086) with
+      the provenance trio, so they reach the Unconfirmed Assumptions panel against this id'
     acceptance:
     - 'attendance timestamps are timestamptz and attributed to business_day: a 01:50 clock-out belongs to
       the day that opened at 11:00, proven by test'
@@ -9719,12 +9725,186 @@ units:
       on the seeded month
     - every manual correction writes an `audit_event` with before/after and a non-empty reason; an empty
       reason is rejected by constraint, not by UI validation alone
+    - 'NOTE: the concrete files this list left as placeholders or got wrong. The migration is
+      packages/db/migrations/0086_attendance.sql (the list said *_hr_attendance.sql). The web surface is
+      apps/web/app/(admin)/hr/timesheets/route.ts plus render.ts and NOT page.tsx: registry.ts is in exact
+      bijection with the filesystem and requires every DOCUMENT to be served in both locales, so a page.tsx
+      would need an Arabic admin document W-SYS-01 has not built and would join a screenshot matrix whose RTL
+      half must be a real Arabic route. P-HR-02''s NOTE records that as the arrangement every HR surface takes,
+      and the rota, credentials and reassignment screens beside it are all route handlers. The gate block is
+      // 113a-113s, selector `pnpm gates:only --only ''// 113a''`. No port band is claimed and none is needed:
+      everything the screen must make visible is decidable from the markup, so apps/web/src/hr-timesheets-render.test.ts
+      renders it as a string and starts no server - a band declared and not used fails ports.test.ts. No ADR:
+      every decision here is recorded in 0086''s header and in these NOTEs, which is the arrangement P-HR-06
+      took for the same reasons. SCHEMA_VERSION is set to 86, the newest migration on disk in this worktree'
+    - 'NOTE: the attendance figures are VERSIONED rows of attendance_grace_rule (0086) and NOT app_setting
+      values, which is the question the brief asked this unit to answer the same way Y9-overtime, Y9-leave-detail
+      and Y9-coverage answered it. The reason carries over and this is the SHARPEST instance of it in the build:
+      attendance is asked about the PAST more insistently than anything else. "Was she late on the 4th of
+      March?" is a question about a day already approved and already paid, and one current value cannot answer
+      it - widening the grace window from five minutes to ten in April would make March''s lateness
+      retroactively disappear, with nothing in the database able to say what the window was when the timesheet
+      was approved. timesheet_approval therefore snapshots grace_rule_effective_from AND
+      working_hours_rule_effective_from, so the row records "this attendance was on time against THESE windows,
+      priced at THESE rates" rather than "this attendance was on time", and only the first stays true.
+      Answering Y9-attendance publishes a NEW version and the Unconfirmed Assumptions panel row leaves by that
+      version being confirmed, the shape consent_wording takes'
+    - 'NOTE: which references PIN their parent, and why - the question the brief asked. Every table here is
+      append-only, so 0081''s principle applies to all of them: an immutable row holds nothing else hostage.
+      (1) employee_id IS a key on all three tables, because 0030 already decided that deleting a person to
+      erase their roster is the delete worth refusing and attendance is the stronger case - these rows are the
+      evidence of what somebody worked, which is the input to their pay. (2) timesheet_approval.rota_version_id
+      IS a key, and it is the one reference here that is a PRECONDITION rather than provenance: it is what
+      P-HR-06 deferred to this unit in its own words, the immutable version exists to be compared against, and
+      a plain column would let a timesheet be approved against a version nobody published. The pin costs
+      nothing because rota_version can never be deleted either (ZW001), which is the case 0081 keeps its own
+      self-references for. (3) attendance_correction.corrects_event_id IS a key, for the same reason: both ends
+      are append-only, so the pin is on a row nothing could release anyway. (4) trading_date is a PLAIN COLUMN
+      on all three tables, and this is the one that looks like it should be a key and must not be. business_day
+      is GENERATED - generateBusinessDays deletes a row when a date stops trading and business-days.itest.ts
+      empties the whole table in a beforeEach - and nothing here can ever be deleted, so a RESTRICT reference
+      would pin every date named FOR EVER, for every caller, from the first punch recorded. 0076 DOES hold that
+      key on cash_session.trading_date, and the difference is the MECHANISM rather than the meaning: a
+      cash_session row can be deleted to release the pin and its own suite releases it, while nothing in this
+      file can be deleted by anybody. So the same key would not mean "you may not un-trade this day"; it would
+      mean "this date can never be removed for any reason, including one generated in error". The guard lives
+      where the row is still fixable, at INSERT: assert_attendance_trading_date (ZX003) refuses a punch whose
+      date disagrees with attendance_trading_date_for() and one on a date business_day does not hold at all.
+      (5) The two rule effective_from dates on timesheet_approval are PLAIN COLUMNS, 0081''s decision verbatim,
+      because hr-working-hours.itest.ts empties working_hours_rule inside a rolled-back probe to prove
+      P-HR-05''s reader throws rather than inventing rates. Consequence for every later unit, as P-HR-06 stated
+      its own: hr-attendance.itest.ts leaves attendance_event, attendance_correction and timesheet_approval
+      rows behind that CANNOT be deleted, by design, so any table they reference must tolerate that for ever -
+      which is why only employee and rota_version are referenced, two tables that already tolerate it'
+    - 'NOTE: the period lock has ONE reader and this unit added no second. periodStatusOn (M-VAT-06) over
+      period_lock_for() and earliest_open_date_from() is the only TypeScript reader, and the two triggers in
+      0086 CALL raise_if_period_locked() rather than restating it - the same choke point every posting path
+      reaches, so a punch cannot be refused by one rule and permitted by another, and because 0073 redefined
+      that function to name the earliest OPEN date as well as the locked period, the refusal a person reads
+      sends them to a month they can actually use. hr-attendance.test.ts asserts the absence of a second reader
+      by SOURCE SCAN and gate 113j splices one in to prove the scan fires, because a second reader agrees with
+      the first on the day it is written and the disagreement arrives with the next change to either. TWO locks
+      are in play and they are different FACTS rather than two readings of one: the accounting period lock is
+      everybody''s and is about the ledger (ZL002, remedy: a correction dated in the next open period), and the
+      approved timesheet is one employee''s and one period''s (ZX004, remedy: a dated correction, because the
+      hours themselves have been agreed). ZX004 is ABSOLUTE with no exemption, which is what a correction
+      producing no punch row buys: nothing needs a way through the lock, so no column can be set to find one'
+    - 'NOTE: a correction produces NO attendance_event, and that is the load-bearing part of the design rather
+      than a simplification. The obvious shape is for a supplied clock-out to insert a punch, and it is wrong
+      twice over: the punch would be dated inside the very period the correction exists to work around, so the
+      accounting guard and ZX004 would both refuse the row the remedy depends on and an INCOMPLETE presence
+      could never be completed at all - and it would put the same fact in two places, so a reader that found
+      the punch and not the correction would report a corrected day as an ordinary one, with no reason and no
+      author attached to a changed payslip. attendance_correction.corrected_occurred_at IS the corrected
+      instant and applyAttendanceCorrections in @berelax/core layers the corrections over the punches once,
+      inside deriveAttendanceVariance so no caller can forget them. "The original row is unchanged" is
+      therefore literal in the strongest sense available: no UPDATE is issued, ZX001 would refuse one, and
+      nothing was written beside it either. A supplied clock-out carries the event id `correction:<uuid>` and
+      NOT a uuid, deliberately - an identifier that looked like an attendance_event.id would be one somebody
+      could go looking for and not find'
+    - 'NOTE: measured, and it changed two things. (1) TWO DEFECTS IN THIS UNIT''S OWN WORK were found by the
+      INTEGRATION run and by neither pure suite, which is the brief''s point about a full run: UNROSTERED was
+      decided before INCOMPLETE, and an open presence was matched as one minute wide. Together they turned
+      "clocked in eight minutes early and forgot to clock out" into a PAYABLE row with an unknown end, so
+      payablePresences threw its structural guard and a 503 reached the timesheet screen for an ordinary case.
+      Both are now pure regression cases and gates 113b and 113c. (2) GATE 113d MEASURED NOTHING as first
+      written. It was pointed at the table row for a missing clock-out, where the mutation is a no-op because
+      the believed total is zero either way; only a span holding a CLOSED presence and an unclosed one tells
+      the two apart, so the pure suite gained that case and the gate now names it. The gate run is what found
+      that, which is the only thing that could have'
+    - 'NOTE: the acceptance list says the bucket equality is "asserted on the seeded month" and there is no
+      seeded month to assert it on. The seeded database holds 0 shift rows, 0 shift_assignment rows and 0
+      rota_version rows - counted, not assumed - so there is no seeded roster and therefore no seeded
+      attendance. Worth reporting rather than working around, because it is not what the fixture SAYS:
+      generateSalon() in packages/fixtures/src/salon.ts builds a salon.shifts array and its own comment says
+      it exists "so that HR has shifts to accrue leave against", and loadSalon() in load.ts never inserts
+      them - the only two occurrences of the word in that file are a date-shifting helper. So docs/12 section
+      5''s "a published rota" is described by the fixture and written by nothing, and any unit that believes
+      a rota is seeded will be wrong. Reported and not fixed: the seeder is not this unit''s. What IS seeded is
+      the business_day calendar (149 trading dates, 2026-05-21 to 2026-10-16), and that is the part the claim
+      actually needs, because the whole subject is which trading date a punch belongs to. So the equality is
+      asserted over a rota hr-attendance.itest.ts publishes itself on seeded trading dates, against the real
+      working_hours_rule rows, and the suite asserts those seven business_day rows exist rather than skipping
+      if they do not. The stronger half of the claim needs no data at all: summariseTimesheet does no minute
+      arithmetic of its own - it hands the attended presences to P-HR-05''s summariseWorkedHours and reports
+      what comes back - so the equality holds by CONSTRUCTION, because the buckets are a partition of the total
+      in that module by its own property. hr-attendance.test.ts asserts that by source scan and gate 113h
+      splices an independent sum to prove it fires'
+    - 'NOTE: INCOMPLETE is a SIXTH outcome beside the five the acceptance list names, and it is terminal for a
+      span rather than a variance: you cannot say whether somebody left early when you do not know when they
+      left, so a verdict of EARLY_LEAVE on a span with no clock-out would be half an answer presented as a
+      whole one. Nothing is lost - the row still carries lateByMinutes, because the clock-IN is known. The
+      outcome is ONE value with a stated precedence (ABSENT, then INCOMPLETE, then UNROSTERED, then LATE before
+      EARLY_LEAVE, then ON_TIME) and BOTH minute figures are on every row whatever the outcome, so the
+      precedence hides no number and the screen prints both when both are non-zero. A span is also INCOMPLETE
+      when its two punches are further apart than maximum_plausible_presence_minutes - the versioned 12 hours -
+      which is how "a test asserts it never yields an implausible >12h shift" is a FIGURE rather than a literal
+      in a test: a clock-out punched the next morning is unpriced rather than paid for fifteen hours'
+    - 'NOTE: UNROSTERED minutes ARE payable, which is the strict reading in the direction that matters rather
+      than the convenient one: not paying somebody who worked is the non-compliant error and paying somebody
+      the rota did not expect is a roster to fix. timesheet_approval therefore carries
+      unrostered_presence_count beside the payable total and the screen prints it, exactly as
+      rota_version.forecast_unpriced_employees is printed - a figure nobody prints is a roster nobody fixes.
+      incomplete_presence_count is NOT NULL on every row for the same reason and the opposite sign: an
+      INCOMPLETE span contributes zero, so a period where every clock-out was missed is 0 payable minutes and
+      reads as a therapist who never came in'
+    - 'NOTE: attendance_event holds one row per PUNCH and not one per presence with a nullable clock-out, and
+      that is forced rather than chosen: filling a clock-out in later is an UPDATE and ZX001 refuses every
+      UPDATE for every role. So INCOMPLETE is a SHAPE - a clock-in with nothing after it - instead of a null
+      every reader has to remember to check, and assert_attendance_punch_alternates (ZX002) is what makes that
+      shape mean exactly one thing. It is scoped to the employee and the trading DATE, because across dates it
+      would be wrong: a therapist who forgot to clock out on Monday has an open clock-in for ever, and refusing
+      Tuesday''s clock-in would stop them working until somebody filed a correction. occurred_at is refused off
+      a whole minute at the column, because workedMinutes in @berelax/core refuses a span that is - so seconds
+      admitted here would surface as a thrown pricing call on a screen three modules away rather than as a
+      rejected punch at the desk'
+    - 'NOTE: the punch tolerance, which is a figure this unit had to invent and could not avoid. A therapist
+      arriving before the doors open and a front desk clocking out after the cash-up are both ordinary, and
+      attendance_trading_date_for() with no tolerance would attribute neither - which means the front desk
+      could not record what happened, and an unrecordable punch is a paid hour that vanishes. 2 hours,
+      provisional, in the versioned row with the rest. The upper BOUND is not taste: trading runs 11:00-02:00,
+      so one day''s close and the next day''s open are nine hours apart, and a tolerance at or above 270
+      minutes each side would make two consecutive days'' widened windows overlap - a punch in the overlap
+      would belong to two trading dates with nothing able to choose. The CHECK caps it at 240,
+      hr-attendance.test.ts asserts the arithmetic rather than the number, and gate 113p raises the bound to
+      300 to prove the assertion fires'
+    - 'NOTE: scoped out. (1) RECORDING A PUNCH FROM THE BROWSER, and a correction and an approval with it: all
+      three are writes with an actor and there is no admin session until W-SYS-01, so the timesheets screen is
+      read-only and three separate not_placeholder constraints refuse a placeholder actor rather than taking
+      one. (2) ATTENDANCE FOR A DAY IN A CLOSED ACCOUNTING PERIOD WITH NO PUNCH AT ALL cannot be entered:
+      attendance_correction.corrects_event_id is NOT NULL because a correction amends a record and cannot
+      invent one, and a pair of punches written after the month closed would be exactly the un-auditable write
+      these tables exist to refuse. That gap is a ledger-side adjustment rather than a punch and is deferred to
+      P-HR-12 (payroll run over approved timesheets, still todo). (3) THE PUBLIC-HOLIDAY FLAG, which P-HR-05
+      and P-HR-06 both deferred to Y9-overtime: premises_closure is a floor and not a calendar, so the flag
+      reaches summariseTimesheet as an argument and both callers leave it unset. P-HR-10 builds the calendar.
+      (4) PAYING ANYBODY. weighted_minute_bp is whole basis-point-minutes and deliberately not money: what an
+      hour of a monthly wage is worth is unanswered (Y9-overtime, Y8-staff) and 0081''s labour_cost_rule is a
+      FORECAST''s divisor, so a dirham figure here would be that answer invented. The payslip, the WPS export
+      and the run itself are P-HR-12''s, still todo. (5) A COMMITTED SECOND RULE VERSION. attendanceGraceFor
+      picks the version governing each trading date and hr-attendance.itest.ts asserts the version in force,
+      but no second version is inserted anywhere: the table has no UPDATE or DELETE grant for the application
+      role, and a committed version 2 would change what every later suite''s attendance was judged against.
+      The per-date selection is asserted in the pure suite, where two versions cost nothing'
     files:
-    - packages/db/migrations/*_hr_attendance.sql
+    - packages/db/migrations/0086_attendance.sql
     - packages/core/src/hr/attendance.ts
     - packages/core/src/hr/attendance.test.ts
+    - packages/core/src/index.ts
     - packages/db/src/repositories/timesheet.ts
-    - apps/web/app/(admin)/hr/timesheets/page.tsx
+    - packages/db/src/schema/attendance.ts
+    - packages/db/src/schema/hr.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/settings-store.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/hr-attendance.test.ts
+    - packages/fixtures/src/hr-attendance.itest.ts
+    - apps/web/app/(admin)/hr/timesheets/route.ts
+    - apps/web/app/(admin)/hr/timesheets/render.ts
+    - apps/web/src/hr-timesheets-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - docs/OPEN-QUESTIONS.md
+    - scripts/test-gates.mjs
   - id: P-HR-08
     order: 97
     title: Leave types, entitlement and the accrual engine with worked examples

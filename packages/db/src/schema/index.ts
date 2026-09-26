@@ -1,4 +1,5 @@
 export * from './agents.ts'
+export * from './attendance.ts'
 export * from './bill.ts'
 export * from './booking.ts'
 export * from './booking-manage-grant.ts'

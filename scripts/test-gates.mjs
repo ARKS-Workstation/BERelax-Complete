@@ -31504,6 +31504,344 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 113a-113s. (P-HR-07) Attendance: every figure shown to come from the version that judged it, and every
+//            refusal shown to be about the thing it says it is about.
+//
+//            This unit's defects are all the same shape — a figure that is WRONG but ordinary. A grace window
+//            read as a literal, a payable total taken from the roster instead of the hours, a punch filed
+//            under the calendar date instead of the trading date: every one of them produces a plausible
+//            number on a screen somebody approves pay from, and none of them makes anything look broken. So
+//            each case here mutates ONE decision and names the ONE test that has to notice.
+//
+//            Three of the mutations are ones this unit actually shipped, and they are marked. 113b and 113c
+//            are the two halves of a defect only the INTEGRATION run found: `UNROSTERED` decided before
+//            `INCOMPLETE`, and an open presence treated as one minute wide, together turned "clocked in early
+//            and forgot to clock out" into a 503 on the timesheet screen. The pure suite could not have found
+//            either, because neither fixture existed until the real rows produced them.
+//
+//            **Most of these cases are caught by a SCAN suite rather than by behaviour, and that is not a
+//            weakness of the cases — it is where the claims live.** A migration mutation cannot be caught
+//            behaviourally at all: the gate runs against an already-migrated database, so editing
+//            `0086_attendance.sql` changes no refusal anybody could observe. `hr-attendance.test.ts` reads the
+//            file, which is the only layer that can see a constraint being weakened before it has cost
+//            somebody a payslip.
+//
+//            **113k runs the integration suite and needs a database.** It is the one claim the pure suites
+//            cannot make — that the trading date on a punch is the database's own derivation and not the
+//            calendar date — and it is about the write path. It mutates nothing the built web application
+//            serves, so 104's warning about browser suites does not apply: `hr-attendance.itest.ts` imports
+//            the sources directly.
+{
+  const CORE = 'packages/core/src/hr/attendance.ts'
+  const REPO = 'packages/db/src/repositories/timesheet.ts'
+  const MIGRATION = 'packages/db/migrations/0086_attendance.sql'
+  const ROUTE = 'apps/web/app/(admin)/hr/timesheets/route.ts'
+  const RENDER = 'apps/web/app/(admin)/hr/timesheets/render.ts'
+
+  const PURE_SUITE = 'packages/core/src/hr/attendance.test.ts'
+  const SCAN_SUITE = 'packages/fixtures/src/hr-attendance.test.ts'
+  const ROWS_SUITE = 'packages/fixtures/src/hr-attendance.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/hr-timesheets-render.test.ts'
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rowsRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block and not `attendanceMutant`, deliberately: blocks 106 and 107 both defined a helper
+   * called `…Mutant` with this exact shape, git found the two bodies as shared context and interleaved the
+   * blocks, and the merge had to rebuild both from whole sides. A distinct name is the whole fix.
+   */
+  const brokenAttendanceSource = (path, anchor, replacement, suite, runner = unitRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 113a. The grace window read as a LITERAL rather than from the rule version in force. The table of outcomes
+  //       still passes — five minutes is what version 1 says — and the claim that dies is the one the whole
+  //       versioning exists for: a window widened in April would then make March's lateness disappear, with
+  //       nothing able to say what the window was when the timesheet was approved.
+  checkRejectedBy(
+    'attendance gate: a grace window hard-coded rather than read from the rule version is caught',
+    brokenAttendanceSource(
+      CORE,
+      'minutesBetween(first.startsAt, rostered.startsAt) - rules.graceMinutesAfterStart,',
+      'minutesBetween(first.startsAt, rostered.startsAt) - 5,',
+      PURE_SUITE,
+    ),
+    'CONTROL: the grace window moves the answer',
+  )
+
+  // 113b. `UNROSTERED` decided before `INCOMPLETE`. SHIPPED, and found by the integration run rather than by
+  //       reading: an unrostered presence with no clock-out becomes a PAYABLE row with an unknown end, so
+  //       `payablePresences` throws its structural guard and a 503 reaches the timesheet screen for an
+  //       ordinary case — somebody clocked in with nothing rostered and forgot to clock out.
+  checkRejectedBy(
+    'attendance gate: an outcome precedence that prices a span with an unknown end is caught',
+    brokenAttendanceSource(
+      CORE,
+      "    incompleteReason !== null\n      ? 'INCOMPLETE'\n      : rostered === null\n        ? 'UNROSTERED'",
+      "    rostered === null\n      ? 'UNROSTERED'\n      : incompleteReason !== null\n        ? 'INCOMPLETE'",
+      PURE_SUITE,
+    ),
+    'INCOMPLETE beats UNROSTERED',
+  )
+
+  // 113c. The other half of the same defect: an OPEN presence treated as one minute wide. A clock-in eight
+  //       minutes before an 11:00 shift then overlaps nothing, so the day reads UNROSTERED and the span it
+  //       belonged to reads ABSENT beside it — two wrong rows for one ordinary morning, and both plausible.
+  checkRejectedBy(
+    'attendance gate: an open presence matched as one minute wide is caught',
+    brokenAttendanceSource(
+      CORE,
+      'if (presence.endsAt === null) return presence.startsAt < rostered.endsAt',
+      'if (presence.endsAt === null)\n    return presence.startsAt < rostered.endsAt && rostered.startsAt < presence.startsAt + MINUTE',
+      PURE_SUITE,
+    ),
+    'matches an open presence to the span it arrived early for',
+  )
+
+  // 113d. The attended minutes of an INCOMPLETE span reported rather than zeroed. The payable total is
+  //       unaffected — the exclusion is by outcome — so this is a screen showing two hours attended on a day
+  //       that paid nothing, which is the figure a therapist would query and nobody could explain.
+  //
+  //       The rule named here is MEASURED rather than chosen. This case was first pointed at the table row for
+  //       a missing clock-out, and it FAILED: over a span holding one unclosed presence the mutation is a
+  //       no-op, because the believed total is zero either way. Only a span holding a CLOSED presence and an
+  //       unclosed one can tell the two apart, and the pure suite gained that case because this gate could not
+  //       otherwise have measured anything.
+  checkRejectedBy(
+    'attendance gate: attended minutes reported for a span whose end is unknown is caught',
+    brokenAttendanceSource(
+      CORE,
+      'attendedMinutes: incompleteReason === null ? believedMinutes : 0,',
+      'attendedMinutes: believedMinutes,',
+      PURE_SUITE,
+    ),
+    'contributes nothing even for the part of the span that WAS closed',
+  )
+
+  // 113e. The INCOMPLETE exclusion removed from the pricing. The most dangerous mutation in this block: a
+  //       presence with no clock-out reaches `summariseWorkedHours`, and what happens next depends on nothing
+  //       anybody chose. The structural guard is what turns it into a refusal rather than a figure.
+  checkRejectedBy(
+    'attendance gate: an incomplete span reaching the pricing is caught',
+    brokenAttendanceSource(
+      CORE,
+      "    if (variance.outcome === 'ABSENT' || variance.outcome === 'INCOMPLETE') continue",
+      "    if (variance.outcome === 'ABSENT') continue",
+      PURE_SUITE,
+    ),
+    'excludes it from the minutes computation rather than truncating it at close',
+  )
+
+  // 113f. The implausible-span comparison relaxed to `>=`. A presence of exactly twelve hours is then
+  //       disbelieved, which is a different rule from the one the figure states — twelve hours, not eleven
+  //       fifty-nine — and it pays nothing for a lawful double shift.
+  checkRejectedBy(
+    'attendance gate: a plausible-span test that disbelieves a presence exactly at the figure is caught',
+    brokenAttendanceSource(
+      CORE,
+      'if (span > rules.maximumPlausiblePresenceMinutes) {',
+      'if (span >= rules.maximumPlausiblePresenceMinutes) {',
+      PURE_SUITE,
+    ),
+    'CONTROL: the same pair one minute inside the plausible span IS priced',
+  )
+
+  // 113g. The implausible-span test removed altogether. A clock-out punched the next morning is then paid as a
+  //       fifteen-hour shift, and the acceptance criterion's "never yields an implausible >12h shift" becomes
+  //       a sentence nothing holds.
+  checkRejectedBy(
+    'attendance gate: a forgotten clock-out closed the next morning being paid in full is caught',
+    brokenAttendanceSource(
+      CORE,
+      '    const span = minutesBetween(presence.endsAt, presence.startsAt)\n    if (span > rules.maximumPlausiblePresenceMinutes) {',
+      '    const span = minutesBetween(presence.endsAt, presence.startsAt)\n    if (false) {',
+      PURE_SUITE,
+    ),
+    'never yields an implausible >12h shift',
+  )
+
+  // 113h. The payable total summed from the VARIANCES rather than from P-HR-05's day rows. The figures agree on
+  //       an ordinary week, which is why the claim has to be about the source: the acceptance criterion is
+  //       "payable minutes equal the sum of the P-HR-05 buckets", and a total computed beside the buckets is
+  //       one that drifts the first time the bucket split changes — into a wrong payslip.
+  checkRejectedBy(
+    'attendance gate: a payable total computed beside the P-HR-05 buckets rather than from them is caught',
+    brokenAttendanceSource(
+      CORE,
+      '  for (const day of workedHours.days) {\n    payableMinutes += day.totalMinutes',
+      '  for (const day of variances.map((row) => ({ totalMinutes: row.rosteredMinutes, weightedMinuteBp: 0 }))) {\n    payableMinutes += day.totalMinutes',
+      SCAN_SUITE,
+    ),
+    'summariseTimesheet sums P-HR-05s day rows and nothing else',
+  )
+
+  // 113i. The roster read pointed at the DRAFT. This is P-HR-06's deferral undone, and it is invisible in every
+  //       behavioural test: `shift` and `rota_version_assignment` hold the same spans for a week nobody has
+  //       edited, and they diverge months later when somebody rewrites a roster — at which point a therapist
+  //       who was on time becomes late on a day already approved and already paid.
+  checkRejectedBy(
+    'attendance gate: measuring attendance against the draft roster rather than the published version is caught',
+    brokenAttendanceSource(
+      REPO,
+      '      from rota_version_assignment\n     where rota_version_id = ${args.rotaVersionId}::uuid',
+      '      from shift s join shift_assignment sa on sa.shift_id = s.id\n     where ${args.rotaVersionId}::uuid is not null',
+      SCAN_SUITE,
+    ),
+    'reads rota_version_assignment and never shift',
+  )
+
+  // 113j. A SECOND reader of the period lock spliced into the repository. It agrees with `periodStatusOn` on
+  //       the day it is written, which is the whole hazard — the disagreement arrives with the next change to
+  //       either, and the symptom is a timesheet one screen permits and another refuses.
+  checkRejectedBy(
+    'attendance gate: a second reader of the period lock is caught',
+    brokenAttendanceSource(
+      REPO,
+      '  const status = await periodStatusOn(sql, on)',
+      '  const [own] = await sql`select period_lock_for(${on}::date) as id from period_lock limit 1`\n  const status = await periodStatusOn(sql, on)',
+      SCAN_SUITE,
+    ),
+    'reaches the lock only through periodStatusOn',
+  )
+
+  // 113k. The trading date derived as the punch's CALENDAR date. The whole subject of the unit, in the one
+  //       place it is invisible: a 01:50 clock-out is filed under the following day, so a therapist's hours
+  //       move between weeks and every weekly total still balances. The database refuses it — ZX003, against
+  //       the one definition — which is why this case needs the database to see it.
+  checkRejectedBy(
+    'attendance gate: a punch filed under its calendar date rather than its trading date is caught',
+    brokenAttendanceSource(
+      REPO,
+      'select attendance_trading_date_for(${input.occurredAtIso}::timestamptz)::text as "tradingDate"',
+      'select ((${input.occurredAtIso}::timestamptz) at time zone \'Asia/Dubai\')::date::text as "tradingDate"',
+      ROWS_SUITE,
+      rowsRun,
+    ),
+    'files a 01:50 clock-out under the day that opened at 11:00',
+  )
+
+  // 113l. A foreign key into `business_day` added to an append-only table. Nothing here can ever be deleted, so
+  //       the reference pins every trading date it names FOR EVER — and the failure lands in
+  //       `business-days.itest.ts`, a suite this unit does not own, as eleven cases about a generator that can
+  //       no longer do its job. P-HR-06 found it that way and wrote the principle down; this case is what
+  //       stops it being rediscovered.
+  checkRejectedBy(
+    'attendance gate: an append-only table pinning the generated business_day calendar is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      '  trading_date    date        not null,\n\n  kind            text        not null',
+      '  trading_date    date        not null\n                    references business_day (trading_date) on delete restrict,\n\n  kind            text        not null',
+      SCAN_SUITE,
+    ),
+    'references business_day from nowhere in 0086',
+  )
+
+  // 113m. A private SQLSTATE renamed in the migration's header and left alone in `ATTENDANCE_SQLSTATE`. Nothing
+  //       but the scan reads that header, so the two lists drift silently and a caller translating a refusal
+  //       stops recognising it — which turns a named `forbidden` into an unhandled 500.
+  checkRejectedBy(
+    'attendance gate: a SQLSTATE in 0086 that the repository does not declare is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      '--   ZX004  the period is closed by an approved timesheet',
+      '--   ZX006  the period is closed by an approved timesheet',
+      SCAN_SUITE,
+    ),
+    'the migration lists every SQLSTATE the repository declares',
+  )
+
+  // 113n. The placeholder arm dropped from the reason constraint. `TBD` then passes — it is neither blank nor
+  //       under eight characters — and the acceptance criterion's "an empty reason is rejected by constraint"
+  //       survives while the constraint stops refusing the reason people actually type.
+  checkRejectedBy(
+    'attendance gate: a correction reason constraint that accepts a placeholder is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      "      check (btrim(reason) <> ''\n         and not is_placeholder_text(reason)\n         and length(btrim(reason)) >= 8),",
+      "      check (btrim(reason) <> ''\n         and length(btrim(reason)) >= 8),",
+      SCAN_SUITE,
+    ),
+    'refuses a reason that is blank, a placeholder, or too short to be one',
+  )
+
+  // 113o. An exemption spliced into the approved-period lock. The shape the hole takes: a column a caller can
+  //       set, checked before the lookup, so a punch walks straight through a lock that looks intact. The
+  //       correction path needs no such exemption, because a correction changes an approved period without
+  //       inserting into that table at all.
+  checkRejectedBy(
+    'attendance gate: an exemption from the approved-period lock is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      '  select * into v_approval from timesheet_approval\n   where employee_id = new.employee_id',
+      "  if new.recorded_by like '%correction%' then return new; end if;\n  select * into v_approval from timesheet_approval\n   where employee_id = new.employee_id",
+      SCAN_SUITE,
+    ),
+    'gives the approved-period lock no exemption to walk through',
+  )
+
+  // 113p. The punch tolerance bound raised past the point two consecutive days' widened windows overlap. A
+  //       punch in the overlap then belongs to two trading dates with nothing able to choose, and
+  //       `attendance_trading_date_for()` answers with whichever the ordering happens to reach.
+  checkRejectedBy(
+    'attendance gate: a punch tolerance wide enough for two days to claim one punch is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      'check (punch_tolerance_minutes between 0 and 240),',
+      'check (punch_tolerance_minutes between 0 and 300),',
+      SCAN_SUITE,
+    ),
+    'bounds the punch tolerance below half the gap',
+  )
+
+  // 113q. The whole-minute CHECK removed from `occurred_at`. Seconds then reach the pricing, where
+  //       `workedMinutes` refuses them — so the failure moves from a rejected punch at the desk to a 503 on the
+  //       screen somebody approves pay from, and the cause is three modules away from the symptom.
+  checkRejectedBy(
+    'attendance gate: a punch instant admitted off a whole minute is caught',
+    brokenAttendanceSource(
+      MIGRATION,
+      "      check (date_trunc('minute', occurred_at) = occurred_at),",
+      '      check (occurred_at is not null),',
+      SCAN_SUITE,
+    ),
+    'refuses a punch off a whole minute at the column',
+  )
+
+  // 113r. The route rendering a punch time in UTC. `toISOString().slice(11, 16)` reports 21:50 for a
+  //       01:50-Dubai clock-out — the previous day, at the wrong time — and it is the one surface where a
+  //       person reads the figure rather than an assertion. P-HR-06 had a test pass for exactly this.
+  checkRejectedBy(
+    'attendance gate: a punch time rendered in UTC rather than in the emirate’s zone is caught',
+    brokenAttendanceSource(
+      ROUTE,
+      'return toLocal(instant).time',
+      'return new Date(instant).toISOString().slice(11, 16)',
+      RENDER_SUITE,
+    ),
+    'the route derives a punch’s wall clock through toLocal',
+  )
+
+  // 113s. The incomplete count dropped from the screen. A week where every clock-out was missed is 0 payable
+  //       minutes, and printed alone that figure reads as a therapist who never came in. `rota_version`'s
+  //       unpriced count is printed unconditionally for the same reason and after the same argument.
+  checkRejectedBy(
+    'attendance gate: a payable total printed without the count of spans that contributed nothing is caught',
+    brokenAttendanceSource(
+      RENDER,
+      '`<dt>Incomplete</dt><dd>${employee.incompletePresenceCount} span(s) contributed nothing because an end ` +',
+      '`<dt>Incomplete</dt><dd>${0} span(s) contributed nothing because an end ` +',
+      RENDER_SUITE,
+    ),
+    'prints the payable total and the incomplete count together',
+  )
+}
+
 
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //

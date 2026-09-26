@@ -338,6 +338,23 @@ export async function unconfirmedAssumptionRows(
       select 'labour_cost_rule', 'wage divisors effective ' || effective_from::text,
              open_question_id, provisional_note
         from labour_cost_rule where is_provisional
+      -- The attendance figures (0086). Here for working_hours_rule's reason and the sharpest instance of it:
+      -- attendance is asked about the PAST more insistently than anything else in this build, so the grace
+      -- windows are VERSIONED rows rather than app_setting values and answering Y9-attendance publishes a NEW
+      -- version whose confirmation clears this row. Per VERSION and not per figure, because the two grace
+      -- windows, the span above which a presence is not believed, the punch tolerance and how a punch is
+      -- captured are one decision somebody makes in one sitting. No backtick appears in this comment, for the
+      -- reason the pipeline paragraph above states: it lives inside a JS template literal and one would end
+      -- it early. Two figures worth knowing while reading the note. CAPTURE IS MANUAL - there is no biometric
+      -- reader and no device integration, which is a fact about what the business has rather than a decision
+      -- this build made, and it is on the panel so the day a reader is bought it is a new version instead of
+      -- a silent change in what every historical row meant. And a presence longer than twelve hours is NOT
+      -- BELIEVED, so a forgotten clock-out closed the next morning pays nothing until somebody corrects it -
+      -- which is the figure a therapist would want to know had been chosen on their behalf.
+      union all
+      select 'attendance_grace_rule', 'attendance effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from attendance_grace_rule where is_provisional
       union all
       select 'consent_purpose', purpose, open_question_id, provisional_note
         from consent_purpose where is_provisional
