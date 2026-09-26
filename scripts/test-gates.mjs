@@ -28042,6 +28042,577 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 109a-109z. (C-CRM-08) Clinical intake behind the consent gate: the refusal that must never fall
+//            through, the AAD term that makes an answer unreadable against the wrong question set, the
+//            step-up window, and the log line that must not carry a payload.
+//
+//            Every mutation in this block leaves a system that WORKS. That is the block's whole subject.
+//            A consent gate whose absent-record branch is removed stores every submission and renders
+//            every screen; an AAD without the template version decrypts every payload; a purpose match
+//            dropped from the read gate lets every legitimate read through; a denial audit row that rolls
+//            back leaves a refusal nobody can find. None of them is visible in a screenshot, in a
+//            typecheck, or in any assertion about what the application does when it is used correctly.
+//
+//            The two worth reading twice are 109c and 109i. **109c** is the one this unit exists for: it
+//            deletes the `consent === null` branch from `resolveClinicalRead`, which is the literal shape
+//            of "we could not establish consent" falling through to "proceed" — and a PURE test catches
+//            it, which is why that decision is pure. **109i** removes `setAAD` from both directions of the
+//            envelope SYMMETRICALLY, which is the only mutation that proves the AUTHENTICATION assertions
+//            test the GCM tag rather than the fingerprint pre-check that runs before it.
+//
+//            Three cases here were rewritten because their first version could pass for the wrong reason.
+//            109m, 109y and 109z originally introduced an identifier nothing declares: the suite then
+//            failed with a ReferenceError, `checkRejectedBy` found the identifier's name in the output,
+//            and the case reported PASS having proved only that an undefined variable throws. Each one now
+//            mutates behaviour the assertion can actually see.
+//
+//            **109f is not a mutation case.** It applies a real cross-boundary foreign key to the database
+//            with `psql`, runs the boundary suite, and drops it in a `finally` — because the criterion is
+//            about `pg_constraint`, and a fixture migration that is never applied is invisible to a query
+//            of the catalogue while one that IS applied would be written into the migration ledger.
+{
+  const CORE = 'packages/core/src/clinical/intake.ts'
+  const SHARED = 'packages/shared/src/clinical.ts'
+  const ENVELOPE = 'packages/clinical/src/envelope.ts'
+  const REPO = 'packages/clinical/src/repository.ts'
+  const RENDER = 'apps/web/app/(admin)/clients/[id]/intake/render.ts'
+  const KEY_STORE = 'packages/clinical/src/crypto/postgres-key-store.ts'
+
+  const CORE_SUITE = 'packages/core/src/clinical/intake.test.ts'
+  const AAD_SUITE = 'packages/clinical/src/envelope-intake-aad.test.ts'
+  const ROW_SUITE = 'packages/clinical/src/intake.itest.ts'
+  const BOUNDARY_SUITE = 'packages/db/src/clinical-boundary.itest.ts'
+  const ROTATION_SUITE = 'packages/clinical/src/crypto/rotation.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/intake-render.test.ts'
+  const SETTINGS_SUITE = 'packages/config/src/settings/clinical-settings.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const intakeMutant = (path, anchor, replacement, suite, runner = rows) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 109a. The consent gate removed from the WRITE path. Every submission then stores and every screen
+  //       looks right. The DATABASE still refuses it at COMMIT (ZJ003), which is what this case is really
+  //       about: the message the suite sees comes from the trigger, so the guard holds for a `psql` session
+  //       that never came through this code at all.
+  checkRejectedBy(
+    'intake gate: a write path with no consent check is caught by the database',
+    intakeMutant(
+      REPO,
+      '    if (consent !== null && consent.withdrawnAt === null) return',
+      '    if (true) return\n    if (consent !== null && consent.withdrawnAt === null) return',
+      ROW_SUITE,
+    ),
+    'IntakeConsentNotEstablished',
+  )
+
+  // 109b. The consent lookup keyed on anything but the wording hash. Every assertion about a client who
+  //       consented to this template still passes. What breaks is the case the hash exists for: a consent
+  //       that predates a rewritten consent paragraph is accepted, because the template it names is still
+  //       the template being answered.
+  checkRejectedBy(
+    'intake gate: a consent lookup keyed on anything but the wording hash is caught',
+    intakeMutant(
+      REPO,
+      '       where customer_id = ${customerId}::uuid and consent_hash = ${consentHash}',
+      '       where customer_id = ${customerId}::uuid and ${consentHash}::text is not null',
+      ROW_SUITE,
+    ),
+    'refuses a submission against a template whose consent wording nobody consented to',
+  )
+
+  // 109c. The absent-consent branch deleted from the PURE decision — "we could not establish consent"
+  //       falling through to "proceed", in one line. Caught by a test that needs no key, no clock and no
+  //       database, which is the reason the decision is pure in the first place.
+  checkRejectedBy(
+    'intake gate: an absent consent record read as permission is caught',
+    intakeMutant(
+      CORE,
+      '  if (request.consent === null) {',
+      '  if (false as boolean) {',
+      CORE_SUITE,
+      unit,
+    ),
+    'refuses when consent could not be established',
+  )
+
+  // 109d. The withdrawal comparison reduced from "in force now" to "recorded at all". The mutation is in
+  //       the SAFER direction and is still wrong, and only the control catches it: a withdrawal recorded
+  //       with a future instant is not yet in force, so a gate refusing on `!== null` refuses a read
+  //       nobody has withdrawn consent for yet.
+  checkRejectedBy(
+    'intake gate: a withdrawal check that ignores WHEN it took effect is caught',
+    intakeMutant(
+      CORE,
+      '  if (request.consent.withdrawnAt !== null && request.consent.withdrawnAt <= request.at) {',
+      '  if (request.consent.withdrawnAt !== null) {',
+      CORE_SUITE,
+      unit,
+    ),
+    'a withdrawal in the FUTURE does not refuse a read now',
+  )
+
+  // 109e. The purpose match dropped from the read gate. Every legitimate read still works. What is lost is
+  //       the bound on what ONE step-up covers: stepping up to check a contraindication before a treatment
+  //       would then cover reading every note on every client for the rest of the window.
+  checkRejectedBy(
+    'intake gate: a step-up grant that covers any purpose is caught',
+    intakeMutant(
+      CORE,
+      '  if (grant.statedPurpose.trim() !== purpose) {',
+      '  if (false as boolean) {',
+      CORE_SUITE,
+      unit,
+    ),
+    'refuses a purpose the grant does not name',
+  )
+
+  // 109f. The cross-boundary foreign key, applied for real (the criterion's known-bad fixture).
+  //
+  //       `step_up_grant.employee_id -> public.employee` is the one somebody will actually write: it is the
+  //       obvious referential integrity, it would work, and it would weld the clinical schema to the roster
+  //       for ever — the single thing ADR 0010 arranges everything else to prevent.
+  {
+    const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
+    const CONSTRAINT = 'gate_fixture_cross_boundary_fk'
+    const psql = (statement) =>
+      run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', url, '-c', statement])
+
+    if (url === '') {
+      // Loudly, not silently. A gate that skips when its environment is absent is the ADR 0002 failure.
+      check(
+        'intake gate: a cross-boundary foreign key is caught',
+        false,
+        'TEST_DATABASE_URL is not set, so pg_constraint cannot be probed',
+      )
+    } else {
+      const added = psql(
+        `alter table clinical.step_up_grant add constraint ${CONSTRAINT} ` +
+          'foreign key (employee_id) references public.employee(id)',
+      )
+      try {
+        // The constraint must have gone on, or the run below proves nothing about it.
+        check(
+          'intake gate: the cross-boundary fixture constraint was actually applied',
+          !added.failed,
+          `psql could not add the fixture constraint, so the case below measured nothing:\n${added.output}`,
+        )
+        checkRejectedBy(
+          'intake gate: a cross-boundary foreign key is caught',
+          runExpectingFailure('pnpm', rows(BOUNDARY_SUITE)),
+          CONSTRAINT,
+        )
+      } finally {
+        psql(`alter table clinical.step_up_grant drop constraint if exists ${CONSTRAINT}`)
+      }
+      // The control on the teardown, and not a formality: a fixture constraint left behind fails every
+      // later run of the boundary suite with a message about a rule that is fine.
+      const remaining = psql(
+        `select count(*) as n from pg_constraint where conname = '${CONSTRAINT}'`,
+      )
+      check(
+        'intake gate: the cross-boundary fixture constraint was dropped again',
+        !remaining.failed && /\b0\b/.test(remaining.output),
+        `the fixture constraint may still be on clinical.step_up_grant:\n${remaining.output}`,
+      )
+    }
+  }
+
+  // 109g. The template version dropped from the AAD at the seal. Every payload still round-trips, because
+  //       it is dropped consistently — so a seal-and-open test would pass. What is lost is the binding: a
+  //       payload captured under version 3 becomes readable against version 4's question set, and an
+  //       answer to "any recent surgery?" is presented as an answer to whatever version 4 asks there.
+  checkRejectedBy(
+    'intake gate: an AAD that does not bind the template version is caught',
+    intakeMutant(
+      ENVELOPE,
+      "  return Buffer.from(binding.context === undefined ? base : `${base}|${binding.context}`, 'utf8')",
+      "  return Buffer.from(base, 'utf8')",
+      AAD_SUITE,
+      unit,
+    ),
+    'a payload with a context and one without are not interchangeable',
+  )
+
+  // 109h. The context dropped from the FINGERPRINT only, leaving it in the GCM tag. The system is still
+  //       safe — authentication refuses — and the error an operator sees changes from a named binding
+  //       mismatch to a bare authentication failure, which is the difference between a diagnosable problem
+  //       and an hour spent on the wrong one.
+  checkRejectedBy(
+    'intake gate: a fingerprint that ignores the fourth AAD term is caught',
+    intakeMutant(
+      ENVELOPE,
+      "  return createHash('sha256').update(aadFor(binding)).digest('hex').slice(0, 32)",
+      '  const { context: _ignored, ...rest } = binding\n' +
+        "  return createHash('sha256').update(aadFor(rest)).digest('hex').slice(0, 32)",
+      AAD_SUITE,
+      unit,
+    ),
+    'the fingerprint discriminates on the context',
+  )
+
+  // 109i. `setAAD` replaced by an empty buffer in BOTH directions, symmetrically. The envelope still round
+  //       trips and still refuses a tampered ciphertext; what stops being true is that the AAD participates
+  //       in the tag, so an attacker who rewrites the stored fingerprint alongside the row identity gets a
+  //       clean decrypt.
+  //
+  //       Symmetry is the whole point. Replacing `cipher.setAAD(aad)` and then `decipher.setAAD(aad)` by
+  //       substring leaves `de` plus a comment on the second line — a bare identifier, a ReferenceError
+  //       inside `open`'s try, and every AAD case failing for a reason that has nothing to do with the AAD.
+  //       Two `replaceOnce` calls on whole lines is what avoids it, and `replaceOnce` would refuse the
+  //       ambiguous anchor rather than take the first match.
+  checkRejectedBy(
+    'intake gate: an AAD that is not part of the GCM tag is caught',
+    withEditedFile(
+      ENVELOPE,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, '  cipher.setAAD(aad)\n', '  cipher.setAAD(Buffer.alloc(0))\n'),
+          '  decipher.setAAD(aad)\n',
+          '  decipher.setAAD(Buffer.alloc(0))\n',
+        ),
+      () => runExpectingFailure('pnpm', unit(AAD_SUITE)),
+    ),
+    'fails AUTHENTICATION with the fingerprint forged to match',
+  )
+
+  // 109j. The cipher replaced by its input — the mutation a seal/open round trip cannot see at all. Every
+  //       AAD case still passes; what fails is the assertion about what an attacker holding the ROW sees,
+  //       which is the only kind of assertion that can tell a cipher from a copy.
+  checkRejectedBy(
+    'intake gate: a cipher that returns its input is caught',
+    intakeMutant(
+      ENVELOPE,
+      '  const body = Buffer.concat([cipher.update(plaintext), cipher.final()])',
+      '  const body = Buffer.from(plaintext)',
+      AAD_SUITE,
+      unit,
+    ),
+    'holds no run of the plaintext',
+  )
+
+  // 109k. The rotation's view of the fourth AAD term removed, so a re-wrap reconstructs a three-term
+  //       binding. Nothing about the rotation's reporting changes — it still counts, still resumes, still
+  //       balances. Every intake row simply stops being re-wrappable, and it surfaces as
+  //       `ClinicalDekUnwrapFailed` on a row nothing is wrong with, half way through a key rotation.
+  checkRejectedBy(
+    'intake gate: a rotation that cannot see the fourth AAD term is caught',
+    intakeMutant(
+      KEY_STORE,
+      "    aadContext: 'aad_context',",
+      '    aadContext: null,',
+      ROTATION_SUITE,
+    ),
+    'ClinicalDekUnwrapFailed',
+  )
+
+  // 109l. The read gate's refusal branch removed. Every read then succeeds and every audit row is still
+  //       written — so the trail looks complete and records reads nobody was authorised to make, which is
+  //       worse than no trail because it reads as evidence that they were.
+  checkRejectedBy(
+    'intake gate: a read that skips the step-up gate is caught',
+    intakeMutant(
+      REPO,
+      '    if (!decision.permitted) {',
+      '    if ((false as boolean) && !decision.permitted) {',
+      ROW_SUITE,
+    ),
+    'clinical_step_up_required',
+  )
+
+  // 109m. The refusal's audit row not written at all — which is the OBSERVABLE state this unit shipped
+  //       first, and a failing assertion found it: the row was written inside the caller's transaction, the
+  //       transaction rolled back (that is what "refused" means), and the row disappeared. An attempt to
+  //       read a health record with no stated purpose became the only event in this system that leaves no
+  //       trace, and migration 0005's own comment says why that matters.
+  //
+  //       A no-op rather than a re-route through the transaction: the two states are indistinguishable to
+  //       the assertion — no row either way — and a no-op cannot fail for the wrong reason, which the first
+  //       version of this case did.
+  checkRejectedBy(
+    'intake gate: a refusal that records no audit row is caught',
+    intakeMutant(
+      REPO,
+      '    const writer = new AuditWriter(sql, {',
+      '    if (true) return\n    const writer = new AuditWriter(sql, {',
+      ROW_SUITE,
+    ),
+    'writes a denied row',
+  )
+
+  // 109n. The template fetched by LOCALE instead of by the id the submission names — one line, and the page
+  //       it produces is a plausible lie: every answer renders, every label comes from the newest version,
+  //       and nothing on the screen says the questions are not the ones that were asked.
+  checkRejectedBy(
+    'intake gate: rendering against the CURRENT template instead of the captured one is caught',
+    intakeMutant(
+      REPO,
+      '       where id = ${templateId}::uuid',
+      '       where locale = (select locale from clinical.intake_form_template\n' +
+        '                        where id = ${templateId}::uuid)\n         and is_current',
+      ROW_SUITE,
+    ),
+    'IntakeRenderVersionMismatch',
+  )
+
+  // 109n1. The supersede removed, so a second intake form leaves two live submissions. Nothing fails and
+  //        nothing is lost — both rows are there, both readable — and the route's `superseded_at is null`
+  //        filter becomes a filter that reads as a rule and is not one, so the screen shows whichever row
+  //        sorted first. The column existed in migration 0008 and nothing had ever set it, which is how
+  //        this was found: by asking what writes it.
+  checkRejectedBy(
+    'intake gate: a second intake form that does not supersede the first is caught',
+    intakeMutant(
+      REPO,
+      `        await tx\`
+          update clinical.intake_submission
+             set superseded_at = now()
+           where customer_id = \${input.customerId}::uuid and superseded_at is null
+        \``,
+      '        // the previous submission is no longer superseded',
+      ROW_SUITE,
+    ),
+    'supersedes the first, and deletes nothing',
+  )
+
+  // 109o. The captured-version guard removed. With 109n's query still correct nothing changes, which is
+  //       exactly why the guard needs a case of its own: it is the assertion that survives the day somebody
+  //       rewrites that query.
+  checkRejectedBy(
+    'intake gate: a render with no captured-version assertion is caught',
+    intakeMutant(
+      CORE,
+      '  if (\n    template.templateId !== captured.templateId ||\n' +
+        '    template.version !== captured.templateVersion\n  ) {',
+      '  if (false as boolean) {',
+      CORE_SUITE,
+      unit,
+    ),
+    'refuses to render against a template that is not the captured one',
+  )
+
+  // 109p. The residency gate removed from the write path. The DATABASE still refuses it (ZJ005), so the
+  //       message the suite sees comes from the trigger — which is the point, because the trigger is what
+  //       holds when a real payload arrives through a path that never came through this function.
+  checkRejectedBy(
+    'intake gate: a real intake payload accepted while Y5-residency is open is caught',
+    intakeMutant(
+      REPO,
+      "      if (input.dataOrigin === 'real' && !realPermitted) {",
+      '      if (false as boolean) {',
+      ROW_SUITE,
+    ),
+    // The test TITLE, not the error name. With the application gate removed the database refuses the same
+    // write with the same name, so the suite fails on the audit-row delta instead — which is the only
+    // observable that separates the two layers, and naming the error would have matched the database's.
+    'refuses a real payload by name',
+  )
+
+  // 109q. The residency setting's default flipped to permissive. The first real submission is then accepted
+  //       into a database whose jurisdiction nobody has confirmed, which is the one mistake in this unit
+  //       that cannot be undone afterwards.
+  //
+  //       Pointed at the REGISTRY suite and not at the integration suite, and the reason is the whole
+  //       value of this case. `readSetting` returns the `app_setting` ROW when there is one, and a seeded
+  //       database always has one — so flipping the default changed nothing any integration assertion
+  //       could see, and the first version of this case reported PASS about a mutation the suite could not
+  //       detect. The default is what a FRESH database and an unseeded key fall back to, and it is the
+  //       default that decides what an uncorrected assumption does (docs/12 §2).
+  checkRejectedBy(
+    'intake gate: a permissive default for the residency setting is caught',
+    intakeMutant(
+      SHARED,
+      'export const PROVISIONAL_REAL_INTAKE_PERMITTED = false',
+      'export const PROVISIONAL_REAL_INTAKE_PERMITTED = true',
+      SETTINGS_SUITE,
+      unit,
+    ),
+    'defaults to FALSE, which is the strict reading',
+  )
+
+  // 109r. The question-copy lint turned off at its default. Y1-licence is unconfirmed, so the narrower
+  //       vocabulary applies; a permissive default here is the provisional value chosen the convenient way
+  //       round rather than the strict one, which is the thing docs/12 §2 exists to prevent.
+  checkRejectedBy(
+    'intake gate: a permissive default for the question-copy lint is caught',
+    intakeMutant(
+      SHARED,
+      'export const PROVISIONAL_LINT_QUESTION_COPY = true',
+      'export const PROVISIONAL_LINT_QUESTION_COPY = false',
+      SETTINGS_SUITE,
+      unit,
+    ),
+    'defaults to TRUE, which is the narrower vocabulary',
+  )
+
+  // 109r1. A provisional marker put on the step-up window. Nothing about the system changes; what changes
+  //        is the Unconfirmed Assumptions panel, which gains a row the owner cannot answer — and a panel
+  //        is worth reading exactly to the extent that everything on it needs an owner. ADR 0031's last
+  //        section is the argument, and this case is what makes it a decision rather than a comment.
+  checkRejectedBy(
+    'intake gate: a provisional marker on the step-up window is caught',
+    intakeMutant(
+      'packages/config/src/settings/registry.ts',
+      `    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+  }),
+  define({
+    /**
+     * Whether intake QUESTION copy is linted as well as the template's assertive copy (Y1-licence).`,
+      `    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: { openQuestionId: 'Y1-licence', note: 'a marker nobody asked for' },
+  }),
+  define({
+    /**
+     * Whether intake QUESTION copy is linted as well as the template's assertive copy (Y1-licence).`,
+      SETTINGS_SUITE,
+      unit,
+    ),
+    'is deliberately NOT provisional',
+  )
+
+  // 109s. The claim-term exemption widened until a question is not linted at all. The form still works and
+  //       every legitimate question passes, which is the shape of a lint that has quietly stopped being one.
+  checkRejectedBy(
+    'intake gate: a question lint that drops every rule is caught',
+    intakeMutant(
+      CORE,
+      '  Object.freeze(lintPublicDisplayName(text, policy).filter((f) => f.rule !== QUESTION_EXEMPT_RULE))',
+      '  Object.freeze([])',
+      CORE_SUITE,
+      unit,
+    ),
+    'refuses an unpermitted staff title in a question',
+  )
+
+  // 109t. The exemption removed entirely, so a question IS linted for claim terms. The STRICT direction,
+  //       and still wrong: the form can then no longer ask about medication, and an intake form that cannot
+  //       ask about medication is not a stricter form, it is one somebody switches the lint off to use.
+  //       Both directions of this rule need a case, because only one of them looks like a mistake.
+  checkRejectedBy(
+    'intake gate: a question lint that refuses asking about medication is caught',
+    intakeMutant(
+      CORE,
+      "const QUESTION_EXEMPT_RULE = 'banned_claim_term'",
+      "const QUESTION_EXEMPT_RULE = 'no_such_rule'",
+      CORE_SUITE,
+      unit,
+    ),
+    'a QUESTION may use a banned claim term',
+  )
+
+  // 109u. The consent wording left out of the assertive lint. The title is still checked, so every case
+  //       about a banned word in a title passes — and the consent paragraph, the one piece of copy on the
+  //       form that is a legal claim, stops being read at all.
+  checkRejectedBy(
+    'intake gate: a lint that skips the consent wording is caught',
+    intakeMutant(
+      CORE,
+      "    ...at('consent_text', lintIntakeAssertionCopy(template.consentText, policy)),",
+      '',
+      CORE_SUITE,
+      unit,
+    ),
+    'refuses a banned claim term in the CONSENT wording',
+  )
+
+  // 109v. The escaping dropped from an answer VALUE. An intake answer is text a client typed, so it is the
+  //       most obviously untrusted string on any admin screen, and it is interpolated into a document.
+  //
+  //       This slot first held a different mutation — printing the refused outcome onto the page — and that
+  //       mutation leaked nothing, because a refused outcome holds a rule name and a submission id and no
+  //       answers at all. The case reported FAIL for the right reason (nothing was rejected) and would have
+  //       reported PASS about a leak that cannot happen. What CAN happen on this page is a dropped wrapper.
+  checkRejectedBy(
+    'intake gate: an unescaped answer value is caught',
+    intakeMutant(
+      RENDER,
+      "        `${answer.missing ? 'not answered' : safeText(answer.value ?? '')}</dd></div>`,",
+      "        `${answer.missing ? 'not answered' : (answer.value ?? '')}</dd></div>`,",
+      RENDER_SUITE,
+      unit,
+    ),
+    'escapes an answer value',
+  )
+
+  // 109w. The per-refusal remedy replaced by one sentence for all seven. The page still refuses and still
+  //       explains itself in general terms; what is lost is the operator being able to tell "go and take a
+  //       consent" from "re-enter your second factor", so they retry and the trail fills with attempts.
+  checkRejectedBy(
+    'intake gate: a refusal page that does not name its remedy is caught',
+    intakeMutant(
+      RENDER,
+      '      `<p>${safeText(REMEDY[outcome.refusal])}</p>` +',
+      "      '<p>This record could not be opened.</p>' +",
+      RENDER_SUITE,
+      unit,
+    ),
+    'every refusal has a remedy of its own',
+  )
+
+  // 109x. The "synthetic records only" notice made unconditional. It then cannot disappear, which turns an
+  //       Unconfirmed Assumptions panel into decoration: a notice that is always there is one nobody reads,
+  //       and the day real data IS permitted the page still says it is not.
+  checkRejectedBy(
+    'intake gate: a residency notice that ignores the setting is caught',
+    intakeMutant(
+      RENDER,
+      '  view.realIntakePermitted\n    ? ',
+      '  (false as boolean)\n    ? ',
+      RENDER_SUITE,
+      unit,
+    ),
+    'stops saying it once real intake data is permitted',
+  )
+
+  // 109y. A payload value put into a structured log line. The line is correct for whatever bug somebody was
+  //       chasing, and it is then in a log aggregator for as long as the retention says. The closed field
+  //       map in `logging.ts` makes this a type error in ordinary code; the case proves the observable half
+  //       fails too, for the day somebody widens the type.
+  //
+  //       Injected through `logger.log` directly rather than through `log`, so it reaches the LINES sink
+  //       alone: `log` writes to both, and a mutation hitting both would make this case and 109z
+  //       indistinguishable — two cases each proving the same thing about half the surface.
+  checkRejectedBy(
+    'intake gate: a payload value in a log line is caught',
+    intakeMutant(
+      REPO,
+      "        log('info', 'intake submission stored', {",
+      "        logger.log({ level: 'info', message: JSON.stringify(input.answers), fields: {} })\n" +
+        "        log('info', 'intake submission stored', {",
+      ROW_SUITE,
+    ),
+    'a log line carries a payload value',
+  )
+
+  // 109z. A payload value put into a Sentry breadcrumb instead. The mirror of 109y, injected through
+  //       `deps.errors?.addBreadcrumb` so it reaches the BREADCRUMB sink alone — and the pair is what
+  //       proves the leak detector reads both, which is the gap `with-google.test.ts` found for the Google
+  //       token by checking both sinks rather than one.
+  checkRejectedBy(
+    'intake gate: a payload value in a breadcrumb is caught',
+    intakeMutant(
+      REPO,
+      '        return { submissionId }',
+      '        deps.errors?.addBreadcrumb({\n' +
+        "          category: 'clinical',\n" +
+        '          message: JSON.stringify(input.answers),\n' +
+        '        })\n' +
+        '        return { submissionId }',
+      ROW_SUITE,
+    ),
+    'a breadcrumb carries a payload value',
+  )
+}
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

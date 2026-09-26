@@ -36,6 +36,7 @@ a decision the table does not list.
 | [0024](0024-deferred-room-capacity-trigger.md) | The room-capacity trigger is deferred to COMMIT; the therapist exclusion constraint is not | — |
 | [0025](0025-staff-field-level-encryption.md) | Staff PII under a third KEK; the employment record is a closed field map | — |
 | [0026](0026-period-reopen-requires-migration.md) | Reopening a closed accounting period requires a migration | — |
+| [0031](0031-clinical-intake-consent-gate.md) | The intake consent gate is a refusal; the AAD binds the template version; residency is a setting | — |
 
 ## Writing one
 

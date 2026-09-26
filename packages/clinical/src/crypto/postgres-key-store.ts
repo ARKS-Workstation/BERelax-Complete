@@ -23,20 +23,36 @@ import {
  * names are per-table and everything else is shared.
  */
 
-/** Per-table column names. Everything else about the two tables is identical. */
+/**
+ * Per-table column names. Everything else about the two tables is identical.
+ *
+ * `aadContext` is the column holding the fourth AAD term, or null for a table whose payloads bind only
+ * the three-term row identity. It is READ rather than derived, and that is what keeps the rotation
+ * correct: a re-wrap has to reproduce the exact AAD a payload was sealed under, so a term the rotation
+ * cannot see is a row the rotation cannot re-wrap — and it would present as `ClinicalDekUnwrapFailed`
+ * on a row nothing is wrong with, at 03:00, half way through a key rotation.
+ */
 const SEALED_COLUMNS: Record<
   ClinicalSealedTable,
-  { readonly relation: string; readonly ciphertext: string; readonly nonce: string }
+  {
+    readonly relation: string
+    readonly ciphertext: string
+    readonly nonce: string
+    readonly aadContext: string | null
+  }
 > = {
   'clinical.intake_submission': {
     relation: 'clinical.intake_submission',
     ciphertext: 'payload_ciphertext',
     nonce: 'payload_nonce',
+    // `template_version=<n>` (migration 0082). A CHECK ties it to the template_version column.
+    aadContext: 'aad_context',
   },
   'clinical.treatment_note': {
     relation: 'clinical.treatment_note',
     ciphertext: 'body_ciphertext',
     nonce: 'body_nonce',
+    aadContext: null,
   },
 }
 
@@ -48,6 +64,7 @@ interface SealedRow {
   readonly wrapped_data_key: Buffer
   readonly kek_version: string
   readonly aad_fingerprint: string
+  readonly aad_context: string | null
 }
 
 const toSealedRecord = (table: ClinicalSealedTable, row: SealedRow): SealedRecord => {
@@ -58,7 +75,16 @@ const toSealedRecord = (table: ClinicalSealedTable, row: SealedRow): SealedRecor
     kekVersion: row.kek_version,
     aadFingerprint: row.aad_fingerprint,
   }
-  return { table, recordId: row.id, customerId: row.customer_id, sealed }
+  // Spread rather than `context: row.aad_context ?? undefined`, because `exactOptionalPropertyTypes`
+  // is on: an explicit `undefined` is not the same as an absent property, and an absent one is what
+  // makes a three-term binding byte-identical to what it was before this field existed.
+  return {
+    table,
+    recordId: row.id,
+    customerId: row.customer_id,
+    sealed,
+    ...(row.aad_context === null ? {} : { context: row.aad_context }),
+  }
 }
 
 export function createPostgresClinicalKeyStore(sql: Sql): ClinicalKeyStore {
@@ -137,7 +163,8 @@ export function createPostgresClinicalKeyStore(sql: Sql): ClinicalKeyStore {
                  ${sql(columns.nonce)} as nonce,
                  wrapped_data_key,
                  kek_version,
-                 aad_fingerprint
+                 aad_fingerprint,
+                 ${columns.aadContext === null ? sql`null` : sql(columns.aadContext)} as aad_context
             from ${sql(columns.relation)}
            where kek_version <> ${version}
            order by id
@@ -165,7 +192,8 @@ export function createPostgresClinicalKeyStore(sql: Sql): ClinicalKeyStore {
                  ${sql(columns.nonce)} as nonce,
                  wrapped_data_key,
                  kek_version,
-                 aad_fingerprint
+                 aad_fingerprint,
+                 ${columns.aadContext === null ? sql`null` : sql(columns.aadContext)} as aad_context
             from ${sql(columns.relation)}
            where kek_version = ${version}
              and (${lowerBound}::uuid is null or id > ${lowerBound}::uuid)

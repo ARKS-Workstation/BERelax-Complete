@@ -1,6 +1,11 @@
 import {
   AppError,
+  CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
+  CLINICAL_REAL_INTAKE_SETTING_KEY,
+  CLINICAL_STEP_UP_WINDOW_MINUTES,
+  CLINICAL_STEP_UP_WINDOW_SETTING_KEY,
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
+  clinicalStepUpWindowSchema,
   credentialExpiringSoonDaysSchema,
   DEFAULT_GOOGLE_REAUTH_REPEAT_CAP,
   DEFAULT_LLM_PROVIDER,
@@ -23,6 +28,8 @@ import {
   OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
   OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
   PROVISIONAL_EXPIRING_SOON_DAYS,
+  PROVISIONAL_LINT_QUESTION_COPY,
+  PROVISIONAL_REAL_INTAKE_PERMITTED,
   REBUILD_OBLIGATION_NOTICES_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
   REMINDER_OFFSETS_SETTING_KEY,
@@ -687,6 +694,89 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y1-licence',
       note: 'An escalation interval is a judgement about how long a renewal can safely sit unacknowledged, which follows from how long the renewal takes — and docs/04 marks every renewal interval [UNVERIFIED]. 7 and 21 days: a week is short enough that the second rung still lands before a month has passed, and the second rung exists because one escalation nobody answers is a notice with nowhere left to go.',
+    },
+  }),
+  define({
+    /**
+     * Whether a real intake payload may be stored at all (C-CRM-08, OPEN-QUESTIONS Y5-residency).
+     *
+     * `compliance_locked` and owner-only, which is what the tier test asks: the tier follows what a value
+     * can RELAX, and this one relaxes the strictest thing in the system — whether special-category health
+     * data may be written to a database that is not in the UAE. Federal Law 2 of 2019 may prohibit it,
+     * DigitalOcean has no UAE region, and the licence classification that decides whether the rule
+     * applies is unconfirmed (ADR 0010).
+     *
+     * It is a SETTING rather than a migration, and that is the point of it: answering Y5-residency is
+     * then a configuration change made on the Unconfirmed Assumptions panel with a written justification
+     * (docs/12 §1.3), not a release. Migration 0082 reads this same row from a trigger, so the refusal
+     * holds for a `psql` session too and an absent row reads as false.
+     *
+     * No cache tag and no job: nothing rendered depends on it, and flipping it does not make the
+     * synthetic fixtures real. What it changes is whether the next write is accepted.
+     */
+    key: CLINICAL_REAL_INTAKE_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.boolean(),
+    defaultValue: PROVISIONAL_REAL_INTAKE_PERMITTED,
+    label: 'Real client intake data may be stored',
+    help: 'Off until it is confirmed that client intake notes may be held in this database. While it is off, only obviously-synthetic fixture submissions can be written and a real one is refused by name, by the database as well as by the application. Turning it on does not move any data: if the answer is that health data must stay in the UAE, the clinical schema has to be relocated first (ADR 0010).',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y5-residency',
+      note: 'Do intake notes count as health data subject to UAE localisation? Unanswered, so the strict reading applies: they do. Being wrong this way costs one setting change; being wrong the other way is a disclosure of special-category data from a jurisdiction it should not have left. Nothing about the clinical boundary has to be rebuilt either way — ADR 0010 built it for relocation — but real data loaded before the answer cannot be un-loaded.',
+    },
+  }),
+  define({
+    /**
+     * How long a step-up re-authentication is good for (C-CRM-08).
+     *
+     * Not provisional, and `packages/shared/src/clinical.ts` carries the argument: a provisional marker
+     * means the owner has to answer something, and this needs no answer — shorter is unambiguously
+     * stricter, five minutes is already short, and nothing about the licence or the entity moves it. The
+     * panel is worth reading exactly to the extent that everything on it needs an owner.
+     *
+     * `compliance_locked` all the same, because widening it is the change that matters: a window nobody
+     * notices has grown to eight hours turns step-up into a login. Migration 0082 caps any grant at
+     * fifteen minutes whatever this holds, so the setting can only tighten within the ceiling — the same
+     * belt-and-braces shape 0043 uses for the KEK, and for the same reason.
+     */
+    key: CLINICAL_STEP_UP_WINDOW_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: clinicalStepUpWindowSchema,
+    defaultValue: CLINICAL_STEP_UP_WINDOW_MINUTES,
+    label: 'Clinical step-up window (minutes)',
+    help: 'How long after re-entering a second factor a member of staff may read clinical records, for the one purpose they stated. Every read inside the window is logged individually with that purpose. The database refuses any window longer than 15 minutes.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+  }),
+  define({
+    /**
+     * Whether intake QUESTION copy is linted as well as the template's assertive copy (Y1-licence).
+     *
+     * The Y1-licence decision made into one switch. Unconfirmed resolves to the narrower vocabulary, so
+     * a question label goes through the publication lexicon for an unpermitted staff title, an
+     * unlicensed activity or a treatment style attached to a person. It is never linted for the
+     * profile's claim list — asking about medication is not claiming to prescribe it — and that
+     * exemption is one rule wide and named in `packages/core/src/clinical/intake.ts`.
+     *
+     * `compliance_locked`, because what it relaxes is a claim the business makes in front of a client,
+     * which is the same subject `regulatory_profile` is locked for.
+     */
+    key: CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.boolean(),
+    defaultValue: PROVISIONAL_LINT_QUESTION_COPY,
+    label: 'Lint intake question wording too',
+    help: 'On: the wording of every intake question is checked against the vocabulary the regulatory profile permits, as well as the form title and the consent paragraph. Off: only the title and the consent paragraph are checked. Turn it off only once the licence classification is confirmed.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y1-licence',
+      note: 'Is the licence a commercial wellness activity or a healthcare one? Unanswered, so the narrower vocabulary applies to everything a client reads on an intake form and not only to what the form asserts. Answering it healthcare widens this twice over: this setting goes off, and regulatory_profile.medical_claims_permitted going true stops the claim list applying to the title and the consent wording as well. Both are configuration changes.',
     },
   }),
 ] as const

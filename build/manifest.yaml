@@ -7350,12 +7350,99 @@ units:
       after the edit)'
     - A structured-logging spy driven through the full submission path asserts no log record and no Sentry
       breadcrumb contains any payload value
+    - 'NOTE: the concrete files. The migration is packages/db/migrations/0082_clinical_intake.sql and
+      SCHEMA_VERSION is 82 (78-81 are numbers held by units in flight; 22, 41, 44, 47, 71 and 74 stay
+      unused, because renumbering to close a gap is how two branches apply one number to different SQL).
+      The manifest declared only the directory packages/db/migrations/ and three files that do not exist
+      under those names: the crypto primitives are packages/clinical/src/envelope.ts (F08''s, extended with
+      a fourth AAD term) rather than a new crypto.ts, and the Drizzle mirror is
+      packages/clinical/src/schema/clinical.ts rather than schema.ts. Nothing was duplicated to match the
+      manifest; the files list is corrected instead.'
+    - 'NOTE: the clinical consent_record the summary names is clinical.treatment_consent, built by
+      migration 0008. No second consent table was added. 0082 adds the index the gate reads
+      (treatment_consent_gate_idx on customer_id, consent_hash where withdrawn_at is null) and the
+      deferred constraint trigger that refuses a submission without a matching live row (ZJ003).'
+    - 'NOTE: deferred to C-CRM-09 - the contraindication flag derivation. 0082 writes no
+      clinical.contraindication_flag row, so the public.customer_contraindication_flags view still answers
+      empty for every submission this unit stores. That is C-CRM-09''s acceptance ("a pure derivation from
+      a decrypted submission produces a closed set of boolean flags") and building a derivation here would
+      be building its FlagKey set before the unit that closes it exists. recordIntake therefore takes no
+      flags argument at all rather than taking one it would have to guess at.'
+    - 'NOTE: deferred to W-SYS-01 - the admin session. /clients/[id]/intake takes ?employee= and ?purpose=
+      as query parameters because there is no admin session yet, exactly as every route under /compliance,
+      /hr, /settings and /clients/duplicates records. It is not a way to read another person''s records:
+      without a step-up grant of their own the read is refused and the refusal is audited against whoever
+      was named. When the session lands, only the SOURCE of those two arguments changes - the store call
+      does not.'
+    - 'NOTE: deferred to deployment (and named in ADR 0031) - the clinical database CREDENTIAL. Migration
+      0009 does `revoke all on schema clinical from berelax_app`, which is ADR 0010 property 2, so
+      /clients/[id]/intake cannot read a submission over DATABASE_URL in production. It works in the test
+      database only because the connecting role there is the owner. The route therefore catches
+      insufficient_privilege (42501) and rethrows it as ClinicalConnectionNotConfigured naming what is
+      missing, with NO fallback: a route that used the application credential when a clinical one was
+      absent would pass every test and fail in the only environment that matters. What is needed is a
+      second database credential holding berelax_clinical, which is a new secret-inventory entry and a
+      runbook heading rather than a code change - and granting berelax_app access to the clinical schema
+      would delete the boundary instead of fixing the page.'
+    - 'NOTE: units, and the `pnpm db:conventions` flag on 0082 line 299. That flag was a FALSE POSITIVE
+      and not a column: the scanner blanks single-quoted strings and dash comments before scanning a line
+      for column TYPES but not a block comment, so the English word for non-synthetic data in prose inside
+      a /** */ block was reported as a floating-point column - and the reworded comment then tripped the
+      naive-timestamp rule the same way, because that word in DOUBLE quotes is not blanked either. There is
+      no floating-point, numeric or money column anywhere in the clinical schema: every column 0082 adds is
+      uuid, bytea, text, integer or timestamptz, confirmed against information_schema. Reworded rather than
+      fixed, because that scanner is another unit''s file, and 0043 and 0077 use the same comment style and
+      have so far been lucky in their choice of words. Where the exactness argument DOES apply in this unit
+      is the answer payload rather than a column: an answer is JSON inside payload_ciphertext, a JSON number
+      is an IEEE double, and the schema sees bytea whatever is inside it - so no column type could catch a
+      measurement stored inexactly. INTAKE_FIELD_KINDS therefore has no numeric kind, which makes a
+      measurement exact text carrying the unit its question asked for ("Weight (kg)" as short_text, storing
+      the string "70.1"), and packages/core/src/clinical/intake.test.ts asserts that absence with a
+      non-vacuity control. If a later unit needs arithmetic over measurements, the shape to add is a kind
+      naming its smallest unit - mass_grams, an integer - which is ADR 0007''s `fils` decision applied to a
+      measurement, and never a float.'
+    - 'NOTE: no port band was taken. packages/harness/src/ports.ts is unchanged. The intake page''s claims
+      are all about what the HTML contains, so apps/web/src/intake-render.test.ts asserts the render
+      directly and needs no server; apps/web/src/test-ports.test.ts refuses a band that is declared and
+      not used, so declaring the reserved intake band would have failed.'
+    - 'NOTE: the step-up window (5 minutes) is a setting and is deliberately NOT marked provisional, which
+      is a claim rather than an omission - see the last section of ADR 0031. The two values that ARE
+      provisional are clinical.real_intake_permitted (Y5-residency, default false) and
+      clinical.intake_copy_lints_questions (Y1-licence, default true). Migration 0082 caps any grant at 15
+      minutes whatever the setting holds.'
+    - 'NOTE: cross-unit edit, reported rather than silent. 0082''s four new NOT NULL columns on
+      clinical.intake_submission and its consent trigger make packages/clinical/src/crypto/rotation.itest.ts
+      (H-HARD-04''s) uncompilable against the new schema, so that file was adapted: its fixture supplies
+      template_version, aad_context, data_origin and retain_until, seals intake payloads with the fourth
+      AAD term, and inserts the consent rows the gate requires. The adaptation is a bonus as well as a
+      cost - the rotation now exercises a four-term AAD and a three-term one in one run, which is what
+      proves the key store reads aad_context off the row rather than assuming a shape.'
     files:
-    - packages/clinical/src/schema.ts
-    - packages/clinical/src/crypto.ts
+    - packages/db/migrations/0082_clinical_intake.sql
     - packages/clinical/src/repository.ts
-    - packages/db/migrations/
-    - apps/web/app/(admin)/clients/[id]/intake/
+    - packages/clinical/src/logging.ts
+    - packages/clinical/src/schema/clinical.ts
+    - packages/clinical/src/envelope.ts
+    - packages/clinical/src/crypto/rotate.ts
+    - packages/clinical/src/crypto/postgres-key-store.ts
+    - packages/clinical/src/crypto/rotation.itest.ts
+    - packages/clinical/src/envelope-intake-aad.test.ts
+    - packages/clinical/src/intake.itest.ts
+    - packages/clinical/src/index.ts
+    - packages/clinical/package.json
+    - packages/core/src/clinical/intake.ts
+    - packages/core/src/clinical/intake.test.ts
+    - packages/core/src/index.ts
+    - packages/shared/src/clinical.ts
+    - packages/shared/src/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/db/src/index.ts
+    - apps/web/app/(admin)/clients/[id]/intake/route.ts
+    - apps/web/app/(admin)/clients/[id]/intake/render.ts
+    - apps/web/src/intake-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - docs/adr/0031-clinical-intake-consent-gate.md
+    - scripts/test-gates.mjs
   - id: C-CRM-09
     order: 88
     title: 'Contraindication flags: the boolean-only crossing'

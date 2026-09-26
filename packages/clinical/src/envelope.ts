@@ -47,6 +47,20 @@ export interface RecordBinding {
   readonly table: string
   readonly recordId: string
   readonly customerId: string
+  /**
+   * A fourth term for a payload whose MEANING depends on something beyond its row identity.
+   *
+   * An intake submission binds `template_version=<n>` here (C-CRM-08). Row identity alone is not
+   * enough for it: the answers are a map from a question set's field keys to values, so a payload
+   * captured under version 3 moved onto a row labelled version 4 would decrypt cleanly and be read
+   * against questions it was not asked — an answer to "any recent surgery?" presented as an answer to
+   * "any allergies?". Binding the version into the GCM tag makes that a decryption failure.
+   *
+   * Optional, and absent is NOT the empty string: a binding with no context produces byte-identical
+   * AAD to the three-term version this interface started as, so a treatment note and every staff
+   * record sealed under ADR 0025 are unaffected by this field existing.
+   */
+  readonly context?: string
 }
 
 export function parseKek(base64Key: string, version: string): Kek {
@@ -66,8 +80,22 @@ export function generateKek(version: string): Kek {
 }
 
 function aadFor(binding: RecordBinding): Buffer {
-  // Canonical, order-independent of the caller's object literal.
-  return Buffer.from(`${binding.table}|${binding.recordId}|${binding.customerId}`, 'utf8')
+  // `|` is the separator, and the context is the LAST term — so a `|` inside it is not ambiguous today,
+  // because there is nothing after it for the split to go wrong between. It is refused anyway, and the
+  // reason is the day a FIFTH term is added: at that point `context: 'a|b'` with no fifth term and
+  // `context: 'a'` with a fifth term of `b` are the same bytes, and the two records can be swapped. The
+  // check costs nothing now and the alternative is noticing this while adding the fifth term.
+  if (binding.context?.includes('|') === true) {
+    throw new AppError(
+      'validation',
+      'A record binding context may not contain "|" — it is the AAD separator, and a term holding ' +
+        'one makes two different bindings produce the same AAD.',
+    )
+  }
+  // Canonical, order-independent of the caller's object literal. The fourth term is appended only when
+  // present, so a three-term binding is byte-identical to what it was before the field existed.
+  const base = `${binding.table}|${binding.recordId}|${binding.customerId}`
+  return Buffer.from(binding.context === undefined ? base : `${base}|${binding.context}`, 'utf8')
 }
 
 export function fingerprint(binding: RecordBinding): string {
