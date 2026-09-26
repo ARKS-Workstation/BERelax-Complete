@@ -143,10 +143,20 @@ afterAll(async () => {
  * reference `invoice` fails here loudly instead of having its rows removed by a statement that never
  * mentioned it.
  */
-beforeEach(async () => {
-  await sql.unsafe(
+/**
+ * The truncate above, named so it has ONE statement of the table list.
+ *
+ * The outbox-collision case below has to reproduce what `beforeEach` does between tests, and a second
+ * copy of that list is the defect this repository fights hardest: the next table to reference `invoice`
+ * would be added to one copy and not the other, and the copy that was missed fails somewhere else.
+ */
+const truncateDocuments = () =>
+  sql.unsafe(
     'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )
+
+beforeEach(async () => {
+  await truncateDocuments()
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'
@@ -295,6 +305,40 @@ describe('issuing', () => {
     expect((await stateOf(sql`delete from invoice where number = 3`)).code).toBe(
       INVOICE_SQLSTATE.appendOnly,
     )
+  })
+
+  it('appends an event per document even when a counter reset repeats the display number', async () => {
+    // `beforeEach` truncates `invoice` and puts the counter back to 1 with an empty period key, so
+    // EVERY test in this file issues `TI-00001`. `outbox_event` is deliberately not in that truncate —
+    // it is another area's table — so until this commit the second and every later document carrying a
+    // number an earlier test had already used collided on `on conflict (idempotency_key) do nothing`
+    // and vanished, with `publishEvent` returning null into a call site that discards it. Nothing in
+    // the suite read `outbox_event`, so nothing said so.
+    //
+    // Keyed on the row id it cannot happen: the id is the identity of the fact "this document was
+    // issued", unique for ever and never reset, while the display number is a label that is unique
+    // only within a series and a period.
+    const first = await issue(twoElevens())
+    await truncateDocuments()
+    await sql`update document_series set next_number = 1 where code = 'TAX-INV'`
+    const second = await issue(twoElevens())
+
+    // The control, and the reason the assertion below means anything: the collision condition was
+    // actually reproduced. Without it the case passes when the reset quietly failed and the two
+    // documents simply carried different numbers — which is a test that measures nothing.
+    expect(
+      second.displayNumber,
+      'the reset did not repeat the number, so this case proved nothing',
+    ).toBe(first.displayNumber)
+    expect(second.id).not.toBe(first.id)
+
+    const events = await sql<{ aggregate_id: string }[]>`
+      select aggregate_id
+        from outbox_event
+       where event_type = 'invoice.issued'
+         and aggregate_id = any(${sql.array([first.id, second.id])})
+    `
+    expect([...events.map((row) => row.aggregate_id)].sort()).toEqual([first.id, second.id].sort())
   })
 })
 

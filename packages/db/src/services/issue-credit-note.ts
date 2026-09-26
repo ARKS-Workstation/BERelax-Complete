@@ -552,9 +552,22 @@ export async function issueCreditNote(
       journalEntryId: issued.journalEntryId,
       customerId: issued.customerId,
     },
-    // Derived from the statutory identifier, which is unique by constraint, so a retry of the same
-    // issue cannot enqueue twice.
-    idempotencyKey: `credit_note.issued:${issued.displayNumber}`,
+    // The ROW's id, not its display number, and the difference is the whole point.
+    //
+    // This used to read `credit_note.issued:${issued.displayNumber}`, on the argument that the statutory
+    // identifier is unique by constraint. It is — WITHIN a series and a period, which is not the scope
+    // this key lives in. `document_number_display` (migration 0013) puts `period_key` in the string, so
+    // an `annual` series cannot repeat a number across years and the argument holds in production; it
+    // stops holding the moment the counter restarts against an empty period key, which is what a
+    // TRUNCATE of `credit_note` does. `on conflict (idempotency_key) do nothing` then drops the second
+    // event in silence and `publishEvent` returns null, which this call site discards — so a fixture
+    // that truncates and re-issues gets no event and fails two layers from the cause, or asserts a
+    // delivery that never had anything to deliver.
+    //
+    // The row id is the identity of the business fact "this document was issued": unique for ever,
+    // never reset, and immutable. The display number is a LABEL, and it is already in the payload
+    // above, so nothing that reads this event loses anything by the change.
+    idempotencyKey: `credit_note.issued:${issued.id}`,
   })
 
   return issued

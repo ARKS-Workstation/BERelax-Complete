@@ -124,11 +124,21 @@ afterAll(async () => {
  * reference 0068 deferred to this unit. `invoice` itself carries no incoming key FROM `credit_note`
  * (0072's header says why), so the invoice half of this list is unchanged from what 0068 left.
  */
-beforeEach(async () => {
-  await sql.unsafe(
+/**
+ * The truncate above, named so the table list is stated ONCE.
+ *
+ * The outbox-collision case below reproduces what `beforeEach` does between tests, and a second copy of
+ * this list is exactly the defect the comment above warns about: the next table to reference one of
+ * these would be added to one copy and missed in the other.
+ */
+const truncateDocuments = () =>
+  sql.unsafe(
     'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
       'invoice_appointment, invoice_line, invoice',
   )
+
+beforeEach(async () => {
+  await truncateDocuments()
   await sql`
     update document_series set next_number = 1, period_key = ''
      where code in ('TAX-INV', 'CR-NOTE')
@@ -395,6 +405,39 @@ describe('issuing a credit note', () => {
     )
     expect(backdated.code).toBe(CREDIT_NOTE_SQLSTATE.beforeTheSupply)
     expect(backdated.message).toContain('CreditNoteBeforeTheSupply')
+  })
+
+  it('appends an event per note even when a counter reset repeats the display number', async () => {
+    // The same case `invoice.itest.ts` carries, for the same reason. `beforeEach` truncates
+    // `credit_note` and puts BOTH counters back to 1 with an empty period key, so every test here
+    // issues `CN-00001`; `outbox_event` is not in that truncate, so until this commit every note after
+    // the first to reuse a number collided on `on conflict (idempotency_key) do nothing` and vanished,
+    // with `publishEvent` returning null into a call site that discards it.
+    const firstInvoice = await issueTestInvoice()
+    const first = await issueNote(partialNoteInput(firstInvoice.id))
+    await truncateDocuments()
+    await sql`
+      update document_series set next_number = 1, period_key = ''
+       where code in ('TAX-INV', 'CR-NOTE')
+    `
+    const secondInvoice = await issueTestInvoice()
+    const second = await issueNote(partialNoteInput(secondInvoice.id))
+
+    // The control: the collision condition was reproduced. Without it the case passes when the reset
+    // quietly failed and the two notes simply carried different numbers.
+    expect(
+      second.displayNumber,
+      'the reset did not repeat the number, so this case proved nothing',
+    ).toBe(first.displayNumber)
+    expect(second.id).not.toBe(first.id)
+
+    const events = await sql<{ aggregate_id: string }[]>`
+      select aggregate_id
+        from outbox_event
+       where event_type = 'credit_note.issued'
+         and aggregate_id = any(${sql.array([first.id, second.id])})
+    `
+    expect([...events.map((row) => row.aggregate_id)].sort()).toEqual([first.id, second.id].sort())
   })
 })
 
