@@ -2900,7 +2900,7 @@ units:
       target. Owns the minimal whatsapp_ref table (short code -> session) as the booking-side contract that
       A-FIRST later generates into.
     owner: claude
-    status: todo
+    status: done
     size: M
     milestone: M1
     depends_on:
@@ -4257,7 +4257,7 @@ units:
       and package_balance snapshotting the terms sold. A sale posts cash against a deferred-revenue liability
       at gross and posts nothing to revenue and nothing to VAT output, because the VAT event is at redemption.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F09
@@ -4351,10 +4351,15 @@ units:
       package is absent from readDrawerTakings, and M-TILL-11''s cash-up will read the drawer as OVER by it
       and post the difference to 6140. That is a real defect in the system today and it is NOT fixable here:
       it needs either a nullable invoice_id or a package_sale_id on `payment`, which is M-TILL-07''s table,
-      and M-TILL-12/13''s decision. DEFERRED TO M-TILL-12. (2) No invoice or tax document at sale, for the
+      and M-TILL-12/13''s decision. **RE-OWNERED BY THE INTEGRATOR TO M-TILL-10: M-TILL-09 deferred this to
+      M-TILL-12, which is already `done`, so the deferral had no owner and would never have been picked up
+      by anybody.** M-TILL-10 is the next package unit, already owns package_balance''s ceilings and already
+      reads expires_on, so the drawdown work and this fix land together. Until then a `done` unit''s cash-up
+      is knowably wrong for package sales, which is worth saying in the open rather than leaving inside a
+      deferral nobody holds. (2) No invoice or tax document at sale, for the
       same question''s sake: if the supply is at redemption there is nothing to state as a standard-rated
       supply on the day the money is taken, and a document naming a VAT figure of zero would be a claim
-      about the answer to Y11-vat-package. DEFERRED TO M-TILL-12. (3) No package_redemption, no drawdown, no
+      about the answer to Y11-vat-package. RE-OWNERED TO M-TILL-10 for the same reason: M-TILL-12 is done. (3) No package_redemption, no drawdown, no
       expiry job, no breakage, no transfer — all M-TILL-10''s. package_balance.sessions_redeemed and
       released_fils exist with their ceilings (package_balance_cannot_overdraw,
       package_balance_cannot_overrelease) declared WITH the columns, because a ceiling added later is a
@@ -7232,16 +7237,24 @@ units:
       Transactional traffic is never counted. The ledger registers itself as a merge participant so a duplicate
       merge cannot reset or double a contact's history.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-AUTO-01
     - C-CRM-05
     blocked_on_owner:
     - Y6-sender-ids
-    provisional: 'Strictest safe: 1 promotional message per contact per rolling 7 days and 4 per rolling
-      30 days, across all flows and campaigns. Per-campaign caps may only be stricter, never looser. No
-      OPEN-QUESTIONS id covers this yet - see spec_gaps.'
+    - Y9-frequency-cap
+    provisional: 'Y9-frequency-cap (docs/OPEN-QUESTIONS.md A2): 2 promotional messages per contact per
+      rolling 7 days and 6 per rolling 30 days, across all flows and campaigns. Per-campaign caps may only
+      be stricter, never looser. THIS FIELD PREVIOUSLY GUESSED 1 and 4 and said "no OPEN-QUESTIONS id
+      covers this yet"; both halves were wrong. Y9-frequency-cap existed before this unit started and
+      carries 2 and 6, which is what `app_setting` holds, what the Unconfirmed Assumptions panel shows,
+      and what the unit was built and asserted against. The guess is corrected here rather than left
+      standing beside a NOTE denying it, because a wrong figure with a correction next to it is still two
+      answers to one question — and this one is the number that decides how often a real customer is
+      messaged. C-AUTO-03 found it and could not fix it: adding the id to blocked_on_owner changes a row
+      docs/PROGRESS.md renders, and regenerating that file is the integrator''s.'
     acceptance:
     - 'Integration test: one contact enrolled in two flows and one campaign all firing in the same hour
       produces exactly one promotional send; the other two record a ''frequency_capped'' outcome with the
@@ -7975,7 +7988,7 @@ units:
       the clinical consent_record, all inside the clinical schema on its own DB role with UUID-only references
       and no crossing foreign keys. Reads require step-up authentication and are individually audited.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-CRM-01
@@ -9001,7 +9014,7 @@ units:
       per segment (including the post-midnight segments and wet-room capability), per-therapist daily treatment-load
       cap, rest gaps and weekly hours, plus swaps, open shifts and an integer-fils labour-cost forecast.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - P-HR-02

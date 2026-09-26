@@ -1963,7 +1963,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // a wording change cannot break them. Deferred to M-TILL-10: `package_redemption`, the drawdown, expiry,
 // breakage and transfers; `expires_on` is generated HERE because it is a property of the sale and a second
 // derivation in TypeScript would be a second answer about when a customer's money runs out. Deferred to
-// M-TILL-12/13 and stated rather than papered over: a package sale writes NO `payment` row, because
+// M-TILL-10 — re-ownered, because the unit wrote M-TILL-12 and that unit is already done — and stated
+// rather than papered over: a package sale writes NO `payment` row, because
 // `payment.invoice_id` is NOT NULL and this unit issues no invoice — so cash taken for a package is absent
 // from `readDrawerTakings` and the cash-up (M-TILL-11) will show it as an over drawer.
 //
@@ -2083,7 +2084,18 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // suite emptying the rate table in a probe to prove its reader throws rather than inventing rates. 0077
 // recorded the first half for `pipeline_stage_transition.customer_id`; the second half is 0081's contribution
 // to the same lesson. `employee_id` IS still a reference, because 0030 already decided that deleting a person
-// to erase their roster is the delete worth refusing. Two figures in it are deliberately visible rather
+// to erase their roster is the delete worth refusing.
+//
+// That principle needs its exception stated beside it, because 0076 four numbers below deliberately does
+// the opposite and is RIGHT to: `cash_session.trading_date` IS a foreign key into `business_day`, ON
+// DELETE RESTRICT, so a trading date on which a drawer was counted cannot be removed. Both positions are
+// correct and the difference is what the reference MEANS. 0081's were provenance — which rota version
+// judged this roster, which rule priced it — and provenance is a fact about the past that should not
+// reach forward and stop somebody editing the present. 0076's is EVIDENCE: a counted drawer is a
+// statement about that day, and a day you took money on is not a day anybody may un-trade. So the rule
+// is not "an immutable table never holds a key"; it is that an immutable row may pin a parent only when
+// pinning it is the point. When it is merely recording where something came from, the reference is a
+// plain column. Two figures in 0081 are deliberately visible rather
 // than convenient: `forecast_unpriced_employees`, because an employee with no wage contributes nothing to a
 // sum and a forecast over the nineteen seeded therapists (every one of whom has `basic_wage_fils` null) is
 // 0 fils and reads as a free rota; and `rota_coverage_rule.high_intensity_treatment_codes`, seeded EMPTY,
