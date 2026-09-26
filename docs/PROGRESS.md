@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**115 / 207 units complete.**
+**115 / 208 units complete.**
 
 ## Next up
 
+1. **W-SYS-11 — The admin session — mounting F07's auth in the web app**
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
 1. **M-TILL-10 — Package redemption drawdown, expiry and breakage**  — **needs owner input:** Y9-package-policy, Y11-vat-package
-1. **C-AUTO-04 — The messaging compliance gate: one choke point, code not settings, failing closed**  — **needs owner input:** Y6-sender-ids
 
 ## All units
 
@@ -56,6 +56,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 39 | `B-UI-03` | Admin calendar: room x time primary, therapist x time secondary, drag to reschedule | `B-LIFE-03`, `B-UI-01` | M1 | — |
 | [x] | 40 | `B-UI-04` | Quick-book, walk-in entry and the WhatsApp ref field | `B-LIFE-02`, `B-UI-03` | M1 | Y12-ref-loop |
 | [x] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
+| [ ] | 41.5 | `W-SYS-11` | The admin session — mounting F07's auth in the web app | `F07`, `W-SYS-01` | — | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |

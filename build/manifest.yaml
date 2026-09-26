@@ -10,7 +10,9 @@ meta:
   branch: claude/massage-crm-planning-c05j70
   plan: docs/11-execution-plan.md
   contract: docs/12-autonomous-delivery.md
-  units_total: 207
+  # 208 rather than 207 since W-SYS-11 was added: the admin session, which 56 references deferred to a
+  # unit that is `done` and never owned it. See W-SYS-11's own NOTEs for the evidence.
+  units_total: 208
 
 units:
   - id: F01
@@ -3345,6 +3347,67 @@ units:
     - apps/web/app/(public)/booking/[token]/handler.ts
     - apps/web/app/(public)/booking/[token]/render.ts
     - apps/web/src/manage-booking.itest.ts
+  - id: W-SYS-11
+    order: 41.5
+    title: The admin session — mounting F07's auth in the web app
+    summary: A real staff session in apps/web — login with mandatory TOTP, a session cookie, a guard on
+      every admin route, and the principal read from that session instead of from a query parameter. F07
+      built the primitives and W-SYS-01 built the shell; nothing mounts one in the other, and 56 manifest
+      references defer to W-SYS-01 for a session it never owned.
+    owner: claude
+    status: todo
+    size: L
+    depends_on:
+    - F07
+    - W-SYS-01
+    blocked_on_owner: []
+    acceptance:
+    - 'Nothing in apps/web reads a principal from the request: a repository-wide scan finds no `?employee=`
+      or `?role=` query parameter used to choose a principal, a role or a permission, and the scan is proven
+      able to fire by a known-bad fixture that reintroduces one'
+    - '`@berelax/auth` is imported by apps/web and the import is asserted: a scan requires at least one
+      module under apps/web to import the session reader, so deleting the wiring fails the build rather
+      than silently returning to a query parameter'
+    - Every route in the admin group refuses an unauthenticated request by name, asserted route by route
+      against the registry rather than against a hand-written list, so a route added later is refused by
+      default and a route that forgot the guard fails this check
+    - A login without a TOTP factor cannot produce a session for owner, manager or accountant — F07's rule,
+      re-asserted through the web boundary because a policy nothing calls is not a policy
+    - 'The session cookie is HttpOnly, Secure, SameSite=Lax and carries no role or permission in its
+      payload: the principal is looked up server-side per request, so a tampered cookie cannot widen
+      anything, proven by a test that edits the cookie and asserts the request is refused'
+    - A receptionist is refused a clinical detail and a salary field through a real served response, which
+      is F07's field-level policy measured at the edge rather than in the matrix
+    - 'The 56 deferrals that named W-SYS-01 are re-pointed at this unit in the same commit that marks it
+      done, and a manifest check refuses a deferral naming a unit whose status is `done`'
+    files:
+    - apps/web/app/(admin)/login/route.ts
+    - apps/web/app/(admin)/login/render.ts
+    - apps/web/src/session.ts
+    - apps/web/src/session.itest.ts
+    - apps/web/src/admin-guard.test.ts
+    - scripts/test-gates.mjs
+    - 'NOTE: this unit was ADDED by the integrator, and the manifest went from 207 units to 208. It is not
+      new scope. C-CRM-09 found that 56 manifest references defer the admin session to W-SYS-01, which is
+      `status: done` and whose title and every acceptance line are about the Next.js app shell, Tailwind
+      token mapping and the type stack — it never owned a session. F07 (`done`) built the primitives
+      (packages/auth/src/{password,session,totp}.ts, mandatory TOTP, deny-by-default RBAC) and its
+      acceptance is entirely about the pure matrix. Verified independently: nothing under apps/web imports
+      `@berelax/auth`, and no `todo` unit''s title or summary mentions a session other than P-HR-14, which
+      is the THERAPIST portal and not the admin estate. So the whole admin surface deferred to finished
+      work, which is the same defect as M-TILL-09 deferring a live money bug to a done unit, at the scale
+      of every admin route.'
+    - 'NOTE: order 41.5 is deliberate and follows F12''s 11.5 precedent. The meta comment says order is a
+      topological sort so following it never blocks; this unit depends only on two `done` units, so any
+      order is topologically valid, and 41.5 puts it immediately before B-M1 (42), the lowest-order `todo`
+      unit. That is honest rather than convenient: B-M1 is the end-to-end walkthrough of screens that
+      currently have no session to walk through.'
+    - 'NOTE: what this unit must NOT do. It must not invent a staff member, a password, a TOTP secret or an
+      email address (brief rule 15) — the seed carries no staff credential and Y8-staff is open. So the
+      login path is proven against a fixture principal the SUITE creates, and a deployment with no staff row
+      must refuse every login rather than fall back to anything. P-HR-14''s therapist portal needs a staff
+      session too and is a separate unit; this one owns the ADMIN estate, and the two should share the
+      session reader rather than each building one.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'
