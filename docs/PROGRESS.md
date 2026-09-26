@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**108 / 207 units complete.**
+**109 / 207 units complete.**
 
 ## Next up
 
 1. **B-UI-04 — Quick-book, walk-in entry and the WhatsApp ref field**  — **needs owner input:** Y12-ref-loop
 1. **M-TILL-09 — Versioned package templates and package sale as deferred revenue**  — **needs owner input:** Y9-package-policy, Y11-vat-package
-1. **M-TILL-11 — Cash drawer reconciliation per shift, keyed on business_day**
+1. **C-AUTO-08 — Kanban pipeline for leads and clients**
 
 ## All units
 
@@ -67,7 +67,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 50 | `M-TILL-08` | Credit notes as the only correction mechanism | `M-TILL-03`, `M-TILL-06` | — | — |
 | [ ] | 51 | `M-TILL-09` | Versioned package templates and package sale as deferred revenue | `F09`, `M-TILL-06` | — | Y9-package-policy, Y11-vat-package |
 | [ ] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
-| [ ] | 53 | `M-TILL-11` | Cash drawer reconciliation per shift, keyed on business_day | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `M-TILL-07` | — | — |
+| [x] | 53 | `M-TILL-11` | Cash drawer reconciliation per shift, keyed on business_day | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `M-TILL-07` | — | — |
 | [x] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
 | [x] | 56 | `M-VAT-01` | Suppliers, supplier tax profile, bills and payables | `M-TILL-02`, `M-TILL-03` | — | — |

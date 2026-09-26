@@ -15646,7 +15646,7 @@ units:
     files:
     - apps/worker/src/jobs/payment-reconciliation.ts
     - packages/payments/src/reconcile.ts
-    - packagesging/db/migrations/00XX-reconciliation-exception.sql
+    - packages/db/migrations/00XX-reconciliation-exception.sql
   - id: H-HARD-05
     order: 198
     title: Alert registry, SLOs and the insider-threat export alarm
@@ -15907,7 +15907,7 @@ units:
       and alerted rather than force-matched
     files:
     - packages/core/src/payments/settlement.ts
-    - packagesging/db/migrations/00XX-settlement-batch.sql
+    - packages/db/migrations/00XX-settlement-batch.sql
     - apps/worker/src/jobs/settlement-import.ts
     - apps/web/app/(admin)/money/settlement/page.tsx
   - id: Y-PAY-10
