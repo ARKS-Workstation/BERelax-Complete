@@ -2925,11 +2925,262 @@ units:
       as four cases
     - The whole screen is operable by keyboard with no pointer events, asserted by a pointer-free Playwright
       run; axe reports zero serious or critical violations
+    - 'NOTE: NOT a page.tsx, and there is no tests/e2e directory in this repository. Two of the four files
+      this entry names do not exist. What is built is route.ts (the Next binding), handler.ts (everything
+      decidable, driven directly by the suite), render.ts (pure HTML) and view.ts (the view type and the
+      refusal vocabularies) - the arrangement every admin surface here already takes, and B-UI-03''s NOTE
+      records the reason in full: apps/web/src/routes/registry.ts is in exact bijection with the filesystem
+      and requires every DOCUMENT to be served in both locales, so a page.tsx would need an Arabic admin
+      document and the W-SYS-01 shell, and would join a screenshot matrix whose RTL half has to be a real
+      Arabic route. `?dir=rtl` re-renders this English document mirrored instead. There is likewise no
+      Playwright runner and no `.spec.ts` convention: Playwright is a dependency of @berelax/harness and is
+      driven from `.itest.ts` files through startWebServer, so the browser half is
+      apps/web/src/quick-book.itest.ts. A `form.client.tsx` island would also be the wrong shape - the only
+      script on the page is about 25 lines narrowing one select, and a React island would have made the page a
+      document.'
+    - 'NOTE: the acceptance line says "requires only phone, service variant and start" and the screen requires
+      a FOURTH field, the client''s gender. That is B-AVAIL-05 rather than this unit''s choice and the line is
+      unsatisfiable as written: under strict same-gender matching (Y9-gender, provisional and IN FORCE) a
+      request with no client gender is refused outright with `requires_client_gender`, so a screen that did
+      not ask would be a screen whose every booking failed. It is a radio group with two options reached in
+      one keystroke, the page says WHY it is asking and cites Y9-gender, and "prefer not to say" is
+      deliberately absent because it is not a value the matching rule can act on. The spirit of the line -
+      the operator states the minimum and picks no resource - is satisfied: therapist and room are the
+      solver''s and there is no control for either, which the browser suite asserts as the ABSENCE of an
+      editable field on the confirm form rather than only as the presence of the displayed pair.'
+    - 'NOTE: TWO POSTs, and the acceptance list is why. "Therapist and room are auto-assigned and displayed
+      before confirm" is only assertable if there is a state between the form and the booking, so `step=check`
+      solves and renders the assignment and `step=confirm` books the tuple that was shown. Neither step needs
+      JavaScript - both are plain `<form method="post">` - and the phone number travels in the POST body
+      across the two, never in a URL, because a query string is in every proxy log and a mobile number is the
+      customer''s identity in this system (ADR 0014). The trading date IS in the URL (`?date=`), which is
+      B-UI-01''s convention for a bookmarkable state of a booking screen and the only piece of this screen''s
+      state that may be there. The browser suite counts the POSTs (exactly two) as part of the work budget,
+      because a third round trip is the one part of a latency target a slow machine cannot hide.'
+    - 'NOTE: SOLO bookings only, stated rather than discovered. A Couple Massage needs two clients'' genders
+      and a Four Hands is unassignable against the seeded room inventory at all (B-AVAIL-03''s NOTE: every
+      standard room 0012 seeds is capacity 1 and 0024 counts appointment ROWS against rooms.capacity), so a
+      ten-second walk-in screen offering either would be offering a control the booking transaction refuses.
+      Those go through /book or the diary. The screen also offers the next 8 quarter-hours rather than the
+      whole trading day, per treatment, cut at the close less that treatment''s own duration: a booking
+      further out is a different question - "when this week?" - asked with the diary, and a select holding a
+      whole day for each of thirty-two treatments is a control nobody can arrow through. `?date=` reaches
+      another day for the desk that wants one.'
+    - 'NOTE: one migration, 0079_whatsapp_ref.sql, and SCHEMA_VERSION goes 77 -> 79 (78 and 80-82 are held by
+      units in flight, so 78 is absent from this tree and is NOT a permanent gap; gate case 90a walks the
+      migrations on disk rather than consecutive integers precisely so that costs nothing). Two tables.
+      `whatsapp_ref` is the minimal code -> session contract A-FIRST will generate into, and it ships EMPTY:
+      this build writes no rows, so every code the front desk types today is `unknown_code`, which is the
+      honest state and is shown on the screen rather than reported as a zero. `issueWhatsappRef` exists
+      anyway, with the signature the real generator needs (docs/12 section 1.1), so filling the port later is
+      a call site rather than a rewrite. `booking_whatsapp_ref_capture` holds ONE row per booking taken at
+      the desk whatever happened, which is what makes a capture rate two counts over one table rather than a
+      matched-count over a guess. The rejected alternative was a nullable `booking.whatsapp_ref` column, and
+      it fails twice: a null there means BOTH "no code offered" and "a code that matched nothing", which are
+      the two findings Y12-ref-loop needs told apart, and a column on `booking` would put a
+      customer-reachable attribution inside C-CRM-05''s merge participant registry - so the capture is keyed
+      on the BOOKING and carries no customer id, because an attribution belongs to the booking and a merge
+      must not move it. Two CHECK constraints written as EQUALITIES are the whole of "an invented attribution
+      is unrepresentable": `matched` requires a ref code and a ref code requires `matched`. The outcome IS a
+      pgEnum and not a 0053-style table, which is the one place this migration departs from that reasoning on
+      purpose - those labels are provisional claims about a person the owner may correct, and these three are
+      the exhaustive result of a string comparison against a primary key. Neither table is append-only:
+      `booking_id` is ON DELETE CASCADE, so an ADR 0017 BEFORE DELETE trigger would make `delete from
+      booking` impossible, and the protection is at the PRIVILEGE level instead (UPDATE, DELETE and TRUNCATE
+      revoked from berelax_app, with referential actions bypassing privileges so the cascade still runs) -
+      stated as the weaker promise it is rather than dressed up as the stronger one.'
+    - 'NOTE: two new provisional settings, both in the registry so the answer reaches them without a deploy
+      and both on the Unconfirmed Assumptions panel, which reads `app_setting` already. (1)
+      `booking.front_desk_min_lead_minutes`, default 0, against Y9-lead. A setting of its own rather than a
+      reuse of `booking.min_lead_minutes` because Y9-lead''s question is "minimum ONLINE booking lead time"
+      in so many words and that setting''s own help text says the same: applying 120 minutes at the counter
+      would make this screen unable to do the one thing it exists for. Zero is the SAFE direction and not
+      merely the convenient one - the availability engine still refuses a start with no free therapist and no
+      free room, so a zero desk lead cannot produce an undeliverable booking, only an imminent one the desk
+      can decline; the other direction is not symmetrical, because a two-hour desk lead cannot be found by a
+      test that asserts "a slot is offered". If the owner says the lead applies at the counter too, the value
+      changes and nothing else does. (2) `booking.whatsapp_ref_expected`, default false, against
+      Y12-ref-loop. It does NOT control the field - the field is present and prominent either way, which is
+      what the acceptance asks for. It controls what a capture RATE may CLAIM: at false a 0% rate is reported
+      as "the ref loop is unconfirmed" and at true the same 0% is a process failure somebody should be told
+      about. One number, two findings, and only the owner can say which. The consumer is named so it is not
+      a knob nothing consults: `refCaptureRate` in @berelax/core takes it and returns a different `claim`.
+      The advance horizon is deliberately Y9-lead''s ONLINE figure used unchanged - "how far ahead may a
+      booking be made" is the same question whichever side of the counter asks it, and a second figure nobody
+      could distinguish the effect of would be a setting that lies about what it controls.'
+    - 'NOTE: what changes when Y12-ref-loop is answered, in full, because that is the question this unit was
+      told to build past. If the owner says the front desk WILL paste the code: set
+      `booking.whatsapp_ref_expected` true (one audited settings change), and the rate panel stops saying
+      "reported, not judged" and starts reporting a process measurement - no code changes. If they say the
+      desk will NOT: nothing changes at all, and that is the point. The field stays, because a code pasted by
+      the occasional operator is still a real join; the capture rate keeps reporting the gap; and every
+      booking with no matched code is recorded as `not_offered` with attribution honestly unknown rather than
+      as an invented attribution. That degradation is the same argument Y9-crm-source settles by making
+      `unknown` the default acquisition source, and it is enforced by the schema rather than by the handler:
+      an unmatched row cannot carry a ref code at all. What the answer does NOT change is `booking.source`,
+      which stays `walk_in` for this screen: a customer who arrived through WhatsApp and then walked in still
+      walked in, and rewriting the source from an attribution would destroy the one fact that column is
+      certain of in order to guess at another.'
+    - 'NOTE: the 10-second line is asserted TWICE, because a wall-clock assertion measures the machine and
+      not the code (standing brief rule 23) and the line names 10 seconds without naming a machine. (1) The
+      WORK, unconditionally: the five required controls in DOM order, the phone field autofocused so the
+      first keystroke needs no pointer or Tab, the therapist and room costing ZERO operator input, and
+      exactly two POSTs. None of that moves with the load on the box and it is what the target is really
+      about. (2) The milliseconds, printed on stderr on every run whatever the outcome (a console.log in a
+      passing test is invisible to vitest''s reporter) and gated on a MEASURED baseline from the same server:
+      if one plain GET of the page costs more than 2,500 ms the box cannot hold a 10-second interaction and
+      the assertion skips LOUDLY with both numbers, while the work assertions above do not skip. Measured on
+      this container: first keystroke to confirmation 1,048 ms against the 10,000 ms ceiling, with one page
+      load at 710 ms (earlier runs of the same case measured 1,043 and 1,252 ms, so the figure is the
+      interaction rather than a lucky sample). The measurement is taken on a PINNED trading day (`?date=`), and that is not shaving
+      it: without a pinned day the screen offers the day in progress and the wall-clock TIME OF DAY decides
+      whether anything is bookable - between midnight and 02:00 Dubai the current day is minutes from
+      closing, so the suite would be red for two hours in every twenty-four for a reason invisible from the
+      symptom. The default-day behaviour is asserted separately and without a clock assumption, by comparing
+      the rendered day against a direct query.'
+    - 'NOTE: the therapist override carries a FIFTH reason code beyond the four the acceptance line names.
+      `gender_mismatch`, `missing_skill`, `credential_expired` and `not_rostered` are
+      EligibilityExclusionReason values and come from the read model rather than from anything decided here;
+      `not_free_at_that_start` is this screen''s, and it is deliberately separate because a therapist who is
+      eligible and simply busy is not ineligible - reporting "off shift" for somebody who is on shift with a
+      client would send the desk to fix a rota that is correct. The other three reasons the read model can
+      produce (`not_employed`, `credential_missing`, `on_approved_leave`) are carried through as themselves
+      for the same reason, and the wording table is a Record over the union so a reason added without a
+      sentence is a pnpm typecheck failure rather than a blank cell at a front desk. The override select
+      lists only the therapists the engine found free (B-UI-01''s therapist selector and P-HR-04''s candidate
+      list both record why a control known to fail is worse than no control), and the refusal path still
+      exists because a page is a snapshot: a credential that expires between the render and the submit is how
+      an ineligible therapist reaches the server. The screen ALSO lists everyone the read model excluded,
+      with the reason, read off the availability answer the check already computed - so the four reason codes
+      are useful at the desk rather than only reachable through a 409. That panel shows on a successful check
+      only, not on a `no_assignment` refusal, which is a scope choice: the refusal already names the times
+      that ARE open, and carrying the exclusion list onto the refusal path would be a second view shape for
+      one screen.'
+    - 'NOTE: allocations and case counts. Migration 0079; gate block `// 106a-106q.` in
+      scripts/test-gates.mjs (17 cases, all passing, exit 0, placed after `// 104a-104k.` and before
+      `// 79a-79k.` because that file is ordered by CATEGORY rather than by number); the suites are
+      apps/web/src/quick-book.itest.ts (25 cases against the built application),
+      apps/web/src/quick-book-render.test.ts (25, no server),
+      packages/fixtures/src/whatsapp-ref.itest.ts (16 against a real PostgreSQL) and the two pure ones,
+      packages/core/src/booking/ref-capture.test.ts and packages/shared/src/whatsapp-ref.test.ts; port band `quick-book` at 11_800 width 300 in @berelax/harness TEST_PORT_BANDS,
+      claimed by the suite through startWebServer (brief rules 18 and 19) - the comment on `pipeline` says
+      11_800 was "held by a unit in flight", which was true when written and is this unit. RESTRICTED_PORTS,
+      portAtIndex and testPort are untouched. No ADR: every decision here is an application of one already
+      recorded (0006 SQL-first, 0007 integer fils, 0014 guest identity, 0017 append-only, 0020 therapist
+      naming, 0021 style-not-price), so 0028 is NOT taken and stays free. No case in the gate block runs the
+      browser suite, for the reason block 104 records: that suite drives the BUILT application, so a mutation
+      to a served file is invisible to it until a rebuild and the case would report "nothing was rejected"
+      about a mutation the server never loaded.'
+    - 'NOTE: four defects found in this unit''s own work, all of them checks whose stated claim was not what
+      they measured. (1) The ref field''s `pattern` was the CANONICAL character class, which is upper case
+      only - and an HTML `pattern` is case sensitive, so a lower-case paste (what a code copied off a phone
+      looks like) was blocked by the browser''s own validation bubble, no request was made, and the page
+      silently did nothing. Found in a browser, not in review. Fixed with a separate
+      WHATSAPP_REF_INPUT_CLASS and a property test asserting that every value the field admits normalises to
+      a value the COLUMN admits, and nothing it rejects does. (2) Gate case 106e''s first mutation folded `0`
+      onto `O` - and `O` is excluded from the alphabet too, so the fold produced a value the pattern still
+      refused and the suite still passed: a known-bad fixture that could not change the answer. Replaced with
+      truncation to four characters, which lands on a DIFFERENT conversation''s code and is the likeliest
+      paste to arrive. (3) Three assertions in quick-book-render.test.ts measured the wrong bytes: a slice
+      reaching 400 characters backwards caught the phone field''s `required`, a `not.toContain` on the entry
+      form''s test id could never pass because the inline script contains that selector, and a hex-literal
+      scan over the whole document failed on `tokensCss()`, which is the token layer and is where hex
+      belongs. (4) The start options shared a `value` across treatments, so `selectOption` by value took the
+      first match - after narrowing, a DISABLED option belonging to another treatment - and left the field
+      empty; the check was then refused for a reason nothing on the page showed. Fixed by making the grid one
+      option per instant carrying the treatments it suits. Two fixture defects are recorded in the suite
+      itself for the same reason: a phone helper that produced eleven-digit numbers, and every case sharing
+      one trading day and one opening-time start so that two bookings exhausted it and nine cases timed out.
+      A fifth defect was found by `pnpm verify` itself and is worth recording because nothing else would have
+      caught it: a comment in handler.ts typed the premises'' CLOSING TIME into a rendered file, which
+      `nap-hours-literal-outside-the-seed` refuses - the hours live in `premises_hours` and reach a surface
+      through a read, so a literal in a rendered file goes on showing the old hours after the owner changes
+      them, and prose is no exception. Two smaller ones found while auditing rather than by a test: the
+      exclusion reason arrives as a plain `string` from the SQL `case` rather than through
+      `exclusionReasonFrom`, so an unrecognised value hit a `?? not_rostered` fallback that would have told
+      the desk to fix a rota that is correct (there is now a `reason_not_recognised` member whose sentence
+      says what happened); and two wording tables were `Record<string, string>` with a `??` behind them, so a
+      claim or an outcome added later would have printed another one''s wording - both are now total over
+      their unions, which makes that a typecheck failure. And the one that would have bitten a real front desk
+      within the hour: the CONFIRM re-checked the offer grid, which is computed from `now` - so with no minimum
+      notice at the counter the first option can be one minute away, and a desk that read an assignment out
+      loud and then pressed Confirm was told the start was "not one this screen offered" about a start it had
+      offered two seconds earlier. The confirm now checks what is still true (on the grid step, inside this
+      day''s window, not passed) and leaves the rest to the booking transaction, which re-validates the tuple
+      under a room lock; a start that HAS passed is refused under its own name `start_has_passed`, because the
+      remedy is to check again rather than to choose differently, and a desk sent to the wrong one retries the
+      same choice. Two browser cases cover the pair, each with a control reaching the other refusal.'
+    - 'NOTE: `booking_whatsapp_ref_capture.booking_id` is deliberately NOT a foreign key, and the route to
+      that decision is worth recording because the obvious shape is wrong and fails loudly. It WAS one, ON
+      DELETE CASCADE. Six integration suites in three files - packages/db/src/schema/booking-constraints.itest.ts
+      (three sites), packages/db/src/repositories/catalogue.itest.ts (two) and
+      packages/fixtures/src/catalogue-compliance.itest.ts (one) - run `truncate booking_idempotency,
+      appointment_status_history, scheduled_step, appointment, booking` by an EXPLICIT list, and PostgreSQL
+      refuses a truncate while a referencing table is absent from the statement. Adding the key turned every
+      case in two of those files red, in files this unit never touched, and produced a second wave of
+      `booking_customer_id_fkey` failures in otp-route.itest.ts, customer-identity.itest.ts and
+      business-days.itest.ts - because a truncate that did not happen leaves bookings behind for whoever
+      deletes a customer next. Sixty-plus red cases from one column. Two ways out, and the repository has
+      already chosen between them: add this table to all six lists (which is what those lists are for, and
+      booking-constraints.itest.ts says so - "Named rather than reached with CASCADE, so the next table shows
+      up here as a failing test"), or carry a bare uuid as `invoice.booking_id`,
+      `checkout_idempotency.booking_id` and `booking_manage_grant.booking_id` all already do. 0067''s header
+      records B-UI-05 hitting this exactly and taking the second branch. This unit follows it: a fourth table
+      quietly matching three existing ones is one decision, where a fourth table editing three other units''
+      test files is six edits and a merge conflict with anybody else holding them - and the standing brief is
+      explicit that two units editing one line is a conflict over a defect. The first attempt HAD edited all
+      four sites it then knew about, and reverting them is why those files are untouched in this branch.
+      What is lost is the cascade, and the cost is bounded rather than absent: in PRODUCTION a booking is
+      never deleted (it is cancelled, which is a status, and `booking.customer_id` is ON DELETE RESTRICT so a
+      customer cannot go while one exists), so an orphan capture row is unreachable; in TESTS a fixture that
+      deletes its bookings must delete its capture rows first, and both of this unit''s suites now do so
+      explicitly, with the reason written at the statement. `booking_id` stays the PRIMARY KEY, so "one
+      booking, one capture row" is unchanged, and `ref_code` remains a real ON DELETE RESTRICT key because
+      nothing truncates `whatsapp_ref` and a code withdrawn under a matched booking would destroy an
+      attribution.'
+    - 'NOTE: a diagnosis worth keeping, because the symptom named the wrong unit and the cause is one the
+      standing brief warns about. After the foreign-key repair above, `apps/web/src/admin-calendar.itest.ts`
+      (B-UI-03''s diary) failed two DRAG cases - "the card moved under the pointer: expected 837.265625 to be
+      greater than 937.265625", i.e. the card moved by exactly zero against a 100px threshold, and a 30-second
+      `waitForFunction` timeout on the commit. It failed ALONE as well as in the suite, so it was not
+      contention. It was not this unit''s code either: the cause was a leftover `needs_reauth` row in
+      `google_connections`, left behind when the earlier FAILED runs stopped before the Google suites could
+      clean up. A broken grant makes `googleReauthBannerFor` render the NON-DISMISSIBLE banner on every admin
+      document (G-CONN-08), the diary''s grid moves down the page, the card''s `boundingBox` is then a
+      coordinate outside the viewport, and `page.mouse.move` to it silently does nothing - which reads exactly
+      like a drag handler nobody wired up. That is the hazard the brief states in so many words. Recreated the
+      database (drop, `pnpm db:apply`, `pnpm seed`) and the diary passes 22/22 alone. CI starts from an empty
+      database, so it cannot arise there; a unit agent re-running a suite after a failed run can, and the fix
+      is a fresh database rather than a change to anybody''s code. Nothing in B-UI-03 or in this unit was
+      touched for it.'
+    - 'NOTE: two claims in `handler.ts` are NOT gated, and this says so rather than leaving a reader to find
+      out. `apps/web/src/quick-book.itest.ts` drives the BUILT application, so a gate case that mutated
+      `handler.ts` and ran it would report "nothing was rejected" about a mutation `next start` never loaded -
+      the reason block 104 gives for the pipeline board. The two are the confirm not re-checking the grid and
+      the passed-start refusal having its own name; both are asserted in the browser suite against a build with
+      a control beside each. Gating them properly needs a suite that drives `handleQuickBookWrite` directly
+      with a frozen clock. The handler is already shaped for one - it takes `now` as a dependency for exactly
+      that reason - and this unit did not write it, which is the honest statement of what is missing.'
     files:
-    - apps/web/app/(admin)/quick-book/page.tsx
-    - apps/web/app/(admin)/quick-book/form.client.tsx
+    - apps/web/app/(admin)/quick-book/route.ts
+    - apps/web/app/(admin)/quick-book/handler.ts
+    - apps/web/app/(admin)/quick-book/render.ts
+    - apps/web/app/(admin)/quick-book/view.ts
+    - apps/web/src/quick-book.itest.ts
+    - apps/web/src/quick-book-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - packages/core/src/booking/ref-capture.ts
+    - packages/core/src/booking/ref-capture.test.ts
+    - packages/shared/src/whatsapp-ref.ts
+    - packages/shared/src/whatsapp-ref.test.ts
+    - packages/db/migrations/0079_whatsapp_ref.sql
     - packages/db/src/schema/whatsapp-ref.ts
-    - apps/web/tests/e2e/quick-book.spec.ts
+    - packages/db/src/repositories/whatsapp-ref.ts
+    - packages/db/src/settings/availability.ts
+    - packages/config/src/settings/registry.ts
+    - packages/fixtures/src/whatsapp-ref.itest.ts
+    - packages/harness/src/ports.ts
+    - scripts/test-gates.mjs
   - id: B-UI-05
     order: 41
     title: Magic-link token service and the manage-booking page
