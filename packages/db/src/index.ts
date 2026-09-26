@@ -2095,7 +2095,15 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // statement about that day, and a day you took money on is not a day anybody may un-trade. So the rule
 // is not "an immutable table never holds a key"; it is that an immutable row may pin a parent only when
 // pinning it is the point. When it is merely recording where something came from, the reference is a
-// plain column. Two figures in 0081 are deliberately visible rather
+// plain column.
+//
+// P-HR-07 then sharpened the test into something mechanical, which is better than a judgement about
+// meaning: ask whether the CHILD can be deleted to release the pin. A `cash_session` can — 0076's own
+// suite deletes its sessions — so the pin is releasable and holding the key costs nothing. An
+// `attendance_event` cannot be deleted by anybody, so a RESTRICT reference from one would pin every date
+// it names for ever, which is why 0086 checks the trading date at INSERT, where the row is still fixable,
+// and keeps the column plain. Same conclusion as "provenance versus evidence", reached without having to
+// agree on what a reference means. Two figures in 0081 are deliberately visible rather
 // than convenient: `forecast_unpriced_employees`, because an employee with no wage contributes nothing to a
 // sum and a forecast over the nineteen seeded therapists (every one of whom has `basic_wage_fils` null) is
 // 0 fils and reads as a free rota; and `rota_coverage_rule.high_intensity_treatment_codes`, seeded EMPTY,
