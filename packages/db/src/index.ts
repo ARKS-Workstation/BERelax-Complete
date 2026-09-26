@@ -2127,4 +2127,44 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 81 as const
+// 82 is 0082_clinical_intake.sql: the template that is versioned rather than edited, the consent that must
+// exist before an answer may be stored, and the step-up grant a read is refused without (C-CRM-08). 0008
+// built the tables and 0043 built the rotation rules; nothing here re-argues either. Five things ARE this
+// file's. A template row is IMMUTABLE apart from `is_current` and `superseded_at` (ZJ001), which is what
+// makes "editing a template creates a new version" a fact about the database rather than a property of the
+// repository that happened to issue the write — a typo corrected in `psql` would otherwise change the
+// meaning of every submission already captured against that row, because a submission holds only a
+// reference to it. A new version must be numbered ABOVE every existing version of its locale (ZJ002), and
+// monotonic rather than contiguous on purpose: a contiguous rule makes this table order-dependent across
+// the integration suite, so the first file to insert version 1 would fail every later file that wanted it,
+// and a BEFORE INSERT trigger fires before ON CONFLICT is resolved, so refusing a version that already
+// exists breaks every idempotent upsert — both found by collateral, the second on the SECOND run of
+// `crypto/rotation.itest.ts`. The consent gate is a DEFERRED constraint trigger matching on the wording
+// HASH and not on the template id (ZJ003), which is the substance of it: consent given to version 3's
+// wording covers version 4 only if the wording did not change, and a gate keyed on the template id would
+// both refuse a client who consented to wording nobody touched and — far worse — ACCEPT one whose consent
+// predates a rewritten consent paragraph. `data_origin = 'real'` is refused outright while
+// OPEN-QUESTIONS Y5-residency is open (ZJ005), through a SETTING the trigger reads, so answering the
+// question is a configuration change and not a release; an absent setting row reads as false, because a
+// gate whose default is "permitted" when its configuration is missing is a gate that opens during a
+// restore. And `clinical.step_up_grant` is in the CLINICAL schema rather than in public, by ADR 0010's own
+// test for what belongs there — exactly one code path consumes a grant, nothing else joins it, and a
+// relocated store that had left its grants behind would reach back across a database boundary for its own
+// authorisation decision. The AAD gains a FOURTH term, `aad_context`, stored rather than derived so that
+// every term the GCM tag covers is a column of the row and 0043's ZK002 freezes all four; a CHECK ties it
+// to `template_version` and a trigger ties that to the referenced template (ZJ004), because an intake
+// payload is a map from a question set's field keys to values, so a payload captured under version 3 moved
+// onto a row labelled version 4 would decrypt cleanly and be read against questions it was not asked.
+// `retain_until` is computed at capture from `regulatory_profile_current.clinical_retention_years` — 25
+// years under the unconfirmed licence, because Y1-licence resolves to the stricter reading — and STORED,
+// so a past decision stays explainable after the profile changes. What this file deliberately does NOT
+// hold: a plaintext column of any kind, a DELETE grant (0009 revokes it across the schema and a grant here
+// would reinstate it for the one table that records who looked at a health record), and any foreign key to
+// `public` — `employee_id` and `customer_id` are plain uuids, which is 0008's decision verbatim. `ZJ` is
+// its private SQLSTATE prefix: `ZI` is 0026's and 0072's, and every other mnemonic letter is taken, so what
+// a private code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
+//
+// 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
+// record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
+// what makes a non-contiguous allocation cost nothing.
+export const SCHEMA_VERSION = 82 as const

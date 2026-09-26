@@ -42,6 +42,8 @@ export const intakeFormTemplate = clinicalSchema.table(
     consentHash: text('consent_hash').notNull(),
     isCurrent: boolean('is_current').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    /** Set when a later version replaced this one (0082). One of two columns an UPDATE may touch. */
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
   },
   (t) => [
     uniqueIndex('intake_template_one_current_per_locale').on(t.locale).where(sql`is_current`),
@@ -66,6 +68,20 @@ export const intakeSubmission = clinicalSchema.table(
     submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull(),
     submittedVia: text('submitted_via').notNull(),
     supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    /**
+     * The template version these answers were given to (0082).
+     *
+     * Denormalised on purpose: it is the fourth term of this payload's AAD, and every term the GCM tag
+     * covers has to be a column of the row so that 0043's ZK002 freezes it. A trigger asserts it equals
+     * the referenced template's own version.
+     */
+    templateVersion: integer('template_version').notNull(),
+    /** The fourth AAD term as stored — `template_version=<n>`, tied to the column above by a CHECK. */
+    aadContext: text('aad_context').notNull(),
+    /** `synthetic` or `real`. A real payload is refused while OPEN-QUESTIONS Y5-residency is open. */
+    dataOrigin: text('data_origin').notNull(),
+    /** Computed at capture from the profile in force, which defaults to healthcare-grade 25 years. */
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
   },
   (t) => [index('intake_submission_customer_idx').on(t.customerId, t.submittedAt)],
 )
@@ -139,4 +155,29 @@ export const treatmentConsent = clinicalSchema.table(
     withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
   },
   (t) => [index('treatment_consent_customer_idx').on(t.customerId, t.consentedAt)],
+)
+
+/**
+ * Step-up re-authentication (migration 0082).
+ *
+ * In the `clinical` schema and not in `public` because ADR 0010's test for what belongs here is whether
+ * it MOVES with the store: exactly one code path consumes a grant — the audited clinical read — and a
+ * relocated store that left its grants behind would reach back across a database boundary for its own
+ * authorisation decision. It holds no health data. `employeeId` is a plain uuid, never a foreign key.
+ */
+export const stepUpGrant = clinicalSchema.table(
+  'step_up_grant',
+  {
+    id: uuid('id').primaryKey().default(sql`public.uuid_generate_v7()`),
+    employeeId: uuid('employee_id').notNull(),
+    method: text('method').notNull(),
+    /** What the reads under this grant are for. A read declaring a different purpose is refused. */
+    statedPurpose: text('stated_purpose').notNull(),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('step_up_grant_live_idx').on(t.employeeId, t.expiresAt).where(sql`revoked_at is null`),
+  ],
 )

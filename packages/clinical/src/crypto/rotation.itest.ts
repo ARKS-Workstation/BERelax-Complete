@@ -61,6 +61,17 @@ const FIXTURE = 'FIXTURE (not a real record) —'
 const ID_PREFIX = '0dec0de0'
 const CUSTOMER_PREFIX = '0dec0de1'
 const TEMPLATE_ID = '0dec0de2-0000-7000-8000-000000000001'
+/**
+ * The fixture template's version, and the fourth term of every intake payload's AAD (C-CRM-08).
+ *
+ * Deliberately a high number rather than 1: migration 0082 requires a new version to be numbered above
+ * every existing version of its locale, and the integration suite runs sequentially against one database
+ * where earlier files leave rows behind (brief rule 12) — so a fixture claiming a low number is a fixture
+ * that fails the day a real template is published before it.
+ */
+const TEMPLATE_VERSION = 10_043
+/** 0082's consent gate matches on the wording HASH, so the fixture consent carries the template's. */
+const FIXTURE_CONSENT_HASH = 'fixture-consent-hash'
 
 /** Large enough that the kill lands well inside it even if several progress lines arrive at once. */
 const STRADDLED = 120
@@ -112,10 +123,12 @@ async function readEstate(table: ClinicalSealedTable, estate: number): Promise<S
       wrapped_data_key: Buffer
       kek_version: string
       aad_fingerprint: string
+      aad_context: string | null
     }[]
   >`
     select id, customer_id, ${sql(ciphertext)} as ct, ${sql(nonce)} as nonce,
-           wrapped_data_key, kek_version, aad_fingerprint
+           wrapped_data_key, kek_version, aad_fingerprint,
+           ${table === 'clinical.intake_submission' ? sql('aad_context') : sql`null`} as aad_context
       from ${sql(table)}
      where id::text like ${`${ID_PREFIX}-0000-7000-8000-${estate}%`}
      order by id
@@ -124,6 +137,9 @@ async function readEstate(table: ClinicalSealedTable, estate: number): Promise<S
     table,
     recordId: row.id,
     customerId: row.customer_id,
+    // The fourth AAD term, read from the row (C-CRM-08). Reconstructing it here instead would make the
+    // verification agree with itself rather than with what the rotation actually re-wrapped.
+    ...(row.aad_context === null ? {} : { context: row.aad_context }),
     sealed: {
       ciphertext: row.ct,
       nonce: row.nonce,
@@ -150,6 +166,11 @@ async function ciphertextDigests(): Promise<Map<string, string>> {
 const sweep = async () => {
   await sql`delete from clinical.intake_submission where id::text like ${`${ID_PREFIX}%`}`
   await sql`delete from clinical.treatment_note where id::text like ${`${ID_PREFIX}%`}`
+  // The consent rows 0082's gate needs go with them. Left behind, they would satisfy the gate for a
+  // later run's submissions without that run having written one, which is a gate that stops gating.
+  await sql`
+    delete from clinical.treatment_consent where customer_id::text like ${`${CUSTOMER_PREFIX}%`}
+  `
 }
 
 beforeAll(async () => {
@@ -169,15 +190,43 @@ beforeAll(async () => {
   await sql`
     insert into clinical.intake_form_template
       (id, version, locale, title, definition, consent_text, consent_hash, is_current, created_at)
-    values (${TEMPLATE_ID}, 10043, 'en', ${`${FIXTURE} rotation fixture`}, '{}'::jsonb,
-            ${`${FIXTURE} consent`}, 'fixture-consent-hash', false, now())
+    values (${TEMPLATE_ID}, ${TEMPLATE_VERSION}, 'en', ${`${FIXTURE} rotation fixture`}, '{}'::jsonb,
+            ${`${FIXTURE} consent`}, ${FIXTURE_CONSENT_HASH}, false, now())
     on conflict do nothing
   `
+
+  /**
+   * One consent row per fixture customer, because migration 0082 refuses an intake submission with no
+   * live consent to the wording its template carries (ZJ003) — a deferred constraint trigger, so it
+   * fires at COMMIT whichever order the two statements are issued in.
+   */
+  for (const record of Array.from({ length: STRADDLED }, (_unused, n) => customerFor(1, n))) {
+    await sql`
+      insert into clinical.treatment_consent
+        (customer_id, template_id, consent_hash, consent_locale, captured_via)
+      values (${record}, ${TEMPLATE_ID}, ${FIXTURE_CONSENT_HASH}, 'en', 'online')
+    `
+  }
+
+  /**
+   * `intake_submission` payloads carry the fourth AAD term C-CRM-08 added; `treatment_note` payloads do
+   * not. Both shapes in one rotation is deliberate: it is the arrangement that proves the key store reads
+   * `aad_context` off the row rather than assuming one shape, and a rotation that reconstructed a
+   * three-term binding for an intake row would fail to unwrap its data key.
+   */
+  const contextFor = (table: ClinicalSealedTable): string | undefined =>
+    table === 'clinical.intake_submission' ? `template_version=${TEMPLATE_VERSION}` : undefined
 
   const build = (table: ClinicalSealedTable, estate: number, count: number): Estate => ({
     table,
     records: Array.from({ length: count }, (_unused, n) => {
-      const identity = { table, recordId: idFor(estate, n), customerId: customerFor(estate, n) }
+      const context = contextFor(table)
+      const identity = {
+        table,
+        recordId: idFor(estate, n),
+        customerId: customerFor(estate, n),
+        ...(context === undefined ? {} : { context }),
+      }
       return { ...identity, sealed: seal(baseKek, bindingFor(identity), plaintextFor(n)) }
     }),
   })
@@ -188,10 +237,12 @@ beforeAll(async () => {
     await sql`
       insert into clinical.intake_submission
         (id, customer_id, template_id, payload_ciphertext, payload_nonce, wrapped_data_key,
-         kek_version, aad_fingerprint, submitted_at, submitted_via)
+         kek_version, aad_fingerprint, submitted_at, submitted_via, template_version, aad_context,
+         data_origin, retain_until)
       values (${record.recordId}, ${record.customerId}, ${TEMPLATE_ID}, ${record.sealed.ciphertext},
               ${record.sealed.nonce}, ${record.sealed.wrappedDataKey}, ${record.sealed.kekVersion},
-              ${record.sealed.aadFingerprint}, now(), 'online')
+              ${record.sealed.aadFingerprint}, now(), 'online', ${TEMPLATE_VERSION},
+              ${`template_version=${TEMPLATE_VERSION}`}, 'synthetic', now() + interval '25 years')
     `
   }
   for (const record of untouched.records) {
@@ -212,6 +263,21 @@ afterAll(async () => {
   await sweep().catch(() => {})
   await sql?.end({ timeout: 5 })
 })
+
+/**
+ * The consent row migration 0082 requires before an intake submission may exist (ZJ003).
+ *
+ * A helper rather than three copies: the gate matches on the wording HASH, and a copy that drifted onto a
+ * different hash would refuse its own submission at COMMIT for a reason naming a trigger rather than the
+ * fixture. The customer prefix is this file's own, so `sweep` removes these with everything else.
+ */
+async function consentFor(customerId: string): Promise<void> {
+  await sql`
+    insert into clinical.treatment_consent
+      (customer_id, template_id, consent_hash, consent_locale, captured_via)
+    values (${customerId}, ${TEMPLATE_ID}, ${FIXTURE_CONSENT_HASH}, 'en', 'online')
+  `
+}
 
 /** Runs the real CLI, optionally SIGKILLing it once `killAfter` progress lines have been seen. */
 function runRotation(options: { readonly killAfter?: number }): Promise<{
@@ -439,19 +505,23 @@ describe('records written before and after the rotation', () => {
       table: 'clinical.intake_submission' as const,
       recordId: freshId,
       customerId: freshCustomer,
+      context: `template_version=${TEMPLATE_VERSION}`,
     }
     const plaintext = `${FIXTURE} sealed after the rotation`
     const registry = await createPostgresClinicalKeyStore(sql).readKekVersions()
     const sealed = sealUnderActiveKek(registry, targetKek, (kek) =>
       seal(kek, bindingFor(identity), plaintext),
     )
+    await consentFor(freshCustomer)
     await sql`
       insert into clinical.intake_submission
         (id, customer_id, template_id, payload_ciphertext, payload_nonce, wrapped_data_key,
-         kek_version, aad_fingerprint, submitted_at, submitted_via)
+         kek_version, aad_fingerprint, submitted_at, submitted_via, template_version, aad_context,
+         data_origin, retain_until)
       values (${freshId}, ${freshCustomer}, ${TEMPLATE_ID}, ${sealed.ciphertext}, ${sealed.nonce},
               ${sealed.wrappedDataKey}, ${sealed.kekVersion}, ${sealed.aadFingerprint}, now(),
-              'staff_entry')
+              'staff_entry', ${TEMPLATE_VERSION}, ${`template_version=${TEMPLATE_VERSION}`},
+              'synthetic', now() + interval '25 years')
     `
 
     const [row] = await readEstate('clinical.intake_submission', 7)
@@ -478,18 +548,22 @@ describe('the AAD row binding survives the rotation', () => {
     if (original === undefined) throw new Error('fixture')
     const copyId = `${ID_PREFIX}-0000-7000-8000-800000000001`
     const otherCustomer = `${CUSTOMER_PREFIX}-0000-7000-8000-800000000001`
+    await consentFor(otherCustomer)
     await sql`
       insert into clinical.intake_submission
         (id, customer_id, template_id, payload_ciphertext, payload_nonce, wrapped_data_key,
-         kek_version, aad_fingerprint, submitted_at, submitted_via)
+         kek_version, aad_fingerprint, submitted_at, submitted_via, template_version, aad_context,
+         data_origin, retain_until)
       values (${copyId}, ${otherCustomer}, ${TEMPLATE_ID}, ${original.sealed.ciphertext},
               ${original.sealed.nonce}, ${original.sealed.wrappedDataKey}, ${targetVersion},
-              ${original.sealed.aadFingerprint}, now(), 'staff_entry')
+              ${original.sealed.aadFingerprint}, now(), 'staff_entry', ${TEMPLATE_VERSION},
+              ${`template_version=${TEMPLATE_VERSION}`}, 'synthetic', now() + interval '25 years')
     `
     const copy: SealedRecord = {
       table: 'clinical.intake_submission',
       recordId: copyId,
       customerId: otherCustomer,
+      context: `template_version=${TEMPLATE_VERSION}`,
       sealed: original.sealed,
     }
     expect(() => open(targetKek, bindingFor(copy), copy.sealed)).toThrow(

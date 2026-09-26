@@ -39,4 +39,26 @@ export {
   type SealedPayload,
   seal,
 } from './envelope.ts'
+export type {
+  ClinicalErrorSink,
+  ClinicalLogFields,
+  ClinicalLogger,
+  ClinicalLogLevel,
+  ClinicalLogLine,
+  ClinicalLogValue,
+} from './logging.ts'
+export { SILENT_CLINICAL_LOGGER } from './logging.ts'
+export {
+  type ClinicalActor,
+  type ClinicalIntakeStore,
+  type ClinicalStoreDeps,
+  createClinicalIntakeStore,
+  type GrantStepUpInput,
+  type IntakeReadResult,
+  type PublishedTemplate,
+  type PublishTemplateInput,
+  type ReadIntakeInput,
+  type RecordIntakeInput,
+  type StepUpGranted,
+} from './repository.ts'
 export type { ClinicalStore, ContraindicationFlags } from './store.ts'

@@ -80,6 +80,15 @@ export interface SealedRecord {
   readonly recordId: string
   readonly customerId: string
   readonly sealed: SealedPayload
+  /**
+   * The fourth AAD term, for a table whose payloads carry one (`clinical.intake_submission` binds
+   * `template_version=<n>`; see migration 0082 and {@link RecordBinding.context}).
+   *
+   * On the record rather than derived per table, because a re-wrap has to reproduce the EXACT AAD a
+   * payload was sealed under: a term the rotation cannot see is a row the rotation cannot re-wrap, and
+   * it would arrive as `ClinicalDekUnwrapFailed` on a row nothing is wrong with.
+   */
+  readonly context?: string
 }
 
 export interface RewrapWrite {
@@ -141,10 +150,16 @@ export const bindingFor = (record: {
   readonly table: string
   readonly recordId: string
   readonly customerId: string
+  readonly context?: string
 }): RecordBinding => ({
   table: record.table,
   recordId: record.recordId,
   customerId: record.customerId,
+  // Spread, not `context: record.context`: `exactOptionalPropertyTypes` distinguishes an explicit
+  // `undefined` from an absent property, and `aadFor` appends the fourth term only when the property is
+  // actually there — so an explicit `undefined` would still be a three-term AAD, but the TYPE would no
+  // longer say so, and the next reader would have to work that out from `aadFor`.
+  ...(record.context === undefined ? {} : { context: record.context }),
 })
 
 /**

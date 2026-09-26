@@ -316,6 +316,31 @@ export const ROUTES = [
       'trading, and would show appointments that have since moved.',
   },
   {
+    id: 'client-intake',
+    path: '/clients/[id]/intake',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-08s clinical intake record: one clients answers, rendered against the template VERSION they ' +
+      'were captured under, behind the consent gate and a step-up re-authentication. A handler rather than ' +
+      'a document for the reason the duplicate queue and the Messages inbox give one directory along - a ' +
+      'registry document must be served in BOTH locales, which needs an Arabic admin document and the ' +
+      'W-SYS-01 shell - and `?dir=rtl` re-renders this English document mirrored so the direction half of ' +
+      'the accessibility matrix is audited without inventing an Arabic admin surface. NO sampleParams, ' +
+      'although the path has a segment: nothing screenshots or crawls a health record, and a sample id ' +
+      'here would be a URL the harness opened on every run, recording a read of somebody in the audit ' +
+      'trail every time. Dynamic and never cached, because a cached clinical record is a record read once ' +
+      'and shown many times with one audit row for the first reader. It WRITES - every request records a ' +
+      'read or a denial - and it is NOT authenticated, exactly as the routes under /compliance, /hr and ' +
+      '/settings record; so the authorisation it enforces is the databases, which refuses the read without ' +
+      'a live clinical.step_up_grant matching the stated purpose (migration 0082). Covered by the /clients ' +
+      'noindex prefix in ADMIN_GROUP_PREFIXES.',
+  },
+  {
     id: 'duplicate-queue',
     path: '/clients/duplicates',
     kind: 'handler',
