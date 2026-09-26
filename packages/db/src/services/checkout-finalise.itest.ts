@@ -1098,8 +1098,11 @@ describe('the outbox: one invoice.issued and one payment.recorded, consumed once
       // Written, not yet delivered: the transaction publishes and the worker drains.
       expect(row.published_at).toBeNull()
     }
-    expect(rows[0]?.idempotency_key).toBe(`invoice.issued:${finalised.invoice.displayNumber}`)
-    expect(rows[1]?.idempotency_key).toBe(`payment.recorded:${finalised.invoice.displayNumber}`)
+    // Both keyed on the invoice ROW, and asserted as a PAIR on purpose: these two events are written in
+    // one transaction, and the defect `ec561e7` left behind was keying one on the row and the other on the
+    // display number. Asserting them together is what makes a future half-migration of this pair fail.
+    expect(rows[0]?.idempotency_key).toBe(`invoice.issued:${finalised.invoice.id}`)
+    expect(rows[1]?.idempotency_key).toBe(`payment.recorded:${finalised.invoice.id}`)
     expect(rows[1]?.payload['tenderTotalFils']).toBe(TENDERED)
     expect(rows[1]?.payload['journalEntryId']).toBe(finalised.journalEntry.entryId)
   }, 20_000)

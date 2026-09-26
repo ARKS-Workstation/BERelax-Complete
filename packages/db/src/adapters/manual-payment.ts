@@ -923,7 +923,10 @@ export function manualPaymentAdapter(): PaymentAdapter {
           amountFils: refunded.amountFils,
           tenderKind: refunded.tenderKind,
         },
-        idempotencyKey: `payment.refunded:${settlement.displayNumber}:${refundNo}`,
+        // The refund ROW, not the document's display number plus an ordinal. `(displayNumber, refundNo)`
+        // recurs whenever the numbering counter restarts, and `refunded.id` — which the audit row beside
+        // this already uses as its `entityId` — is unique for ever and needs no ordinal to disambiguate.
+        idempotencyKey: `payment.refunded:${refunded.id}`,
       })
 
       return refunded

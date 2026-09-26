@@ -675,9 +675,13 @@ export async function finaliseCheckout(
               postingAccountCode: tender.postingAccountCode,
             })),
           },
-          // Derived from the statutory identifier, which is unique by constraint, so a retry of the
-          // same finalisation cannot enqueue twice — and neither can a second drain.
-          idempotencyKey: `payment.recorded:${invoice.displayNumber}`,
+          // The invoice ROW, exactly as `invoice.issued` beside it — and these two are written in ONE
+          // transaction, so keying them differently was the defect. `ec561e7` moved `invoice.issued` off
+          // the display number because a statutory number is reset by design (the counter restarts with an
+          // empty period key, which a TRUNCATE does) and left this one behind: the pair then disagreed
+          // about what identifies a finalisation, and `checkout-finalise.itest.ts` went red on the
+          // assertion that they match. `aggregateId` on this very event is already `invoice.id`.
+          idempotencyKey: `payment.recorded:${invoice.id}`,
         })
 
         return finalised
