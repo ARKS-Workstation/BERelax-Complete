@@ -8348,11 +8348,12 @@ units:
     - P-HR-01
     blocked_on_owner:
     - Y8-leave
-    - Y9-leave-policy
-    provisional: 'Y9-leave-policy is NEW and must be added to OPEN-QUESTIONS.md. Provisional (strictest
-      safe): 30 calendar days annual accrued 2.5 days per completed month, 6-month probation with no annual
-      leave taken but accrual running, carry-over capped at 30 days and not expiring, sick leave 15 full
-      / 30 half / 45 unpaid after probation; Y8-leave opening balances default to zero flagged provisional'
+    - Y9-leave-detail
+    provisional: 'Y9-leave-detail (docs/OPEN-QUESTIONS.md A2), widened by this unit rather than duplicated.
+      Provisional (strictest safe): 30 calendar days annual accrued 2.5 days per completed month, 6-month
+      probation with no annual leave taken but accrual running, carry-over capped at 30 days and not
+      expiring, sick leave 15 full / 30 half / 45 unpaid after probation; Y8-leave opening balances default
+      to zero flagged provisional'
     acceptance:
     - 'worked examples from docs/04 §7 pass as named tests: a full year of service accrues 30 calendar days,
       and each test case string names the rule it encodes'
@@ -8374,19 +8375,21 @@ units:
       64 and 65 are held by units in flight in other worktrees, and that gap is not closed here for the
       reason packages/db/src/index.ts already records: renumbering to close a gap is how two branches
       apply one number to different SQL.'
-    - 'NOTE: this entry says "Y9-leave-policy is NEW and must be added to OPEN-QUESTIONS.md". It is not
-      new and no such id was created. docs/OPEN-QUESTIONS.md A2 already carries Y9-leave-detail —
+    - 'NOTE: this entry USED TO SAY "Y9-leave-policy is NEW and must be added to OPEN-QUESTIONS.md". It was
+      not new and no such id was ever created, so the claim and the two references to it have now been
+      replaced by the real id rather than left standing beside a note correcting them — a false statement
+      with a correction next to it is still two answers to one question, which is the defect this codebase
+      fights hardest. docs/OPEN-QUESTIONS.md A2 already carried Y9-leave-detail —
       "probation length, first-year and pro-rata accrual, carry-over cap and expiry, and whether a public
       holiday inside annual leave is counted" — which is the same question. A second id for one question
       would put two rows in the Unconfirmed Assumptions panel that can only be answered together, and
       clearing one would clear half a decision. Y9-leave-detail was instead WIDENED to name the parts this
       unit added (the leave-year anchor, the sick-leave band lengths, which absences stop accrual) and to
       record the three places its answer is unsettled. Y8-leave was widened the same way, to describe the
-      importer and the flagged-zero default rather than the bare "Zero balances" it held. This entry''s own
-      blocked_on_owner list still names Y9-leave-policy and is deliberately left alone: renaming it would
-      change the row docs/PROGRESS.md renders, and regenerating that file needs `pnpm progress`, which this
-      unit is instructed not to run. Whoever marks the unit done should rename it to Y9-leave-detail in the
-      same pass.'
+      importer and the flagged-zero default rather than the bare "Zero balances" it held. P-HR-08 left the
+      rename to the integrator on purpose, because renaming the id changes the row docs/PROGRESS.md renders
+      and regenerating that file needs `pnpm progress`, which a unit is instructed not to run. Done, in this
+      commit, with the file regenerated.'
     - 'NOTE: the two recorded provisional answers CONFLICT on carry-over expiry and the conflict is
       resolved rather than averaged. This entry says "carry-over capped at 30 days and not expiring";
       Y9-leave-detail said "30-day carry-over cap expiring after 12 months". 0066 seeds

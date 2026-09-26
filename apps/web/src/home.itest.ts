@@ -16,6 +16,7 @@ import { cropForViewportWidth, selectedRungFor } from '@berelax/media/srcset'
 import { derivativeHeaders, publicKeyFor } from '@berelax/media/storage'
 import { derivativePath } from '@berelax/media/url'
 import { THEME_STORAGE_KEY } from '@berelax/ui'
+import { HERO_STATE_ATTRIBUTE } from '@berelax/ui/media'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -172,6 +173,23 @@ async function fetchHtml(path: string): Promise<string> {
  * machine the island won the race and the sample reported the video as an element invisible at first paint. It
  * was not: it was invisible one frame later, which is a different claim. An LCP claim measured after
  * hydration is not an LCP claim, and a first-paint claim measured a frame late is not a first-paint claim.
+ *
+ * **The synchronous callback SHRANK that race and did not remove it, and the first-paint assertion below went
+ * on failing intermittently because of the part that was left.** A `PerformanceObserver` callback is not
+ * delivered at the paint; it is queued and runs in a later task, so on a loaded machine hydration can still
+ * get in first and the sample is once again a frame late — the same false failure, the same
+ * `data-hero-state="attaching"`, just rarer and therefore harder to believe. Making the callback earlier is
+ * not available: there is no hook that runs inside the paint.
+ *
+ * So the first-paint case removes the race instead of shrinking it, by making hydration IMPOSSIBLE for that
+ * one page load: `blockHydration` aborts the client chunks, nothing runs after the document's own blocking
+ * inline scripts, and no later task can change what the snapshot sees. The claim is unchanged and the
+ * measurement is now exact rather than probable — first paint happens before hydration by definition, so a
+ * document that cannot hydrate is the first-paint document, held still for as long as the test needs.
+ *
+ * Both of the document's inline scripts survive that, which is what makes the cell assertions still mean
+ * something: `themeBootstrapScript()` and the motion bootstrap are `dangerouslySetInnerHTML` in
+ * `app/_document/shell.tsx`, not chunks, precisely because they have to run before paint.
  */
 const OBSERVERS = `
 (() => {
@@ -239,6 +257,14 @@ interface PageOptions {
   readonly width?: number
   readonly path?: string
   readonly theme?: 'light' | 'dark'
+  /**
+   * Abort the client chunks, so the document paints and then holds still.
+   *
+   * Only the first-paint case sets it, and only because that case's claim is about the frame before
+   * hydration. Every other case here WANTS the hydrated page: the LCP cases are about a poster the island
+   * may replace, and the card cases read a DOM the client fills in.
+   */
+  readonly blockHydration?: boolean
 }
 
 async function withPage<T>(options: PageOptions, body: (page: Page) => Promise<T>): Promise<T> {
@@ -263,6 +289,13 @@ async function withPage<T>(options: PageOptions, body: (page: Page) => Promise<T
     }
     const page = await context.newPage()
     await page.addInitScript({ content: OBSERVERS })
+    if (options.blockHydration === true) {
+      // The init script above still installs: it is not a chunk. What stops is everything Next would run
+      // after the document, which is the only thing that could change the DOM between the paint and the
+      // observer callback. The pattern is asserted rather than trusted — see the `data-hero-state` control
+      // in the first-paint case, which fails loudly if Next ever serves its client code from elsewhere.
+      await page.route('**/_next/static/chunks/**', (route) => route.abort())
+    }
     await page.bringToFront()
     await page.goto(`${BASE}${options.path ?? ROUTE}`, { waitUntil: 'load' })
     // The poster has to have arrived for anything here to be about the poster: an `<img>` whose bytes 404 is
@@ -483,21 +516,38 @@ describe('acceptance — nothing above the fold animates or arrives faded', () =
   for (const path of [ROUTE, ROUTE_AR]) {
     for (const theme of ['light', 'dark'] as const) {
       it(`${path} in the ${theme} theme paints everything at once`, async () => {
-        const first = await withPage({ path, theme, width: PHONE }, async (page) => {
-          await page.waitForFunction(
-            () => (globalThis as unknown as { __firstPaint: unknown }).__firstPaint !== null,
-          )
-          return await page.evaluate(() => ({
-            paint: (
-              globalThis as unknown as { __firstPaint: { animations: string[]; faded: string[] } }
-            ).__firstPaint,
-            theme: document.documentElement.getAttribute('data-theme'),
-            dir: document.documentElement.getAttribute('dir'),
-          }))
-        })
+        const first = await withPage(
+          { path, theme, width: PHONE, blockHydration: true },
+          async (page) => {
+            await page.waitForFunction(
+              () => (globalThis as unknown as { __firstPaint: unknown }).__firstPaint !== null,
+            )
+            return await page.evaluate(
+              (heroAttribute) => ({
+                paint: (
+                  globalThis as unknown as {
+                    __firstPaint: { animations: string[]; faded: string[] }
+                  }
+                ).__firstPaint,
+                theme: document.documentElement.getAttribute('data-theme'),
+                dir: document.documentElement.getAttribute('dir'),
+                heroState: document.querySelector('.be-hero')?.getAttribute(heroAttribute) ?? null,
+              }),
+              HERO_STATE_ATTRIBUTE,
+            )
+          },
+        )
         // The cell is the cell it claims to be, before anything is concluded from it.
         expect(first.theme).toBe(theme)
         expect(first.dir).toBe(path === ROUTE_AR ? 'rtl' : 'ltr')
+        // And the page really did hold still. `still` is what the SERVER renders; the island's first act is
+        // to write `attaching`, so anything but `still` here means the chunks were served after all and this
+        // assertion is back to racing hydration — which is how it failed intermittently before. Without this
+        // line a renamed chunk path would put the flake back and nothing would say so.
+        expect(
+          first.heroState,
+          'the hero island ran, so the chunk block missed and this is no longer a first-paint sample',
+        ).toBe('still')
         expect(first.paint.animations, 'a running animation above the fold at first paint').toEqual(
           [],
         )
