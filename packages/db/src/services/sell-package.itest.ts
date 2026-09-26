@@ -156,16 +156,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql?.unsafe(
-    'truncate package_balance, package_sale, package_template_line, package_template_version, ' +
-      'package_template',
+    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
+    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement.
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
   )
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
   await sql.unsafe(
-    'truncate package_balance, package_sale, package_template_line, package_template_version, ' +
-      'package_template',
+    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
+    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement.
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
   )
   nonce += 1
 })
@@ -937,8 +941,10 @@ describe('a sold balance never changes when the template is edited', () => {
 
     for (const seed of [11, 101, 1_009, 7_919, 20_260_101, 31_337, 424_242, 999_983]) {
       await sql.unsafe(
-        'truncate package_balance, package_sale, package_template_line, ' +
-          'package_template_version, package_template',
+        // 0083: `package_redemption` and `payment` both reference this family now, and PostgreSQL
+        // refuses a TRUNCATE while a referencing table is missing from the statement.
+        'truncate package_redemption, payment, package_balance, package_sale, ' +
+          'package_template_line, package_template_version, package_template',
       )
       const random = lcg(seed)
       const key = keyFor(`weave_${seed}`)

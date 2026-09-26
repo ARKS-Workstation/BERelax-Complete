@@ -43,6 +43,11 @@ import {
   REBUILD_OBLIGATION_NOTICES_JOB,
   SEND_OBLIGATION_NOTICE_JOB,
 } from './jobs/obligation-reminders.ts'
+import {
+  PACKAGE_EXPIRY_ACTOR,
+  PACKAGE_EXPIRY_AGENT,
+  runPackageExpirySweep,
+} from './jobs/package-expiry.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
@@ -282,6 +287,29 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     // reclaiming it cannot double-accrue because the unique index refuses the second row.
     expireInSeconds: 600,
     handler: leaveAccrualHandler,
+  },
+  {
+    name: 'package.expiry-sweep',
+    purpose:
+      'Daily: measures the packages whose validity has run out and what is still unreleased against ' +
+      'them — the liability 2050 holds for entitlements nobody can draw on any more. Posts NOTHING: ' +
+      '[UNVERIFIED] Y9-package-policy provisionally RETAINS an unredeemed balance, so the customer is ' +
+      'still owed the treatments and moving 2050 into revenue would recognise money the business owes, ' +
+      'on a VAT box, for a supply that has not happened. The measurement is what makes the question ' +
+      'answerable; a sale sold under FORFEITED terms is refused rather than guessed at (M-TILL-10).',
+    // 05:30 Asia/Dubai. After trading closes at 02:00, after the four nightly passes at 03:00, 03:45,
+    // 04:15 and 04:45, and after the monthly accrual at 05:00 — nothing contends and the figure it reports
+    // is a whole trading day behind it. Deliberately NOT inside 00:00-02:00: the session in force then
+    // opened the previous day, so a package expiring at midnight would be reported live for one more pass.
+    cron: '30 5 * * *',
+    agent: PACKAGE_EXPIRY_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 300,
+    retryBackoff: true,
+    // One read of a view and one audit insert. Sixty seconds is generous; a pass still running past it is
+    // blocked on a lock rather than slow, and the pass writes nothing a reclaim could double.
+    expireInSeconds: 60,
+    handler: packageExpiryHandler,
   },
   {
     name: 'google-connection.health',
@@ -552,6 +580,35 @@ async function leaveAccrualHandler(_data: never, context: JobContext): Promise<v
   console.log(
     `hr.leave-accrual through ${result.throughMonth}: ${result.considered} employee(s) considered, ` +
       `${result.written.length} accrual(s) written, ${result.accruedHundredths} day-hundredths added`,
+  )
+}
+
+/**
+ * The package expiry sweep.
+ *
+ * Thin, like the sweeps above: the business date is resolved inside `runPackageExpirySweep` from the instant
+ * this passes it, so the integration suite can drive it at a frozen clock and ask what the sweep saw on a
+ * given day. What this wrapper adds is the connection and the log line.
+ *
+ * The log line reports the figure even when it is ZERO, and that is the point rather than noise: this pass
+ * posts nothing, so its only visible output is the audit row and this line. A pass that logged only when
+ * there was exposure would be indistinguishable from a pass that had stopped, which is docs/10 §6's failure
+ * and the reason `agent_heartbeat` exists.
+ */
+async function packageExpiryHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The package expiry sweep ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const result = await runPackageExpirySweep(sql, PACKAGE_EXPIRY_ACTOR, context.now())
+  console.log(
+    `package.expiry-sweep as at ${result.asAt}: ${result.exposure.expired.length} expired sale(s), ` +
+      `${result.exposure.unreleasedFils} fils still unreleased, ` +
+      `${result.journalEntriesPosted} journal entries posted (Y9-package-policy: balance RETAINED)`,
   )
 }
 

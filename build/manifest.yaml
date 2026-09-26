@@ -4597,12 +4597,264 @@ units:
       attempt writes an audit_event
     - a unique constraint prevents redeeming the same appointment against two balances, and prevents the
       same appointment being both redeemed and invoiced for cash
+    - 'NOTE: the migration is 0083_package_redemption.sql and SCHEMA_VERSION = 83. 0084-0087 were held by
+      units in flight and 22, 41, 44, 47, 71 and 74 are PERMANENT gaps that were not reused, because
+      renumbering into a gap is how two branches come to apply one number to different SQL. The ledger
+      paragraph in packages/db/src/index.ts is in numeric order; if 0084+ lands first the integrator sets
+      SCHEMA_VERSION to that number, because it tracks the NEWEST migration on disk and not this unit''s.'
+    - 'NOTE: the SQLSTATE class is ZG, the SAME as 0078''s, and that is the one place this unit departs from
+      M-TILL-09''s own header argument on purpose. 0078 moved off the mnemonic ZP because 0056_consent.sql
+      raises ZP001-ZP003 and packageError and consentError both match on SQLSTATE ALONE, so two DOMAINS
+      sharing a class makes one translator answer for the other''s refusal. This is the same domain read by
+      the same caller, and the six new codes are disjoint from 0078''s six — so packageError and
+      packageRedemptionError partition ZG between them and neither can claim the other''s code. Measured
+      before it was written, because 0078''s NOTE proposed a gate for exactly this: ELEVEN codes already
+      appear in more than one migration file (ZT001, ZT002, ZT003, ZU001-ZU003, ZW001, ZW002, ZB001, ZB002,
+      ZL002, and ZV002 in three), because a later migration `create or replace`s the function that raises
+      one. So "a code lives in one file" is not this repository''s rule and never was, and the gate 0078
+      asked for would fire on the tree today; "a code has one MEANING" is the rule, and ZT001 appears in
+      0083 for precisely that reason. The six new codes are ZG007 immutable redemption, ZG008 the posting is
+      not the release, ZG009 the drawdown disagrees with its redemptions or with the formula, ZG010 a
+      redemption after expiry, ZG011 an appointment both redeemed and charged, ZG012 the payments against a
+      package sale do not equal its price.'
+    - 'NOTE: the POSTING, and what changes when Y11-vat-package is answered. A redemption posts Dr 2050 at
+      the released GROSS, Cr 4020 Package redemption revenue at the NET and Cr 2030 at the VAT, so the sale
+      period''s output-VAT box holds nothing from packages and the redemption period''s box 1 holds the tax
+      on what was actually delivered. That is Y11-vat-package''s provisional answer — date of supply at
+      REDEMPTION — and it is 0078''s, unchanged. ZG008 is that rule as a database refusal and it is STRICTER
+      than ZG005 has to be: a sale may say "nothing on revenue", and a release has to say "exactly this much
+      on exactly 4020 and nothing on any other revenue account". The other-revenue half measures debits PLUS
+      credits and not the net, ZG005''s reason: 4010 credited against the contra 4095 by the same figure nets
+      to zero and HAS put a package''s revenue on the wrong account and the wrong VAT box, with the trial
+      balance still balancing. Asserted at four layers, none redundant: probePackageRedemptionPosting in core
+      measures it off the entry''s lines against the chart; reconcilePackageRedemptionMapping in
+      packages/fixtures measures the MAPPED JournalEntryInput against the MAPPED row fields, which is the
+      layer neither half''s own suite can see; ZG008 measures it in SQL over the rows PostgreSQL holds; and
+      the pair itest measures it as two PERIOD movements over 2030, which is what a VAT return actually is
+      and what no single entry''s assertion can make. If the owner answers the other way — supply at SALE —
+      what changes is ZG005''s predicate and ZG008''s: the sale would credit 4020 net and 2030 the VAT and a
+      redemption would move the balance and nothing else. No table in either file changes, because a balance
+      still has to be drawn down.'
+    - 'NOTE: what a redemption RELEASES, and why the answer is a closed form rather than allocateByWeight.
+      release_through(value, total, redeemed) = ceil(value * redeemed / total), and one redemption of u
+      sessions releases the difference at redeemed + u and at redeemed. package_release_through_fils in 0083
+      is that function in integer arithmetic — (value * redeemed + total - 1) / total, which cannot round at
+      all — and it is the ONE statement of the rule: ZG009 re-adds it over the rows, redeemPackage checks a
+      caller''s figure against it with the balance ROW LOCKED, and packages/core''s releaseThrough computes
+      the same expression in BigInt so a posting can be built without a round trip. It is deliberately NOT
+      largest-remainder over equal weights, which is what M-TILL-09''s per-LINE split uses: largest remainder
+      gives the spare fils to the FIRST sessions and this gives them to sessions spread through the course,
+      both sum to the value exactly, and neither is more correct commercially. The closed form was chosen
+      because a CONSTRAINT has to be able to check it, and checking a largest-remainder allocation in SQL
+      means reimplementing largest remainder in PL/pgSQL — a second implementation of an arithmetic rule. The
+      two implementations are held equal over a CENSUS and not a sample: 2,080 comparisons (13 values x 15
+      session counts x every redemption point) in packages/fixtures/src/package-redemption.itest.ts, with a
+      control comparing core against a deliberately WRONG SQL expression and requiring a disagreement,
+      because a census over two implementations is worthless if the comparison cannot fail. A census rather
+      than a property test on purpose: the last batch had a float implementation PASS a 300-run property
+      because the generator never produced a quotient near a whole number.'
+    - 'NOTE: BREAKAGE IS A MEASUREMENT AND NOT A POSTING, which is where Y9-package-policy''s retained
+      answer bites and the thing this unit had to get right. If an unredeemed balance is RETAINED then the
+      customer is still owed the treatments and the liability is real — so an entry moving 2050 into revenue
+      at expiry would recognise money the business owes, on a VAT box, for a supply that has not happened,
+      and reversing it when the owner says "of course we honour it" means amending a filed return. Forfeiting
+      is the aggressive reading and is the one that looks like accounting. So there is NO breakage posting,
+      no breakage account, and no breakagePosting function anywhere in packages/core — a function that built
+      the entry and left it to a caller not to post it would be the "stub that looks like it works" docs/12
+      §1 forbids. What exists instead is package_expiry_exposure, a VIEW measuring per sale what is still
+      unreleased against it, and apps/worker''s daily sweep, which reads it, writes an audit_event carrying
+      the figure and posts nothing. That is not a placeholder for the real job: the measurement is exactly
+      the figure the owner needs in order to answer Y9-package-policy at all. 4050 Unredeemed voucher
+      breakage exists in the chart (0018) and is deliberately NOT reused, because a voucher and a package are
+      different products that happen to share a VAT box and reusing the account would make the one report
+      that could tell them apart unable to. A sale sold under FORFEITED terms — possible only because
+      somebody typed it in, since the provisional default is retained — makes the sweep RAISE
+      BreakagePolicyUnanswered rather than guess, after the audit row for the retained sales has been written
+      and committed, because a silent skip is indistinguishable from a sweep that had nothing to do. When the
+      owner answers forfeited, what is needed is that posting, an account of its own, and a SECOND tax
+      question nobody has asked: whether forfeited consideration is a supply at all, which Y11-vat-package''s
+      wording does not reach. unredeemed_balance_policy is snapshotted per SALE, so no answer restates an
+      outstanding balance.'
+    - 'NOTE: the appointment-once rule is HALF a unique constraint and half a trigger pair, and the
+      acceptance line''s wording cannot be satisfied literally. package_redemption_appointment_once IS a
+      UNIQUE constraint and it is "not against two balances". "Not redeemed AND invoiced for cash" cannot be
+      one, because the two facts live in two tables and PostgreSQL has no cross-table unique — so it is
+      package_redemption_not_charged and invoice_appointment_not_redeemed, both ZG011, one on each table,
+      because whichever row arrives SECOND has to be the one refused and a guard on one table only closes
+      one of the two orders. The rejected alternative was a shared appointment_settlement table with a
+      primary key on the appointment, written by both paths: that WOULD be one unique constraint, and it
+      would also be a second answer to "was this appointment billed" sitting beside invoice_appointment,
+      which is the question that table exists to answer. "Charged" is invoice_appointment.line_no is not
+      null, which is 0063''s own reason for making the column nullable, and the sanctioned mapping derives
+      line_no from posting.charges so every chargeable appointment has one. The RESIDUAL hole is stated
+      rather than hidden: a hand-built finaliseCheckout call that omitted lineNo for a CHARGED appointment
+      would read as a redemption link. Closing it properly means requiring a line_no for every charged
+      appointment, which is M-TILL-06''s contract and M-TILL-13''s caller (M-TILL-13 is todo).'
+    - 'NOTE: the transfer refusal cannot be a database rule, and this is a real limitation rather than an
+      omission. A transfer is `update package_sale set customer_id = …`, byte for byte the statement a
+      customer MERGE issues — which 0078 permits for exactly that reason, and berelax_app holds
+      `update (customer_id)` and nothing else. No trigger can tell the two apart, so a guard in SQL would
+      either refuse the merge it exists to permit or permit the transfer it exists to refuse. The refusal is
+      therefore transferPackageBalance''s, which reads the snapshotted `transferable` and writes the
+      audit_event the acceptance line asks for — and the itest asserts BOTH halves: the transfer refused, and
+      the merge''s own statement still accepted under `set local role berelax_app`. That function takes a Sql
+      and not a UnitOfWork, which is forced rather than a preference: see the defects note.'
+    - 'NOTE: the payment-row defect RE-OWNERED here by the integrator, and the shape chosen. M-TILL-09
+      deferred it to M-TILL-12, which is already done, so it had no owner. A package sale wrote no `payment`
+      row because payment.invoice_id was NOT NULL (0063) and a package sale issues no invoice — and
+      readDrawerTakings and ZU005 (0076) both sum `payment` for the business day, so cash taken for a package
+      was invisible to both and M-TILL-11''s cash-up read the drawer as OVER by exactly that amount and
+      posted the difference to 6140 Cash over and short. FIXED HERE, and the shape is BOTH of the two the
+      integrator named: invoice_id becomes NULLABLE and a package_sale_id is added beside it, with
+      payment_settles_exactly_one_document (num_nonnulls = 1) requiring exactly one. Nullable alone was the
+      other option and is worse twice over — the row would name no document at all, so nothing could say
+      which package the money was for; and payment_one_row_per_tender is unique (invoice_id, tender_no) with
+      NULLs DISTINCT in a unique index, so every package payment would have escaped the one-row-per-tender
+      rule as well, hence payment_one_row_per_package_tender beside it. sellPackage now writes one payment
+      row per tender, which is the one edit to M-TILL-09''s own service. `refund.invoice_id` is deliberately
+      NOT widened: 0068''s reason for it is that money leaving with no document behind it is how "an issued
+      invoice is never edited or voided" stops being true, and a package refund is M-TILL-08''s credit-note
+      question. payment_within_the_document() (ZT001, 0068) is REPLACED and not extended, and not for a
+      feature: with a nullable invoice_id its test became `0 > NULL`, which is NULL, which is not TRUE, so
+      the ceiling silently stopped applying to exactly the rows 0083 adds while still reporting itself as
+      present. The package branch is an EQUALITY (ZG012) and not a ceiling, because an invoice may be part
+      paid — M-TILL-07''s receivable — and a package may not: a part payment would credit 2050 with a
+      liability the salon was never paid for, and enforcing only the ceiling would have left the
+      under-tender, which is the half that loses money rather than the half that looks wrong. A gate case
+      proves ZT001 still fires for an overpaid INVOICE after the branch was added.'
+    - 'NOTE: defects found in THIS unit''s own work, all nine recorded because every one had reported a
+      pass or looked right. (1) transferPackageBalance wrote its refusal audit_event and then threw, INSIDE
+      the caller''s unit of work — and withUnitOfWork wraps the callback in sql.begin, so the throw rolled
+      the row back and the acceptance line''s evidence was lost. Found by the itest''s DELTA over
+      audit_event, which read zero. The signature now takes a Sql rather than a UnitOfWork and commits the
+      refusal''s own transaction before throwing, which means this function owns its transaction boundary —
+      almost nothing else in packages/db does, and it has to, because "the evidence survives the refusal"
+      cannot be a property of code running inside the transaction being refused. A gate mutant restores the
+      throw-first order. (2) The Drizzle mirror edit was a multi-occurrence string replace and
+      `invoiceId: uuid(''invoice_id'').notNull().references(...)` appears in BOTH `payment` and `refund` in
+      one file — so `refund` silently gained a package_sale_id and lost its NOT NULL. Caught by pnpm
+      db:drift, which is the check that exists for exactly this; it is the same hazard brief rule 20 states
+      for gate anchors, inflicted through an edit script instead of a gate. (3) The property test''s coverage
+      floors and the "measured over eight runs" figures were WRITTEN BEFORE they were measured, which is
+      M-TILL-09''s recorded defect (2) repeated. Measured over eight seeded runs of 400: fully redeemed 227
+      250 234 256 259 253 251 242 (lowest 227), indivisible 294 271 288 286 274 289 285 282 (lowest 271),
+      multi-session step 390 385 384 390 380 390 388 390 (lowest 380), took at least one step 385 382 387 386
+      380 381 387 383 (lowest 380). The floors sit at about half of each lowest. The FOURTH arm was added
+      because of what the measurement showed: a step that would overdraw is SKIPPED, so 20 of 400 generated
+      sequences walk the whole property without redeeming anything and assert nothing at all — brief rule 22
+      literally. (4) The census count was stated as 1,365 by arithmetic done in a comment; it is 2,080. (5)
+      Three psql probes and two itest cases reported the WRONG rule while claiming another: `set constraints
+      all immediate` STICKS for the rest of the transaction, so a probe that issued it half way through was
+      refused by assert_entry_balanced (ZL003) on the next journal_entry insert before its own lines existed;
+      and the itest''s invoice fixture inserted the header in its own implicit transaction, so ZI002
+      InvoiceWithoutLines answered for both ZG011 cases. Both now put the whole fixture in one transaction
+      and `set constraints` last. (6) ZG010''s message shared the phrase "ran out on" with PackageExpired''s,
+      which is the defect M-TILL-09 recorded M-TILL-11 measuring — a test asserting a phrase both layers
+      emit passes after either is deleted. ZG010 now says "the terms of sale … ended on" and the itest
+      asserts the ABSENCE of that phrase from the service''s message. (7) Every ledger assertion in the pair
+      itest was an ABSOLUTE figure off journal_line, which is append-only and truncated by nobody while
+      beforeEach truncates the package family — so the second run reported 430,003 fils where 33,334 was
+      expected, from its own first run. Every one is now a DELTA (brief rules 9 and 12). (8) The gate mutant
+      for the transferable check was written to assert PackageNotTransferable and the case FAILED, which is
+      how it was found that removing the outer check still refuses — the permitted branch re-reads under the
+      row lock and refuses there too. So what the outer check uniquely provides is the EVIDENCE, and the
+      case now matches the audit assertion; naming the class would have been a rule the edit does not break.
+      (9) The pair itest issued its fixture document into series TAX-INV and LEFT it there — `invoice`
+      refuses DELETE for every role, so the only removal is a TRUNCATE and truncating it would wipe every
+      other suite''s documents. `checkout-finalise.itest.ts` asserts `document_series.next_number =
+      max(invoice.number) + 1` for TAX-INV, so a leaked document numbered from 840,000 broke a test in a
+      file this unit does not touch: `expected 11 to be 840160`. The only thing hiding it was the ORDER of
+      the integration suite — packages/db runs before packages/fixtures, so on a clean run the poisoned
+      assertion had already passed. The fixture is now a `simplified_invoice` in SIMPL-INV, which nothing
+      asserts a counter over, and the helper states why the series is a decision rather than a default.
+      Proven by running this unit''s suites FIRST on a fresh database and watching that file go from 17
+      passed to 18.'
+    - 'NOTE: a defect in ANOTHER unit''s work, reported and NOT fixed, and it fails `pnpm verify` on the
+      base commit as well as on this branch. `packages/db/src/services/checkout-finalise.itest.ts` line
+      1101 asserts the outbox row''s key is `invoice.issued:${finalised.invoice.displayNumber}`, and
+      `issueInvoice` writes `invoice.issued:${issued.id}` — changed deliberately by commit ec561e7 ("the
+      issued-document event is keyed on the ROW, because the statutory number is reset by design"), whose
+      own comment explains that a TRUNCATE of `invoice` restarts the counter and `on conflict
+      (idempotency_key) do nothing` then drops the second event in silence. The test was not updated with
+      it, so the two can never agree. Proven independent of this unit: `git diff HEAD` is empty for both
+      files, and the assertion fails with this unit''s suites run first, run last, and not run at all. It
+      is the ONLY failing case in the integration suite (2,436 passed, 1 failed, 1 skipped across 146
+      files). The one-line fix is to assert `invoice.issued:${finalised.invoice.id}`; it belongs to
+      M-TILL-06''s suite, so this unit reports it rather than editing it.'
+    - 'NOTE: SCOPED OUT and stated rather than papered over, and both to M-TILL-13, which is `todo` and
+      depends on this unit. (1) No tax document at redemption. Under the provisional answer the redemption IS
+      the supply, so a document naming it is owed — and issuing one needs the numbering series, the issuer
+      snapshot and the mandatory field list (Y11-vat-invoice), which is `invoice`''s machinery and not a
+      second document shape. The VAT itself is NOT deferred with it: 2030 is credited here, so box 1 is right
+      whether or not the paper exists yet. M-TILL-09''s deferral (2) — no document at SALE — is ANSWERED
+      rather than deferred again: under the provisional answer there is no supply at the sale, so no document
+      is due then, and one naming a VAT figure of zero would be a claim about Y11-vat-package. (2) No seeded
+      package templates, still. docs/12 §5 promises "packages at several drawdown states" in the fixture
+      salon, and what the business actually sells is a FACT nobody has stated (brief rule 15) — an invented
+      "6 Massage Package" would be indistinguishable from a configured one. M-TILL-13 already owes a seeded
+      receipt fixture containing a package redemption and owns the screens where an invented name would be
+      visible in a screenshot somebody reviews, so the seed belongs with the thing that displays it. (3) No
+      outbox event for package.redeemed. Nothing consumes one and an event with no handler is a capability
+      being claimed; the audit_event carries the same facts for anything that needs to read them.'
+    - 'NOTE: gate labels used: 110a-110z in scripts/test-gates.mjs, placed immediately AFTER block
+      109a-109z and BEFORE 79a-79k, because that file is ordered by CATEGORY — unit blocks, then the harness
+      blocks 79/88/89/90, then the repository-wide cases 101/102, then 29 last. Selector
+      `pnpm gates:only --only ''// 110a''`. FORTY-EIGHT cases: twenty-nine psql probes asserting each 0083
+      rule BY NAME against real PostgreSQL (every probe inside begin / … / set constraints all immediate /
+      rollback, with the `set constraints` LAST because it sticks for the rest of the transaction); one
+      accepted control covering a whole course redeemed to the fils, a release dated ON the expiry, the
+      redemption LINK a checkout writes with line_no null, and the redemption insert plus the drawdown UPDATE
+      run under `set local role berelax_app`; one formula-properties probe written so it RAISES when a
+      property fails, plus its own control proving the raise can fire; thirteen source mutants — five in
+      packages/core/src/money/package-drawdown.ts, four in packages/db/src/services/redeem-package.ts, one in
+      packages/db/src/services/sell-package.ts (the payment rows removed, which is M-TILL-09''s defect
+      restored), one in packages/fixtures/src/package-redemption.ts and two in
+      apps/worker/src/jobs/package-expiry.ts — and three controls that the core suite, the pair suite and the
+      sweep suite each pass unedited. Every anchor goes through replaceOnce (brief rule 20). The local mutant
+      helper is named `redemptionMutant` and NOT after a shape another block uses: blocks 106 and 107 each
+      defined a same-shaped `…Mutant`, git found the two bodies as shared context and INTERLEAVED the blocks
+      on merge. No server-starting suite was added, so no port band was claimed and
+      packages/harness/src/ports.ts is untouched. The business days are in 2085, which nothing else posts
+      into; the pair itest uses 2084 and the sweep itest 2083.'
+    - 'NOTE: files beyond the five listed, and the manifest''s list is corrected below. The manifest named
+      packages/db/src/services/redeem-package.itest.ts; there is no such file, because the suite that
+      exercises the service needs BOTH @berelax/core and @berelax/db and packages/db may never import
+      packages/core — so it is packages/fixtures/src/package-redemption.itest.ts, which is the only package
+      allowed to depend on both. Added: packages/core/src/money/package-drawdown.{ts,test.ts},
+      packages/db/migrations/0083_package_redemption.sql, packages/db/src/services/redeem-package.ts,
+      packages/fixtures/src/package-redemption.{ts,itest.ts} (the mapping and the PAIR),
+      apps/worker/src/jobs/package-expiry.{ts,itest.ts}. Edited: packages/core/src/index.ts,
+      packages/db/src/schema/package.ts (packageRedemption appended to the SAME mirror, because db:drift keys
+      its map on the table name and a second file declaring it would silently win — 0078''s NOTE asked for
+      one mirror per unit and this extends it), packages/db/src/schema/payment.ts (nullable invoice_id,
+      package_sale_id, the two new constraints), packages/db/src/services/sell-package.ts (the payment rows),
+      packages/db/src/index.ts (the export block, the ledger paragraph for 83, SCHEMA_VERSION = 83),
+      packages/fixtures/src/index.ts, apps/worker/src/registry.ts (the cron and its handler),
+      scripts/test-gates.mjs and build/manifest.yaml. Two `done` units'' TEST files were edited and the
+      reason is forced: 0083 makes package_redemption reference package_balance and payment reference
+      package_sale, and PostgreSQL refuses a TRUNCATE while a referencing table is absent from the statement
+      — so packages/fixtures/src/package.itest.ts and packages/db/src/services/sell-package.itest.ts both
+      have `package_redemption, payment` added to their truncate lists (three sites in the second). No new
+      pnpm step was added to the verify chain, so case 29''s list and pnpm gate-registry are untouched.'
     files:
-    - packages/db/src/schema/package.ts
-    - packages/db/src/services/redeem-package.ts
-    - packages/db/src/services/redeem-package.itest.ts
+    - packages/db/migrations/0083_package_redemption.sql
     - packages/core/src/money/package-drawdown.ts
+    - packages/core/src/money/package-drawdown.test.ts
+    - packages/core/src/index.ts
+    - packages/db/src/schema/package.ts
+    - packages/db/src/schema/payment.ts
+    - packages/db/src/services/redeem-package.ts
+    - packages/db/src/services/sell-package.ts
+    - packages/db/src/services/sell-package.itest.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/package-redemption.ts
+    - packages/fixtures/src/package-redemption.itest.ts
+    - packages/fixtures/src/package.itest.ts
+    - packages/fixtures/src/index.ts
     - apps/worker/src/jobs/package-expiry.ts
+    - apps/worker/src/jobs/package-expiry.itest.ts
+    - apps/worker/src/registry.ts
+    - scripts/test-gates.mjs
   - id: M-TILL-11
     order: 53
     title: Cash drawer reconciliation per shift, keyed on business_day

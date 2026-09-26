@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { invoice } from './invoice.ts'
 import { account } from './ledger.ts'
+import { packageSale } from './package.ts'
 
 /**
  * Every way the business takes money, with the account each one is debited to. Mirrors
@@ -120,9 +121,24 @@ export const payment = pgTable(
   'payment',
   {
     id: uuid('id').primaryKey(),
-    invoiceId: uuid('invoice_id')
-      .notNull()
-      .references(() => invoice.id),
+    /**
+     * The document this tender settled, or NULL for a package sale (0083).
+     *
+     * Nullable since 0083, and the reason is a defect rather than a feature: 0078 took money for a package
+     * and wrote no `payment` row at all, because this column was NOT NULL and a package sale issues no
+     * invoice — [UNVERIFIED] Y11-vat-package puts the date of supply at redemption, so there is nothing to
+     * state as a supply on the day the money is taken. `readDrawerTakings` and `ZU005` (0076) both sum this
+     * table for the business day, so package cash was invisible to the cash-up and the drawer read as OVER
+     * by it.
+     *
+     * Exactly one of this and `packageSaleId` is set (`payment_settles_exactly_one_document`). Merely
+     * dropping the NOT NULL was the other option and is worse twice over: the row would name no document at
+     * all, and `payment_one_row_per_tender` is `unique (invoice_id, tender_no)` with NULLs distinct, so
+     * every package payment would have escaped the one-row-per-tender rule too.
+     */
+    invoiceId: uuid('invoice_id').references(() => invoice.id),
+    /** The package sale this tender paid for, or NULL for a checkout (0083). */
+    packageSaleId: uuid('package_sale_id').references(() => packageSale.id),
     /** Position within the checkout, so two reads of one sale list the tenders in the same order. */
     tenderNo: smallint('tender_no').notNull(),
     /**
@@ -194,6 +210,19 @@ export const payment = pgTable(
   },
   (t) => [
     unique('payment_one_row_per_tender').on(t.invoiceId, t.tenderNo),
+    /**
+     * The package side's twin of the rule above (0083).
+     *
+     * Needed because NULLs are DISTINCT in a unique index, so `payment_one_row_per_tender` constrains none
+     * of the rows a package sale writes — a retry could write tender 1 twice and the drawer would then
+     * expect the money twice.
+     */
+    unique('payment_one_row_per_package_tender').on(t.packageSaleId, t.tenderNo),
+    /** One document, never none and never both (0083). */
+    check(
+      'payment_settles_exactly_one_document',
+      sql`num_nonnulls(${t.invoiceId}, ${t.packageSaleId}) = 1`,
+    ),
     check('payment_tender_no_positive', sql`${t.tenderNo} >= 1`),
     /** Strictly positive: `fils_nonneg` alone would accept a zero, which is a tender nobody made. */
     check('payment_amount_positive', sql`${t.amountFils} > 0`),
@@ -233,6 +262,14 @@ export const refund = pgTable(
   'refund',
   {
     id: uuid('id').primaryKey(),
+    /**
+     * The document being refunded. Still NOT NULL, and 0083 deliberately did not widen it.
+     *
+     * `payment.invoice_id` became nullable because a package SALE takes money against no invoice. A REFUND
+     * is different: 0068's reason for the column is that money leaving with no document behind it is how
+     * "an issued invoice is never edited or voided" stops being true, and a package refund is M-TILL-08's
+     * credit-note question rather than a nullable column.
+     */
     invoiceId: uuid('invoice_id')
       .notNull()
       .references(() => invoice.id),
