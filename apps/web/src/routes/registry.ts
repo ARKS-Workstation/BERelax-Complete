@@ -691,6 +691,31 @@ export const ROUTES = [
       'because every figure on it is a row.',
   },
   {
+    id: 'quick-book',
+    path: '/quick-book',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'B-UI-04s quick-book screen: the one the front desk uses for a walk-in. Phone, treatment, who it is ' +
+      'for and a start; the therapist and the room are the availability solvers and are displayed before ' +
+      'anything is booked. A handler answering text/html rather than a document, for the reason the diary, ' +
+      'the pipeline board, the Messages inbox, the template editor, the compliance calendar and the ' +
+      'duplicate queue all give: a registry document must be served in BOTH locales, which needs an Arabic ' +
+      'admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English document mirrored so ' +
+      'the direction half of the accessibility matrix is audited without inventing an Arabic admin ' +
+      'surface. It WRITES - its POST checks and then books, through the one booking endpoint - and it is ' +
+      'NOT authenticated until W-SYS-01, so the actor every audit row records is the SURFACE ' +
+      '(`Quick-book (front desk)`) rather than a name nobody signed in with. Dynamic because every start ' +
+      'it offers is computed from the clock: a prerendered copy would offer times that have gone. It is ' +
+      'the one admin route that sits under NO prefix in ADMIN_GROUP_PREFIXES, and that is deliberate - ' +
+      'nothing else will ever live at /quick-book, and NOINDEX_PATTERNS covers a non-indexable handler on ' +
+      'its own path, which is what W-SITE-05 made the `indexable` field mean.',
+  },
+  {
     id: 'robots-txt',
     path: '/robots.txt',
     kind: 'handler',

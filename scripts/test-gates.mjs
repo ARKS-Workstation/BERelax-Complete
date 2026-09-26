@@ -28739,6 +28739,336 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 106a-106q. (B-UI-04) The WhatsApp ref loop and the quick-book screen: the attribution that must never be
+//            invented, the rate that must not be allowed to judge the front desk, the field a browser has to
+//            accept, and the DOM order a keyboard follows.
+//
+//            The mutations here mostly produce a screen that WORKS. That is the point of the block. A
+//            `decideRefCapture` that records what was typed when nothing matched books every customer
+//            correctly and reports a capture rate somebody would act on; a `refCaptureRate` whose numerator
+//            includes the unmatched codes prints a healthy-looking percentage; a ref field whose `pattern` is
+//            the canonical class looks right in every source review and silently refuses to submit when
+//            somebody pastes a lower-case code. Every one of those is invisible in a screenshot.
+//
+//            Two are worth reading twice. 106f is the defect this unit actually shipped and then found in a
+//            browser: an HTML `pattern` is case sensitive, so the canonical class blocked the submit with the
+//            browser's own validation bubble, no request was made, and the page silently did nothing. And
+//            106m collapses two refusal wordings into one — every behavioural assertion still passes, and
+//            what fails is the claim the acceptance line is actually about: four ineligible choices refused
+//            with FOUR reasons rather than four copies of "not available".
+//
+//            **No case here runs `apps/web/src/quick-book.itest.ts`, and that is not an omission.** That
+//            suite drives the BUILT application (`next start` serves `.next`), so a mutation to
+//            `app/(admin)/quick-book/render.ts`, to `handler.ts`, or to anything the page imports is invisible
+//            to it until the app is rebuilt — and a case that mutated a served file and ran the browser suite
+//            would report "exited zero; nothing was rejected" about a mutation the server never loaded, which
+//            is a false FAIL on a rule that is fine. The same reasoning block 104 records for the pipeline
+//            board.
+//
+//            So the render-level claims are gated through `quick-book-render.test.ts`, which imports the
+//            source, and the ones that live in `handler.ts` are not gated here at all. Two of those are worth
+//            naming, because the reader should know they are asserted and where: the CONFIRM deliberately does
+//            not re-check the offer grid (a desk that reads an assignment out loud and then presses Confirm has
+//            crossed a quarter-hour boundary, and re-checking tells them a start they were just offered was
+//            "not one this screen offered"), and a start that HAS passed is refused under its own name because
+//            the remedy differs. Both are asserted in the browser suite against a build, each with a control
+//            beside it that reaches the other refusal — which is the arrangement block 104 settles for a
+//            handler whose only driver is a server. Gating them properly needs a suite that drives
+//            `handleQuickBookWrite` directly with a frozen clock; the handler is already shaped for one and
+//            this unit did not write it.
+{
+  const RULE = 'packages/core/src/booking/ref-capture.ts'
+  const SHAPE = 'packages/shared/src/whatsapp-ref.ts'
+  const REPO = 'packages/db/src/repositories/whatsapp-ref.ts'
+  const RENDER = 'apps/web/app/(admin)/quick-book/render.ts'
+  const VIEW = 'apps/web/app/(admin)/quick-book/view.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+
+  const RULE_SUITE = 'packages/core/src/booking/ref-capture.test.ts'
+  const SHAPE_SUITE = 'packages/shared/src/whatsapp-ref.test.ts'
+  const ROW_SUITE = 'packages/fixtures/src/whatsapp-ref.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/quick-book-render.test.ts'
+  const PORT_SUITE = 'packages/harness/src/ports.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const refMutant = (path, anchor, replacement, suite, runner = unit) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 106a. An attribution invented from what was typed. The booking is taken, the confirmation reads
+  //       correctly, and the funnel now claims a WhatsApp conversation for every code the desk mistyped.
+  //       This is the single defect the whole unit is arranged against.
+  checkRejectedBy(
+    'ref gate: an attribution invented from what was typed is caught',
+    refMutant(
+      RULE,
+      `  return {
+    outcome: 'unknown_code',
+    refCode: null,
+    enteredCode: normaliseWhatsappRefCode(typed) ?? typed,
+    warns: true,
+  }`,
+      `  return {
+    outcome: 'matched',
+    refCode: normaliseWhatsappRefCode(typed) ?? typed,
+    enteredCode: null,
+    warns: false,
+  }`,
+      RULE_SUITE,
+    ),
+    'never invents an attribution',
+  )
+
+  // 106b. A blank optional field reported as a warning. Every booking with no code now shows the desk an
+  //       amber panel about a field they were never asked to fill, which is how a screen comes to be ignored.
+  checkRejectedBy(
+    'ref gate: a warning for leaving the optional field alone is caught',
+    refMutant(
+      RULE,
+      "    return { outcome: 'not_offered', refCode: null, enteredCode: null, warns: false }",
+      "    return { outcome: 'not_offered', refCode: null, enteredCode: null, warns: true }",
+      RULE_SUITE,
+    ),
+    'reports a blank field as nothing claimed, with no warning',
+  )
+
+  // 106c. The unmatched codes moved into the numerator. The rate goes up, nothing else changes, and the one
+  //       number the owner would read to answer Y12-ref-loop is the one that is wrong.
+  checkRejectedBy(
+    'ref gate: a capture rate that counts an unknown code as captured is caught',
+    refMutant(
+      RULE,
+      'capturedBp: total === 0 ? null : Math.round((counts.matched * 10_000) / total),',
+      'capturedBp:\n      total === 0 ? null : Math.round(((counts.matched + counts.unknownCode) * 10_000) / total),',
+      RULE_SUITE,
+    ),
+    'counts an unknown code in the denominator and never in the numerator',
+  )
+
+  // 106d. The fail-safe reversed. A caller that has never heard of the setting now turns an unanswered
+  //       question into a claim about the front desk — "the desk is failing to capture" — and the arithmetic
+  //       is identical, so nothing on the page looks different.
+  checkRejectedBy(
+    'ref gate: a capture rate that judges the desk by default is caught',
+    refMutant(
+      RULE,
+      'const expected = options.expected ?? PROVISIONAL_WHATSAPP_REF_EXPECTED',
+      'const expected = options.expected ?? true',
+      RULE_SUITE,
+    ),
+    'treats an absent option as the provisional value, not as confirmed',
+  )
+
+  // 106e. The repair that lands on somebody else's conversation. Truncating to four characters is the most
+  //       tempting tidy-up on this field — a paste with a trailing character becomes a valid code — and it is
+  //       the worst one available: `AB234` silently becomes `AB23`, which is a DIFFERENT conversation, so the
+  //       booking gets a confident wrong attribution where refusing to repair gets an honest unknown.
+  //
+  //       Deliberately NOT the look-alike fold (`0` onto `O`), which was this case's first mutation and
+  //       proved nothing: `O` is excluded from the alphabet too, so folding onto it produces a value the
+  //       pattern still refuses and the suite still passed. A mutation that cannot change the answer is not a
+  //       known-bad fixture, and it is this session's dominant defect class arriving in a gate case.
+  checkRejectedBy(
+    'ref gate: silently truncating a code onto another conversation’s is caught',
+    refMutant(
+      SHAPE,
+      '  const upper = raw.trim().toUpperCase()',
+      '  const upper = raw.trim().toUpperCase().slice(0, WHATSAPP_REF_CODE_LENGTH)',
+      SHAPE_SUITE,
+    ),
+    'does not strip inner separators or truncate',
+  )
+
+  // 106f. The defect this unit shipped, and the reason the input class exists at all. An HTML `pattern` is
+  //       CASE SENSITIVE: with the canonical class the browser blocks the submit on a lower-case paste with
+  //       its own validation bubble, no request is made, and the page silently does nothing. It reads exactly
+  //       like a handler nobody wired up.
+  checkRejectedBy(
+    'ref gate: a field pattern that refuses what the normaliser folds is caught',
+    refMutant(
+      SHAPE,
+      "export const WHATSAPP_REF_INPUT_CLASS = 'A-HJ-NP-Za-hj-np-z2-9'",
+      "export const WHATSAPP_REF_INPUT_CLASS = 'A-HJ-NP-Z2-9'",
+      SHAPE_SUITE,
+    ),
+    'accepts in the FIELD exactly what the normaliser can make canonical',
+  )
+
+  // 106g. The capture row upserted instead of claimed once. The booking endpoint is idempotent, so a retry
+  //       after a timeout returns the ORIGINAL booking — and this rewrites the first decision with a second
+  //       one, or counts one booking twice. Nothing about a single booking looks different.
+  checkRejectedBy(
+    'ref gate: a capture row that a replay can rewrite is caught',
+    refMutant(
+      REPO,
+      '    on conflict (booking_id) do nothing\n',
+      '    on conflict (booking_id) do update set outcome = excluded.outcome,\n      ref_code = excluded.ref_code, entered_code = excluded.entered_code\n',
+      ROW_SUITE,
+      rows,
+    ),
+    'records one row per booking and keeps the FIRST decision on a replay',
+  )
+
+  // 106h. One of the three counts dropped. The numerator is untouched and the DENOMINATOR loses a class, so
+  //       the rate goes up and the total no longer equals the rows — which is the shape of every counter
+  //       defect this repository has paid for.
+  checkRejectedBy(
+    'ref gate: a capture count that leaves an outcome out of the denominator is caught',
+    refMutant(
+      REPO,
+      "           count(*) filter (where outcome = 'unknown_code')::text as unknown_code,",
+      '           0::text as unknown_code,',
+      ROW_SUITE,
+      rows,
+    ),
+    'counts matched and unmatched separately',
+  )
+
+  // 106i. The audit call removed from the capture write. The row is still written and the booking is still
+  //       correct; what is lost is that an attribution can be attributed to the surface that made it, which
+  //       is the only thing standing between this table and a claim nobody made.
+  checkRejectedBy(
+    'ref gate: an attribution recorded with no audit row is caught',
+    refMutant(
+      REPO,
+      `  await uow.audit.record({
+    action: 'booking.whatsapp_ref_capture',`,
+      `  if (false) await uow.audit.record({
+    action: 'booking.whatsapp_ref_capture',`,
+      ROW_SUITE,
+      rows,
+    ),
+    'audits the capture, naming the surface that recorded it',
+  )
+
+  // 106j. The code space opened to the four look-alikes. Every code still validates, stores and matches; what
+  //       changes is that A-FIRST can now issue a code a person reading it off a phone cannot transcribe, and
+  //       the failure surfaces months later as an unexplained drop in capture rate.
+  checkRejectedBy(
+    'ref gate: an alphabet that admits I, O, 0 and 1 is caught',
+    refMutant(
+      SHAPE,
+      "export const WHATSAPP_REF_CODE_CLASS = 'A-HJ-NP-Z2-9'",
+      "export const WHATSAPP_REF_CODE_CLASS = 'A-Z0-9'",
+      SHAPE_SUITE,
+    ),
+    'admits every character in the alphabet and nothing outside it',
+  )
+
+  // 106k. The ref field moved after the note. It is still on the page, still optional, still validated — and
+  //       it is no longer the first thing the desk reaches, which is the whole of the acceptance line and the
+  //       difference between a field that gets filled and one that does not.
+  checkRejectedBy(
+    'ref gate: a ref field that is not the first optional field in DOM order is caught',
+    refMutant(
+      RENDER,
+      `    refField(view),
+    variantSelect(view),`,
+      `    variantSelect(view),`,
+      RENDER_SUITE,
+    ),
+    'puts it after the phone and before every other optional control',
+  )
+
+  // 106l. The ref field made required. The booking now cannot be taken without a code, which answers
+  //       Y12-ref-loop by fiat: the desk stops using the screen and the funnel reports a capture rate of 100%
+  //       over the bookings it still sees.
+  checkRejectedBy(
+    'ref gate: a ref field that blocks the booking is caught',
+    refMutant(
+      RENDER,
+      '    `inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" `,',
+      '    `inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" required `,',
+      RENDER_SUITE,
+    ),
+    'marks it optional in words as well as by the absence of `required`',
+  )
+
+  // 106m. Two refusal wordings collapsed into one. Every behavioural assertion still passes — the four
+  //       ineligible choices are still refused, still with their own reason CODE — and what fails is the
+  //       claim the acceptance line is about: four different conversations with the front desk rather than
+  //       four copies of "not available". A missing skill is a training record and an expired credential is a
+  //       renewal, and a desk told the wrong one goes and does the wrong thing.
+  checkRejectedBy(
+    'ref gate: two therapist refusals sharing one wording is caught',
+    refMutant(
+      VIEW,
+      `  not_rostered: 'they are not on shift on this trading date. That is a rota edit.',`,
+      `  not_rostered:
+    'they do not hold the skill this treatment’s style requires. That is a training record, not a rota ' +
+    'edit.',`,
+      RENDER_SUITE,
+    ),
+    'renders the reason as a data attribute and a sentence, for every reason in the union',
+  )
+
+  // 106n. The gender-mismatch wording made to name the therapist. It is the only refusal that is not a fact
+  //       about the therapist at all — the same person is eligible for the next client — so naming them
+  //       discloses a recorded gender to a reader with no operational use for it, which is exactly why
+  //       `ELIGIBILITY_EXCLUSION_REASONS` puts it last.
+  checkRejectedBy(
+    'ref gate: a gender refusal that talks about the therapist is caught',
+    refMutant(
+      VIEW,
+      `  gender_mismatch:
+    'same-gender matching does not allow this pairing. It is not a fact about the therapist: they are ' +
+    'available for the next client.',`,
+      `  gender_mismatch: 'this therapist is male and the client is female.',`,
+      RENDER_SUITE,
+    ),
+    'says nothing about the therapist for a gender mismatch',
+  )
+
+  // 106o. A blank attribution instead of the word `unknown`. The cell is empty, which reads as a field
+  //       nobody filled rather than as a fact nobody has — the distinction Y9-crm-source settles for the
+  //       whole build, made invisible on the one screen where somebody could correct it.
+  checkRejectedBy(
+    'ref gate: an attribution left blank rather than stated as unknown is caught',
+    refMutant(
+      RENDER,
+      '${safeText(booked.captureLabel)}</dd>',
+      "${safeText(booked.captureOutcome === 'matched' ? booked.captureLabel : '')}</dd>",
+      RENDER_SUITE,
+    ),
+    'prints `unknown` in words for a booking with no matched code',
+  )
+
+  // 106p. The override offered when the engine found nobody else. A select holding only "whoever the solver
+  //       chose" is a control that cannot do anything, which is the reasoning B-UI-01's therapist selector
+  //       and P-HR-04's candidate list each avoid the same way.
+  checkRejectedBy(
+    'ref gate: an override offered with no alternative to offer is caught',
+    refMutant(
+      RENDER,
+      "if (checked === null || checked.alternatives.length === 0) return ''",
+      "if (checked === null) return ''",
+      RENDER_SUITE,
+    ),
+    'offers no override at all when the engine found nobody else',
+  )
+
+  // 106q. The port band overlapped with the pipeline board's. This is the failure `TEST_PORT_BANDS` exists
+  //       for and the one that means nothing either way: the second `next start` cannot bind, exits, and the
+  //       suite's own wait-for-server loop answers from the FIRST one's server — so the assertions run
+  //       against another worktree's build.
+  checkRejectedBy(
+    'ref gate: a port band that overlaps another suite is caught',
+    refMutant(
+      PORTS,
+      "  'quick-book': { start: 11_800, width: 300 },",
+      "  'quick-book': { start: 12_000, width: 300 },",
+      PORT_SUITE,
+    ),
+    'overlaps',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

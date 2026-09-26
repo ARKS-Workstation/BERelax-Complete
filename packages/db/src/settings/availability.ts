@@ -1,8 +1,10 @@
 import {
   AppError,
+  FRONT_DESK_MIN_LEAD_SETTING_KEY,
   GENDER_MATCHING_SETTING_KEY,
   type GenderMatchingMode,
   genderMatchingMode,
+  WHATSAPP_REF_EXPECTED_SETTING_KEY,
 } from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 import { readSetting, type WriteResult, writeSetting } from '../settings-store.ts'
@@ -107,6 +109,43 @@ function wholeMinutes(key: string, value: unknown, floor: number): number {
     )
   }
   return parsed
+}
+
+/**
+ * The notice the FRONT DESK needs, in minutes, as distinct from the online minimum.
+ *
+ * Its own setting rather than a reuse of `booking.min_lead_minutes` because Y9-lead's question is about
+ * ONLINE booking in so many words, and B-UI-04's quick-book screen exists to seat a person standing at the
+ * counter — a screen that applied a two-hour minimum could not book a walk-in. `FRONT_DESK_MIN_LEAD_SETTING_KEY`
+ * carries the whole argument, including why zero is the SAFE direction and not merely the convenient one.
+ *
+ * Read through {@link readAvailabilityLimits}'s own coercion, so a stored value that is not a whole number
+ * of minutes REFUSES rather than falling back — the reasoning `wholeMinutes` records: a corrupted lead time
+ * has no safe reading, because a zero offers slots in the next minute and a large one offers none at all,
+ * and both look like working software.
+ */
+export async function readFrontDeskMinLeadMinutes(sql: Sql): Promise<number> {
+  return wholeMinutes(
+    FRONT_DESK_MIN_LEAD_SETTING_KEY,
+    await readSetting<unknown>(sql, FRONT_DESK_MIN_LEAD_SETTING_KEY),
+    0,
+  )
+}
+
+/**
+ * Whether the front desk is expected to paste the WhatsApp ref code — Y12-ref-loop, as a value.
+ *
+ * Fail-safe in the direction that makes no claim about anybody. Anything that is not the boolean `true`
+ * reads as `false`, including an absent row, a string `'true'` written by an older build and a null: the
+ * permissive answer here is not a security relaxation but a claim about the FRONT DESK — a 0% capture rate
+ * reported as a process failure when nobody ever told them to paste the code — and a claim about people is
+ * the one thing an unreadable settings row must not be able to produce.
+ *
+ * `readGenderMatching`'s shape and not `readAvailabilityLimits`': there IS a safe reading to fall back to
+ * here, which is why this one normalises rather than throws.
+ */
+export async function readWhatsappRefExpected(sql: Sql): Promise<boolean> {
+  return (await readSetting<unknown>(sql, WHATSAPP_REF_EXPECTED_SETTING_KEY)) === true
 }
 
 /**

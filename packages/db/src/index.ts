@@ -930,6 +930,29 @@ export {
   unsuppressKey,
   verifyOptOutToken,
 } from './repositories/suppression.ts'
+/*
+  B-UI-04's WhatsApp ref loop (0079). `issueWhatsappRef` and `mintWhatsappRefCode` are exported although
+  nothing in this build calls them, and that is the deferred-scope contract rather than dead code: they are
+  the interface A-FIRST will generate codes through (docs/12 §1.1), so filling the port later is a call site
+  and not a rewrite. `whatsapp_ref` ships EMPTY, which is why every code the front desk types today is
+  `unknown_code` — the honest state, shown on the screen rather than reported as a zero.
+*/
+export {
+  type IssueWhatsappRefInput,
+  issueWhatsappRef,
+  matchWhatsappRef,
+  mintWhatsappRefCode,
+  REF_CAPTURE_OUTCOME_NAMES,
+  type RecordedRefCapture,
+  type RecordRefCaptureInput,
+  type RefCaptureCountsQuery,
+  type RefCaptureCountsRead,
+  type RefCaptureOutcomeName,
+  readRefCaptureCounts,
+  recordRefCapture,
+  WHATSAPP_REF_MINT_ATTEMPTS,
+  type WhatsappRefRow,
+} from './repositories/whatsapp-ref.ts'
 export {
   type PublicHolidayClosureRow,
   type RosteredShiftRow,
@@ -1249,7 +1272,9 @@ export {
   MAX_ADVANCE_SETTING_KEY,
   MIN_LEAD_SETTING_KEY,
   readAvailabilityLimits,
+  readFrontDeskMinLeadMinutes,
   readGenderMatching,
+  readWhatsappRefExpected,
   setGenderMatching,
 } from './settings/availability.ts'
 export {
@@ -1897,6 +1922,40 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `payment.invoice_id` is NOT NULL and this unit issues no invoice — so cash taken for a package is absent
 // from `readDrawerTakings` and the cash-up (M-TILL-11) will show it as an over drawer.
 //
+// 79 is 0079_whatsapp_ref.sql: the WhatsApp ref loop — the codes A-FIRST will issue, and what the front
+// desk did with one when it took a booking (B-UI-04). Four things are this file's and none of them
+// re-argues 0053, which built both CRM vocabularies and said why a vocabulary about a PERSON is a table
+// rather than an enum. First, the capture is ONE row per booking taken at the desk whatever happened —
+// matched, matched nothing, or not offered — so a capture rate is two counts over one table rather than a
+// matched-count divided by a guess at how many bookings there were. The rejected alternative was a nullable
+// `booking.whatsapp_ref` column, and it fails twice over: a null there means BOTH "no code offered" and "a
+// code that matched nothing", which are the two findings Y12-ref-loop needs told apart ("the desk is not
+// pasting" is training, "the desk is pasting codes we have no rows for" is A-FIRST not having written the
+// row), and a column on `booking` would put a customer-reachable attribution inside C-CRM-05's merge
+// participant registry — so the capture is keyed on the BOOKING and carries no customer id at all, because
+// an attribution belongs to the booking and a client-record merge must not move it. Second, the two CHECK
+// constraints are the whole of "an invented attribution is unrepresentable", and they are EQUALITIES rather
+// than one-way implications precisely so that neither hole is open: `matched` requires a `ref_code` and a
+// `ref_code` requires `matched`, so no row can name a conversation nobody proved it came from and no
+// matched row can fail to name one. Third, `whatsapp_ref_capture_outcome` IS an enum, and that is the one
+// place this file departs from 0053's reasoning on purpose: those labels are provisional claims about a
+// person the owner may correct, and these three are the exhaustive result of a string comparison against a
+// primary key — no fourth answer for anybody to supply, nothing to confirm, no label to rename — so
+// `is_provisional` would have nothing to say. Fourth, neither table is append-only, and the reason is
+// mechanical rather than a relaxation: `booking_id` is ON DELETE CASCADE, so an ADR 0017 BEFORE DELETE
+// trigger that raised would make `delete from booking` impossible, which is how every fixture in this
+// repository cleans up. The protection is at the PRIVILEGE level instead — UPDATE, DELETE and TRUNCATE
+// revoked from `berelax_app`, with referential actions bypassing privileges so the cascade still runs — and
+// that is stated as the weaker promise it is rather than dressed up as the stronger one. What this file
+// deliberately does NOT hold: a phone number anywhere (Y1-nap records two rival WhatsApp numbers and the
+// build picks neither, so `session_reference` is A-FIRST's opaque handle and a column shaped like a number
+// could not be honestly filled), a `times_used` counter beside the rows (a count beside the rows is a count
+// that disagrees with them — `readRefCaptureCounts` is one `count(*) filter` statement), an expiry on a code
+// (the code is a primary key and is never reissued, so nothing goes stale), and a UNIQUE on
+// `session_reference` (the contract is "short code -> session", many-to-one: a conversation that comes back
+// gets a second code, and refusing that would be a guess about A-FIRST's behaviour dressed as a safety
+// rule). It ships with NO rows, which is the state the quick-book screen shows rather than hides.
+//
 // 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
 // branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
 // C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
@@ -1904,8 +1963,9 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // EXIST on disk rather than consecutive integers, so a gap costs nothing and needs no declaration. 62
 // through 66 were one allocation block held across five worktrees and 67 through 70 another across four;
 // 72, 73 and 75 were held by three more; every one of those has landed, and 76 and 77 landed within the
-// hour of each other after that. 78 is this file's; 79 through 82 were held by four units in flight when
-// it was allocated, so the next number nobody holds is 83 unless one of those four turns out to need none. 55, 56 and 57 landed out of order
+// hour of each other after that. 78 through 82 were allocated to one batch of five units and landed
+// together, which is why no number between 78 and 82 is a gap and why none of them was ever the "next
+// free" number for long. 83 is the next number nobody holds. 55, 56 and 57 landed out of order
 // and within an hour of one another, which is the arrangement this note exists for: the number is a
 // high-water mark, not a count, and no gap has been closed to tidy the sequence.
 //
@@ -1922,4 +1982,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 78 as const
+export const SCHEMA_VERSION = 79 as const

@@ -72,6 +72,13 @@ export const TEST_PORT_BANDS = {
   // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
   // one. [12_100, 12_400) contains none of RESTRICTED_PORTS.
   pipeline: { start: 12_100, width: 300 },
+  // B-UI-04's quick-book screen, which needs a real server for the claims a pure render cannot make: the
+  // 10-second walk-in measurement is a browser typing into a real form and waiting for a real POST, a
+  // pointer-free run has to be a real keyboard driving real controls, and axe needs a rendered DOM. 11_800
+  // is the band this unit was allocated. The comment on `pipeline` above says 11_800 was "held by a unit in
+  // flight in another worktree", which was true when it was written: that unit is this one, and the
+  // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
+  'quick-book': { start: 11_800, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

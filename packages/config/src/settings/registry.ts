@@ -8,6 +8,7 @@ import {
   DEFAULT_OBLIGATION_REMINDER_OFFSETS_DAYS,
   DEFAULT_REMINDER_OFFSETS_HOURS,
   DETECTABLE_REVIEW_LANGUAGES,
+  FRONT_DESK_MIN_LEAD_SETTING_KEY,
   GENDER_MATCHING_SETTING_KEY,
   GOOGLE_REAUTH_REPEAT_CAP_SETTING_KEY,
   GOOGLE_REAUTH_SMS_SETTING_KEY,
@@ -23,6 +24,8 @@ import {
   OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
   OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
   PROVISIONAL_EXPIRING_SOON_DAYS,
+  PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
+  PROVISIONAL_WHATSAPP_REF_EXPECTED,
   REBUILD_OBLIGATION_NOTICES_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
   REMINDER_OFFSETS_SETTING_KEY,
@@ -34,6 +37,7 @@ import {
   reviewCoolingOffHoursSchema,
   reviewReplyLanguagesSchema,
   STRICT_GENDER_MATCHING,
+  WHATSAPP_REF_EXPECTED_SETTING_KEY,
 } from '@berelax/shared'
 import { z } from 'zod'
 
@@ -229,6 +233,75 @@ export const SETTINGS = [
     audited: true,
     invalidates: ['availability'],
     provisional: { openQuestionId: 'Y9-lead', note: '90 days assumed.' },
+  }),
+  define({
+    /**
+     * The notice the FRONT DESK needs, as distinct from the notice an online booking needs.
+     *
+     * A setting of its own and not a reuse of `booking.min_lead_minutes`, because Y9-lead's question is
+     * "minimum **online** booking lead time" in so many words and the help text above says the same. Two
+     * hours at the counter would make B-UI-04's quick-book screen unable to do the one thing it exists for:
+     * a walk-in standing at the desk cannot be booked in two hours' time.
+     *
+     * Zero is the provisional value, and it is the SAFE direction rather than the convenient one. The
+     * availability engine still refuses a start with no free therapist and no free room, so a zero desk
+     * lead cannot produce a booking the salon cannot deliver — only an imminent one, which is a person at
+     * the counter the desk can decline. The other direction is not symmetrical, and that asymmetry is the
+     * argument: a two-hour desk lead cannot be found by a test that asserts "a slot is offered", because a
+     * slot two hours out IS a slot, so the screen would look exactly right and be useless.
+     */
+    key: FRONT_DESK_MIN_LEAD_SETTING_KEY,
+    tier: 'operational',
+    schema: z
+      .number()
+      .int()
+      .min(0)
+      .max(60 * 48),
+    defaultValue: PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
+    label: 'Minimum notice at the front desk',
+    help: 'How soon before a slot the desk may still take a booking. Zero lets the desk seat a walk-in now; the online minimum is separate.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: ['availability'],
+    provisional: {
+      openQuestionId: 'Y9-lead',
+      note:
+        'Zero assumed. Y9-lead states a 2-hour minimum for ONLINE booking and says nothing about the ' +
+        'counter; a walk-in screen that applied it could not book a walk-in.',
+    },
+  }),
+  define({
+    /**
+     * Whether the front desk is expected to paste the WhatsApp ref code at all — **Y12-ref-loop**, as a
+     * value the code reads.
+     *
+     * `false` because nobody has said they will. What it controls is one thing and it is NOT the field: the
+     * field is present and prominent either way, which is what the unit's acceptance asks for. It controls
+     * what a capture RATE is allowed to claim. At `false`, a 0% rate is reported as *the ref loop is
+     * unconfirmed* rather than as *the desk is failing to capture*; at `true`, the same 0% is a process
+     * failure somebody should be told about. One number, two findings, and only the owner can say which.
+     *
+     * The consumer is named so this is not a knob nothing consults: `refCaptureRate` in `@berelax/core`
+     * takes it as an argument and returns a different `claim`.
+     */
+    key: WHATSAPP_REF_EXPECTED_SETTING_KEY,
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: PROVISIONAL_WHATSAPP_REF_EXPECTED,
+    label: 'Front desk records the WhatsApp ref code',
+    help: 'Turn on once the desk is expected to paste the code. Until then a low capture rate is reported as an unanswered question rather than as a failure.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // Nothing about availability or the catalogue changes; what changes is a report's wording, so the
+    // content tag is the honest one. It is NOT tagged `availability`, which would purge the slot memo for a
+    // change that cannot alter a slot.
+    invalidates: ['content'],
+    provisional: {
+      openQuestionId: 'Y12-ref-loop',
+      note:
+        'False assumed. Nobody has said the front desk will paste the ref code, so attribution degrades ' +
+        'to unknown and the funnel reports the gap rather than inventing the join.',
+    },
   }),
   define({
     key: 'booking.cancellation_window_hours',
