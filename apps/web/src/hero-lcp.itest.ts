@@ -8,7 +8,7 @@ import { derivativeHeaders, publicKeyFor } from '@berelax/media/storage'
 import { derivativePath } from '@berelax/media/url'
 import { heroVideoSources } from '@berelax/media/video'
 import { LIGHT_PALETTE, MOTION_STORAGE_KEY, THEME_STORAGE_KEY } from '@berelax/ui'
-import { HERO_CROSS_FADE_MS, HERO_MIN_DOWNLINK_KBPS } from '@berelax/ui/media'
+import { HERO_CROSS_FADE_MS, HERO_MIN_DOWNLINK_KBPS, HERO_STATE_ATTRIBUTE } from '@berelax/ui/media'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { HERO_DEMO_ASSET, heroDemoMedia, STAND_IN_NOTE } from './media/hero-demo-asset.ts'
@@ -207,6 +207,13 @@ interface PageOptions {
   readonly refusePlay?: string
   /** Serve a source this browser can decode, in place of the four the page declares. */
   readonly playableFixture?: boolean
+  /**
+   * Abort the client chunks, so the document paints and then holds still.
+   *
+   * Only the first-paint case sets it. Every other case in this file NEEDS the island to run — it is a
+   * file about what the island does to the hero — so this is deliberately not the default.
+   */
+  readonly blockHydration?: boolean
 }
 
 /**
@@ -451,6 +458,12 @@ async function withPage<T>(options: PageOptions, body: (page: Page) => Promise<T
           body: html.replace(attribute, `data-hero-sources="${replacement}"`),
         })
       })
+    }
+    if (options.blockHydration === true) {
+      // `OBSERVERS` still installs: it is an init script, not a chunk. What stops is everything Next would
+      // run after the document — the only thing that can change the DOM between the paint and the observer
+      // callback. Asserted rather than trusted: see the `data-hero-state` control in the first-paint case.
+      await page.route('**/_next/static/chunks/**', (route) => route.abort())
     }
     await page.bringToFront()
     await page.goto(`${BASE}${options.path ?? ROUTE}`, { waitUntil: 'load' })
@@ -1008,21 +1021,38 @@ describe('acceptance — nothing above the fold animates or arrives faded', () =
   for (const path of [ROUTE, ROUTE_AR]) {
     for (const theme of ['light', 'dark'] as const) {
       it(`${path} in the ${theme} theme paints everything at once`, async () => {
-        const first = await withPage({ path, theme, width: PHONE }, async (page) => {
-          await page.waitForFunction(
-            () => (globalThis as unknown as { __firstPaint: unknown }).__firstPaint !== null,
-          )
-          return await page.evaluate(() => ({
-            paint: (
-              globalThis as unknown as { __firstPaint: { animations: string[]; faded: string[] } }
-            ).__firstPaint,
-            theme: document.documentElement.getAttribute('data-theme'),
-            dir: document.documentElement.getAttribute('dir'),
-          }))
-        })
+        const first = await withPage(
+          { path, theme, width: PHONE, blockHydration: true },
+          async (page) => {
+            await page.waitForFunction(
+              () => (globalThis as unknown as { __firstPaint: unknown }).__firstPaint !== null,
+            )
+            return await page.evaluate(
+              (heroAttribute) => ({
+                paint: (
+                  globalThis as unknown as {
+                    __firstPaint: { animations: string[]; faded: string[] }
+                  }
+                ).__firstPaint,
+                theme: document.documentElement.getAttribute('data-theme'),
+                dir: document.documentElement.getAttribute('dir'),
+                heroState: document.querySelector('.be-hero')?.getAttribute(heroAttribute) ?? null,
+              }),
+              HERO_STATE_ATTRIBUTE,
+            )
+          },
+        )
         // The cell is the cell it claims to be, before anything is concluded from it.
         expect(first.theme).toBe(theme)
         expect(first.dir).toBe(path === ROUTE_AR ? 'rtl' : 'ltr')
+        // And the page held still. `still` is what the SERVER renders and the island's first act is to
+        // write `attaching`, so anything else here means the chunks were served after all and this sample
+        // is racing hydration again — which is how this case failed M-TILL-09's verify with
+        // `["video.be-hero__video @ 0"]`, the very string the comment above `OBSERVERS` describes.
+        expect(
+          first.heroState,
+          'the hero island ran, so the chunk block missed and this is no longer a first-paint sample',
+        ).toBe('still')
         expect(first.paint.animations, 'a running animation above the fold at first paint').toEqual(
           [],
         )
