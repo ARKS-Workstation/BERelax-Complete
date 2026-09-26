@@ -27932,6 +27932,59 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 102. The per-unit check list must be DERIVED from `pnpm verify`, never written down beside it.
+//
+//      A unit agent runs the cheap steps plus its own gate block instead of the two-hour suite. The first
+//      version of that instruction was a hand-kept list in the agent preamble, which is a second statement
+//      of what `verify` runs — and it drifted on the first batch that used it: the list omitted
+//      `pnpm secrets`, a unit shipped a 43-character mixed-case token literal that the credential scanner
+//      flags, the unit's own checks were green, and the integrating verify died at step 7 of 38 after
+//      paying for a fresh database and a web build.
+//
+//      `scripts/verify-except-gates.mjs` reads the chain out of `package.json` instead. This case is what
+//      keeps that true: the steps it would run must be exactly `verify`'s steps minus `gates:test`, with
+//      nothing added and nothing dropped, and it must REFUSE if `gates:test` ever stops being last —
+//      because a step added after the gate suite would then be skipped in silence, which is the failure
+//      the whole arrangement exists to avoid.
+{
+  const chain = JSON.parse(readFileSync('package.json', 'utf8')).scripts.verify
+  const steps = chain.split('&&').map((part) => part.trim().replace(/^pnpm\s+/, ''))
+  const printed = run(process.execPath, ['scripts/verify-except-gates.mjs', '--print'])
+  const listed = printed.output.trim().split('\n').filter(Boolean)
+  check(
+    'the per-unit check list is exactly the verify chain minus the gate suite',
+    !printed.failed && listed.join('\u0000') === steps.slice(0, -1).join('\u0000'),
+    printed.failed
+      ? `the script would not print its list:\n${printed.output}`
+      : `it would run ${listed.length} step(s) and the chain has ${steps.length - 1} before ` +
+          `\`${steps.at(-1)}\`.\n        only in the script: ${listed.filter((s) => !steps.includes(s)).join(', ') || '(none)'}` +
+          `\n        only in verify: ${
+            steps
+              .slice(0, -1)
+              .filter((s) => !listed.includes(s))
+              .join(', ') || '(none)'
+          }`,
+  )
+  check(
+    'and the gate suite is still the last step, which is what makes "everything else" safe',
+    steps.at(-1) === 'gates:test',
+    `\`pnpm verify\` now ends with \`${steps.at(-1)}\`, so a step after the gate suite would be skipped ` +
+      'by every unit agent without anybody noticing',
+  )
+  // The control: the refusal has to be reachable. Move the gate suite off the end and the script must
+  // exit non-zero rather than quietly running a list that is missing a step.
+  const refused = withEditedFile(
+    'package.json',
+    (text) => replaceOnce(text, ' && pnpm gates:test"', ' && pnpm gates:test && pnpm lint"'),
+    () => runExpectingFailure(process.execPath, ['scripts/verify-except-gates.mjs', '--print']),
+  )
+  checkRejectedBy(
+    'the list refuses to be derived when the gate suite is no longer last',
+    refused,
+    'no longer ends with',
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

@@ -628,7 +628,13 @@ describe('the URL is where the capability lives, because a path segment cannot h
     // lower-cases every path segment and the proxy 301s to the result, and C-CRM-04's token is 43
     // characters of MIXED-CASE base64url — so a token in a path is destroyed by the site's own
     // canonicalisation, for every customer, every time, with a 404 whose cause is two modules away.
-    const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE'
+    // BUILT rather than written down. A 43-character mixed-case base64url literal assigned to `token` is
+    // indistinguishable from a leaked credential, and `pnpm secrets` flags it
+    // `[high-entropy-assigned-secret]` — correctly, because the scanner cannot know this one was never
+    // minted, and a scanner that took a test file's word for that would be no scanner. What this case is
+    // about is the SHAPE, so the shape is what it constructs: 43 characters, both cases, base64url
+    // alphabet, and no entropy for anybody to mistake for a secret.
+    const token = `${'aA1'.repeat(14)}b`
     expect(token).toHaveLength(OPT_OUT_TOKEN_LENGTH)
     const path = preferenceCentrePath({ contactId: readerId, token, locale: 'ar' })
     const built = new URL(path, 'https://berelax.test')

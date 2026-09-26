@@ -32,6 +32,7 @@
     "gate-registry": "node scripts/check-gate-registry.mjs",
     "gates:test": "node scripts/test-gates.mjs",
     "gates:only": "node scripts/gate-slice.mjs",
+    "verify:except-gates": "node scripts/verify-except-gates.mjs",
     "invisibles": "node scripts/check-invisible-chars.mjs",
     "jobs": "tsx scripts/check-job-registry.mjs",
     "layout": "node scripts/check-layout-rules.mjs",
