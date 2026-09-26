@@ -980,6 +980,34 @@ export {
   therapistStyleSkill,
 } from './seed/therapists.ts'
 export {
+  CASH_SESSION_SQLSTATE,
+  type CashSessionRowShape,
+  type CloseCashSessionInput,
+  cashSessionError,
+  closeCashSession,
+  type DrawerTakingsRow,
+  isCashSessionClosed,
+  isCashSessionPeriodLocked,
+  isCountRequired,
+  isVarianceNotPosted,
+  type OpenCashSessionInput,
+  openCashSession,
+  type PostCashSessionAdjustmentInput,
+  type PostedCashSessionAdjustment,
+  postCashSessionAdjustment,
+  type RecordCashDropInput,
+  type RecordedCashDrop,
+  type RegisteredCashDrawer,
+  readCashDrawers,
+  readCashDrops,
+  readCashSession,
+  readCashSessionAdjustments,
+  readCashSessionsForBusinessDay,
+  readDrawerTakings,
+  readOpenCashSession,
+  recordCashDrop,
+} from './services/cash-session.ts'
+export {
   AppointmentAlreadyBilled,
   CHECKOUT_CONSTRAINT,
   type CheckoutAppointmentInput,
@@ -1705,28 +1733,70 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // cascade still works, because a referential action does not check the deleting role's privilege on the
 // referencing table.
 //
-// 71, 73 and 74 are NOT holes in this ledger. 71 will stay unused for the reason 22, 41, 44 and 47 do;
-// 73 and 74 were allocations held by units in flight when this one was written, and gate 90a walks the
-// migrations that EXIST on disk rather than consecutive integers, so a number nobody has written SQL for
-// is not a missing paragraph.
+// 76 is 0076_cash_session.sql: the cash drawer reconciliation, keyed on the BUSINESS DAY (M-TILL-11).
+// 0011 made `business_day` a table because trading runs 11:00-02:00 and a trading date cannot be had by
+// truncating a timestamp; 0063 put `trading_date` on `payment` naming this unit -- "the cash-up that
+// reconciles it (M-TILL-11) cuts on this column"; and 0068 put `change_given_fils` BESIDE `amount_fils`
+// for this unit too, "because a drawer is counted against the notes that went in and the notes that came
+// out". Nothing here re-argues any of that. Four things ARE this file's. `cash_session.trading_date` is a
+// foreign key into `business_day (trading_date)` and carries the SAME column name as the other nine
+// tables holding this quantity, `business_day`'s own primary key included -- a tenth spelling for one
+// fact is how two queries come to disagree about which day a note belongs to -- and it is the key
+// because a shift from 23:00 to 02:00 is ONE business day: 02:00 is the close instant of the 23:00
+// date's session, so both instants resolve to the same date, and a CALENDAR key would split that shift
+// across two counts, measure the first against a drawer still in use and the second against a float
+// nobody declared, and balance neither. There is deliberately no generated date beside `opened_at`: a
+// second derivation is a second answer. `expected_float_fils` and `discrepancy_fils` are both GENERATED
+// through one immutable function, `cash_session_expected_float_fils()`, because PostgreSQL forbids a
+// generation expression from referencing another generated column and the alternative is two copies of
+// the cash-up formula; the function is `strict`, so an OPEN session has a NULL expectation rather than
+// one derived from a count nobody took. `discrepancy_fils` is `counted - expected`, SIGNED, in the
+// permissive `fils` domain -- negative is short, positive is over -- and not a boolean, because a till
+// out by 5 fils and one out by 500 dirhams are the same boolean and different events, and a boolean
+// cannot be summed over a month to tell a process problem from a person problem; `fils_nonneg` there
+// would refuse the short drawer, which is the case that matters, with a message naming no rule anybody
+// could act on (0068 measured the same trap on `applied_fils`). A disagreement is RECORDED and never
+// refused: `cash_session_variance_needs_a_reason` demands a `count_note` and ZU004 -- a DEFERRED
+// constraint trigger, because the close and its entry are separate statements in one transaction --
+// demands a `cash_up` entry dated on the session's business day carrying exactly the discrepancy on the
+// side its sign says, and demands the opposite for a balanced drawer, which must name NO entry because
+// `journal_line_exactly_one_side` refuses a zero-value line. Refusing the close was weighed and is
+// wrong: the count is a measurement of the physical world and the expectation a derivation from rows, so
+// a refusal would destroy the evidence with the mechanism meant to protect it and leave the operator
+// typing the expected figure in to finish the day. ZU005 holds the four snapshotted figures equal to the
+// `payment`, `refund` and `cash_drop` rows at COMMIT and ZU006 keeps that true afterwards by refusing
+// cash dated on a business day whose drawer has been counted -- both scoped to the business day rather
+// than to a drawer, which is EXACT while `cash_drawer` holds one row and is stated as M-TILL-13's to
+// narrow once `payment.drawer_code` exists. And closed is TERMINAL: ZU002 refuses EVERY update to a
+// closed session for every role including the owner, not just the `closed`->`open` transition, because
+// rewriting `counted_float_fils` in place undoes a count without touching `status`; the remedy is
+// `cash_session_adjustment`, a new row on its OWN business day with its own entry, which is 0072's shape
+// for a credit note and 0073's for a dated reversal. "Is this date closed?" is `period_lock_for()` and
+// `earliest_open_date_from()` -- 0018's and 0073's, the same two the journal's guards and
+// `periodStatusOn()` read -- so no second definition exists to disagree.
 //
 // 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
 // branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
 // C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
-// mistake to tidy away. Gate case 90a walks the migrations that EXIST rather than consecutive
-// integers, so a gap costs nothing and needs no declaration. 62 through 66 were one allocation block
-// held across five worktrees and 67 through 70 another across four; every one of those landed. 55, 56
-// and 57 landed out of order and within an hour of one another, which is the arrangement this note
-// exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
-// come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
-// flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
-// through 70 are in use. 71 was allocated to a unit that turned out to need no migration, which makes it
-// permanent rather than held, and 74 and 75 are held by units in flight as this is written. 55, 56 and 57
-// landed out of order and
+// mistake to tidy away, so both are PERMANENT rather than held. Gate case 90a walks the migrations that
+// EXIST on disk rather than consecutive integers, so a gap costs nothing and needs no declaration. 62
+// through 66 were one allocation block held across five worktrees and 67 through 70 another across four;
+// 72, 73 and 75 were held by three more; every one of those has landed. 77 and 78 are held by units in
+// flight as this is written. 55, 56 and 57 landed out of order and within an hour of one another, which
+// is the arrangement this note exists for: the number is a high-water mark, not a count, and no gap has
+// been closed to tidy the sequence.
+//
+// This paragraph was THREE rival paragraphs when M-TILL-11 arrived, and repairing them is the reason to
+// say so here rather than in a commit message. One claimed 73 was still held by a unit in flight, six
+// lines under 73's own paragraph; one restated the permanent gaps a second time; and the third stopped
+// mid-sentence at “55, 56 and 57 landed out of order and”. That is the same clean-merge loss gate case
+// 90a exists for, arriving in the one part of this region 90a cannot read: it checks the `// NN is FILE`
+// openings, and nothing checks the prose. Three branches each based before the others' paragraphs
+// existed, the merge taking the incoming side of each, and no conflict to look at.
 //
 // Those five paragraphs were deleted three times by CLEAN merges before this one stuck. Each branch was
 // based before the others' paragraphs existed, so git took the incoming side of this region with nothing
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 75 as const
+export const SCHEMA_VERSION = 76 as const

@@ -4081,7 +4081,7 @@ units:
       expected-versus-counted variance always posted to a cash over/short account in the close transaction.
       Corrections are new dated adjustments; a closed session cannot be reopened.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-CAT-01
@@ -4106,10 +4106,163 @@ units:
       rows for that business_day, exact to the fils
     - 'reopening a closed session is impossible: no exported function does it (export-surface test) and
       a DB trigger rejects the status transition; a correction is a new dated adjustment entry'
+    - 'NOTE: the KEY, stated because the unit is named for it. cash_session.trading_date is a foreign key
+      into business_day (trading_date) — the SAME column name the other nine tables carrying this quantity
+      use, business_day''s own primary key included. business_day IS first-class here: it is a TABLE
+      (0011), and the column that names a row of it is trading_date everywhere, so a tenth spelling for one
+      fact was rejected as the "two answers" defect this codebase fights. A shift that opens at 23:00 and
+      ends at 02:00 is ONE row: 02:00 is the close instant of the 23:00 date''s session (business_day
+      .closes_at, generated, crosses_midnight true), so resolveTradingDate maps every instant in the shift
+      to that one date. Keyed on the CALENDAR date it would be two sessions and neither would balance — the
+      money taken before midnight measured against a drawer still in use, the money after it against an
+      opening float nobody declared — and the unique index would not even refuse the second, because a
+      different date is a different key. There is deliberately no generated date beside opened_at: a second
+      derivation of the trading date is a second answer. Asserted three ways: a table-driven core test over
+      23:59, 00:01, 01:30 and 01:59 that also asserts each after-midnight instant does NOT resolve to its
+      calendar date (three of the four differ, and the count is asserted); a core case that resolves five
+      instants across one 23:00-to-02:00 shift to a single date, with the control that their calendar dates
+      are two; and packages/fixtures/src/cash-up.itest.ts, which files four real cash tenders taken at
+      15:05, 23:30, 00:40 and 01:55 and reconciles the session to the sum of those payment rows exact to
+      the fils.'
+    - 'NOTE: what happens when the count and the expectation disagree, and the argument. The close is
+      RECORDED with a reason and a posting, never refused. The count is a MEASUREMENT of the physical world
+      and the expectation is a derivation from rows; when they differ the measurement is the fact. Refusing
+      the close would leave the shift with no counted figure at all — destroying the evidence of the
+      discrepancy with the mechanism meant to protect it — and the operator''s only way to finish the day
+      would be to type the expected number in, which is exactly the silent absorption this unit exists to
+      prevent; the money would still be missing and nothing would say so. So
+      cash_session_variance_needs_a_reason demands a count_note, and ZU004 (a DEFERRED constraint trigger,
+      because the close and its entry are separate statements in one transaction) demands a cash_up entry
+      dated on the session''s business day carrying exactly the discrepancy to 6140 on the side its sign
+      says. Both directions: a BALANCED session must name NO entry, because journal_line_exactly_one_side
+      (0018) refuses a zero-value line so any entry there is about some other figure. discrepancy_fils is a
+      GENERATED, SIGNED, STORED column in the permissive `fils` domain — negative short, positive over — and
+      not a boolean: a till out by 5 fils and one out by 500 dirhams are the same boolean and different
+      events, and a boolean cannot be summed over a month to tell a process problem from a person problem.
+      fils_nonneg there would refuse the short drawer, which is the case that matters, naming no rule a
+      caller could act on (0068 measured the same trap on applied_fils). A real non-zero discrepancy is
+      asserted end to end in the pair itest: counted 101,300 against 102,500 expected, stored as -1200, and
+      read back off journal_line as Dr 6140 1,200 / Cr 1010 1,200 on the shift''s own business day.'
+    - 'NOTE: the formula exists ONCE on each side of the boundary, and the two are held equal.
+      cash_session_expected_float_fils(opening, received, change, refunded, drops) is an IMMUTABLE SQL
+      function, and BOTH of cash_session''s generated columns call it — PostgreSQL forbids a generation
+      expression from referencing another generated column, so discrepancy_fils cannot say `counted -
+      expected_float_fils` and the alternative is two copies of the arithmetic. It is STRICT, so an OPEN
+      session has a NULL expectation rather than one derived from a count nobody took. core''s
+      expectedFloat() is the other statement, and packages/fixtures/src/cash-up.itest.ts compares the two
+      over a table of takings with a control that transposes the opening float against the change given —
+      one added, one subtracted, so the answer has to move. The first version of that control transposed
+      change against refunds, which are both subtracted, and reported PASS while comparing a value to
+      itself.'
+    - 'NOTE: 0068''s decision used for the purpose it was taken for. cash_received_fils and
+      change_given_fils are stored as TWO figures on the session and never as one net figure, because a
+      cash-up sheet is checked against the till roll in both directions — notes in and notes out — and
+      sum(applied_fils) reconciles against neither. Gate case 103 makes that a rule rather than a
+      preference: an edit changing readDrawerTakings to sum applied_fils instead of amount_fils must make
+      the db itest go red, and it does, even though the expected float it produces is still arithmetically
+      correct.'
+    - 'NOTE: the period close, through M-VAT-06''s ONE reader. "Is this business day closed?" is
+      periodStatusOn(sql, date) from @berelax/db, called by openCashSession and postCashSessionAdjustment;
+      no second reader was written. ZU003 in SQL calls period_lock_for() and earliest_open_date_from() —
+      0018''s and 0073''s, the same two the BEFORE INSERT guards on journal_entry and journal_line call — so
+      a cash-up cannot be refused by one rule and permitted by another, and the refusal names the earliest
+      OPEN date because naming only the lock sends the person to a month they also cannot use. Both layers
+      are asserted: the service refusal carries the date as DATA, and the database refuses the same insert
+      past the service.'
+    - 'NOTE: two tables beyond the two the acceptance names, and why each had to exist. cash_drop, because
+      the expected float subtracts drops and 1010 is debited as each payment is taken (0068''s adapter) — so
+      a drop recorded only at the close would leave the drawer account overstated for the rest of the shift,
+      and a trial balance taken mid-shift is exactly when somebody is looking. Each drop carries its own
+      journal entry (Dr destination / Cr drawer, source `payout` and NOT `cash_up`, because ZU004 matches
+      the session''s variance entry on that source and a drop sharing it could make a real discrepancy look
+      posted). And cash_drawer, a registry, because the acceptance''s index is partial on
+      (drawer_code, trading_date) and a mistyped code would not collide with the row it was meant to
+      collide with: ''Reception'' beside ''reception'' would be a second OPEN session on one physical till.
+      One row is seeded, ''reception'', because there is one till at reception (docs/06 F8 settles nothing
+      else about the hardware) and a second drawer is a ROW and not a migration. cash_drawer
+      .posting_account_code is what the cash-up posting reads rather than assuming 1010, so a safe float
+      (1015) is not written off against the till''s balance.'
+    - 'NOTE: SCOPED — ZU005 and ZU006 are keyed on the BUSINESS DAY and not on a drawer, and that is exact
+      today rather than approximate. `payment` carries no drawer_code: the till is the thing that knows
+      which drawer took the money, so attributing a tender to one is M-TILL-13''s, and a column here that
+      nothing populated would read as "drawer unknown" for every sale ever made. With one row in
+      cash_drawer the two rules are precisely right; with two they would be over-strict (drawer A counted,
+      drawer B still taking cash). Both predicates name the column they will gain, and the migration says
+      so where a reader looks. DEFERRED TO M-TILL-13.'
+    - 'NOTE: gate labels used 103a-103z, NOT the 102 that was allocated. The coordinator''s protocol fix
+      (commit 5f56f63, which this worktree could not merge — see the last NOTE) states that gate case 102
+      holds the `pnpm verify:except-gates` derivation, so numbering this block 102 would put two blocks
+      behind one opening and `--only ''// 102''` would match both, which gate case 3c exists to refuse. The
+      selector for this block is therefore `--only ''// 103a''`. Thirty-seven cases: twenty-seven psql
+      probes asserting each 0076 rule BY NAME against real PostgreSQL (every probe inside `begin; …; set
+      constraints all immediate; rollback;`, because ZU004 and ZU005 are DEFERRED and would otherwise fire
+      at a COMMIT that never comes — block 98''s measurement), one accepted control covering six facts in
+      order, a properties probe over the generated columns written so it RAISES when a property fails plus
+      its own control proving the raise can fire, four edits to packages/core/src/money/cash-up.ts, two to
+      packages/db/src/services/cash-session.ts, one to packages/fixtures/src/cash-up.ts, and the control
+      that all three suites pass unedited. Every anchor goes through replaceOnce (brief rule 20). No
+      server-starting suite was added, so no port band was claimed and packages/harness/src/ports.ts is
+      untouched.'
+    - 'NOTE: two defects the gate block found in this unit''s own tests, both worth recording because both
+      had reported a pass. (1) The db itest asserted `posts on that business day` for a cash-up dated on
+      the wrong day — which is a phrase the SERVICE and ZU004 both use, so deleting the service check left
+      the suite green with the database refusing the close instead. It now asserts the service''s own
+      wording, `A cash-up entry for business day`, and the database''s layer is exercised by the probe where
+      it is the only one left. (2) The core property test''s generator drew all five takings figures freely,
+      which made expectedFloat NEGATIVE often enough that the count clamped to zero came out POSITIVE: a
+      measured run put 231 of 400 cases in the "over" arm and 75 in "balanced" where a third of each was
+      intended. Drops and refunds are now drawn as shares of the cash actually in the drawer. The coverage
+      floors are measured over eight runs of 400 (balanced 104, short 120, over 116, non-zero 243) and set
+      at about half each (brief rule 22).'
+    - 'NOTE: migration 0076, and the ledger. 0077 and 0078 were held by units in flight; 0071 and 0074 are
+      PERMANENT gaps and were not reused, because renumbering into a gap is how two branches come to apply
+      one number to different SQL. Gate 90a walks the migrations that EXIST on disk, so the gaps need no
+      declaration. SCHEMA_VERSION = 76 and the paragraph is in numeric order. While adding it, the gap
+      region of packages/db/src/index.ts was found to hold THREE rival paragraphs from earlier clean
+      merges: one claiming 73 was still held by a unit in flight (six lines under 73''s own paragraph), one
+      restating the permanent gaps a second time, and one stopping mid-sentence at “55, 56 and 57 landed out
+      of order and”. They are replaced by one accurate paragraph, with a note saying what was found — the
+      same clean-merge loss 90a exists for, arriving in the one part of that region 90a cannot read,
+      because it checks the `// NN is FILE` openings and nothing checks the prose.'
+    - 'NOTE: what the manifest got wrong. (1) The migration was listed as
+      packages/db/migrations/00xx_cash_session.sql, a placeholder that allocates no number — and the new
+      gate case 101 fails the build for a `done` unit declaring a path that does not exist, so it would
+      have fired the moment this unit was marked done. It is now 0076_cash_session.sql. (2)
+      packages/db/src/services/cash-session.ts was not declared at all, although its itest was; added. (3)
+      Nothing in the acceptance list itself was wrong. (4) FOUND BUT NOT FIXED, because it belongs to
+      another unit: `pnpm gates:only --only ''// 101.''` is RED in this worktree on one path, M-VAT-11''s
+      `artifacts/screens/M-VAT-11/`. That directory is gitignored and generated by a screenshot run, so it
+      exists only where one has happened, and case 101 fails the build for exactly that. It is left for
+      M-VAT-11''s owner or the integrator rather than edited here: the coordinator says commit 5f56f63
+      carries "manifest-path corrections", and a second fix to one line is a merge conflict over a defect
+      that is already answered. The two sibling declarations, `artifacts/screens/` and
+      `artifacts/screens/M-TILL-13/`, are on `todo` units and case 101 does not check those yet. Over 1,033
+      declared paths of `done` units, that one is the only miss.'
+    - 'NOTE: files beyond the five listed. Added: packages/core/src/money/cash-up.{ts,test.ts},
+      packages/db/migrations/0076_cash_session.sql, packages/db/src/schema/cash-session.ts (all four tables
+      in ONE mirror, because pnpm db:drift keys its map on the table name and 0063''s NOTE asked for one
+      mirror per unit), packages/db/src/services/cash-session.{ts,itest.ts}, and
+      packages/fixtures/src/cash-up.{ts,itest.ts} — the mapping and the PAIR, because packages/db may never
+      import packages/core and only packages/fixtures may depend on both. Edited: packages/db/src/index.ts
+      (the export block, the ledger paragraph for 76, SCHEMA_VERSION = 76, and the gap-paragraph repair),
+      packages/core/src/index.ts, packages/db/src/schema/index.ts, packages/fixtures/src/index.ts,
+      scripts/test-gates.mjs (block 103a-103z, immediately before the numbered CI-completeness case), and
+      build/manifest.yaml. No new `pnpm` step was added to the verify chain, so case 29''s list and
+      pnpm gate-registry are untouched.'
+    - 'NOTE: the check list this unit was given could not be followed as written, and the reason is worth
+      recording. The coordinator replaced it mid-run with `pnpm verify:except-gates`, "already pushed" on
+      commit 5f56f63 — which is on the branch tip but NOT in this worktree, and the merge that would bring
+      it in was refused by this session''s permission layer as a shared-resource change (`git merge
+      --ff-only`, and `git show` of the same commit, both denied). package.json here therefore has no
+      verify:except-gates script. What was run instead is the `verify` chain read out of package.json with
+      its last step (`pnpm gates:test`) dropped, which is what that script is described as deriving; the
+      output of every step is in the unit report. Whoever integrates this should re-run
+      `pnpm verify:except-gates` on the merged tree, where the script exists.'
     files:
     - packages/db/src/schema/cash-session.ts
-    - packages/db/migrations/00xx_cash_session.sql
+    - packages/db/migrations/0076_cash_session.sql
     - packages/core/src/money/cash-up.ts
+    - packages/db/src/services/cash-session.ts
     - packages/db/src/services/cash-session.itest.ts
   - id: M-TILL-12
     order: 54

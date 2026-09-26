@@ -27205,6 +27205,635 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 103a-103z. (M-TILL-11) The cash drawer reconciliation: the rules the DATABASE refuses, the signed
+// discrepancy that cannot be absorbed, and the edits that must make this unit's own suites go red.
+//
+// Three parts, because the unit's claims are of three kinds.
+//
+// The probes are known-bad fixtures against real PostgreSQL. Almost everything `0076_cash_session.sql`
+// adds is a DATABASE rule — a partial unique index, two generated columns through one immutable function,
+// four per-row triggers, two DEFERRED constraint triggers, a column-level grant list — and a constraint is
+// only a gate once something has been seen to bounce off it (ADR 0003). A case that proved only that a
+// TypeScript guard refuses would leave the statement `psql` issues untested, and that statement is what
+// the whole unit is about: a reconciliation only `closeCashSession` checks is a reconciliation a migration
+// performs.
+//
+// `VERBOSITY=verbose` so psql prints the SQLSTATE as well as the message, and every probe runs inside
+// `begin; … ; set constraints all immediate; rollback;`. The `set constraints` is not decoration: ZU004
+// and ZU005 are DEFERRED and would otherwise fire at a COMMIT that never comes (block 98's measurement,
+// one unit along). The rollback is also what lets each probe register its own drawer and business days.
+//
+// The second part breaks `packages/core/src/money/cash-up.ts`,
+// `packages/db/src/services/cash-session.ts` and `packages/fixtures/src/cash-up.ts` and watches the suites
+// that cover them fail. The third is the control that every suite and every probe passes unedited.
+//
+// Every source case edits a shipped file and restores it in a `finally`, and every anchor goes through
+// `replaceOnce` (brief rule 20).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  /** A year no suite posts into: journal.itest 2088, period-close 2091, gate 98 2094, this unit 2087/2089. */
+  const YEAR = 2093
+  const DAY = `${YEAR}-07-14`
+  const NEXT = `${YEAR}-07-15`
+  const LOCKED = `${YEAR}-09-09`
+  const DRAWER = 'gate_cash_up'
+  const CASH = '1010'
+  const OVER_SHORT = '6140'
+  const BANK = '1020'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /** The trading calendar rows the foreign key needs, 11:00 to 02:00 so they cross midnight (0011). */
+  const calendar = [DAY, NEXT, LOCKED]
+    .map(
+      (day) =>
+        'insert into business_day (trading_date, opens_at, closes_at, source) values (' +
+        `'${day}'::date, ('${day}'::date + time '11:00') at time zone 'Asia/Dubai', ` +
+        `('${day}'::date + interval '1 day' + time '02:00') at time zone 'Asia/Dubai', 'weekly') ` +
+        'on conflict (trading_date) do nothing',
+    )
+    .join('; ')
+
+  const drawer =
+    'insert into cash_drawer (code, label, posting_account_code) values ' +
+    `('${DRAWER}', 'Gate probe drawer', '${CASH}') on conflict (code) do nothing`
+
+  /**
+   * Every lock in the probe's own year removed, inside the transaction that rolls back.
+   *
+   * `journal.itest.ts` deletes every `period_lock` row between cases and `period-close.itest.ts` clears
+   * its own in `afterAll`, so what survives the integration stage depends on which file ran last. A
+   * leftover lock over this year would make every probe below report ZU003 instead of the rule it is
+   * about. Scoped to one year so it cannot remove a lock any suite relies on.
+   */
+  const NO_LOCKS = `delete from period_lock where starts_on >= '${YEAR}-01-01' and ends_on <= '${YEAR}-12-31'`
+
+  const SETUP = `${NO_LOCKS}; ${calendar}; ${drawer}`
+
+  /** An OPEN session on `day`, shift `n`, with a 50,000-fils float. */
+  const open = (day, n = 1) =>
+    'insert into cash_session (drawer_code, trading_date, shift_no, opening_float_fils, ' +
+    `opened_by_actor_kind) values ('${DRAWER}', '${day}'::date, ${n}, 50000, 'staff')`
+
+  const sessionOf = (day, n = 1) =>
+    `(select id from cash_session where drawer_code = '${DRAWER}' and trading_date = '${day}'::date ` +
+    `and shift_no = ${n})`
+
+  /** A two-line cash-up entry moving `fils` to or from 6140. `short` decides the side. */
+  const cashUp = (id, day, fils, short = true, source = 'cash_up') =>
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${id}', '${day}'::date, 'Gate probe cash-up', '${source}'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils) values ' +
+    `('${id}', 1, '${short ? OVER_SHORT : CASH}', ${fils}); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${id}', 2, '${short ? CASH : OVER_SHORT}', ${fils})`
+
+  /**
+   * The close, as an UPDATE of the ten columns a close writes.
+   *
+   * `counted` and the four snapshot figures are written out per probe rather than derived, because what is
+   * under test is what the DATABASE does with them.
+   */
+  const close = (day, counted, options = {}) => {
+    const note = options.note === undefined ? 'null' : `'${options.note}'`
+    const entry = options.entryId === undefined ? 'null' : `'${options.entryId}'`
+    const received = options.received ?? 0
+    const change = options.change ?? 0
+    const refunded = options.refunded ?? 0
+    return (
+      'update cash_session set ' +
+      `status = 'closed', cash_received_fils = ${received}, change_given_fils = ${change}, ` +
+      `cash_refunded_fils = ${refunded}, counted_float_fils = ${counted}, closed_at = now(), ` +
+      `closed_by_actor_kind = 'staff', count_note = ${note}, journal_entry_id = ${entry} ` +
+      `where id = ${sessionOf(day, options.shift ?? 1)}`
+    )
+  }
+
+  /**
+   * A document whose gross is exactly `fils`, and a tender of `fils` against it.
+   *
+   * The gross is derived FROM the tender rather than fixed, and that is a measured correction: a 3,000-fils
+   * document paid with 20,000 fils is refused by `ZT001` (0068's overpayment ceiling) before anything in
+   * 0076 is reached, so the ZU005 probes reported a rule from another unit. VAT is the remainder of the
+   * gross, which is authoritative (ADR 0007), so `net + vat === gross` exactly.
+   */
+  const document = (day, label, fils, tender) => {
+    const vat = Math.round((fils * 5) / 105)
+    const net = fils - vat
+    return (
+      'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+      'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+      'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+      `values ('tax_invoice', 'TAX-INV', 'GATE-CASH-UP', ${930_100 + label}, 'GATE-CU-000${label}', ` +
+      "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+      `'100123456700003', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+      `'${day}'::date, '${day}'::date, ${net}, ${vat}, ${fils}, 'GATE-CU-${label}'); ` +
+      'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+      'vat_rate_bp, line_net_fils, line_vat_fils) values ' +
+      `((select id from invoice where notes = 'GATE-CU-${label}'), 1, 'Gate probe treatment', 1, ` +
+      `${fils}, 500, ${net}, ${vat}); ` +
+      'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, amount_fils, ' +
+      `reference, trading_date) values ` +
+      `((select id from invoice where notes = 'GATE-CU-${label}'), 1, '${tender.kind}', ` +
+      `'${tender.account}', ${fils}, ${tender.reference}, '${day}'::date)`
+    )
+  }
+
+  /** A cash payment on `day`, with the document it settles. Cash carries no reference (0063). */
+  const cashPayment = (day, label, fils) =>
+    document(day, label, fils, { kind: 'cash', account: CASH, reference: 'null' })
+
+  /** A card payment on `day`. `1040 Card terminal clearing`, and a reference is mandatory (ZT003). */
+  const cardPayment = (day, label, fils) =>
+    document(day, label, fils, {
+      kind: 'card_in_salon',
+      account: '1040',
+      reference: "'AUTH-000123'",
+    })
+
+  const lockSeptember =
+    'insert into period_lock (period_id, starts_on, ends_on, reason, locked_by_actor_kind) values ' +
+    `('GATE-CASH-UP-${YEAR}-09', '${YEAR}-09-01', '${YEAR}-09-30', 'gate probe', 'system')`
+
+  const probes = [
+    {
+      // THE artefact. A close with no counted float records an expectation and no measurement, which is a
+      // shift that was never counted wearing the word closed.
+      name: 'cash-up gate rejects a close with no counted amount',
+      rule: 'ZU001',
+      sql: `${SETUP}; ${open(DAY)}; update cash_session set status = 'closed' where id = ${sessionOf(DAY)}`,
+    },
+    {
+      name: 'cash-up gate names CountRequired rather than a constraint nobody recognises',
+      rule: 'CountRequired',
+      sql: `${SETUP}; ${open(DAY)}; update cash_session set status = 'closed' where id = ${sessionOf(DAY)}`,
+    },
+    {
+      // The acceptance line: at most one OPEN session per drawer per business day. Two shifts taking
+      // money into one drawer with two opening floats is the state this index exists to make impossible.
+      name: 'cash-up gate rejects a second OPEN session for one drawer and business day',
+      rule: 'cash_session_one_open_per_drawer_per_day',
+      sql: `${SETUP}; ${open(DAY)}; ${open(DAY, 2)}`,
+    },
+    {
+      // THE rule of the unit, at COMMIT. A reconciliation that can absorb a variance is not a
+      // reconciliation.
+      name: 'cash-up gate rejects a close that absorbs a variance',
+      rule: 'ZU004',
+      sql: `${SETUP}; ${open(DAY)}; ${close(DAY, 47500, { note: 'Absorbed' })}`,
+    },
+    {
+      // The figure is in the message. "The drawer does not balance" without it is a day of somebody's
+      // time, and the number is usually most of the diagnosis.
+      name: 'cash-up gate names the discrepancy in fils and the account it belongs in',
+      rule: 'out by -2500 fils',
+      sql: `${SETUP}; ${open(DAY)}; ${close(DAY, 47500, { note: 'Absorbed' })}`,
+    },
+    {
+      // The other direction, and as important: `journal_line_exactly_one_side` (0018) refuses a
+      // zero-value line, so an entry on a balanced session can only be about some other figure. A rule
+      // written for the non-zero case alone would let one through.
+      name: 'cash-up gate rejects a BALANCED close that names a journal entry',
+      rule: 'balanced exactly',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-STRAY', DAY, 100)}; ` +
+        `${close(DAY, 50000, { entryId: 'GATE-CU-STRAY' })}`,
+    },
+    {
+      // A posting for a different figure. The entry balances; the drawer does not.
+      name: 'cash-up gate rejects a variance posted for the wrong figure',
+      rule: 'must carry 2500 fils',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-FIGURE', DAY, 2400)}; ` +
+        `${close(DAY, 47500, { note: 'Short', entryId: 'GATE-CU-FIGURE' })}`,
+    },
+    {
+      // A posting on the wrong SIDE balances just as well and states the opposite of what happened. It is
+      // the one error in a cash-up that reconciles, and nothing but the side check catches it.
+      name: 'cash-up gate rejects a variance posted on the wrong side',
+      rule: 'on the debit side',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-SIDE', DAY, 2500, false)}; ` +
+        `${close(DAY, 47500, { note: 'Short', entryId: 'GATE-CU-SIDE' })}`,
+    },
+    {
+      // Dated on another business day. The discrepancy is a fact about THAT shift, so posting it
+      // elsewhere files the loss in a period the shift never reached — and at a month end, in the wrong
+      // month.
+      name: 'cash-up gate rejects a variance dated on another business day',
+      rule: 'posts on that business day',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-DATE', NEXT, 2500)}; ` +
+        `${close(DAY, 47500, { note: 'Short', entryId: 'GATE-CU-DATE' })}`,
+    },
+    {
+      // Classified as something else. A refund and a cash-up can produce identical lines, and the source
+      // is the only thing that tells them apart when a customer asks.
+      name: 'cash-up gate rejects a variance whose entry is not classified cash_up',
+      rule: 'and not "cash_up"',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-SOURCE', DAY, 2500, true, 'refund')}; ` +
+        `${close(DAY, 47500, { note: 'Short', entryId: 'GATE-CU-SOURCE' })}`,
+    },
+    {
+      // A discrepancy nobody explained is a discrepancy nobody investigated. The sentence is the only
+      // part of the row a person wrote.
+      name: 'cash-up gate rejects a variance with no reason',
+      rule: 'cash_session_variance_needs_a_reason',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-NONOTE', DAY, 2500)}; ` +
+        `${close(DAY, 47500, { entryId: 'GATE-CU-NONOTE' })}`,
+    },
+    {
+      // A HALF-counted close: a counted float with no receipts total against it is a figure that
+      // reconciles to nothing.
+      name: 'cash-up gate rejects a half-counted close',
+      rule: 'cash_session_closed_is_complete',
+      sql:
+        `${SETUP}; ${open(DAY)}; update cash_session set status = 'closed', ` +
+        `counted_float_fils = 50000, closed_at = now(), closed_by_actor_kind = 'staff' ` +
+        `where id = ${sessionOf(DAY)}`,
+    },
+    {
+      // "Reopening a closed session is impossible", asserted against the statement rather than against
+      // the export surface. For EVERY role including the owner, which is what a psql session is.
+      name: 'cash-up gate rejects reopening a closed session',
+      rule: 'ZU002',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${close(DAY, 50000)}; ` +
+        `update cash_session set status = 'open' where id = ${sessionOf(DAY)}`,
+    },
+    {
+      // Why the trigger refuses EVERY update and not the transition: rewriting the count in place undoes
+      // a count without touching `status`, and a rule that named the transition would permit it.
+      name: 'cash-up gate rejects a rewrite of the count with the status untouched',
+      rule: 'ZU002',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${close(DAY, 50000)}; ` +
+        `update cash_session set counted_float_fils = 1 where id = ${sessionOf(DAY)}`,
+    },
+    {
+      name: 'cash-up gate rejects a DELETE of a counted session',
+      rule: 'ZU002',
+      sql: `${SETUP}; ${open(DAY)}; ${close(DAY, 50000)}; delete from cash_session where id = ${sessionOf(DAY)}`,
+    },
+    {
+      // The drawer's history may not change after the reconciliation that depended on it.
+      name: 'cash-up gate rejects a drop into a counted session',
+      rule: 'ZU002',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${close(DAY, 50000)}; ${cashUp('GATE-CU-DROP', DAY, 1000)}; ` +
+        'insert into cash_drop (cash_session_id, drop_no, amount_fils, destination_account_code, ' +
+        `reason, journal_entry_id) values (${sessionOf(DAY)}, 1, 1000, '${BANK}', 'Late banking', ` +
+        "'GATE-CU-DROP')",
+    },
+    {
+      // The snapshot is evidence AS AT the count, so it has to be what the rows said at the count.
+      name: 'cash-up gate rejects a snapshot that disagrees with the payment rows',
+      rule: 'ZU005',
+      sql:
+        `${SETUP}; ${cashPayment(DAY, 1, 20000)}; ${open(DAY)}; ` +
+        `${close(DAY, 80000, { received: 30000 })}`,
+    },
+    {
+      name: 'cash-up gate names both sides of the disagreement',
+      rule: 'the rows hold received 20000',
+      sql:
+        `${SETUP}; ${cashPayment(DAY, 1, 20000)}; ${open(DAY)}; ` +
+        `${close(DAY, 80000, { received: 30000 })}`,
+    },
+    {
+      // Without this, ZU005's guarantee holds only until the transaction that took the snapshot commits.
+      name: 'cash-up gate rejects cash taken on a business day whose drawer was counted',
+      rule: 'ZU006',
+      sql: `${SETUP}; ${open(DAY)}; ${close(DAY, 50000)}; ${cashPayment(DAY, 2, 5000)}`,
+    },
+    {
+      // `period_lock_for()` and `earliest_open_date_from()` are 0018's and 0073's, and this calls the same
+      // two the journal's own guards call — so a cash-up cannot be refused by one rule and permitted by
+      // another. The message names the earliest OPEN date, because naming only the lock sends the person
+      // to a month they also cannot use.
+      name: 'cash-up gate rejects a session on a business day inside a locked period',
+      rule: `The earliest open date is ${YEAR}-10-01`,
+      sql: `${SETUP}; ${lockSeptember}; ${open(LOCKED)}`,
+    },
+    {
+      // An adjustment is the remedy for a session that HAS been counted. While one is open the drawer is
+      // re-counted at its close.
+      name: 'cash-up gate rejects an adjustment against a session that is still open',
+      rule: 'ZU007',
+      sql:
+        `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-ADJ1', NEXT, 100)}; ` +
+        'insert into cash_session_adjustment (cash_session_id, adjustment_no, trading_date, ' +
+        `amount_fils, reason, journal_entry_id) values (${sessionOf(DAY)}, 1, '${NEXT}'::date, 100, ` +
+        "'Premature', 'GATE-CU-ADJ1')",
+    },
+    {
+      // A correction may not appear on a business day the shift never reached.
+      name: 'cash-up gate rejects an adjustment dated before the shift it corrects',
+      rule: 'ZU007',
+      sql:
+        `${SETUP}; ${open(NEXT)}; ${close(NEXT, 50000)}; ${cashUp('GATE-CU-ADJ2', DAY, 100)}; ` +
+        'insert into cash_session_adjustment (cash_session_id, adjustment_no, trading_date, ' +
+        `amount_fils, reason, journal_entry_id) values (${sessionOf(NEXT)}, 1, '${DAY}'::date, 100, ` +
+        "'Backdated', 'GATE-CU-ADJ2')",
+    },
+    {
+      // A closed date is ABSENT from business_day rather than present with a flag (0011), so the foreign
+      // key is what makes "a cash-up for a day we did not open" unrepresentable.
+      name: 'cash-up gate rejects a session on a date the trading calendar does not hold',
+      rule: 'cash_session_trading_date_fkey',
+      sql: `${SETUP}; ${open(`${YEAR}-12-25`)}`,
+    },
+    {
+      // A mistyped drawer code would not collide with the row it was meant to collide with, so
+      // 'Reception' beside 'reception' would be a second OPEN session on one physical till.
+      name: 'cash-up gate rejects a drawer code that is not lower snake case',
+      rule: 'cash_drawer_code_is_snake_case',
+      sql:
+        `${SETUP}; insert into cash_drawer (code, label, posting_account_code) values ` +
+        `('Reception', 'Mis-cased', '${CASH}')`,
+    },
+    {
+      // The grant layer, which refuses before a trigger is reached — and is the half that holds for an
+      // OPEN session, where no trigger would fire at all.
+      name: 'cash-up gate refuses the application role a DELETE on cash_session',
+      rule: 'permission denied for table cash_session',
+      sql: `${SETUP}; ${open(DAY)}; set local role berelax_app; delete from cash_session where id = ${sessionOf(DAY)}`,
+    },
+    {
+      // `trading_date` is what the reconciliation is ABOUT, so a statement that could move it could
+      // re-point a counted drawer at another business day. 0009 granted table-level UPDATE and set
+      // default privileges extending it to later tables, so the column list only narrows anything
+      // because 0076 REVOKES the table-level grant first — which is what this probe holds shut.
+      name: 'cash-up gate refuses the application role an UPDATE of the business day',
+      rule: 'permission denied for table cash_session',
+      sql:
+        `${SETUP}; ${open(DAY)}; set local role berelax_app; ` +
+        `update cash_session set trading_date = '${NEXT}'::date where id = ${sessionOf(DAY)}`,
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(probe.name, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The control for every probe above, in one psql run, because an ACCEPTED probe is a single exit code.
+  // Without it each case would also pass for a trigger that refused every close and for a `cash_session`
+  // nothing could be inserted into at all. Six accepted facts in order: a drawer registers and a session
+  // opens; a drop is recorded against it; the session closes BALANCED with no entry at all; a SECOND
+  // shift opens on the same business day once the first is counted and closes SHORT with its variance
+  // posted to 6140; a CARD payment is accepted on that counted day, so ZU006 is about cash rather than
+  // about payments; and a correction posts on the next open business day.
+  {
+    const accepted = psqlProbe(
+      `${SETUP}; ${open(DAY)}; ${cashUp('GATE-CU-OK-DROP', DAY, 10000)}; ` +
+        'insert into cash_drop (cash_session_id, drop_no, amount_fils, destination_account_code, ' +
+        `reason, journal_entry_id) values (${sessionOf(DAY)}, 1, 10000, '${BANK}', 'Banking run', ` +
+        "'GATE-CU-OK-DROP'); " +
+        `update cash_session set status = 'closed', cash_received_fils = 0, change_given_fils = 0, ` +
+        `cash_refunded_fils = 0, drops_fils = 10000, counted_float_fils = 40000, closed_at = now(), ` +
+        `closed_by_actor_kind = 'staff' where id = ${sessionOf(DAY)}; ` +
+        `${open(DAY, 2)}; ${cashUp('GATE-CU-OK-SHORT', DAY, 2500)}; ` +
+        `${close(DAY, 47500, { note: 'Short by 2500', entryId: 'GATE-CU-OK-SHORT', shift: 2 })}; ` +
+        `${cardPayment(DAY, 9, 3000)}; ` +
+        `${cashUp('GATE-CU-OK-ADJ', NEXT, 2500, false)}; ` +
+        'insert into cash_session_adjustment (cash_session_id, adjustment_no, trading_date, ' +
+        `amount_fils, reason, journal_entry_id) values (${sessionOf(DAY, 2)}, 1, '${NEXT}'::date, ` +
+        "2500, 'Found under the till', 'GATE-CU-OK-ADJ')",
+    )
+    check(
+      'cash-up gate: a counted drawer, a drop, a posted variance and a dated correction ARE accepted',
+      !accepted.failed,
+      'the control probe was refused, so every cash-up probe above may be passing for the wrong ' +
+        `reason:\n${accepted.output}`,
+    )
+  }
+
+  // The generated columns and the one formula behind them, asserted in SQL rather than through a reader.
+  //
+  // `expected_float_fils` and `discrepancy_fils` both call `cash_session_expected_float_fils()`, because
+  // PostgreSQL forbids a generation expression from referencing another generated column — so the
+  // alternative is two copies of the cash-up formula, and two copies of an arithmetic rule is one
+  // opportunity for them to disagree. Written as a probe that RAISES when a property does not hold, with
+  // its own control below proving the raise can fire.
+  {
+    const raiseIf = (condition, marker) =>
+      `do $$ begin if ${condition} then raise exception '${marker}'; end if; end $$`
+    const properties = psqlProbe(
+      `${SETUP}; ${open(DAY)}; ` +
+        `${raiseIf(
+          `(select expected_float_fils is not null or discrepancy_fils is not null from cash_session ` +
+            `where id = ${sessionOf(DAY)})`,
+          'OPEN-SESSION-HAS-AN-EXPECTATION',
+        )}; ` +
+        `${cashUp('GATE-CU-PROPS', DAY, 2500)}; ` +
+        `${close(DAY, 47500, { note: 'Short', entryId: 'GATE-CU-PROPS', received: 0 })}; ` +
+        `${raiseIf(
+          `(select expected_float_fils <> 50000 or discrepancy_fils <> -2500 from cash_session ` +
+            `where id = ${sessionOf(DAY)})`,
+          'GENERATED-FIGURES-ARE-WRONG',
+        )}; ` +
+        `${raiseIf(
+          'cash_session_expected_float_fils(50000, 20000, 1500, 0, 10000) <> 58500',
+          'FORMULA-IS-WRONG',
+        )}; ` +
+        `${raiseIf(
+          'cash_session_expected_float_fils(50000, null, 0, 0, 0) is not null',
+          'FORMULA-IS-NOT-STRICT',
+        )}`,
+    )
+    check(
+      'cash-up gate: the generated expectation is NULL while open, signed once counted, and STRICT',
+      !properties.failed,
+      'OPEN-SESSION-HAS-AN-EXPECTATION means the formula is not strict at the column, so an uncounted ' +
+        'shift states an expected float; GENERATED-FIGURES-ARE-WRONG means the discrepancy is not ' +
+        'counted minus expected; FORMULA-IS-WRONG means a term is dropped or its sign is flipped; ' +
+        `FORMULA-IS-NOT-STRICT means a coalesce has crept into it:\n${properties.output}`,
+    )
+    // The control for that probe: a `raise` that can never fire is a case that measures nothing, and this
+    // one is written the way round where that is easy to miss.
+    checkRejectedBy(
+      'cash-up gate: the generated-figures probe can actually fire',
+      psqlProbe(
+        `${SETUP}; ${raiseIf('cash_session_expected_float_fils(1, 1, 0, 0, 0) <> 99', 'FORMULA-IS-WRONG')}`,
+      ),
+      'FORMULA-IS-WRONG',
+    )
+  }
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+  const CORE = 'packages/core/src/money/cash-up.ts'
+  const CORE_SUITE = 'packages/core/src/money/cash-up.test.ts'
+  const SERVICE = 'packages/db/src/services/cash-session.ts'
+  const SERVICE_SUITE = 'packages/db/src/services/cash-session.itest.ts'
+  const MAPPING = 'packages/fixtures/src/cash-up.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/cash-up.itest.ts'
+
+  // `cashUpPosting` stops refusing a balanced drawer. The refusal is what makes silent absorption
+  // impossible from the OTHER direction: without it a cash-up can build an entry for a drawer that
+  // balanced, and the only entry it could build is one about some other figure.
+  checkRejectedBy(
+    'cash-up gate: a cashUpPosting that will post for a balanced drawer is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const { discrepancyFils } = input.reconciliation\n  if (discrepancyFils === 0) {',
+          '  const { discrepancyFils } = input.reconciliation\n  if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'DrawerBalances',
+  )
+
+  // The side, flipped. A posting on the wrong side balances just as well and states the opposite of what
+  // happened, so nothing but an assertion on the side catches it — which is why the property test asserts
+  // the SIGNED amount reaching 6140 rather than its magnitude.
+  checkRejectedBy(
+    'cash-up gate: a cash-up that credits 6140 for a SHORT drawer is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const lines: EntryLineDraft[] = short\n    ? [debit(CASH_OVER_SHORT_ACCOUNT, amount, memo), credit(input.drawerAccount, amount, memo)]\n    : [debit(input.drawerAccount, amount, memo), credit(CASH_OVER_SHORT_ACCOUNT, amount, memo)]',
+          '  const lines: EntryLineDraft[] = short\n    ? [debit(input.drawerAccount, amount, memo), credit(CASH_OVER_SHORT_ACCOUNT, amount, memo)]\n    : [debit(CASH_OVER_SHORT_ACCOUNT, amount, memo), credit(input.drawerAccount, amount, memo)]',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'cash-up',
+  )
+
+  // The change given, dropped from the expectation. This is the figure 0068 created a second column for —
+  // "a drawer is counted against the notes that went in and the notes that came out" — and dropping it
+  // makes every over-tendered sale read as cash the till never kept.
+  checkRejectedBy(
+    'cash-up gate: an expected float that ignores the change handed back is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    takings.cashReceivedFils -\n    takings.changeGivenFils -\n    takings.cashRefundedFils -',
+          '    takings.cashReceivedFils -\n    takings.cashRefundedFils -',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'expectedFloat',
+  )
+
+  // `reconcileDrawer` treats "nobody counted" as a count of zero. A zero count is an empty drawer, which
+  // is a fact; no count at all is the absence of one, and conflating them reports the whole float as
+  // missing on a shift nobody has counted yet.
+  checkRejectedBy(
+    'cash-up gate: a reconcileDrawer that reads an absent count as zero is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (counted === undefined) {\n    throw new CountRequired(context.drawerCode, context.businessDay)\n  }',
+          '  if (counted === undefined) {\n    counted = money(filsFrom(0))\n  }',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    // The assertion's own name, because the mutation makes the throw NOT happen: vitest prints
+    // "expected function to throw an error, but it didn't" and never the class name. Asserting on
+    // `CountRequired` here reported the gate as not firing when it had (ADR 0003's point, from the
+    // other side).
+    'refuses a close with no counted amount',
+  )
+
+  // `readDrawerTakings` sums the NET tender instead of the two figures. `applied_fils` is
+  // `amount_fils - change_given_fils`, so the expectation still comes out right — and the cash-up sheet
+  // can no longer be checked against the till roll in either direction, which is exactly what 0068
+  // separated the two columns to make possible.
+  checkRejectedBy(
+    'cash-up gate: a takings reader that nets the change into the takings is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(
+          text,
+          'sum(p.amount_fils)::bigint       as received_fils,',
+          'sum(p.applied_fils)::bigint      as received_fils,',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'notes that went in and the notes that came out',
+  )
+
+  // `closeCashSession` stops checking that the cash-up entry is dated on the session's business day. The
+  // database refuses it too (ZU004, above), but at COMMIT and with no idea which date it should have been
+  // — and the whole reason the service checks first is that a caller can act on the answer.
+  checkRejectedBy(
+    'cash-up gate: a close that accepts a cash-up dated on another business day is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (input.posting.entryDate !== existing.tradingDate) {',
+          'if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    // The SERVICE's own wording, and the itest asserts on that rather than on the shared phrase: ZU004's
+    // message also says "posts on that business day", so with the service check removed the database
+    // refused the same close and the suite stayed green. The gate was reporting a pass over a check that
+    // had been deleted.
+    'A cash-up entry for business day',
+  )
+
+  // The MAPPING drops the posting. The two halves compile against nothing — `packages/db` may not import
+  // `packages/core`, so core's entry is a structural mirror and a mapping that silently omitted it is
+  // invisible to both halves' own suites. Only the pair can see it, and what it would produce in
+  // production is a closed drawer whose variance reached no account.
+  checkRejectedBy(
+    'cash-up gate: a mapping that drops the variance posting is caught by the pair',
+    withEditedFile(
+      MAPPING,
+      (text) =>
+        replaceOnce(
+          text,
+          '      ...(posting === undefined ? {} : { posting: toEntryInput(posting) }),',
+          '      ...(posting === undefined ? {} : {}),',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(PAIR_SUITE)),
+    ),
+    'reconciliation that can absorb a variance is not a reconciliation',
+  )
+
+  // The controls for the seven source edits: all three suites pass unedited. Without this, an anchor gone
+  // stale or a suite that had stopped running would make every one of them report a pass.
+  {
+    const core = run('pnpm', unitRun(CORE_SUITE))
+    const service = run('pnpm', itestRun(SERVICE_SUITE))
+    const pair = run('pnpm', itestRun(PAIR_SUITE))
+    check(
+      'the cash-up suites pass unedited',
+      !core.failed && !service.failed && !pair.failed,
+      `core suite ${core.failed ? 'FAILED' : 'passed'}, service suite ` +
+        `${service.failed ? 'FAILED' : 'passed'}, pair suite ${pair.failed ? 'FAILED' : 'passed'}:\n` +
+        `${core.output}\n${service.output}\n${pair.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
