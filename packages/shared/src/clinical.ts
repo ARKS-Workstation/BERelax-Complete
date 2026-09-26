@@ -69,3 +69,117 @@ export const CLINICAL_OPEN_QUESTIONS = {
   residency: 'Y5-residency',
   licence: 'Y1-licence',
 } as const
+
+// ------------------------------------------------------------------------------------------------
+// The boolean-only crossing (C-CRM-09)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * The closed set of contraindication flags — the ONLY thing permitted to leave the clinical boundary.
+ *
+ * Here in `@berelax/shared` rather than in `@berelax/core` for the reason the three settings above are
+ * here: four packages that may not import one another need the key set. `@berelax/core` derives the flags,
+ * `@berelax/clinical` writes the row, `@berelax/db` reads the public view over the application credential,
+ * and `apps/web` renders them. Core cannot hold it, because `packages/db` may never import core (brief
+ * rule 4) and the reader of the crossing is a db repository — which is the whole point: the booking layer
+ * reads booleans out of a view and imports nothing from the clinical package at all.
+ *
+ * **Adding a key is a migration plus a template version, never a free-text field.** A flag is a column of
+ * `clinical.contraindication_flag` and a column of `public.customer_contraindication_flags`, and it can
+ * only ever be derived from a question a template actually asked. There is deliberately no "other" key and
+ * no `notes` companion: an open-ended flag is a free-text field with a boolean's name, and the first thing
+ * anybody would put in it is the thing this boundary exists to keep in.
+ *
+ * ## Why `requires_consultation` and not `practitioner_review_required`
+ *
+ * The manifest's provisional set named the eighth key `practitioner_review_required`. It is
+ * `requires_consultation` for two independent reasons, and either alone would decide it.
+ *
+ * The committed schema already has the column: migration 0008 created
+ * `clinical.contraindication_flag.requires_consultation` and 0009's view exposes it. Renaming it would be a
+ * migration whose only product is a synonym.
+ *
+ * And `Y1-licence` is open. It decides the permitted public vocabulary and the permitted staff titles, and
+ * unconfirmed resolves to the NARROWER reading — commercial wellness. `practitioner` is in
+ * `PROVIDER_TITLES` (`packages/core/src/compliance/lexicon.ts`) and is not in the seeded
+ * `regulatory_profile.permitted_public_titles` (`['Therapist','Senior Therapist','Spa Therapist']`, 0004),
+ * so a label built on that word is refused by `unpermitted_staff_title` — asserted, with a control, in
+ * `packages/core/src/clinical/contraindication-flags.test.ts`. Being wrong this way costs a reworded label;
+ * being wrong the other way is a staff title this business may not be licensed to use, printed beside a
+ * health marker.
+ *
+ * **What widens if the owner answers `healthcare`:** `permitted_public_titles` gains the clinical titles
+ * and `CONTRAINDICATION_FLAG_LABELS` may then name who reviews. The KEY does not change — a database column
+ * is not copy, and a synonym migration is not a licence classification.
+ */
+export const CONTRAINDICATION_FLAG_KEYS = [
+  'pregnancy',
+  'recent_surgery',
+  'cardiovascular',
+  'skin_condition',
+  'allergy_present',
+  'blood_thinners',
+  'acute_injury',
+  'requires_consultation',
+] as const
+
+export type ContraindicationFlagKey = (typeof CONTRAINDICATION_FLAG_KEYS)[number]
+
+/**
+ * The crossing. Booleans keyed by the closed set, and nothing else.
+ *
+ * No customer id, no instant, no count, no derivation version, no free text. Each of those is a value that
+ * would be true to add and wrong to carry here: an id belongs to the row this was read for, an instant says
+ * when somebody filled in a health form, and a count of set flags is a measure of how ill somebody is. What
+ * the booking layer needs is whether to route or to ask, and that is eight booleans.
+ *
+ * **`false` means "not affirmed by an answer on record". It never means "ruled out".** A template that does
+ * not ask about blood thinners produces `blood_thinners: false`, because the crossing has no third state and
+ * inventing an affirmative from silence would be inventing a clinical fact. The screens say so in words, and
+ * `deriveContraindicationFlags` reports the undetermined answers separately — inside the boundary, where
+ * they can be acted on.
+ */
+export type ContraindicationFlagSet = Readonly<Record<ContraindicationFlagKey, boolean>>
+
+/**
+ * The runtime shape of the crossing, written out key by key ON PURPOSE.
+ *
+ * A schema built by mapping over {@link CONTRAINDICATION_FLAG_KEYS} could not disagree with the key set, so
+ * the introspection test asserting they are equal would be vacuous (brief rule 3). Written literally, the
+ * test is a real one: it walks `.shape`, asserts every entry is a `ZodBoolean` and asserts the key set
+ * equals the committed enum, so a ninth field — of any type — fails, and so does a key spelled differently
+ * here from the way the enum spells it.
+ *
+ * `strictObject`, so an unknown key is an error rather than a value that is stripped and forgotten. A
+ * stripped key is exactly how a `notes` field reaches a caller that logs whatever it was handed.
+ */
+export const contraindicationFlagSetSchema = z.strictObject({
+  pregnancy: z.boolean(),
+  recent_surgery: z.boolean(),
+  cardiovascular: z.boolean(),
+  skin_condition: z.boolean(),
+  allergy_present: z.boolean(),
+  blood_thinners: z.boolean(),
+  acute_injury: z.boolean(),
+  requires_consultation: z.boolean(),
+})
+
+/**
+ * The one flag that means "a human has to look", rather than naming a condition.
+ *
+ * Named as a constant because two rules turn on it and neither may spell it: an answer the derivation
+ * cannot read sets THIS flag rather than the specific one, and migration 0084 holds the same rule as a
+ * CHECK (`undetermined_count = 0 or requires_consultation`). Three spellings of it would be three rules.
+ */
+export const CONTRAINDICATION_ESCALATION_FLAG =
+  'requires_consultation' as const satisfies ContraindicationFlagKey
+
+/**
+ * The version of the DERIVATION, not of the template and not of the schema.
+ *
+ * Stored on every flag row so a stale set is detectable rather than silently used. It is bumped when the
+ * rules change what the same answers would produce — a new key, a changed field mapping, a changed reading
+ * of a missing answer. It is NOT bumped when a template changes: that is what `source_template_version`
+ * records, and conflating the two would make every reword look like a code change.
+ */
+export const CONTRAINDICATION_DERIVATION_VERSION = 1

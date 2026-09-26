@@ -39,6 +39,13 @@ export {
   type SealedPayload,
   seal,
 } from './envelope.ts'
+export {
+  type ContraindicationWriteResult,
+  contraindicationFreshness,
+  storedContraindicationFlags,
+  storedFlagProvenance,
+  writeContraindicationFlags,
+} from './flags-view.ts'
 export type {
   ClinicalErrorSink,
   ClinicalLogFields,
@@ -53,6 +60,8 @@ export {
   type ClinicalIntakeStore,
   type ClinicalStoreDeps,
   createClinicalIntakeStore,
+  type DerivedFlagsResult,
+  type DeriveFlagsInput,
   type GrantStepUpInput,
   type IntakeReadResult,
   type PublishedTemplate,

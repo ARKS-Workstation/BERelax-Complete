@@ -172,12 +172,31 @@ module.exports = {
         'here would only ever be the shape of a field somebody intends to interpolate. ' +
         'The known-bad fixture is in scripts/test-gates.mjs and asserts this rule fires BY NAME, from ' +
         'packages/google/src/reviews — where no other rule forbids clinical, so the fixture proves this ' +
-        'rule rather than an older one shadowing it.',
+        'rule rather than an older one shadowing it. ' +
+        'WIDENED BY C-CRM-09 to name packages/core/src/clinical/, and the argument is a gap the other ' +
+        'three entries cannot close. C-CRM-08 considered this and left it, reasoning that the real ' +
+        'protection is that decrypting needs the KEK and the store — which is true of DATA and is not ' +
+        'what this rule is for: the rule closes the IMPORT PATH, and every path it named crosses a package ' +
+        'boundary. packages/core/src/reviews/ and packages/core/src/clinical/ are sibling directories of ' +
+        'ONE package, so `import { deriveContraindicationFlags } from "../clinical/..."` needs no entry in ' +
+        'any package.json, is invisible to pnpm deps, and would have been the shortest edit in the ' +
+        'repository. What it reaches is not incidental either: renderSubmission takes a decrypted answer ' +
+        'map and labels it with the questions a client was asked, and deriveContraindicationFlags takes ' +
+        'the same map — a prompt builder importing either has a payload in hand, which is the only reason ' +
+        'to import them. Type-only is not exempted here for the reason it is not exempted above: ' +
+        'ContraindicationFlagSet and RenderedAnswer are the shapes of fields somebody intends to ' +
+        'interpolate. What is NOT forbidden is @berelax/shared, which holds the flag KEY SET (a closed list ' +
+        'of eight column names, and the negative half of the manage-booking allowlist derives from it) — ' +
+        'banning it would ban the package every package may import. The known-bad fixture for this entry is ' +
+        'in scripts/test-boundaries.mjs, because a relative import inside one package is what has to be ' +
+        'seen to fire and a fixture importing @berelax/core would resolve to core/src/index.ts and match ' +
+        'nothing.',
       severity: 'error',
       from: { path: '^(packages/core/src/reviews/|packages/google/src/reviews/)' },
       to: {
         path: [
           '^packages/clinical/',
+          '^packages/core/src/clinical/',
           '^packages/db/src/repositories/[^/]*(intake|clinical)',
           '^packages/db/src/schema/[^/]*(intake|clinical)',
         ],

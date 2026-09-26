@@ -123,19 +123,43 @@ export const kekVersion = clinicalSchema.table('kek_version', {
   retiredAt: timestamp('retired_at', { withTimezone: true }),
 })
 
-/** The only shape permitted to cross the boundary. Booleans, no detail, no diagnosis. */
-export const contraindicationFlag = clinicalSchema.table('contraindication_flag', {
-  customerId: uuid('customer_id').primaryKey(),
-  pregnancy: boolean('pregnancy').notNull(),
-  recentSurgery: boolean('recent_surgery').notNull(),
-  cardiovascular: boolean('cardiovascular').notNull(),
-  skinCondition: boolean('skin_condition').notNull(),
-  requiresConsultation: boolean('requires_consultation').notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
-  sourceSubmissionId: uuid('source_submission_id')
-    .notNull()
-    .references(() => intakeSubmission.id),
-})
+/**
+ * The only shape permitted to cross the boundary. Booleans, no detail, no diagnosis.
+ *
+ * The closed set is eight keys (`CONTRAINDICATION_FLAG_KEYS`), and migration 0084 added the three it was
+ * missing. The three non-boolean columns are NOT part of the crossing and are deliberately absent from
+ * `public.customer_contraindication_flags`: `derivation_version` and `source_template_version` are the
+ * provenance a staleness verdict is computed from, and `undetermined_count` is how many answers the
+ * derivation refused to interpret — a count of anything about somebody's answers is more than a boolean, so
+ * it stays behind the boundary and its only consumers are 0084's CHECK and an audit row.
+ */
+export const contraindicationFlag = clinicalSchema.table(
+  'contraindication_flag',
+  {
+    customerId: uuid('customer_id').primaryKey(),
+    pregnancy: boolean('pregnancy').notNull(),
+    recentSurgery: boolean('recent_surgery').notNull(),
+    cardiovascular: boolean('cardiovascular').notNull(),
+    skinCondition: boolean('skin_condition').notNull(),
+    allergyPresent: boolean('allergy_present').notNull(),
+    bloodThinners: boolean('blood_thinners').notNull(),
+    acuteInjury: boolean('acute_injury').notNull(),
+    requiresConsultation: boolean('requires_consultation').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+    sourceSubmissionId: uuid('source_submission_id')
+      .notNull()
+      .references(() => intakeSubmission.id),
+    /** Which version of the DERIVATION produced this row. 0 means "before the derivation existed". */
+    derivationVersion: integer('derivation_version').notNull(),
+    /** The template version the source submission was captured under. Tied to it by 0084's ZA001. */
+    sourceTemplateVersion: integer('source_template_version').notNull(),
+    /** Answers the derivation would not interpret. Non-zero implies `requiresConsultation` (0084). */
+    undeterminedCount: integer('undetermined_count').notNull(),
+  },
+  (t) => [
+    index('contraindication_flag_stale_idx').on(t.derivationVersion, t.sourceTemplateVersion),
+  ],
+)
 
 export const treatmentConsent = clinicalSchema.table(
   'treatment_consent',

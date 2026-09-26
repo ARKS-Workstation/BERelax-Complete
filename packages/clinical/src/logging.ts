@@ -54,6 +54,21 @@ export interface ClinicalLogFields {
   readonly dataOrigin?: string
   readonly ciphertextBytes?: number
   readonly outcome?: 'stored' | 'read' | 'refused'
+  /**
+   * The contraindication derivation's three fields (C-CRM-09). Each one is a number or a boolean about
+   * the DERIVATION, never about the client.
+   *
+   * `undeterminedCount` is how many flags the captured version asked about and whose answer the derivation
+   * would not interpret — a measure of how readable the form was. `flagsChanged` says whether a
+   * re-derivation moved anything, which is the difference between a sweep and a real change.
+   *
+   * Deliberately absent: the flag set itself, and a count of how many flags are SET. The first is the
+   * crossing and belongs on a screen behind a permission, not in a log aggregator for as long as the
+   * retention says; the second is a measure of how ill somebody is, which is worse than either.
+   */
+  readonly undeterminedCount?: number
+  readonly derivationVersion?: number
+  readonly flagsChanged?: boolean
 }
 
 export interface ClinicalLogLine {
