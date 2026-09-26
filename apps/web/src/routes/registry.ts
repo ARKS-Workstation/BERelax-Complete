@@ -538,6 +538,29 @@ export const ROUTES = [
       'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-rota',
+    path: '/hr/rota',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-06s rota screen: which version is published for a period, what the current draft would be ' +
+      'refused for, which segments the floor is short in, and what the roster would cost. A handler ' +
+      'answering text/html rather than a document, for the reason the two HR screens beside it give: a ' +
+      'document must be served in both locales, which would need an Arabic admin document and the ' +
+      'W-SYS-01 shell, and would join a screenshot matrix whose RTL half has to be a real Arabic route. ' +
+      'READ-ONLY on purpose — publishing is a write with an actor, there is no admin session until ' +
+      'W-SYS-01, and rota_version_published_by_not_placeholder refuses a placeholder rather than taking ' +
+      'one. It names no therapist: a coverage shortfall is a claim about a NUMBER on the floor, and ' +
+      'nineteen employees have no name recorded (ADR 0020). Dynamic because the answer is a claim about ' +
+      'which day it is and about a draft that is rewritten freely, so a prerendered copy would show a ' +
+      'rota somebody had already changed. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it ' +
+      'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+  },
+  {
     id: 'journal',
     path: '/journal',
     kind: 'document',

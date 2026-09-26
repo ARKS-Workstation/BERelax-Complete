@@ -853,6 +853,37 @@ export {
   recordRoutingVerdict,
 } from './repositories/reviews.ts'
 export {
+  type LabourCostRuleRow,
+  type PublishedRota,
+  type PublishRotaArgs,
+  publishRota,
+  ROTA_PUBLISHED_TEMPLATE_KEY,
+  type RotaAssignmentToPublish,
+  type RotaChangeRequestArgs,
+  type RotaChangeRequestResult,
+  type RotaCoverageRuleRow,
+  type RotaPublicationNoticeRow,
+  type RotaTherapistRow,
+  type RotaVerdict,
+  type RotaVersionAssignmentRow,
+  type RotaVersionRow,
+  readCurrentRotaVersion,
+  readLabourCostRules,
+  readRotaCoverageRules,
+  readRotaPublicationNotices,
+  readRotaTherapists,
+  readRotaVersionAssignments,
+  readTradingDayWindows,
+  readTreatmentLoads,
+  readWetRoomBookableWindows,
+  readWetRoomSkills,
+  recordRotaChangeRequest,
+  rotaAssignmentDigest,
+  type TradingDayWindowRow,
+  type TreatmentLoadRow,
+  type WetRoomWindowRow,
+} from './repositories/rota.ts'
+export {
   buildScheduledSteps,
   type ClaimedStep,
   claimScheduledStep,
@@ -2016,6 +2047,60 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // into the switched-off one. `ZW002` refuses an UPDATE that re-dates or un-counts a send, for every role
 // including the owner; `contact_customer_id` stays writable, because the merge re-points it.
 //
+// 81 is 0081_hr_rota_version.sql: rota publishing — the immutable published version, the versioned
+// coverage and fatigue thresholds, the wage divisor a forecast needs, the swap and claim record, and the
+// per-employee publication notice (P-HR-06). Six tables, and the decision that shapes all of them is the
+// one 0059 and 0066 already took for their own figures, taken again rather than by analogy: a rota is asked
+// about the PAST. "Was the floor covered on the 4th of March?" is a question about a rota published months
+// ago, and raising the floor minimum in April must not make March's rota retroactively non-compliant —
+// which one `app_setting` value cannot express, and `app_setting_history` read as a rule table is a rule
+// table nobody meant to build. So `rota_coverage_rule` and `labour_cost_rule` are VERSIONED rows keyed on
+// the first trading date each governs, and `rota_version` names all three rule versions that judged and
+// priced it, so the record is "this rota satisfied THESE thresholds" rather than "this rota was valid" —
+// and only the first stays true. `labour_cost_rule` is separate from 0059's table rather than two more
+// columns on it because the divisor answers a different question from the multipliers and will be answered
+// by a different person: a column added from here would mean confirming Y9-overtime also restated a divisor
+// nobody asked about. There is NO status column and no draft version row, which is 0030's decision rather
+// than a simplification — the draft already exists as `shift` plus `shift_assignment`, which 0030 says "is
+// rewritten", so a draft version row would be a second draft for the two to disagree about. Supersession is
+// therefore forward-only: the new row carries `supersedes_id`, `unique (supersedes_id)` makes a concurrent
+// double-publish a database error instead of two rival current rotas, and "the current version" is the row
+// nothing points at. An OPEN SHIFT needs no table at all: it is a `shift` row with no `shift_assignment`
+// row, which is what 0030 made two tables FOR, and a `rota_open_shift` flag would be a second way to say
+// the same thing for somebody to forget to clear. `rota_version_assignment` SNAPSHOTS the employee, the
+// trading date and the period rather than referencing `shift_assignment`, because that table's `shift_id`
+// is ON DELETE CASCADE and a published rota that lost rows when a draft shift was deleted would not be
+// immutable — which is the one claim it exists to make. And every reference OUT of the four immutable tables
+// to a parent anybody legitimately deletes is a PLAIN COLUMN rather than a foreign key — `trading_date`, the
+// three rule `effective_from` dates and both `shift_id` columns — under one principle stated in the
+// migration's header: an immutable row records what was true and holds nothing else hostage. Both referential
+// actions fail here for the same underlying reason and both were found by ANOTHER unit's suite. ON DELETE SET
+// NULL arrives as an UPDATE, which these tables refuse for every role, so a `source_shift_id` reference made
+// `delete from shift` impossible and the draft roster 0030 exists to let anybody rewrite could never be
+// rewritten again; ON DELETE RESTRICT pins the parent for ever, because nothing here can be deleted to
+// release it, so a reference to `business_day` stopped `generateBusinessDays` removing a date that had
+// stopped trading (eleven cases in `business-days.itest.ts`) and one to `working_hours_rule` stopped P-HR-05's
+// suite emptying the rate table in a probe to prove its reader throws rather than inventing rates. 0077
+// recorded the first half for `pipeline_stage_transition.customer_id`; the second half is 0081's contribution
+// to the same lesson. `employee_id` IS still a reference, because 0030 already decided that deleting a person
+// to erase their roster is the delete worth refusing. Two figures in it are deliberately visible rather
+// than convenient: `forecast_unpriced_employees`, because an employee with no wage contributes nothing to a
+// sum and a forecast over the nineteen seeded therapists (every one of whom has `basic_wage_fils` null) is
+// 0 fils and reads as a free rota; and `rota_coverage_rule.high_intensity_treatment_codes`, seeded EMPTY,
+// because Y9-coverage says "max 4 of them deep-tissue" and no service in the catalogue is recorded as heavy
+// work — 0004 refuses "Therapeutic Deep Tissue" as a CLAIM — so a list here would be a guess
+// indistinguishable from a decision (brief rule 15). The sub-cap is therefore inert and says so, which is
+// the visible error rather than the invisible one. `rota_publication_notice` is one row per assigned
+// EMPLOYEE per version, unique on the pair, and its outcome today is `skipped` with
+// `no_recipient_on_file`: nothing in this build holds a staff phone or email, and 0075 had to record the
+// same gap for the Google re-auth ladder. `ZW001` (published rota immutable), `ZW002` (change request
+// append-only), `ZW003` (an unchanged re-publish, refused at COMMIT by a deferred constraint trigger, which
+// is how "re-publishing an unchanged version emits no notification" is a property of the database rather
+// than of whichever caller remembered to compare), `ZW004` (notice append-only) and `ZW005` (a version that
+// does not follow the one it supersedes) are its private SQLSTATEs; `ZW` rather than a mnemonic letter
+// because the mnemonic ones are taken (`ZR` is the reschedule's, `ZS` the session's) and what a private code
+// has to be is unique to one file, not memorable — 0077's reasoning verbatim.
+//
 // 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
 // branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
 // C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
@@ -2042,4 +2127,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 80 as const
+export const SCHEMA_VERSION = 81 as const

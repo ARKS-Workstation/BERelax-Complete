@@ -29361,6 +29361,272 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 }
+// 108a-108n. (P-HR-06) The rota validator: every rule shown to fire, and every rule shown to be about the
+//            thing it says it is about.
+//
+//            A validator is a pile of refusals, so ADR 0003 applies to it harder than to anything else in
+//            this file: a refusal that fires for the wrong reason is indistinguishable from one that fires
+//            for the right reason, and a suite asserting only "it was refused" passes over both. Every case
+//            here therefore mutates ONE rule and names the ONE test that has to notice — not "the validator
+//            suite fails", which would be satisfied by any of forty-eight cases going red.
+//
+//            The mutations are chosen to be the ones somebody would actually write, and most of them leave
+//            every other assertion in the repository green:
+//
+//              * `contains` relaxed to `overlaps` (108a) makes one therapist present for one minute of each
+//                segment cover the whole day. The rota still validates, the screen still draws, and the
+//                floor is empty for twenty-nine minutes in thirty.
+//              * presence counted by INSTANT instead of by trading date (108b) is the version a reader
+//                would call more correct — the therapist IS on the floor — and it passes a rota whose cover
+//                `readEligibleTherapists` cannot find, so the booking system will not serve a treatment in a
+//                segment the rota says is covered.
+//              * a rate computed per minute and then multiplied (108i) is the natural way to write the
+//                forecast and is what ADR 0007 forbids. It agrees with exact arithmetic on 19,951 of 20,000
+//                realistic cases, which is why the property suite's generator is weighted and its drift
+//                census is counted rather than hoped for.
+//
+//            **108k and 108l run the integration suite and need a database.** They are the two claims the
+//            pure suites cannot make — that `publishRota` refuses a rota the validator refused, and that a
+//            notice is written per EMPLOYEE rather than per shift — and both are about the write path.
+//            Neither mutates anything the built web application serves, so 104's warning about browser
+//            suites does not apply: `hr-rota.itest.ts` imports the sources directly.
+{
+  const VALIDATOR = 'packages/core/src/hr/rota-validator.ts'
+  const COST = 'packages/core/src/hr/labour-cost.ts'
+  const REPO = 'packages/db/src/repositories/rota.ts'
+  const MIGRATION = 'packages/db/migrations/0081_hr_rota_version.sql'
+
+  const RULES_SUITE = 'packages/core/src/hr/rota-validator.test.ts'
+  const COST_SUITE = 'packages/core/src/hr/labour-cost.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/hr/labour-cost.property.test.ts'
+  const SCAN_SUITE = 'packages/fixtures/src/hr-rota.test.ts'
+  const ROWS_SUITE = 'packages/fixtures/src/hr-rota.itest.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const rotaMutant = (path, anchor, replacement, suite, runner = unit) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 108a. Coverage by OVERLAP instead of containment. A therapist present for one minute of a segment then
+  //       counts for all of it, so one person on a fifteen-minute shift covers a thirty-minute segment and
+  //       a rota needing two passes with one. Nothing else in the repository changes.
+  checkRejectedBy(
+    'rota gate: coverage counted by overlap rather than by whole-segment presence is caught',
+    rotaMutant(
+      VALIDATOR,
+      '      if (!present.some((presence) => contains(presence, segment.period))) continue',
+      '      if (!present.some((presence) => overlaps(presence, segment.period))) continue',
+      RULES_SUITE,
+    ),
+    'counts a therapist only in the segments their presence covers WHOLLY',
+  )
+
+  // 108b. Presence counted by INSTANT rather than by the trading date the shift is FILED under. The version
+  //       a reader would call more correct, and it passes a rota whose cover the solver cannot find:
+  //       `readEligibleTherapists` joins `shift` on `trading_date` (0030), so a shift filed under the wrong
+  //       date offers no candidate of the date it physically covers.
+  checkRejectedBy(
+    'rota gate: cover counted by instant rather than by the shift’s own trading date is caught',
+    rotaMutant(
+      VALIDATOR,
+      '      const present = presences.get(dayKey(therapist.employeeId, day.tradingDate))',
+      '      const present = [...presences.entries()]\n' +
+        '        .filter(([key]) => key.startsWith(`${therapist.employeeId}\\u0000`))\n' +
+        '        .flatMap(([, periods]) => periods)',
+      RULES_SUITE,
+    ),
+    'does not count a shift filed under another trading date, even when it physically overlaps',
+  )
+
+  // 108c. A segment labelled by the CALENDAR date of its own instants rather than by the trading date.
+  //       This is the defect the whole unit is written against, in the one place it is invisible: the grid
+  //       still has thirty segments, the counts are still right, and the four segments after midnight are
+  //       filed under tomorrow — so "was the floor covered on the 4th?" answers about two different days.
+  //
+  //       The first version of this case stopped the walk at the last whole step instead, and it proved
+  //       NOTHING: 11:00-02:00 is exactly thirty 30-minute steps, so the mutation changed no output and the
+  //       suite passed. The gate run is what found that, which is the only thing that could have.
+  checkRejectedBy(
+    'rota gate: a segment labelled by its calendar date rather than its trading date is caught',
+    rotaMutant(
+      VALIDATOR,
+      '      label: `${day.tradingDate} ${localTimeOf(startsAt, zone)}-${localTimeOf(endsAt, zone)}`,',
+      '      label: `${toLocal(startsAt, zone).date} ${localTimeOf(startsAt, zone)}-${localTimeOf(endsAt, zone)}`,',
+      RULES_SUITE,
+    ),
+    'names the post-midnight segments against the PREVIOUS trading date',
+  )
+
+  // 108d. Wet-room bookability by CONTAINMENT instead of overlap. Ten minutes of bookable wet room inside a
+  //       thirty-minute segment then demands nobody, which is the looser direction — and a bath booked in
+  //       those ten minutes is a bath nobody on the floor can run.
+  checkRejectedBy(
+    'rota gate: wet-room cover demanded only for segments wholly inside a bookable window is caught',
+    rotaMutant(
+      VALIDATOR,
+      '    const isWetRoomBookable = day.wetRoomBookableDuring.some((window) =>\n      overlaps(window, segment.period),\n    )',
+      '    const isWetRoomBookable = day.wetRoomBookableDuring.some((window) =>\n      contains(window, segment.period),\n    )',
+      RULES_SUITE,
+    ),
+    'demands cover for a segment the wet room is bookable in for only part of',
+  )
+
+  // 108e. The empty-skill-set guard removed. Every therapist becomes incapable, so every segment the wet
+  //       room is bookable in is refused and the refusal NAMES THE SEGMENT while the cause is an argument
+  //       nobody filled in. A rule firing for the wrong reason, which is worse than one that does not fire.
+  checkRejectedBy(
+    'rota gate: a wet-room rule that fires because no skill was supplied is caught',
+    rotaMutant(
+      VALIDATOR,
+      '  if (\n    rules.minimumWetRoomCapable > 0 &&\n    day.wetRoomBookableDuring.length > 0 &&\n    wetSkills.size === 0\n  ) {',
+      '  if (false) {',
+      RULES_SUITE,
+    ),
+    'refuses the CALL when the wet room is bookable and no wet-room skill was supplied at all',
+  )
+
+  // 108f. The daily treatment cap comparing `>=`. A rota exactly at the cap is then refused, which is a
+  //       different rule from the one Y9-coverage states — six treatment-hours a day, not five and a half.
+  checkRejectedBy(
+    'rota gate: a treatment cap that refuses a rota exactly at the cap is caught',
+    rotaMutant(
+      VALIDATOR,
+      '    if (total > rules.treatmentMinutesCapPerDay) {',
+      '    if (total >= rules.treatmentMinutesCapPerDay) {',
+      RULES_SUITE,
+    ),
+    'passes at exactly the cap and refuses one minute past it',
+  )
+
+  // 108g. The high-intensity sub-cap reporting the TOTAL cap's rule name. Both rules still fire on the right
+  //       rotas and `rota_change_request.refused_rule` then says the wrong thing, so the therapist is told
+  //       to move six hours of work when the rule they broke is about four. A case asserting only "refused"
+  //       would pass; this one asserts the name.
+  checkRejectedBy(
+    'rota gate: a sub-cap breach reported under the total cap’s rule name is caught',
+    rotaMutant(
+      VALIDATOR,
+      "        rule: 'daily_high_intensity_load_cap',",
+      "        rule: 'daily_treatment_load_cap',",
+      RULES_SUITE,
+    ),
+    'refuses the high-intensity sub-cap by its OWN name, and not as the total cap',
+  )
+
+  // 108h. A SECOND credential implementation spliced in beside the call to P-HR-02's evaluator. The
+  //       behavioural half of the acceptance criterion still passes — the inline version agrees on these
+  //       inputs — and the source scan is what refuses it, which is why the criterion asks for both halves.
+  checkRejectedBy(
+    'rota gate: a second credential implementation in the validator is caught',
+    rotaMutant(
+      VALIDATOR,
+      '    if (verdict.eligible) continue',
+      '    const stillValid = therapist.credentials.every((held) => held.expiresOn === null || held.expiresOn >= shift.tradingDate)\n    if (verdict.eligible && stillValid) continue',
+      SCAN_SUITE,
+    ),
+    'contains no expiry comparison, status literal or window arithmetic of its own',
+  )
+
+  // 108i. The forecast computing a rate per minute and then multiplying — the natural way to write it, and
+  //       the one ADR 0007 forbids. 20.8333 fils a minute has no exact representation, so the product lands
+  //       a hair either side of a whole number and the ceiling is one fil out.
+  //
+  //       The rule named here is the CENSUS's, and that is a measurement rather than a preference. This case
+  //       was first pointed at the `fc.assert` property whose title reads like the acceptance criterion, and
+  //       it FAILED: with the mutation in place, 300 runs of the weighted generator produced no rota whose
+  //       exact quotient sat close enough to a whole number to change a ceiling, so the property passed and
+  //       the deterministic 20,000-case census was the only thing that noticed. Asserting the property's
+  //       name would have been asserting a phrase emitted by a layer that does not do the work — the exact
+  //       failure the brief warns about. The property file's header records the measurement.
+  checkRejectedBy(
+    'rota gate: a labour-cost forecast that computes a float rate first is caught',
+    rotaMutant(
+      COST,
+      '  return Math.floor((numerator + denominator - 1) / denominator)',
+      '  return Math.ceil(((basicWageFils / (rules.monthlyWageDaysDivisor * rules.paidMinutesPerDay)) * weightedMinuteBp) / BASIS_POINTS_PER_UNIT)',
+      PROPERTY_SUITE,
+    ),
+    'catches the rate-first float implementation on a measured number of cases',
+  )
+
+  // 108j. An unrecorded wage treated as zero. Every one of the nineteen seeded employees has
+  //       `basic_wage_fils` null, so this reports the ordinary rota as costing nothing — a free rota, with
+  //       no figure on the screen looking wrong. The most dangerous mutation in this block and the smallest.
+  checkRejectedBy(
+    'rota gate: an unrecorded wage priced as zero rather than reported unpriced is caught',
+    rotaMutant(
+      COST,
+      '    if (basicWageFils === null) {\n      unpriced.add(day.employeeId)',
+      '    if (false) {\n      unpriced.add(day.employeeId)',
+      COST_SUITE,
+    ),
+    'is UNPRICED and named, never counted as zero',
+  )
+
+  // 108k. The verdict gate removed from `publishRota`. A rota the validator refused is then published,
+  //       immutably, and every therapist on it is notified of a roster the business may not lawfully run.
+  //       The write path's own claim, so it needs the database.
+  checkRejectedBy(
+    'rota gate: publishing a rota the validator refused is caught',
+    rotaMutant(REPO, '  if (!args.verdict.isPublishable) {', '  if (false) {', ROWS_SUITE, rows),
+    'refuses to publish a rota whose floor holds nobody able to run the bath, naming the segment',
+  )
+
+  // 108l. One notice per ASSIGNMENT instead of per employee. Somebody rostered on four days of the week is
+  //       then told four times that the week's rota changed, which is how a channel stops being read.
+  //
+  //       The rule named is the CONSTRAINT's, deliberately: the second insert is refused by
+  //       `rota_publication_notice_one_per_employee_per_version`, so the publish throws inside the suite's
+  //       `beforeAll` and no individual test title is ever printed. Asserting a test's name here would have
+  //       asserted a phrase the run cannot emit; the constraint is the layer that refuses, and its name is
+  //       what the output carries. It is also the stronger claim — the database refuses this for every
+  //       caller, not only for a publisher that loops correctly.
+  checkRejectedBy(
+    'rota gate: a staff notice written per shift rather than per employee is caught',
+    rotaMutant(
+      REPO,
+      '    for (const employeeId of employeeIds) {',
+      '    for (const employeeId of args.assignments.map((row) => row.employeeId)) {',
+      ROWS_SUITE,
+      rows,
+    ),
+    'rota_publication_notice_one_per_employee_per_version',
+  )
+
+  // 108m. The canonical form dropping the END of a span. Two rotas differing only in when a shift finishes
+  //       then have the same digest, so shortening every late shift by an hour is an "unchanged" re-publish:
+  //       ZW003 refuses it, no version is created, and nobody is told the rota changed.
+  checkRejectedBy(
+    'rota gate: an assignment digest blind to when a shift ends is caught',
+    rotaMutant(
+      VALIDATOR,
+      '      (row) => `${row.employeeId}|${row.tradingDate}|${String(row.startsAt)}|${String(row.endsAt)}`,',
+      '      (row) => `${row.employeeId}|${row.tradingDate}|${String(row.startsAt)}`,',
+      RULES_SUITE,
+    ),
+    'changes when any one field changes, including the end instant',
+  )
+
+  // 108n. A rule renamed in the migration's enumeration and left alone in `ROTA_RULE_NAMES`. The two lists
+  //       are the contract `rota_change_request.refused_rule` rests on, and nothing but the scan reads the
+  //       SQL comment — so a rename here is invisible to every other check in this repository.
+  checkRejectedBy(
+    'rota gate: a rule name in 0081 that the vocabulary does not have is caught',
+    rotaMutant(
+      MIGRATION,
+      '`daily_high_intensity_load_cap`, `daily_overtime_cap`',
+      '`daily_deep_tissue_load_cap`, `daily_overtime_cap`',
+      SCAN_SUITE,
+    ),
+    'names every rule in 0081, so a refused row can carry any of them',
+  )
+}
 
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
