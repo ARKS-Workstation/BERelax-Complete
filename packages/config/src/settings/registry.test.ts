@@ -215,6 +215,38 @@ describe('validateSetting', () => {
     expect(validateSetting('booking.same_gender_matching', 'advisory')).toBe('advisory')
   })
 
+  it('refuses a frequency cap of zero, which is how the cap gets switched off', () => {
+    // C-AUTO-03. The schema was `min(0)`, which made 0 a value the database could hold — and 0 looks like
+    // the strictest possible setting while being the ambiguous one: in every other `max_` setting anybody
+    // has met, 0 ALSO means "no limit", so a reader that treats it as falsy ("no cap configured, so
+    // allow") turns the strictest value into the switched-off one. Stopping promotional traffic altogether
+    // is the marketing kill switch's job (C-AUTO-05), which says so on its face and records who engaged
+    // it. Migration 0080's `frequency_cap_value_is_a_cap()` refuses the same three spellings in the
+    // database, so the refusal holds for a psql session too.
+    for (const key of [
+      'messaging.frequency_cap_per_week',
+      'messaging.frequency_cap_per_month',
+    ] as const) {
+      expect(() => validateSetting(key, 0), `${key} = 0`).toThrow()
+      expect(() => validateSetting(key, null), `${key} = null`).toThrow()
+      expect(() => validateSetting(key, 'unlimited'), `${key} = "unlimited"`).toThrow()
+      expect(() => validateSetting(key, 2.5), `${key} = 2.5`).toThrow()
+      // The control: a real cap still validates, so the four refusals are about those values and not
+      // about a schema that has stopped accepting anything.
+      expect(validateSetting(key, 1)).toBe(1)
+    }
+    // And the two figures are the provisional ones OPEN-QUESTIONS records under Y9-frequency-cap, both
+    // flagged so they reach the Unconfirmed Assumptions panel.
+    for (const [key, value] of [
+      ['messaging.frequency_cap_per_week', 2],
+      ['messaging.frequency_cap_per_month', 6],
+    ] as const) {
+      const definition = getDefinition(key)
+      expect(definition.defaultValue).toBe(value)
+      expect(definition.provisional?.openQuestionId).toBe('Y9-frequency-cap')
+    }
+  })
+
   it('accepts a valid value and returns it parsed', () => {
     expect(validateSetting('booking.turnaround_minutes_standard', 25)).toBe(25)
     expect(validateSetting('messaging.promotional_window', { startHour: 9, endHour: 20 })).toEqual({

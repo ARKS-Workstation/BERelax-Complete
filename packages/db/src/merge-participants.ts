@@ -122,6 +122,43 @@ export interface MergeParticipant {
 const participant = (p: MergeParticipant): MergeParticipant => Object.freeze(p)
 
 /**
+ * Freezes the registry, refusing a (schema, table, column) registered twice.
+ *
+ * At module load, and throwing, for the reason `define()` in the settings registry throws: a duplicate
+ * entry here is legal TypeScript that breaks every merge the business attempts. `applyMergeParticipant`
+ * takes its counts from the database on both sides of the work, so a table applied twice re-points its
+ * rows on the first pass and moves ZERO on the second — and 0069's
+ * `rows_before_loser = rows_moved + rows_retained_on_loser` is then violated by the second report, which
+ * rolls the whole merge back. The symptom is "merge refused" on every pair, with a constraint name that
+ * says nothing about a duplicated list.
+ *
+ * It has happened: a clean auto-merge of two branches left a duplicate entry in this file, and nothing in
+ * either diff said so — the file is a flat list of near-identical objects and the duplicate reads as one
+ * more table. A module that refuses to load is a far cheaper failure than a merge nobody can perform, and
+ * it fails in `pnpm test` rather than in front of the front desk.
+ */
+function registry(participants: readonly MergeParticipant[]): readonly MergeParticipant[] {
+  const seen = new Set<string>()
+  const duplicated: string[] = []
+  for (const p of participants) {
+    const key = `${p.schema}.${p.table}.${p.column}`
+    if (seen.has(key)) duplicated.push(key)
+    seen.add(key)
+  }
+  if (duplicated.length > 0) {
+    throw new AppError(
+      'invariant_violated',
+      `The merge participant registry declares ${duplicated.join(', ')} more than once. A table applied ` +
+        'twice re-points its rows on the first pass and moves zero on the second, which violates ' +
+        'merge_record_table\u2019s rows_before_loser = rows_moved + rows_retained_on_loser and rolls every ' +
+        'merge back. Remove the duplicate; do not reconcile the counts.',
+      { details: { duplicated, refusal: 'merge_participant_duplicated' } },
+    )
+  }
+  return Object.freeze(participants)
+}
+
+/**
  * Every table a merge acts on, in the order it acts on them.
  *
  * `consent` is deliberately NOT last. The transaction test injects a failure immediately after the
@@ -129,7 +166,7 @@ const participant = (p: MergeParticipant): MergeParticipant => Object.freeze(p)
  * ordering is also the one a reader wants: the profile tables, then the append-only records, then the
  * back-reference that depends on nothing.
  */
-export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
+export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
   participant({
     schema: 'public',
     table: 'booking',
@@ -339,6 +376,41 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
       'The pin (flow_id, definition_version) is immutable (ZF002) and is NOT touched: re-pointing the ' +
       'customer leaves the version this enrolment is governed by exactly where it was.',
     registeredBy: 'C-CRM-06',
+  }),
+  participant({
+    schema: 'public',
+    table: 'frequency_ledger',
+    column: 'contact_customer_id',
+    strategy: 'union_dedupe',
+    // The natural key of a SEND, minus the contact: after the merge both sides ARE the survivor's rows, so
+    // keying on the contact would make every pair of rows look distinct and fold nothing. It is exactly
+    // `frequency_ledger_one_counted_send`, and `assertParticipantKeyIsAUniqueIndex` refuses this
+    // registration if that index's columns ever stop matching.
+    conflictKey: ['send_key'],
+    // The index is PARTIAL on counted rows, so only a COUNTED send can collide. A refusal row re-points
+    // freely — `customer_therapist_do_not_pair`'s lifted-row case, and for the same structural reason: a
+    // row outside the unique index cannot be in conflict with anything and must move.
+    activePredicate: 'counted_at is not null',
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason:
+      'The same send is already counted against the survivor under this natural key, so the loser\u2019s row ' +
+      'is the SAME message recorded twice \u2014 an at-least-once job replayed against a contact id a merge ' +
+      'had already moved. Counted once: moving the second would double a message the rolling cap reads and ' +
+      'silence the contact for a fortnight on the strength of one send, with a support ticket nobody can ' +
+      'answer because the ledger says two sends happened.',
+    why:
+      'A ledger row says this contact was sent a promotional message at this instant, and after a merge ' +
+      'the contact IS the survivor \u2014 so re-pointing it makes nothing untrue and makes the cap read one ' +
+      'person\u2019s real history. The two alternatives are both wrong in a direction somebody pays for. ' +
+      'Left on the tombstone the rows are invisible to the cap, which hands the merged contact a FRESH ' +
+      'ALLOWANCE and turns a merge into a way to message somebody past the cap. Copied the way `consent` ' +
+      'is copied, one message would count twice. `union_dedupe` is the strategy 0069 reserved for this ' +
+      'table and this is the only participant that uses it: mechanically `repoint_update` with a natural ' +
+      'conflict key, and different in what a conflict MEANS \u2014 for a keyed profile table a conflict is a ' +
+      'value discarded, here it is the same event recorded twice and counting it once is the whole point.',
+    registeredBy: 'C-AUTO-03',
   }),
   participant({
     schema: 'public',
