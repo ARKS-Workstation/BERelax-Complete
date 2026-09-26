@@ -8292,12 +8292,149 @@ units:
       function)
     - publish emits one staff notification per assigned employee through a transactional-class template,
       and re-publishing an unchanged version emits none
+    - 'NOTE: the concrete files this list left as placeholders or got wrong. The migration is
+      packages/db/migrations/0081_hr_rota_version.sql (the list said *_hr_rota_version.sql). The web surface
+      is apps/web/app/(admin)/hr/rota/route.ts plus render.ts and NOT page.tsx: registry.ts is in exact
+      bijection with the filesystem and requires every DOCUMENT to be served in both locales, so a page.tsx
+      would need an Arabic admin document W-SYS-01 has not built and would join a screenshot matrix whose
+      RTL half must be a real Arabic route. P-HR-02''s NOTE records that as the arrangement every HR surface
+      takes, and the credentials and reassignment screens beside it are both route handlers. The gate block
+      is // 108a-108n'
+    - 'NOTE: the coverage and fatigue thresholds are VERSIONED rows of rota_coverage_rule (0081) and NOT
+      app_setting values, which is the question the brief asked this unit to answer the same way Y9-overtime
+      and Y9-leave-detail answered it. The reason carries over exactly: a rota is asked about the PAST.
+      "Was the floor covered on the 4th of March?" is a question about a rota published months ago, and
+      raising the floor minimum in April must not make March''s rota retroactively non-compliant - which one
+      current value cannot express. It is SHARPER here than for a pay rate, because a published rota_version
+      is immutable and names the rule version that judged it, so the record is "this rota satisfied THESE
+      thresholds" rather than "this rota was valid", and only the first stays true. Answering Y9-coverage
+      publishes a NEW version and the Unconfirmed Assumptions panel row leaves by that version being
+      confirmed, the shape consent_wording takes'
+    - 'NOTE: the labour-cost forecast needed a figure nobody had answered, and it is a SECOND versioned table
+      rather than two more columns on 0059''s. P-HR-05 stops at weightedMinuteBp because
+      employee.basic_wage_fils is a MONTHLY figure and the monthly-to-hourly divisor is a policy question
+      (Y9-overtime, Y8-staff) - and this unit''s acceptance line demands integer fils, so the divisor has to
+      exist. labour_cost_rule (0081) holds it, versioned, provisional, with the provenance trio: 30 days of
+      480 paid minutes, the MOHRE convention and not a confirmed figure. Separate from working_hours_rule
+      because what an hour of a monthly salary is worth is a different question from what an uplift is and
+      will be answered by a different person: a column added there would mean confirming Y9-overtime also
+      restated a divisor nobody asked about'
+    - 'NOTE: all nineteen seeded employees have basic_wage_fils NULL, so the honest forecast over the seeded
+      roster is 0 fils. An unpriced employee contributes nothing to a sum, so a forecast that treated null as
+      zero would report a free rota with no figure looking wrong. forecastLabourCost therefore returns
+      unpricedEmployeeIds, rota_version carries forecast_unpriced_employees NOT NULL on every row, and the
+      rota screen prints the count beside the total unconditionally. A wage is a fact about a person and the
+      build does not invent one (brief rule 15)'
+    - 'NOTE: Y9-coverage says "max 4 of them deep-tissue" and the catalogue contains NO deep-tissue
+      treatment - 0004''s regulatory profile refuses "Therapeutic Deep Tissue" as a CLAIM on a service name,
+      so no service is recorded as heavy work and nothing in the database says which of the twelve is.
+      rota_coverage_rule.high_intensity_treatment_codes is therefore seeded EMPTY and the 240-minute sub-cap
+      is INERT, which is deliberately not the strictest reading: the strictest would be "every treatment is
+      heavy work", which turns the sub-cap into the real daily cap and refuses rotas nobody was asked about,
+      and the least strict is an invented list. Empty is visibly unanswered (brief rule 15), it refuses
+      nothing, the rule is fully implemented and fully tested in core with its own fixtures, the screen says
+      out loud that the cap cannot fire, and answering Y9-coverage is one row rather than one unit'
+    - 'NOTE: "wet-room-capable" is DERIVED from the catalogue and is not a new therapist_skill value.
+      therapist_skill is (asian_style, arabic_style); 0012 maps morocco_bath_jacuzzi to required_room_type
+      = wet for both styles and ADR 0021 makes style an attribute of the TREATMENT, so "can deliver a
+      wet-room treatment" is exactly "holds the skill a wet-room service requires" - a join, which
+      readWetRoomSkills performs. Adding a wet_room skill instead would invent a training fact about
+      nineteen people nobody has said anything about (brief rule 15, Y12-names). Consequence worth knowing:
+      both styles reach the wet room, so every therapist holding either skill counts as capable and the rule
+      is cheap to satisfy. It is not vacuous - a floor holding only employees with no employee_skill row
+      fails it, which a new joiner is - and the validator takes the capable SET as an argument, so a real
+      capability table the day the owner names the bath-trained therapists changes one read and no rule'
+    - 'NOTE: an OPEN SHIFT needs no table. It is a shift row with no shift_assignment row, which is what 0030
+      made them two tables FOR ("one rostered span, n employees on it", and n = 0 is the span nobody is on
+      yet). A rota_open_shift table would be a second way to say the same thing for somebody to forget to
+      clear. Likewise there is no draft rota_version row and no status column: 0030 says a shift "IS deleted
+      - an unpublished roster is rewritten", so the draft already exists as shift plus shift_assignment and a
+      draft version row would be a second draft for the two to disagree about'
+    - 'NOTE: the largest finding in this unit''s own work, and the principle it produced: AN IMMUTABLE ROW
+      HOLDS NOTHING ELSE HOSTAGE. Every reference out of the four immutable tables to a parent anybody
+      legitimately deletes is now a plain column - trading_date, the three rule effective_from dates and both
+      shift_id columns. Both referential actions fail here for the same underlying reason and BOTH WERE FOUND
+      BY ANOTHER UNIT''S SUITE rather than by reading. ON DELETE SET NULL arrives as an UPDATE, which these
+      tables refuse for every role, so a source_shift_id foreign key made `delete from shift` impossible and
+      the draft roster 0030 exists to let anybody rewrite could never be rewritten again - caught by
+      hr-rota.itest.ts''s own cleanup failing. ON DELETE RESTRICT pins the parent for ever, because nothing
+      here can be deleted to release it: a reference to business_day stopped generateBusinessDays removing a
+      date that had stopped trading (eleven failing cases in business-days.itest.ts) and one to
+      working_hours_rule stopped P-HR-05''s suite emptying the rate table in a probe to prove its reader
+      throws rather than inventing rates. 0077 recorded the first half for
+      pipeline_stage_transition.customer_id; the second half is this unit''s contribution to the same lesson.
+      employee_id IS still a reference, because 0030 already decided that deleting a person to erase their
+      roster is the delete worth refusing. Consequence worth knowing for every later unit: hr-rota.itest.ts
+      leaves rota_version rows behind that CANNOT be cleaned up, by design, so any table it references must
+      tolerate that for ever'
+    - 'NOTE: a second finding of the same shape. A draft may legally hold TWO IDENTICAL spans for one
+      employee (0030: overlapping rows for one employee are one presence), which mergePresences collapses so
+      the validator cannot see it, and rota_version_assignment''s primary key then refuses the publish with
+      "duplicate key value violates ...". publishRota refuses it first, naming the employee and the span,
+      because the constraint''s own message names a key and the thing to fix is a duplicated draft shift'
+    - 'NOTE: a coupling worth knowing, and the direction chosen for it. readWetRoomBookableWindows derives
+      its windows from `rooms` (type wet, is_bookable) minus resource_block, and readWetRoomSkills derives
+      the capable skills from the published catalogue. Archive every wet-room SERVICE and the room stays
+      bookable while the skill set goes empty — and the validator then REFUSES THE CALL rather than the
+      rota, with a message naming the missing argument. That is deliberate: the alternative is for the
+      read to return no windows when nothing wet is sellable, which makes the wet-room rule silently stop
+      firing the day somebody archives a service, and a rule that quietly stops checking is the invisible
+      error this unit is written against. A loud 503 on one admin screen is the visible one. If the owner
+      ever delists the bath and keeps the room, this is the line to revisit'
+    - 'NOTE: the credential rule BLOCKS publication and not only an open-shift claim, and the acceptance
+      list''s own logic forces it: if a claim is refused because the claimant''s licence expired, an
+      assignment must be refused for the same reason or the rule is evaded by writing the assignment
+      directly. Consequence on a fresh database, asserted rather than discovered: employee_document is EMPTY
+      in the seed and six document types are mandatory, so no rota over the seeded therapists publishes
+      until their files exist. That is a true statement about the business''s readiness, and the rota screen
+      prints it'
+    - 'NOTE: the staff notification is a rota_publication_notice row per assigned employee with outcome
+      skipped and no_recipient_on_file, because NOTHING IN THIS BUILD HOLDS A STAFF CONTACT DETAIL -
+      employee has no phone and no email and there is no employee_contact table, and an invented address is
+      brief rule 15 in the one place it would reach a stranger. 0075 recorded the same gap for the Google
+      re-auth ladder and answers it the same way. The row says what was attempted, for whom and against
+      which template (hr.rota_published, transactional, both locales, added to DEFAULT_TEMPLATES) rather
+      than being a no-op reporting success (docs/12 section 1). The other half of the criterion needs no
+      code: an unchanged re-publish creates no rota_version (ZW003, a DEFERRED constraint trigger) and a
+      notice cannot exist without one. Deferred to the unit that adds a staff contact detail: the send'
+    - 'NOTE: measured, and it changed a gate case. Gate 108i splices the natural float implementation (a rate
+      per minute computed first, then multiplied) into the forecast, and the fast-check property whose title
+      reads like the acceptance criterion PASSED - 300 runs of a weighted generator produced no rota whose
+      exact quotient sat close enough to a whole number to change a ceiling. The deterministic 20,000-case
+      census in the same file caught it, 49 cases of 20,000, so the gate asserts the census''s name. The
+      property now also counts how many of its generated lines could have exposed drift at all and asserts a
+      floor, which is brief rule 22 applied to the one claim it was written for'
+    - 'NOTE: scoped out. (1) PUBLISHING FROM THE BROWSER: the rota screen is read-only, because a publish is
+      a write with an actor and there is no admin session until W-SYS-01 -
+      rota_version_published_by_not_placeholder refuses a placeholder rather than taking one. (2) THE SWAP
+      APPROVAL WORKFLOW: rota_change_request has no pending state, because a pending request needs an
+      APPROVER identity that does not exist until W-SYS-01, and the first thing built on a pending row would
+      be a way to approve without one; every request is decided in the transaction that made it. (3) THE
+      PUBLIC-HOLIDAY CALENDAR, which P-HR-05 already deferred to Y9-overtime: premises_closure is a floor and
+      not a calendar, so the holiday flag reaches the validator as an argument and both callers pass false.
+      (4) POINTING THE AVAILABILITY SOLVER AT THE PUBLISHED ROTA: readEligibleTherapists still reads shift,
+      and re-pointing it needs a rule for a trading date no published version covers - B-AVAIL''s, not this
+      unit''s. (5) ATTENDANCE VARIANCE against the published rota, which is P-HR-07''s and is what the
+      immutable version exists to be compared against'
     files:
     - packages/core/src/hr/rota-validator.ts
     - packages/core/src/hr/rota-validator.test.ts
-    - packages/db/migrations/*_hr_rota_version.sql
-    - apps/web/app/(admin)/hr/rota/page.tsx
     - packages/core/src/hr/labour-cost.ts
+    - packages/core/src/hr/labour-cost.test.ts
+    - packages/core/src/hr/labour-cost.property.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0081_hr_rota_version.sql
+    - packages/db/src/schema/hr.ts
+    - packages/db/src/repositories/rota.ts
+    - packages/db/src/settings-store.ts
+    - packages/db/src/index.ts
+    - packages/messaging/src/templates.ts
+    - packages/fixtures/src/hr-rota.test.ts
+    - packages/fixtures/src/hr-rota.itest.ts
+    - apps/web/app/(admin)/hr/rota/route.ts
+    - apps/web/app/(admin)/hr/rota/render.ts
+    - apps/web/src/hr-rota-render.test.ts
+    - apps/web/src/routes/registry.ts
     - scripts/test-gates.mjs
   - id: P-HR-07
     order: 96

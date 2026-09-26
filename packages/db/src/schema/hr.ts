@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
+  bigint,
   boolean,
   check,
   customType,
@@ -20,8 +22,8 @@ import { employee, leaveRequest, staffLanguage } from './staff.ts'
 
 /**
  * Drizzle mirror of the two tables `packages/db/migrations/0050_employee.sql` creates, the one
- * `packages/db/migrations/0059_hr_shift.sql` adds, and the two `packages/db/migrations/0066_hr_leave.sql`
- * adds.
+ * `packages/db/migrations/0059_hr_shift.sql` adds, the two `packages/db/migrations/0066_hr_leave.sql`
+ * adds, and the six `packages/db/migrations/0081_hr_rota_version.sql` adds.
  *
  * The columns 0050 ADDS to `employee` and `employee_document` are in `./staff.ts` beside the rest of
  * those tables, because a mirror is a mirror of a table and not of a migration — splitting one table
@@ -39,6 +41,19 @@ import { employee, leaveRequest, staffLanguage } from './staff.ts'
 /** Ciphertext columns. Same representation as `./google.ts` and migration 0008's clinical payloads. */
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
+})
+
+/**
+ * `tstzrange`, which Drizzle has no built-in column type for.
+ *
+ * Declared here as well as in `./staff.ts`, `./rooms.ts` and `./booking.ts` rather than shared, which is
+ * the convention those three already set: the text form is carried unparsed, so there is nothing for four
+ * copies of five lines to disagree about, and a shared helper that grew a parser would put range
+ * semantics in the ORM layer where a caller could build an inclusive upper bound without noticing. The
+ * database refuses anything but `[)` (`rota_version_assignment_period_half_open`).
+ */
+const tstzrange = customType<{ data: string; driverData: string }>({
+  dataType: () => 'tstzrange',
 })
 
 /**
@@ -482,6 +497,384 @@ export const leaveMovement = pgTable(
     check(
       'leave_movement_created_by_not_placeholder',
       sql`not is_placeholder_text(${t.createdBy})`,
+    ),
+  ],
+)
+
+/**
+ * The versioned coverage and fatigue thresholds (0081).
+ *
+ * Versioned rows and not `app_setting` values, because a rota is asked about the PAST: raising the floor
+ * minimum in April must not make March's published rota retroactively non-compliant, and one current
+ * value cannot say what the threshold was when the rota was published. `rota_version` names the row that
+ * judged it, so the record is "this rota satisfied THESE thresholds" rather than "this rota was valid",
+ * and only the first stays true. 0081's header argues it at length.
+ */
+export const rotaCoverageRule = pgTable(
+  'rota_coverage_rule',
+  {
+    /** The first trading date this version governs. No FK to `business_day`, for 0059's reason. */
+    effectiveFrom: date('effective_from').primaryKey(),
+    /** The grid the floor is counted on. A judgement about how short a gap in cover may be, not a constant. */
+    coverageSegmentMinutes: smallint('coverage_segment_minutes').notNull(),
+    /** Therapists, not employees: a receptionist on shift covers no treatment. */
+    minimumTherapistsOnFloor: smallint('minimum_therapists_on_floor').notNull(),
+    minimumWetRoomCapable: smallint('minimum_wet_room_capable').notNull(),
+    /** TREATMENT minutes, not rostered minutes. The rostered side is `working_hours_rule`'s. */
+    treatmentMinutesCapPerDay: smallint('treatment_minutes_cap_per_day').notNull(),
+    highIntensityMinutesCapPerDay: smallint('high_intensity_minutes_cap_per_day').notNull(),
+    /**
+     * EMPTY in version 1, which makes the sub-cap inert rather than absent. No treatment in the catalogue
+     * is recorded as heavy work and 0004 refuses "Therapeutic Deep Tissue" as a claim, so a list here
+     * would be invented (Y9-coverage, brief rule 15).
+     */
+    highIntensityTreatmentCodes: text('high_intensity_treatment_codes').array().notNull(),
+    isProvisional: boolean('is_provisional').notNull(),
+    provisionalNote: text('provisional_note'),
+    openQuestionId: text('open_question_id'),
+    sourceNote: text('source_note').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check('rota_coverage_rule_floor_minimum_is_positive', sql`${t.minimumTherapistsOnFloor} >= 1`),
+    check(
+      'rota_coverage_rule_wet_minimum_not_above_floor',
+      sql`${t.minimumWetRoomCapable} >= 0
+       and ${t.minimumWetRoomCapable} <= ${t.minimumTherapistsOnFloor}`,
+    ),
+    check(
+      'rota_coverage_rule_treatment_cap_plausible',
+      sql`${t.treatmentMinutesCapPerDay} > 0 and ${t.treatmentMinutesCapPerDay} <= 1440`,
+    ),
+    // A sub-cap above the total cap could never fire, because the total would refuse first — which reads
+    // as a rule that passes.
+    check(
+      'rota_coverage_rule_high_intensity_cap_within_total',
+      sql`${t.highIntensityMinutesCapPerDay} >= 0
+       and ${t.highIntensityMinutesCapPerDay} <= ${t.treatmentMinutesCapPerDay}`,
+    ),
+    check(
+      'rota_coverage_rule_provisional_names_a_question',
+      sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
+    ),
+    check(
+      'rota_coverage_rule_source_note_not_placeholder',
+      sql`not is_placeholder_text(${t.sourceNote})`,
+    ),
+  ],
+)
+
+/**
+ * The versioned monthly-wage divisors the forecast needs (0081).
+ *
+ * A separate table from `working_hours_rule` although both are versioned on a trading date: the divisor
+ * answers what an hour of a monthly salary is worth and the multipliers answer what an uplift is, they
+ * will be answered by different people, and two units' figures in one row would mean confirming
+ * Y9-overtime's multipliers also restated a divisor nobody asked about.
+ */
+export const labourCostRule = pgTable(
+  'labour_cost_rule',
+  {
+    effectiveFrom: date('effective_from').primaryKey(),
+    /** Calendar days a monthly wage is taken to cover. 30 — the MOHRE convention, not a confirmed figure. */
+    monthlyWageDaysDivisor: smallint('monthly_wage_days_divisor').notNull(),
+    /**
+     * The DENOMINATOR, and deliberately not `working_hours_rule.ordinary_minutes_per_day` although
+     * version 1 carries the same 480: that figure is a CAP, and reading a cap as a denominator makes
+     * every hour cheaper the day somebody raises the daily cap.
+     */
+    paidMinutesPerDay: smallint('paid_minutes_per_day').notNull(),
+    isProvisional: boolean('is_provisional').notNull(),
+    provisionalNote: text('provisional_note'),
+    openQuestionId: text('open_question_id'),
+    sourceNote: text('source_note').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    check(
+      'labour_cost_rule_days_divisor_plausible',
+      sql`${t.monthlyWageDaysDivisor} between 1 and 31`,
+    ),
+    check(
+      'labour_cost_rule_paid_minutes_plausible',
+      sql`${t.paidMinutesPerDay} between 1 and 1440`,
+    ),
+    check(
+      'labour_cost_rule_provisional_names_a_question',
+      sql`not ${t.isProvisional} or ${t.openQuestionId} is not null`,
+    ),
+    check(
+      'labour_cost_rule_source_note_not_placeholder',
+      sql`not is_placeholder_text(${t.sourceNote})`,
+    ),
+  ],
+)
+
+/**
+ * One PUBLISHED rota, immutable (0081).
+ *
+ * There is no status column and no draft row, and that is 0030's decision rather than a simplification:
+ * the draft already exists as `shift` plus `shift_assignment`, which "is rewritten" freely, and a draft
+ * version row would be a second draft for the two to disagree about. An edit to a published rota is a NEW
+ * row carrying `supersedesId`.
+ *
+ * Four triggers and two of this file's constraints are not expressible in Drizzle and live in the
+ * migration: `refuse_published_rota_change` (ZW001) refuses every UPDATE and DELETE for every role
+ * including the owner, `assert_rota_version_sequence` (ZW005) keeps the numbering unbroken, and the
+ * DEFERRED `rota_version_changes_something` (ZW003) refuses a re-publish whose assignment set is
+ * identical to its predecessor's — which is how an unchanged re-publish emits no staff notification: it
+ * creates no version at all. `packages/fixtures/src/hr-rota.itest.ts` asserts all four against real
+ * PostgreSQL.
+ */
+export const rotaVersion = pgTable(
+  'rota_version',
+  {
+    id: uuid('id').primaryKey(),
+    /**
+     * Inclusive at both ends, because a trading date is a whole session and a half-open date range
+     * invites the off-by-one that drops the last day. NOT foreign-keyed into `business_day`: the period
+     * is a label for what was published and its ends may fall on a closed date, while every
+     * ASSIGNMENT's trading date is constrained, which is where the claim is true.
+     */
+    fromTradingDate: date('from_trading_date').notNull(),
+    toTradingDate: date('to_trading_date').notNull(),
+    /**
+     * Forward-only supersession, and UNIQUE is the load-bearing part: two concurrent publishes both
+     * superseding version 3 would otherwise leave two rival current rotas with nothing able to choose.
+     */
+    supersedesId: uuid('supersedes_id').references((): AnyPgColumn => rotaVersion.id, {
+      onDelete: 'restrict',
+    }),
+    versionNo: integer('version_no').notNull(),
+    /**
+     * The three rule versions that judged and priced it. Plain dates and NOT foreign keys.
+     *
+     * A row in an immutable table records what was true and holds nothing else hostage: `rota_version` can
+     * never be deleted, so a RESTRICT reference from it makes its parent undeletable for ever from the first
+     * rota published. These three began as references and stopped
+     * `packages/fixtures/src/hr-working-hours.itest.ts` emptying `working_hours_rule` in a probe, which is
+     * how P-HR-05 proves its reader throws rather than inventing rates.
+     */
+    coverageRuleEffectiveFrom: date('coverage_rule_effective_from').notNull(),
+    workingHoursRuleEffectiveFrom: date('working_hours_rule_effective_from').notNull(),
+    labourCostRuleEffectiveFrom: date('labour_cost_rule_effective_from').notNull(),
+    /** Integer fils on the `fils_nonneg` domain, VAT-free: a wage is not a supply. */
+    forecastLabourCostFils: bigint('forecast_labour_cost_fils', { mode: 'bigint' }).notNull(),
+    /**
+     * Assigned employees with no `basic_wage_fils` on file when the forecast was made. NOT NULL on every
+     * version, because an unpriced employee contributes nothing to a sum: a forecast over a rota of
+     * unpriced therapists is 0 fils and reads as a free rota. All nineteen seeded employees are unpriced.
+     */
+    forecastUnpricedEmployees: smallint('forecast_unpriced_employees').notNull(),
+    /** sha-256 of `rotaAssignmentCanonicalForm()` in `@berelax/core`, hashed by `publishRota`. */
+    assignmentDigest: text('assignment_digest').notNull(),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+    /** A label, not a uuid: there is no admin session until W-SYS-01 and the audit row carries the actor. */
+    publishedBy: text('published_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('rota_version_supersedes_key').on(t.supersedesId),
+    uniqueIndex('rota_version_number_unique_per_period').on(
+      t.fromTradingDate,
+      t.toTradingDate,
+      t.versionNo,
+    ),
+    index('rota_version_period_idx').on(t.fromTradingDate, t.toTradingDate, t.versionNo),
+    check('rota_version_period_ordered', sql`${t.toTradingDate} >= ${t.fromTradingDate}`),
+    check('rota_version_number_is_positive', sql`${t.versionNo} >= 1`),
+    check('rota_version_unpriced_count_nonneg', sql`${t.forecastUnpricedEmployees} >= 0`),
+    check('rota_version_digest_is_a_sha256_hex', sql`${t.assignmentDigest} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'rota_version_published_by_not_placeholder',
+      sql`not is_placeholder_text(${t.publishedBy}) and btrim(${t.publishedBy}) <> ''`,
+    ),
+  ],
+)
+
+/**
+ * The published rota, snapshotted (0081).
+ *
+ * Copies rather than references `shift_assignment`, because `shift_assignment.shift_id` is ON DELETE
+ * CASCADE and a published rota that lost rows when a draft shift was deleted would not be immutable —
+ * which is the one claim this table exists to make. `sourceShiftId` is a plain uuid and NOT a foreign key,
+ * which is 0077's decision for `pipeline_stage_transition.customer_id` verbatim and for exactly its reason:
+ * an immutable table cannot reference a mutable parent, because the referential action arrives as an UPDATE
+ * and ZW001 refuses every UPDATE — so `delete from shift` would become impossible and the draft roster
+ * could never be rewritten again.
+ */
+export const rotaVersionAssignment = pgTable(
+  'rota_version_assignment',
+  {
+    rotaVersionId: uuid('rota_version_id')
+      .notNull()
+      .references(() => rotaVersion.id, { onDelete: 'restrict' }),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employee.id, { onDelete: 'restrict' }),
+    /**
+     * Snapshotted, and deliberately NOT foreign-keyed into `business_day` — the opposite of
+     * `shift.trading_date`, because a shift row is mutable and this one is not. `business_day` is GENERATED:
+     * a row is deleted when a date stops trading, and `business-days.itest.ts` empties the table to prove it.
+     * A RESTRICT reference from a row that can never be deleted pinned every date it named and broke the
+     * generator. The guard lives on `shift.trading_date`, where the row is mutable and the error is fixable.
+     */
+    tradingDate: date('trading_date').notNull(),
+    period: tstzrange('period').notNull(),
+    sourceShiftId: uuid('source_shift_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Two identical rows would be counted twice by the coverage read and would double the forecast.
+    primaryKey({ columns: [t.rotaVersionId, t.employeeId, t.period] }),
+    index('rota_version_assignment_employee_idx').on(t.employeeId, t.tradingDate),
+    index('rota_version_assignment_date_idx').on(t.rotaVersionId, t.tradingDate),
+    check('rota_version_assignment_period_nonempty', sql`not isempty(${t.period})`),
+    check(
+      'rota_version_assignment_period_bounded',
+      sql`lower(${t.period}) is not null and upper(${t.period}) is not null`,
+    ),
+    check(
+      'rota_version_assignment_period_half_open',
+      sql`lower_inc(${t.period}) and not upper_inc(${t.period})`,
+    ),
+  ],
+)
+
+/**
+ * Swaps and open-shift claims, append-only, each decided in the transaction that made it (0081).
+ *
+ * No pending state: a pending request needs an APPROVER and there is no admin session until W-SYS-01, so
+ * a pending row would wait for an identity that does not exist and the first thing built on it would be a
+ * way to approve without one. The refused rows are the point of the table — "why can't I swap with her on
+ * Thursday?" has one answer and it is the rule name the validator returned.
+ */
+export const rotaChangeRequest = pgTable(
+  'rota_change_request',
+  {
+    id: uuid('id').primaryKey(),
+    /** `swap` or `open_shift_claim`. */
+    kind: text('kind').notNull(),
+    rotaVersionId: uuid('rota_version_id')
+      .notNull()
+      .references(() => rotaVersion.id, { onDelete: 'restrict' }),
+    /** The DRAFT shift, because that is what a swap or a claim moves. */
+    shiftId: uuid('shift_id'),
+    /** Null for a claim: an open shift has no assignment, so there is nobody to take it from. */
+    fromEmployeeId: uuid('from_employee_id').references(() => employee.id, {
+      onDelete: 'restrict',
+    }),
+    toEmployeeId: uuid('to_employee_id')
+      .notNull()
+      .references(() => employee.id, { onDelete: 'restrict' }),
+    /** `applied` or `refused`, decided in the same transaction. */
+    decision: text('decision').notNull(),
+    /**
+     * The rule name `@berelax/core` returned. TEXT and not an enum: the rule set is `packages/core`'s and
+     * a migration per new rule would put the vocabulary in two places.
+     */
+    refusedRule: text('refused_rule'),
+    refusalDetail: text('refusal_detail'),
+    appliedRotaVersionId: uuid('applied_rota_version_id').references(() => rotaVersion.id, {
+      onDelete: 'restrict',
+    }),
+    requestedBy: text('requested_by').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('rota_change_request_applied_version_key').on(t.appliedRotaVersionId),
+    index('rota_change_request_version_idx').on(t.rotaVersionId, t.requestedAt),
+    index('rota_change_request_employee_idx').on(t.toEmployeeId, t.requestedAt),
+    check('rota_change_request_kind_known', sql`${t.kind} in ('swap', 'open_shift_claim')`),
+    check(
+      'rota_change_request_swap_has_two_sides',
+      sql`(${t.kind} = 'swap') = (${t.fromEmployeeId} is not null)`,
+    ),
+    check(
+      'rota_change_request_sides_differ',
+      sql`${t.fromEmployeeId} is null or ${t.fromEmployeeId} <> ${t.toEmployeeId}`,
+    ),
+    check('rota_change_request_decision_known', sql`${t.decision} in ('applied', 'refused')`),
+    // Biconditionals both ways: a refusal with no rule is a refusal nobody can answer, and an applied
+    // request carrying one is a row two readers would count differently.
+    check(
+      'rota_change_request_refusal_names_a_rule',
+      sql`(${t.decision} = 'refused') = (${t.refusedRule} is not null)`,
+    ),
+    check(
+      'rota_change_request_refusal_detail_follows_the_rule',
+      sql`${t.refusedRule} is not null or ${t.refusalDetail} is null`,
+    ),
+    check(
+      'rota_change_request_application_names_a_version',
+      sql`(${t.decision} = 'applied') = (${t.appliedRotaVersionId} is not null)`,
+    ),
+    check(
+      'rota_change_request_requested_by_not_placeholder',
+      sql`not is_placeholder_text(${t.requestedBy}) and btrim(${t.requestedBy}) <> ''`,
+    ),
+  ],
+)
+
+/**
+ * One row per assigned employee per published version: the staff notification (0081).
+ *
+ * A notice row rather than a `message` row alone, because **nothing in this build holds a staff contact
+ * detail** — `employee` has no phone and no email, there is no `employee_contact` table, and a plausible
+ * address would be indistinguishable from a configured one in the one place it would actually reach a
+ * stranger (brief rule 15). 0075 had to record the same thing for the Google re-auth ladder and answers it
+ * the same way: the outcome is `skipped` with `no_recipient_on_file`, which says what was attempted, for
+ * whom and against which template, rather than being a no-op that reports success (docs/12 §1).
+ *
+ * UNIQUE on (version, employee) is what makes it one per EMPLOYEE rather than one per shift: somebody
+ * rostered on four days of the week is told once about the week, and a publisher that looped over
+ * assignments would be refused here rather than sending four messages.
+ */
+export const rotaPublicationNotice = pgTable(
+  'rota_publication_notice',
+  {
+    id: uuid('id').primaryKey(),
+    rotaVersionId: uuid('rota_version_id')
+      .notNull()
+      .references(() => rotaVersion.id, { onDelete: 'restrict' }),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employee.id, { onDelete: 'restrict' }),
+    /** Pinned to `hr.rota_published` by a CHECK: a rota is a fact about somebody's working week, so the
+     * marketing kill switch and the promotional sender identity must not be able to reach it. */
+    templateKey: text('template_key').notNull(),
+    /** `sent` or `skipped`. */
+    outcome: text('outcome').notNull(),
+    /** `no_recipient_on_file` is the shipped state rather than an edge case. */
+    skippedReason: text('skipped_reason'),
+    /** Nullable even for `sent`, for 0075's reason: F03 diverts every send outside production. */
+    messageId: uuid('message_id'),
+    notifiedAt: timestamp('notified_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('rota_publication_notice_one_per_employee_per_version').on(
+      t.rotaVersionId,
+      t.employeeId,
+    ),
+    index('rota_publication_notice_employee_idx').on(t.employeeId, t.notifiedAt),
+    check(
+      'rota_publication_notice_template_is_the_rota_one',
+      sql`${t.templateKey} = 'hr.rota_published'`,
+    ),
+    check('rota_publication_notice_outcome_known', sql`${t.outcome} in ('sent', 'skipped')`),
+    check(
+      'rota_publication_notice_skipped_reason_known',
+      sql`${t.skippedReason} in ('no_recipient_on_file', 'send_refused')`,
+    ),
+    check(
+      'rota_publication_notice_skip_carries_a_reason',
+      sql`(${t.outcome} = 'skipped') = (${t.skippedReason} is not null)`,
+    ),
+    check(
+      'rota_publication_notice_skip_produced_no_message',
+      sql`${t.skippedReason} is null or ${t.messageId} is null`,
     ),
   ],
 )

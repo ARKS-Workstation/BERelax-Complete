@@ -314,6 +314,30 @@ export async function unconfirmedAssumptionRows(
       -- indistinguishable from one somebody's lawyer had approved. Keyed by purpose and version, because
       -- consent_wording is append-only: answering the question publishes version 2 and version 1 stays,
       -- so the panel row leaves by the NEW row being confirmed rather than by the old one being edited.
+      -- The rota coverage and fatigue thresholds (0081). Here for working_hours_rule's reason exactly:
+      -- a rota is asked about the PAST, so the thresholds are VERSIONED rows rather than app_setting
+      -- values, and answering Y9-coverage publishes a NEW version whose confirmation is what clears the
+      -- panel row. Per VERSION and not per figure, because the floor minimum, the wet-room minimum, the
+      -- segment grid and the two daily caps are one decision somebody makes in one sitting. No backtick
+      -- appears in this comment, for the reason the pipeline paragraph above states: it lives inside a JS
+      -- template literal and one would end it early. The figure worth knowing while reading the note is
+      -- that high_intensity_treatment_codes is EMPTY: no service in the catalogue is recorded as heavy
+      -- work, so the 240-minute sub-cap is inert, and this row is where that is said out loud rather than
+      -- discovered by a therapist who was never protected by it.
+      union all
+      select 'rota_coverage_rule', 'coverage effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from rota_coverage_rule where is_provisional
+      -- The monthly-wage divisors the labour-cost forecast needs (0081). A separate row from
+      -- working_hours_rule's although both are flagged against Y9-overtime, and separate for the reason
+      -- 0081 gives for the separate table: what an hour of a monthly salary is worth is a different
+      -- question from what an uplift is, and one flag covering both would clear the panel for an answer
+      -- nobody gave. P-HR-05's NOTE records that nobody has answered the monthly-to-hourly question at
+      -- all, so this row is the first place the question is visible rather than deferred.
+      union all
+      select 'labour_cost_rule', 'wage divisors effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from labour_cost_rule where is_provisional
       union all
       select 'consent_purpose', purpose, open_question_id, provisional_note
         from consent_purpose where is_provisional

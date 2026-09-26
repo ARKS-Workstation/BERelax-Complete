@@ -407,6 +407,57 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
       'يدوياً، ولن يضيع شيء.',
     variables: ['expires', 'link'],
   },
+  /*
+    The rota notification (P-HR-06).
+
+    Transactional, and immutably so: a published rota is a fact about somebody's working week, so the
+    marketing kill switch must not be able to suppress it and it must not leave from the AD- promotional
+    identity. `rota_publication_notice.template_key` is pinned to this key by a CHECK, so a notice cannot be
+    addressed at anything else.
+
+    **Nothing is sent today**, and the reason is the one 0075 had to record for the Google re-auth ladder:
+    no table in this build holds a staff phone or an email. `publishRota` therefore writes a notice row per
+    assigned employee with outcome `skipped` and `no_recipient_on_file` — a record of what was attempted,
+    for whom and against which template, rather than a no-op reporting success (docs/12 §1). The words exist
+    now so that the day a staff address does, the send is one branch and not one approval cycle.
+
+    SMS and not email, which is the opposite of the re-auth notice's choice and for the opposite reason: a
+    rota change is exactly the thing that belongs on a lock screen, and the person it is for is not at a
+    desk. It carries NO LINK, for the reason the re-auth SMS gives — the Arabic body has to fit one segment
+    at 70 UCS-2 units — and no rota detail either: which shifts somebody has is the rota, and the rota is
+    long. "Ask the front desk" is deliberately the whole of the next step, because there is no authenticated
+    staff surface to link to until W-SYS-01 and a link to an unauthenticated page listing a roster would be
+    a worse answer than no link.
+
+    The Arabic variant exists for M-VAT-11's reason and carries its caveat, verbatim from the re-auth
+    templates: no table records which language a member of staff reads, so the selector asks for `en`, and
+    picking a locale per ROLE would be a guess about a person (ADR 0020). Seeding the Arabic half now means
+    the day a staff locale exists the words are already approved.
+  */
+  {
+    key: 'hr.rota_published',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee that the rota covering their shifts has been published or changed (P-HR-06). ' +
+      'Names no treatment, no customer and no colleague: the dates and where to get a copy.',
+    channel: 'sms',
+    locale: 'en',
+    body: 'Your rota for {{dates}} is published. Ask the front desk for your copy.',
+    variables: ['dates'],
+  },
+  {
+    key: 'hr.rota_published',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells an employee that the rota covering their shifts has been published or changed (P-HR-06). ' +
+      'Names no treatment, no customer and no colleague: the dates and where to get a copy.',
+    channel: 'sms',
+    locale: 'ar',
+    body: 'تم نشر جدول عملك لفترة {{dates}}. اطلب نسختك من مكتب الاستقبال.',
+    variables: ['dates'],
+  },
   {
     key: 'review.request',
     messageClass: 'promotional',
