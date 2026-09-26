@@ -5,11 +5,13 @@ import {
   ClinicalReadRefused,
   type Clock,
   type CompliancePolicy,
+  deriveContraindicationFlags,
   type Instant,
   type IntakeField,
   type IntakeTemplate,
   IntakeTemplateCopyRefused,
   intakeAadContext,
+  lintContraindicationDefinition,
   lintIntakeDefinition,
   lintIntakeTemplateCopy,
   type RenderedSubmission,
@@ -30,8 +32,10 @@ import {
   CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
   CLINICAL_REAL_INTAKE_SETTING_KEY,
   CLINICAL_STEP_UP_WINDOW_SETTING_KEY,
+  type ContraindicationFlagKey,
 } from '@berelax/shared'
 import { type Kek, open, seal } from './envelope.ts'
+import { type ContraindicationWriteResult, writeContraindicationFlags } from './flags-view.ts'
 import type { ClinicalErrorSink, ClinicalLogger } from './logging.ts'
 
 /**
@@ -146,6 +150,29 @@ export interface IntakeReadResult {
   readonly grantId: string
 }
 
+/**
+ * A derivation of the contraindication flags from one stored submission (C-CRM-09).
+ *
+ * The same three arguments a read takes, because it IS a read: it decrypts a payload, so it goes through
+ * the same step-up gate, writes the same `read` audit row, and is refused for the same seven reasons.
+ * Anything else would be a second door onto the same data with a different lock.
+ */
+export interface DeriveFlagsInput {
+  readonly submissionId: string
+  readonly actor: ClinicalActor
+  readonly statedPurpose: string
+}
+
+export interface DerivedFlagsResult extends ContraindicationWriteResult {
+  readonly submissionId: string
+  readonly customerId: string
+  /** Flags whose question was asked and whose answer the derivation would not interpret. */
+  readonly undetermined: readonly ContraindicationFlagKey[]
+  /** Flags the captured version never asked about. Not an escalation — see the core module. */
+  readonly notAsked: readonly ContraindicationFlagKey[]
+  readonly grantId: string
+}
+
 export interface GrantStepUpInput {
   readonly employeeId: string
   readonly statedPurpose: string
@@ -216,6 +243,15 @@ export interface ClinicalIntakeStore {
   grantStepUp(input: GrantStepUpInput): Promise<StepUpGranted>
   recordIntake(input: RecordIntakeInput): Promise<{ readonly submissionId: string }>
   readIntake(input: ReadIntakeInput): Promise<IntakeReadResult>
+  /**
+   * Derives the contraindication flags from a stored submission and writes the crossing row.
+   *
+   * On this interface rather than as a free function in `flags-view.ts`, and the reason is the brief's:
+   * a flag derived by reading plaintext into a module outside `@berelax/clinical` would defeat both the
+   * encrypted store and the closed log-field map. The plaintext exists for the duration of this call,
+   * inside the package that holds the key, and what comes back is eight booleans.
+   */
+  deriveFlags(input: DeriveFlagsInput): Promise<DerivedFlagsResult>
   readTreatmentNote(input: {
     readonly noteId: string
     readonly actor: ClinicalActor
@@ -498,6 +534,110 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
     return decision
   }
 
+  /**
+   * One gated, audited decryption of one submission. The only path to a plaintext intake payload.
+   *
+   * Extracted when `deriveFlags` became the second reader, for the reason `authoriseRead` is one function
+   * for two tables: a second copy of this sequence is where the two come to disagree, and the way they
+   * disagree is that one of them stops fetching the CAPTURED template, or stops asserting the version, or
+   * opens the envelope with a binding it rebuilt slightly differently. Each of those is a whole gate case
+   * in `scripts/test-gates.mjs` for the first reader and would be invisible on the second.
+   *
+   * The plaintext is returned to a caller inside this package and to nowhere else. It is never logged: the
+   * caller's `log` calls take a `ClinicalLogFields`, which is a closed map of ids and counts.
+   */
+  const openSubmission = async (
+    uow: UnitOfWork,
+    input: {
+      readonly submissionId: string
+      readonly actor: ClinicalActor
+      readonly statedPurpose: string
+    },
+  ): Promise<{
+    readonly row: {
+      readonly id: string
+      readonly customerId: string
+      readonly templateVersion: number
+    }
+    readonly template: IntakeTemplate & { readonly consentHash: string }
+    readonly decision: Extract<ClinicalReadDecision, { permitted: true }>
+    readonly answers: Readonly<Record<string, unknown>>
+  }> => {
+    const tx = uow.sql
+    const [row] = await tx<
+      {
+        id: string
+        customerId: string
+        templateId: string
+        templateVersion: number
+        aadContext: string
+        ciphertext: Buffer
+        nonce: Buffer
+        wrappedDataKey: Buffer
+        kekVersion: string
+        aadFingerprint: string
+      }[]
+    >`
+      select id,
+             customer_id        as "customerId",
+             template_id        as "templateId",
+             template_version   as "templateVersion",
+             aad_context        as "aadContext",
+             payload_ciphertext as "ciphertext",
+             payload_nonce      as "nonce",
+             wrapped_data_key   as "wrappedDataKey",
+             kek_version        as "kekVersion",
+             aad_fingerprint    as "aadFingerprint"
+        from clinical.intake_submission
+       where id = ${input.submissionId}::uuid
+    `
+    if (row === undefined) {
+      throw new AppError('not_found', `No intake submission ${input.submissionId}`, {
+        details: { submissionId: input.submissionId },
+      })
+    }
+
+    // The template the submission NAMES, never the current one for its locale. Fetched before the gate
+    // because the gate needs the consent hash of the wording actually agreed to.
+    const template = await templateById(tx, row.templateId)
+    assertCapturedVersion(template, {
+      templateId: row.templateId,
+      templateVersion: Number(row.templateVersion),
+    })
+
+    const decision = await authoriseRead(uow, {
+      entityType: 'clinical.intake_submission',
+      entityId: row.id,
+      customerId: row.customerId,
+      consentHash: template.consentHash,
+      actor: input.actor,
+      statedPurpose: input.statedPurpose,
+    })
+
+    const plaintext = open(
+      kek,
+      {
+        table: 'clinical.intake_submission',
+        recordId: row.id,
+        customerId: row.customerId,
+        context: row.aadContext,
+      },
+      {
+        ciphertext: row.ciphertext,
+        nonce: row.nonce,
+        wrappedDataKey: row.wrappedDataKey,
+        kekVersion: row.kekVersion,
+        aadFingerprint: row.aadFingerprint,
+      },
+    )
+    return {
+      row: { id: row.id, customerId: row.customerId, templateVersion: Number(row.templateVersion) },
+      template,
+      decision,
+      answers: JSON.parse(plaintext) as Readonly<Record<string, unknown>>,
+    }
+  }
+
   return {
     publishTemplate: async (input) => {
       const structural = lintIntakeDefinition(input.fields)
@@ -506,6 +646,32 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
           'validation',
           `IntakeTemplateDefinitionRefused: ${structural.join(', ')}`,
           { userFacing: true, details: { rules: structural } },
+        )
+      }
+
+      /**
+       * The contraindication rules, checked at PUBLICATION (C-CRM-09).
+       *
+       * A field keyed `recent_surgery` and asked as `long_text` looks exactly like the question that feeds
+       * the flag, is answered by every client, and derives nothing for the life of that template version.
+       * Refused here because publication is the only moment anybody is looking at the question set: the
+       * alternative is a front desk reading `recent_surgery: false` for a client who wrote the answer out
+       * in full, and nothing anywhere saying why.
+       */
+      const contraindication = lintContraindicationDefinition(input.fields)
+      if (contraindication.length > 0) {
+        throw new AppError(
+          'validation',
+          `IntakeTemplateContraindicationRefused: ${contraindication
+            .map((problem) => `${problem.fieldKey}: ${problem.why}`)
+            .join(' ')}`,
+          {
+            userFacing: true,
+            details: {
+              rules: contraindication.map((problem) => problem.rule),
+              at: contraindication.map((problem) => problem.fieldKey),
+            },
+          },
         )
       }
 
@@ -818,74 +984,7 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
 
     readIntake: async (input) => {
       return await inTransaction(input.actor, async (uow) => {
-        const tx = uow.sql
-        const [row] = await tx<
-          {
-            id: string
-            customerId: string
-            templateId: string
-            templateVersion: number
-            aadContext: string
-            ciphertext: Buffer
-            nonce: Buffer
-            wrappedDataKey: Buffer
-            kekVersion: string
-            aadFingerprint: string
-          }[]
-        >`
-          select id,
-                 customer_id        as "customerId",
-                 template_id        as "templateId",
-                 template_version   as "templateVersion",
-                 aad_context        as "aadContext",
-                 payload_ciphertext as "ciphertext",
-                 payload_nonce      as "nonce",
-                 wrapped_data_key   as "wrappedDataKey",
-                 kek_version        as "kekVersion",
-                 aad_fingerprint    as "aadFingerprint"
-            from clinical.intake_submission
-           where id = ${input.submissionId}::uuid
-        `
-        if (row === undefined) {
-          throw new AppError('not_found', `No intake submission ${input.submissionId}`, {
-            details: { submissionId: input.submissionId },
-          })
-        }
-
-        // The template the submission NAMES, never the current one for its locale. Fetched before the
-        // gate because the gate needs the consent hash of the wording actually agreed to.
-        const template = await templateById(tx, row.templateId)
-        assertCapturedVersion(template, {
-          templateId: row.templateId,
-          templateVersion: Number(row.templateVersion),
-        })
-
-        const decision = await authoriseRead(uow, {
-          entityType: 'clinical.intake_submission',
-          entityId: row.id,
-          customerId: row.customerId,
-          consentHash: template.consentHash,
-          actor: input.actor,
-          statedPurpose: input.statedPurpose,
-        })
-
-        const plaintext = open(
-          kek,
-          {
-            table: 'clinical.intake_submission',
-            recordId: row.id,
-            customerId: row.customerId,
-            context: row.aadContext,
-          },
-          {
-            ciphertext: row.ciphertext,
-            nonce: row.nonce,
-            wrappedDataKey: row.wrappedDataKey,
-            kekVersion: row.kekVersion,
-            aadFingerprint: row.aadFingerprint,
-          },
-        )
-        const answers = JSON.parse(plaintext) as Readonly<Record<string, unknown>>
+        const { row, template, decision, answers } = await openSubmission(uow, input)
         const rendered = renderSubmission(template, answers)
 
         await uow.audit.record({
@@ -897,8 +996,8 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
             statedPurpose: decision.statedPurpose,
             grantId: decision.grantId,
             customerId: row.customerId,
-            templateId: row.templateId,
-            templateVersion: Number(row.templateVersion),
+            templateId: template.templateId,
+            templateVersion: row.templateVersion,
           },
         })
         log('info', 'intake submission read', {
@@ -907,7 +1006,7 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
           employeeId: input.actor.employeeId,
           grantId: decision.grantId,
           statedPurpose: decision.statedPurpose,
-          templateVersion: Number(row.templateVersion),
+          templateVersion: row.templateVersion,
           answerCount: rendered.answers.length,
           outcome: 'read',
         })
@@ -915,6 +1014,65 @@ export function createClinicalIntakeStore(deps: ClinicalStoreDeps): ClinicalInta
           submissionId: row.id,
           customerId: row.customerId,
           rendered,
+          grantId: decision.grantId,
+        }
+      })
+    },
+
+    deriveFlags: async (input) => {
+      return await inTransaction(input.actor, async (uow) => {
+        const { row, template, decision, answers } = await openSubmission(uow, input)
+
+        // The pure derivation. The plaintext goes in as an argument and nothing comes out but booleans,
+        // counts and flag keys — which is what makes the whole rule checkable with no key and no server.
+        const derivation = deriveContraindicationFlags(template, answers)
+
+        // Audited as a READ of the submission, in addition to the derivation's own row, because that is
+        // what it is: a payload was decrypted. A path that wrote only "flags derived" would be a way to
+        // open a health record that the insider-threat query for reads of a submission does not see.
+        await uow.audit.record({
+          action: 'clinical.intake_submission.read',
+          entityType: 'clinical.intake_submission',
+          entityId: row.id,
+          operation: 'read',
+          after: {
+            statedPurpose: decision.statedPurpose,
+            grantId: decision.grantId,
+            customerId: row.customerId,
+            templateId: template.templateId,
+            templateVersion: row.templateVersion,
+            readFor: 'contraindication_flag_derivation',
+          },
+        })
+
+        const written = await writeContraindicationFlags(uow, {
+          customerId: row.customerId,
+          submissionId: row.id,
+          derivation,
+        })
+
+        log('info', 'contraindication flags derived', {
+          submissionId: row.id,
+          customerId: row.customerId,
+          employeeId: input.actor.employeeId,
+          grantId: decision.grantId,
+          statedPurpose: decision.statedPurpose,
+          templateVersion: row.templateVersion,
+          // Counts, never keys and never values. `undeterminedCount` is how many answers this derivation
+          // would not interpret, which is a fact about the form rather than about the client.
+          answerCount: Object.keys(answers).length,
+          undeterminedCount: written.undeterminedCount,
+          derivationVersion: written.derivationVersion,
+          flagsChanged: written.changed,
+          outcome: 'read',
+        })
+
+        return {
+          ...written,
+          submissionId: row.id,
+          customerId: row.customerId,
+          undetermined: derivation.undetermined,
+          notAsked: derivation.notAsked,
           grantId: decision.grantId,
         }
       })

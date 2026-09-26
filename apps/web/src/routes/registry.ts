@@ -316,6 +316,35 @@ export const ROUTES = [
       'trading, and would show appointments that have since moved.',
   },
   {
+    id: 'client-flags',
+    path: '/clients/[id]/flags',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-09s boolean-only crossing: the eight contraindication markers, and nothing else a clinical ' +
+      'record holds. The one admin page that reads clinical information over the APPLICATION credential ' +
+      'and is right to - it selects from public.customer_contraindication_flags, a security_invoker = ' +
+      'false view exposing a customer id and eight booleans, so it needs no clinical privilege, holds no ' +
+      'key and imports nothing from @berelax/clinical. Its sibling `/clients/[id]/intake` is the opposite ' +
+      'and says so: that page needs a credential nobody has configured. A handler rather than a document ' +
+      'for the reason the intake record, the duplicate queue and the Messages inbox give - a registry ' +
+      'document must be served in BOTH locales, which needs an Arabic admin document and the W-SYS-01 ' +
+      'shell - and `?dir=rtl` re-renders it mirrored so the direction half of the accessibility matrix is ' +
+      'audited without inventing an Arabic admin surface. NO sampleParams, although the path has a ' +
+      'segment: a sample id would be a client whose markers the screenshot harness opened on every run. ' +
+      'Dynamic and never cached, because a cached marker set is one derived once and shown after the ' +
+      'client has answered a newer form. It WRITES NOTHING and records no audit row, which is the one ' +
+      'place it differs from the intake page deliberately: the crossing is eight booleans a receptionist ' +
+      'may hold, and a row per glance at a diary would bury the reads that matter. `?employee=` and ' +
+      '`?role=` are query parameters because there is no session until W-SYS-01, and `?role=` can only ' +
+      'NARROW - the decision is intersected with a receptionist ceiling, so no query string unlocks the ' +
+      'detail behind a marker. Covered by the /clients noindex prefix in ADMIN_GROUP_PREFIXES.',
+  },
+  {
     id: 'client-intake',
     path: '/clients/[id]/intake',
     kind: 'handler',

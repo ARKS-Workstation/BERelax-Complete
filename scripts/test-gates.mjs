@@ -31008,6 +31008,502 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 }
+// 111a-111z. (C-CRM-09) The boolean-only crossing: the flag that must not be invented, the answer that
+//            must not be read, and the detail a reader who may see the marker must not receive.
+//
+//            Every mutation in this block leaves a system that WORKS. That is the block's subject. A
+//            derivation with no escalation stores a flag set for every submission and renders every screen;
+//            one that reads free text produces BETTER flags most of the time; a screen that prints only the
+//            set markers looks tidier; a ceiling removed from the sessionless route makes the page more
+//            useful. None of them is visible in a screenshot, in a typecheck, or in any assertion about what
+//            the application does when it is used correctly.
+//
+//            The four worth reading twice:
+//
+//            **111c** removes the kind guard AND makes a string read as affirmative, in two `replaceOnce`
+//            calls, because either alone changes nothing observable: the guard already returns
+//            `undetermined` for a non-boolean field, and the value reader never sees a string while the
+//            guard stands. Only the pair is "this system now interprets what a client wrote", which is the
+//            one thing the module refuses to do.
+//
+//            **111a and 111d are the two directions of one rule** and both are wrong. 111a drops the
+//            escalation, so an answer nobody could read becomes "not flagged". 111d escalates every question
+//            the form never asked, which is the STRICT direction and still wrong: every submission of every
+//            real template then lights the marker, and a marker that is always lit is one nobody reads.
+//            109s and 109t are the same pairing one unit along.
+//
+//            **111a and 111l are the two LAYERS of one rule**, and their observables are deliberately
+//            different. 111a is caught by a pure assertion with no database. 111l leaves the derivation
+//            correct and makes the WRITER force the escalation off, which migration 0084 refuses by
+//            constraint name — so deleting either layer is caught by a case the other cannot satisfy. Asserted
+//            on the constraint's name rather than on a message both layers would produce, which is C-CRM-08's
+//            recorded fix for exactly this shape.
+//
+//            **111w is not a mutation case.** It replaces the real view with one that does not resolve a
+//            merged-away customer id, using `psql`, and restores it in a `finally` — because the resolution
+//            lives in a migration that is already applied, and a fixture migration that is never applied is
+//            invisible. 109f is the precedent, including the teardown control.
+{
+  const CORE = 'packages/core/src/clinical/contraindication-flags.ts'
+  const SHARED = 'packages/shared/src/clinical.ts'
+  const REPO = 'packages/clinical/src/repository.ts'
+  const FLAGS_VIEW = 'packages/clinical/src/flags-view.ts'
+  const FLAGS_RENDER = 'apps/web/app/(admin)/clients/[id]/flags/render.ts'
+  const TOKEN = 'packages/core/src/identity/booking-token.ts'
+
+  const FLAG_CORE_SUITE = 'packages/core/src/clinical/contraindication-flags.test.ts'
+  const FLAG_ROW_SUITE = 'packages/clinical/src/flags-view.itest.ts'
+  const FLAG_RENDER_SUITE = 'apps/web/src/flags-render.test.ts'
+
+  const flagUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const flagRows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named `flagEdit` and not `…Mutant`: blocks 106 and 107 each defined a `…Mutant` helper of the same
+   * shape and git interleaved them around the shared bodies, so the merge had to rebuild both from whole
+   * sides. A local helper in this file needs a name no other block's has.
+   */
+  const flagEdit = (path, anchor, replacement, suite, runner = flagRows) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 111a. The escalation removed from the derivation. Every submission still derives a full flag set and
+  //       every screen still renders; what is lost is that an answer this system will not interpret becomes
+  //       "not flagged", which is "we could not establish it" falling through to "proceed" — the failure
+  //       ADR 0031 spent a whole unit making unreachable one layer down.
+  checkRejectedBy(
+    'flags gate: an unreadable answer that escalates nothing is caught',
+    flagEdit(
+      CORE,
+      '  const escalate = undetermined.length > 0',
+      '  const escalate = false as boolean',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'escalates an answer it cannot read',
+  )
+
+  // 111b. The escalation made to set the SPECIFIC flag as well. The strict-looking direction, and it is the
+  //       prohibition this unit exists under: asserting a condition from an answer nobody could read is a
+  //       claim about somebody's health that nobody made.
+  checkRejectedBy(
+    'flags gate: an unreadable answer that asserts the condition is caught',
+    flagEdit(
+      CORE,
+      "    if (chosen.reading === 'undetermined') undetermined.push(flag)",
+      "    if (chosen.reading === 'undetermined') {\n" +
+        '      undetermined.push(flag)\n' +
+        '      affirmed.add(flag)\n' +
+        '    }',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'never asserts the condition from an answer it could not read',
+  )
+
+  // 111c. The module made to read FREE TEXT. Two edits, and the pair is load-bearing: the kind guard alone
+  //       already answers `undetermined` for a non-boolean field, and the value reader alone never sees a
+  //       string while the guard stands — so either edit on its own changes nothing any assertion can see.
+  //       Together they are the one thing this module will not do, and the flags it produces would be right
+  //       most of the time, which is what makes it tempting.
+  checkRejectedBy(
+    'flags gate: a derivation that reads free text is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          replaceOnce(
+            text,
+            "  if (field.kind !== CONTRAINDICATION_FIELD_KIND) return 'undetermined'",
+            '  if (false as boolean) return undefined as never',
+          ),
+          "  if (value === true) return 'affirmed'",
+          "  if (value === true || typeof value === 'string') return 'affirmed'",
+        ),
+      () => runExpectingFailure('pnpm', flagUnit(FLAG_CORE_SUITE)),
+    ),
+    'unreadable rather than as a no',
+  )
+
+  // 111d. The other direction of 111a: every question the captured version never asked escalates too. Safer
+  //       on its face and useless in practice — every submission of every real template lights the marker,
+  //       and a marker that is always lit is one the front desk stops reading. Both directions need a case,
+  //       because only one of them looks like a mistake.
+  checkRejectedBy(
+    'flags gate: escalating a question the form never asked is caught',
+    flagEdit(
+      CORE,
+      '  const escalate = undetermined.length > 0',
+      '  const escalate = undetermined.length + notAsked.length > 0',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'does NOT escalate a question the captured version never asked',
+  )
+
+  // 111e. The publication rule that a flag-keyed question must be a boolean, removed from the lint. The
+  //       template publishes, every client answers it, and it derives nothing for the life of that version.
+  checkRejectedBy(
+    'flags gate: a flag-keyed question of the wrong kind passing the lint is caught',
+    flagEdit(
+      CORE,
+      '    if (field.kind !== CONTRAINDICATION_FIELD_KIND) {',
+      '    if (false as boolean) {',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'refuses a flag-keyed question asked as anything but a boolean',
+  )
+
+  // 111f. The same rule, still correct, no longer CALLED by `publishTemplate`. The lint's own suite stays
+  //       green, which is the whole point of a second case: a rule nothing consults is not a rule.
+  checkRejectedBy(
+    'flags gate: a publish path that does not consult the contraindication lint is caught',
+    flagEdit(
+      REPO,
+      '      if (contraindication.length > 0) {',
+      '      if (false as boolean) {',
+      FLAG_ROW_SUITE,
+    ),
+    'refuses a flag-keyed free-text question by name',
+  )
+
+  // 111g. The provenance's wording dropped. Every flag is still right; what is lost is that a flag can be
+  //       traced to the question a client was actually asked, in the version it was asked in — which is the
+  //       whole difference between a derived flag and an assertion about somebody's health.
+  checkRejectedBy(
+    'flags gate: a flag with no traceable wording is caught',
+    flagEdit(
+      CORE,
+      '      label: chosen.field.label,',
+      '      label: null,',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'traces every determined flag to the wording',
+  )
+
+  // 111h. A string field added to the crossing's runtime shape. This is the acceptance line's own control
+  //       ("adding a string field fails both"), and `notes` is the field somebody actually adds.
+  checkRejectedBy(
+    'flags gate: a string field on the crossing schema is caught',
+    flagEdit(
+      SHARED,
+      '  requires_consultation: z.boolean(),',
+      '  requires_consultation: z.boolean(),\n  notes: z.string(),',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'every field is a boolean',
+  )
+
+  // 111i. The same widening at the TYPE level, and the runner is `tsc` rather than vitest — because vitest
+  //       does not typecheck (brief rule 28), so an `expectTypeOf` assertion is proved only by a compile.
+  //       The assertion is the test file's own path: the widening touches nothing else in that file, so an
+  //       error reported there is the type assertion firing and not collateral.
+  checkRejectedBy(
+    'flags gate: a crossing type with a string on it fails the typecheck',
+    withEditedFile(
+      SHARED,
+      (text) =>
+        replaceOnce(
+          text,
+          'export type ContraindicationFlagSet = Readonly<Record<ContraindicationFlagKey, boolean>>',
+          'export type ContraindicationFlagSet = Readonly<Record<ContraindicationFlagKey, boolean>> & {\n' +
+            '  readonly note: string\n' +
+            '}',
+        ),
+      () => runExpectingFailure('pnpm', ['typecheck']),
+    ),
+    'contraindication-flags.test.ts',
+  )
+
+  // 111j. The derivation version bumped on ONE side. The staleness check has to run as SQL, because the
+  //       credential serving the crossing cannot read the clinical schema, so the number is spelled twice —
+  //       and two spellings that must agree need an assertion rather than a convention.
+  checkRejectedBy(
+    'flags gate: a derivation version the database does not share is caught',
+    flagEdit(
+      SHARED,
+      'export const CONTRAINDICATION_DERIVATION_VERSION = 1',
+      'export const CONTRAINDICATION_DERIVATION_VERSION = 2',
+      FLAG_ROW_SUITE,
+    ),
+    'spells the derivation version the same way',
+  )
+
+  // 111k. The superseded-submission clause removed from the PURE staleness verdict. The view still escalates
+  //       — the SQL half is untouched — so the front desk is still told to ask, and what fails is the
+  //       verdict's reason. That is the two layers being tested apart rather than one standing in for both.
+  checkRejectedBy(
+    'flags gate: a staleness verdict blind to a newer submission is caught',
+    flagEdit(
+      CORE,
+      '  if (stored.sourceSubmissionId !== liveSubmission.submissionId) {',
+      '  if (false as boolean) {',
+      FLAG_ROW_SUITE,
+    ),
+    'source_submission_changed',
+  )
+
+  // 111l. The WRITER forced to store `requires_consultation: false`. The derivation is untouched and its
+  //       pure suite stays green; the row it writes claims an unreadable answer and no consultation, and
+  //       migration 0084's CHECK refuses it. Asserted on the CONSTRAINT NAME, which is the only observable
+  //       that separates this layer from 111a's — C-CRM-08's recorded fix for two cases that reported the
+  //       same error name for both layers and stayed green with one deleted.
+  checkRejectedBy(
+    'flags gate: a row that swallows an unreadable answer is caught by the database',
+    flagEdit(
+      FLAGS_VIEW,
+      '  requiresConsultation: flags.requires_consultation,',
+      '  requiresConsultation: false,',
+      FLAG_ROW_SUITE,
+    ),
+    'contraindication_undetermined_requires_consultation',
+  )
+
+  // 111m. The therapist's assignment scope dropped. Every legitimate read still works; what is lost is that
+  //       a flag set is a disclosure about a person somebody has no reason to be looking at.
+  checkRejectedBy(
+    'flags gate: an unassigned therapist reading the flags is caught',
+    flagEdit(
+      CORE,
+      "      ? notAssigned('the flags')",
+      '      ? ({ permitted: true })',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'an unassigned therapist is refused BOTH',
+  )
+
+  // 111n. The note refusal dropped, so a receptionist is handed the detail behind a marker. Caught through
+  //       the SCREEN rather than the decision, which is what proves the page renders the decision instead of
+  //       taking one of its own — the defect that makes a permission matrix decorative.
+  checkRejectedBy(
+    'flags gate: a front-desk screen offering the clinical detail is caught',
+    flagEdit(
+      CORE,
+      "  const note: ContraindicationAccessDecision = !can(request.role, 'clinical_note:read')",
+      '  const note: ContraindicationAccessDecision = (false as boolean)',
+      FLAG_RENDER_SUITE,
+      flagUnit,
+    ),
+    'is refused the detail BY NAME',
+  )
+
+  // 111o. The sessionless ceiling made a no-op, so `?role=therapist` on an unauthenticated page unlocks the
+  //       detail behind a marker. An escalation with a query string, and the page looks more useful for it.
+  checkRejectedBy(
+    'flags gate: a ceiling that does not narrow is caught',
+    flagEdit(
+      CORE,
+      '  ): ContraindicationAccessDecision => (a.permitted ? b : a)',
+      '  ): ContraindicationAccessDecision => a',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'can only NARROW',
+  )
+
+  // 111p. The sentence that stops "Not flagged" being read as "ruled out", removed from the screen. Every
+  //       marker still renders; what is lost is the one line that corrects the reading a reader arrives with,
+  //       on a page whose whole job is to be read correctly by somebody who cannot see the answers.
+  checkRejectedBy(
+    'flags gate: a screen that lets "not flagged" read as "cleared" is caught',
+    flagEdit(
+      FLAGS_RENDER,
+      '    `<p class="meta" data-false-meaning>${safeText(CONTRAINDICATION_FALSE_MEANING)}</p>` +',
+      "    '' +",
+      FLAG_RENDER_SUITE,
+      flagUnit,
+    ),
+    'never as cleared',
+  )
+
+  // 111q. The screen made to print only the SET markers. Tidier, and it makes an empty page mean two things
+  //       — nothing is set, and nothing was derived — with no way for the reader to tell which.
+  checkRejectedBy(
+    'flags gate: a screen that prints only the set markers is caught',
+    flagEdit(
+      FLAGS_RENDER,
+      '  `<ul class="flags">${CONTRAINDICATION_FLAG_KEYS.map((flag) => {',
+      '  `<ul class="flags">${CONTRAINDICATION_FLAG_KEYS.filter((flag) => flags[flag]).map((flag) => {',
+      FLAG_RENDER_SUITE,
+      flagUnit,
+    ),
+    'lists EVERY flag of the closed set',
+  )
+
+  // 111r. The "not the same as having none" sentence removed from the no-derivation state. The page still
+  //       says there are no markers, which is exactly the reading that is wrong: a derivation that has never
+  //       run is not a client with no contraindications.
+  checkRejectedBy(
+    'flags gate: a no-derivation page that reads as "no contraindications" is caught',
+    flagEdit(
+      FLAGS_RENDER,
+      "      '<p><strong>That is not the same as having none.</strong> Either this client has not filled in an ' +",
+      "      '<p>There is nothing to show for this client. ' +",
+      FLAG_RENDER_SUITE,
+      flagUnit,
+    ),
+    'not the same as having none',
+  )
+
+  // 111s. The closed flag set removed from the egress marker list. Four of the eight keys match no other
+  //       marker — `recent_surgery`, `cardiovascular`, `skin_condition` and `requires_consultation` — so a
+  //       response body naming any of them passes the sweep, and the other four still match, which is how a
+  //       hand-kept list comes to be half right and read as whole.
+  checkRejectedBy(
+    'flags gate: an egress marker list that does not derive from the closed set is caught',
+    flagEdit(
+      TOKEN,
+      '  ...CONTRAINDICATION_FLAG_KEYS,',
+      '  // the closed flag set is no longer spread into the marker list',
+      FLAG_CORE_SUITE,
+      flagUnit,
+    ),
+    'is not caught by any clinical field marker',
+  )
+
+  // 111t. The flag set put onto the audit row. Helpful, append-only, and a disclosure: `audit:read` is held
+  //       by the accountant and the AUDITOR, and neither holds the `clinical.flags` field group — so this
+  //       hands a client's contraindications to two roles the matrix refuses them to, in a table nothing can
+  //       correct.
+  checkRejectedBy(
+    'flags gate: flag values on the audit row are caught',
+    flagEdit(
+      FLAGS_VIEW,
+      '      notAskedCount: derivation.notAsked.length,',
+      '      notAskedCount: derivation.notAsked.length,\n      ...derivation.flags,',
+      FLAG_ROW_SUITE,
+    ),
+    'the audit row carries the flag',
+  )
+
+  // 111u. The derivation's READ row on the submission recorded as something other than a read. The flags are
+  //       still derived and still audited, so the trail looks complete — and a payload was decrypted by a
+  //       path the insider-threat query for reads of a health record does not see.
+  checkRejectedBy(
+    'flags gate: a derivation that does not record a read of the submission is caught',
+    flagEdit(
+      REPO,
+      // Anchored on the whole `after` block, because `operation: 'read',` appears on both read paths and
+      // `readFor` is the only line unique to this one. Dropping `readFor` alone was the first version of
+      // this case, and it reported "nothing was rejected" for the right reason: the read row was still
+      // written, so nothing observable changed. What this does change is what the row IS — a decryption
+      // recorded as a creation, which the insider-threat query for reads of a health record does not see.
+      "          operation: 'read',\n" +
+        '          after: {\n' +
+        '            statedPurpose: decision.statedPurpose,\n' +
+        '            grantId: decision.grantId,\n' +
+        '            customerId: row.customerId,\n' +
+        '            templateId: template.templateId,\n' +
+        '            templateVersion: row.templateVersion,\n' +
+        "            readFor: 'contraindication_flag_derivation',",
+      "          operation: 'create',\n" +
+        '          after: {\n' +
+        "            readFor: 'contraindication_flag_derivation',",
+      FLAG_ROW_SUITE,
+    ),
+    'writes a read row on the submission',
+  )
+
+  // 111v. `changed` hard-wired true. Every re-derivation then reports a change, so a sweep over every client
+  //       is indistinguishable from a client whose answers actually moved — which is the only question worth
+  //       asking of that column.
+  checkRejectedBy(
+    'flags gate: a re-derivation that always reports a change is caught',
+    flagEdit(
+      FLAGS_VIEW,
+      '  const changed =\n' +
+        '    previous === null ||\n' +
+        '    Object.entries(derivation.flags).some(\n' +
+        '      ([key, value]) => previous[key as keyof ContraindicationFlagSet] !== value,\n' +
+        '    )',
+      '  const changed = true',
+      FLAG_ROW_SUITE,
+    ),
+    'changed nothing as changed: false',
+  )
+
+  // 111w. The merge resolution removed from the view, applied for real (109f's shape).
+  //
+  //       `packages/db/src/merge-participants.ts` registers this table as one a merge deliberately does not
+  //       re-point and records that the tombstone is resolved ON READ — and that nothing in the build read
+  //       the view yet. This unit is its first reader, so the deferral came due here. Without the
+  //       resolution a client whose duplicate record was merged away silently loses every contraindication
+  //       marker, which is the worst shape a data-quality fix could take, and nothing but a real view can
+  //       show it: the resolution lives in a migration that is already applied.
+  {
+    const dbUrl = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
+    const psql = (statement) =>
+      run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', dbUrl, '-c', statement])
+
+    const COLUMNS =
+      'f.pregnancy, f.recent_surgery, f.cardiovascular, f.skin_condition, f.allergy_present, ' +
+      'f.blood_thinners, f.acute_injury, ' +
+      'f.requires_consultation or clinical.contraindication_flags_are_stale(f.customer_id) ' +
+      'as requires_consultation'
+    // `create or replace view` keeps the grant, so the application role can still read it while broken.
+    const unresolved =
+      'create or replace view public.customer_contraindication_flags ' +
+      `with (security_invoker = false) as select f.customer_id, ${COLUMNS} ` +
+      'from clinical.contraindication_flag f'
+    const restored =
+      'create or replace view public.customer_contraindication_flags ' +
+      'with (security_invoker = false) as select merge_survivor_of(f.customer_id) as customer_id, ' +
+      'bool_or(f.pregnancy) as pregnancy, bool_or(f.recent_surgery) as recent_surgery, ' +
+      'bool_or(f.cardiovascular) as cardiovascular, bool_or(f.skin_condition) as skin_condition, ' +
+      'bool_or(f.allergy_present) as allergy_present, bool_or(f.blood_thinners) as blood_thinners, ' +
+      'bool_or(f.acute_injury) as acute_injury, ' +
+      'bool_or(f.requires_consultation or clinical.contraindication_flags_are_stale(f.customer_id)) ' +
+      'as requires_consultation from clinical.contraindication_flag f ' +
+      'group by merge_survivor_of(f.customer_id)'
+
+    if (dbUrl === '') {
+      // Loudly, not silently. A gate that skips when its environment is absent is the ADR 0002 failure.
+      check(
+        'flags gate: a crossing that loses a merged-away record`s markers is caught',
+        false,
+        'TEST_DATABASE_URL is not set, so the view cannot be replaced',
+      )
+    } else {
+      const applied = psql(unresolved)
+      try {
+        // The replacement must have gone on, or the run below proves nothing about it.
+        check(
+          'flags gate: the unresolved-view fixture was actually applied',
+          !applied.failed,
+          `psql could not replace the view, so the case below measured nothing:\n${applied.output}`,
+        )
+        checkRejectedBy(
+          'flags gate: a crossing that loses a merged-away record`s markers is caught',
+          runExpectingFailure('pnpm', flagRows(FLAG_ROW_SUITE)),
+          'the survivor lost the flags',
+        )
+      } finally {
+        psql(restored)
+      }
+      // The control on the teardown, and not a formality: a broken view left behind fails every later run
+      // of this suite with a message about a rule that is fine.
+      const back = psql(
+        "select count(*) as n from pg_views where viewname = 'customer_contraindication_flags' " +
+          "and definition like '%merge_survivor_of%'",
+      )
+      check(
+        'flags gate: the view was restored with its merge resolution',
+        !back.failed && /\b1\b/.test(back.output),
+        `public.customer_contraindication_flags may still be the fixture version:\n${back.output}`,
+      )
+    }
+  }
+}
+
 
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //

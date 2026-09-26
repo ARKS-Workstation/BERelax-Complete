@@ -386,6 +386,10 @@ export {
   withdrawConsent,
 } from './repositories/consent.ts'
 export {
+  readAssignedTherapistIds,
+  readContraindicationFlags,
+} from './repositories/contraindication-flags.ts'
+export {
   BOOKABLE_STATUSES,
   BOOKING_REFUSALS,
   BOOKING_SQLSTATE,
@@ -2251,4 +2255,50 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing. 84 through 87 are held the same way.
-export const SCHEMA_VERSION = 83 as const
+//
+// 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
+// learn about a clinical record, made into a shape that can carry nothing else. 0008 created
+// `clinical.contraindication_flag` with five booleans and 0009 built the view over it; 0082 wrote no flag
+// row at all, so until this file the view answered EMPTY for every submission in the database and nothing
+// in the build read it. Four changes, and each closes a way the crossing could say something it has no
+// right to say. **The closed set is eight keys, so three columns are added** — `allergy_present`,
+// `blood_thinners` and `acute_injury` are in `CONTRAINDICATION_FLAG_KEYS` and had no column, and a key
+// without a column is a flag that derives and is then indistinguishable from a client who answered no. The
+// eighth key is `requires_consultation` and NOT `practitioner_review_required`: `practitioner` is a
+// `PROVIDER_TITLES` entry the seeded `regulatory_profile.permitted_public_titles` does not permit, so under
+// the unconfirmed licence (Y1-licence, which resolves to the narrower wellness vocabulary) a label built on
+// it is refused by `unpermitted_staff_title` — and 0008 already had the column under this name. **A flag
+// row carries its own provenance**, `derivation_version` and `source_template_version`, because without
+// them a stale set is indistinguishable from a fresh one and the front desk reads a marker derived from a
+// form the client has since replaced; a trigger ties the claimed version to the referenced submission
+// (ZA001) and, the one that would be a disclosure rather than a stale marker, refuses a row whose source
+// submission belongs to a DIFFERENT customer (ZA002) — `customer_id` is the primary key and
+// `source_submission_id` points at a row whose own customer is another column, so nothing structural stops
+// a flag row putting one person's answers on somebody else's record. An existing row back-fills to
+// `derivation_version = 0` and not 1, because a back-filled 1 would claim the current derivation produced
+// it and read as fresh for ever; 0 reads as stale, which is brief rule 15 applied to a version number. Both
+// defaults are then DROPPED, so a writer that omits `undetermined_count` cannot assert that every answer
+// was readable. **"We could not read an answer" implies "ask a human", as a CHECK**:
+// `undetermined_count = 0 or requires_consultation`, here as well as in the derivation for ADR 0010's
+// reason, so a row written by hand that swallows an unreadable answer is refused — and the two layers are
+// asserted through different observables on purpose, a pure assertion for the derivation and this
+// constraint's NAME for the row, which is C-CRM-08's recorded fix for two cases that reported the same name
+// for both. **The view is rebuilt to carry the crossing and nothing else**: a customer id and eight
+// booleans, asserted against `information_schema`. `updated_at` is DROPPED from it — the one non-boolean it
+// carried, and the date on which somebody filled in a health form is not a booking decision — and it stays
+// on the table, behind the step-up gate. `customer_id` is resolved through `merge_survivor_of()` and the
+// two histories `bool_or`ed, which closes C-CRM-05's deferral: `merge-participants.ts` registers this table
+// as one a merge deliberately does not re-point, records that the tombstone is resolved ON READ, and
+// records that nothing read the view yet — so this unit is its first reader, and without the resolution a
+// client whose duplicate record was merged away would silently lose every marker. `requires_consultation`
+// is ORed with `clinical.contraindication_flags_are_stale()` in the view, so a stale set arrives at the
+// front desk as "ask the client" with no second column for a consumer to forget; that function is SECURITY
+// DEFINER with a pinned `search_path`, because `security_invoker = false` makes a view's own base relations
+// checked against the view owner and does NOT do that for a function called from the view body — found by
+// running one statement as `berelax_app` rather than as the owner a test pool connects as. `ZA` is its
+// private SQLSTATE prefix: `ZB` through `ZW` are taken, one file each, so what a private code has to be is
+// unique to one file rather than memorable, which is 0077's argument and 0082's verbatim.
+//
+// 83 and 85 through 87 are allocations held by units in flight in other worktrees, so 83 is a gap in the
+// numbers and not in the record, for the reason above.
+export const SCHEMA_VERSION = 84 as const

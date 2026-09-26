@@ -37,6 +37,7 @@ a decision the table does not list.
 | [0025](0025-staff-field-level-encryption.md) | Staff PII under a third KEK; the employment record is a closed field map | — |
 | [0026](0026-period-reopen-requires-migration.md) | Reopening a closed accounting period requires a migration | — |
 | [0031](0031-clinical-intake-consent-gate.md) | The intake consent gate is a refusal; the AAD binds the template version; residency is a setting | — |
+| [0033](0033-contraindication-flag-crossing.md) | The crossing carries a flag and never an answer; `false` means "not affirmed"; an answer nobody can read escalates | — |
 
 ## Writing one
 

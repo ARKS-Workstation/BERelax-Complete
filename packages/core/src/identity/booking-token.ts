@@ -1,3 +1,4 @@
+import { CONTRAINDICATION_FLAG_KEYS } from '@berelax/shared'
 import { digestsEqual } from '../consent/optout-token.ts'
 import { type Instant, instantToIso } from '../time.ts'
 
@@ -336,4 +337,20 @@ export const CLINICAL_FIELD_MARKERS = [
   'health',
   'injury',
   'consent_wording',
+  /**
+   * Every key of the closed flag set (C-CRM-09), SPREAD rather than typed out.
+   *
+   * Enumerating the eight keys against the hand-written list above found four of them absent:
+   * `recent_surgery`, `cardiovascular`, `skin_condition` and `requires_consultation` matched no marker,
+   * so a response body naming any of them passed the sweep. `pregnancy` matched `pregnan`,
+   * `allergy_present` matched `allergy` and `acute_injury` matched `injury`, which is exactly how a
+   * hand-kept list comes to be half right and read as whole.
+   *
+   * Derived rather than copied, so a ninth key is refused by this guard on the commit that adds it rather
+   * than on the commit that remembers to. And the keys are safe as substring markers in a way that the
+   * English words they contain are not: the marker is the whole snake_case key, so `requires_consultation`
+   * cannot be tripped by a treatment called "Consultation" the way a bare `consultation` would — which is
+   * the false positive that gets a sweep like this switched off.
+   */
+  ...CONTRAINDICATION_FLAG_KEYS,
 ] as const

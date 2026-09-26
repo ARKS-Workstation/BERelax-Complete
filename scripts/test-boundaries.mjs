@@ -168,6 +168,27 @@ const CASES = [
       '',
     ].join('\n'),
   },
+  // C-CRM-09 widened `reviews-generator-must-not-reach-clinical-data` to name
+  // `packages/core/src/clinical/`, and this is the fixture that makes the new entry a rule somebody has
+  // seen fail. The existing fixtures for that rule are in `scripts/test-gates.mjs` and both cross a
+  // PACKAGE boundary — `@berelax/clinical` from `packages/google/src/reviews`, and a relative reach into
+  // `packages/clinical/src` from `packages/core/src/reviews`. Neither can exercise this entry, and the
+  // difference is the reason the entry was added: the prompt builder and the clinical derivation are
+  // sibling directories of ONE package, so the import needs no package.json entry, is invisible to
+  // `pnpm deps`, and is the shortest edit in the repository.
+  //
+  // `deriveContraindicationFlags` rather than a type, because it is the function a prompt builder would
+  // actually reach for: a reply that mentioned what a client had disclosed would be a better reply, and
+  // the breach would be invisible until one quoted a health disclosure on a public listing.
+  {
+    rule: 'reviews-generator-must-not-reach-clinical-data',
+    file: 'packages/core/src/reviews/__boundary_fixture__.ts',
+    source: [
+      "import { deriveContraindicationFlags } from '../clinical/contraindication-flags.ts'",
+      'export const illegal = deriveContraindicationFlags',
+      '',
+    ].join('\n'),
+  },
   {
     rule: 'db-must-not-import-core',
     file: 'packages/db/src/__boundary_fixture__.ts',

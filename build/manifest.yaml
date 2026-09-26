@@ -8437,8 +8437,13 @@ units:
     blocked_on_owner:
     - Y1-licence
     provisional: 'Closed FlagKey set: pregnancy, recent_surgery, cardiovascular, skin_condition, allergy_present,
-      blood_thinners, acute_injury, practitioner_review_required. Adding a key is a migration plus a template
-      version, never a free-text field.'
+      blood_thinners, acute_injury, requires_consultation. Adding a key is a migration plus a template version,
+      never a free-text field. The eighth key is requires_consultation and NOT practitioner_review_required:
+      Y1-licence is open, so the narrower wellness vocabulary applies, and "practitioner" is a PROVIDER_TITLES
+      entry that the seeded regulatory_profile.permitted_public_titles does not permit - asserted, with a
+      control, in packages/core/src/clinical/contraindication-flags.test.ts. Migration 0008 already had the
+      column under that name. What answering Y1-licence "healthcare" buys is a wider label vocabulary, not a
+      renamed column.'
     acceptance:
     - 'The exported crossing type is Record<FlagKey, boolean> and nothing else: an expectTypeOf test plus
       a runtime zod introspection test assert every field is z.boolean() and the key set equals the committed
@@ -8455,10 +8460,192 @@ units:
       the therapist assigned to the appointment reads the flag set; an unassigned therapist is refused both'
     - A test enumerating every FlagKey asserts each is rejected by the analytics egress allowlist, and this
       test is registered in scripts/test-gates.mjs so the guard itself is proven to fire
+    - 'NOTE: the concrete files. The migration is packages/db/migrations/0084_contraindication.sql and
+      SCHEMA_VERSION is 84 (83 and 85-87 are numbers held by units in flight; renumbering to close a gap is
+      how two branches apply one number to different SQL). The manifest declared the directory
+      packages/db/migrations/ rather than a file, and named two modules that are not the whole shape: the
+      closed key set, the crossing type and its zod schema are in packages/shared/src/clinical.ts rather than
+      in core, because packages/db may never import packages/core (brief rule 4) and the READER of the
+      crossing is a db repository - which is the point rather than a filing choice. The files list is
+      corrected rather than the code contorted to match it.'
+    - 'NOTE: the reader of the crossing is packages/db/src/repositories/contraindication-flags.ts, NOT
+      packages/clinical/src/flags-view.ts as the files list implied. flags-view.ts is the writer''s side: the
+      upsert, the audit row and the staleness verdict, all behind the boundary. Putting the reader beside it
+      would have made every consumer of the crossing - the diary, the client record, a therapist''s screen -
+      import @berelax/clinical, the package holding the envelope and the KEK parser, and the dependency rule
+      that keeps the review generator away from clinical data would then be the only thing between a prompt
+      builder and a package the whole application depends on. The reader selects from
+      public.customer_contraindication_flags over the application credential, holds no key and needs no
+      clinical privilege. ADR 0033 records the argument.'
+    - 'NOTE: there is no analytics schema and no analytics egress allowlist in this repository, so the
+      acceptance line naming one has no target as written. The guard that exists is CLINICAL_FIELD_MARKERS in
+      packages/core/src/identity/booking-token.ts - the negative half of the manage-booking field allowlist,
+      swept over a real served response body by apps/web/src/manage-booking.itest.ts. Enumerating the eight
+      FlagKeys against it found FOUR absent: recent_surgery, cardiovascular, skin_condition and
+      requires_consultation matched no marker, so a response naming any of them passed the sweep while
+      pregnancy, allergy_present and acute_injury matched. That is a real defect in another unit''s guard,
+      found by this unit''s enumeration and FIXED rather than reported, because the fix is to derive rather
+      than to add: the list now spreads CONTRAINDICATION_FLAG_KEYS, so a ninth key extends the guard on the
+      commit that adds it. The keys are safe as substring markers in a way the English words they contain are
+      not - requires_consultation cannot be tripped by a treatment called "Consultation".'
+    - 'NOTE: two crossings existed and now there is one. packages/clinical/src/store.ts (F08''s) declared a
+      second ContraindicationFlags interface with five booleans, a customerId and an updatedAt. The acceptance
+      is that the exported crossing type is Record<FlagKey, boolean> AND NOTHING ELSE, which a second exported
+      shape defeats however careful the first is - a consumer imports whichever it found. It is now an alias of
+      the shape in @berelax/shared. In the same file IntakeSubmissionInput.flags is REMOVED: flags a caller
+      states are not derived flags, and a call site could have set pregnancy: true for a client who was never
+      asked. C-CRM-08 reached the same conclusion from the other end and gave recordIntake no flags argument at
+      all. Both are cross-unit edits to F08''s seam, reported rather than silent; nothing implements
+      ClinicalStore, so no call site changed.'
+    - 'NOTE: migration 0084 DROPS updated_at from public.customer_contraindication_flags, which is a
+      cross-unit change to 0009''s view. It was the one non-boolean the crossing carried, and it is the date on
+      which somebody filled in a health form; the view is now a customer id and eight booleans, asserted
+      against information_schema. It stays on the table, behind the step-up gate. Nothing read it: the only
+      committed readers of the view were a row count in packages/db/src/clinical-boundary.itest.ts and prose
+      in packages/db/src/merge-participants.ts.'
+    - 'NOTE: C-CRM-05''s deferral on this table came due here, and is closed rather than carried.
+      packages/db/src/merge-participants.ts registers clinical.contraindication_flag.customer_id as a column a
+      customer merge deliberately does not re-point, records that the tombstone is therefore resolved ON READ
+      by merge_survivor_of(), and records that "nothing in the build reads the view yet". This unit is the
+      view''s first reader, so without the resolution a client whose duplicate record was merged away would
+      silently lose every contraindication marker. 0084''s view resolves customer_id through
+      merge_survivor_of() and bool_ors the two histories, because a merge joins two and either may hold the
+      affirmative. Gate case 111w replaces the view with an unresolved one using psql and restores it in a
+      finally, with a teardown control, because the resolution lives in a migration that is already applied.'
+    - 'NOTE: staleness reaches the booking layer as the ESCALATION FLAG and not as a ninth column. The front
+      desk''s credential cannot compute staleness - 0009 revokes the clinical schema from berelax_app, so it
+      can see neither which submission is live nor what version the form is at - and a check a consumer cannot
+      perform is one it silently skips. So clinical.contraindication_flags_are_stale() is ORed into the view''s
+      requires_consultation: a consumer cannot forget it, the crossing stays the closed set, and the REASON is
+      lost, which is correct for a reader who may not see the detail. resolveContraindicationFreshness in
+      @berelax/core carries the reason for the clinical side. The stored column and the view''s column
+      therefore differ on purpose: the row records what the derivation FOUND, the view reports what the front
+      desk must DO.'
+    - 'NOTE: clinical.contraindication_flags_are_stale() is SECURITY DEFINER, which is the one privilege
+      elevation this unit adds, and it was found by running one statement as berelax_app rather than as the
+      owner the test pool connects as. security_invoker = false makes a view''s own base relations checked
+      against the view owner; it does NOT do that for a function called from the view body, so the SECURITY
+      INVOKER version read the clinical schema as berelax_app and the page answered "permission denied for
+      schema clinical". Inlining the clauses into the view needs no elevated function and was rejected: the
+      rule would then exist only inside a view body, uncallable by a sweep, unassertable against the pure
+      verdict and unmutatable by a gate case. search_path is pinned, EXECUTE is revoked from public and granted
+      to berelax_app and berelax_clinical only.'
+    - 'NOTE: the dependency-cruiser rule reviews-generator-must-not-reach-clinical-data was WIDENED to name
+      ^packages/core/src/clinical/. C-CRM-08 considered this and left it, reasoning that the real protection is
+      that decrypting needs the KEK and the store - true of the DATA, and not what the rule is for: it closes
+      the IMPORT PATH, and every path it named crosses a package boundary. packages/core/src/reviews/ and
+      packages/core/src/clinical/ are sibling directories of ONE package, so ../clinical/... needs no
+      package.json entry, is invisible to pnpm deps, and is the shortest edit in the repository - and what it
+      reaches is renderSubmission and deriveContraindicationFlags, both of which take a decrypted answer map.
+      @berelax/shared is deliberately not forbidden: it holds the key set, and banning it would ban the package
+      every package may import. The known-bad fixture is in scripts/test-boundaries.mjs, because a relative
+      import inside one package is what has to fire and a fixture importing @berelax/core would resolve to
+      core/src/index.ts and match nothing.'
+    - 'NOTE: deriving a flag set is a full clinical READ and is gated and audited as one - a step-up grant for
+      a stated purpose, a read audit row on the submission AND a derived row on the flag set. It is
+      ClinicalIntakeStore.deriveFlags rather than a free function, because a flag derived by reading plaintext
+      into a module outside @berelax/clinical would defeat both the encrypted store and the closed log-field
+      map. Consequence the front desk will feel: it cannot refresh somebody''s markers, and a client whose form
+      nobody has opened has NO markers - rendered as its own screen state and never as eight falses, which
+      would be a claim that their form said no to eight questions when nothing has read it.'
+    - 'NOTE: a flag row is OVERWRITTEN rather than superseded, which is the one place this unit departs from
+      the clinical schema''s append-only habit. A flag set is not evidence: the evidence is the submission,
+      which is retained and superseded (ADR 0010) and still decrypts, and the eight booleans are a function of
+      it. A history of them would be a growing record of somebody''s health conditions kept for no reason
+      anybody could state. The audit trail holds what changed and when - and NOT the flag values, because
+      audit:read reaches the accountant and the auditor and neither holds the clinical.flags field group.'
+    - 'NOTE: no port band was taken. packages/harness/src/ports.ts is unchanged, exactly as C-CRM-08 recorded
+      for the intake page: every claim about the flags screen is about what the HTML contains, so
+      apps/web/src/flags-render.test.ts drives the real renderer and asserts the bytes, and
+      apps/web/src/test-ports.test.ts refuses a band that is declared and not used. The served-response half
+      of the leak sweep is apps/web/src/manage-booking.itest.ts''s, which already runs a real server and now
+      sweeps every FlagKey over a real booking page.'
+    - 'NOTE: the screen''s reader identity. /clients/[id]/flags takes ?employee= and ?role= as query
+      parameters because there is no admin session until W-SYS-01, as every route under /compliance, /hr,
+      /settings and /clients records. ?role= is different in kind from ?employee= - a role IS the permission -
+      so it can only NARROW: narrowContraindicationAccess intersects the claimed role''s decision with
+      CONTRAINDICATION_SESSIONLESS_CEILING_ROLE''s (receptionist, which holds clinical_flags:read and not
+      clinical_note:read). ?role=therapist therefore does not unlock the detail, ?role=therapist still has to
+      be ASSIGNED to see the flags because that half comes from the database, and ?role=marketer is refused
+      everything. Both the ceiling and the narrowing are in @berelax/core so the property is proved by a pure
+      test; a ceiling whose only test needs a server is one somebody removes without seeing it fail. When the
+      session lands the ceiling comes off and only the SOURCE of the two arguments changes.'
+    - 'NOTE: deferred to C-CRM-10 (still todo) - a re-derivation SWEEP. A bumped
+      CONTRAINDICATION_DERIVATION_VERSION, or a reworded template, makes every stored flag row stale, and
+      clearing it needs somebody who can open each submission. Nothing here schedules that: a job that
+      decrypted every client''s intake payload on a timer is a bulk clinical read with an audit shape nobody
+      has designed, and building one as a side effect of this unit would make it available before anybody
+      argued for it. What this unit guarantees meanwhile is that the staleness is never silently used - the
+      view escalates. C-CRM-10 owns the retention and erasure engine and is where a per-data-class sweep
+      belongs.'
+    - 'NOTE: DEFECT FOUND, NOT FIXED, and it is not this unit''s - THE ADMIN SESSION HAS NO `todo` OWNER.
+      This unit''s route takes ?employee= and ?role= because there is no admin session, and every route under
+      /compliance, /hr, /settings and /clients says the same thing in the same words: "until W-SYS-01". There
+      are 58 references to W-SYS-01 in this manifest. W-SYS-01 is `status: done` and is "Next.js app shell,
+      Tailwind v4 token mapping and the type stack" - it never owned a session, and none of its acceptance
+      lines mentions one. F07 ("Staff auth with mandatory TOTP and the RBAC policy layer") is also done and
+      its three acceptance lines are all assertions about the PURE matrix, not about a web session. So the
+      whole admin estate is deferring to a finished unit, which is exactly the hazard the brief records
+      against M-TILL-09 - at the scale of every admin route rather than one. Reported and not fixed, because
+      re-ownering needs a unit somebody decides on and inventing one here would be worse than the gap being
+      visible. C-CRM-08 carries the same deferral, merged an hour ago, and predates this by a long way. What
+      this unit does about it meanwhile is make the query parameter unable to widen anything: ?role= is
+      intersected with a receptionist ceiling, so the shape survives the session landing and cannot be an
+      escalation before it does.'
+    - 'NOTE: SECOND DEFECT FOUND, NOT FIXED, and it is not this unit''s either - a STALE ASSERTION left by
+      commit ec561e7. `packages/db/src/services/checkout-finalise.itest.ts:1101` asserts the outbox key
+      `invoice.issued:${finalised.invoice.displayNumber}` while
+      `packages/db/src/repositories/invoice.ts:552` publishes `invoice.issued:${issued.id}`. ec561e7 ("the
+      issued-document event is keyed on the ROW, because the statutory number is reset by design") changed the
+      key shape and updated invoice.itest.ts and issue-credit-note.itest.ts - its four-file stat does not list
+      this one. It fails deterministically rather than flakily: the two cannot agree unless a display number
+      equals a uuid, so it fails on any tree carrying ec561e7. Confirmed byte-identical at ec561e7, at the base
+      commit 5775435 and in this worktree, so nothing in C-CRM-09 is involved - this unit touches no invoice,
+      no document series and no outbox row, and its only mentions of outbox_event are a comment and a test
+      title. It is the ONE failure in `pnpm test:integration` for this unit''s run. M-TILL-06 owns that file
+      and is `done`, so it needs re-ownering by hand, like the admin-session gap above.'
+    - 'NOTE: also NOT built here - a screen that DERIVES. The flags page reads and never writes, so nothing
+      on it can mint a step-up grant; the derivation is reachable through the store and through the intake
+      page''s reader, and a button that re-derived from the front desk would be a clinical read taken by
+      somebody who has not stepped up.'
+    - 'NOTE: NO new setting, and that is a claim rather than an omission. This unit''s provisional value is
+      the closed key set and the label vocabulary, both of which Y1-licence decides - and neither is
+      owner-settable. The Unconfirmed Assumptions panel already carries Y1-licence through C-CRM-08''s
+      `clinical.intake_copy_lints_questions`, and docs/12 §2''s argument is that the panel is worth reading
+      exactly to the extent that everything on it needs an owner''s ANSWER: a setting the owner could flip
+      here would change nothing until somebody edited label copy, so it would be a row that looks actionable
+      and is not. The treatment is therefore the manifest''s provisional block, blocked_on_owner: Y1-licence,
+      and the OPEN-QUESTIONS row, which now names what widens in each direction. Same shape of decision as
+      ADR 0031''s last section about the step-up window.'
+    - 'NOTE: units. Every column 0084 adds is boolean or integer, confirmed against information_schema; there
+      is no floating-point, numeric or money column in the clinical schema. undetermined_count and
+      derivation_version are integers and are deliberately NOT exposed by the view - a count of anything about
+      a client''s answers is more than a boolean.'
     files:
+    - packages/db/migrations/0084_contraindication.sql
+    - packages/shared/src/clinical.ts
+    - packages/shared/src/index.ts
     - packages/core/src/clinical/contraindication-flags.ts
+    - packages/core/src/clinical/contraindication-flags.test.ts
+    - packages/core/src/identity/booking-token.ts
+    - packages/core/src/index.ts
     - packages/clinical/src/flags-view.ts
-    - packages/db/migrations/
+    - packages/clinical/src/flags-view.itest.ts
+    - packages/clinical/src/repository.ts
+    - packages/clinical/src/store.ts
+    - packages/clinical/src/logging.ts
+    - packages/clinical/src/schema/clinical.ts
+    - packages/clinical/src/index.ts
+    - packages/db/src/repositories/contraindication-flags.ts
+    - packages/db/src/index.ts
+    - apps/web/app/(admin)/clients/[id]/flags/route.ts
+    - apps/web/app/(admin)/clients/[id]/flags/render.ts
+    - apps/web/src/flags-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - docs/adr/0033-contraindication-flag-crossing.md
+    - docs/adr/README.md
+    - .dependency-cruiser.cjs
+    - scripts/test-boundaries.mjs
     - scripts/test-gates.mjs
   - id: C-CRM-10
     order: 89
