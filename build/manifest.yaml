@@ -6152,7 +6152,7 @@ units:
       cards dragged between ordered stages, with every move recorded as a transition and stage entry able
       to start a flow enrolment through the same API as any other trigger.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-01
@@ -6174,10 +6174,148 @@ units:
       trigger - no bespoke path - and the per-flow max-enrolment limit still applies'
     - Screenshots at 390/768/1440 x 2 themes x 2 directions land in artifacts/screens/C-AUTO-08 and two
       consecutive runs produce zero pixel diff
+    - 'NOTE: migration 0077_pipeline.sql and SCHEMA_VERSION is 77. 76 is HELD rather than free - a unit was in
+      flight in another worktree with that number allocated when this was written - and 71 and 74 are PERMANENT
+      gaps for the reason the ledger states (both units turned out to need no migration). Gate case 90a walks
+      the migrations that EXIST on disk rather than consecutive integers, so neither costs anything and neither
+      needs declaring; the paragraph in packages/db/src/index.ts is for 0077 alone.'
+    - 'NOTE: three tables, and the NAMING is the classification rather than a style choice. pipeline_stage is the
+      board''s ordered column list; customer_pipeline_card is where one contact is, one row per person with the
+      customer id as the whole primary key; pipeline_stage_transition is the append-only record of who moved
+      whom, from where, to where and when. The card carries the customer_ prefix ON PURPOSE, because
+      CRM_TABLE_PATTERN in packages/db/src/repositories/crm.ts is ^customer(_|$) and its row is what the front
+      desk says about a person - so it is inside the CRM audit area and is registered in CRM_AUDIT_COVERAGE as
+      audited by customer_pipeline_card_audit. By TRIGGER although it HAS a repository, and that is the entry
+      worth reading: for a table whose whole row is one column and one instant, a psql UPDATE is a plausible
+      correction, so the actor goes into the transaction-local berelax.audit_actor_* settings (0036''s
+      mechanism) and the trigger records it - a repository action PLUS the trigger would be two audit rows for
+      one move. The other two tables are outside the area and named accordingly: a column list is not a claim
+      about a person, and a log that names its own actor cannot go unattributed. Both registries were updated:
+      customer_pipeline_card is a repoint_update merge participant and pipeline_stage_transition is a
+      MERGE_ALLOWLIST entry, each with its reason (packages/db/src/merge-participants.ts).'
+    - 'NOTE: what a MERGE does to a card, because the brief asks for the decision to be written down. The card is
+      re-pointed (repoint_update, conflictKey [] - the primary key is the customer id alone), and when the
+      survivor already has one the loser''s is RETAINED. Merging two records does NOT advance a stage: the
+      obvious rule is "keep the furthest-along of the two", and that would be the SYSTEM making a claim about a
+      person when every other stage in the table was put there by a named human. So the survivor keeps the
+      column somebody last dragged them to. The re-point is invisible to
+      customer_pipeline_card_records_every_move, which returns early when neither stage_key nor stage_entered_at
+      changes - so a merge does not have to fabricate a transition saying a stage was entered when nobody
+      entered it. readPipelineBoard filters merged-away contacts out for the retained case, because the loser''s
+      customer row survives as a tombstone and the board would otherwise draw one person twice. The transition
+      log is ALLOWLISTED rather than re-pointed: it is append-only for every role (ZU002) and a row in it says a
+      named actor moved THIS record, so re-pointing it would put a move nobody made into the survivor''s history
+      - the invoice argument, for a log. The stated cost is that readCardHistory for a survivor does not include
+      the loser''s moves, and nothing in this build reads that history to make a decision.'
+    - 'NOTE: the per-flow max-enrolment limit is NOT implemented here and is DEFERRED to C-AUTO-07, which owns it
+      - C-AUTO-06''s NOTE says the per-flow cap, the already-enrolled outcome and the idempotency of a trigger
+      are that unit''s, and its provisional line names the figure (5,000 active enrolments per flow). Inventing
+      the threshold here would be inventing a number nobody has agreed, in the wrong unit. What IS built and
+      asserted is everything the cap needs in order to apply to a stage entry the moment it exists:
+      PIPELINE_ENROLMENT_PATH.enrol IS enrolOnLiveVersion, compared by reference with toBe (gate case 104h wraps
+      it in a lambda and watches that assertion fail), and a refusal raised by that writer travels out of
+      moveCard as stage_entry_flow_refused carrying the writer''s own refusal in details.flowRefusal, with the
+      card move rolled back in the same transaction - asserted by injecting an enroller that refuses, with the
+      real writer as the control in the same case. A path that caught the refusal and carried on would pass
+      every other case in the file.'
+    - 'NOTE: pipeline.stage_entered is now a member of FLOW_TRIGGER_EVENTS, which is what C-AUTO-06''s NOTE
+      deferred here, and packages/core/src/automation/dsl.test.ts was changed to partition the vocabulary BY
+      PREFIX rather than by subtracting manual: the appointment.* members are still asserted to equal what the
+      lifecycle emits in both directions, and the non-appointment members are enumerated as exactly [manual,
+      pipeline.stage_entered] so a third one cannot arrive unexamined. WHICH column starts a flow is NOT in the
+      document: pipeline_stage.entry_flow_key names the flow per column, because the trigger node is .strict()
+      and carries no stage field, and a stage qualifier in the node would be a second place to configure one
+      board. moveCard refuses to enrol on a flow whose LIVE version does not declare that trigger
+      (stage_entry_flow_not_triggered_by_stage_entry, fail closed) so the two cannot drift; gate case 104i
+      widens that predicate to "has a trigger at all" and watches the case fail.'
+    - 'NOTE: the other half of C-AUTO-06''s NOTE (5) - checking an action_stage node''s stage and a condition''s
+      lifecycle_state value against the vocabularies at PUBLISH time - is still deferred, and to C-AUTO-07
+      rather than back to nobody. The reason is not effort: a publish-time check cannot be the guarantee,
+      because a stage can be archived after a flow is published and nothing re-publishes a flow when the board
+      changes. The choke point has to be the WRITE, and that is built here - moveCard refuses an unknown stage
+      (stage_not_found) and an archived one (stage_archived) by name, for every caller, and the database refuses
+      a card in a stage that does not exist by foreign key. So what C-AUTO-07''s action_stage step needs is to
+      call moveCard rather than to trust a check made days earlier. Adding a publish-time check as well would
+      mean a new injected registry in validateFlowDefinition, two new FLOW_DSL_RULES and a fail-closed arm, all
+      to restate at publish time a rule the write already enforces at the only moment it can be true.'
+    - 'NOTE: the board read is ONE statement, and it is counted rather than asserted by reading the source -
+      B-UI-03''s device for the admin calendar''s two axes, a wrapper around Sql that counts every statement the
+      reader issues, with a second read as the control so "one" is a measurement. A query per column is the
+      implementation this replaces: six round trips can disagree with each other, so a card moved between the
+      second and the fifth appears twice or not at all, and the board is wrong in a way no single row is. Two
+      filters in that one query are load-bearing and neither is obvious: archived columns and their cards are
+      left off (or the board offers a column every drop into it is refused for), and merged-away contacts are
+      left off (see the merge NOTE). Gate cases 104a, 104b and 104c are the three known-bad fixtures.'
+    - 'NOTE: positions are unique AND gapless, and both constraints are DEFERRED to COMMIT - which is the
+      decision that makes a reorder possible at all. Every intermediate state of a three-row shuffle holds
+      either a duplicate or a gap, so an immediate UNIQUE refuses the first statement and an immediate gapless
+      check refuses the second; reorderPipelineStages therefore needs no scratch positions, and the set
+      display_order = -n pass it replaces is the one that leaves negative positions behind when a transaction
+      dies half way through. A reorder takes the WHOLE order as a permutation rather than a patch ("move booked
+      to position 1" has to compute what happens to the four rows it did not mention, wrongly and differently
+      for a move up than for a move down). The 100 randomised reorders use a seeded shuffle, not Math.random: a
+      random test that fails once in a hundred runs is a flake, and the test COUNTS the distinct permutations
+      its hundred seeds produce and asserts a floor, so the generator is shown to be able to disagree with
+      itself. Gate cases 104f and 104g.'
+    - 'NOTE: what is NOT built. There is no per-column CARD order - cards are ordered by stage_entered_at, and a
+      second ordering would be a second thing a drag has to get right; no pipeline_stage.card_count, because a
+      count beside the rows is a count that disagrees with them; and entry_flow_key is one nullable column
+      rather than a join table, because the second flow on one column is a question for the editor that has to
+      display them (C-AUTO-09) and a join table nothing writes two rows into is a table pretending to a
+      capability. A stage is never DELETED: a transition names the column it moved a card into and that log is
+      append-only, so the reference is ON DELETE RESTRICT and the schema offers archiving instead, with the
+      archived row KEEPING its position - renumbering the survivors to close the gap would reorder the board as
+      a side effect of hiding one column. For the same reason every reference to pipeline_stage.stage_key is ON
+      UPDATE RESTRICT: a stage key is immutable once a card has entered it.'
+    - 'NOTE: the browser half. apps/web/src/pipeline.itest.ts takes the port band pipeline at 12_100 (width 300,
+      the next free start after 11_800, which is an allocation held by a unit in flight) - the ONE change made
+      to packages/harness/src/ports.ts - and drives the BUILT application through startWebServer. The drag cases
+      move a card between the two FIXTURE columns rather than to a seeded one, and the reason is geometry rather
+      than taste: eight columns at their minimum width are wider than a 1440px viewport, so the board scrolls
+      (the board, not the page - a page that scrolled sideways would move the re-auth banner off screen) and two
+      columns at opposite ends cannot both be visible. A pointer gesture between two elements that cannot both
+      be seen is not a drag a person could make either, and dragTo REFUSES it by name rather than silently
+      measuring a coordinate outside the viewport, which is how this file first failed. The forced-409 case is
+      driven by the KEYBOARD, because the word that makes that acceptance line an assertion is "optimistic":
+      ArrowRight moves the card and commits nothing, so the case asserts the card is in the doomed column,
+      presses Enter, and asserts it is back - both halves observed and neither timed.'
+    - 'NOTE: no gate case runs apps/web/src/pipeline.itest.ts, and that is a finding rather than a gap. That
+      suite drives the built application, so next start serves whatever .next holds - a mutation to
+      app/(admin)/crm/pipeline/render.ts, or to anything the page imports, is invisible to it until the app is
+      rebuilt, and a gate case that mutated a served file and ran the browser suite would report "exited zero;
+      nothing was rejected" about a mutation the server never loaded. That is a false FAIL on a rule that is
+      fine, and it is the same fact brief rule 17 states from the other direction. So the eleven cases in block
+      104 run the ROW suite (packages/fixtures/src/crm-pipeline.itest.ts, which calls the repository from
+      source) and the RENDER suite (apps/web/src/pipeline-render.test.ts, which imports the document from
+      source); the browser suite''s own claims are asserted there with their controls beside them, including a
+      page-error collector so a broken listener reads as an error rather than as a timeout waiting for a data
+      attribute.'
+    - 'NOTE: Y9-crm-pipeline is a new row in docs/OPEN-QUESTIONS.md and all six stages carry the provenance trio,
+      reaching the Unconfirmed Assumptions panel through a new arm of unconfirmedAssumptionRows - the
+      arrangement C-CRM-01 made for the other two CRM vocabularies. It is deliberately NOT the same vocabulary
+      as customer_lifecycle_state: the lifecycle is derived from what has happened and a pipeline stage is where
+      a human has PUT somebody, and the two disagree on purpose - a record can be active in the lifecycle and
+      lapsed on the board because the front desk has given up on them. The card shows both, side by side,
+      because the disagreement is the useful thing. ZU001, ZU002 and ZU003 are 0077''s private SQLSTATEs; ZU
+      rather than a mnemonic letter because the mnemonic ones are taken (ZK is the KEK''s, ZP is consent''s, ZF
+      is the flow''s) and what a private code has to be is unique to one file, not memorable.'
+    - 'NOTE: this route is NOT authenticated - there is no admin session until W-SYS-01, exactly as the
+      credentials screen, the reassignment queue, the compliance calendar, the Messages inbox and the duplicate
+      queue all record - so the actor every transition carries is the SURFACE, Pipeline board, and not a name
+      nobody signed in with. Stated rather than invented, because pipeline_stage_transition_actor_is_stated
+      refuses a placeholder and a plausible name would be indistinguishable from a real one (brief rule 15).
+      W-SYS-01 replaces the label with the signed-in operator and nothing else about the write changes. /crm was
+      added to ADMIN_GROUP_PREFIXES rather than relying on this one route being indexable: false, because
+      C-CRM-01''s NOTE already allocates the estate there and the second route under a prefix arrives noindex on
+      the commit that creates it rather than on the commit that remembers to.'
     files:
+    - packages/db/migrations/0077_pipeline.sql
     - packages/db/src/schema/pipeline.ts
-    - apps/web/app/(admin)/crm/pipeline/
     - packages/db/src/repositories/pipeline.ts
+    - apps/web/app/(admin)/crm/pipeline/
+    - apps/web/src/pipeline-render.test.ts
+    - apps/web/src/pipeline.itest.ts
+    - packages/fixtures/src/crm-pipeline.itest.ts
   - id: C-CRM-02
     order: 74
     title: E.164 normalisation and deterministic duplicate scoring

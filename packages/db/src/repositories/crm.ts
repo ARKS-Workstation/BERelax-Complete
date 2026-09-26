@@ -953,6 +953,23 @@ export const CRM_AUDIT_COVERAGE: Readonly<
   customer_therapist_do_not_pair: { by: 'repository', action: CRM_AUDIT_ACTIONS.doNotPairSet },
   customer_lifecycle_state: { by: 'trigger', trigger: 'customer_lifecycle_state_audit' },
   customer_acquisition_source: { by: 'trigger', trigger: 'customer_acquisition_source_audit' },
+  /*
+    C-AUTO-08's pipeline card, audited BY TRIGGER although it HAS a repository — which is the one entry
+    here that needs its reasoning stated, because `by: 'repository'` was available and was not taken.
+
+    The register's two arms are about who can be trusted to record a change. For a table whose whole row
+    is one column and one instant, the honest answer is nobody: a `psql` UPDATE is a plausible correction
+    to a board, and the stage has to be attributable however it moved. So `moveCard` sets the
+    transaction-local `berelax.audit_actor_*` values (0036's mechanism) and `customer_pipeline_card_audit`
+    writes the row, which means a correction made outside the repository is audited as `system` with a
+    stating label rather than not at all. It also keeps the count honest: a repository action PLUS the
+    trigger would be two audit rows for one move, and a reader would have to know which to believe.
+
+    The move's own record is `pipeline_stage_transition`, which is a different question — that log carries
+    the from-stage and is what a board's history reads; this register is about whether a change to a CRM
+    row is attributable at all.
+  */
+  customer_pipeline_card: { by: 'trigger', trigger: 'customer_pipeline_card_audit' },
 })
 
 /**
@@ -966,11 +983,13 @@ export const CRM_AUDIT_COVERAGE: Readonly<
  * ## What it does NOT cover, and why that is not a hole
  *
  * This comment used to say "the next CRM table is in the area the moment it is created", and that is not
- * what a name prefix can promise. Nine base tables carry a customer id and are outside it — `booking`,
+ * what a name prefix can promise. Ten base tables carry a customer id and are outside it — `booking`,
  * `booking_session`, `checkout_finalisation`, `consent`, `flow_enrolment`, `invoice`, `optout_grant`,
- * `suppression`, `waitlist` — and none of them carries `record_crm_vocabulary_change`. They are audited
- * on their own units' repository paths, which is right: this register is about the CRM VOCABULARY, the
- * tables whose rows are what the front desk says about a person, and a booking is not vocabulary.
+ * `pipeline_stage_transition`, `suppression`, `waitlist` — and none of them carries
+ * `record_crm_vocabulary_change`. They are audited on their own units' repository paths, or ARE the
+ * record (`pipeline_stage_transition` is append-only and names its own actor), which is right: this
+ * register is about the CRM VOCABULARY, the tables whose rows are what the front desk says about a
+ * person, and a booking is not vocabulary.
  *
  * So the boundary is the NAME and it is deliberate. What stops that becoming a way to escape the
  * register is that the name is also the thing a new CRM vocabulary table will have. A table about a

@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**109 / 207 units complete.**
+**110 / 207 units complete.**
 
 ## Next up
 
 1. **B-UI-04 — Quick-book, walk-in entry and the WhatsApp ref field**  — **needs owner input:** Y12-ref-loop
 1. **M-TILL-09 — Versioned package templates and package sale as deferred revenue**  — **needs owner input:** Y9-package-policy, Y11-vat-package
-1. **C-AUTO-08 — Kanban pipeline for leads and clients**
+1. **C-AUTO-03 — Frequency ledger and a global cap across every flow and campaign**  — **needs owner input:** Y6-sender-ids
 
 ## All units
 
@@ -87,7 +87,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
 | [x] | 71 | `C-CRM-01` | Client record: preferences, tags, lifecycle, source, VIP and a blocklist that actually blocks | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F09` | — | — |
 | [x] | 72 | `C-AUTO-06` | Flow DSL, versioning and enrolment pinning | `C-AUTO-01`, `C-CRM-01` | — | — |
-| [ ] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
+| [x] | 73 | `C-AUTO-08` | Kanban pipeline for leads and clients | `C-CRM-01`, `H04` | — | — |
 | [x] | 74 | `C-CRM-02` | E.164 normalisation and deterministic duplicate scoring | `C-CRM-01`, `F05` | — | — |
 | [x] | 75 | `C-CRM-03` | Consent: channel x purpose x timestamp x wording version, append-only | `C-CRM-01`, `F06` | — | Y8-customers, Y1-entity |
 | [x] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |

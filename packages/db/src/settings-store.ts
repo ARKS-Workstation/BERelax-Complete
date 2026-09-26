@@ -294,6 +294,18 @@ export async function unconfirmedAssumptionRows(
       union all
       select 'customer_acquisition_source', source, open_question_id, provisional_note
         from customer_acquisition_source where is_provisional
+      -- The pipeline stages (0077). A third vocabulary, here for the two above's reason and one of its
+      -- own: a board column is the most VISIBLE assumption in this system - the front desk reads six of
+      -- them every day and drags people between them - and a column nobody has agreed to is a claim being
+      -- made about every person on the board. Per LABEL, because the business can confirm one column
+      -- without confirming the rest. No backtick appears in this comment, deliberately: it lives inside a
+      -- JS template literal and one would end it early, which is how this paragraph first broke the build.
+      -- Archived stages are included deliberately: a column taken off the board is
+      -- still an unanswered question until somebody says the stage was wrong, and its row is what a
+      -- reorder puts back.
+      union all
+      select 'pipeline_stage', stage_key, open_question_id, provisional_note
+        from pipeline_stage where is_provisional
       -- The consent purposes and the consent wording (0056). The vocabulary is here for the same reason
       -- the two above are: a TABLE rather than an enum precisely so each label can carry the provenance
       -- trio and reach this panel. The WORDING is the one that matters most, and it is the reason the

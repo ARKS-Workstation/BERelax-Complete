@@ -432,6 +432,29 @@ export const ROUTES = [
       'first ISR page that renders NAP.',
   },
   {
+    id: 'pipeline-board',
+    path: '/crm/pipeline',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-08s pipeline board: the six ordered columns and the cards dragged between them, with every ' +
+      'move written as a transition the database refuses to omit (ZU001). A handler answering text/html ' +
+      'rather than a document, for the reason the Messages inbox, the template editor, the compliance ' +
+      'calendar and the duplicate queue give: a registry document must be served in BOTH locales, which ' +
+      'needs an Arabic admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English ' +
+      'document mirrored so the direction half of the accessibility and screenshot matrices is audited ' +
+      'without inventing an Arabic admin surface. It WRITES - its POST is the move, in one transaction - ' +
+      'and it is NOT authenticated until W-SYS-01, so the actor every transition records is the SURFACE ' +
+      '(`Pipeline board`) rather than a name nobody signed in with. Dynamic because the page is a claim ' +
+      'about where every card is right now: a prerendered copy would draw cards in columns they left. The ' +
+      '/crm prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, so the CRM screens the manifest puts ' +
+      'beside it arrive excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
     id: 'faq',
     path: '/faq',
     kind: 'document',
@@ -934,11 +957,18 @@ export type RouteId = Route['id']
  * a person's clinical file. The second route under a prefix arrives noindex on the commit that creates it
  * rather than on the commit that remembers to, and for that one the difference is a health record.
  *
+ * `/crm` is C-AUTO-08's, and it holds one route today: the pipeline board. A prefix rather than an entry
+ * because C-CRM-01's NOTE already allocates the estate there ("C-AUTO-08 already owns
+ * apps/web/app/(admin)/crm/"), and what goes beside a board is the flow editor (C-AUTO-09) and whatever
+ * reads a single client record — screens that show one named person's history. The second route under a
+ * prefix arrives noindex on the commit that creates it rather than on the commit that remembers to.
+ *
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/analytics',
   '/clients',
   '/compliance',
+  '/crm',
   '/hr',
   '/messaging',
   '/settings',

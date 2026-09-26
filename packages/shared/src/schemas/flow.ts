@@ -89,9 +89,23 @@ export const FLOW_TERMINAL_NODE_KINDS = ['exit'] as const
 /**
  * What may start a flow.
  *
- * Every member but `manual` is an outbox event an appointment transition already publishes (0024,
- * B-LIFE-01). `manual` is an operator enrolling somebody by hand, which C-AUTO-07's enrolment API
- * offers and which has no event because nothing happened to the customer.
+ * Every `appointment.*` member is an outbox event an appointment transition already publishes (0024,
+ * B-LIFE-01), and `packages/core/src/automation/dsl.test.ts` asserts that set equals what the lifecycle
+ * emits in BOTH directions — so a transition added without deciding whether a flow may start on it fails
+ * the build, and a trigger naming an event nothing emits can never fire.
+ *
+ * Two members are not appointment events, and each one is here because something in this build can now
+ * cause it:
+ *
+ *   - `manual` is an operator enrolling somebody by hand, which C-AUTO-07's enrolment API offers. It has
+ *     no event because nothing happened to the customer.
+ *   - `pipeline.stage_entered` is a card entering a pipeline column (C-AUTO-08). It was deliberately
+ *     ABSENT while `pipeline_stage` did not exist — C-AUTO-06's NOTE says so and defers it here — because
+ *     a trigger naming an event nothing can raise is a flow an operator draws and waits on for ever.
+ *     WHICH column starts the flow is not in the document: `pipeline_stage.entry_flow_key` names the flow
+ *     per column, because the trigger node below is `.strict()` and has no stage field, and a stage
+ *     qualifier in the node would be a second place to configure one board. `moveCard` refuses to enrol
+ *     on a flow whose live definition does not declare this event, so the two cannot drift.
  */
 export const FLOW_TRIGGER_EVENTS = [
   'appointment.confirmed',
@@ -102,6 +116,7 @@ export const FLOW_TRIGGER_EVENTS = [
   'appointment.cancelled_by_customer',
   'appointment.cancelled_by_salon',
   'appointment.rescheduled',
+  'pipeline.stage_entered',
   'manual',
 ] as const
 export type FlowTriggerEvent = (typeof FLOW_TRIGGER_EVENTS)[number]
