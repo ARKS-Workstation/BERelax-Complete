@@ -134,7 +134,13 @@ async function readPage(
   frozen: { readonly date: string; readonly hhmm: string },
 ): Promise<string> {
   const response = await handleCalendarRead(
-    { searchParams: new URLSearchParams(query) },
+    {
+      searchParams: new URLSearchParams(query),
+      // The diary's own claims are about the day. Whether the Google connection needs re-authorising is
+      // another suite's subject, and a banner read here would make this file depend on whichever
+      // connection an earlier suite left behind (brief rule 12).
+      chrome: { googleReauth: null, returnTo: '/calendar' },
+    },
     deps(frozen),
   )
   expect(response.status, query).toBe(200)

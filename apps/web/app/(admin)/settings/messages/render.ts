@@ -30,6 +30,11 @@
 import { maskRecipient, safeText } from '@berelax/core'
 import type { InboxEntry } from '@berelax/db'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /** The page's own styles. Colours are tokens only; there is no literal in this file. */
 const INBOX_CSS = `
@@ -250,6 +255,15 @@ function messageArticle(entry: InboxEntry): string {
 }
 
 export interface InboxView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   readonly entries: readonly InboxEntry[]
   /** Echoed so a reader can see the list is filtered rather than empty. */
   readonly filter: {
@@ -287,10 +301,11 @@ export function renderInboxHtml(view: InboxView): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Messages — BE RELAX admin</title>',
-    `<style>${tokensCss()}${INBOX_CSS}</style>`,
+    `<style>${tokensCss()}${INBOX_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Messages</h1>',
     '<div class="stub">',
     `<p><strong>Nothing here left the building.</strong> The SMS provider is <code>${safeText(

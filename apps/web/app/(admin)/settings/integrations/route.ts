@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { renderIntegrationsPage } from './connection-card.ts'
 import { integrationsView } from './handler.ts'
 
@@ -28,10 +29,23 @@ export async function GET(request: Request): Promise<Response> {
   const config = loadConfig()
   const sql = createConnection({ url: config.DATABASE_URL, max: 2 })
   try {
-    const connectionId = new URL(request.url).searchParams.get('connectionId')
+    const params = new URL(request.url).searchParams
+    const connectionId = params.get('connectionId')
+    const now = Date.now() as Instant
+    // The three outcomes a round trip can arrive with: a Test connection's verdict, and the consent
+    // callback's kind and warning. Read here rather than in the handler because they are a property of the
+    // REQUEST, and the handler is the reading of the database.
+    const roundTrip = {
+      tested: params.get('tested'),
+      consent: params.get('outcome'),
+      warning: params.get('warning'),
+      connectionId: params.get('connection'),
+    }
     const view = await integrationsView({
       sql,
-      now: Date.now() as Instant,
+      now,
+      chrome: await adminChromeFor({ sql, now, request }),
+      roundTrip,
       ...(connectionId === null || connectionId === '' ? {} : { connectionId }),
     })
     return new Response(renderIntegrationsPage(view), {

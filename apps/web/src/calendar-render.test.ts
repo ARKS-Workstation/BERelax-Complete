@@ -59,6 +59,9 @@ function view(overrides: Partial<CalendarDayFacts> = {}): CalendarView {
     ...overrides,
   }
   return {
+    // No banner, which is the state of a business whose Google connection is fine. The banner's own
+    // branches are asserted in `google-reauth-banner.test.ts`; here it must not change the diary.
+    chrome: { googleReauth: null, returnTo: '/calendar' },
     axes: calendarAxes(facts),
     currentTradingDate: '2099-06-17',
     previousTradingDate: '2099-06-16',
@@ -210,6 +213,7 @@ describe('the document carries one live region, one grid and the script', () => 
     const html = renderClosedDayHtml({
       tradingDate: '2099-06-20',
       currentTradingDate: '2099-06-17',
+      chrome: { googleReauth: null, returnTo: '/calendar' },
     })
     expect(html).toContain('data-testid="calendar-closed"')
     expect(html).toContain('2099-06-20')

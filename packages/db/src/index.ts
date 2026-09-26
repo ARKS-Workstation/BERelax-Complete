@@ -1654,7 +1654,48 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // been to turn them red. Reopening is shut for every CODE path instead -- no grant for `berelax_app`, no
 // exported function, ADR 0026 -- and that is what `period-close.itest.ts` and block 98 assert.
 //
-// 22, 41, 44, 47 and 71 are unused and will stay unused: renumbering to close a gap is how two branches
+// 75 is 0075_google_reauth_notice.sql: what the Google re-auth ladder has already told somebody
+// (G-CONN-08). 0016 created the connection, its capabilities and the append-only event log, and G-CONN-06
+// computed the notification DECISION while saying outright that it sends nothing; this is the one durable
+// fact the sending needs, and nothing here re-argues any of that. Four things ARE this file's. The table
+// records DECISIONS rather than planning intentions, which is where it departs from 0051 and 0060: those
+// two plan `pending` rows because both are about a date that can MOVE, and a re-auth rung is a pure
+// function of the instant the incident opened and a cap (`reauthLadderFor`), so a planned row would store
+// a reproducible derivation and be wrong the moment the cap changed. Every row is therefore terminal on
+// insert and `google_reauth_notice_is_terminal` raises on UPDATE — but DELETE is deliberately NOT refused
+// and the table does not claim to be append-only, because the foreign key cascades from
+// `google_connections` and a notice history is about a grant. `incident_key` is what makes "one incident"
+// a fact rather than a window: `reauth:<event id>` for a dead grant, `expiry:<iso instant>` for an
+// approaching Testing expiry — that second form is the only thing that can satisfy "does not re-fire for
+// the same expiry instant", because nothing HAPPENS at the moment a deadline comes into view and there is
+// therefore no event row to key on. The unique index on (connection, incident, step, role, channel) is
+// total rather than partial on `sent`, which is 0060's opposite choice and deliberate: a skip is also a
+// decision about that rung, so a partial index would let a skipped rung retry on every pass and each retry
+// would be an insert the index refuses and a pass that throws. And `rung_index between 1 and 8` restates
+// MAX_GOOGLE_REAUTH_LADDER_STEPS in SQL for 0051's reason — a cap that lives only in code is a cap one bad
+// settings row removes, and "escalating for ever" is the failure the word escalating invites.
+// The door is held twice, which is M-VAT-06's precedent for `period_lock` and 0072's for `credit_note`:
+// `google_reauth_notice_is_terminal` refuses an UPDATE from every role including the owner, and the grants
+// at the foot of the file revoke UPDATE, DELETE and TRUNCATE from `berelax_app` — 0009 granted all three
+// on every table in public and set default privileges extending that to tables created later, so this one
+// ARRIVED with them. TRUNCATE is the one that matters most and the one a trigger cannot see: a truncated
+// notice table is a ladder that sends every rung of every live incident again. DELETE stays revoked and the
+// cascade still works, because a referential action does not check the deleting role's privilege on the
+// referencing table.
+//
+// 71, 73 and 74 are NOT holes in this ledger. 71 will stay unused for the reason 22, 41, 44 and 47 do;
+// 73 and 74 were allocations held by units in flight when this one was written, and gate 90a walks the
+// migrations that EXIST on disk rather than consecutive integers, so a number nobody has written SQL for
+// is not a missing paragraph.
+//
+// 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
+// branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
+// C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
+// mistake to tidy away. Gate case 90a walks the migrations that EXIST rather than consecutive
+// integers, so a gap costs nothing and needs no declaration. 62 through 66 were one allocation block
+// held across five worktrees and 67 through 70 another across four; every one of those landed. 55, 56
+// and 57 landed out of order and within an hour of one another, which is the arrangement this note
+// exists for: the number is a high-water mark, not a count, and no gap was closed to tidy the sequence.
 // come to apply the same number to different SQL. 62 through 66 were allocations held by five units in
 // flight in five worktrees, and 67 through 70 by four more; every one of them has now landed, so 55
 // through 70 are in use. 71 was allocated to a unit that turned out to need no migration, which makes it
@@ -1666,4 +1707,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 73 as const
+export const SCHEMA_VERSION = 75 as const

@@ -31,7 +31,12 @@
  */
 import { type AppEnv, parseConfig } from '@berelax/config'
 import { fixedClock } from '@berelax/core'
-import { CONSENT_PURPOSES, SEND_GATING_CONSENT_PURPOSES } from '@berelax/shared'
+import {
+  CONSENT_PURPOSES,
+  GOOGLE_REAUTH_TEMPLATE_KEY_LIST,
+  REAUTH_REASSURANCE_SENTENCE,
+  SEND_GATING_CONSENT_PURPOSES,
+} from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
 import { costOf } from './encoding.ts'
 import { type GateEvaluators, TDRA_PROMOTIONAL_WINDOW } from './gate.ts'
@@ -225,5 +230,86 @@ describe('the shipped promotional templates are held to the same rules as the tr
     // transactional half IS approved, because those messages have to work out of the box.
     const approved = DEFAULT_TEMPLATES.filter((t) => t.approvalState === 'approved')
     expect(approved.length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * G-CONN-08 — the re-auth notices keep docs/10 §4's promise, in the words the banner uses.
+ *
+ * Appended here rather than written as a fourth assertion in `render.test.ts` because the claim is about
+ * the CORPUS: it has to hold for every re-auth template that exists, including the one somebody adds next,
+ * and it has to fail if the sentence is reworded in either place. `REAUTH_REASSURANCE_SENTENCE` is the
+ * single spelling; `CONNECTION_STATE_COPY.broken.detail` in `@berelax/core` carries it too, and
+ * `packages/core/src/google/reauth.test.ts` asserts that end.
+ */
+describe('the Google re-auth notices', () => {
+  const reauth = DEFAULT_TEMPLATES.filter((template) =>
+    GOOGLE_REAUTH_TEMPLATE_KEY_LIST.includes(template.key),
+  )
+
+  it('ships both keys, in both locales, so the claims below are about something', () => {
+    expect(reauth.length).toBeGreaterThan(0)
+    for (const key of GOOGLE_REAUTH_TEMPLATE_KEY_LIST) {
+      const locales = reauth.filter((template) => template.key === key).map((t) => t.locale)
+      expect(new Set(locales), key).toEqual(new Set(['en', 'ar']))
+    }
+  })
+
+  it('carries the reassurance sentence in every English EMAIL body, verbatim', () => {
+    // Email only, and the acceptance line says email only: *"every email deep-links to the reconnect
+    // screen and contains the reassurance sentence"*. The clause is 79 characters. An SMS is 160 GSM-7
+    // characters and 70 in Arabic, so putting it in the SMS body would spend half the English budget and
+    // more than the whole Arabic one — a two-segment message about a credential, twice a day, for the
+    // length of an incident. The SMS says the connection stopped and where to fix it; the email beside it
+    // is where the promise and the link belong.
+    const english = reauth.filter(
+      (template) => template.locale === 'en' && template.channel === 'email',
+    )
+    expect(english.length).toBeGreaterThan(0)
+    for (const template of english) {
+      expect(template.body, `${template.key}/${template.channel}`).toContain(
+        REAUTH_REASSURANCE_SENTENCE,
+      )
+    }
+    // The control, so this is not satisfied by a corpus in which every body contains everything: the
+    // sentence is absent from the booking templates, which are the ones it would be wrong in.
+    const booking = DEFAULT_TEMPLATES.filter((template) => template.key.startsWith('booking.'))
+    expect(booking.length).toBeGreaterThan(0)
+    for (const template of booking) {
+      expect(template.body).not.toContain(REAUTH_REASSURANCE_SENTENCE)
+    }
+  })
+
+  it('deep-links from every email and from no SMS', () => {
+    for (const template of reauth) {
+      if (template.channel === 'email') {
+        // The variable rather than a URL: the absolute link is built by `reconnectLink` from the
+        // validated site origin, because a URL written into a template is a URL nobody can promote.
+        expect(template.variables, `${template.key}/${template.locale}`).toContain('link')
+        expect(template.body).toContain('{{link}}')
+      } else {
+        // The SMS has to fit one segment in Arabic at 70 UCS-2 units. A link there would cost half of it.
+        expect(template.variables, `${template.key}/${template.locale}`).not.toContain('link')
+      }
+    }
+  })
+
+  it('is transactional on every channel, which is what the marketing kill switch cannot touch', () => {
+    for (const template of reauth) {
+      expect(template.messageClass, `${template.key}/${template.channel}`).toBe('transactional')
+      expect(template.approvalState).toBe('approved')
+    }
+    // And at least one SMS variant exists, or "it cannot be sent from a promotional sender ID" is a claim
+    // about no template at all.
+    expect(reauth.filter((template) => template.channel === 'sms').length).toBeGreaterThan(0)
+  })
+
+  it('names no scope URL and no Google console address anywhere', () => {
+    for (const template of reauth) {
+      const text = `${template.subject ?? ''} ${template.body}`
+      expect(text, `${template.key}/${template.locale}`).not.toContain('googleapis.com/auth/')
+      expect(text).not.toContain('console.cloud.google.com')
+      expect(text).not.toContain('https://')
+    }
   })
 })

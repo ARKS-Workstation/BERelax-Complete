@@ -4,6 +4,7 @@ import {
   boolean,
   customType,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -131,5 +132,55 @@ export const googleConnectionEvent = pgTable(
   (t) => [
     index('google_connection_events_connection_idx').on(t.connectionId, t.occurredAt),
     index('google_connection_events_event_idx').on(t.event, t.occurredAt),
+  ],
+)
+
+/**
+ * Migration 0075's record of what the re-auth ladder has already told somebody.
+ *
+ * Terminal on insert, which is why there is no `updatedAt` to mirror: a BEFORE UPDATE trigger raises, so
+ * the row is evidence rather than a field. DELETE is not refused — the foreign key cascades from the
+ * connection, because a notice history is about a grant.
+ *
+ * `messageId` is nullable even for a sent row, deliberately: F03's guard diverts every send to the local
+ * outbox outside production and writes no `message` row, which on a staging worker is the ordinary
+ * outcome (B-MSG-04's NOTE). The constraint the migration does make is the other direction — a skipped row
+ * has no message.
+ */
+export const googleReauthNotice = pgTable(
+  'google_reauth_notice',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => googleConnection.id, { onDelete: 'cascade' }),
+    /** `reauth:<event id>`, `expiry:<iso instant>` or `stale:<iso instant>`. */
+    incidentKey: text('incident_key').notNull(),
+    /** reactive | predictive */
+    kind: text('kind').notNull(),
+    /** `reactive_0h`, `reactive_24h`, `predictive_0h`. */
+    step: text('step').notNull(),
+    rungIndex: integer('rung_index').notNull(),
+    toRole: text('to_role').notNull(),
+    /** email | sms */
+    channel: text('channel').notNull(),
+    /** sent | skipped */
+    outcome: text('outcome').notNull(),
+    messageId: uuid('message_id'),
+    skippedReason: text('skipped_reason'),
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // THE dedupe: one decision per rung, per role, per channel, per incident.
+    uniqueIndex('google_reauth_notice_one_per_rung_role_channel').on(
+      t.connectionId,
+      t.incidentKey,
+      t.step,
+      t.toRole,
+      t.channel,
+    ),
+    index('google_reauth_notice_by_incident_idx').on(t.connectionId, t.incidentKey, t.decidedAt),
   ],
 )

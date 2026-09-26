@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**106 / 207 units complete.**
+**107 / 207 units complete.**
 
 ## Next up
 
@@ -173,7 +173,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 156 | `G-CONN-06` | Daily health check, Testing-expiry tripwire, listing-drift detection | `G-AGT-01`, `G-CONN-04`, `G-CONN-05` | — | Y4-token-test |
 | [x] | 157 | `G-CONN-07` | Connection state machine, plain-English states, Test connection, settings card | `G-CONN-06`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 158 | `G-AGT-02` | Agent console: last success, cost against budget, pending approvals, kill switches | `G-AGT-01`, `G-CONN-07`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
-| [ ] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |
+| [x] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |
 | [x] | 160 | `G-CONN-09` | Disconnect with revocation at Google, zeroisation, and the offboarding runbook | `F06`, `G-CONN-04` | — | — |
 | [x] | 161 | `G-REV-01` | Review data model: nullable google_review_id, delivery_mode as a column | `G-CONN-01` | — | — |
 | [ ] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |

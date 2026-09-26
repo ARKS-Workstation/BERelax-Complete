@@ -94,7 +94,11 @@ for (const prefix of prefixes) {
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'gate-slice-'))
-const out = join(dir, 'slice.mjs')
+// Named so a process list can SEE it. The commit guard that decides whether a worktree is safe to commit
+// matches `scripts/test-gates.mjs` as an argv element, and a slice used to run as `<tmp>/slice.mjs` — so
+// the guard reported "no gate run live" while a slice was mutating tracked files, which is precisely the
+// state it exists to refuse. It cost a contaminated control and a mutation left in a shipped file.
+const out = join(dir, 'gate-slice-run.mjs')
 const preamble = lines.slice(0, openings[0])
 writeFileSync(
   out,

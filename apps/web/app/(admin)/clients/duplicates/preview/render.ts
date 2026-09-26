@@ -1,6 +1,11 @@
 import type { CustomerMergeFieldPlan, CustomerMergeSubject } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../../src/components/admin/google-reauth-banner.ts'
 import type { RenderDirection } from '../render.ts'
 
 /**
@@ -66,6 +71,16 @@ export interface PreviewConsentView {
 
 export interface MergePreviewView {
   readonly kind: 'preview'
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
+
   readonly survivor: CustomerMergeSubject
   readonly loser: CustomerMergeSubject
   readonly scorePerMille: number
@@ -90,6 +105,8 @@ export interface MergePreviewView {
 
 export interface MergedAwayView {
   readonly kind: 'already_merged'
+  /** The banner, for the same reason the preview carries one: it is an admin document. */
+  readonly chrome: AdminChrome
   readonly mergeRecordId: string
   readonly survivorCustomerId: string
   readonly loserCustomerId: string
@@ -173,7 +190,13 @@ const PREVIEW_CSS = `
   @media (min-width: 48rem) { .pair { grid-template-columns: 1fr 1fr; } }
 `
 
-const HEAD = (title: string, direction: RenderDirection): readonly string[] => [
+// The chrome is an argument of the shared head rather than of each document, so both documents in this
+// file carry the banner and neither can be given one without the other.
+const HEAD = (
+  title: string,
+  direction: RenderDirection,
+  chrome: AdminChrome,
+): readonly string[] => [
   '<!doctype html>',
   `<html lang="en" dir="${direction}">`,
   '<head>',
@@ -182,10 +205,11 @@ const HEAD = (title: string, direction: RenderDirection): readonly string[] => [
   '<meta name="robots" content="noindex, nofollow, noarchive">',
   // No brand in the title, for the reason the queue's render states.
   `<title>${safeText(title)} — admin</title>`,
-  `<style>${tokensCss()}${PREVIEW_CSS}</style>`,
+  `<style>${tokensCss()}${PREVIEW_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
   '</head>',
   '<body>',
   '<main>',
+  renderAdminBanner(chrome),
 ]
 
 const record = (subject: CustomerMergeSubject, role: 'survivor' | 'loser'): string =>
@@ -252,7 +276,7 @@ const fieldRows = (view: MergePreviewView): string =>
 
 function renderPreview(view: MergePreviewView): string {
   return [
-    ...HEAD('Merge preview', view.direction),
+    ...HEAD('Merge preview', view.direction, view.chrome),
     '<h1>Merge preview</h1>',
     '<section class="lede">',
     '<p><strong>Nothing has been merged.</strong> Every figure below was produced by running the real ' +
@@ -357,7 +381,7 @@ function renderPreview(view: MergePreviewView): string {
 
 function renderMergedAway(view: MergedAwayView): string {
   return [
-    ...HEAD('Already merged', view.direction),
+    ...HEAD('Already merged', view.direction, view.chrome),
     '<h1>Already merged</h1>',
     '<section class="lede">',
     '<p>This pair has been merged. A merge is recorded once per merged-away record — that unique row IS ' +

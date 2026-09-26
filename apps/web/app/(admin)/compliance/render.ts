@@ -1,5 +1,10 @@
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The compliance calendar, as HTML (M-VAT-11, docs/04 §9).
@@ -77,6 +82,15 @@ export interface CalendarNoticeRow {
 }
 
 export interface ComplianceCalendarView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   readonly asOf: string
   readonly obligations: readonly CalendarObligationRow[]
   readonly occurrences: readonly CalendarOccurrenceRow[]
@@ -303,10 +317,11 @@ export function renderComplianceCalendarHtml(view: ComplianceCalendarView): stri
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and an
     // internal back-office screen has no reason to name the business at all.
     '<title>Compliance calendar — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Compliance calendar</h1>',
     banner,
     questions,

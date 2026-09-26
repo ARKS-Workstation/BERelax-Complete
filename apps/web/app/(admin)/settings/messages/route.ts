@@ -1,6 +1,8 @@
 import { loadConfig } from '@berelax/config'
+import type { Instant } from '@berelax/core'
 import { createConnection, type InboxFilter, listMessageInbox, type Sql } from '@berelax/db'
 import { isAppError, MESSAGE_STATUSES, type MessageStatus } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { renderInboxHtml } from './render.ts'
 
 /**
@@ -67,9 +69,13 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const config = loadConfig()
     const filter = parseFilter(new URL(request.url))
-    const entries = await withSql((sql) => listMessageInbox(sql, filter))
+    const { entries, chrome } = await withSql(async (sql) => ({
+      entries: await listMessageInbox(sql, filter),
+      chrome: await adminChromeFor({ sql, now: Date.now() as Instant, request }),
+    }))
     return new Response(
       renderInboxHtml({
+        chrome,
         entries,
         filter: {
           templateKey: filter.templateKey ?? null,

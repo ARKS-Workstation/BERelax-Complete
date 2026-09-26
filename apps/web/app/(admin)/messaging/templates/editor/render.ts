@@ -28,6 +28,11 @@
  */
 import { type SmsCostPreview, safeText, smsCost, smsUnitsOf } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The body the editor opens with: docs/04 §5's worked example, 150 Arabic characters.
@@ -243,7 +248,14 @@ function figure(label: string, key: keyof PreviewFigures, value: string): string
   )
 }
 
-export function renderEditorHtml(body: string): string {
+/**
+ * The editor document.
+ *
+ * `chrome` is a required second argument rather than a field on a view, because this page has no view: it
+ * is priced from one string. G-CONN-08 needs the banner on every admin document and this is one, so the
+ * route reads it — see that file's header for why a page that reads no row now reads one.
+ */
+export function renderEditorHtml(body: string, chrome: AdminChrome): string {
   const cost = smsCost('smsala', body)
   const figures = previewFiguresFrom(cost)
   return [
@@ -260,10 +272,11 @@ export function renderEditorHtml(body: string): string {
     // this unit's first verify. The full trading name on an internal authoring tool would say something it
     // does not mean, and no mention at all is not a violation: the rule is about how the brand is written.
     '<title>Template editor — admin</title>',
-    `<style>${tokensCss()}${EDITOR_CSS}</style>`,
+    `<style>${tokensCss()}${EDITOR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(chrome),
     '<h1>Template editor</h1>',
     '<div class="stub">',
     '<p><strong>Nothing here is saved.</strong> This surface prices a body and does not create a ' +

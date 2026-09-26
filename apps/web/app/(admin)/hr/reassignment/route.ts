@@ -1,7 +1,8 @@
 import { loadConfig } from '@berelax/config'
-import { orderReassignmentQueue } from '@berelax/core'
+import { instantFromIso, orderReassignmentQueue } from '@berelax/core'
 import { createConnection, readReassignmentQueue, type Sql } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { type ReassignmentQueueEntryView, renderReassignmentQueueHtml } from './render.ts'
 
 /**
@@ -49,13 +50,16 @@ export async function GET(request: Request): Promise<Response> {
     const limit = parseLimit(url)
     const readAtIso = new Date().toISOString()
 
-    const entries = await withSql(async (sql) => {
+    const { entries, chrome } = await withSql(async (sql) => {
+      // Read on the same connection as the queue: a second pool for the chrome would make one page load
+      // two connections, and the integration suite opens a 64-connection pool of its own to prove a lock.
+      const chrome = await adminChromeFor({ sql, now: instantFromIso(readAtIso), request })
       const rows = await readReassignmentQueue(sql)
       // Ordered by the pure comparator over what the reader returned, then cut. The cut is AFTER the
       // ordering on purpose: a limit applied first would drop the appointments that start soonest if the
       // reader's order ever stopped matching the rule's, which is the disagreement this call exists to
       // make impossible.
-      return orderReassignmentQueue(
+      const ordered = orderReassignmentQueue(
         rows.map((row) => ({
           appointmentId: row.appointmentId,
           startsAt: row.startsAt.getTime(),
@@ -87,9 +91,10 @@ export async function GET(request: Request): Promise<Response> {
             appointmentStatus: row.appointmentStatus,
           }),
         )
+      return { entries: ordered, chrome }
     })
 
-    return new Response(renderReassignmentQueueHtml({ entries, readAtIso }), {
+    return new Response(renderReassignmentQueueHtml({ chrome, entries, readAtIso }), {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         // Never cached. A cached copy of a work queue outlives the work: an appointment reassigned five

@@ -8,3 +8,4 @@
 export * from './connection.ts'
 export * from './connection-state.ts'
 export * from './health.ts'
+export * from './reauth.ts'

@@ -5,9 +5,11 @@ import {
   DUPLICATE_AUTO_MERGE_THRESHOLD,
   DUPLICATE_REVIEW_THRESHOLD,
   DUPLICATE_THRESHOLDS_OPEN_QUESTION,
+  instantFromIso,
 } from '@berelax/core'
 import { createConnection, type Sql, scanDuplicateQueue } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { atFrom, directionFrom, limitFrom, scopeFrom } from './params.ts'
 import { renderDuplicateQueueHtml } from './render.ts'
 
@@ -69,6 +71,11 @@ export async function GET(request: Request): Promise<Response> {
       }))
       const queue = buildDuplicateQueue({ records, edges: scan.edges })
       return renderDuplicateQueueHtml({
+        chrome: await adminChromeFor({
+          sql,
+          now: instantFromIso(atIso),
+          request,
+        }),
         queue,
         scope: {
           customerIds: customerIds ?? null,

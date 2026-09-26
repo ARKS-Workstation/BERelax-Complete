@@ -10,6 +10,11 @@ import {
   toLocal,
 } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The front-desk diary, as HTML. Room × time first, therapist × time second, one read behind both.
@@ -50,6 +55,15 @@ export type CalendarOutcome =
   | { readonly kind: 'refused'; readonly refusal: string }
 
 export interface CalendarView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   readonly axes: CalendarAxes
   /** The business day the clock resolves to right now, so the page can say whether it is showing it. */
   readonly currentTradingDate: string
@@ -557,7 +571,7 @@ function slotElement(slot: CalendarSlot): string {
   )
 }
 
-function laneElement(lane: CalendarLane, view: CalendarView): string {
+function laneElement(lane: CalendarLane, view: CalendarGridView): string {
   const slots = view.axes.slots.map((slot) => slotElement(slot)).join('')
   const bands = lane.cards
     .flatMap((card) => card.bands.map((band) => bandElement(band, card.appointment.id, lane.axis)))
@@ -573,7 +587,7 @@ function laneElement(lane: CalendarLane, view: CalendarView): string {
 }
 
 /** The hour marks, so a reader can tell 19:00 from 23:00 without counting quarter hours. */
-function rulerElement(view: CalendarView): string {
+function rulerElement(view: CalendarGridView): string {
   const marks = view.axes.slots
     .filter((slot) => slot.label.endsWith(':00'))
     .map(
@@ -586,7 +600,7 @@ function rulerElement(view: CalendarView): string {
 
 function axisSection(
   lanes: readonly CalendarLane[],
-  view: CalendarView,
+  view: CalendarGridView,
   args: { readonly axis: 'room' | 'therapist'; readonly heading: string; readonly note: string },
 ): string {
   const body =
@@ -610,7 +624,18 @@ function axisSection(
  * there is no second renderer for the "after" state, which is how a moved card comes to be drawn in a place
  * a reload would not put it.
  */
-export function renderCalendarGridFragment(view: CalendarView): string {
+/**
+ * The day without the chrome.
+ *
+ * The grid fragment is repainted by the inline script after a move and carries no banner: the banner is a
+ * fact about a credential and the fragment is a fact about one day, and replacing the whole document to
+ * repaint a lane would lose the operator's scroll position. So everything that reads the day but not the
+ * chrome takes this, which also means the write path does not have to invent a chrome to compute an
+ * announcement.
+ */
+export type CalendarGridView = Omit<CalendarView, 'chrome'>
+
+export function renderCalendarGridFragment(view: CalendarGridView): string {
   return (
     axisSection(view.axes.rooms, view, {
       axis: 'room',
@@ -633,7 +658,7 @@ export function renderCalendarGridFragment(view: CalendarView): string {
 }
 
 /** The no-JavaScript path: one appointment, one new time, one room. A GET form would be a write on a link. */
-function moveForm(view: CalendarView): string {
+function moveForm(view: CalendarGridView): string {
   const appointments = view.axes.rooms.flatMap((lane) =>
     lane.cards
       // The same rule the cards use: a completed treatment is on the grid and is not on offer here, or the
@@ -702,10 +727,11 @@ export function renderCalendarHtml(view: CalendarView): string {
     // No brand in the title: docs/09's "brand collision" forbids the bare brand in any title, and an
     // internal screen has no reason to name the business at all.
     '<title>Diary — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Diary</h1>',
     dayHeader(view),
     // `role="status"` is an implicit `aria-live="polite"`, and both are written because the two together
@@ -728,6 +754,8 @@ export function renderCalendarHtml(view: CalendarView): string {
 export function renderClosedDayHtml(args: {
   readonly tradingDate: string
   readonly currentTradingDate: string
+  /** The banner shows on a closed day too: the connection does not stop being dead on a Sunday. */
+  readonly chrome: AdminChrome
 }): string {
   return [
     '<!doctype html>',
@@ -737,10 +765,11 @@ export function renderClosedDayHtml(args: {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
     '<title>Diary — admin</title>',
-    `<style>${tokensCss()}${CALENDAR_CSS}</style>`,
+    `<style>${tokensCss()}${CALENDAR_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(args.chrome),
     '<h1>Diary</h1>',
     `<p class="empty" data-testid="calendar-closed">The premises does not trade on ${safeText(
       args.tradingDate,

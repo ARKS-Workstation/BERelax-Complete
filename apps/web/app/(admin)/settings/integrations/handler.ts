@@ -18,12 +18,14 @@ import {
   spellDate,
 } from '@berelax/google'
 import { AppError } from '@berelax/shared'
+import type { AdminChrome } from '../../../../src/components/admin/google-reauth-banner.ts'
 import type {
   CapabilityRowView,
   ConfirmedListingView,
   ConnectionCardView,
   IntegrationsView,
   PendingApprovalView,
+  RoundTripView,
 } from './connection-card.ts'
 
 /**
@@ -63,10 +65,20 @@ export const TEST_CONNECTION_PATH = '/settings/integrations/test-connection'
 
 export interface IntegrationsDeps {
   readonly sql: Sql
+  /** The banner and the return path, built by the route from the request (G-CONN-08). */
+  readonly chrome: AdminChrome
   /** Injected, so the page is reproducible. */
   readonly now: Instant
   /** One connection only, for a screenshot that must not diff when another suite adds a row. */
   readonly connectionId?: string
+  /**
+   * The outcome of whatever brought the operator here, read from the query by the route.
+   *
+   * Optional, and this is the ONE place an optional is right rather than permissive: the absence of a
+   * round trip is the ordinary state of this page — somebody opened it from a link — and the default is
+   * therefore “nothing happened” rather than a missing fact.
+   */
+  readonly roundTrip?: RoundTripView
 }
 
 /**
@@ -187,6 +199,8 @@ export async function integrationsView(deps: IntegrationsDeps): Promise<Integrat
   }
 
   return {
+    chrome: deps.chrome,
+    roundTrip: deps.roundTrip ?? { tested: null, consent: null, warning: null, connectionId: null },
     connections,
     narrowed: deps.connectionId !== undefined,
     reconnectPath: RECONNECT_PATH,

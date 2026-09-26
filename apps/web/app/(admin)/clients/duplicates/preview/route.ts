@@ -5,6 +5,7 @@ import {
   type CustomerMergePlan,
   type CustomerMergeSubject,
   type Instant,
+  instantFromIso,
   planCustomerMerge,
   resolveConsent,
   scoreDuplicatePair,
@@ -21,6 +22,7 @@ import {
   withUnitOfWork,
 } from '@berelax/db'
 import { AppError, isAppError } from '@berelax/shared'
+import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
 import { atFrom, directionFrom, idFrom } from '../params.ts'
 import { type RenderDirection, scopeQuery } from '../render.ts'
 import { type MergePreviewView, type PreviewConsentView, renderMergePreviewHtml } from './render.ts'
@@ -215,6 +217,8 @@ export async function GET(request: Request): Promise<Response> {
     const { swapHref, queueHref } = hrefs(url, survivorId, loserId, atIso, direction)
 
     const html = await withSql(async (sql) => {
+      // The same `?at=` the preview is judged at, so the page — banner included — is photographable.
+      const chrome = await adminChromeFor({ sql, now: instantFromIso(atIso), request })
       const { plan, survivor, loser } = await planFor(sql, survivorId, loserId)
       const preview = await previewCustomerMerge(sql, {
         plan,
@@ -229,6 +233,7 @@ export async function GET(request: Request): Promise<Response> {
       if (preview.kind === 'already_merged') {
         return renderMergePreviewHtml({
           kind: 'already_merged',
+          chrome,
           mergeRecordId: preview.mergeRecordId,
           survivorCustomerId: preview.survivorCustomerId,
           loserCustomerId: preview.loserCustomerId,
@@ -240,6 +245,7 @@ export async function GET(request: Request): Promise<Response> {
 
       const view: MergePreviewView = {
         kind: 'preview',
+        chrome,
         survivor,
         loser,
         scorePerMille: plan.scorePerMille,

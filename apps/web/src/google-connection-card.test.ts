@@ -65,6 +65,11 @@ function view(overrides: Partial<ConnectionCardView> = {}): IntegrationsView {
     ...overrides,
   }
   return {
+    // No banner on this document's own fixtures: the card's claims are about the card, and
+    // `google-reauth-banner.test.ts` is where the banner's branches are asserted.
+    chrome: { googleReauth: null, returnTo: '/settings/integrations' },
+    // No round trip: the page was opened from a link, which is its ordinary state.
+    roundTrip: { tested: null, consent: null, warning: null, connectionId: null },
     connections: [card],
     narrowed: true,
     reconnectPath: '/settings/integrations/google/connect',
@@ -318,6 +323,8 @@ describe('acceptance — the card says what it is pointed at, in English', () =>
 describe('acceptance — an empty page says nothing is connected', () => {
   it('renders the no-connection sentence and no card', () => {
     const html = renderIntegrationsPage({
+      chrome: { googleReauth: null, returnTo: '/settings/integrations' },
+      roundTrip: { tested: null, consent: null, warning: null, connectionId: null },
       connections: [],
       narrowed: false,
       reconnectPath: '/settings/integrations/google/connect',

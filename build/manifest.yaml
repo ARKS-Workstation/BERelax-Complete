@@ -13065,7 +13065,7 @@ units:
       Reactive email to owner and manager on the first invalid_grant, deduped to one per incident, repeated
       at 24h then daily to a cap, plus a predictive email at T-48h. Optional transactional SMS, off by default.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -13093,6 +13093,157 @@ units:
       against the rendered template body
     - Playwright captures the banner and the reconnect screen at 3 viewports x 2 themes x 2 directions with
       zero pixel diff on rerun; axe zero violations on both
+    - 'NOTE: migration 0075_google_reauth_notice.sql and SCHEMA_VERSION is 75. 71 stays permanently unused
+      and 73/74 were held by units in flight, which gate 90a tolerates because it walks the migrations that
+      EXIST rather than consecutive integers. The table records DECISIONS rather than planning intentions,
+      which is where it departs from 0051 and 0060: those plan pending rows because both are about a date
+      that can MOVE, and a re-auth rung is a pure function of the instant the incident opened and a cap
+      (reauthLadderFor), so a planned row would store a reproducible derivation and be wrong the moment the
+      cap changed. Every row is therefore terminal on insert and google_reauth_notice_is_terminal raises on
+      UPDATE; DELETE is deliberately NOT refused and the table does not claim to be append-only, because the
+      foreign key cascades from google_connections and a notice history is about a grant. The door is held
+      TWICE, which is M-VAT-06''s precedent for period_lock and 0072''s for credit_note: the trigger refuses
+      an UPDATE from every role including the owner, and the grants revoke UPDATE, DELETE and TRUNCATE from
+      berelax_app — 0009 granted all three on every table in public and set default privileges extending
+      that to tables created later, so this one ARRIVED with them, and TRUNCATE is the statement a row-level
+      trigger cannot see. A truncated notice table is a ladder that sends every rung of every live incident
+      again. The cascade still works with DELETE revoked, because a referential action does not check the
+      deleting role''s privilege on the referencing table; the itest asserts the grant set in both
+      directions.'
+    - 'NOTE: "one per incident" is a UNIQUE INDEX on (connection_id, incident_key, step, to_role, channel)
+      and not a convention in the sender, because the pass''s own dedupe is a read-then-write that two
+      workers can interleave. incident_key is what makes "one incident" a fact rather than a window:
+      reauth:<google_connection_events id> for a dead grant, expiry:<iso instant> for an approaching Testing
+      expiry — and that second form is the ONLY construction under which "does not re-fire for the same
+      expiry instant" is true by the shape of the key, because nothing HAPPENS at the moment a deadline comes
+      into view and there is therefore no event row to key on. The index is total rather than partial on
+      sent (0060 makes the other choice) because a skip is also a decision about that rung: a partial index
+      would let a skipped rung retry on every pass, and each retry would be an insert the index refuses.'
+    - 'NOTE: "escalating" cannot mean "for ever", and that is enforced three times because each layer
+      catches what the others cannot. The rungs are an enumerated union with a Record of timings, so a rung
+      added without one is a compile error (gate 100f); reauthLadderCap REFUSES a cap outside 1..8 rather
+      than clamping it, so an unbounded run is a thrown error naming the value; and rung_index between 1 and
+      8 in SQL makes a row claiming a rung nobody declared unstorable, because a cap that lives only in code
+      is a cap one bad settings row removes. Gate 100g is the half the compiler cannot do: REAUTH_LADDERS is
+      a Record over the KIND union, not over the rungs, so a rung with a timing that no ladder stands on
+      COMPILES — the case asserts that it compiles and then requires the suite to refuse it.'
+    - 'NOTE: "non-dismissible" is a property of the RENDER and of nothing else. reauthBannerFor reads
+      stateShownFor (G-CONN-07''s one instruction to this unit) and there is no value of any input —
+      no cookie, no query parameter, no script, because these admin documents ship no client bundle at all —
+      that makes it return null for a broken connection. The broken branch emits no <details>, no <summary>,
+      no <button>, no <form>, no <script>, no hidden and no id, so there is nothing to press and nothing for
+      a stylesheet or a script to target by name. google-reauth-banner.itest.ts asks the BROWSER rather than
+      the bytes — the element has a non-zero box and getComputedStyle reports it visible at all six cells —
+      because an element with display:none is dismissed as thoroughly as one that was removed and no
+      assertion over source text can see it. The four dismissals are gate fixtures: a control on the broken
+      banner (100a), a CSS rule that collapses it (100b), a query parameter that suppresses it (100c), and an
+      admin document that forgets it (100d).'
+    - 'NOTE: the banner is on ALL TEN admin documents, not the three the first acceptance line samples, and
+      there is no exemption list. Every one of them carries a REQUIRED AdminChrome field on its view — an
+      optional one would be a permissive default, and the default would be the state this banner exists to
+      make impossible — and apps/web/src/google-reauth-banner.test.ts walks app/(admin) for files emitting a
+      doctype and fails by name for any that does not call renderAdminBanner, with two controls beside it (a
+      floor on the count, and the requirement that a NON-document must not call it). A new admin screen
+      therefore fails on the day it is written. There is no .tsx anywhere, for the reason G-CONN-07, the
+      Messages inbox, the compliance calendar and the HR screens all record: the route registry is in exact
+      bijection with the filesystem and requires every DOCUMENT in both locales, so an admin page is a route
+      handler that returns bytes. The renderer is apps/web/src/components/admin/google-reauth-banner.ts and
+      the one shared read is google-reauth-source.ts, so ten routes cannot be ten derivations of "is the
+      Google connection working".'
+    - 'NOTE: G-CONN-07 named two deferrals for this unit and this unit took ONE. The return trip IS
+      discharged: the test-connection POST now answers a FORM post with a 303 back to the page it was pressed
+      on, carrying tested=<ok|reason>, and the card renders that reason as a sentence (plus the consent
+      callback''s own outcome and warning, which G-CONN-02 had handed to G-CONN-07 and which was still
+      unrendered). A JSON caller still gets JSON, so the picker''s contract beside it is unchanged; 303 and
+      not 302 because this POST spends a forced token refresh and some clients re-POST a 302 on reload. The
+      Disconnect control is NOT taken and is deferred again, to the unit that brings a staff session: there
+      is still no admin session (principalForRequest reads Payload''s CMS session and its user table is not
+      the staff table), and an unauthenticated POST that revoked the business''s Google grant would be an off
+      switch for anybody who found the URL — which is what G-CONN-07 and M-VAT-11 both refused, for this
+      reason, and nothing about it has changed.'
+    - 'NOTE: a DEFECT in existing code, found and fixed here. The consent callback redirected to
+      /settings/integrations/google on every SUCCESSFUL consent, and that is not a route: the directory holds
+      connect, picker and health and has no document of its own, so the end of the happy path was a 404. It
+      now lands on the page the reconnect started from — carried in the HttpOnly consent COOKIE as
+      PendingConsent.returnTo, never in the callback''s query string, because a callback URL is
+      attacker-constructable and a return path read from it would be an open redirect on a route whose only
+      output is a redirect — and falls back to RECONNECT_SCREEN_PATH in @berelax/shared, which is now the one
+      spelling the banner''s link, the emails'' deep link and this landing all read. parseReturnPath in
+      @berelax/core is the syntactic half of the defence (no //, no scheme, no backslash, no colon, no
+      fragment, no control character, 200 characters) and is applied on the way in and again on the way out.'
+    - 'NOTE: NO new cron and no new agent_definition row. The ladder runs on the back of G-CONN-06''s 03:00
+      deep check, which has just derived every connection''s health — a second cron would wake up to ask a
+      question the first had answered minutes earlier, would need its own agent row for the watchdog''s "no
+      success within twice the interval" to mean anything, and the ladder''s cadence after its first rung IS
+      daily. The handler invokes SCHEDULED_REAUTH_NOTIFY, exported as that exact reference so the identity is
+      assertable rather than reviewable (G-CONN-07''s arrangement for TEST_CONNECTION_PASS), and a failure of
+      the notify pass deliberately does NOT fail the run: re-running the deep check spends three forced token
+      refreshes to retry something that is not a Google problem, and the unsent rungs are still unsent next
+      time. Gate 100i mutates the call away.'
+    - 'NOTE scoped — NOTHING IS SENT by default, and that is the honest shipped state rather than an
+      omission. recipientForRole answers null for every role on every channel (NO_STAFF_CONTACT_ON_FILE),
+      because no table in this build holds a staff email address or phone number and a plausible one is worse
+      than a blank — brief rule 15, and the same value obligationNoticeRuntimeFor ships for the same reason.
+      Every due rung is therefore recorded as skipped with no_recipient_on_file, which is a row on the
+      connection somebody can read, and the ladder moves on to the next rung rather than retrying this one
+      against an index that would refuse it. So the acceptance line''s "fifty failed jobs produce exactly one
+      owner email and one manager email in the fake Resend outbox" is asserted where a count can be made
+      honestly: packages/google/src/notify/reauth-ladder.test.ts drives fifty passes through the real ladder
+      against a recording sender and asserts 2, then 0 for the next forty-nine, and 0 for a healthy
+      connection. Two further reasons the fake Resend outbox itself cannot hold them today: F03''s guard
+      diverts every send to the LOCAL outbox outside production and writes no message row (B-MSG-04''s stated
+      rule), and no verified sending address exists (Y6-email-sender). Deferred to the unit that brings a
+      staff contact table; the seam it will fill is one argument.'
+    - 'NOTE: SMS is off by default (google.reauth_sms_enabled, an operational setting) and transactional
+      immutably. The template''s message_class is fixed by 0015''s trigger, so the marketing kill switch
+      cannot suppress it and sender-identity routing cannot put it on the AD- promotional identity — that is
+      a property of the TEMPLATE rather than of the switch, which is why turning the switch on cannot turn a
+      service message into a marketing one. With the switch off the SMS side is handed nothing at all and the
+      row records channel_disabled, because a switch whose state leaves no trace is a switch nobody can prove
+      was off. google.reauth_notice_repeat_cap is the second setting: five by default, bounded 1..8 at both
+      ends, and zero is refused because a dead Google connection nobody is told about is the silent failure
+      docs/10 exists to remove.'
+    - 'NOTE: the reassurance sentence from docs/10 SS4 is ONE constant — REAUTH_REASSURANCE_SENTENCE in
+      @berelax/shared — and it appears verbatim in CONNECTION_STATE_COPY.broken.detail (which the banner and
+      the card both print) and in every English re-auth email body. Three spellings of one promise would make
+      the owner decide which is true. It is asserted on the EMAIL bodies only, and the acceptance line says
+      email only: the clause is 79 characters against an SMS budget of 160 GSM-7 and 70 UCS-2, so putting it
+      in the Arabic SMS would spend more than the whole segment. The Arabic variants of both templates ship
+      approved and are not selected yet, for M-VAT-11''s recorded reason: no table records which language a
+      member of staff reads, and choosing one per ROLE would be a guess about a person. Gate 100j rewords the
+      clause in one template and watches the corpus name the rule.'
+    - 'NOTE scoped — the capture matrix is 3 viewports x 2 themes = SIX cells, not twelve, for the reason
+      G-CONN-07 and M-VAT-11 both recorded: the direction axis needs a real Arabic admin route and the
+      (admin) layout is locale=''en'', so an RTL cell would be a screenshot of a document that is not served.
+      Deferred to whichever unit builds the Arabic admin shell. Each cell is photographed twice through two
+      browser contexts and compared byte for byte, with a control proving that a changed banner differs; axe
+      audits all six with a known-bad control that must report button-name and color-contrast BY ID, injected
+      into the banner itself so the audit is shown to reach it.'
+    - 'NOTE scoped — the browser-level claims are made on THREE admin documents (the Messages inbox, the HR
+      credentials screen and the reassignment queue) rather than on all ten, which is what the first
+      acceptance line asks for. Those three are the documents whose views are cheap enough to build by hand,
+      which keeps that file a claim about the banner rather than about a diary''s axes. That all ten render it
+      is the filesystem walk in google-reauth-banner.test.ts, which is the stronger direction: it fails for a
+      document that does not exist yet. There is no apps/web/e2e directory in this repository and no
+      Playwright spec file anywhere — every screenshot and axe suite in this build is an .itest.ts driving
+      page.setContent, so google-reauth.spec.ts in the files list below could not have been written as named.'
+    - 'NOTE: packages/harness/src/ports.ts was NOT touched and this suite draws NO band. Every renderer
+      involved is pure and every handler takes its instant as an argument, so page.setContent renders the
+      exact bytes the route serves at a frozen clock — no next start, no port, no temp root (brief rules 18
+      and 19), the arrangement G-CONN-07''s card suite and manage-booking.itest.ts already use. A band
+      declared and unused fails apps/web/src/test-ports.test.ts by name, so the 11_800 allocation offered to
+      this unit was deliberately left free.'
+    - 'NOTE deferred — the Places API review-count trigger G-CONN-06 handed to this unit is NOT built. It is
+      a different daily job with a different failure mode (a polled COUNT against a quota, rather than a
+      credential that has died), it needs the Places API and a quota figure this build does not have, and
+      folding it into the re-auth ladder would put two unrelated causes behind one incident key — which is
+      the conflation every other decision in this unit refuses. It belongs with the review pipeline
+      (G-REV-*), which owns review counts.'
+    - 'NOTE: a manifest inaccuracy in this entry. The admin routes are /calendar, /compliance,
+      /settings/messages and so on — the (admin) route GROUP adds no path segment — so "starting reconnect
+      from /admin/calendar" is /calendar, and the return-path test asserts the real paths. Two more: the
+      files list names a .tsx that cannot exist (see the banner NOTE) and an apps/web/e2e spec in a
+      repository that has no e2e directory.'
     files:
     - apps/web/app/(admin)/_components/google-reauth-banner.tsx
     - packages/google/src/notify/reauth-ladder.ts

@@ -1,6 +1,11 @@
 import type { CredentialAssessment, CredentialEvaluation, CredentialStatus } from '@berelax/core'
 import { safeText } from '@berelax/core'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /**
  * The HR credentials screen, as HTML.
@@ -38,6 +43,15 @@ export interface CredentialRow {
 }
 
 export interface CredentialsView {
+  /**
+   * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
+   *
+   * Required rather than optional. An optional field would be a permissive default, and the default
+   * would be the one state this banner exists to make impossible: an admin page that says nothing while
+   * the Google grant is dead. `apps/web/src/google-reauth-banner.test.ts` walks every admin document on
+   * disk and fails by name if one of them does not render it.
+   */
+  readonly chrome: AdminChrome
   readonly rows: readonly CredentialRow[]
   /** The profile version the mandatory set came from, so the page names the row it judged against. */
   readonly profileVersion: number
@@ -218,10 +232,11 @@ export function renderCredentialsHtml(view: CredentialsView): string {
     // because its title reads "BE RELAX admin"; this page needs no exemption, because an internal
     // back-office screen has no reason to name the business at all.
     '<title>Credentials — HR admin</title>',
-    `<style>${tokensCss()}${CREDENTIALS_CSS}</style>`,
+    `<style>${tokensCss()}${CREDENTIALS_CSS}${GOOGLE_REAUTH_BANNER_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Credentials</h1>',
     '<div class="policy">',
     `<p><strong>Judged at ${safeText(DUBAI.format(new Date(view.evaluatedAtIso)))} Dubai</strong>, ` +
