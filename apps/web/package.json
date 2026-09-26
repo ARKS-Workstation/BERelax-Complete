@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node ../../scripts/web-build.mjs",
     "start": "next start"
   },
   "dependencies": {
