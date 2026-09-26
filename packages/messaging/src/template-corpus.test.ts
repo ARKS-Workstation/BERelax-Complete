@@ -39,7 +39,7 @@ import {
 } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
 import { costOf } from './encoding.ts'
-import { type GateEvaluators, TDRA_PROMOTIONAL_WINDOW } from './gate.ts'
+import { type GateEvaluators, TDRA_PROMOTIONAL_WINDOW } from './gate/index.ts'
 import { InMemoryOutbox } from './outbox.ts'
 import type { MessageId } from './port.ts'
 import { renderTemplate, validateTemplate } from './render.ts'

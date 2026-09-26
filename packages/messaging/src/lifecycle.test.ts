@@ -13,7 +13,7 @@
 import { parseConfig } from '@berelax/config'
 import { type Clock, type Instant, instantFromIso, MESSAGE_RETRY_POLICY } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import { TDRA_PROMOTIONAL_WINDOW } from './gate.ts'
+import { TDRA_PROMOTIONAL_WINDOW } from './gate/index.ts'
 import {
   type DeliveryDeps,
   deliverMessage,

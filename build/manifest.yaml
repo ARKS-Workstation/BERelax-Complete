@@ -4571,7 +4571,7 @@ units:
       the revenue and VAT event at redemption. Expiry evaluated against the frozen clock, with the provisional
       retained-balance policy posting no breakage.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -7789,7 +7789,7 @@ units:
       dropping outside it. If any input cannot be evaluated the send does not happen. The gate runs before
       the staging send guard so a refusal is recorded as a refusal, not as a divert.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-AUTO-01
@@ -7827,13 +7827,219 @@ units:
       inside 07:00-21:00'
     - The gate's known-bad fixture is registered in scripts/test-gates.mjs and named by the CI-completeness
       check, discharging the consent-gating obligation ADR 0003 left open
+    - 'NOTE: THE DEFECT WORTH READING FIRST, because the scanner written to prove there was no second send
+      path found one on its first run. `createGuardedTransport` in packages/messaging/src/outbox.ts took any
+      `Transport` and returned a `Transport` whose `send` applied the staging guard and then called the inner
+      transport - so a message through it had NO template judgement, no sender-identity resolution, no
+      consent, no suppression, no frequency cap and no quiet hours. It was exported from the @berelax/messaging
+      BARREL, so it was reachable by autocomplete from any feature in the repository, and its `Transport.send`
+      took a bare message with no idempotency key, so a retry through it would have been a second charge.
+      Nothing in shipped code ever called it, which is exactly why it survived: a dead bypass raises no
+      failure, and `messaging-providers-only-inside-a-transport` could not see it because that rule forbids
+      reaching a PROVIDER and this reached whatever it was handed. It is removed, together with the
+      `Transport` and `SendOutcome` types it was the only implementor of; outbox.ts and port.ts carry the
+      whole argument where the declarations were; its three test cases were not lost (send.test.ts already
+      asserts all three through the real choke point, which is strictly stronger because those run the gate
+      and the identity resolution too); and gate case 114a is the shape being seen to be rejected. This is
+      another unit''s code and was removed rather than reported, because documenting it as a permitted export
+      would have written the bypass into this unit''s own baseline - which is the one thing a choke-point unit
+      must not do.'
+    - 'NOTE: HOW A SECOND SEND PATH IS CAUGHT, and what was done to prove that claim can fail.
+      scripts/check-send-chokepoint.mjs (`pnpm send-chokepoint`, step 22 of 39 in the verify chain, in
+      ci.yml after `pnpm chokepoint`, registered in gate case 29) holds four rules, each named and each with
+      a known-bad fixture in block 114 asserting rejection BY NAME. (1)
+      `message-send-outside-the-choke-point`: a `.send(` whose FIRST ARGUMENT is an object literal or the
+      message itself, outside four declared (file, receiver) pairs. The argument shape is the discriminator
+      that separates a message send from pg-boss''s `boss.send(name, data, opts)`, whose first argument is an
+      identifier - without it the rule would condemn the job registry and be turned off within the week. (2)
+      `gate-evaluator-answers-a-constant`: `hasConsent: () => true` in any shipped module. That is what
+      "configuration" actually looks like once somebody has written one - not a setting, a stub - and no type
+      refuses it because it satisfies the interface perfectly. (3)
+      `promotional-gate-evaluated-outside-the-choke-point`: a second caller of `evaluateGate`, with a
+      lookbehind excluding the declaration (the first run reported the declaration itself, which is how that
+      distinction came to be written down). (4)
+      `choke-point-runs-the-gate-before-the-staging-guard`: a POSITIONAL check that send.ts contains
+      judgeVariant -> resolveSenderIdentity -> evaluateGate -> guardOutbound -> transport.send in that order,
+      which is the acceptance line about ordering made structural rather than only behavioural. All four were
+      driven by mutation before block 114 existed and all four fire; the fifth, 114e, breaks the
+      DISCRIMINATOR rather than the tree, because every rule here is a difference against an allowlist and a
+      difference against nothing is empty - the scanner counts the sends it was told to expect and refuses
+      rather than reporting a clean tree when the count is short (ADR 0002''s green tick on zero modules, one
+      layer down).'
+    - 'NOTE: THE MANIFEST''S THIRD ACCEPTANCE LINE IS WRONG for the tree as built, and the honest equivalent
+      was implemented instead. It asks for "a dependency-cruiser rule [that] forbids any module outside
+      packages/messaging/src/gate from importing a provider adapter or constructing a Transport". Both halves
+      misdescribe the design B-MSG-02 landed. The provider half already exists and names the right directory:
+      `messaging-providers-only-inside-a-transport` confines provider imports to
+      packages/messaging/src/transports, which is where they belong - the GATE reaches no provider at all,
+      and a rule naming `gate` would have been satisfied by a tree where nothing worked. The Transport half
+      would condemn correct code: a transport is CONSTRUCTED at the edge and handed to `sendMessage`, which
+      is what all five shipped runtimes do (two routes, three worker jobs), so forbidding construction
+      outside gate/ would report five violations, every one of them the intended design. What is actually
+      dangerous is not constructing a transport but CALLING it, and dependency-cruiser cannot see a call -
+      it sees module-to-module edges. Hence the scanner. `.dependency-cruiser.cjs` and
+      scripts/test-boundaries.mjs are therefore UNCHANGED and are removed from the files list; the
+      known-bad fixtures live in scripts/test-gates.mjs block 114, which is where the rules they prove live.'
+    - 'NOTE: SCOPED OUT, and to which unit, checked still `todo`. (1) The DURABLE EXPIRY ROW and the release
+      job. Acceptance line 5 asks that a queued message past its staleness ceiling is "expired with reason
+      ''stale_outside_window'' and recorded". The DECISION is built and asserted end to end here: `evaluateGate`
+      returns `{kind: ''expire'', reason: ''stale_outside_window''}` and `sendMessage` returns
+      `{kind: ''expired'', ...}` with the hold instant and the ceiling, the transport is never called, and
+      gate/window.test.ts drives it through the real choke point including on staging. What is NOT built is
+      the job that RELEASES a held message and moves its existing `message` row - and that is C-AUTO-07''s by
+      its own acceptance line ("a delay node whose target instant lands outside the promotional window is
+      released by the gate at the next window open"). C-AUTO-07 is `todo`. Nothing in this build releases a
+      hold, so `deliverMessage` returns `not_sent` for an expiry and writes no row, which lifecycle.ts now
+      says in full. A migration extending `message_failure_reason_known` was deliberately NOT written: the
+      value would be unwritable by anything, and a vocabulary with no writer is a CHECK five other units''
+      probes depend on, edited for a caller that does not exist. (2) READING the dated overrides. The gate
+      takes `windowOverrides` as an argument and `business_calendar` (migration 0003, `kind =
+      ''ramadan_hours''`) is where the rows belong; the repository read is the campaign scheduler''s, C-AUTO-10,
+      which is `todo`. No Ramadan DATE is invented anywhere - see the next note. (3) The KILL SWITCH is read
+      from `ctx.marketingKillSwitch`, still a literal `false` in all five runtimes; making it a real audited
+      read is C-AUTO-05''s, which is `todo` and depends on this unit.'
+    - 'NOTE: THE MANIFEST''S OWN `provisional:` FIELD IS WRONG about Ramadan and is left as it stands, because
+      the authority is elsewhere and rewriting it would leave two answers to one question. It says "Ramadan
+      override rows exist in a dated-override table, seeded at the same hours and marked provisional". Two
+      problems. `Y9-ramadan-window` in docs/OPEN-QUESTIONS.md says the provisional answer is **narrowed to
+      10:00-16:00**, not "the same hours", and OPEN-QUESTIONS is the authority - C-AUTO-03 set that precedent
+      for `Y9-frequency-cap` and the reasoning is identical. And "seeded" cannot be done at all: Ramadan''s
+      dates are announced by an authority and are a FACT ABOUT THE WORLD, so a seeded row would be an invented
+      date, which brief rule 15 forbids and which is worse than a blank because a plausible date is
+      indistinguishable from a confirmed one. So the HOURS are code
+      (`RAMADAN_PROMOTIONAL_HOURS` in @berelax/core, 10:00-16:00, carrying the question id) and the DATES are
+      an argument - `DatedPromotionalOverride[]`, which a `business_calendar` read will supply. Nothing is
+      seeded and no date appears anywhere in this unit''s output. The other three figures in that field are
+      right and are built: 07:00-21:00 Asia/Dubai, 12 hours of queued staleness
+      (`MAX_QUEUED_PROMOTIONAL_STALENESS_SECONDS`, `Y9-queued-staleness`), and the DNC register treated as
+      binding on us, which needs nothing here because `dnc_register` is already a `suppression_source`
+      (migration 0064) and a key suppressed under it is refused by the suppression evaluator this unit wires.'
+    - 'NOTE: `Y6-sender-ids` is carried the way B-MSG-02, C-AUTO-01, C-AUTO-02 and C-AUTO-03 carry it and no
+      second pattern was invented: `PROVISIONAL_SENDER_IDS` in packages/messaging/src/sender-identity.ts is
+      ONE constant validated at import by `assertSenderIdRegistry`, and every suite here sends through it.
+      The promotional identity is the `AD-` one, which 0061''s `message_sms_identity_matches_its_class`
+      biconditional makes unavoidable for a promotional row, and invariants.property.test.ts asserts
+      `senderId === ''AD-BERELAX''` on every send that happened while window.test.ts asserts `BERELAX` on the
+      transactional half of the 01:30 collision. Nothing in this unit invents a sender ID and nothing changes
+      when the real registrations land except that one constant. The unreachable-alphanumeric fact is also
+      WHY "Reply STOP" is forbidden, and no fixture body in this unit makes an opt-out claim of any kind -
+      C-AUTO-03''s fixture tripped `unreachableOptOutPhrasesIn` and, because an itest template row is
+      permanent, put the offending body into the corpus apps/web/src/preference-centre.itest.ts scans. The
+      bodies here are "Two treatments for the price of one at BE RELAX this week." with no opt-out sentence:
+      the working opt-out is C-CRM-07''s preference-centre link, and a body that promises a reply keyword
+      sends somebody who wants to stop into a void.'
+    - 'NOTE: three layers make the window unswitchable, which is 0080''s arrangement for the frequency cap
+      applied to quiet hours, and each layer is the only one that holds against a different route in. (1)
+      CODE: `assertPromotionalWindowChange` refuses null, false, "off", a widening, an inverted window and one
+      that never opens, and checks the ROLE first because the setting is compliance-locked. (2) The ZOD
+      SCHEMA, which this unit changed from `startHour: min(0).max(23)` / `endHour: min(1).max(24)` to
+      `min(7).max(20)` / `min(8).max(21)` plus a `.refine` that start < end. That change matters: before it
+      the schema ACCEPTED `{startHour: 0, endHour: 24}` - the whole day - and the only refusal was the code
+      layer, so a seed, an import, a `writeSetting` from a script and the admin panel''s own validation
+      message all got the widening. (3) THE DATABASE: `promotional_window_is_a_narrowing()` in migration 0087,
+      ONE predicate called from a trigger (the sentence a human reads) and from a CHECK (the layer that still
+      holds under `session_replication_role = ''replica''`, which is how a restore runs). `case` rather than
+      `and`, because SQL does not guarantee `and`''s evaluation order and the cast would raise on the very
+      value the predicate exists to refuse politely - 0080''s finding. NOT strict, because a strict function
+      returns NULL for NULL and a CHECK whose expression is NULL is SATISFIED. `ZX001` is its one private
+      SQLSTATE. Gate case 114h drives four refusals plus the triggers-off CHECK plus an acceptance control.'
+    - 'NOTE: SEVEN DEFECTS IN THIS UNIT''S OWN WORK, all found by its own checks and three of them the
+      session''s dominant class - a check whose stated claim was not what it measured. (1) THE PROPERTY
+      FLOORS WERE GUESSED. invariants.property.test.ts first carried "measured over ten runs of 400:
+      sendable min 21 mean 29.2" and floors of 14/10/165, none of which had been run. Ten real runs give
+      sendable min 11 mean 23.7, held min 14 mean 19.0, refused min 344 mean 357.3 - so the floor of 14 was
+      ABOVE the observed minimum of 11 and the suite would have failed about one run in ten, on a day nobody
+      could tie to a change. That is brief rule 22''s trap arriving in the file written to avoid it. Floors
+      are now 8/9/178 from the real numbers, and sendable''s is a third of its mean rather than a half because
+      half its mean is exactly the observed minimum. (2) TIGHTENING THE ZOD SCHEMA MADE THE WORSE MESSAGE
+      WIN. With the schema bounded, `validateSetting` ran before `assertPromotionalWindowChange`''s own
+      ceiling check, so every widening reported zod''s "expected <= 21" instead of the sentence naming the
+      ceiling, the role and why widening is how quiet hours get disabled. send.test.ts''s "refuses the
+      widening that disables quiet hours" caught it. The refusals are reordered - shape, never-opens,
+      ceiling, THEN schema - so the explanatory sentence wins and the schema is the final layer; one
+      expectation in send.test.ts that asserted WHICH LAYER refused is updated, with a case added beside it
+      (a fractional hour, inside the ceiling and opening) that only the schema refuses, so the schema is
+      still proven to be in the path. (3) THE GATE CASES COULD NOT READ THEIR OWN SQLSTATE. All four 114h
+      probes bounced off the right trigger and `checkRejectedBy` reported "did not report ZX001", because
+      psql''s DEFAULT verbosity prints the message and not the code: a private SQLSTATE no probe can read
+      proves nothing. `-v VERBOSITY=verbose` now, and a fifth probe with `session_replication_role =
+      ''replica''` because the BEFORE trigger always wins and the CHECK - the layer that matters most - was
+      otherwise never exercised. (4) The scanner reported `export function evaluateGate(` as a violation of
+      its own second-caller rule on the first run; a lookbehind excludes the declaration while leaving the
+      rule live INSIDE the gate module, which is better than exempting the file by path. (5) `nextLocalDate`
+      was written rather than reusing `addDays` from hr/leave-accrual.ts because `pnpm purity` bans the
+      `Date` token throughout packages/core/src/messaging and both existing helpers are built on
+      `new Date(...)`; the exhaustive 366-day walk in promotional-window.test.ts is what makes a hand-written
+      day-length table safe, and it uses the full Gregorian rule because a four-year approximation puts the
+      last day of February 2100 on the 29th. (6) MOVING THE GATE INTO `gate/index.ts` SILENTLY REMOVED IT
+      FROM THE COVERAGE FLOOR. `vitest.config.ts` excludes `**/index.ts` from coverage, which is right for a
+      barrel - counting a list of re-exports either inflates the number or invites a test of the list - and
+      it meant the promotional compliance gate, the one module in this package whose uncovered branch is an
+      SMS to somebody who opted out, stopped being counted at all. Nothing would have failed: every suite
+      passes, `pnpm coverage` would have reported a number that had quietly stopped being about the gate,
+      and the floor would have been met by the rest of the package. Found by reading vitest.config.ts rather
+      than by any check. The body is now `packages/messaging/src/gate/decide.ts`, where the floor counts it,
+      and `gate/index.ts` is a barrel re-exporting decide.ts, window.ts and wire.ts - which is what the
+      exclusion is actually for. (7) STOPPING A VERIFY RUN LEFT A `__boundary_fixture__.ts` BEHIND in
+      packages/core, which is brief rule 13''s hazard inflicted on myself: `scripts/test-boundaries.mjs`
+      removes its fixtures in a `finally`, and a killed child never reaches it, so `pnpm boundaries` then
+      failed `core-must-be-pure` on a file that imports `node:fs` on purpose. Removed by hand and the tree
+      re-checked. Two things made the diagnosis slower than it should have been and are worth the next
+      agent knowing: the `----  n/38` step headers are BUFFERED into the log, so the log read "step 2" while
+      the chain was really at step 4; and a `/proc` scan whose pattern is a SUBSTRING of its own command
+      line matches its own `grep` children, which produced four consecutive false "a check process is
+      live" readings - brief rule 27 says exactly this and it still caught me. Matching each script as its
+      own argv ENTRY, and comparing the cwd, answers correctly.'
+    - 'NOTE: A DEFECT IN ANOTHER UNIT''S WORK, reported and not fixed. `ZW001` and `ZW002` are raised by BOTH
+      migration 0080 (C-AUTO-03: FrequencyCapNotACap, FrequencyLedgerCountImmutable) and migration 0081
+      (P-HR-06: published rota immutable, change request append-only). That is precisely the collision the
+      private-SQLSTATE convention exists to prevent, and 0080''s own header states the reason: a shared code
+      means "a probe asserting it passes when the statement bounced off something else entirely". Both units
+      are `done` and both migrations are applied, so renaming a code is another unit''s migration and not
+      this one''s edit. This unit took `ZX001`, having checked that `ZX` is unowned. Worth an integrator
+      decision rather than a silent carry: the two ZW001s are in different tables, so no probe is wrong
+      TODAY, but nothing stops the next one being.'
+    - 'NOTE: gate block `// 114a-114z.` in scripts/test-gates.mjs, 16 cases, placed immediately after
+      `// 109a-109z.`''s closing brace and before `// 79a-79k.`, because that file is ordered by CATEGORY
+      rather than by number. Selector: `pnpm gates:only --only ''// 114a''`. The mutation helper is called
+      `withChokeEdit` and deliberately NOT `...Mutant`: blocks 106 and 107 both defined a `...Mutant` helper
+      of the same shape, git found the bodies as shared context and INTERLEAVED the two blocks, and this
+      block''s subject overlaps C-AUTO-03''s, so it is the one most likely to repeat that. No case mutates
+      packages/db/migrations/0087_compliance_gate.sql: the database the suites run against has already had it
+      applied, so an edit to the file changes nothing a statement can see and a PASS would be a report about
+      a file nothing read. No server is started and no port band was taken.'
+    - 'NOTE: SCHEMA_VERSION set to 87, the newest migration on disk in this worktree, with a `// 87 is
+      0087_compliance_gate.sql` paragraph added after 82''s. 83 to 86 are allocations held by units in
+      flight, which the new paragraph states; the existing gaps paragraph was deliberately NOT edited, since
+      three branches rewriting one paragraph is the clean-merge loss gate case 90a exists for and C-AUTO-03
+      recorded the same decision. Gate case 90a walks the migrations that EXIST rather than consecutive
+      integers, so the run is 49..82 plus 87 and the four held numbers cost nothing.'
     files:
-    - packages/messaging/src/gate/index.ts
-    - packages/messaging/src/gate/window.ts
     - packages/core/src/messaging/promotional-window.ts
-    - .dependency-cruiser.cjs
+    - packages/core/src/messaging/promotional-window.test.ts
+    - packages/core/src/index.ts
+    - packages/messaging/src/gate/index.ts
+    - packages/messaging/src/gate/decide.ts
+    - packages/messaging/src/gate/window.ts
+    - packages/messaging/src/gate/wire.ts
+    - packages/messaging/src/gate/window.test.ts
+    - packages/messaging/src/gate/wire.test.ts
+    - packages/messaging/src/gate/settings-are-code.test.ts
+    - packages/messaging/src/gate/invariants.property.test.ts
+    - packages/messaging/src/gate/fail-closed.test.ts
+    - packages/messaging/src/chokepoint-surface.test.ts
+    - packages/messaging/src/send.ts
+    - packages/messaging/src/lifecycle.ts
+    - packages/messaging/src/outbox.ts
+    - packages/messaging/src/port.ts
+    - packages/messaging/src/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/db/migrations/0087_compliance_gate.sql
+    - packages/db/src/index.ts
+    - scripts/check-send-chokepoint.mjs
     - scripts/test-gates.mjs
-    - scripts/test-boundaries.mjs
+    - package.json
+    - .github/workflows/ci.yml
   - id: C-AUTO-05
     order: 80
     title: Marketing kill switch and promotional-identity containment
@@ -8430,7 +8636,7 @@ units:
       and no counts, and a sentinel-leak sweep proves no free text escapes the boundary into any table,
       response, log or analytics event.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-CRM-08
@@ -9696,7 +9902,7 @@ units:
       rota, an INCOMPLETE state for a missing clock-out, and timesheet approval that locks the period so
       corrections are dated adjustment rows rather than edits — the payable-hours input to payroll.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - P-HR-06

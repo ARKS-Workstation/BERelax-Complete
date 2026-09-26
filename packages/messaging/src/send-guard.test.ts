@@ -1,7 +1,6 @@
 import type { AppEnv } from '@berelax/config'
 import { describe, expect, it } from 'vitest'
-import { createGuardedTransport, InMemoryOutbox } from './outbox.ts'
-import type { MessageId, OutboundMessage, SendOutcome, Transport } from './port.ts'
+import type { MessageId, OutboundMessage } from './port.ts'
 import { guardOutbound } from './send-guard.ts'
 
 const message = (overrides: Partial<OutboundMessage> = {}): OutboundMessage => ({
@@ -55,63 +54,14 @@ describe('guardOutbound', () => {
   })
 })
 
-describe('createGuardedTransport', () => {
-  const recordingTransport = (): Transport & { readonly sent: OutboundMessage[] } => {
-    const sent: OutboundMessage[] = []
-    return {
-      channel: 'sms',
-      sent,
-      async send(m: OutboundMessage): Promise<SendOutcome> {
-        sent.push(m)
-        return { kind: 'sent', providerMessageId: 'provider-1' }
-      },
-    }
-  }
-
-  it('never reaches the inner transport when the guard diverts', async () => {
-    const inner = recordingTransport()
-    const outbox = new InMemoryOutbox()
-    const transport = createGuardedTransport({
-      inner,
-      decide: (m) => guardOutbound({ appEnv: 'staging', outboundAllowlist: [] }, m),
-      outbox,
-      now: () => '2026-09-18T06:00:00.000Z',
-    })
-
-    const outcome = await transport.send(message())
-
-    expect(outcome.kind).toBe('diverted')
-    expect(inner.sent).toHaveLength(0)
-    expect(outbox.size).toBe(1)
-  })
-
-  it('records a diverted message with its reason rather than dropping it', async () => {
-    const outbox = new InMemoryOutbox()
-    const transport = createGuardedTransport({
-      inner: recordingTransport(),
-      decide: (m) => guardOutbound({ appEnv: 'test', outboundAllowlist: [] }, m),
-      outbox,
-      now: () => '2026-09-18T06:00:00.000Z',
-    })
-
-    await transport.send(message())
-    const [entry] = outbox.all()
-    expect(entry?.reason).toContain('OUTBOUND_ALLOWLIST')
-    expect(entry?.message.templateKey).toBe('booking.confirmed')
-    expect(entry?.recordedAtIso).toBe('2026-09-18T06:00:00.000Z')
-  })
-
-  it('reaches the inner transport in production', async () => {
-    const inner = recordingTransport()
-    const transport = createGuardedTransport({
-      inner,
-      decide: (m) => guardOutbound({ appEnv: 'production', outboundAllowlist: [] }, m),
-      outbox: new InMemoryOutbox(),
-      now: () => '2026-09-18T06:00:00.000Z',
-    })
-
-    const outcome = await transport.send(message())
-    expect(outcome).toEqual({ kind: 'sent', providerMessageId: 'provider-1' })
-    expect(inner.sent).toHaveLength(1)
-  })
-})
+/**
+ * `describe('createGuardedTransport')` USED TO BE HERE, and its three cases are not lost.
+ *
+ * C-AUTO-04 removed `createGuardedTransport`: it was a second send path that applied this guard and
+ * nothing else (see `outbox.ts` for the whole argument). Its three claims — a diverted message never
+ * reaches the transport, it is recorded in the outbox with its reason and instant, and production
+ * delivers — are all asserted through the REAL choke point instead, in `send.test.ts`: 'diverts to the
+ * local outbox instead of sending', 'delivers to an allowlisted recipient' and the production cases
+ * above them. Asserting them there is strictly stronger, because those run the gate, the identity
+ * resolution and the template judgement as well, which is the order a real send takes.
+ */

@@ -1,4 +1,4 @@
-import type { OutboundMessage, SendOutcome, Transport } from './port.ts'
+import type { OutboundMessage } from './port.ts'
 
 /**
  * The local outbox. A diverted message is recorded here and is visible in the admin UI and in
@@ -31,26 +31,25 @@ export class InMemoryOutbox {
 }
 
 /**
- * Wraps a transport so no send can bypass the guard. Features depend on this type, never on a
- * raw Transport — which is why `Transport.send` is documented as never being called directly.
+ * `createGuardedTransport` USED TO BE HERE, and its removal is C-AUTO-04's subject rather than a tidy-up.
+ *
+ * It took any `Transport` and returned a `Transport` whose `send` applied a divert decision and then called
+ * `inner.send(message)`. That is a second send path, and it is the exact shape this unit exists to make
+ * impossible: a message leaving through it passed the staging guard and NOTHING else — no template
+ * approval, no sender-identity resolution, no consent, no suppression, no frequency cap and no quiet
+ * hours. It was exported from the package barrel, so it was reachable by autocomplete from any feature,
+ * and it was reachable from a `Transport` — a shape whose `send` takes a bare message with no
+ * idempotency key, so a retry through it would have been a second charge.
+ *
+ * Nothing in shipped code ever called it. That is why it survived: a dead bypass raises no failure, and
+ * `messaging-providers-only-inside-a-transport` could not see it because it forbids reaching a PROVIDER
+ * and this reached whatever it was handed. What finds it now is
+ * `scripts/check-send-chokepoint.mjs`'s `message-send-outside-the-choke-point` rule, which fired on
+ * `args.inner.send(message)` here on the first run it was pointed at the repository — and which would fire
+ * again the moment anybody reintroduced it. `chokepoint-surface.test.ts` is the other half: it refuses a
+ * barrel export matching a transport-factory name, so putting it back would fail two checks rather than
+ * being reviewed.
+ *
+ * The staging guard itself is unchanged and is not optional. `sendMessage` applies `guardOutbound` after
+ * the gate (`send.ts` says why the order matters) and records a divert in this outbox.
  */
-export function createGuardedTransport(args: {
-  readonly inner: Transport
-  readonly decide: (
-    message: OutboundMessage,
-  ) => { kind: 'deliver' } | { kind: 'divert'; reason: string }
-  readonly outbox: InMemoryOutbox
-  readonly now: () => string
-}): Transport {
-  return {
-    channel: args.inner.channel,
-    async send(message: OutboundMessage): Promise<SendOutcome> {
-      const decision = args.decide(message)
-      if (decision.kind === 'divert') {
-        const outboxRef = args.outbox.record(message, decision.reason, args.now())
-        return { kind: 'diverted', reason: decision.reason, outboxRef }
-      }
-      return args.inner.send(message)
-    },
-  }
-}

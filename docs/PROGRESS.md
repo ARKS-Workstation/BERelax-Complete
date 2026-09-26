@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**115 / 208 units complete.**
+**119 / 208 units complete.**
 
 ## Next up
 
 1. **W-SYS-11 — The admin session — mounting F07's auth in the web app**
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **M-TILL-10 — Package redemption drawdown, expiry and breakage**  — **needs owner input:** Y9-package-policy, Y11-vat-package
+1. **M-TILL-13 — Till, cash-up and package screens, and the M2 Bankable vertical slice**
 
 ## All units
 
@@ -67,7 +67,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 49 | `M-TILL-07` | Payments and refunds through the manual tender adapter | `M-TILL-06` | — | — |
 | [x] | 50 | `M-TILL-08` | Credit notes as the only correction mechanism | `M-TILL-03`, `M-TILL-06` | — | — |
 | [x] | 51 | `M-TILL-09` | Versioned package templates and package sale as deferred revenue | `F09`, `M-TILL-06` | — | Y9-package-policy, Y11-vat-package |
-| [ ] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
+| [x] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
 | [x] | 53 | `M-TILL-11` | Cash drawer reconciliation per shift, keyed on business_day | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `M-TILL-07` | — | — |
 | [x] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
 | [ ] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
@@ -94,7 +94,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 76 | `C-CRM-04` | Suppression list and the opt-out token service | `C-CRM-03` | — | — |
 | [x] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
 | [x] | 78 | `C-AUTO-03` | Frequency ledger and a global cap across every flow and campaign | `C-AUTO-01`, `C-CRM-05` | — | Y6-sender-ids, Y9-frequency-cap |
-| [ ] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
+| [x] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
 | [ ] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
 | [ ] | 81 | `C-AUTO-07` | The interpreter on pg-boss: idempotency, loop detection and dry run | `C-AUTO-04`, `C-AUTO-06`, `F06` | — | — |
 | [ ] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
@@ -103,7 +103,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 85 | `C-CRM-06` | Duplicate review queue and merge preview | `C-CRM-05`, `H04` | — | — |
 | [x] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
 | [x] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
-| [ ] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
+| [x] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
 | [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
 | [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
 | [x] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
@@ -111,7 +111,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 93 | `P-HR-04` | Reassignment work queue and the reassign transaction | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-03` | — | Y9-gender |
 | [x] | 94 | `P-HR-05` | Shift model and midnight-crossing working-hours maths | `P-HR-01` | — | Y9-overtime |
 | [x] | 95 | `P-HR-06` | Rota publishing, coverage and fatigue validator, labour-cost forecast | `P-HR-02`, `P-HR-05` | — | Y9-coverage |
-| [ ] | 96 | `P-HR-07` | Attendance, timesheets and the period lock | `P-HR-06` | — | Y9-attendance |
+| [x] | 96 | `P-HR-07` | Attendance, timesheets and the period lock | `P-HR-06` | — | Y9-attendance |
 | [x] | 97 | `P-HR-08` | Leave types, entitlement and the accrual engine with worked examples | `P-HR-01` | — | Y8-leave, Y9-leave-detail |
 | [ ] | 98 | `P-HR-09` | Leave approval: delegation, coverage, booking conflicts, availability block | `P-HR-04`, `P-HR-06`, `P-HR-08` | M6 | Y9-coverage |
 | [ ] | 99 | `P-HR-10` | Holiday calendar, lunar confirmation impact report, Ramadan dated override | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-06` | — | — |

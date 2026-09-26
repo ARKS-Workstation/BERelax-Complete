@@ -31,7 +31,7 @@
 import { type AppEnv, parseConfig } from '@berelax/config'
 import { fixedClock, type Instant, instantFromIso } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import { TDRA_PROMOTIONAL_WINDOW } from './gate.ts'
+import { TDRA_PROMOTIONAL_WINDOW } from './gate/index.ts'
 import { InMemoryOutbox } from './outbox.ts'
 import type { MessageId } from './port.ts'
 import {

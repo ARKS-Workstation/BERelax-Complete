@@ -300,9 +300,17 @@ export async function deliverMessage(
     const result = await sendMessage(deps.send, request)
     const atIso = instantToIso(deps.send.clock.now())
 
-    if (result.kind === 'blocked' || result.kind === 'diverted') {
-      // Only reachable on the first attempt: neither outcome depends on the transport, so a retry
+    if (result.kind === 'blocked' || result.kind === 'diverted' || result.kind === 'expired') {
+      // Only reachable on the first attempt: none of the three depends on the transport, so a retry
       // would produce the same answer and a row for it would claim a send that never happened.
+      //
+      // `expired` is here rather than beside `queued` although both come from the window, and the
+      // difference is what each one has to leave behind. A hold is a message that will be sent, so it gets
+      // a row with its release instant. An expiry is a message that never will be, so a row saying
+      // `queued` would be a reminder that waits for ever and a row saying `sent` would be a lie — the
+      // outcome is returned, typed, and the caller reports it (`Y9-queued-staleness` asks the owner for a
+      // report rather than a late send). Moving an EXISTING held row to expired is the release job's, which
+      // is C-AUTO-07's; nothing in this build releases a hold yet, so nothing here can reach that case.
       if (row === undefined) return { kind: 'not_sent', result }
       throw new AppError(
         'invariant_violated',

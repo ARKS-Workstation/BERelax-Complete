@@ -17,18 +17,28 @@ export {
 export {
   asPromotionalWindow,
   assertPromotionalWindowChange,
+  type DatedPromotionalOverride,
+  decideSendWindow,
   evaluateGate,
+  type GateAttempt,
   type GateContext,
   type GateDecision,
   type GateEvaluatorName,
   type GateEvaluators,
   type GateRefusal,
+  MAX_QUEUED_PROMOTIONAL_STALENESS_SECONDS,
   nextPromotionalWindowOpen,
   PROMOTIONAL_WINDOW_SETTING_KEY,
   type PromotionalWindow,
+  type SendWindowQuestion,
   TDRA_PROMOTIONAL_WINDOW,
   withinPromotionalWindow,
-} from './gate.ts'
+} from './gate/index.ts'
+export {
+  type GateEvaluatorSources,
+  type PromotionalGateReads,
+  promotionalGateEvaluators,
+} from './gate/wire.ts'
 export {
   type AttemptOutcome,
   type DeliveryDeps,
@@ -51,15 +61,8 @@ export {
   type InMemoryMessageStore,
   type StoredMessage,
 } from './lifecycle-memory.ts'
-export { createGuardedTransport, InMemoryOutbox, type OutboxEntry } from './outbox.ts'
-export type {
-  Channel,
-  MessageClass,
-  MessageId,
-  OutboundMessage,
-  SendOutcome,
-  Transport,
-} from './port.ts'
+export { InMemoryOutbox, type OutboxEntry } from './outbox.ts'
+export type { Channel, MessageClass, MessageId, OutboundMessage } from './port.ts'
 export {
   placeholdersIn,
   renderTemplate,

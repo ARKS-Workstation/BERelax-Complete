@@ -10,14 +10,8 @@
  */
 import { fixedClock, type Instant, type LocalDateTime, type TimeZone } from '@berelax/core'
 import { describe, expect, it } from 'vitest'
-import {
-  evaluateGate,
-  type GateContext,
-  type GateEvaluators,
-  TDRA_PROMOTIONAL_WINDOW,
-} from './gate.ts'
-import { InMemoryOutbox } from './outbox.ts'
-import type { MessageId } from './port.ts'
+import { InMemoryOutbox } from '../outbox.ts'
+import type { MessageId } from '../port.ts'
 import {
   type ClassifiedTemplate,
   type ClassRoutedTransport,
@@ -25,8 +19,14 @@ import {
   type SendRequest,
   sendMessage,
   type TransportRequest,
-} from './send.ts'
-import { PROVISIONAL_SENDER_IDS } from './sender-identity.ts'
+} from '../send.ts'
+import { PROVISIONAL_SENDER_IDS } from '../sender-identity.ts'
+import {
+  evaluateGate,
+  type GateContext,
+  type GateEvaluators,
+  TDRA_PROMOTIONAL_WINDOW,
+} from './index.ts'
 
 /** 14:00 Asia/Dubai: trading, and well inside the promotional window. Nothing here is about timing. */
 const AFTERNOON = '2026-09-18T10:00:00.000Z'

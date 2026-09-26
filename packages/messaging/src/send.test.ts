@@ -22,7 +22,7 @@ import {
   assertPromotionalWindowChange,
   TDRA_PROMOTIONAL_WINDOW,
   withinPromotionalWindow,
-} from './gate.ts'
+} from './gate/index.ts'
 import { InMemoryOutbox } from './outbox.ts'
 import type { MessageId, OutboundMessage } from './port.ts'
 import { renderTemplate, type TemplateValues } from './render.ts'
@@ -428,8 +428,21 @@ describe('the promotional window setting narrows and never opens', () => {
     expect(() =>
       assertPromotionalWindowChange({ proposed: { startHour: 7, endHour: 7 }, role: 'owner' }),
     ).toThrow(/never opens/)
+    // 07:00-25:00 is refused by the CEILING check now and was refused by the registry schema before.
+    //
+    // This expectation used to read `/Promotional send window/`, which is the setting's LABEL and
+    // therefore the zod message. C-AUTO-04 bounded the schema inside 07:00-21:00 as well, and reordered
+    // `assertPromotionalWindowChange` so its own refusals run BEFORE the schema — because zod reports
+    // "endHour: expected <= 21" where this function names the ceiling, the role and why widening it is how
+    // quiet hours get disabled. The value is still refused; the sentence is better, so the assertion
+    // follows the sentence rather than the code being contorted to keep the worse one.
     expect(() =>
       assertPromotionalWindowChange({ proposed: { startHour: 7, endHour: 25 }, role: 'owner' }),
+    ).toThrow(/may only be narrowed inside 07:00-21:00/)
+    // And the schema IS still in the path, which the case above no longer shows: a fractional hour is
+    // inside the ceiling and does open, so only the registry schema refuses it.
+    expect(() =>
+      assertPromotionalWindowChange({ proposed: { startHour: 7.5, endHour: 21 }, role: 'owner' }),
     ).toThrow(/Promotional send window/)
   })
 

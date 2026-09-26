@@ -374,10 +374,37 @@ export const SETTINGS = [
   define({
     key: 'messaging.promotional_window',
     tier: 'compliance_locked',
-    schema: z.object({
-      startHour: z.number().int().min(0).max(23),
-      endHour: z.number().int().min(1).max(24),
-    }),
+    /**
+     * Bounded INSIDE 07:00-21:00, which is C-AUTO-04's half of "the window cannot be switched off".
+     *
+     * It used to be `min(0).max(23)` / `min(1).max(24)`, so the schema accepted `{startHour: 0, endHour:
+     * 24}` — the whole day, which is quiet hours switched off — and the only thing refusing it was
+     * `assertPromotionalWindowChange` in `@berelax/messaging`. That is the right refusal and it was the
+     * ONLY one, so every route into this row that did not go through that function accepted a widening:
+     * a seed, an import, `writeSetting` called from a script, and the admin panel's own validation error
+     * message, which said nothing about a ceiling because the schema had none.
+     *
+     * The same three-layer arrangement C-AUTO-03 gave the frequency cap, for the same reason — the failure
+     * is somebody at 2am who wants a campaign out: code refuses it (`assertPromotionalWindowChange`, with
+     * the role and the reason), this schema refuses it (so the admin panel does), and
+     * `promotional_window_is_a_narrowing()` in migration 0087 refuses it in the database (so a `psql`
+     * session does, and so does a restore running with triggers off).
+     *
+     * `.refine` rather than two more bounds, because "07:00-21:00 is a window and 20:00-08:00 is not" is a
+     * relation between the two fields and no per-field bound can express it. An inverted window is how
+     * "disable quiet hours" gets spelled by somebody who has read that the hours may only be narrowed.
+     */
+    schema: z
+      .object({
+        startHour: z.number().int().min(7).max(20),
+        endHour: z.number().int().min(8).max(21),
+      })
+      .refine((w) => w.startHour < w.endHour, {
+        message:
+          'The promotional window must open before it closes. A window whose start is at or after its ' +
+          'end never opens, which is not a narrowing of quiet hours but a different rule with no hours ' +
+          'in it.',
+      }),
     defaultValue: { startHour: 7, endHour: 21 },
     label: 'Promotional send window (Asia/Dubai)',
     help: 'TDRA restricts promotional SMS. This narrows the window only — it can never be widened beyond 07:00-21:00, and it cannot be switched off.',
