@@ -976,6 +976,41 @@ export {
   verifyOptOutToken,
 } from './repositories/suppression.ts'
 /*
+  P-HR-07's attendance and timesheet side (0086). Every table is append-only, so nothing here issues an
+  UPDATE and nothing here deletes: a correction is `recordAttendanceCorrection`, a dated row that leaves the
+  punch saying what it always said.
+
+  `readRosteredSpansFromVersion` reads `rota_version_assignment` and deliberately NOT `shift`, which is
+  P-HR-06's deferral in its own words — the immutable published version exists to be compared against. A
+  variance measured against the draft would change every time somebody rewrote next month's roster.
+
+  No function here answers "is this period closed?". That is `periodStatusOn` (M-VAT-06), which these call,
+  over the same `period_lock_for()` and `earliest_open_date_from()` the database's own guards call.
+*/
+export {
+  type ApproveTimesheetArgs,
+  ATTENDANCE_SQLSTATE,
+  type AttendanceCorrectionResult,
+  type AttendanceCorrectionRow,
+  type AttendanceGraceRuleRow,
+  type AttendancePunchRow,
+  approveTimesheet,
+  attendanceError,
+  type RecordCorrectionInput,
+  type RecordPunchInput,
+  type RosteredSpanRow,
+  readAttendanceCorrections,
+  readAttendanceGraceRules,
+  readAttendancePunches,
+  readRosteredSpansFromVersion,
+  readTimesheetApprovals,
+  recordAttendanceCorrection,
+  recordAttendancePunch,
+  type TimesheetApprovalRow,
+  type TimesheetFigures,
+  type TradingDateRange,
+} from './repositories/timesheet.ts'
+/*
   B-UI-04's WhatsApp ref loop (0079). `issueWhatsappRef` and `mintWhatsappRefCode` are exported although
   nothing in this build calls them, and that is the deferred-scope contract rather than dead code: they are
   the interface A-FIRST will generate codes through (docs/12 §1.1), so filling the port later is a call site
@@ -2176,7 +2211,47 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // its private SQLSTATE prefix: `ZI` is 0026's and 0072's, and every other mnemonic letter is taken, so what
 // a private code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
 //
-// 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
-// record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
-// what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 82 as const
+// 86 is 0086_attendance.sql: attendance as EVIDENCE, the timesheet approval that locks a period, and the
+// dated correction that is the only way to change what a locked period says. Every table is append-only
+// (ZX001, for every role including the owner) because payroll pays attendance: a punch that can be edited is
+// a paid hour that can be made never to have happened. `attendance_event` holds one row per PUNCH rather than
+// one per presence with a nullable clock-out, and that is forced rather than chosen — filling a clock-out in
+// later is an UPDATE — which makes INCOMPLETE a SHAPE, a clock-in with nothing after it, instead of a null a
+// reader has to remember to check. `occurred_at` is refused off a whole minute, because `workedMinutes` in
+// @berelax/core refuses a span that is, so seconds admitted here would surface as a thrown pricing call on a
+// screen rather than as a rejected punch at the desk. `attendance_trading_date_for()` is THE one definition
+// of which trading date a punch belongs to — the insert trigger checks the column against it (ZX003) and
+// `recordAttendancePunch` takes no trading date at all, so a 01:50 clock-out belongs to the day that opened
+// at 11:00 and there is no second reading to disagree; it reads the materialised `business_day` calendar
+// widened by a versioned `punch_tolerance_minutes`, bounded at 240 because one day's close and the next day's
+// open are nine hours apart and a wider tolerance would make two days claim one punch.
+// `assert_attendance_punch_alternates` (ZX002) is what makes INCOMPLETE mean exactly one thing, and it is
+// scoped to the trading date because an unclosed Monday must not stop somebody clocking in on Tuesday. The
+// grace windows, the implausible-span figure and the tolerance are VERSIONED rows of `attendance_grace_rule`
+// and not `app_setting` values, which is 0059's, 0066's and 0081's decision taken a fourth time and it is
+// sharpest here: this is the unit asked about the PAST most often, and widening the window in April must not
+// make March's lateness retroactively disappear. A correction produces NO punch row — the obvious shape, and
+// wrong twice, because the punch would be dated inside the very period the correction works around and
+// because the same fact in two places means a reader that found one and not the other reports a corrected day
+// as an ordinary one; `applyAttendanceCorrections` layers the row over the punches instead, and
+// `attendance_correction.reason` is refused blank, placeholder or under eight characters by CONSTRAINT rather
+// than by UI validation alone. TWO locks compose without a second reader of either: the accounting period
+// lock through `raise_if_period_locked()`, the same function every posting path reaches so a refusal names
+// the earliest OPEN date, and the approved timesheet through ZX004, which is absolute and needs no exemption
+// precisely because a correction changes an approved period without inserting into that table. What this file
+// deliberately does NOT hold: a foreign key from any of the three tables into `business_day`, because
+// `business_day` is generated and `business-days.itest.ts` empties it, so a RESTRICT reference from a row
+// that can never be deleted would pin every date it named for ever — the failure P-HR-06 found in eleven
+// cases of another unit's suite, and the reason 0076's `cash_session.trading_date` CAN hold that key is the
+// mechanism rather than the meaning: a cash session can be deleted to release the pin. What it does hold is
+// `timesheet_approval.rota_version_id` as a KEY, which is P-HR-06's deferral in its own words — the immutable
+// version exists to be compared against — and a PRECONDITION rather than provenance, since a plain column
+// would let a timesheet be approved against a version nobody published (ZX005 also refuses a superseded one).
+// `ZX` is its private SQLSTATE prefix: every mnemonic letter from `ZB` to `ZW` is taken, so what a private
+// code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
+//
+// 78 through 81 were allocations held by units in flight in other worktrees, and 83 through 85 and 87 are
+// held by units in flight now, so the jump from 82 to 86 is not a gap in the record: gate case 90a walks the
+// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
+// allocation cost nothing.
+export const SCHEMA_VERSION = 86 as const

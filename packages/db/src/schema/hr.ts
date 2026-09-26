@@ -23,7 +23,9 @@ import { employee, leaveRequest, staffLanguage } from './staff.ts'
 /**
  * Drizzle mirror of the two tables `packages/db/migrations/0050_employee.sql` creates, the one
  * `packages/db/migrations/0059_hr_shift.sql` adds, the two `packages/db/migrations/0066_hr_leave.sql`
- * adds, and the six `packages/db/migrations/0081_hr_rota_version.sql` adds.
+ * adds, and the six `packages/db/migrations/0081_hr_rota_version.sql` adds. The four tables 0086 adds are in
+ * `./attendance.ts`, because this file mirrors the ROSTER — what the business intends people to work — and
+ * those four are the record of what actually happened and what was paid for it.
  *
  * The columns 0050 ADDS to `employee` and `employee_document` are in `./staff.ts` beside the rest of
  * those tables, because a mirror is a mirror of a table and not of a migration — splitting one table

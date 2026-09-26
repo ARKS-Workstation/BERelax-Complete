@@ -586,6 +586,34 @@ export const ROUTES = [
       'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-timesheets',
+    path: '/hr/timesheets',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-07s timesheets screen: what each therapist actually worked against the PUBLISHED rota version, ' +
+      'which spans are incomplete and therefore unpriced, every dated correction with its reason, and ' +
+      'whether the period has been approved. A handler answering text/html rather than a document, for the ' +
+      'reason the three HR screens beside it give: a document must be served in both locales, which would ' +
+      'need an Arabic admin document and the W-SYS-01 shell, and would join a screenshot matrix whose RTL ' +
+      'half has to be a real Arabic route. READ-ONLY on purpose — a punch, a correction and an approval are ' +
+      'all writes with an actor, no route in this application reads a staff session, and three separate ' +
+      'constraints ' +
+      'refuse a placeholder rather than taking one. It names no therapist: staff_reference is the handle, ' +
+      'and nineteen employees have no name recorded (ADR 0020). Nothing on it is money — the weighted ' +
+      'figure is basis-point-minutes, because what an hour of a monthly wage is worth is unanswered ' +
+      '(Y9-overtime) and payroll is P-HR-12s. Dynamic because the answer is a claim about punches entered ' +
+      'minutes ago, so a prerendered copy would be a period somebody had already corrected. The /hr prefix ' +
+      'in ADMIN_GROUP_PREFIXES is what makes it noindex. NOT authenticated, and the reason the HR screens ' +
+      'beside it give for that is wrong: W-SYS-01 is the app shell and is done, F07s auth primitives are done ' +
+      'too, and what is actually missing is that nothing in apps/web imports @berelax/auth - route.ts records ' +
+      'the misattribution in full.',
+  },
+  {
     id: 'journal',
     path: '/journal',
     kind: 'document',
