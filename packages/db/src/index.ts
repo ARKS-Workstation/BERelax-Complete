@@ -1222,6 +1222,28 @@ export {
   tradingDateAt,
 } from './services/recurring-cost.ts'
 export {
+  ArchivedServiceReferenced,
+  currentPackageTemplateVersion,
+  DEFERRED_REVENUE_ACCOUNT_CODE,
+  isDuplicatePackageLine,
+  isPackageVersionRaced,
+  PACKAGE_SQLSTATE,
+  type PackageBalanceInput,
+  type PackageSaleRow,
+  type PackageTemplateLineInput,
+  PackageTemplateUnavailable,
+  type PackageTemplateVersionRow,
+  type PackageTenderInput,
+  packageError,
+  readPackageSale,
+  type SavedPackageTemplateVersion,
+  type SavePackageTemplateVersionInput,
+  type SellPackageInput,
+  type SoldPackage,
+  savePackageTemplateVersion,
+  sellPackage,
+} from './services/sell-package.ts'
+export {
   type AvailabilityLimits,
   GENDER_MATCHING_SETTING_KEY,
   MAX_ADVANCE_SETTING_KEY,
@@ -1240,6 +1262,14 @@ export {
   readObligationEscalationOffsets,
   readObligationReminderOffsets,
 } from './settings/compliance.ts'
+export {
+  PACKAGE_POLICY_SETTING_KEYS,
+  PACKAGE_TRANSFERABLE_SETTING_KEY,
+  PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY,
+  PACKAGE_VALIDITY_MONTHS_SETTING_KEY,
+  type PackageDefaultTerms,
+  readPackageDefaultTerms,
+} from './settings/package.ts'
 export {
   REMINDER_OFFSETS_SETTING_KEY,
   readReminderOffsets,
@@ -1837,6 +1867,36 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ones are taken (`ZK` is the KEK's, `ZP` is consent's, `ZF` is the flow's) and what a private code has to
 // be is unique to one file, not memorable.
 //
+// 78 is 0078_package.sql: versioned package templates, and a package sale that is a LIABILITY rather than
+// a sale (M-TILL-09). Two things kept apart: what the business currently offers, which changes, and what a
+// customer actually bought, which never does. `package_template_version` and `package_template_line` refuse
+// UPDATE and DELETE outright (ZG001), so "edit the six-massage package" is `insert ... version = 2` and the
+// row every outstanding balance points at cannot be reached by the edit at all — 0072's decision for a
+// document and C-AUTO-06's for a flow definition, and this is the third; nothing here re-argues it. The
+// current version is `max(version)` and there is deliberately NO pointer column, whose failure mode is a
+// pointer at a version a later insert superseded. A sale SNAPSHOTS all five terms even though the version
+// is immutable, `invoice`'s reason for snapshotting the issuer's legal name — a contract has to be readable
+// as a document rather than as a join — and the two cannot drift because ZG002 holds them equal at COMMIT,
+// `session_count` against `sum(package_template_line.session_count)` rather than against a stored total
+// that would be a third copy. The POSTING is the unit: `Dr` tender / `Cr 2050` at the FULL gross and
+// nothing on any revenue account and nothing on 2030, because **[UNVERIFIED] Y11-vat-package** puts the
+// date of supply at REDEMPTION and that is the strictest safe reading — the salon holds the money as a
+// liability and recognises nothing until a treatment is delivered, so an uncorrected assumption cannot
+// understate a box that has already been filed. ZG005 is that rule as a database refusal, and it measures
+// TOTAL movement (debits plus credits) rather than the net, because an entry crediting 4010 and debiting
+// the contra 4095 by the same figure nets to zero and HAS recognised revenue. `package_balance.value_fils`
+// is the sale's gross allocated across the lines largest-remainder so the shares sum to the price exactly
+// (ZG006 re-adds them in SQL), because a redemption needs a figure to release and "the package cost 3,000"
+// does not say what one facial out of it was worth. Its SQLSTATE class is `ZG` and NOT the mnemonic `ZP`:
+// 0056_consent.sql already raises ZP001-ZP003, and two files raising one code would have made
+// `packageError` translate a consent refusal as a package one — both match on SQLSTATE alone precisely so
+// a wording change cannot break them. Deferred to M-TILL-10: `package_redemption`, the drawdown, expiry,
+// breakage and transfers; `expires_on` is generated HERE because it is a property of the sale and a second
+// derivation in TypeScript would be a second answer about when a customer's money runs out. Deferred to
+// M-TILL-12/13 and stated rather than papered over: a package sale writes NO `payment` row, because
+// `payment.invoice_id` is NOT NULL and this unit issues no invoice — so cash taken for a package is absent
+// from `readDrawerTakings` and the cash-up (M-TILL-11) will show it as an over drawer.
+//
 // 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
 // branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
 // C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
@@ -1844,7 +1904,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // EXIST on disk rather than consecutive integers, so a gap costs nothing and needs no declaration. 62
 // through 66 were one allocation block held across five worktrees and 67 through 70 another across four;
 // 72, 73 and 75 were held by three more; every one of those has landed, and 76 and 77 landed within the
-// hour of each other after that. 78 is the next number nobody holds. 55, 56 and 57 landed out of order
+// hour of each other after that. 78 is this file's; 79 through 82 were held by four units in flight when
+// it was allocated, so the next number nobody holds is 83 unless one of those four turns out to need none. 55, 56 and 57 landed out of order
 // and within an hour of one another, which is the arrangement this note exists for: the number is a
 // high-water mark, not a count, and no gap has been closed to tidy the sequence.
 //
@@ -1861,4 +1922,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 77 as const
+export const SCHEMA_VERSION = 78 as const

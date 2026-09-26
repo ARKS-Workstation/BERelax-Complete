@@ -135,6 +135,23 @@ export const PERMISSIONS = [
   'settings:read',
   'settings:write',
   'settings:write_compliance',
+  /**
+   * Compliance-locked settings that are ACCOUNTING policy rather than customer-safety policy
+   * (M-TILL-09).
+   *
+   * A second permission rather than widening `settings:write_compliance`, because the two lock different
+   * things and the same role must not hold both by accident. `settings:write_compliance` guards
+   * same-gender matching, the promotional window and review auto-send — decisions about what the salon
+   * does to a customer, which stay with the owner alone and whose test asserts exactly that. This one
+   * guards how a figure is recognised in the books: the treatment of an unredeemed package balance at
+   * expiry is a revenue-recognition decision, and the role the system already trusts with `ledger:post`,
+   * `period:lock`, `vat_return:prepare` and `invoice:credit_note` is the accountant. Leaving it under
+   * `settings:write_compliance` would have meant either that the accountant could switch same-gender
+   * matching off, or that the owner had to be fetched to answer a bookkeeping question.
+   *
+   * The manager holds NEITHER. `settings:write` is the operational tier and stops at it.
+   */
+  'settings:write_accounting_policy',
   'audit:read',
   'agent:configure',
   'integration:connect',
@@ -266,6 +283,9 @@ export const ROLE_DEFINITIONS: Readonly<Record<Role, RoleDefinition>> = Object.f
       'ledger:post',
       'period:lock',
       'vat_return:prepare',
+      // Revenue-recognition policy, and nothing else in the compliance tier. See the permission's own
+      // comment: this is NOT `settings:write_compliance`, which stays with the owner alone.
+      'settings:write_accounting_policy',
       'cost:write',
       'invoice:issue',
       'invoice:credit_note',
@@ -428,4 +448,7 @@ export function redactForRole<T extends Record<string, unknown>>(
 }
 
 /** Permissions that may only be changed as an audited action, never silently. */
-export const COMPLIANCE_LOCKED: readonly Permission[] = ['settings:write_compliance'] as const
+export const COMPLIANCE_LOCKED: readonly Permission[] = [
+  'settings:write_compliance',
+  'settings:write_accounting_policy',
+] as const

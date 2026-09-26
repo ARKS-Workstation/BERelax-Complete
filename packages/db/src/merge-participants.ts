@@ -286,6 +286,35 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
+    table: 'package_sale',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    /**
+     * No unique key involves the customer. `package_sale_one_per_entry` is on `journal_entry_id` and the
+     * two indexes that mention `customer_id` are plain, so a re-point cannot be refused and the statement
+     * needs no conflict subquery. A person legitimately buys the same package twice.
+     */
+    conflictKey: null,
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason: null,
+    why:
+      'A prepaid package is money the customer has already handed over and treatments the salon still ' +
+      'owes, so it has to follow the person: a balance left on a tombstone is an entitlement somebody ' +
+      'paid for and can no longer draw on. The `invoice` and `credit_note` allowlist entries deliberately ' +
+      'do NOT apply — those snapshot the customer’s name, phone and TRN onto a filed document and the ' +
+      'FTA reads those columns, so a re-attributed invoice is a different document; a package sale ' +
+      'snapshots no customer identity at all, only the terms. `package_sale` therefore refuses every ' +
+      'UPDATE except one that changes `customer_id` alone (ZG001, and the application role holds ' +
+      '`update (customer_id)` and nothing more), which is exactly the statement this strategy issues. ' +
+      '`package_balance` carries no customer id and hangs off the sale, so it follows without being ' +
+      'named here.',
+    registeredBy: 'M-TILL-09',
+  }),
+  participant({
+    schema: 'public',
     table: 'flow_enrolment',
     column: 'customer_id',
     strategy: 'repoint_update',

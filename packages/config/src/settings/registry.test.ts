@@ -43,10 +43,68 @@ describe('registry integrity — properties over the whole registry, not example
     }
   })
 
-  it('every compliance-locked setting is owner-only', () => {
-    for (const s of SETTINGS) {
-      if (s.tier === 'compliance_locked') expect([...s.editableBy]).toEqual(['owner'])
+  /**
+   * The tier holds two locks, and the rule is an ALLOW-LIST rather than "not the manager".
+   *
+   * This case used to require `['owner']` exactly. M-TILL-09 added
+   * `packages.unredeemed_balance_policy`, which is compliance-locked because forfeiting a balance a
+   * customer paid for writes it off to breakage revenue — a revenue-recognition decision with a VAT
+   * consequence — and which the ACCOUNTANT must be able to change: that role already holds `ledger:post`,
+   * `period:lock` and `vat_return:prepare`, and fetching the owner to answer a bookkeeping question is how
+   * a locked setting comes to be worked around.
+   *
+   * What has NOT been relaxed: every role outside the allow-list is still refused, which the three
+   * negative assertions below state one by one rather than by asserting "not the manager". The first
+   * version of this case asserted only that a manager was absent, and that is satisfied by a list
+   * containing the receptionist.
+   */
+  it('a compliance-locked setting is editable only by the owner or the accountant', () => {
+    const locked = SETTINGS.filter((s) => s.tier === 'compliance_locked')
+    // The control: if the filter matched nothing, every assertion below would pass vacuously.
+    expect(locked.length).toBeGreaterThanOrEqual(5)
+    for (const s of locked) {
+      for (const role of s.editableBy) {
+        expect(['owner', 'accountant'], `${s.key} grants "${role}"`).toContain(role)
+      }
+      expect([...s.editableBy], `${s.key}`).toContain('owner')
+      for (const refused of ['manager', 'receptionist', 'therapist', 'marketer', 'auditor']) {
+        expect([...s.editableBy], `${s.key} must not grant "${refused}"`).not.toContain(refused)
+      }
     }
+  })
+
+  it('exactly one compliance-locked setting is the accountant’s, and it is the package one', () => {
+    const accountants = SETTINGS.filter(
+      (s) => s.tier === 'compliance_locked' && s.editableBy.includes('accountant'),
+    ).map((s) => s.key)
+    // Named, so widening the accountant's reach inside this tier is a deliberate edit to this list and
+    // not a side effect of adding a setting. The customer-safety locks stay with the owner alone.
+    expect(accountants).toEqual(['packages.unredeemed_balance_policy'])
+  })
+
+  it('a manager is refused the package balance policy and the accountant is not', () => {
+    // The acceptance line, at the layer that decides it. `assertRoleMayEdit` is what
+    // `writeSetting` calls before it touches a row, so this is the same refusal the service reports —
+    // and the pair is asserted together, because "the manager is refused" is satisfied by a setting
+    // nobody may edit at all.
+    expect(() => assertRoleMayEdit('packages.unredeemed_balance_policy', 'manager')).toThrow(
+      /compliance_locked/,
+    )
+    expect(() =>
+      assertRoleMayEdit('packages.unredeemed_balance_policy', 'accountant'),
+    ).not.toThrow()
+    expect(() => assertRoleMayEdit('packages.unredeemed_balance_policy', 'owner')).not.toThrow()
+    // And the accountant's reach stops there: the customer-safety locks are still the owner's alone.
+    expect(() => assertRoleMayEdit('booking.same_gender_matching', 'accountant')).toThrow(
+      /compliance_locked/,
+    )
+  })
+
+  it('the transferability default is owner-only even though it is merely operational', () => {
+    // `operational` normally carries OWNER_MANAGER. A movable balance is a fraud path, so this one does
+    // not, and the control beside it is a genuinely operational sibling that DOES.
+    expect(() => assertRoleMayEdit('packages.default_transferable', 'manager')).toThrow(/manager/)
+    expect(() => assertRoleMayEdit('packages.default_validity_months', 'manager')).not.toThrow()
   })
 
   it('every provisional setting names an OPEN-QUESTIONS id', () => {
