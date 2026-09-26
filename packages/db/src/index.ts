@@ -2176,7 +2176,40 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // its private SQLSTATE prefix: `ZI` is 0026's and 0072's, and every other mnemonic letter is taken, so what
 // a private code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
 //
+// 87 is 0087_compliance_gate.sql: the promotional send window cannot be switched off, and the refusal holds
+// for a `psql` session (C-AUTO-04). It adds no table and seeds no row. `messaging.promotional_window` is an
+// `app_setting` row, and before this file the ONLY thing refusing `{"startHour": 0, "endHour": 24}` was
+// `assertPromotionalWindowChange` in `@berelax/messaging` — correct, and not in the path of a seed, an
+// import, a `writeSetting` from a script, or the UPDATE somebody runs at 02:00 to get a campaign out. So
+// `promotional_window_is_a_narrowing()` is ONE predicate called from a trigger and from a CHECK, which is
+// 0080's division of labour verbatim: the trigger is the sentence a human can act on, the CHECK is the layer
+// that still holds when `session_replication_role = 'replica'` has triggers off, which is how a restore
+// runs. It refuses SQL NULL, JSON null, `0`, `false`, `"off"`, a non-integer hour, any widening past
+// 07:00-21:00, and — the subtle one — a window that never opens: `{"startHour": 21, "endHour": 21}` is
+// inside the ceiling by both bounds and permits nothing, which holds every promotional message for ever with
+// nothing saying why, so it is quiet hours switched off by starvation rather than by a setting. `case`
+// rather than `and`, because SQL does not guarantee `and`'s evaluation order and the cast would raise on
+// the very value the predicate exists to refuse politely (0080 found that). NOT strict, because a strict
+// function returns NULL for NULL and a CHECK whose expression is NULL is SATISFIED. The figures 7 and 21
+// are written down here and nowhere else in SQL: the alternative is an `app_setting` row holding the
+// ceiling, which is a switch for the ceiling, and a ceiling that an UPDATE can raise is not a ceiling. They
+// are NOT provisional and no OPEN-QUESTIONS id covers them — 07:00-21:00 is TDRA's restriction, which is
+// why `messaging.promotional_window` deliberately does not appear in the Unconfirmed Assumptions panel.
+// What is provisional is the Ramadan NARROWING (`Y9-ramadan-window`, provisionally 10:00-16:00), held as
+// dated `business_calendar` rows an admin states because Ramadan's dates are announced by an authority and
+// are not a value this build may invent, and the staleness ceiling on a held promotional message
+// (`Y9-queued-staleness`, provisionally 12 hours), which is a constant in `@berelax/core`. `ZX001` is its
+// one private SQLSTATE, and `ZX` was chosen because it is unowned: `ZW001` is currently raised by BOTH 0080
+// and 0081, which is exactly the collision the private-class convention exists to prevent, since a probe
+// asserting `ZW001` cannot tell which statement it bounced off.
+//
+// 83, 84, 85 and 86 are allocations held by units in flight in other worktrees, which is why 0087 follows
+// 0082 on disk. Gate case 90a walks the migrations that EXIST rather than consecutive integers, so the run
+// is 49..82 plus 87 and the four held numbers cost nothing. If any of them turns out to need no migration
+// it becomes a permanent gap like 22, 41, 44, 47, 71 and 74, and is not renumbered: renumbering to close a
+// gap is how two branches come to apply the same number to different SQL.
+//
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 82 as const
+export const SCHEMA_VERSION = 87 as const

@@ -141,6 +141,14 @@ jobs:
       - name: Google token chokepoint
         run: pnpm chokepoint
 
+      # Every outbound message goes through sendMessage(), and the claim needs something that FAILS when a
+      # second path exists. Four rules no type and no import rule can express: a `.send({...})` on a
+      # transport outside the choke point, a gate evaluator with the answer written in
+      # (`hasConsent: () => true`), a second caller of evaluateGate, and the ORDER inside send.ts - the
+      # gate must run before the staging guard, or a refusal is recorded as a divert on staging.
+      - name: Messaging send choke point
+        run: pnpm send-chokepoint
+
       # A tax document prints stored figures and derives none of them, declares only the Arabic weights
       # the PDF actually embeds, and builds right-to-left from the dir attribute rather than from a
       # direction mark. Three rules a review does not reliably catch on a template.

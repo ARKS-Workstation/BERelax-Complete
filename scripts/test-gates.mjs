@@ -30199,6 +30199,292 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 114a-114z. (C-AUTO-04) The messaging compliance gate: one choke point, code not configuration.
+//
+//            The unit's title is its specification, and the claim "nothing sends without passing the gate"
+//            can only be made by something that FAILS when a second send path exists. Reviewing call sites
+//            is not that. `scripts/check-send-chokepoint.mjs` is, in four rules, and 114a to 114d are those
+//            four rules being seen to fire — each asserted BY RULE NAME, because a fixture rejected by some
+//            other rule would leave the one under test free to have stopped matching anything (ADR 0003).
+//
+//            114a is the case the scanner was written for, and it found something on its first run: a
+//            second send path already existed. `createGuardedTransport` in `packages/messaging/src/outbox.ts`
+//            took any `Transport` and returned a `Transport` whose `send` applied the staging guard and
+//            then called the inner transport — so a message through it had no template judgement, no
+//            sender-identity resolution, no consent, no suppression, no frequency cap and no quiet hours.
+//            It was exported from the package barrel, reachable by autocomplete from any feature, and it
+//            was reachable from a shape whose `send` took a bare message with no idempotency key, so a
+//            retry through it would have been a second charge. Nothing in shipped code called it, which is
+//            exactly why it survived for months: a dead bypass raises no failure, and
+//            `messaging-providers-only-inside-a-transport` could not see it because that rule forbids
+//            reaching a PROVIDER and this reached whatever it was handed. It is gone, `outbox.ts` and
+//            `port.ts` carry the argument where the declarations were, and this case is what stops it
+//            coming back.
+//
+//            114b is "code, not configuration" as a check. The failure is not that somebody adds a
+//            setting — it is that somebody writes `hasConsent: () => true` in a runtime, which satisfies
+//            the interface perfectly and which no type refuses. The five runtimes that wire this gate today
+//            all supply evaluators that THROW, because none has a recipient list to prefetch for, and a
+//            throw is a refusal (`blocked_unevaluable`); a permissive constant is not a smaller version of
+//            that, it is the opposite answer.
+//
+//            114d is the one worth reading twice, because the mutation leaves a system that works. Moving
+//            `guardOutbound` in front of `evaluateGate` changes nothing in production — the guard delivers
+//            there — and on staging every refusal becomes a `diverted`. So the one environment where the
+//            compliance path runs daily becomes the one environment that never exercises it, every test
+//            still passes, and the first evidence is a complaint from somebody who opted out.
+//
+//            114e is the scanner's own control, and it is not a formality. Every rule above is a difference
+//            against an allowlist, and a difference against nothing is empty — so a discriminator that
+//            stopped matching would report a clean tree. The scanner COUNTS the sends it was told to
+//            expect, and this case breaks the counting rather than the tree.
+//
+//            114f to 114h are the window. The pure rule is in `@berelax/core` and its unit suite asserts it
+//            to the millisecond; what these three break is the part that would still look right. 114f
+//            deletes the staleness check's precedence over the window, which sends a twelve-hour-old
+//            promotional message the moment the window reopens — advertising yesterday, and spending the
+//            contact's frequency allowance to do it. 114g turns the override intersection into a
+//            replacement, so a dated `business_calendar` row can WIDEN the window rather than only narrow
+//            it, which is quiet hours switched off through the calendar. 114h drives migration 0087's
+//            `promotional_window_is_a_narrowing()` with the registry's own numbers, which is the only thing
+//            that ties the two places 07:00-21:00 is written down.
+//
+//            No case here mutates `packages/db/migrations/0087_compliance_gate.sql`: the database the
+//            suites run against has already had it applied, so an edit to the file changes nothing a
+//            statement can see and a PASS would be a report about a file nothing read. 0087's refusals are
+//            driven as statements in 114h instead, with a control beside them.
+{
+  const CORE_WINDOW = 'packages/core/src/messaging/promotional-window.ts'
+  const SEND = 'packages/messaging/src/send.ts'
+  const OTP_ROUTE = 'apps/web/app/api/v1/otp/route.ts'
+
+  const CORE_WINDOW_SUITE = 'packages/core/src/messaging/promotional-window.test.ts'
+  const WINDOW_SUITE = 'packages/messaging/src/gate/window.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the command that must fail because of it.
+   *
+   * Deliberately NOT named like block 107's helper or block 106's. Those two both defined a `…Mutant`
+   * helper of the same shape, git found the bodies as shared context and INTERLEAVED the two blocks, and
+   * the merge had to be rebuilt from whole sides. This block's subject overlaps C-AUTO-03's, so it is the
+   * one most likely to repeat that.
+   */
+  const withChokeEdit = (path, anchor, replacement, args) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', args),
+    )
+
+  const scan = () => ['send-chokepoint']
+
+  // 114a. A second send path, in a module that legitimately holds a transport. This is the shape
+  //       `createGuardedTransport` had, reintroduced into the place it would actually be written: a worker
+  //       that already imports a transport in order to hand it to the choke point.
+  checkRejectedBy(
+    'send chokepoint: a second send path is rejected',
+    withChokeEdit(
+      'apps/worker/src/run.ts',
+      'async function main(): Promise<void> {',
+      'async function sendDirectly(transport, message) {\n' +
+        '  return await transport.send({ message, senderId: null, idempotencyKey: message.id })\n' +
+        '}\n' +
+        'void sendDirectly\n' +
+        'async function main(): Promise<void> {',
+      scan(),
+    ),
+    'message-send-outside-the-choke-point',
+  )
+
+  // 114b. A gate evaluator with the answer written in. The realistic version: a runtime whose consent
+  //       prefetch is inconvenient, "temporarily" answering true.
+  checkRejectedBy(
+    'send chokepoint: a gate evaluator answering a constant is rejected',
+    withChokeEdit(
+      OTP_ROUTE,
+      '      evaluators: {\n        hasConsent: () => {',
+      '      evaluators: {\n        hasConsent: () => true,\n        unusedConsent: () => {',
+      scan(),
+    ),
+    'gate-evaluator-answers-a-constant',
+  )
+
+  // 114c. A second caller of the gate. It reaches the same answer today, which is the point: two callers
+  //       decide separately what to do with a refusal, a hold and an unevaluable input, and the day they
+  //       disagree is the day a refusal is recorded as a divert.
+  checkRejectedBy(
+    'send chokepoint: a second caller of evaluateGate is rejected',
+    withChokeEdit(
+      'packages/messaging/src/lifecycle.ts',
+      '  const message = outboundMessageFor(request)',
+      '  const message = outboundMessageFor(request)\n' +
+        '  void evaluateGate(deps.send.gate, message, deps.send.clock.now())',
+      scan(),
+    ),
+    'promotional-gate-evaluated-outside-the-choke-point',
+  )
+
+  // 114d. The staging guard moved in front of the gate. See the block header: the mutation leaves a system
+  //       that works in production and stops exercising compliance on staging.
+  checkRejectedBy(
+    'send chokepoint: the staging guard ahead of the gate is rejected',
+    withChokeEdit(
+      SEND,
+      '  const decision = evaluateGate(ctx.gate, message, instant, request.attempt)',
+      '  const early = guardOutbound(\n' +
+        '    { appEnv: ctx.appEnv, outboundAllowlist: ctx.outboundAllowlist },\n' +
+        '    message,\n' +
+        '  )\n' +
+        '  void early\n' +
+        '  const decision = evaluateGate(ctx.gate, message, instant, request.attempt)',
+      scan(),
+    ),
+    'choke-point-runs-the-gate-before-the-staging-guard',
+  )
+
+  // 114e. The scanner's own control. The discriminator is the argument SHAPE — an object literal or the
+  //       message itself — so a choke point that handed its transport a bound method would match nothing,
+  //       and every "nothing matched outside the allowlist" rule would pass over a tree it had not read.
+  //       ADR 0002's green tick on zero modules, one layer down.
+  checkRejectedBy(
+    'send chokepoint: a discriminator that matches nothing is a failure, not a clean tree',
+    withChokeEdit(
+      SEND,
+      '    outcome = await transport.send({',
+      '    const handOver = transport.send.bind(transport)\n    outcome = await handOver({',
+      scan(),
+    ),
+    'did not read what it thinks it read',
+  )
+
+  // 114f. Staleness stops taking precedence over the window. A message held since 23:00 and released at
+  //       11:00 the next day is then INSIDE the window and sends — twelve hours late, about an offer that
+  //       may have finished, having spent the contact's frequency allowance to do it. `Y9-queued-staleness`
+  //       asks for a report to the owner rather than a late send.
+  checkRejectedBy(
+    'compliance gate: staleness checked after the window instead of before it is caught',
+    withChokeEdit(
+      CORE_WINDOW,
+      '  const maxStalenessSeconds = input.maxStalenessSeconds ?? MAX_QUEUED_PROMOTIONAL_STALENESS_SECONDS\n' +
+        '  if (input.queuedSince !== undefined) {',
+      '  const maxStalenessSeconds = input.maxStalenessSeconds ?? MAX_QUEUED_PROMOTIONAL_STALENESS_SECONDS\n' +
+        '  if (input.queuedSince !== undefined && false) {',
+      unit(CORE_WINDOW_SUITE),
+    ),
+    'expires a stale message that is INSIDE the window',
+  )
+
+  // 114g. The override intersection turned into a replacement. A dated `business_calendar` row can then
+  //       WIDEN the window instead of only narrowing it, which is quiet hours switched off through the
+  //       calendar — and the structural layer that was supposed to hold when the explicit refusal is
+  //       removed stops holding.
+  checkRejectedBy(
+    'compliance gate: an override that replaces rather than narrows is caught',
+    withChokeEdit(
+      CORE_WINDOW,
+      '    startHour: Math.max(a.startHour, b.startHour),\n    endHour: Math.min(a.endHour, b.endHour),',
+      '    startHour: b.startHour,\n    endHour: b.endHour,',
+      unit(CORE_WINDOW_SUITE),
+    ),
+    'the intersection alone cannot widen',
+  )
+
+  // 114h. Migration 0087 driven as statements, with the registry's own numbers on one side. This is the
+  //       only thing that ties the two places 07:00-21:00 is written down - the registry default in
+  //       TypeScript and the literals in the CHECK - and a drift between them is a window the admin panel
+  //       and the database disagree about.
+  //
+  //       Four refusals and one acceptance, because a predicate that refused everything would satisfy the
+  //       refusals alone. The widening is the one this exists for; a start equal to its end is the subtle
+  //       one, inside the ceiling by both bounds and permitting nothing, which holds every promotional
+  //       message for ever with nothing saying why.
+  //
+  //       Every probe runs inside begin/rollback, so one that is wrongly ACCEPTED leaves nothing behind -
+  //       and an `insert ... on conflict do update` rather than a bare `update`, because an UPDATE matching
+  //       no row exits ZERO and `checkRejectedBy` would then report "nothing was rejected" about a database
+  //       that simply had not been seeded.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    /**
+     * One write of the setting, inside begin/rollback.
+     *
+     * `VERBOSITY=verbose` is what makes the assertion possible at all, and the first run of this case is
+     * why it is here: psql's DEFAULT verbosity prints the message and NOT the SQLSTATE, so all four probes
+     * bounced off the right trigger and `checkRejectedBy` reported "exited non-zero but did not report
+     * ZX001" about a database that had refused them perfectly. A private SQLSTATE that no probe can read is
+     * a private SQLSTATE that proves nothing (0080's argument for having one at all, one step further on).
+     *
+     * `withTriggersOff` is the second layer. The trigger is BEFORE INSERT so it always wins, which means
+     * the CHECK constraint beside it is never exercised by an ordinary probe - and the CHECK is the layer
+     * that matters most, because it is the one that still holds under `session_replication_role =
+     * 'replica'`, which is how a restore from a dump runs. So the same value is driven twice: once for the
+     * sentence a human reads, and once with triggers off for the layer that holds when nobody is watching.
+     */
+    const windowProbe = (value, withTriggersOff = false) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${withTriggersOff ? "set local session_replication_role = 'replica'; " : ''}` +
+          'insert into app_setting (key, value, tier) values ' +
+          `('messaging.promotional_window', '${value}'::jsonb, 'compliance_locked') ` +
+          'on conflict (key) do update set value = excluded.value; rollback;',
+      ])
+
+    for (const [value, why] of [
+      ['{"startHour":0,"endHour":24}', 'the whole day, which is quiet hours switched off'],
+      ['{"startHour":6,"endHour":21}', 'an hour earlier than TDRA permits'],
+      ['{"startHour":21,"endHour":21}', 'a window that never opens'],
+      ['"off"', 'the string "off"'],
+    ]) {
+      checkRejectedBy(`compliance gate: the database refuses ${why}`, windowProbe(value), 'ZX001')
+    }
+
+    // The CHECK, with the trigger out of the way. A restore runs with triggers off, and a restore that
+    // silently widened the promotional window would be the one route in that nobody is watching.
+    checkRejectedBy(
+      'compliance gate: the CHECK refuses a widened window with triggers off, as a restore runs',
+      windowProbe('{"startHour":0,"endHour":24}', true),
+      'app_setting_promotional_window_cannot_be_widened',
+    )
+
+    // The control, which must PASS. A narrowing is exactly what an owner is allowed to do, and a predicate
+    // that refused it would be refusing the legitimate change while looking strict - which is the version
+    // of this rule somebody deletes.
+    const narrowed = windowProbe('{"startHour":9,"endHour":20}')
+    check(
+      'compliance gate: the database accepts a narrowing of the promotional window',
+      !narrowed.failed,
+      narrowed.output,
+    )
+  }
+
+  // 114z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as eight passing cases.
+  {
+    const clean = run('pnpm', scan())
+    check(
+      'send chokepoint: the unedited repository passes the scanner',
+      !clean.failed,
+      clean.output,
+    )
+
+    for (const suite of [CORE_WINDOW_SUITE, WINDOW_SUITE]) {
+      const green = run('pnpm', unit(suite))
+      check(`compliance gate: ${suite} passes unedited`, !green.failed, green.output)
+    }
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -31043,6 +31329,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm colours',
     'pnpm cms',
     'pnpm chokepoint',
+    'pnpm send-chokepoint',
     'pnpm layout',
     'pnpm jobs',
     'pnpm adr',

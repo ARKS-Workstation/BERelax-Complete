@@ -23,13 +23,17 @@ export interface OutboundMessage {
   readonly locale: 'en' | 'ar'
 }
 
-export type SendOutcome =
-  | { readonly kind: 'sent'; readonly providerMessageId: string }
-  | { readonly kind: 'diverted'; readonly reason: string; readonly outboxRef: string }
-  | { readonly kind: 'rejected'; readonly reason: string }
-
-export interface Transport {
-  readonly channel: Channel
-  /** Never called directly by a feature. Everything goes through the guarded transport. */
-  send(message: OutboundMessage): Promise<SendOutcome>
-}
+/**
+ * `Transport` and `SendOutcome` USED TO BE HERE, and their removal is C-AUTO-04's subject.
+ *
+ * `Transport.send(message)` took a bare message and returned a bare outcome: no sender identity, because
+ * the choke point selects it, and no idempotency key, so a retry through it was a second charge. Its only
+ * implementor was `createGuardedTransport` in `outbox.ts` — a send path that applied the staging guard and
+ * nothing else — and its own comment said `send` was "never called directly by a feature", which is a
+ * convention rather than a rule. Nothing in shipped code implemented or called either type.
+ *
+ * The seam that survives is `ClassRoutedTransport` in `send.ts`, and the difference is the unit's whole
+ * point: its `send` takes a `TransportRequest`, which carries the resolved identity and the idempotency
+ * key, so it is not constructible without the decisions the choke point makes. A shape that CAN be
+ * satisfied without them is a shape somebody eventually satisfies without them.
+ */

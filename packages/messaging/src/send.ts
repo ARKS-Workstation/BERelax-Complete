@@ -7,9 +7,20 @@
  *     `template_not_approved` or `outside_care_window`;
  *  2. resolve `message_class` from the **template**, never from the call site;
  *  3. select the sender identity registered for that (class, channel) pair, or refuse;
- *  4. run the promotional gate (`gate.ts`), which fails closed;
+ *  4. run the promotional gate (`gate/`), which fails closed — and which may answer `queued_for_window`
+ *     for a message that is early, or `stale_outside_window` for one that has been held too long to be
+ *     worth sending; neither reaches a transport;
  *  5. compute encoding, segments and cost, and check the campaign spend cap;
  *  6. apply the staging send guard, then hand the message to the transport and record the provider id.
+ *
+ * That order is not a convention. `scripts/check-send-chokepoint.mjs`'s
+ * `choke-point-runs-the-gate-before-the-staging-guard` rule reads the POSITIONS of `judgeVariant`,
+ * `resolveSenderIdentity`, `evaluateGate`, `guardOutbound` and `transport.send` in this file and fails if
+ * they are not in that sequence — because a behavioural test proves the order for the cases it drives and
+ * this proves it for every case, including the one nobody wrote a test for. The same scanner's
+ * `message-send-outside-the-choke-point` rule is what makes "every outbound message goes through
+ * `sendMessage`" a checkable claim rather than a sentence at the top of a file: it permits a `.send(` on a
+ * transport HERE and in the two transports, and nowhere else in the repository.
  *
  * ## Why there is no `senderId` on `SendRequest`
  *
@@ -45,7 +56,13 @@ import type { AppEnv } from '@berelax/config'
 import { type Clock, type Instant, instantToIso } from '@berelax/core'
 import { AppError, type MessageFailureReason } from '@berelax/shared'
 import { costOf } from './encoding.ts'
-import { evaluateGate, type GateContext, type GateEvaluatorName, type GateRefusal } from './gate.ts'
+import {
+  evaluateGate,
+  type GateAttempt,
+  type GateContext,
+  type GateEvaluatorName,
+  type GateRefusal,
+} from './gate/index.ts'
 import type { InMemoryOutbox } from './outbox.ts'
 import type { Channel, MessageClass, MessageId, OutboundMessage } from './port.ts'
 import { placeholdersIn, renderTemplate, type TemplateValues } from './render.ts'
@@ -185,6 +202,15 @@ export interface SendRequest {
   /** E.164 for sms/whatsapp, an address for email. */
   readonly recipient: string
   /**
+   * What a RELEASE attempt already knows about itself: when this message was first held.
+   *
+   * Absent for a first attempt, and absent rather than defaulted to the current instant, because "held for
+   * zero seconds" and "never held" are different facts and only one of them can go stale. It is safe for a
+   * caller to supply and impossible for a caller to abuse in the direction that matters: a `queuedSince`
+   * in the past can only ever make the gate EXPIRE a message, never send one it would otherwise have held.
+   */
+  readonly attempt?: GateAttempt
+  /**
    * The three fences, and they are not fields.
    *
    * `readonly x?: never` makes any object carrying the property unassignable to this type — not only an
@@ -233,6 +259,21 @@ export type SendResult =
       readonly kind: 'queued'
       readonly reason: 'queued_for_window'
       readonly releaseAtIso: string
+    }
+  /**
+   * Held past the staleness ceiling, so it expires unsent rather than being released late.
+   *
+   * A separate kind from `blocked`, because the two are different pieces of work for whoever reads the
+   * report: a block is about this contact and reads the same tomorrow, an expiry is about this message and
+   * says the offer outlived its window. `Y9-queued-staleness` asks for a report to the owner rather than a
+   * late send, and a report cannot distinguish them if they arrive under one heading.
+   */
+  | {
+      readonly kind: 'expired'
+      readonly reason: 'stale_outside_window'
+      readonly detail: string
+      readonly queuedSinceIso: string
+      readonly maxStalenessSeconds: number
     }
   /** Outside production, and the recipient is not allowlisted. In the local outbox, inspectable. */
   | { readonly kind: 'diverted'; readonly reason: string; readonly outboxRef: string }
@@ -351,7 +392,7 @@ export async function sendMessage(ctx: SendContext, request: SendRequest): Promi
   }
   const senderId: SenderIdentity | null = resolved.kind === 'identity' ? resolved.identity : null
 
-  const decision = evaluateGate(ctx.gate, message, instant)
+  const decision = evaluateGate(ctx.gate, message, instant, request.attempt)
   if (decision.kind === 'refuse' || decision.kind === 'unevaluable') {
     return {
       kind: 'blocked',
@@ -362,6 +403,15 @@ export async function sendMessage(ctx: SendContext, request: SendRequest): Promi
   }
   if (decision.kind === 'queue') {
     return { kind: 'queued', reason: decision.reason, releaseAtIso: decision.releaseAtIso }
+  }
+  if (decision.kind === 'expire') {
+    return {
+      kind: 'expired',
+      reason: decision.reason,
+      detail: decision.detail,
+      queuedSinceIso: decision.queuedSinceIso,
+      maxStalenessSeconds: decision.maxStalenessSeconds,
+    }
   }
 
   const cost = costOf(message.channel, message.body)

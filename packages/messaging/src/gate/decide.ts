@@ -3,12 +3,17 @@
  *
  * ## Why every check here is a function and not a toggle
  *
- * Consent, suppression, the weekly frequency cap and the 07:00–21:00 Asia/Dubai window are the four
+ * Consent, suppression, the global frequency cap and the 07:00–21:00 Asia/Dubai window are the four
  * things TDRA can suspend a sender ID over, and the practical sanction is suspension rather than a
  * fine (docs/04 §5). A settings page that can switch any of them off is a page somebody uses at 2am
- * to get a campaign out. So the rules live in this module as code; what is configurable is *bounded*
- * — the window may be narrowed inside 07:00–21:00 by the owner and audited, and nothing more. See
- * `assertPromotionalWindowChange` below and ADR 0016.
+ * to get a campaign out. So the rules live in this module and in `@berelax/core` as code; what is
+ * configurable is *bounded* — the window may be narrowed inside 07:00–21:00 by the owner and audited,
+ * and nothing more. See `./window.ts` and ADR 0016.
+ *
+ * `scripts/check-send-chokepoint.mjs` is the half of that claim a type cannot make. Its
+ * `gate-evaluator-answers-a-constant` rule refuses `hasConsent: () => true` in any shipped module, which
+ * is what a toggle actually looks like once somebody has written one: not a setting, a stub. The five
+ * runtimes that wire this gate today all supply evaluators that THROW, and a throw is a refusal.
  *
  * ## Why an evaluator that throws blocks the send
  *
@@ -30,117 +35,20 @@
  * not stop a booking confirmation or an OTP. A marketing problem that becomes an operational outage is
  * the failure ADR 0016 exists to remove.
  */
-import { assertRoleMayEdit, getDefinition, validateSetting } from '@berelax/config'
 import {
   ASIA_DUBAI,
-  fromLocal,
   type Instant,
   instantToIso,
-  type LocalDate,
   type LocalDateTime,
-  localDate,
-  localTime,
-  minutesSinceMidnight,
   type TimeZone,
   toLocal,
 } from '@berelax/core'
-import { AppError } from '@berelax/shared'
-import type { OutboundMessage } from './port.ts'
-
-/** Hours of the day, in the business timezone, that promotional traffic may leave in. */
-export interface PromotionalWindow {
-  /** Inclusive. */
-  readonly startHour: number
-  /** Exclusive, so 21 means "nothing after 20:59". */
-  readonly endHour: number
-}
-
-export const PROMOTIONAL_WINDOW_SETTING_KEY = 'messaging.promotional_window'
-
-function isWindowShape(value: unknown): value is PromotionalWindow {
-  if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Partial<Record<keyof PromotionalWindow, unknown>>
-  return typeof candidate.startHour === 'number' && typeof candidate.endHour === 'number'
-}
-
-/**
- * Reads a proposed window, rejecting anything that is not one.
- *
- * `null`, `false` and `'off'` all arrive here from the same intention — switching quiet hours off —
- * and all three are refused by shape before the bounded ranges in the settings registry are even
- * consulted.
- */
-export function asPromotionalWindow(value: unknown): PromotionalWindow {
-  if (!isWindowShape(value)) {
-    throw new AppError(
-      'validation',
-      'The promotional send window must be an object with startHour and endHour. It cannot be ' +
-        'switched off, set to null or set to "off": outside 07:00-21:00 Asia/Dubai a promotional ' +
-        'SMS is a TDRA breach whose practical sanction is sender-ID suspension.',
-      { userFacing: true, details: { key: PROMOTIONAL_WINDOW_SETTING_KEY, value } },
-    )
-  }
-  // The registry owns the bounded ranges, so the hours cannot drift from what the admin panel
-  // accepts.
-  validateSetting(PROMOTIONAL_WINDOW_SETTING_KEY, value)
-  return { startHour: value.startHour, endHour: value.endHour }
-}
-
-/**
- * The window as TDRA restricts it, read from the settings registry rather than copied.
- *
- * Copying `07:00-21:00` into this module would let the gate and the admin panel disagree, and the
- * symptom of that disagreement is a message sent at 21:30 that every screen says was compliant.
- */
-export const TDRA_PROMOTIONAL_WINDOW: PromotionalWindow = asPromotionalWindow(
-  getDefinition(PROMOTIONAL_WINDOW_SETTING_KEY).defaultValue,
-)
-
-/**
- * Validates a change to the window, and who is making it.
- *
- * Narrowing is accepted: an owner who wants promotional traffic confined to 09:00–20:00 is being
- * stricter than the regulator, which is always allowed. Widening is refused, and so is a window with
- * no hours in it — both are how "disable quiet hours" is actually spelled in a change request.
- *
- * The role check comes first because the setting is compliance-locked: a manager cannot touch it at
- * all, and finding that out only after the value validated would let the admin panel show a
- * validation error where the honest answer is "not you".
- */
-export function assertPromotionalWindowChange(args: {
-  readonly proposed: unknown
-  readonly role: string
-}): PromotionalWindow {
-  assertRoleMayEdit(PROMOTIONAL_WINDOW_SETTING_KEY, args.role)
-  const proposed = asPromotionalWindow(args.proposed)
-
-  if (proposed.startHour >= proposed.endHour) {
-    throw new AppError(
-      'validation',
-      `A promotional window of ${hourLabel(proposed.startHour)}-${hourLabel(proposed.endHour)} ` +
-        'never opens. That is not a narrowing of the window, it is a different rule with no hours ' +
-        'in it; disable the campaign instead.',
-      { userFacing: true, details: { proposed } },
-    )
-  }
-
-  const ceiling = TDRA_PROMOTIONAL_WINDOW
-  if (proposed.startHour < ceiling.startHour || proposed.endHour > ceiling.endHour) {
-    throw new AppError(
-      'forbidden',
-      `The promotional window may only be narrowed inside ` +
-        `${hourLabel(ceiling.startHour)}-${hourLabel(ceiling.endHour)} Asia/Dubai, never widened ` +
-        `to ${hourLabel(proposed.startHour)}-${hourLabel(proposed.endHour)}. Widening it to the ` +
-        'full day is how quiet hours get disabled, and quiet hours a manager can disable are not ' +
-        'quiet hours.',
-      { userFacing: true, details: { proposed, ceiling } },
-    )
-  }
-
-  return proposed
-}
-
-const hourLabel = (hour: number): string => `${String(hour).padStart(2, '0')}:00`
+import type { OutboundMessage } from '../port.ts'
+import {
+  type DatedPromotionalOverride,
+  decideSendWindow,
+  type PromotionalWindow,
+} from './window.ts'
 
 // --- the gate ----------------------------------------------------------------------------------
 
@@ -168,6 +76,22 @@ export type GateDecision =
       readonly reason: 'queued_for_window'
       readonly releaseAtIso: string
     }
+  /**
+   * Held past the staleness ceiling. Expires unsent — never sent late, never silently discarded.
+   *
+   * A separate kind from `refuse` because the two answer different questions and a caller acts on them
+   * differently: a refusal is about this contact and is the same answer tomorrow, an expiry is about this
+   * message and says the offer outlived its window. Folding it into `refuse` would file "we held it too
+   * long" under the same heading as "they opted out", and the report the owner is owed (`Y9-queued-staleness`)
+   * would be unable to tell them apart.
+   */
+  | {
+      readonly kind: 'expire'
+      readonly reason: 'stale_outside_window'
+      readonly detail: string
+      readonly queuedSinceIso: string
+      readonly maxStalenessSeconds: number
+    }
 
 export interface GateEvaluators {
   /** True when an affirmative marketing consent record exists for this recipient and channel. */
@@ -180,9 +104,9 @@ export interface GateEvaluators {
    * Wall-clock reader for the quiet-hours rule, defaulting to `toLocal`.
    *
    * Overridable only so the unevaluable path is reachable from a test — there is deliberately no
-   * setting behind it, and the window itself is the code rule above. A clock that cannot answer is
-   * the third way quiet hours become unevaluable, alongside an unreachable consent store and an
-   * unreachable suppression list.
+   * setting behind it, and the window itself is the code rule in `./window.ts`. A clock that cannot
+   * answer is the third way quiet hours become unevaluable, alongside an unreachable consent store and
+   * an unreachable suppression list.
    */
   readonly localTimeAt?: (instant: Instant, zone: TimeZone) => LocalDateTime
 }
@@ -196,6 +120,27 @@ export interface GateContext {
   readonly promotionalWindow: PromotionalWindow
   readonly evaluators: GateEvaluators
   readonly zone?: TimeZone
+  /**
+   * Dated narrowings of the window, as `business_calendar` holds them (migration 0003,
+   * `kind = 'ramadan_hours'`).
+   *
+   * Supplied rather than read, and empty by default, because no Ramadan date appears anywhere in this
+   * build: the dates are announced by an authority and are a fact about the world, not a value a unit may
+   * invent (brief rule 15, `Y9-ramadan-window`). An override may only NARROW, and `@berelax/core` refuses
+   * one that would widen as well as intersecting it so it structurally cannot.
+   */
+  readonly windowOverrides?: readonly DatedPromotionalOverride[]
+}
+
+/**
+ * What this attempt already knows about itself. Absent for a first attempt.
+ *
+ * Only `queuedSince` today, and an object rather than a bare instant so the release path can grow a
+ * second fact — the campaign, the flow run — without changing `evaluateGate`'s arity again.
+ */
+export interface GateAttempt {
+  /** When this message was first held for the window. Its age is what the staleness ceiling measures. */
+  readonly queuedSince: Instant
 }
 
 type Evaluated =
@@ -233,34 +178,6 @@ const describe = (error: unknown): string =>
 
 const ALLOW: GateDecision = { kind: 'allow' }
 
-/** True when the instant's wall-clock time in the business zone is inside the window. */
-export function withinPromotionalWindow(local: LocalDateTime, window: PromotionalWindow): boolean {
-  const minutes = minutesSinceMidnight(local.time)
-  return minutes >= window.startHour * 60 && minutes < window.endHour * 60
-}
-
-/**
- * The next instant the window opens.
- *
- * Trading runs 11:00–02:00, so the interesting case is 01:00: inside trading hours, outside the
- * promotional window, and the next opening is 07:00 the *same* calendar day rather than the next.
- */
-export function nextPromotionalWindowOpen(
-  local: LocalDateTime,
-  window: PromotionalWindow,
-  zone: TimeZone = ASIA_DUBAI,
-): Instant {
-  const openAt = localTime(hourLabel(window.startHour))
-  const alreadyOpenedToday = minutesSinceMidnight(local.time) >= window.startHour * 60
-  return fromLocal(alreadyOpenedToday ? nextDay(local.date) : local.date, openAt, zone)
-}
-
-function nextDay(date: LocalDate): LocalDate {
-  const next = new Date(`${date}T00:00:00Z`)
-  next.setUTCDate(next.getUTCDate() + 1)
-  return localDate(next.toISOString().slice(0, 10))
-}
-
 /**
  * The gate. Order matters and is asserted:
  *
@@ -268,12 +185,13 @@ function nextDay(date: LocalDate): LocalDate {
  * 2. the marketing kill switch, before any store is read, so a stopped campaign reads nothing;
  * 3. consent, suppression, frequency cap — each failing closed;
  * 4. the window, which queues rather than refuses, because a promotional message at 01:00 is not
- *    wrong, it is early.
+ *    wrong, it is early — or expires it, if it has been held too long to be worth sending.
  */
 export function evaluateGate(
   ctx: GateContext,
   message: OutboundMessage,
   instant: Instant,
+  attempt?: GateAttempt,
 ): GateDecision {
   if (message.messageClass === 'transactional') return ALLOW
 
@@ -331,12 +249,48 @@ export function evaluateGate(
     return unevaluable('quiet_hours', `The quiet-hours clock threw: ${describe(error)}`)
   }
 
-  if (withinPromotionalWindow(local, ctx.promotionalWindow)) return ALLOW
+  // The window rule itself is pure and lives in `@berelax/core`. Reaching it through `decideSendWindow`
+  // rather than re-deciding here is what makes the claim "there is one quiet-hours rule" true of the code
+  // rather than of a comment — the scheduler and the interpreter read the same function.
+  //
+  // It can throw, and the throw is not a bug: a dated override that would WIDEN the window, or a set of
+  // overrides under which the window never opens, are both refused by name there. Either is a
+  // configuration fault the send must not proceed through, so it lands on the quiet-hours evaluator
+  // exactly as an unreadable clock does.
+  let decision: ReturnType<typeof decideSendWindow>
+  try {
+    decision = decideSendWindow({
+      messageClass: message.messageClass,
+      at: instant,
+      local,
+      zone,
+      window: ctx.promotionalWindow,
+      overrides: ctx.windowOverrides,
+      queuedSince: attempt?.queuedSince,
+    })
+  } catch (error) {
+    return unevaluable(
+      'quiet_hours',
+      `The promotional window could not be resolved: ${describe(error)}`,
+    )
+  }
+
+  if (decision.kind === 'open' || decision.kind === 'not_applicable') return ALLOW
+
+  if (decision.kind === 'expire') {
+    return {
+      kind: 'expire',
+      reason: decision.reason,
+      detail: decision.detail,
+      queuedSinceIso: instantToIso(decision.queuedSince),
+      maxStalenessSeconds: decision.maxStalenessSeconds,
+    }
+  }
 
   return {
     kind: 'queue',
-    reason: 'queued_for_window',
-    releaseAtIso: instantToIso(nextPromotionalWindowOpen(local, ctx.promotionalWindow, zone)),
+    reason: decision.reason,
+    releaseAtIso: instantToIso(decision.releaseAt),
   }
 }
 
