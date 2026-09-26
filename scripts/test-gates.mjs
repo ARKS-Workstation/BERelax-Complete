@@ -28042,6 +28042,703 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 105a-105z. (M-TILL-09) Versioned package templates and the package sale: the rules the DATABASE
+//            refuses, the posting that must move nothing on revenue, the allocation that has to sum to the
+//            price, and the edits that must make this unit's own suites go red.
+//
+// Three parts, because the unit's claims are of three kinds.
+//
+// The probes are known-bad fixtures against real PostgreSQL. Almost everything `0078_package.sql` adds is a
+// DATABASE rule — six per-row immutability triggers, one per-row archived-service trigger, four DEFERRED
+// constraint triggers, a generated expiry column, two narrowed column grants — and a constraint is only a
+// gate once something has been seen to bounce off it (ADR 0003). A case that proved only that a TypeScript
+// guard refuses would leave the statement `psql` issues untested, and that statement is what the unit is
+// about: a version only `savePackageTemplateVersion` treats as immutable is a version a migration can edit.
+//
+// `VERBOSITY=verbose` so psql prints the SQLSTATE as well as the message, and every probe runs inside
+// `begin; … ; set constraints all immediate; rollback;`. The `set constraints` is not decoration: ZG002,
+// ZG004, ZG005 and ZG006 are DEFERRED and would otherwise fire at a COMMIT that never comes (block 98's
+// measurement). The rollback is also what lets a probe ARCHIVE a seeded service — permanently archiving
+// one would break `business-seed.itest.ts` (8 services) and every availability suite.
+//
+// **Trigger ORDER matters to these probes and it is why several of them insert a correct balance.** Every
+// DEFERRED trigger on `package_sale` fires at the same COMMIT, and PostgreSQL fires triggers on one event
+// in alphabetical order by NAME — so `package_balance_shares_sum_to_the_price` (ZG006) answers first for a
+// sale with no balances. A probe about the VAT line that left the balances out would report ZG006 while
+// claiming to be about ZG005, which is this session's dominant defect class: a check whose stated claim is
+// not what it measures. Two of this unit's own itest cases had exactly that defect and were corrected.
+//
+// The second part breaks `packages/core/src/money/package-terms.ts`,
+// `packages/db/src/services/sell-package.ts`, `packages/db/src/settings/package.ts`,
+// `packages/fixtures/src/package.ts`, `packages/config/src/settings/registry.ts` and
+// `packages/core/src/access/permissions.ts`, and watches the suites that cover them fail. The third is the
+// control that every suite and every probe passes unedited.
+//
+// Every source case edits a shipped file and restores it in a `finally`, and every anchor goes through
+// `replaceOnce` (brief rule 20).
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  /** A year no suite and no other gate posts into: 2087/2089 M-TILL-11, 2088 journal, 2091 period-close,
+   *  2093 gate 103, 2094 gate 98, 2092 this unit's itest, 2095/2096 two fixtures suites, 2097-2099 three. */
+  const YEAR = 2086
+  const DAY = `${YEAR}-02-17`
+  const NEXT = `${YEAR}-02-18`
+  const CASH = '1010'
+  const DEFERRED = '2050'
+  const TREATMENT_REVENUE = '4010'
+  const DISCOUNTS = '4095'
+  const OUTPUT_VAT = '2030'
+  const KEY = 'gate_pkg_105'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /** The trading calendar rows the foreign key needs, 11:00 to 02:00 so they cross midnight (0011). */
+  const calendar = [DAY, NEXT]
+    .map(
+      (day) =>
+        'insert into business_day (trading_date, opens_at, closes_at, source) values (' +
+        `'${day}'::date, ('${day}'::date + time '11:00') at time zone 'Asia/Dubai', ` +
+        `('${day}'::date + interval '1 day' + time '02:00') at time zone 'Asia/Dubai', 'weekly') ` +
+        'on conflict (trading_date) do nothing',
+    )
+    .join('; ')
+
+  /** The nth live priced variant, by descending price. A subquery, so no id is written into this file. */
+  const variant = (n) =>
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    `where s.archived_at is null order by v.gross_price_fils desc, v.id limit 1 offset ${n})`
+  const buyer = '(select id from customer order by id limit 1)'
+
+  /** No lock over this year, for gate 103's reason: a leftover lock would answer before any rule here. */
+  const NO_LOCKS = `delete from period_lock where starts_on >= '${YEAR}-01-01' and ends_on <= '${YEAR}-12-31'`
+  const SETUP = `${NO_LOCKS}; ${calendar}`
+
+  const templateId = `(select id from package_template where template_key = '${KEY}')`
+  const versionId = (n = 1) =>
+    `(select id from package_template_version where template_id = ${templateId} and version = ${n})`
+  const saleId = (entry) => `(select id from package_sale where journal_entry_id = '${entry}')`
+
+  const template = `insert into package_template (template_key) values ('${KEY}')`
+
+  /** A version with the provisional terms, priced at `price`. */
+  const version = (n, price, options = {}) =>
+    'insert into package_template_version (template_id, version, internal_name, ' +
+    'public_display_name, price_fils, validity_months, transferable, unredeemed_balance_policy, ' +
+    `is_provisional, provisional_note, open_question_id) values (${templateId}, ${n}, ` +
+    `'Gate course', 'Gate course', ${price}, ${options.months ?? 6}, ` +
+    `${options.transferable ?? false}, '${options.policy ?? 'retained'}', ` +
+    `${options.provisional ?? true}, 'gate probe', ` +
+    `${options.question === null ? 'null' : `'${options.question ?? 'Y9-package-policy'}'`})`
+
+  const line = (n, lineNo, sessions, variantOffset = 0) =>
+    'insert into package_template_line (template_version_id, line_no, service_variant_id, ' +
+    `session_count) values (${versionId(n)}, ${lineNo}, ${variant(variantOffset)}, ${sessions})`
+
+  /**
+   * The deferred-revenue entry: Dr cash, Cr 2050, at `gross`.
+   *
+   * `extra` appends further lines, which is how the revenue and VAT probes are built — the whole point of
+   * ZG005 is what happens when an entry carries a line it should not.
+   */
+  const entry = (id, day, gross, extra = '') =>
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${id}', '${day}'::date, 'Gate package sale', 'package_sale'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+    `('${id}', 1, '${CASH}', ${gross}, 0), ('${id}', 2, '${DEFERRED}', 0, ${gross})${extra}`
+
+  const sale = (id, price, options = {}) =>
+    'insert into package_sale (customer_id, template_version_id, trading_date, price_fils, ' +
+    'session_count, validity_months, transferable, unredeemed_balance_policy, journal_entry_id) ' +
+    `values (${buyer}, ${versionId(options.version ?? 1)}, '${options.day ?? DAY}'::date, ` +
+    `${price}, ${options.sessions ?? 5}, ${options.months ?? 6}, ${options.transferable ?? false}, ` +
+    `'${options.policy ?? 'retained'}', '${id}')`
+
+  const balance = (id, lineNo, sessions, value, variantOffset = 0) =>
+    'insert into package_balance (package_sale_id, line_no, service_variant_id, sessions_total, ' +
+    `value_fils) values (${saleId(id)}, ${lineNo}, ${variant(variantOffset)}, ${sessions}, ${value})`
+
+  /** A template, version 1 with one line of 5 sessions at 100,000 fils. The base of most probes. */
+  const ONE_LINE = `${template}; ${version(1, 100_000)}; ${line(1, 1, 5)}`
+  /** That version SOLD, correctly: entry, sale, balance. */
+  const SOLD = (id) =>
+    `${entry(id, DAY, 100_000)}; ${sale(id, 100_000)}; ${balance(id, 1, 5, 100_000)}`
+
+  /**
+   * The same variant, chosen WITHOUT the archived filter.
+   *
+   * `variant()` filters on `s.archived_at is null`, and the archived-service probes archive a service
+   * inside the same transaction — so a line written with `variant(0)` after the archive resolves to a
+   * DIFFERENT, still-live variant and the probe reports that nothing was rejected. It did exactly that on
+   * the first run: two cases exited zero while claiming to prove ZG003, which is the defect of a fixture
+   * that no longer contains the thing it is about.
+   */
+  const anyVariant = (n) =>
+    '(select v.id from service_variant v order by v.gross_price_fils desc, v.id limit 1 ' +
+    `offset ${n})`
+
+  const archiveOne =
+    'update service set published_at = null, archived_at = now() where id = ' +
+    `(select service_id from service_variant where id = ${anyVariant(0)})`
+
+  /** A line on the variant whose service `archiveOne` archives, written so the archive cannot move it. */
+  const archivedLine =
+    'insert into package_template_line (template_version_id, line_no, service_variant_id, ' +
+    `session_count) values (${versionId(1)}, 1, ${anyVariant(0)}, 5)`
+
+  const probes = [
+    {
+      // THE artefact of the unit. A version somebody has sold against is evidence about an agreement that
+      // happened, and an UPDATE of it restates a customer's terms after the fact.
+      name: 'package gate rejects an UPDATE of a template version',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; update package_template_version set price_fils = 1 where id = ${versionId()}`,
+    },
+    {
+      name: 'package gate rejects a DELETE of a template version',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; delete from package_template_version where id = ${versionId()}`,
+    },
+    {
+      // The line matters as much as the version: an edit of the session count is an edit of the
+      // entitlement, and the price would still say what it said.
+      name: 'package gate rejects an UPDATE of a template line',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; update package_template_line set session_count = 99 where template_version_id = ${versionId()}`,
+    },
+    {
+      name: 'package gate rejects a DELETE of a template line',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; delete from package_template_line where template_version_id = ${versionId()}`,
+    },
+    {
+      name: 'package gate rejects an UPDATE of a sale',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-IMM')}; update package_sale set price_fils = 1 where id = ${saleId('GATE-PKG-IMM')}`,
+    },
+    {
+      name: 'package gate rejects a DELETE of a sale',
+      rule: 'ZG001',
+      sql: `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-IMM2')}; delete from package_sale where id = ${saleId('GATE-PKG-IMM2')}`,
+    },
+    {
+      // The acceptance line. The availability solver will not offer an archived treatment
+      // (`service_bookable_idx` is partial on published-and-not-archived), so the money would buy an
+      // appointment the front desk can never make.
+      name: 'package gate rejects a template line on an ARCHIVED catalogue service',
+      rule: 'ZG003',
+      sql: `${SETUP}; ${archiveOne}; ${template}; ${version(1, 100_000)}; ${archivedLine}`,
+    },
+    {
+      // The refusal names what a customer ends up with, and NOT the phrase the service layer uses. When
+      // the two layers share wording, deleting the service check leaves its suite green with the database
+      // answering instead — M-TILL-11 measured that, and the gate reported a pass over a check that had
+      // gone.
+      name: 'package gate says what an archived line would sell, in words the service does not use',
+      rule: 'availability solver will never offer',
+      sql: `${SETUP}; ${archiveOne}; ${template}; ${version(1, 100_000)}; ${archivedLine}`,
+    },
+    {
+      name: 'package gate rejects a version with no lines, at COMMIT',
+      rule: 'ZG004',
+      sql: `${SETUP}; ${template}; ${version(1, 100_000)}`,
+    },
+    {
+      // The snapshot is a copy the database refuses to let disagree, which is a different thing from a
+      // copy nobody checks. The balances are correct here on purpose: ZG006 sorts first alphabetically
+      // and would otherwise answer for a probe about ZG002.
+      name: 'package gate rejects a sale whose snapshotted VALIDITY disagrees with its version',
+      rule: 'ZG002',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${entry('GATE-PKG-ZG002', DAY, 100_000)}; ` +
+        `${sale('GATE-PKG-ZG002', 100_000, { months: 12 })}; ${balance('GATE-PKG-ZG002', 1, 5, 100_000)}`,
+    },
+    {
+      name: 'package gate rejects a sale whose snapshotted SESSION COUNT disagrees with its version',
+      rule: 'ZG002',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${entry('GATE-PKG-ZG002B', DAY, 100_000)}; ` +
+        `${sale('GATE-PKG-ZG002B', 100_000, { sessions: 9 })}; ` +
+        `${balance('GATE-PKG-ZG002B', 1, 9, 100_000)}`,
+    },
+    {
+      // THE rule of the unit. 4010 credited 7,000 and the contra 4095 debited 7,000: the NET revenue
+      // movement is ZERO and revenue HAS been recognised on a package sale. ZG005 measures debits PLUS
+      // credits precisely so this is caught, and the figure it reports is the total of both sides.
+      name: 'package gate rejects revenue smuggled through a self-cancelling contra pair',
+      rule: 'moves 14000 fils across revenue accounts',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ` +
+        `${entry(
+          'GATE-PKG-ZG005',
+          DAY,
+          100_000,
+          `, ('GATE-PKG-ZG005', 3, '${TREATMENT_REVENUE}', 0, 7000), ` +
+            `('GATE-PKG-ZG005', 4, '${DISCOUNTS}', 7000, 0)`,
+        )}; ${sale('GATE-PKG-ZG005', 100_000)}; ${balance('GATE-PKG-ZG005', 1, 5, 100_000)}`,
+    },
+    {
+      // Output VAT charged at the sale — the posting the OTHER answer to Y11-vat-package would make. 2050
+      // is credited 95,000 against a price of 100,000, so ZG005 finds the liability first and names it;
+      // asserting on the VAT sentence here would be asserting on a branch this input does not reach.
+      name: 'package gate rejects output VAT charged on a prepayment',
+      rule: 'credits 2050 Deferred revenue by 95000',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ` +
+        'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+        `('GATE-PKG-VAT', '${DAY}'::date, 'Gate VAT on prepayment', 'package_sale'); ` +
+        'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+        `('GATE-PKG-VAT', 1, '${CASH}', 100000, 0), ('GATE-PKG-VAT', 2, '${DEFERRED}', 0, 95000), ` +
+        `('GATE-PKG-VAT', 3, '${OUTPUT_VAT}', 0, 5000); ` +
+        `${sale('GATE-PKG-VAT', 100_000)}; ${balance('GATE-PKG-VAT', 1, 5, 100_000)}`,
+    },
+    {
+      // A sale filed under another day's takings lands in another VAT period, and at a period boundary in
+      // one that has already been filed.
+      name: 'package gate rejects an entry dated on another business day than its sale',
+      rule: 'and the sale is on business day',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${entry('GATE-PKG-DAY', NEXT, 100_000)}; ` +
+        `${sale('GATE-PKG-DAY', 100_000)}; ${balance('GATE-PKG-DAY', 1, 5, 100_000)}`,
+    },
+    {
+      // One fils short. That is the whole of the acceptance line "exact to the fils": a share that rounds
+      // independently loses the fils that makes the liability disagree with the cash taken.
+      name: 'package gate rejects balances that are ONE FILS short of the price',
+      rule: 'ZG006',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${entry('GATE-PKG-ZG006', DAY, 100_000)}; ` +
+        `${sale('GATE-PKG-ZG006', 100_000)}; ${balance('GATE-PKG-ZG006', 1, 5, 99_999)}`,
+    },
+    {
+      // A two-line version sold with one balance. Every line of a package somebody paid for has to be an
+      // entitlement they can draw on, and a missing one is money with nothing behind it.
+      name: 'package gate rejects a sale that opens fewer balances than the version has lines',
+      rule: 'balance(s) and the version it names has 2 line(s)',
+      sql:
+        `${SETUP}; ${template}; ${version(1, 100_000)}; ${line(1, 1, 5)}; ${line(1, 2, 3, 1)}; ` +
+        `${entry('GATE-PKG-MISS', DAY, 100_000)}; ${sale('GATE-PKG-MISS', 100_000, { sessions: 8 })}; ` +
+        `${balance('GATE-PKG-MISS', 1, 8, 100_000)}`,
+    },
+    {
+      // The right NUMBER of balances, one of them numbered for a line the version does not have. A count
+      // alone accepts it, `package_balance_one_row_per_line` only forbids a repeat, and no foreign key can
+      // reach it — so the SET of line numbers is compared, and this is the probe that says so.
+      name: 'package gate rejects a balance numbered for a line the version does not have',
+      rule: 'numbered for a line the version it names does not have',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${entry('GATE-PKG-LINENO', DAY, 100_000)}; ` +
+        `${sale('GATE-PKG-LINENO', 100_000)}; ${balance('GATE-PKG-LINENO', 3, 5, 100_000)}`,
+    },
+    {
+      // M-TILL-10's ceiling, declared with the column here because a ceiling added later is a ceiling that
+      // was absent while rows were being written.
+      name: 'package gate rejects a balance redeemed past what was sold',
+      rule: 'package_balance_cannot_overdraw',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-OVER')}; ` +
+        `update package_balance set sessions_redeemed = 6 where package_sale_id = ${saleId('GATE-PKG-OVER')}`,
+    },
+    {
+      name: 'package gate rejects a balance releasing more value than it holds',
+      rule: 'package_balance_cannot_overrelease',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-REL')}; ` +
+        `update package_balance set released_fils = 100001 where package_sale_id = ${saleId('GATE-PKG-REL')}`,
+    },
+    {
+      // Two lines for one variant is one entitlement expressed twice, and it would give a redemption two
+      // balances to draw down in either order — so "which of my four massages did that use" would have two
+      // answers.
+      name: 'package gate rejects two template lines for one catalogue variant',
+      rule: 'package_template_line_one_row_per_variant',
+      sql: `${SETUP}; ${template}; ${version(1, 100_000)}; ${line(1, 1, 5)}; ${line(1, 2, 3)}`,
+    },
+    {
+      // The race, which is what makes `max(version) + 1` safe: two concurrent saves both read the same
+      // number and the loser is refused by the constraint rather than by a check in the service.
+      name: 'package gate rejects a second version with the same number',
+      rule: 'package_template_version_one_row_per_number',
+      sql: `${SETUP}; ${ONE_LINE}; ${version(1, 200_000)}`,
+    },
+    {
+      // A provisional row that names no question is an assumption nobody can look up. The provenance trio
+      // is worth nothing without the third column.
+      name: 'package gate rejects a provisional version that names no open question',
+      rule: 'package_template_version_provisional_names_a_question',
+      sql: `${SETUP}; ${template}; ${version(1, 100_000, { question: null })}`,
+    },
+    {
+      name: 'package gate rejects two sales against one journal entry',
+      rule: 'package_sale_one_per_entry',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-TWICE')}; ` + `${sale('GATE-PKG-TWICE', 100_000)}`,
+    },
+    {
+      // The half of `package_sale`'s immutability a customer MERGE depends on, from the refusing side.
+      // `berelax_app` holds `update (customer_id)` and nothing more, so the grant stops a terms edit
+      // before the trigger is reached — and the accepted control below issues the re-point the merge
+      // executor issues, because "the terms are immutable" alone is satisfied by a table nothing may
+      // update at all.
+      name: 'package gate refuses the application role an UPDATE of a sale PRICE',
+      rule: 'permission denied for table package_sale',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-APPUPD')}; set local role berelax_app; ` +
+        `update package_sale set price_fils = 1 where id = ${saleId('GATE-PKG-APPUPD')}`,
+    },
+    {
+      // And from the OWNER's side, where the trigger is the only thing left. The message is the contract
+      // sentence, which no other rule in this file uses.
+      name: 'package gate refuses a terms edit even for the owner, naming the contract',
+      rule: 'a package sale is a contract and its terms are immutable',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-OWNUPD')}; ` +
+        `update package_sale set validity_months = 12 where id = ${saleId('GATE-PKG-OWNUPD')}`,
+    },
+    {
+      // The grants. The door is held twice, 0072's and 0076's arrangement: the triggers refuse for every
+      // role, and the grant refuses before a trigger is reached.
+      name: 'package gate refuses the application role an UPDATE of a template version',
+      rule: 'permission denied for table package_template_version',
+      sql:
+        `${SETUP}; ${ONE_LINE}; set local role berelax_app; ` +
+        `update package_template_version set price_fils = 1 where id = ${versionId()}`,
+    },
+    {
+      // The column grant on `package_balance` is narrowed to the two columns M-TILL-10 moves. A grant
+      // nobody has needed yet is a grant nobody has argued for.
+      name: 'package gate refuses the application role an UPDATE of a balance VALUE',
+      rule: 'permission denied for table package_balance',
+      sql:
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-GRANT')}; set local role berelax_app; ` +
+        `update package_balance set value_fils = 1 where package_sale_id = ${saleId('GATE-PKG-GRANT')}`,
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(probe.name, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The control for every probe above, in one psql run, because an ACCEPTED probe is a single exit code.
+  // Without it each case would also pass for a `package_sale` nothing could be inserted into at all and
+  // for a trigger that refused every version. Six accepted facts in order: a template registers and
+  // version 1 with two lines is saved; version 2 is saved with DIFFERENT terms, which is what an edit is;
+  // version 1 is SOLD with its own snapshot and two balances summing to the price; the same version is
+  // sold a SECOND time to the same customer, because a customer may buy a course twice; a DRAFT service —
+  // published_at null, archived_at null — is accepted as a line, which is the decision that archiving is
+  // terminal and a draft is not; and `package_template.retired_at` is set, which is the one UPDATE this
+  // family permits.
+  {
+    const accepted = psqlProbe(
+      `${SETUP}; ${template}; ${version(1, 100_000)}; ${line(1, 1, 5)}; ${line(1, 2, 3, 1)}; ` +
+        `${version(2, 250_000, { months: 12, transferable: true, policy: 'forfeited' })}; ` +
+        `${line(2, 1, 9)}; ` +
+        `${entry('GATE-PKG-OK', DAY, 100_000)}; ${sale('GATE-PKG-OK', 100_000, { sessions: 8 })}; ` +
+        `${balance('GATE-PKG-OK', 1, 5, 60_000)}; ${balance('GATE-PKG-OK', 2, 3, 40_000, 1)}; ` +
+        `${entry('GATE-PKG-OK2', NEXT, 100_000)}; ` +
+        `${sale('GATE-PKG-OK2', 100_000, { sessions: 8, day: NEXT })}; ` +
+        `${balance('GATE-PKG-OK2', 1, 5, 60_000)}; ${balance('GATE-PKG-OK2', 2, 3, 40_000, 1)}; ` +
+        // The customer re-point a merge issues, as `berelax_app` — the role and the statement the
+        // executor uses. Inside the accepted control rather than as its own probe, because an accepted
+        // probe is a single exit code and this belongs with the facts it is in order with.
+        'set local role berelax_app; ' +
+        'update package_sale set customer_id = (select id from customer order by id desc limit 1) ' +
+        `where id = ${saleId('GATE-PKG-OK')}; reset role; ` +
+        'update service set published_at = null where id = (select service_id from service_variant ' +
+        `where id = ${variant(2)}); ` +
+        `${version(3, 50_000)}; ` +
+        'insert into package_template_line (template_version_id, line_no, service_variant_id, ' +
+        `session_count) values (${versionId(3)}, 1, ${variant(2)}, 2); ` +
+        `update package_template set retired_at = now() where id = ${templateId}`,
+    )
+    check(
+      'package gate: two versions, two sales, a merge re-point, a DRAFT line and a retirement ARE accepted',
+      !accepted.failed,
+      'the control probe was refused, so every package probe above may be passing for the wrong ' +
+        `reason:\n${accepted.output}`,
+    )
+  }
+
+  // The generated expiry column, asserted in SQL rather than through a reader. Written as a probe that
+  // RAISES when a property does not hold, with its own control below proving the raise can fire.
+  {
+    const raiseIf = (condition, marker) =>
+      `do $$ begin if ${condition} then raise exception '${marker}'; end if; end $$`
+    const properties = psqlProbe(
+      `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-EXP')}; ` +
+        `${raiseIf(
+          `(select expires_on <> '${YEAR}-08-17'::date from package_sale where id = ${saleId('GATE-PKG-EXP')})`,
+          'EXPIRY-IS-NOT-SIX-MONTHS-ON',
+        )}; ` +
+        `${raiseIf(
+          `(select expires_on = trading_date from package_sale where id = ${saleId('GATE-PKG-EXP')})`,
+          'EXPIRY-IS-THE-SALE-DATE',
+        )}; ` +
+        `${raiseIf(
+          `(select sessions_redeemed <> 0 or released_fils <> 0 from package_balance ` +
+            `where package_sale_id = ${saleId('GATE-PKG-EXP')})`,
+          'A-NEW-BALANCE-IS-ALREADY-DRAWN-DOWN',
+        )}`,
+    )
+    check(
+      'package gate: the expiry is GENERATED from the business day and the validity, and a new balance is untouched',
+      !properties.failed,
+      'EXPIRY-IS-NOT-SIX-MONTHS-ON means the generation expression is wrong or the validity is not ' +
+        'read; EXPIRY-IS-THE-SALE-DATE means the interval is being dropped, which expires every ' +
+        'package on the day it is sold; A-NEW-BALANCE-IS-ALREADY-DRAWN-DOWN means the drawdown columns ' +
+        `do not default to zero, so M-TILL-10 would release money nobody redeemed:\n${properties.output}`,
+    )
+    // The control for that probe: a `raise` that can never fire is a case that measures nothing.
+    checkRejectedBy(
+      'package gate: the expiry probe can actually fire',
+      psqlProbe(
+        `${SETUP}; ${ONE_LINE}; ${SOLD('GATE-PKG-EXP2')}; ` +
+          `${raiseIf(
+            `(select expires_on = expires_on from package_sale where id = ${saleId('GATE-PKG-EXP2')})`,
+            'EXPIRY-IS-NOT-SIX-MONTHS-ON',
+          )}`,
+      ),
+      'EXPIRY-IS-NOT-SIX-MONTHS-ON',
+    )
+  }
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+  const CORE = 'packages/core/src/money/package-terms.ts'
+  const CORE_SUITE = 'packages/core/src/money/package-terms.test.ts'
+  const SERVICE = 'packages/db/src/services/sell-package.ts'
+  const SERVICE_SUITE = 'packages/db/src/services/sell-package.itest.ts'
+  const SETTINGS_READER = 'packages/db/src/settings/package.ts'
+  const MAPPING = 'packages/fixtures/src/package.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/package.itest.ts'
+  const REGISTRY = 'packages/config/src/settings/registry.ts'
+  const REGISTRY_SUITE = 'packages/config/src/settings/registry.test.ts'
+  const PERMISSIONS = 'packages/core/src/access/permissions.ts'
+  const ROLE_PAIR_SUITE = 'packages/fixtures/src/package.test.ts'
+  const PARTICIPANTS = 'packages/db/src/merge-participants.ts'
+  const MERGE_SUITE = 'packages/fixtures/src/merge.itest.ts'
+
+  // `probePackageSalePosting` sums the NET movement on revenue accounts instead of the total. This is the
+  // defect the probe was first written with, and it reports as clean the one posting that matters: 4010
+  // credited and the contra 4095 debited by the same figure, which nets to zero and HAS recognised revenue
+  // on a package sale.
+  checkRejectedBy(
+    'package gate: a revenue probe that sums the NET movement is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    const movement = line.debitFils + line.creditFils',
+          '    const movement = line.creditFils - line.debitFils',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'revenueMovementFils',
+  )
+
+  // The allocation drops the indivisible remainder. Every share is still arithmetically defensible and the
+  // parts no longer sum to the price — which is the fils that makes the deferred-revenue balance disagree
+  // with the cash taken, and the acceptance line this unit is judged on.
+  checkRejectedBy(
+    'package gate: an allocation that loses the remainder is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const shares = [...floors]\n  for (const { index } of order) {',
+          '  const shares = [...floors]\n  for (const { index } of order.slice(0, 0)) {',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'allocateByWeight',
+  )
+
+  // The tender coverage check removed. A sale that accepted less than the price would credit 2050 with a
+  // liability the salon was never paid for, and every later reconciliation of the liability against the
+  // cash would be out by it.
+  checkRejectedBy(
+    'package gate: a sale that accepts tenders not covering the price is caught',
+    withEditedFile(
+      CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (tendered !== input.priceGross.fils) {',
+          '  if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(CORE_SUITE)),
+    ),
+    'PackageTendersDoNotCoverPrice',
+  )
+
+  // The SERVICE's archived-service check deleted. The database still refuses it (ZG003, proven above), so
+  // the suite only goes red because it asserts the SERVICE's class and the SERVICE's wording — which is
+  // the whole reason the two layers were made to say different things.
+  checkRejectedBy(
+    'package gate: a save that accepts an archived catalogue service is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(text, '    if (service.archivedAt !== null) {', '    if (false as boolean) {'),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'ArchivedServiceReferenced',
+  )
+
+  // The `source` check removed. A package sale filed under `sale` is indistinguishable from a treatment in
+  // every report that groups by source — including the one that proves this unit's liability came from
+  // packages.
+  checkRejectedBy(
+    'package gate: a sale posted under the wrong journal source is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (input.journal.source !== 'package_sale') {",
+          '  if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'package_sale',
+  )
+
+  // The template upsert restored. `berelax_app`'s UPDATE on `package_template` is narrowed to
+  // `retired_at`, and a column-list grant is checked against the columns a statement NAMES — so naming
+  // `updated_at` is `42501 permission denied`. This was a real defect in this unit's first draft and no
+  // test could see it, because every other case in that suite connects as the OWNER. The case that catches
+  // it runs the whole save-and-sell path under `set local role berelax_app`, and this is the mutant that
+  // proves it catches it.
+  checkRejectedBy(
+    'package gate: a template upsert the application role may not run is caught',
+    withEditedFile(
+      SERVICE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    on conflict (template_key) do nothing\n  `',
+          '    on conflict (template_key) do update set updated_at = now()\n  `',
+        ),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'permission denied for table package_template',
+  )
+
+  // The settings reader stops carrying the provenance. The version would hold the provisional terms and
+  // say nothing about it, so every template created from an unanswered question would look configured —
+  // brief rule 15 in the place it is easiest to break, because the VALUES would all still be right.
+  checkRejectedBy(
+    'package gate: a settings reader that drops the provisional flag is caught',
+    withEditedFile(
+      SETTINGS_READER,
+      (text) =>
+        replaceOnce(text, '    isProvisional: flagged.length > 0,', '    isProvisional: false,'),
+      () => runExpectingFailure('pnpm', itestRun(SERVICE_SUITE)),
+    ),
+    'Y9-package-policy',
+  )
+
+  // The MAPPING drops the liability line. The two halves compile against nothing — `packages/db` may not
+  // import `packages/core`, so core's entry is a structural mirror and a mapping that silently omitted a
+  // line is invisible to both halves' own suites. Only the pair can see it, and what it would produce in
+  // production is cash taken with no liability recorded against it.
+  checkRejectedBy(
+    'package gate: a mapping that drops the deferred-revenue line is caught by the pair',
+    withEditedFile(
+      MAPPING,
+      (text) =>
+        replaceOnce(
+          text,
+          '  lines: entry.lines.map((line) => ({\n    accountCode: line.account as string,',
+          "  lines: entry.lines.filter((l) => (l.account as string) !== '2050').map((line) => ({\n    accountCode: line.account as string,",
+        ),
+      () => runExpectingFailure('pnpm', itestRun(PAIR_SUITE)),
+    ),
+    'PackageSaleMappingMismatch',
+  )
+
+  // The compliance-locked guard, tested the only way a caller can reach it: `define` runs at import time,
+  // so a setting that names a role the tier forbids fails every test in the file. The manager is the role
+  // that matters — `settings:write` is the operational tier and stops there.
+  checkRejectedBy(
+    'package gate: a compliance-locked setting editable by a MANAGER is caught',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(text, '    editableBy: OWNER_ACCOUNTANT,', '    editableBy: OWNER_MANAGER,'),
+      () => runExpectingFailure('pnpm', unitRun(REGISTRY_SUITE)),
+    ),
+    'compliance-locked and may only be editable by',
+  )
+
+  // The F07 half. The accountant loses `settings:write_accounting_policy`, so the matrix says nobody but
+  // the owner may make a locked accounting change while the registry goes on letting the accountant make
+  // one. Neither package can see the other, which is why the pair test exists at all.
+  checkRejectedBy(
+    'package gate: a registry role the permission matrix does not trust is caught by the pair',
+    withEditedFile(
+      PERMISSIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          "      // comment: this is NOT `settings:write_compliance`, which stays with the owner alone.\n      'settings:write_accounting_policy',\n",
+          '      // comment: this is NOT `settings:write_compliance`, which stays with the owner alone.\n',
+        ),
+      () => runExpectingFailure('pnpm', unitRun(ROLE_PAIR_SUITE)),
+    ),
+    'holds no locked-change permission',
+  )
+
+  // The merge participant entry removed. `package_sale` carries a `customer_id`, so C-CRM-05's registry
+  // requires it to be a participant or an allowlisted exception — and this unit shipped it as neither on
+  // the first pass, which `packages/fixtures/src/merge.itest.ts` caught. The registry exists to notice a
+  // table nobody registered; this is the case that proves it still does.
+  checkRejectedBy(
+    'package gate: a customer-scoped table missing from the merge registry is caught',
+    withEditedFile(
+      PARTICIPANTS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    table: 'package_sale',\n    column: 'customer_id',\n    strategy: 'repoint_update',",
+          "    table: 'package_sale_unregistered',\n    column: 'customer_id',\n    strategy: 'repoint_update',",
+        ),
+      () => runExpectingFailure('pnpm', itestRun(MERGE_SUITE)),
+    ),
+    'package_sale',
+  )
+
+  // The controls for the source edits: every suite passes unedited. Without this, an anchor gone
+  // stale or a suite that had stopped running would make every one of them report a pass.
+  {
+    const core = run('pnpm', unitRun(CORE_SUITE))
+    const registry = run('pnpm', unitRun(REGISTRY_SUITE))
+    const roles = run('pnpm', unitRun(ROLE_PAIR_SUITE))
+    const service = run('pnpm', itestRun(SERVICE_SUITE))
+    const pair = run('pnpm', itestRun(PAIR_SUITE))
+    check(
+      'the package suites pass unedited',
+      !core.failed && !registry.failed && !roles.failed && !service.failed && !pair.failed,
+      `core ${core.failed ? 'FAILED' : 'passed'}, registry ${registry.failed ? 'FAILED' : 'passed'}, ` +
+        `roles ${roles.failed ? 'FAILED' : 'passed'}, service ${service.failed ? 'FAILED' : 'passed'}, ` +
+        `pair ${pair.failed ? 'FAILED' : 'passed'}:\n${core.output}\n${registry.output}\n` +
+        `${roles.output}\n${service.output}\n${pair.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -92,6 +92,29 @@ export interface SettingDefinition<T = unknown> {
 
 const OWNER_ONLY = ['owner'] as const
 const OWNER_MANAGER = ['owner', 'manager'] as const
+/**
+ * A compliance-locked setting that is ACCOUNTING policy: the owner, and the accountant.
+ *
+ * Not a relaxation of the tier, and the manager is still refused. The tier holds two kinds of decision
+ * and they are locked to two different people. Customer-safety policy — same-gender matching, the
+ * promotional window, review auto-send — is the owner's alone, and `settings:write_compliance` in the F07
+ * matrix says so with a test asserting the list is exactly `['owner']`. Revenue recognition is the
+ * accountant's: the role the matrix already trusts with `ledger:post`, `period:lock`,
+ * `vat_return:prepare` and `invoice:credit_note`. `settings:write_accounting_policy` is that second
+ * permission, and `packages/fixtures/src/package.test.ts` holds this list and the matrix equal — the one
+ * place `@berelax/config` and `@berelax/core` can both be imported.
+ */
+const OWNER_ACCOUNTANT = ['owner', 'accountant'] as const
+
+/**
+ * Who may hold a compliance-locked setting at all.
+ *
+ * Spelled as a list rather than as `=== 'owner'` because the tier now covers two locks (see
+ * {@link OWNER_ACCOUNTANT}), and a predicate naming one role would have had to be widened to `!== 'manager'`
+ * — which permits the receptionist, the therapist and the marketer by omission. An allow-list cannot fail
+ * that way.
+ */
+const COMPLIANCE_LOCKED_EDITORS: readonly string[] = ['owner', 'accountant']
 
 function define<T>(d: SettingDefinition<T>): SettingDefinition<T> {
   if (d.tier !== 'content' && !d.audited) {
@@ -100,14 +123,37 @@ function define<T>(d: SettingDefinition<T>): SettingDefinition<T> {
       `Setting "${d.key}" is tier "${d.tier}" and must be audited. Only content-tier settings may be unaudited.`,
     )
   }
-  if (d.tier === 'compliance_locked' && d.editableBy.some((r) => r !== 'owner')) {
+  if (
+    d.tier === 'compliance_locked' &&
+    d.editableBy.some((r) => !COMPLIANCE_LOCKED_EDITORS.includes(r))
+  ) {
     throw new AppError(
       'invariant_violated',
-      `Setting "${d.key}" is compliance-locked and may only be editable by the owner, not ${d.editableBy.join(', ')}.`,
+      `Setting "${d.key}" is compliance-locked and may only be editable by ` +
+        `${COMPLIANCE_LOCKED_EDITORS.join(' or ')}, not ${d.editableBy.join(', ')}.`,
     )
   }
   return d
 }
+
+/**
+ * The three package-policy setting keys.
+ *
+ * Spelled here and used in the definitions below, so there is ONE string per key rather than a literal in
+ * the registry and another in every reader. `packages/db/src/settings/package.ts` imports these; the
+ * obligation ladders one screen up take the same shape for the same reason, and the reason is that a
+ * mismatched spelling is a reader that silently falls back to a declared default.
+ */
+export const PACKAGE_VALIDITY_MONTHS_SETTING_KEY = 'packages.default_validity_months'
+export const PACKAGE_TRANSFERABLE_SETTING_KEY = 'packages.default_transferable'
+export const PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY = 'packages.unredeemed_balance_policy'
+
+/** All three, for a panel or a test that has to prove none of them was forgotten. */
+export const PACKAGE_POLICY_SETTING_KEYS = [
+  PACKAGE_VALIDITY_MONTHS_SETTING_KEY,
+  PACKAGE_TRANSFERABLE_SETTING_KEY,
+  PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY,
+] as const
 
 // --- the registry ------------------------------------------------------------------------------
 // Provisional values are the STRICTEST safe option, so an uncorrected assumption leaves the system
@@ -274,8 +320,16 @@ export const SETTINGS = [
       note: 'No figure supplied; 2 per week assumed.',
     },
   }),
+  /**
+   * The three package-policy settings, all three of them Y9-package-policy's.
+   *
+   * They are the DEFAULT a new `package_template_version` is created with, and nothing more. Every term a
+   * customer actually bought is snapshotted onto `package_sale` and held equal to the immutable version it
+   * names by ZG002, so changing any of these can never alter an outstanding balance — which is what makes
+   * them safe to be settings at all rather than a migration.
+   */
   define({
-    key: 'packages.default_validity_months',
+    key: PACKAGE_VALIDITY_MONTHS_SETTING_KEY,
     tier: 'operational',
     schema: z.number().int().min(1).max(60),
     defaultValue: 6,
@@ -286,7 +340,59 @@ export const SETTINGS = [
     invalidates: ['catalogue', 'content'],
     provisional: {
       openQuestionId: 'Y9-package-policy',
-      note: '6 months, non-transferable, balance retained at expiry.',
+      // The note used to state all three terms at once, which read as one answered question and made the
+      // other two invisible on the Unconfirmed Assumptions panel. Each now carries its own row and its own
+      // note; this one is about the validity and says so.
+      note: '6 months assumed. Short enough that an uncorrected assumption leaves no unbounded liability on the balance sheet.',
+    },
+  }),
+  define({
+    key: PACKAGE_TRANSFERABLE_SETTING_KEY,
+    /**
+     * `operational`, and **owner-only**.
+     *
+     * Not compliance-locked: transferability is a commercial term, not a legal position, and the tier
+     * exists for decisions that cannot be relaxed without a compliance consequence. But not
+     * `OWNER_MANAGER` either, which is what `operational` usually carries — a transferable balance can be
+     * moved between customers, which is a fraud path and a data-protection question nobody has been
+     * asked, and turning it on is a decision about what the business promises rather than about how the
+     * floor runs.
+     */
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: false,
+    label: 'Packages are transferable by default',
+    help: 'Whether a new package may be used by someone other than the person who bought it. A package already sold keeps the transferability it was sold under.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: ['catalogue', 'content'],
+    provisional: {
+      openQuestionId: 'Y9-package-policy',
+      note: 'Non-transferable assumed. A movable balance is a fraud path and a data-protection question nobody has been asked, so false is the option that cannot cost the business money.',
+    },
+  }),
+  define({
+    key: PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY,
+    /**
+     * `compliance_locked`, and the accountant may change it.
+     *
+     * Forfeiting an unredeemed balance writes a liability the customer paid for off to breakage revenue.
+     * That is a revenue-recognition decision with a VAT consequence — `4050 Unredeemed voucher breakage`
+     * already carries an `[UNVERIFIED] Y11-vat-package` note about whether breakage is a supply at all —
+     * and it is the one setting in this file that changes a figure on a filed return. So it is locked, and
+     * the lock is `settings:write_accounting_policy`: the owner and the accountant, never the manager.
+     */
+    tier: 'compliance_locked',
+    schema: z.enum(['retained', 'forfeited']),
+    defaultValue: 'retained' as const,
+    label: 'Unredeemed package balance at expiry',
+    help: "Retained leaves the liability on the balance sheet and lets the customer come back. Forfeited writes it off to breakage revenue, which is a revenue-recognition decision with a VAT consequence — the accountant's, not the floor's.",
+    editableBy: OWNER_ACCOUNTANT,
+    audited: true,
+    invalidates: ['catalogue', 'content'],
+    provisional: {
+      openQuestionId: 'Y9-package-policy',
+      note: 'Balance retained, not forfeited. Forfeiting is the aggressive reading, and if the real policy turns out to be retention a forfeited balance has already been written off against a customer who was entitled to it. Retention also posts NOTHING at expiry, so the conservative answer is the one with no journal entry to reverse.',
     },
   }),
   define({

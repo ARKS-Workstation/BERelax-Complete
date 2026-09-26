@@ -4029,12 +4029,222 @@ units:
       and appear in the Unconfirmed Assumptions query
     - 'the unredeemed-balance policy field is compliance-locked: a manager-role change is denied by the
       F07 policy layer, an accountant-role change succeeds and writes an audit_event'
+    - 'NOTE: the migration is 0078_package.sql. The manifest said 00xx_package.sql, a placeholder that
+      allocates no number — and gate case 101 fails the build for a `done` unit declaring a path that does
+      not exist, so it would have fired the moment this unit was marked done. 0079-0082 were held by units
+      in flight and 22, 41, 44, 47, 71 and 74 are PERMANENT gaps that were not reused, because renumbering
+      into a gap is how two branches come to apply one number to different SQL. SCHEMA_VERSION = 78, and
+      the ledger paragraph in packages/db/src/index.ts is in numeric order; if 0079+ lands first the
+      integrator sets it to that number, because SCHEMA_VERSION tracks the newest migration and not this
+      unit''s.'
+    - 'NOTE: the SQLSTATE class is ZG and NOT the mnemonic ZP, and finding that out was a real defect in
+      this unit''s first draft. 0056_consent.sql already raises ZP001, ZP002 and ZP003. Two files raising
+      one code is worse than an unmemorable letter: packageError would have translated a consent refusal as
+      a package refusal and consentError the reverse, and both match on SQLSTATE ALONE precisely so that a
+      wording change cannot break them. The six codes are ZG001 immutable row, ZG002 snapshot disagrees
+      with its version, ZG003 archived service referenced, ZG004 version with no lines, ZG005 posting is
+      not pure deferred revenue, ZG006 allocation disagrees. The class list is derivable with
+      grep over packages/db/migrations for errcode, and nothing in the build checks that two files never
+      share a class — which is the next gate somebody should write.'
+    - 'NOTE: the POSTING, and what changes when Y11-vat-package is answered. A sale posts Dr tender (cash
+      1010 / card terminal 1040 / bank 1020, from core''s TENDER_ACCOUNT, so card money does NOT touch the
+      bank) and Cr 2050 Deferred revenue at the FULL gross, and nothing to any revenue account and nothing
+      to 2030. That is the provisional answer to Y11-vat-package — date of supply at REDEMPTION — chosen as
+      the strictest safe option: the salon holds the money as a liability and recognises nothing until a
+      treatment is delivered, so an uncorrected assumption cannot understate an output-VAT box that has
+      already been filed. It is asserted at three layers, none of which is redundant: probePackageSalePosting
+      in core measures it off the entry''s lines against the chart; reconcilePackageSaleMapping in
+      packages/fixtures measures it off the MAPPED JournalEntryInput, which is the layer neither half''s own
+      suite can see; and ZG005 measures it in SQL over the rows PostgreSQL holds. All three measure TOTAL
+      movement — debits PLUS credits — and not the net, because an entry crediting 4010 and debiting the
+      contra 4095 by the same figure nets to ZERO and has recognised revenue on a package sale. The first
+      version of the core probe summed credit minus debit and reported that posting as clean; the test that
+      catches it is in package-terms.test.ts and the gate case that proves the test catches it is in block
+      105. If the owner answers the other way, what changes is this posting and ZG005''s predicate: the
+      sale would credit 4020 net and 2030 the VAT and a redemption would move nothing. No table changes,
+      because a balance still has to be drawn down.'
+    - 'NOTE: provisional values leaned on, all of them Y9-package-policy''s and all of them the strictest
+      safe option. 6 months validity (short enough that an uncorrected assumption leaves no unbounded
+      liability on the balance sheet), non-transferable (a movable balance is a fraud path and a
+      data-protection question nobody has been asked), and unredeemed balance RETAINED not forfeited
+      (forfeiting is the aggressive reading, and retention posts NOTHING at expiry — so the conservative
+      answer is the one with no journal entry to reverse). All three are registered settings with
+      provisional:true: packages.default_validity_months already existed and its note was corrected —
+      it stated all THREE terms at once, which read as one answered question and made the other two
+      invisible on the panel — and packages.default_transferable and packages.unredeemed_balance_policy are
+      new. They are the DEFAULT a new version is created with and nothing more: every term a customer
+      bought is snapshotted onto package_sale and held equal to the immutable version by ZG002, so changing
+      a setting can never alter an outstanding balance. A version defaulted from a still-unconfirmed setting
+      is itself flagged provisional and names Y9-package-policy, and the flag follows app_setting''s own
+      flag — which writeSetting CLEARS on confirmation — so answering the question stops new versions being
+      flagged without anybody editing code. When the owner answers: the three settings are confirmed on the
+      Unconfirmed Assumptions panel and a NEW template version is published carrying the real terms; every
+      version already sold under keeps what it was sold under, which is the unit''s whole point.'
+    - 'NOTE: the compliance lock needed a SECOND permission, and this is the one change outside the unit''s
+      own files. The acceptance asks for a manager-role change to be denied and an accountant-role change to
+      succeed on a compliance-locked field. The F09 registry''s define() refused any role but the owner on
+      that tier, and packages/core/src/access/permissions.ts said settings:write_compliance is the owner
+      ALONE with a test asserting exactly that list. Widening that permission would have let the accountant
+      switch same-gender matching off. So a second permission was added —
+      settings:write_accounting_policy, granted to the owner and the accountant, never the manager — and
+      define()''s guard became an ALLOW-LIST of [owner, accountant] rather than a predicate naming one role:
+      a `not the manager` test would have admitted the receptionist, the therapist and the marketer by
+      omission. settings:write_compliance is untouched and still owner-only. packages/config cannot import
+      packages/core, so the two can only be compared from packages/fixtures, and
+      packages/fixtures/src/package.test.ts holds them equal in BOTH directions — every role a
+      compliance-locked setting names holds a locked-change permission, and every role holding one is named
+      by some locked setting. That check did not exist before and its absence is why an editableBy naming
+      the marketer would have been caught by nothing.'
+    - 'NOTE: SCOPED OUT and stated rather than papered over. (1) A package sale writes NO `payment` row,
+      because payment.invoice_id is NOT NULL (0063) and this unit issues no invoice. So cash taken for a
+      package is absent from readDrawerTakings, and M-TILL-11''s cash-up will read the drawer as OVER by it
+      and post the difference to 6140. That is a real defect in the system today and it is NOT fixable here:
+      it needs either a nullable invoice_id or a package_sale_id on `payment`, which is M-TILL-07''s table,
+      and M-TILL-12/13''s decision. DEFERRED TO M-TILL-12. (2) No invoice or tax document at sale, for the
+      same question''s sake: if the supply is at redemption there is nothing to state as a standard-rated
+      supply on the day the money is taken, and a document naming a VAT figure of zero would be a claim
+      about the answer to Y11-vat-package. DEFERRED TO M-TILL-12. (3) No package_redemption, no drawdown, no
+      expiry job, no breakage, no transfer — all M-TILL-10''s. package_balance.sessions_redeemed and
+      released_fils exist with their ceilings (package_balance_cannot_overdraw,
+      package_balance_cannot_overrelease) declared WITH the columns, because a ceiling added later is a
+      ceiling that was absent while rows were being written, and M-TILL-10''s first acceptance line gets it
+      free. ZG006 also compares the SET of balance line numbers against the version''s lines and not only
+      how many there are: a count alone accepts a balance numbered 3 against a two-line version, which is
+      the right number of entitlements with one of them naming a line that does not exist, and no foreign
+      key can reach it because a line is keyed on (template_version_id, line_no) while a balance knows the
+      SALE — carrying the version id onto the balance to make a composite key possible would be another
+      copy to hold equal. expires_on is GENERATED here, from the trading date and the validity months, so the derivation
+      exists once and M-TILL-10 reads the column. (4) No seeded package templates. What the business
+      actually sells is a FACT nobody has stated (brief rule 15) and a plausible "6 Massage Package" seeded
+      here would be indistinguishable from a configured one; docs/12 section 5 promises "packages at several
+      drawdown states" in the fixture salon and that belongs with M-TILL-10, which is the unit that can put
+      them at a drawdown state. (5) No outbox event. Nothing consumes package.sold yet and an event with no
+      handler is a capability being claimed.'
+    - 'NOTE: defects found in THIS unit''s own work, all twelve recorded because every one had reported a
+      pass. (1) probePackageSalePosting summed credit MINUS debit on revenue accounts and called it "zero
+      revenue posted" — a check whose stated claim is not what it measures, since 4010 credited against
+      4095 debited nets to zero. Now debits PLUS credits, with a test that builds that exact entry and a
+      gate mutant. (2) The coverage floors in package-terms.test.ts were WRITTEN BEFORE they were measured:
+      the comments claimed "lowest observed 381 of 500" and "232 multi-line, 189 multi-tender", which were
+      invented. Measured over eight runs of 500/300: remainder 436 436 425 438 439 420 419 426 (lowest 419),
+      multi-line lowest 225, multi-tender lowest 177. The comments now hold the real figures and the floors
+      sit at about half. (3) Two itest probes named a rule they could not reach. Every DEFERRED trigger on
+      package_sale fires at one COMMIT and PostgreSQL fires triggers on one event in ALPHABETICAL order by
+      name, so package_balance_shares_sum_to_the_price (ZG006) answers first for a sale with no balances —
+      the ZG005 output-VAT case and the ZG002 session-count case both reported ZG006 while claiming
+      otherwise. Both now open the correct balances first. (4) The "entry dated on another business day"
+      case went through the sellOne helper, which derives the sale date AND the entry date from one
+      argument — so it was asserting that a CONSISTENT sale fails, and it could only ever have failed. It
+      now builds the entry by hand. (5) Two gate probes exited ZERO while claiming to prove ZG003: the
+      variant subquery filters on archived_at is null, so archiving the service inside the same transaction
+      made the subquery resolve to a different, still-live variant. anyVariant() now pins it. (6)
+      reconcilePackageSaleMapping first reported Math.max of two revenue measurements, and the larger of
+      two measurements is not a measurement of anything; it now reports both, by code block and by chart
+      type, and asserts both. (7) THE WORST ONE, and nothing in the build could see it:
+      savePackageTemplateVersion upserted the template with `on conflict (template_key) do update set
+      updated_at = now()`, and 0078 narrows berelax_app''s UPDATE on package_template to retired_at alone
+      — a column-list grant is checked against the columns a statement NAMES, so that statement is 42501
+      permission denied for the APPLICATION role. Every case in the suite connects as the OWNER, so the
+      service passed every test and would have failed on the first real save. Found by running the
+      statement in psql as berelax_app, not by any check. The upsert is now an insert-on-conflict-do-nothing
+      plus a read (widening the grant was the alternative and is worse: updated_at exists so a retirement
+      is dated, and a grant letting the application touch it for any other reason is a grant nobody argued
+      for), an itest case now runs the whole save-and-sell path under `set local role berelax_app` with the
+      control that the same role still cannot restate a sold version, and gate case 105 restores the upsert
+      and requires that itest to go red. (8) Two of the service''s early refusals were plain AppErrors
+      whose MESSAGE spelled PackageTemplateUnavailable while the object was not one, so `err instanceof
+      PackageTemplateUnavailable` answered false for an error that said so on the line above. Both now
+      throw the class, and an itest case asserts the class on all three of them. (9) packageError did not
+      translate package_template_line_one_row_per_variant, so a caller listing one treatment twice got a
+      raw 23505; isDuplicatePackageLine and a readable refusal were added, with the control that two lines
+      on DIFFERENT variants are accepted. (10) ZG006 compared only HOW MANY balances a sale opened
+      against how many lines the version has, so a balance numbered 3 against a two-line version was
+      accepted: the right number of entitlements, one of them naming a line that does not exist. It now
+      compares the SET of line numbers, with its own psql probe. (11) `package_sale` carries a customer_id
+      and was registered in NEITHER merge-participants.ts nor its allowlist, so a customer merge would have
+      left a live entitlement on a tombstone nothing reads. Caught by
+      packages/fixtures/src/merge.itest.ts, which is the check C-CRM-05 wrote for exactly this — "the
+      registry that has to notice a table nobody registered" — and it noticed. See the merge NOTE below for
+      what was done. (12) The trigger that permits the merge''s customer_id re-point compared
+      `to_jsonb(new) - ''customer_id''` against the same of OLD, and it refused EVERY update including the
+      one it exists to permit: PostgreSQL computes a GENERATED column AFTER the BEFORE triggers run, so
+      new.expires_on is NULL while old.expires_on holds the stored date. `expires_on` is now removed from
+      both sides, which costs nothing because it is generated from trading_date and validity_months and the
+      comparison still covers both. Found by the itest case written for the re-point — the first version of
+      that case would have passed against a table nothing may update at all, which is why it asserts the
+      permitted UPDATE and the refused ones together.'
+    - 'NOTE: a sale follows the person a customer MERGE keeps, and this is the one place the unit had to
+      relax its own immutability. package_sale carries a customer_id, so C-CRM-05''s registry requires it to
+      be a merge participant or an allowlisted exception. The `invoice` and `credit_note` allowlist entries
+      look like the precedent and are NOT: those are exempt because they SNAPSHOT the customer''s name,
+      phone and TRN onto a filed document and the FTA reads those columns, so a re-attributed invoice is a
+      different document. A package sale snapshots no customer identity at all — only the terms — and unlike
+      a filed document it is an entitlement somebody is still going to walk in and use, so a balance left on
+      a tombstone is money a customer paid that they can no longer draw on. It is therefore registered as
+      `repoint_update` (registeredBy: M-TILL-09, conflictKey null because no unique key involves the
+      customer — a person legitimately buys the same package twice), and package_sale''s immutability is
+      narrowed accordingly: `package_sale_terms_are_immutable` refuses any UPDATE that changes anything but
+      customer_id, by comparing the whole row as jsonb with customer_id (and the generated expires_on)
+      removed from both sides rather than by listing columns — a list has to be extended every time a column
+      is added and the once somebody forgets is the once the terms become editable. berelax_app holds
+      `update (customer_id)` and nothing more, so the door is held twice: the grant refuses a terms edit
+      before the trigger is reached, and the trigger refuses it for the owner too. DELETE is still refused
+      outright for every role. package_balance carries no customer id and hangs off the sale, so it follows
+      without being registered.'
+    - 'NOTE: gate labels used: 105a-105z in scripts/test-gates.mjs, placed immediately AFTER block
+      104a-104k and BEFORE 79a-79k, because that file is ordered by CATEGORY — unit blocks, then the
+      harness blocks 79/88/89/90, then the repository-wide cases 101/102, then 29 last. Selector
+      `pnpm gates:only --only ''// 105a''`. Forty-two cases: twenty-seven psql probes asserting each 0078
+      rule BY NAME against real PostgreSQL (every probe inside begin / set constraints all immediate /
+      rollback, because four of the six refusals are DEFERRED and would otherwise fire at a COMMIT that
+      never comes — and the rollback is also what lets a probe ARCHIVE a seeded service, which permanently
+      would break business-seed.itest.ts''s "exactly 8 services"), one accepted control covering six facts
+      in order including a DRAFT service line (archiving is terminal, a draft is not), a generated-column
+      properties probe written so it RAISES when a property fails plus its own control proving the raise can
+      fire, three edits to packages/core/src/money/package-terms.ts, two to
+      packages/db/src/services/sell-package.ts, one to packages/db/src/settings/package.ts, one to
+      packages/fixtures/src/package.ts, one to packages/config/src/settings/registry.ts, one to
+      packages/core/src/access/permissions.ts, one to packages/db/src/merge-participants.ts (eleven source
+      mutants in all: one restores the template upsert the application role may not run, and one unregisters
+      package_sale from the merge registry), and the control that all five suites pass unedited. Every
+      anchor goes through replaceOnce (brief rule 20). No server-starting suite was added, so no port band
+      was claimed and packages/harness/src/ports.ts is untouched.'
+    - 'NOTE: files beyond the five listed, and the manifest''s list is corrected below. Added:
+      packages/core/src/money/package-terms.{ts,test.ts}, packages/db/migrations/0078_package.sql,
+      packages/db/src/schema/package.ts (all five tables in ONE mirror, because pnpm db:drift keys its map
+      on the table name and a second file declaring package_balance would silently win — 0063''s NOTE asked
+      for one mirror per unit and M-TILL-10 extends this one),
+      packages/db/src/services/sell-package.{ts,itest.ts}, packages/db/src/settings/package.ts, and
+      packages/fixtures/src/package.{ts,itest.ts,test.ts} — the mapping, the PAIR, and the
+      config-versus-core role check, because packages/db may never import packages/core and only
+      packages/fixtures may depend on both. Edited:
+      packages/config/src/settings/registry.{ts,test.ts}, packages/config/src/index.ts,
+      packages/core/src/access/permissions.ts, packages/core/src/index.ts, packages/db/src/index.ts (the two
+      export blocks, the ledger paragraph for 78, SCHEMA_VERSION = 78), packages/db/src/schema/index.ts,
+      packages/db/src/merge-participants.ts (the package_sale participant, C-CRM-05''s registry),
+      packages/fixtures/src/index.ts, scripts/test-gates.mjs and build/manifest.yaml. No new pnpm step was
+      added to the verify chain, so case 29''s list and pnpm gate-registry are untouched.'
     files:
-    - packages/db/src/schema/package.ts
-    - packages/db/migrations/00xx_package.sql
     - packages/core/src/money/package-terms.ts
+    - packages/core/src/money/package-terms.test.ts
+    - packages/db/migrations/0078_package.sql
+    - packages/db/src/schema/package.ts
+    - packages/db/src/schema/index.ts
     - packages/db/src/services/sell-package.ts
     - packages/db/src/services/sell-package.itest.ts
+    - packages/db/src/settings/package.ts
+    - packages/db/src/index.ts
+    - packages/db/src/merge-participants.ts
+    - packages/config/src/settings/registry.ts
+    - packages/config/src/settings/registry.test.ts
+    - packages/config/src/index.ts
+    - packages/core/src/access/permissions.ts
+    - packages/core/src/index.ts
+    - packages/fixtures/src/package.ts
+    - packages/fixtures/src/package.test.ts
+    - packages/fixtures/src/package.itest.ts
+    - packages/fixtures/src/index.ts
+    - scripts/test-gates.mjs
   - id: M-TILL-10
     order: 52
     title: Package redemption drawdown, expiry and breakage
