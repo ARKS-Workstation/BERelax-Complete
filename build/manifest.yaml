@@ -3128,7 +3128,6 @@ units:
     - apps/web/tests/e2e/m1-walkthrough.spec.ts
     - .github/workflows/ci.yml
     - docs/PROGRESS.md
-    - artifacts/screens/
   - id: M-TILL-01
     order: 43
     title: Chart of accounts and the pure double-entry ledger kernel
@@ -4285,7 +4284,6 @@ units:
     - apps/web/src/app/(admin)/till/cash-up/page.tsx
     - apps/web/src/app/(admin)/packages/page.tsx
     - apps/web/e2e/m2-bankable.spec.ts
-    - artifacts/screens/M-TILL-13/
   - id: M-VAT-01
     order: 56
     title: Suppliers, supplier tax profile, bills and payables
@@ -5402,7 +5400,6 @@ units:
     - apps/web/src/routes/registry.ts
     - packages/db/src/services/obligation-blocking.itest.ts
     - scripts/test-gates.mjs
-    - artifacts/screens/M-VAT-11/
   - id: M-VAT-12
     order: 67
     title: Closed test month reconciliation report

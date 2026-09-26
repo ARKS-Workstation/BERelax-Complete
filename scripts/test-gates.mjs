@@ -27895,16 +27895,38 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       inFiles = false
     }
   }
-  const missing = declared.filter(({ path }) =>
-    path.includes('*')
-      ? globSync(path, { nodir: false }).length === 0
-      : !existsSync(path.replace(/\/$/, '')),
-  )
+  /*
+    TRACKED BY GIT, not merely present on disk, and that distinction is a real failure this case had.
+
+    M-VAT-11 declares `artifacts/screens/M-VAT-11/` — a directory the screenshot harness generates and
+    `.gitignore` excludes. It exists in a worktree where a capture run has happened and nowhere else, so an
+    `existsSync` check passes on the machine that just ran the suite and fails on a fresh clone, which is
+    every CI run. A check whose answer depends on which machine asks it is not a check.
+
+    Asking git also states the rule the manifest is actually for: a `done` unit's `files` list is the record
+    of what was COMMITTED, and a path nobody committed is not part of the build however real it looks in one
+    directory. Generated output is described by the unit that generates it, not declared as a file.
+  */
+  const tracked = new Set(run('git', ['ls-files']).output.split('\n').filter(Boolean))
+  const isTracked = (path) => {
+    if (path.includes('*')) {
+      const pattern = new RegExp(
+        `^${path.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`,
+      )
+      return [...tracked].some((file) => pattern.test(file))
+    }
+    const bare = path.replace(/\/$/, '')
+    if (tracked.has(bare)) return true
+    const prefix = `${bare}/`
+    return [...tracked].some((file) => file.startsWith(prefix))
+  }
+  const missing = declared.filter(({ path }) => !isTracked(path))
   check(
-    'every file a done unit declares in the manifest is on disk',
+    'every file a done unit declares in the manifest is tracked in the repository',
     missing.length === 0,
-    `${missing.length} declared path(s) do not exist, so the manifest describes a build that is not ` +
-      `here:\n${missing.map(({ unit: u, path }) => `        ${u}: ${path}`).join('\n')}`,
+    `${missing.length} declared path(s) are not tracked by git, so the manifest describes a build that ` +
+      `is not in the repository:\n${missing.map(({ unit: u, path }) => `        ${u}: ${path}`).join('\n')}` +
+      '\n        (a generated, gitignored directory counts as missing here on purpose — see the comment)',
   )
   // The control, in both directions. The scan has to be finding paths at all — an empty `declared` would
   // satisfy the assertion above for ever — and it has to be able to FAIL, which a real absent path proves.
@@ -27923,11 +27945,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // one-line predicate.
     const phantom = 'packages/db/migrations/0000_a_migration_nobody_wrote.sql'
     const glob = 'packages/db/migrations/*_a_migration_nobody_wrote.sql'
+    // A real tracked path, a real tracked directory, a literal nobody wrote, and a glob that matches
+    // nothing — so the predicate is shown to separate all four rather than to answer one of them.
     check(
-      'the scan can fail: an absent literal path and a glob matching nothing both count as missing',
-      !existsSync(phantom) && globSync(glob).length === 0,
-      'a path nobody wrote was reported as present, so the assertion above is being satisfied by a ' +
-        'check that cannot tell absent from present',
+      'the scan can fail, and it can pass: it separates tracked from untracked and glob from no match',
+      isTracked('package.json') &&
+        isTracked('packages/db/migrations') &&
+        isTracked('packages/db/migrations/*_period_close.sql') &&
+        !isTracked(phantom) &&
+        !isTracked(glob),
+      'the tracked-path predicate did not separate the four cases, so the assertion above could be ' +
+        'satisfied by a check that answers the same way for everything',
     )
   }
 }
