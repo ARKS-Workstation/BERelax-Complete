@@ -18,7 +18,10 @@ import type { UnitOfWork } from '../tx.ts'
  * ## A sale credits a LIABILITY
  *
  * `sellPackage` writes the journal entry the caller built (`packageSalePosting` in `@berelax/core`), the
- * sale, and one balance per line. The entry is `Dr` tender / `Cr 2050 Deferred revenue` at the full gross
+ * sale, one `payment` row per tender, and one balance per line. The payment rows were MISSING in this
+ * unit's first version and 0083 §6 is the argument: `payment.invoice_id` was NOT NULL and a package sale
+ * issues no invoice, so cash taken for a package never reached `readDrawerTakings` and M-TILL-11's cash-up
+ * read the drawer as over by it. The entry is `Dr` tender / `Cr 2050 Deferred revenue` at the full gross
  * and moves nothing on revenue and nothing on `2030`: **[UNVERIFIED] Y11-vat-package** puts the date of
  * supply at redemption, which is the strictest safe reading. Releasing `2050` into `4020` is M-TILL-10's.
  *
@@ -540,7 +543,10 @@ export interface SellPackageInput {
   readonly journal: JournalEntryInput
   /** One per template line, in `line_no` order. ZG006 requires one per line and the exact total. */
   readonly balances: readonly PackageBalanceInput[]
-  /** Recorded for the reconciliation, not posted: the posting is the caller's journal entry. */
+  /**
+   * The tenders, one `payment` row each. NOT posted from here — the posting is the caller's journal entry,
+   * and {@link TenderPostingDisagrees}'s hazard one domain along is why the two are mapped together.
+   */
   readonly tenders: readonly PackageTenderInput[]
 }
 
@@ -591,6 +597,37 @@ export async function sellPackage(uow: UnitOfWork, input: SellPackageInput): Pro
   `
   if (sale === undefined) {
     throw new AppError('invariant_violated', 'package_sale insert returned no row')
+  }
+
+  /**
+   * The `payment` rows, and this is M-TILL-09's own recorded defect being fixed rather than a feature.
+   *
+   * This unit took money for a package and wrote no `payment` row, because `payment.invoice_id` was NOT
+   * NULL (0063) and a package sale issues no invoice. The consequence is not cosmetic: `readDrawerTakings`
+   * and `ZU005` (0076) both sum this table for the business day, so cash taken for a package was invisible
+   * to both — and M-TILL-11's cash-up read the drawer as OVER by exactly that amount and posted the
+   * difference to `6140 Cash over and short`. A `done` unit's reconciliation was knowably wrong for every
+   * package sold for cash.
+   *
+   * `0083_package_redemption.sql` made `invoice_id` nullable, added `package_sale_id` beside it, and
+   * requires exactly one of the two (`payment_settles_exactly_one_document`). `tender_no` is the POSITION,
+   * 0063's reason: an insertion-ordered list reorders the moment a query plan changes, and
+   * `payment_one_row_per_package_tender` is what makes a retried tender a refusal rather than a second
+   * expectation in the drawer.
+   *
+   * `trading_date` is the sale's business day and not a truncated instant. Trading runs 11:00-02:00, so a
+   * 01:30 package sale belongs to the previous trading date and the cash-up that reconciles it cuts on this
+   * column — getting it wrong moves the takings between two drawers, both of which then fail to balance.
+   */
+  for (const [index, tender] of input.tenders.entries()) {
+    await uow.sql`
+      insert into payment (invoice_id, package_sale_id, tender_no, tender_kind,
+                           posting_account_code, amount_fils, change_given_fils, reference,
+                           trading_date)
+      values (null, ${sale.id}::uuid, ${index + 1}, ${tender.tenderKind},
+              ${tender.postingAccountCode}, ${tender.amountFils}, 0,
+              ${tender.reference ?? null}, ${input.tradingDate}::date)
+    `
   }
 
   const balanceIds: string[] = []

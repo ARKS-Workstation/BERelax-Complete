@@ -18,11 +18,12 @@ import { journalEntry } from './ledger.ts'
 import { businessDay } from './trading.ts'
 
 /**
- * Versioned package templates and the package sale, mirroring `0078_package.sql`.
+ * Versioned package templates, the package sale and the redemption, mirroring `0078_package.sql` and
+ * `0083_package_redemption.sql`.
  *
  * One file for all five tables, deliberately: `pnpm db:drift` keys its map on the TABLE name, so a second
  * file declaring `package_balance` would silently win, and 0063's NOTE asked for one mirror per unit.
- * M-TILL-10 extends this file rather than shadowing it.
+ * M-TILL-10 extended this file rather than shadowing it, which is what that note asked for.
  *
  * ## Editing a template inserts a version; it does not change one
  *
@@ -41,7 +42,8 @@ import { businessDay } from './trading.ts'
  * database refusal, measured over TOTAL movement rather than the net — a posting that credited `4010` and
  * debited the contra `4095` by the same figure nets to zero and has recognised revenue on a package sale.
  *
- * Releasing `2050` into `4020` at redemption is M-TILL-10's.
+ * Releasing `2050` into `4020` and `2030` at redemption is {@link packageRedemption}, at the foot of this
+ * file.
  *
  * Nothing writes through Drizzle. The mirror exists so `pnpm db:drift` can compare the two directions.
  */
@@ -257,5 +259,98 @@ export const packageBalance = pgTable(
     // leave an entitlement nobody can count.
     check('package_balance_cannot_overdraw', sql`${t.sessionsRedeemed} <= ${t.sessionsTotal}`),
     check('package_balance_cannot_overrelease', sql`${t.releasedFils} <= ${t.valueFils}`),
+  ],
+)
+
+/**
+ * One treatment delivered against one prepaid entitlement, mirroring `0083_package_redemption.sql`.
+ *
+ * ## This is where the VAT event is
+ *
+ * **[UNVERIFIED] Y11-vat-package.** A redemption posts `Dr 2050` at the released gross, `Cr 4020` at the
+ * net and `Cr 2030` at the VAT: the provisional answer puts the date of supply HERE and not at the sale, so
+ * the sale period's output-VAT box contains nothing from packages and the redemption period's box 1 contains
+ * the tax on what was actually delivered. `package_redemption_posts_the_release` (ZG008) is that rule as a
+ * database refusal, and it is stricter than ZG005 has to be: a sale may say "nothing on revenue", and a
+ * release has to say "exactly this much on exactly 4020 and nothing on any other revenue account".
+ *
+ * ## Append-only
+ *
+ * UPDATE and DELETE raise (ZG007). A redemption is the recognition of a supply on a VAT return, so the
+ * correction for a wrong one is a dated reversal and a fresh row (ADR 0017) — which is also why there is no
+ * `updatedAt` here.
+ *
+ * ## The figure is not this table's opinion
+ *
+ * `releasedFils` is `package_release_through_fils(value, total, redeemed)` at the point after this row minus
+ * the same before it — one expression, in SQL, which `@berelax/core`'s `releaseThrough` computes identically
+ * in `BigInt` and which ZG009 re-adds over the rows. `netFils` is GENERATED as `releasedFils - vatFils`, so
+ * `net + vat === gross` holds by construction (ADR 0007).
+ *
+ * `appointmentId` carries NO foreign key, `invoiceAppointment.appointmentId`'s reason (0063): PostgreSQL
+ * refuses `truncate appointment` while a referencing table is absent from the statement, and four suites
+ * truncate it by list. `package_redemption_appointment_once` still bites, because it constrains the id.
+ */
+export const packageRedemption = pgTable(
+  'package_redemption',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    packageBalanceId: uuid('package_balance_id')
+      .notNull()
+      .references(() => packageBalance.id, { onDelete: 'restrict' }),
+    /** The delivery. No foreign key: see the note above. */
+    appointmentId: uuid('appointment_id').notNull(),
+    sessionsRedeemed: smallint('sessions_redeemed').notNull(),
+    /**
+     * The gross released out of `2050`.
+     *
+     * `mode: 'bigint'` rather than `'number'`, `payment.amountFils`'s reason: the driver returns bigint as a
+     * string precisely so an amount cannot silently lose precision, and a mirror that re-introduced a JS
+     * number here would undo that for the column a VAT return is built from.
+     */
+    releasedFils: bigint('released_fils', { mode: 'bigint' }).notNull(),
+    vatFils: bigint('vat_fils', { mode: 'bigint' }).notNull(),
+    /**
+     * `releasedFils - vatFils`, **generated and stored**.
+     *
+     * Mirrored as an ordinary column because `pnpm db:drift` compares presence and nullability, and because
+     * nothing writes through Drizzle. Its domain in SQL is `fils` and not `fils_nonneg`, deliberately: a
+     * generated column's domain is checked BEFORE the table's CHECK constraints, so `fils_nonneg` there
+     * would refuse a VAT figure above the gross with `fils_nonneg_check` and
+     * `package_redemption_vat_not_more_than_gross` would never fire — 0068 measured that on
+     * `payment.applied_fils` and 0083 does not repeat it.
+     */
+    netFils: bigint('net_fils', { mode: 'bigint' }).notNull(),
+    /** The rate applied, snapshotted: a rate change must not restate a release already in a filed return. */
+    vatRateBp: smallint('vat_rate_bp').notNull(),
+    /**
+     * The BUSINESS DAY the treatment was delivered on, and the VAT period this release falls in.
+     *
+     * A foreign key into `business_day`, `packageSale.tradingDate`'s reason: trading runs 11:00–02:00, so a
+     * 01:30 redemption belongs to the previous trading date — and `expiresOn` is compared against THIS
+     * column rather than against a date truncated from an instant.
+     */
+    tradingDate: date('trading_date')
+      .notNull()
+      .references(() => businessDay.tradingDate, { onUpdate: 'cascade', onDelete: 'restrict' }),
+    /** Mandatory and a real foreign key: a liability released with no entry behind it is unexplainable. */
+    journalEntryId: text('journal_entry_id')
+      .notNull()
+      .references(() => journalEntry.entryId),
+    redeemedAt: timestamp('redeemed_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    /** One appointment is one delivery, so it draws down one entitlement. The acceptance line. */
+    unique('package_redemption_appointment_once').on(t.appointmentId),
+    /** One entry per redemption, which is what lets ZG008 measure the WHOLE entry against this row. */
+    unique('package_redemption_one_per_entry').on(t.journalEntryId),
+    index('package_redemption_balance_idx').on(t.packageBalanceId),
+    index('package_redemption_trading_date_idx').on(t.tradingDate),
+    check('package_redemption_sessions_positive', sql`${t.sessionsRedeemed} >= 1`),
+    check('package_redemption_release_positive', sql`${t.releasedFils} > 0`),
+    check('package_redemption_rate_bounded', sql`${t.vatRateBp} between 0 and 10000`),
+    /** Named, because the domain on `netFils` would otherwise answer with no rule a caller can recognise. */
+    check('package_redemption_vat_not_more_than_gross', sql`${t.vatFils} <= ${t.releasedFils}`),
   ],
 )

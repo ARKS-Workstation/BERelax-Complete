@@ -30199,6 +30199,816 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 110a-110z. (M-TILL-10) Package redemption: the drawdown the DATABASE refuses to let drift, the release
+//            posting that must land on exactly one revenue account, the expiry that posts NOTHING, and the
+//            payment row a package sale never wrote.
+//
+// Three parts, because the unit's claims are of three kinds.
+//
+// The probes are known-bad fixtures against real PostgreSQL. Almost everything `0083_package_redemption.sql`
+// adds is a DATABASE rule — two immutability triggers, an expiry trigger, a trigger PAIR for the
+// redeemed-or-charged question, two DEFERRED constraint triggers, five CHECKs, a replaced ceiling function
+// and a raising arithmetic function — and a constraint is only a gate once something has been seen to bounce
+// off it (ADR 0003). A case that proved only that a TypeScript guard refuses would leave the statement
+// `psql` issues untested, and that statement is what the unit is about: a liability only `redeemPackage`
+// treats as un-releasable is a liability a migration can release.
+//
+// `VERBOSITY=verbose` so psql prints the SQLSTATE as well as the message, and every probe runs inside
+// `begin; … ; set constraints all immediate; rollback;`. The `set constraints` is not decoration: ZG008 and
+// ZG009 are DEFERRED and would otherwise fire at a COMMIT that never comes (block 98's measurement).
+//
+// **`set constraints all immediate` STICKS for the rest of the transaction, which is why every probe here
+// puts it last.** A probe that issued it half way through was refused by `assert_entry_balanced` (ZL003) on
+// the NEXT `insert into journal_entry`, before its own lines existed — measured while writing this block, and
+// it reported ZL003 while claiming to be about the release.
+//
+// **Trigger ORDER matters and it is why several probes write a CORRECT balance move.** PostgreSQL fires
+// triggers on one event in alphabetical order by NAME, so on `package_redemption`
+// `package_redemption_drawdown_matches_the_balance` (ZG009) answers before
+// `package_redemption_posts_the_release` (ZG008). A probe about the posting that left the balance alone
+// would report ZG009 while claiming to be about ZG008 — this session's dominant defect class, and the one
+// M-TILL-09 recorded twice.
+//
+// The second part breaks `packages/core/src/money/package-drawdown.ts`,
+// `packages/db/src/services/redeem-package.ts`, `packages/db/src/services/sell-package.ts` and
+// `packages/fixtures/src/package-redemption.ts`, and watches the suites that cover them fail. The third is
+// the control that every suite and every probe passes unedited.
+//
+// Every source case edits a shipped file and restores it in a `finally`, and every anchor goes through
+// `replaceOnce` (brief rule 20). The local mutant helper is named `redemptionMutant` and not `…Mutant`
+// after a shape another block uses: blocks 106 and 107 each defined a same-shaped `…Mutant` and git found
+// the bodies as shared context and INTERLEAVED the two blocks on merge.
+{
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  /** A year nothing else posts into: 2083 is this unit's sweep suite, 2084 its pair suite, 2086 gate 105,
+   *  2087/2089 M-TILL-11, 2088 the journal, 2091 period-close, 2092 M-TILL-09's itest, 2093 gate 103,
+   *  2094 gate 98, 2095-2099 five fixtures suites. */
+  const YEAR = 2085
+  const SOLD = `${YEAR}-04-08`
+  const TAKEN = `${YEAR}-06-12`
+  /** Six months from SOLD, which is the GENERATED `expires_on` — read, never re-derived. */
+  const EXPIRES = `${YEAR}-10-08`
+  const LATE = `${YEAR}-10-09`
+  const CASH = '1010'
+  const DEFERRED = '2050'
+  const REDEMPTION_REVENUE = '4020'
+  const TREATMENT_REVENUE = '4010'
+  const DISCOUNTS = '4095'
+  const OUTPUT_VAT = '2030'
+  const GRATUITIES = '2040'
+  const KEY = 'gate_pkgred_110'
+  /** A three-session, 100,001-fils balance: ceil(100001/3) = 33,334, then 33,334, then 33,333. */
+  const PRICE = 100_001
+  const SESSIONS = 3
+  const FIRST_RELEASE = 33_334
+  const FIRST_NET = 31_747
+  const FIRST_VAT = 1_587
+  // Fifteen digits. A gate value, block 92's: the real TRN is unknown (Y1-trn) and the seeded placeholder
+  // is refused by two CHECKs on `invoice` (0026).
+  const GATE_TRN = '100123456700003'
+
+  const psqlProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /** The trading calendar rows the foreign keys need, 11:00 to 02:00 so they cross midnight (0011). */
+  const calendar = [SOLD, TAKEN, EXPIRES, LATE]
+    .map(
+      (day) =>
+        'insert into business_day (trading_date, opens_at, closes_at, source) values (' +
+        `'${day}'::date, ('${day}'::date + time '11:00') at time zone 'Asia/Dubai', ` +
+        `('${day}'::date + interval '1 day' + time '02:00') at time zone 'Asia/Dubai', 'weekly') ` +
+        'on conflict (trading_date) do nothing',
+    )
+    .join('; ')
+
+  /** The nth live priced variant, by descending price. A subquery, so no id is written into this file. */
+  const variant = (n) =>
+    '(select v.id from service_variant v join service s on s.id = v.service_id ' +
+    `where s.archived_at is null order by v.gross_price_fils desc, v.id limit 1 offset ${n})`
+  const buyer = '(select id from customer order by id limit 1)'
+
+  /** No lock over this year, gate 103's and gate 105's reason: a leftover lock answers before any rule. */
+  const NO_LOCKS = `delete from period_lock where starts_on >= '${YEAR}-01-01' and ends_on <= '${YEAR}-12-31'`
+  const SETUP = `${NO_LOCKS}; ${calendar}`
+
+  const templateId = `(select id from package_template where template_key = '${KEY}')`
+  const versionId = `(select id from package_template_version where template_id = ${templateId} and version = 1)`
+  const saleId = `(select id from package_sale where journal_entry_id = 'GATE-RED-SALE')`
+  const balanceId = `(select id from package_balance where package_sale_id = ${saleId})`
+
+  /**
+   * A template, a version, its line, the sale's entry, the sale, its balance and its payment row.
+   *
+   * The payment row is part of the base fixture rather than an extra, because ZG012 requires the payments
+   * against a sale to EQUAL its price: a base without it would be refused at the `set constraints` of every
+   * probe below, which would report ZG012 for every case in this block.
+   */
+  const SOLD_PACKAGE =
+    `insert into package_template (template_key) values ('${KEY}'); ` +
+    'insert into package_template_version (template_id, version, internal_name, ' +
+    'public_display_name, price_fils, validity_months, transferable, unredeemed_balance_policy, ' +
+    `is_provisional, provisional_note, open_question_id) values (${templateId}, 1, ` +
+    `'Gate course', 'Gate course', ${PRICE}, 6, false, 'retained', true, 'gate probe', ` +
+    "'Y9-package-policy'); " +
+    'insert into package_template_line (template_version_id, line_no, service_variant_id, ' +
+    `session_count) values (${versionId}, 1, ${variant(0)}, ${SESSIONS}); ` +
+    "insert into journal_entry (entry_id, entry_date, narrative, source) values ('GATE-RED-SALE', " +
+    `'${SOLD}'::date, 'Gate package sale', 'package_sale'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+    `('GATE-RED-SALE', 1, '${CASH}', ${PRICE}, 0), ('GATE-RED-SALE', 2, '${DEFERRED}', 0, ${PRICE}); ` +
+    'insert into package_sale (customer_id, template_version_id, trading_date, price_fils, ' +
+    'session_count, validity_months, transferable, unredeemed_balance_policy, journal_entry_id) ' +
+    `values (${buyer}, ${versionId}, '${SOLD}'::date, ${PRICE}, ${SESSIONS}, 6, false, 'retained', ` +
+    "'GATE-RED-SALE'); " +
+    'insert into package_balance (package_sale_id, line_no, service_variant_id, sessions_total, ' +
+    `value_fils) values (${saleId}, 1, ${variant(0)}, ${SESSIONS}, ${PRICE}); ` +
+    'insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ' +
+    `posting_account_code, amount_fils, change_given_fils, trading_date) values (null, ${saleId}, 1, ` +
+    `'cash', '${CASH}', ${PRICE}, 0, '${SOLD}'::date)`
+
+  const BASE = `${SETUP}; ${SOLD_PACKAGE}`
+
+  /**
+   * The release entry. `lines` overrides the three default lines, which is how the ZG008 probes are built —
+   * the whole point of that rule is what happens when an entry carries a line it should not.
+   */
+  const releaseEntry = (id, day, options = {}) =>
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${id}', '${day}'::date, 'Gate redemption', 'package_redemption'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils, credit_fils) values ' +
+    (options.lines ??
+      `('${id}', 1, '${DEFERRED}', ${FIRST_RELEASE}, 0), ` +
+        `('${id}', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_NET}), ` +
+        `('${id}', 3, '${OUTPUT_VAT}', 0, ${FIRST_VAT})`)
+
+  const redemption = (id, options = {}) =>
+    'insert into package_redemption (package_balance_id, appointment_id, sessions_redeemed, ' +
+    `released_fils, vat_fils, vat_rate_bp, trading_date, journal_entry_id) values (${balanceId}, ` +
+    `${options.appointment ?? 'gen_random_uuid()'}, ${options.units ?? 1}, ` +
+    `${options.released ?? FIRST_RELEASE}, ${options.vat ?? FIRST_VAT}, 500, ` +
+    `'${options.day ?? TAKEN}'::date, '${id}')`
+
+  /** The balance move a correct redemption of `units` session(s) makes. Two columns, which is all the grant
+   *  allows — and setting `released_fils` from the FUNCTION rather than by addition is what makes ZG009's
+   *  third equality hold by construction. */
+  const drawdown = (units = 1) =>
+    'update package_balance set sessions_redeemed = sessions_redeemed + ' +
+    `${units}, released_fils = package_release_through_fils(value_fils, sessions_total, ` +
+    `sessions_redeemed + ${units}) where id = ${balanceId}`
+
+  /** A correct, complete first redemption. The base of every probe that is about something else. */
+  const REDEEMED = (id) => `${releaseEntry(id, TAKEN)}; ${redemption(id)}; ${drawdown()}`
+
+  /** One issued document with one line, billing `appointment` as line `lineNo` (or as no line). */
+  const invoiceBilling = (appointment, lineNo) =>
+    'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+    'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+    'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total, notes) ' +
+    `values ('tax_invoice', 'TAX-INV', 'GATE-PKGRED', 850101, 'GATE-PKGRED-0001', ` +
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', " +
+    `'${GATE_TRN}', '250 Al Meena Street', 'Abu Dhabi', 'Customer 0042', ` +
+    `'${SOLD}'::date, '${SOLD}'::date, 20, 2, 22, 'GATE-PKGRED-1'); ` +
+    'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+    'vat_rate_bp, line_net_fils, line_vat_fils) values ((select id from invoice where notes = ' +
+    "'GATE-PKGRED-1'), 1, 'Gate probe treatment', 1, 22, 500, 20, 2); " +
+    'insert into invoice_appointment (invoice_id, appointment_id, line_no) values ((select id from ' +
+    `invoice where notes = 'GATE-PKGRED-1'), ${appointment}, ${lineNo === null ? 'null' : lineNo})`
+
+  const APPT = "'aaaaaaaa-0000-4000-8000-000000000001'::uuid"
+
+  const probes = [
+    // --- the redemption is append-only ----------------------------------------------------------
+    {
+      // A release is the recognition of a supply on a VAT return. An UPDATE of it restates a figure that
+      // has been filed, and the correction is a dated reversal and a new row (ADR 0017).
+      name: 'redemption gate rejects an UPDATE of a redemption',
+      rule: 'ZG007',
+      sql: `${BASE}; ${REDEEMED('GATE-RED-IMM')}; update package_redemption set vat_rate_bp = 0 where journal_entry_id = 'GATE-RED-IMM'`,
+    },
+    {
+      name: 'redemption gate rejects a DELETE of a redemption',
+      rule: 'ZG007',
+      sql: `${BASE}; ${REDEEMED('GATE-RED-IMM2')}; delete from package_redemption where journal_entry_id = 'GATE-RED-IMM2'`,
+    },
+
+    // --- expiry ---------------------------------------------------------------------------------
+    {
+      // The acceptance line, in SQL. `expires_on` is 0078's GENERATED column and this reads it; a release
+      // after that date puts revenue and output VAT into a period for an entitlement the terms had closed.
+      name: 'redemption gate rejects a redemption dated after the sale expired',
+      rule: 'ZG010',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-LATE', LATE)}; ${redemption('GATE-RED-LATE', { day: LATE })}; ${drawdown()}`,
+    },
+    {
+      // The message has to name the DATE the money ran out, not merely refuse. A refusal a front desk
+      // cannot act on is the one that gets retried.
+      name: 'redemption gate names the date the entitlement closed',
+      rule: `ended on ${EXPIRES}`,
+      sql: `${BASE}; ${releaseEntry('GATE-RED-LATE2', LATE)}; ${redemption('GATE-RED-LATE2', { day: LATE })}; ${drawdown()}`,
+    },
+
+    // --- ZG009: the drawdown is what the redemptions say, and what the formula says ---------------
+    {
+      // A liability released against nothing. This is the case a ceiling cannot catch: 0078's CHECKs allow
+      // any move up to the total, and nothing in 0078 says the columns came from a redemption at all.
+      name: 'redemption gate rejects a balance drawn down with no redemption row',
+      rule: 'ZG009',
+      sql: `${BASE}; ${drawdown()}`,
+    },
+    {
+      // The mirror: a redemption row that did not move the balance. The supply would be recognised twice
+      // the next time anybody read the entitlement.
+      name: 'redemption gate rejects a redemption that did not move the balance',
+      rule: 'ZG009',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-NOMOVE', TAKEN)}; ${redemption('GATE-RED-NOMOVE')}`,
+    },
+    {
+      // ONE FILS off, consistently on the row AND on the balance. Both of ZG009's first two equalities hold
+      // and the figure is still wrong — this is the case the third equality exists for, and the only one
+      // that reads the formula rather than the rows.
+      name: 'redemption gate rejects a release figure one fils off, consistent in both places',
+      rule: 'the release formula gives',
+      sql:
+        `${BASE}; ${releaseEntry('GATE-RED-FIG', TAKEN, {
+          lines:
+            `('GATE-RED-FIG', 1, '${DEFERRED}', ${FIRST_RELEASE - 1}, 0), ` +
+            `('GATE-RED-FIG', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_NET - 1}), ` +
+            `('GATE-RED-FIG', 3, '${OUTPUT_VAT}', 0, ${FIRST_VAT})`,
+        })}; ` +
+        `${redemption('GATE-RED-FIG', { released: FIRST_RELEASE - 1 })}; ` +
+        'update package_balance set sessions_redeemed = sessions_redeemed + 1, released_fils = ' +
+        `released_fils + ${FIRST_RELEASE - 1} where id = ${balanceId}`,
+    },
+    {
+      // The session counts disagreeing while the money agrees: two sessions taken off the balance and one
+      // recorded. The entitlement and the money are two columns and a redemption moves both.
+      name: 'redemption gate rejects a session count the redemptions do not add up to',
+      rule: 'redemption session(s)',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-SESS', TAKEN)}; ${redemption('GATE-RED-SESS')}; ${drawdown(2)}`,
+    },
+
+    // --- ZG008: the posting IS the release -------------------------------------------------------
+    {
+      // A release filed under another day's takings lands in another VAT period, and at a period boundary
+      // in one that has already been filed.
+      name: 'redemption gate rejects an entry dated on another business day than its redemption',
+      rule: 'ZG008',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-DAY', EXPIRES)}; ${redemption('GATE-RED-DAY')}; ${drawdown()}`,
+    },
+    {
+      // 2050 debited by the net rather than the gross: the entry balances, because the VAT line is gone
+      // too, and the liability has fallen by less than the customer consumed.
+      name: 'redemption gate rejects a liability released by the NET rather than the gross',
+      rule: 'debits 2050 Deferred revenue by',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-NET', TAKEN, {
+        lines:
+          `('GATE-RED-NET', 1, '${DEFERRED}', ${FIRST_NET}, 0), ` +
+          `('GATE-RED-NET', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_NET})`,
+      })}; ${redemption('GATE-RED-NET')}; ${drawdown()}`,
+    },
+    {
+      // The GROSS credited to revenue and nothing to 2030: the supply overstated by the tax, which is the
+      // mistake that understates a VAT return and overstates the year's income at once.
+      name: 'redemption gate rejects revenue recognised at the gross',
+      rule: 'credits 4020 Package redemption revenue by',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-GROSS', TAKEN, {
+        lines:
+          `('GATE-RED-GROSS', 1, '${DEFERRED}', ${FIRST_RELEASE}, 0), ` +
+          `('GATE-RED-GROSS', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_RELEASE})`,
+      })}; ${redemption('GATE-RED-GROSS')}; ${drawdown()}`,
+    },
+    {
+      // THE rule. 4010 credited 7,000 and the contra 4095 debited 7,000: the NET movement on the other
+      // revenue accounts is ZERO and a package's revenue HAS been put on the wrong account and the wrong
+      // VAT box. ZG008 measures debits PLUS credits precisely so this is caught, and the figure it reports
+      // is the total of both sides.
+      name: 'redemption gate rejects revenue smuggled through a self-cancelling contra pair',
+      rule: 'moves 14000 fils across revenue accounts other than 4020',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-CONTRA', TAKEN, {
+        lines:
+          `('GATE-RED-CONTRA', 1, '${DEFERRED}', ${FIRST_RELEASE}, 0), ` +
+          `('GATE-RED-CONTRA', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_NET}), ` +
+          `('GATE-RED-CONTRA', 3, '${OUTPUT_VAT}', 0, ${FIRST_VAT}), ` +
+          `('GATE-RED-CONTRA', 4, '${TREATMENT_REVENUE}', 0, 7000), ` +
+          `('GATE-RED-CONTRA', 5, '${DISCOUNTS}', 7000, 0)`,
+      })}; ${redemption('GATE-RED-CONTRA')}; ${drawdown()}`,
+    },
+    {
+      // The output VAT put on another liability — 2040 Gratuities payable, which is a plausible slip and
+      // balances perfectly. 2030 moves nothing, so box 1 is short by the tax on a supply that happened.
+      name: 'redemption gate rejects output VAT posted to another liability',
+      rule: 'credits 2030 Output VAT payable by 0',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-WRONGVAT', TAKEN, {
+        lines:
+          `('GATE-RED-WRONGVAT', 1, '${DEFERRED}', ${FIRST_RELEASE}, 0), ` +
+          `('GATE-RED-WRONGVAT', 2, '${REDEMPTION_REVENUE}', 0, ${FIRST_NET}), ` +
+          `('GATE-RED-WRONGVAT', 3, '${GRATUITIES}', 0, ${FIRST_VAT})`,
+      })}; ${redemption('GATE-RED-WRONGVAT')}; ${drawdown()}`,
+    },
+
+    // --- one appointment, one settlement ---------------------------------------------------------
+    {
+      // One appointment is one delivery, so it draws down one entitlement. Without this, two balances could
+      // each be told they paid for the same treatment and 2050 would be released twice for one supply.
+      name: 'redemption gate rejects two redemptions of one appointment',
+      rule: 'package_redemption_appointment_once',
+      sql:
+        `${BASE}; ${releaseEntry('GATE-RED-A1', TAKEN)}; ${redemption('GATE-RED-A1', { appointment: APPT })}; ` +
+        `${drawdown()}; ${releaseEntry('GATE-RED-A2', TAKEN)}; ` +
+        `${redemption('GATE-RED-A2', { appointment: APPT, released: FIRST_RELEASE })}`,
+    },
+    {
+      // One entry per redemption, which is what lets ZG008 measure the WHOLE entry against one row's
+      // figures instead of trying to find its own lines inside a shared posting.
+      name: 'redemption gate rejects two redemptions sharing one journal entry',
+      rule: 'package_redemption_one_per_entry',
+      sql: `${BASE}; ${releaseEntry('GATE-RED-E1', TAKEN)}; ${redemption('GATE-RED-E1')}; ${redemption('GATE-RED-E1')}`,
+    },
+    {
+      // The pair, first direction: the document already states the appointment as a chargeable line, so
+      // redeeming it as well would release 2050 for a treatment the customer paid for twice.
+      name: 'redemption gate rejects redeeming an appointment a document charges for',
+      rule: 'ZG011',
+      sql:
+        `${BASE}; ${invoiceBilling(APPT, 1)}; ${releaseEntry('GATE-RED-CH', TAKEN)}; ` +
+        `${redemption('GATE-RED-CH', { appointment: APPT })}; ${drawdown()}`,
+    },
+    {
+      // The pair, other direction. A guard on one table only refuses one of the two orders, and the money
+      // is released twice for one supply in both.
+      name: 'redemption gate rejects charging for an appointment already redeemed',
+      rule: 'ZG011',
+      sql:
+        `${BASE}; ${releaseEntry('GATE-RED-CH2', TAKEN)}; ` +
+        `${redemption('GATE-RED-CH2', { appointment: APPT })}; ${drawdown()}; ${invoiceBilling(APPT, 1)}`,
+    },
+
+    // --- the ceilings 0078 declared with the columns ---------------------------------------------
+    {
+      // The first acceptance line, for a writer that came through neither core nor the service.
+      name: 'redemption gate rejects drawing a balance past what was sold',
+      rule: 'package_balance_cannot_overdraw',
+      sql: `${BASE}; update package_balance set sessions_redeemed = ${SESSIONS + 1} where id = ${balanceId}`,
+    },
+    {
+      // Two ceilings and not one: a redemption moves both, and one that moved only the money would leave an
+      // entitlement nobody can count.
+      name: 'redemption gate rejects releasing more than the balance is worth',
+      rule: 'package_balance_cannot_overrelease',
+      sql: `${BASE}; update package_balance set released_fils = ${PRICE + 1} where id = ${balanceId}`,
+    },
+    {
+      // NAMED, and that is the case. `net_fils` is generated as `released - vat`, and a generated column's
+      // DOMAIN is checked BEFORE the table's CHECKs — so with `fils_nonneg` there this would have been
+      // refused by `fils_nonneg_check`, naming no rule a caller could recognise (0068's measurement).
+      name: 'redemption gate rejects VAT above the gross BY NAME, not by a domain',
+      rule: 'package_redemption_vat_not_more_than_gross',
+      sql:
+        `${BASE}; ${releaseEntry('GATE-RED-VATBIG', TAKEN)}; ` +
+        `${redemption('GATE-RED-VATBIG', { vat: FIRST_RELEASE + 1 })}`,
+    },
+
+    // --- the payment row, and the ceiling that had stopped applying ------------------------------
+    {
+      // Exactly one document. Both set is a payment attached to two things, and the drawer would expect the
+      // money once while two documents each claimed it.
+      name: 'redemption gate rejects a payment settling both an invoice and a package',
+      rule: 'payment_settles_exactly_one_document',
+      sql:
+        `${BASE}; ${invoiceBilling(APPT, 1)}; ` +
+        'insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ' +
+        'posting_account_code, amount_fils, change_given_fils, trading_date) values ((select id from ' +
+        `invoice where notes = 'GATE-PKGRED-1'), ${saleId}, 2, 'cash', '${CASH}', 1, 0, '${SOLD}'::date)`,
+    },
+    {
+      // And neither: money in the drawer with no reason for being there, which is the state a cash-up
+      // cannot explain. `num_nonnulls = 1` refuses both directions as ONE constraint.
+      name: 'redemption gate rejects a payment settling no document at all',
+      rule: 'payment_settles_exactly_one_document',
+      sql:
+        `${BASE}; insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ` +
+        'posting_account_code, amount_fils, change_given_fils, trading_date) values (null, null, 9, ' +
+        `'cash', '${CASH}', 1, 0, '${SOLD}'::date)`,
+    },
+    {
+      // NULLs are DISTINCT in a unique index, so `payment_one_row_per_tender` constrains none of the rows
+      // 0083 adds. This is its twin, and without it a retried tender would have the drawer expecting the
+      // money twice.
+      name: 'redemption gate rejects a repeated tender number on one package sale',
+      rule: 'payment_one_row_per_package_tender',
+      sql:
+        `${BASE}; insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ` +
+        `posting_account_code, amount_fils, change_given_fils, trading_date) values (null, ${saleId}, ` +
+        `1, 'cash', '${CASH}', 1, 0, '${SOLD}'::date)`,
+    },
+    {
+      // An OVER-tender. ZG012 is an EQUALITY and not a ceiling, which is where it differs from ZT001: an
+      // invoice may be part paid and a package may not.
+      name: 'redemption gate rejects a package over-tendered by one fils',
+      rule: 'ZG012',
+      sql:
+        `${BASE}; insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ` +
+        `posting_account_code, amount_fils, change_given_fils, trading_date) values (null, ${saleId}, ` +
+        `2, 'cash', '${CASH}', 1, 0, '${SOLD}'::date)`,
+    },
+    {
+      // A PART payment, which is the half a ceiling alone would have let through — and the half that
+      // credits 2050 with a liability the salon was never paid for.
+      name: 'redemption gate rejects a part-paid package',
+      rule: 'ZG012',
+      sql:
+        `${SETUP}; ${SOLD_PACKAGE}; delete from payment where package_sale_id = ${saleId}; ` +
+        'insert into payment (invoice_id, package_sale_id, tender_no, tender_kind, ' +
+        `posting_account_code, amount_fils, change_given_fils, trading_date) values (null, ${saleId}, ` +
+        `1, 'cash', '${CASH}', ${PRICE - 1}, 0, '${SOLD}'::date)`,
+    },
+    {
+      // ZT001 STILL FIRES after `payment_within_the_document()` was replaced. This is the case the
+      // replacement exists for: with a nullable `invoice_id` the single-branch version compared `0 > NULL`,
+      // which is NULL, which is not TRUE — a ceiling that silently stopped applying to the new rows while
+      // still reporting itself as present.
+      name: 'redemption gate: ZT001 still refuses an overpaid INVOICE after the branch was added',
+      rule: 'ZT001',
+      sql:
+        `${SETUP}; ${invoiceBilling(APPT, 1)}; ` +
+        'insert into payment (invoice_id, tender_no, tender_kind, posting_account_code, ' +
+        'amount_fils, change_given_fils, trading_date) values ((select id from invoice where notes = ' +
+        `'GATE-PKGRED-1'), 1, 'cash', '${CASH}', 5000, 0, '${SOLD}'::date)`,
+    },
+
+    // --- the formula function refuses rather than returning NULL ---------------------------------
+    {
+      // A NULL here would propagate into ZG009's comparison and make it neither true nor false — a check
+      // that silently stops checking, which is the exact failure mode ZT001's replacement is about.
+      name: 'redemption gate: the release formula refuses a balance of no sessions',
+      rule: 'has no share to release',
+      sql: `${SETUP}; select package_release_through_fils(1000::bigint, 0, 0)`,
+    },
+    {
+      name: 'redemption gate: the release formula refuses a point past the entitlement',
+      rule: 'must not answer for it',
+      sql: `${SETUP}; select package_release_through_fils(1000::bigint, 3, 4)`,
+    },
+    {
+      name: 'redemption gate: the release formula refuses a NULL argument',
+      rule: 'neither true nor false',
+      sql: `${SETUP}; select package_release_through_fils(null::bigint, 3, 1)`,
+    },
+  ]
+
+  for (const probe of probes) {
+    checkRejectedBy(probe.name, psqlProbe(probe.sql), probe.rule)
+  }
+
+  // The ACCEPTED control. Without it every probe above could be passing because the base fixture is
+  // rejected, and the gate would report the unit's rules as working while nothing could be written at all.
+  //
+  // Six facts in order: the whole course redeemed to the fils, a redemption ON the expiry date accepted,
+  // the link row a checkout containing a redemption writes (`line_no` null) accepted, the drawdown run as
+  // `berelax_app` — the role and the statements the executor uses — and the exposure view readable.
+  {
+    const accepted = psqlProbe(
+      `${BASE}; ` +
+        `${releaseEntry('GATE-OK-1', TAKEN)}; ${redemption('GATE-OK-1')}; ${drawdown()}; ` +
+        `${releaseEntry('GATE-OK-2', TAKEN)}; ${redemption('GATE-OK-2')}; ${drawdown()}; ` +
+        // The third session carries the remainder DOWN: 33,333 and not 33,334, which is what makes the
+        // three sum to the price exactly. Dated ON the expiry, because a validity in months that refused
+        // its last day would be five months and thirty days and the customer counts in months.
+        `${releaseEntry('GATE-OK-3', EXPIRES, {
+          lines:
+            `('GATE-OK-3', 1, '${DEFERRED}', 33333, 0), ` +
+            `('GATE-OK-3', 2, '${REDEMPTION_REVENUE}', 0, 31746), ` +
+            `('GATE-OK-3', 3, '${OUTPUT_VAT}', 0, 1587)`,
+        })}; ` +
+        // As `berelax_app`, the role the application actually connects as, for the two statements that
+        // matter. M-TILL-09's worst recorded defect was an upsert naming a column outside this role's
+        // grant: every test connected as the OWNER, so it passed everything and would have failed on the
+        // first real save. 0078 narrowed `package_balance`'s UPDATE to exactly these two columns for this
+        // unit, so the drawdown is RUN as the role that will run it rather than checked by reading a grant.
+        'set local role berelax_app; ' +
+        `${redemption('GATE-OK-3', { released: 33333, day: EXPIRES })}; ${drawdown()}; reset role; ` +
+        // The redemption LINK a checkout writes: `line_no` null, which 0063 made nullable for exactly this
+        // and which the ZG011 pair must not refuse.
+        `${invoiceBilling('gen_random_uuid()', null)}; ` +
+        `select unreleased_fils from package_expiry_exposure where package_sale_id = ${saleId}`,
+    )
+    check(
+      'redemption gate: a whole course redeemed, a boundary-date release, a redemption LINK and the app role ARE accepted',
+      !accepted.failed,
+      'the control probe was refused, so every redemption probe above may be passing for the wrong ' +
+        `reason:\n${accepted.output}`,
+    )
+  }
+
+  // The release formula's own properties, asserted in SQL over a census rather than through a reader.
+  // Written as a probe that RAISES when a property does not hold, with its own control below proving the
+  // raise can fire — block 105's shape, and the reason is the same: a `do $$` block that cannot raise is a
+  // case that measures nothing.
+  {
+    const raiseIf = (condition, marker) =>
+      `do $$ begin if ${condition} then raise exception '${marker}'; end if; end $$`
+    const census =
+      'select count(*) from generate_series(1, 400) v, generate_series(1, 25) n ' +
+      'where package_release_through_fils(v::bigint, n, n) <> v'
+    const zeroAt =
+      'select count(*) from generate_series(1, 400) v, generate_series(1, 25) n ' +
+      'where package_release_through_fils(v::bigint, n, 0) <> 0'
+    const monotone =
+      'select count(*) from generate_series(1, 400) v, generate_series(1, 25) n, ' +
+      'generate_series(1, 25) r where r <= n and ' +
+      'package_release_through_fils(v::bigint, n, r) < package_release_through_fils(v::bigint, n, r - 1)'
+    const band =
+      'select count(*) from generate_series(1, 400) v, generate_series(1, 25) n, ' +
+      'generate_series(1, 25) r where r <= n and (package_release_through_fils(v::bigint, n, r) - ' +
+      'package_release_through_fils(v::bigint, n, r - 1)) not between v / n and (v + n - 1) / n'
+    const properties = psqlProbe(
+      `${SETUP}; ${raiseIf(`(${census}) > 0`, 'A-FULL-COURSE-DOES-NOT-RELEASE-THE-WHOLE-VALUE')}; ` +
+        `${raiseIf(`(${zeroAt}) > 0`, 'AN-UNTOUCHED-BALANCE-HAS-ALREADY-RELEASED-SOMETHING')}; ` +
+        `${raiseIf(`(${monotone}) > 0`, 'A-REDEMPTION-CAN-PUT-MONEY-BACK-INTO-THE-LIABILITY')}; ` +
+        `${raiseIf(`(${band}) > 0`, 'A-SESSION-IS-NOT-WORTH-AN-EVEN-SHARE-OF-THE-BALANCE')}`,
+    )
+    check(
+      'redemption gate: the release formula sums to the value, starts at zero, never decreases, and is even',
+      !properties.failed,
+      'A-FULL-COURSE-DOES-NOT-RELEASE-THE-WHOLE-VALUE means a fully redeemed balance leaves money in ' +
+        '2050 the customer has consumed; AN-UNTOUCHED-BALANCE-HAS-ALREADY-RELEASED-SOMETHING means a ' +
+        'sale recognises revenue before a treatment; A-REDEMPTION-CAN-PUT-MONEY-BACK-INTO-THE-LIABILITY ' +
+        'means the formula is not monotonic, so a drawdown could credit 2050; ' +
+        'A-SESSION-IS-NOT-WORTH-AN-EVEN-SHARE-OF-THE-BALANCE means the split is exact but not ' +
+        `defensible — one session carrying two sessions' worth:\n${properties.output}`,
+    )
+    // The control for that probe: a `raise` that can never fire is a case that measures nothing. Floor
+    // division instead of ceiling, which is the wrong answer the formula exists to avoid, and it must trip
+    // the whole-course property.
+    checkRejectedBy(
+      'redemption gate: the formula property probe can actually fire',
+      psqlProbe(
+        `${SETUP}; ${raiseIf(
+          '(select count(*) from generate_series(1, 400) v, generate_series(1, 25) n ' +
+            'where (v::bigint * 1) / n <> package_release_through_fils(v::bigint, n, 1)) > 0',
+          'A-FULL-COURSE-DOES-NOT-RELEASE-THE-WHOLE-VALUE',
+        )}`,
+      ),
+      'A-FULL-COURSE-DOES-NOT-RELEASE-THE-WHOLE-VALUE',
+    )
+  }
+
+  // --- the source mutants -----------------------------------------------------------------------
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+  const DRAWDOWN = 'packages/core/src/money/package-drawdown.ts'
+  const DRAWDOWN_SUITE = 'packages/core/src/money/package-drawdown.test.ts'
+  const SERVICE = 'packages/db/src/services/redeem-package.ts'
+  const SELL = 'packages/db/src/services/sell-package.ts'
+  const MAPPING = 'packages/fixtures/src/package-redemption.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/package-redemption.itest.ts'
+  const SWEEP = 'apps/worker/src/jobs/package-expiry.ts'
+  const SWEEP_SUITE = 'apps/worker/src/jobs/package-expiry.itest.ts'
+
+  /**
+   * One edit to one shipped file, and the suite that must go red.
+   *
+   * Named `redemptionMutant` rather than after a shape another block uses. Blocks 106 and 107 each defined
+   * a `…Mutant` helper of the same shape, git found the two bodies as shared context and INTERLEAVED the
+   * blocks on merge, and both had to be rebuilt from whole sides.
+   */
+  const redemptionMutant = (file, find, into, suite, runner = unitRun) =>
+    withEditedFile(
+      file,
+      (text) => replaceOnce(text, find, into),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // The closed form becomes floor division. Every share is still arithmetically defensible, the parts no
+  // longer sum to the value, and the fils it loses is the one that makes the liability disagree with the
+  // cash taken. This is the defect the formula exists to prevent.
+  checkRejectedBy(
+    'redemption gate: a floor-division release is caught',
+    redemptionMutant(
+      DRAWDOWN,
+      '  const released = (BigInt(valueGross.fils) * BigInt(sessionsRedeemed) + total - 1n) / total',
+      '  const released = (BigInt(valueGross.fils) * BigInt(sessionsRedeemed)) / total',
+      DRAWDOWN_SUITE,
+    ),
+    'releaseThrough',
+  )
+
+  // `alreadyRedeemed` and `units` transposed. Both are small integers and both are "sessions", so this is
+  // the plausible slip — and the case that catches it asserts a DISAGREEMENT rather than an agreement,
+  // which is what M-TILL-11's expectedFloat control failed to do.
+  checkRejectedBy(
+    'redemption gate: transposing the balance state and the units redeemed is caught',
+    redemptionMutant(
+      DRAWDOWN,
+      '  const before = releaseThrough(valueGross, sessionsTotal, alreadyRedeemed)\n' +
+        '  const after = releaseThrough(valueGross, sessionsTotal, alreadyRedeemed + units)',
+      '  const before = releaseThrough(valueGross, sessionsTotal, units)\n' +
+        '  const after = releaseThrough(valueGross, sessionsTotal, units + alreadyRedeemed)',
+      DRAWDOWN_SUITE,
+    ),
+    'transposing',
+  )
+
+  // The probe sums the NET movement on the other revenue accounts rather than the total, which reports as
+  // clean the one posting that matters: 4010 credited and the contra 4095 debited by the same figure.
+  checkRejectedBy(
+    'redemption gate: an other-revenue probe that sums the NET movement is caught',
+    redemptionMutant(
+      DRAWDOWN,
+      "    } else if (account.type === 'revenue') {\n      otherRevenue += line.debitFils + line.creditFils",
+      "    } else if (account.type === 'revenue') {\n      otherRevenue += line.creditFils - line.debitFils",
+      DRAWDOWN_SUITE,
+    ),
+    'otherRevenueMovementFils',
+  )
+
+  // The expiry boundary becomes EXCLUSIVE, which makes a six-month validity five months and thirty days —
+  // and the customer counts in months.
+  checkRejectedBy(
+    'redemption gate: an exclusive expiry boundary is caught',
+    redemptionMutant(
+      DRAWDOWN,
+      '  return (onDate as string) <= (expiresOn as string)',
+      '  return (onDate as string) < (expiresOn as string)',
+      DRAWDOWN_SUITE,
+    ),
+    'redemptionIsInTime',
+  )
+
+  // The breakage measurement stops filtering on "something still owed", so a package somebody used up
+  // appears as exposure — and the figure the owner would answer Y9-package-policy from is inflated by
+  // every fully redeemed package that ever expired.
+  checkRejectedBy(
+    'redemption gate: an exposure figure that counts fully drawn-down packages is caught',
+    redemptionMutant(
+      DRAWDOWN,
+      '    (row) => !redemptionIsInTime(row.expiresOn, asAt) && row.unreleasedGross.fils > 0,',
+      '    (row) => !redemptionIsInTime(row.expiresOn, asAt),',
+      DRAWDOWN_SUITE,
+    ),
+    'breakageExposure',
+  )
+
+  // The service stops checking the caller's release figure against the LOCKED balance. ZG009 still refuses
+  // it at COMMIT, so the transaction fails either way — but the itest asserts the CLASS, and an
+  // `invariant_violated` from a trigger is not a `PackageReleaseDisagrees` a caller can retry on.
+  checkRejectedBy(
+    'redemption gate: dropping the release verification is caught',
+    redemptionMutant(
+      SERVICE,
+      '  const expected = Number(balance.expectedReleaseFils)\n  if (expected !== input.releasedFils) {',
+      '  const expected = Number(balance.expectedReleaseFils)\n  if (false && expected !== input.releasedFils) {',
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'PackageReleaseDisagrees',
+  )
+
+  // The service stops reading `expires_on`. ZG010 still refuses the statement, so the redemption does not
+  // happen — but the caller gets a raw SQLSTATE where the acceptance line asks for `PackageExpired`, and
+  // the itest asserts BOTH the class and the ABSENCE of ZG010's own phrase.
+  checkRejectedBy(
+    'redemption gate: dropping the expiry check leaves the database answering, and is caught',
+    redemptionMutant(
+      SERVICE,
+      '  if (input.tradingDate > balance.expiresOn) {',
+      '  if (false && input.tradingDate > balance.expiresOn) {',
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'PackageExpired',
+  )
+
+  // The outer transferable check goes. The acceptance line is that a non-transferable balance may not move,
+  // and the database CANNOT hold this one — a transfer is the same statement a merge issues — so the
+  // service is the only thing between a customer's entitlement and somebody else's record.
+  //
+  // What this case MEASURED, and it is worth recording: the balance still does not move, because the
+  // permitted branch re-reads under the row lock and refuses `!locked.transferable` there too. So the door
+  // is held twice inside one function, and what the outer check uniquely provides is the EVIDENCE — the
+  // `audit_event` for the refused attempt. The rule matched is therefore the audit assertion's and not the
+  // class's, because naming the class would have been a rule this edit does not break.
+  checkRejectedBy(
+    'redemption gate: dropping the outer transferable check loses the evidence, and is caught',
+    redemptionMutant(
+      SERVICE,
+      '  if (!sale.transferable) {',
+      '  if (false && !sale.transferable) {',
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'writes an audit_event for the refused attempt',
+  )
+
+  // The refusal throws BEFORE its audit row is written, which is where this function started and why the
+  // signature takes a `Sql`: a row written inside the caller's transaction does not survive the throw,
+  // because `withUnitOfWork` wraps the callback in `sql.begin`. The itest's DELTA over `audit_event` is
+  // what found that, and this is the finding held shut.
+  checkRejectedBy(
+    'redemption gate: a refusal that throws before recording the attempt is caught',
+    redemptionMutant(
+      SERVICE,
+      "    await withUnitOfWork(sql, actor, async (uow) => {\n      await uow.audit.record({\n        action: 'package.transfer_refused',",
+      '    if (input.reason !== undefined) {\n' +
+        '      throw new PackageNotTransferable(input.packageSaleId, sale.customerId, input.toCustomerId)\n' +
+        '    }\n' +
+        "    await withUnitOfWork(sql, actor, async (uow) => {\n      await uow.audit.record({\n        action: 'package.transfer_refused',",
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'writes an audit_event for the refused attempt',
+  )
+
+  // The `payment` rows a package sale writes go away — which is M-TILL-09's recorded defect, restored. The
+  // cash taken for a package vanishes from `readDrawerTakings` and ZU005, and M-TILL-11's cash-up reads the
+  // drawer as OVER by it and posts the difference to 6140.
+  checkRejectedBy(
+    'redemption gate: a package sale that writes no payment row is caught',
+    redemptionMutant(
+      SELL,
+      '  for (const [index, tender] of input.tenders.entries()) {\n    await uow.sql`\n      insert into payment (invoice_id, package_sale_id, tender_no, tender_kind,',
+      '  for (const [index, tender] of [].entries()) {\n    await uow.sql`\n      insert into payment (invoice_id, package_sale_id, tender_no, tender_kind,',
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'writes one payment row per tender',
+  )
+
+  // The mapping sends the NET where the row wants the GROSS. Both halves' own suites stay green — core's
+  // posting is untouched and the service is untouched — and the figure in the ledger and the figure on the
+  // row disagree. This is the layer neither half can see, and gate 103 showed a mapping that silently
+  // omitted a posting was invisible to everything but the pair.
+  checkRejectedBy(
+    'redemption gate: a mapping that sends the net where the row wants the gross is caught',
+    redemptionMutant(
+      MAPPING,
+      '      releasedFils: posting.releasedGross.fils,',
+      '      releasedFils: posting.net.fils,',
+      PAIR_SUITE,
+      itestRun,
+    ),
+    'PackageRedemptionMappingMismatch',
+  )
+
+  // The sweep stops RAISING for a sale sold under `forfeited` terms, and silently reports a clean run.
+  // Writing such a balance off needs an account that does not exist — 4050 is the VOUCHER account and a
+  // package is a different product on the same VAT box — and an answer to whether forfeited consideration is
+  // a supply at all. A silent skip is indistinguishable from a sweep that had nothing to do, which is the
+  // "stub that looks like it works" docs/12 §1 forbids.
+  checkRejectedBy(
+    'redemption gate: a sweep that silently skips what it cannot answer for is caught',
+    redemptionMutant(
+      SWEEP,
+      '  if (exposure.awaitingPolicy.length > 0) {',
+      '  if (false && exposure.awaitingPolicy.length > 0) {',
+      SWEEP_SUITE,
+      itestRun,
+    ),
+    'BreakagePolicyUnanswered',
+  )
+
+  // The business date is sliced off the ISO instant instead of resolved in Asia/Dubai. The business is at
+  // UTC+4, so a sweep at 20:30 UTC is already the next day locally — and at a month boundary a package that
+  // expired at midnight reads as still live for one more pass.
+  checkRejectedBy(
+    'redemption gate: a business date sliced off a UTC instant is caught',
+    redemptionMutant(
+      SWEEP,
+      "  return new Intl.DateTimeFormat('en-CA', {",
+      "  if (atIso.length > 0) return atIso.slice(0, 10)\n  return new Intl.DateTimeFormat('en-CA', {",
+      SWEEP_SUITE,
+      itestRun,
+    ),
+    'resolves the business date in Asia/Dubai',
+  )
+
+  // The controls: every suite passes unedited. Without these, a mutant case that failed for an unrelated
+  // reason — a stale anchor, a broken import, a database nobody seeded — would report PASS.
+  for (const [name, suite, runner] of [
+    ['the core drawdown suite', DRAWDOWN_SUITE, unitRun],
+    ['the redemption pair suite', PAIR_SUITE, itestRun],
+    ['the expiry sweep suite', SWEEP_SUITE, itestRun],
+  ]) {
+    const clean = run('pnpm', runner(suite))
+    check(
+      `redemption gate: ${name} passes unedited`,
+      !clean.failed,
+      `it does not, so every mutant case above may be failing for a reason that is not the edit:\n${clean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

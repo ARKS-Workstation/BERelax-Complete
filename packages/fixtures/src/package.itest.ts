@@ -95,16 +95,22 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql?.unsafe(
-    'truncate package_balance, package_sale, package_template_line, package_template_version, ' +
-      'package_template',
+    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
+    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement — a package
+    // sale now writes a `payment` row (0083 §6) and a redemption hangs off a balance.
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
   )
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
   await sql.unsafe(
-    'truncate package_balance, package_sale, package_template_line, package_template_version, ' +
-      'package_template',
+    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
+    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement — a package
+    // sale now writes a `payment` row (0083 §6) and a redemption hangs off a balance.
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
   )
   nonce += 1
 })

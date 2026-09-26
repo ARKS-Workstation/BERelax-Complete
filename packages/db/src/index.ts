@@ -1290,6 +1290,26 @@ export {
   tradingDateAt,
 } from './services/recurring-cost.ts'
 export {
+  isAppointmentAlreadyRedeemed,
+  isBalanceOverdrawn,
+  PACKAGE_REDEMPTION_SQLSTATE,
+  PackageBalanceUnavailable,
+  PackageExpired,
+  type PackageExposureRow,
+  type PackageLiability,
+  PackageNotTransferable,
+  PackageReleaseDisagrees,
+  packageRedemptionError,
+  type RedeemedPackage,
+  type RedeemPackageInput,
+  readExpiredPackages,
+  readPackageLiability,
+  redeemPackage,
+  type TransferPackageBalanceInput,
+  type TransferredPackage,
+  transferPackageBalance,
+} from './services/redeem-package.ts'
+export {
   ArchivedServiceReferenced,
   currentPackageTemplateVersion,
   DEFERRED_REVENUE_ACCOUNT_CODE,
@@ -2176,7 +2196,51 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // its private SQLSTATE prefix: `ZI` is 0026's and 0072's, and every other mnemonic letter is taken, so what
 // a private code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
 //
+// 83 is 0083_package_redemption.sql: the drawdown, the VAT event, expiry, and the `payment` row a package
+// sale never wrote (M-TILL-10). 0078 put the whole consideration into 2050 as a liability; this is the other
+// end, and the POSTING is the unit: `Dr 2050` at the released gross, `Cr 4020` at the net, `Cr 2030` at the
+// VAT, because **[UNVERIFIED] Y11-vat-package** puts the date of supply at REDEMPTION — so the sale period's
+// output-VAT box holds nothing from packages and the redemption period's box 1 holds the tax on what was
+// delivered. ZG008 is that rule as a database refusal and it is STRICTER than ZG005 has to be: a sale may
+// say "nothing on revenue", and a release has to say "exactly this much on exactly 4020 and nothing on any
+// other revenue account" — measured as debits PLUS credits on the others, ZG005's reason, because 4010
+// credited against the contra 4095 nets to zero and has put a package's revenue on the wrong VAT box. What a
+// redemption releases is `package_release_through_fils(value, total, redeemed) = ceil(value * redeemed /
+// total)`, ONE expression in SQL that `@berelax/core`'s `releaseThrough` computes identically in BigInt and
+// that a census in packages/fixtures holds equal both ways; deliberately NOT largest-remainder over equal
+// weights, which is what the per-LINE split uses, because checking largest remainder in a CONSTRAINT means
+// reimplementing it in PL/pgSQL and a closed form has no second implementation. ZG009 is what makes the
+// drawdown columns mean anything: 0078 gave them ceilings and a ceiling is not an identity, so ZG009 holds
+// `sessions_redeemed` and `released_fils` equal to the SUM of the redemptions AND to the formula — the third
+// equality being the one the other two cannot give, since a caller releasing a plausible but wrong figure
+// consistently in both places satisfies them. It fires from BOTH tables, because a balance moved with no
+// redemption row and a redemption row with no balance move are different defects. Expiry READS 0078's
+// generated `expires_on` (ZG010) and BREAKAGE POSTS NOTHING: **[UNVERIFIED] Y9-package-policy**
+// provisionally RETAINS an unredeemed balance, so the customer is still owed the treatments and moving 2050
+// into revenue would recognise money the business owes — on a VAT box, for a supply that has not happened,
+// and reversing it later means amending a filed return. `package_expiry_exposure` is therefore a VIEW that
+// MEASURES what is unreleased against an expired sale, which is the figure the owner needs to answer the
+// question at all; a sale sold under `forfeited` terms gets a refusal naming the question rather than a
+// guessed posting, and 4050 Unredeemed voucher breakage is NOT reused because a voucher and a package are
+// different products sharing a box. An appointment is redeemed or charged and never both, which cannot be a
+// unique constraint because the two facts live in two tables — it is a TRIGGER PAIR (ZG011), one on each
+// table, because whichever row arrives second has to be the one refused. Finally the fix to 0078's own
+// recorded defect: `payment.invoice_id` becomes NULLABLE, `payment.package_sale_id` is added beside it and
+// exactly one of the two is required, because a package sale writes no invoice and cash taken for it was
+// absent from `readDrawerTakings` and ZU005 — so M-TILL-11's cash-up read the drawer as OVER by it and
+// posted the difference to 6140. `payment_within_the_document()` (ZT001) is REPLACED rather than extended,
+// and not for a feature: with a nullable invoice_id its test became `0 > NULL`, which is NULL, which is not
+// TRUE, so the ceiling silently stopped applying to exactly the rows this file adds — the package branch is
+// an EQUALITY (ZG012) and not a ceiling, because an invoice may be part paid and a package may not. Its
+// SQLSTATE class is `ZG`, the SAME as 0078's, which is the one place this file departs from that header's
+// argument on purpose: 0078 left `ZP` because two DOMAINS sharing a class makes one translator answer for
+// the other's refusal, and this is the same domain read by the same caller with disjoint numbers — and
+// eleven codes already appear in more than one migration file, because a later migration replaces the
+// function that raises one. Deferred to M-TILL-13, which is todo: a tax document at redemption (the VAT
+// itself is NOT deferred with it — 2030 is credited here) and the seeded fixture packages, because what the
+// business sells is a fact nobody has stated.
+//
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
-// what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 82 as const
+// what makes a non-contiguous allocation cost nothing. 84 through 87 are held the same way.
+export const SCHEMA_VERSION = 83 as const
