@@ -28042,6 +28042,300 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 107a-107n. (C-AUTO-03) The frequency ledger: the window boundary that has to be a second rather than a
+//            week, the column the count reads, the transactional path that must not touch the ledger at
+//            all, and the merge key that must be backed by the index it claims.
+//
+//            The two worth reading twice are 107h and 107i, because both mutations leave a system that
+//            works. 107h points the ledger read at `attempted_at` instead of `counted_at` — every counted
+//            send is still counted, every report still balances, and REFUSALS now count too, which makes
+//            the cap self-reinforcing: the first refusal raises the count that caused it, each refusal
+//            extends its own window, and a contact who hits the cap once is refused for ever. Nothing
+//            fails, nothing logs, and the symptom arrives months later as a campaign that reaches nobody.
+//            107i makes a transactional send write a ledger row: booking confirmations and OTPs then spend
+//            the marketing allowance, so the cap becomes a function of how often somebody logs in and the
+//            marketing this business IS allowed to do goes quiet.
+//
+//            107a and 107b are the two ends of one window and they have two needles on purpose — the unit
+//            suite was split into two named cases for exactly that, because a gate case that breaks one
+//            boundary and fails a test called "the window" proves only that the window is wrong somewhere.
+//
+//            107k is the one this block exists for beyond its own unit. A clean auto-merge once left a
+//            DUPLICATE participant entry in `merge-participants.ts` — legal TypeScript, invisible in a diff
+//            of a flat list of near-identical objects, and it would have made `merge_record_table`'s
+//            `rows_before_loser = rows_moved + rows_retained_on_loser` fail on the second pass and roll
+//            back every merge the business ever attempted. `registry()` now throws at module load and this
+//            is the case that has been seen to make it fire.
+//
+//            No case here mutates `packages/db/migrations/0080_frequency_ledger.sql`. The database the
+//            suites run against has already had it applied, so an edit to the file changes nothing a
+//            statement can see, and a case that reported PASS on it would be reporting on a file nothing
+//            read. The migration's own refusals — `ZW001` for a switched-off cap, `ZW002` for a re-dated
+//            send, and the CHECK that still holds with `session_replication_role = replica` — are asserted
+//            behaviourally in `frequency-ledger.itest.ts`, each with its control beside it.
+{
+  const CORE = 'packages/core/src/messaging/frequency-cap.ts'
+  const REPO = 'packages/db/src/repositories/frequency-ledger.ts'
+  const REGISTRY = 'packages/db/src/merge-participants.ts'
+  const MIRROR = 'packages/db/src/schema/frequency-ledger.ts'
+  const SETTINGS = 'packages/config/src/settings/registry.ts'
+
+  const CORE_SUITE = 'packages/core/src/messaging/frequency-cap.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/messaging/frequency-cap.property.test.ts'
+  const ROW_SUITE = 'packages/fixtures/src/frequency-ledger.itest.ts'
+  const SETTINGS_SUITE = 'packages/config/src/settings/registry.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const capMutant = (path, anchor, replacement, suite, runner = unit) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 107a. The window's lower bound widened from `>` to `>=`. A send exactly seven days old then still
+  //       counts, so every contact is held one second longer than the rule says — for ever, invisibly, and
+  //       no calendar-week test could see it. This is the acceptance line's "asserted to the second".
+  checkRejectedBy(
+    'frequency gate: a window start that includes the send exactly on it is caught',
+    capMutant(
+      CORE,
+      'return countedAt.filter((instant) => instant > start && instant <= now).length',
+      'return countedAt.filter((instant) => instant >= start && instant <= now).length',
+      CORE_SUITE,
+    ),
+    'excludes a send at exactly the window start',
+  )
+
+  // 107b. The upper bound dropped. A ledger row dated in the future — which a backfill produces and the
+  //       send path cannot — then counts, and one bad row refuses every send to that contact for a month.
+  checkRejectedBy(
+    'frequency gate: counting a send dated in the future is caught',
+    capMutant(
+      CORE,
+      'return countedAt.filter((instant) => instant > start && instant <= now).length',
+      'return countedAt.filter((instant) => instant > start).length',
+      CORE_SUITE,
+    ),
+    'does not count a send in the future',
+  )
+
+  // 107c. The transactional early return removed, so the caps are consulted first and the class checked
+  //       afterwards. Behaviourally identical for every contact with headroom, which is almost all of them
+  //       — and an OTP refused on the one day the marketing had been busy. The property test is what sees
+  //       it, because it drives BOTH classes through cap states that refuse and counts how many did.
+  checkRejectedBy(
+    'frequency gate: a cap that can refuse a transactional send is caught',
+    capMutant(
+      CORE,
+      "  if (input.messageClass === 'transactional') {\n" +
+        "    return { kind: 'not_counted', reason: 'transactional' }\n" +
+        '  }',
+      '  // the class is no longer checked first',
+      PROPERTY_SUITE,
+    ),
+    'transactional in the',
+  )
+
+  // 107d. The bound cap reported as the NARROWEST breaching window instead of the widest. A contact who
+  //       has spent both allowances is then told "you can message them again in five days" when the real
+  //       answer is three weeks — an under-statement, which is the direction that produces a second
+  //       refused attempt and a support ticket nobody can answer from the ledger.
+  checkRejectedBy(
+    'frequency gate: naming the narrowest breaching cap instead of the widest is caught',
+    capMutant(
+      CORE,
+      'if (widest === null || breach.cap.windowSeconds > widest.cap.windowSeconds) widest = breach',
+      'if (widest === null || breach.cap.windowSeconds < widest.cap.windowSeconds) widest = breach',
+      CORE_SUITE,
+    ),
+    'names the LONGEST window when both are spent',
+  )
+
+  // 107e. The horizon guard disabled. A ledger read that goes back a week then decides a THIRTY-day cap on
+  //       one week of history: the decision is `permitted` with a plausible count, and an under-counted cap
+  //       is indistinguishable from not having one.
+  checkRejectedBy(
+    'frequency gate: a ledger read too short for the widest window is caught',
+    capMutant(CORE, '    if (since > start) {', '    if (false) {', CORE_SUITE),
+    'refuses a read that does not reach as far back as a window',
+  )
+
+  // 107f. The limit validator's floor dropped from 1 to 0. Zero looks like the strictest possible setting
+  //       and is the ambiguous one: in every other `max_` setting zero also means "no limit", so a reader
+  //       that treats it as falsy turns the strictest value into the switched-off one.
+  checkRejectedBy(
+    'frequency gate: a cap limit of zero accepted by the validator is caught',
+    capMutant(CORE, '  if (value < 1) {', '  if (value < 0) {', CORE_SUITE),
+    'refuses 0, null, "unlimited", a fraction and a negative',
+  )
+
+  // 107g. The evaluator's missing-prefetch throw turned into `false`. A campaign then answers "not capped"
+  //       for every recipient its prefetch missed and reports a clean run, having sent past the cap to
+  //       exactly the contacts it knew least about. An unread ledger is not an allowance.
+  checkRejectedBy(
+    'frequency gate: an unread ledger read as headroom is caught',
+    capMutant(
+      CORE,
+      '    if (countedAt === undefined) {\n      throw new AppError(',
+      '    if (countedAt === undefined) {\n      return false\n    }\n' +
+        '    if (false as boolean) {\n      throw new AppError(',
+      CORE_SUITE,
+    ),
+    'throws for a recipient the prefetch missed',
+  )
+
+  // 107h. THE case. The ledger read pointed at `attempted_at` instead of `counted_at`, which is the column
+  //       a refusal leaves NULL. Refusals then count, and the cap becomes self-reinforcing: the first
+  //       refusal raises the count that caused it, each refusal extends its own window, and a contact who
+  //       hit the cap once is refused for ever. Every counted send is still counted and every report still
+  //       balances, so nothing else in the system looks wrong.
+  checkRejectedBy(
+    'frequency gate: a cap read that counts its own refusals is caught',
+    capMutant(
+      REPO,
+      '           (extract(epoch from counted_at) * 1000)::bigint::text as "countedAtMs"\n' +
+        '      from frequency_ledger\n' +
+        '     where contact_customer_id = any (${[...args.contactCustomerIds]}::uuid[])\n' +
+        '       and counted_at > ${args.sinceIso}::timestamptz\n' +
+        '       and counted_at <= ${args.untilIso}::timestamptz\n' +
+        '     order by contact_customer_id, counted_at desc',
+      '           (extract(epoch from attempted_at) * 1000)::bigint::text as "countedAtMs"\n' +
+        '      from frequency_ledger\n' +
+        '     where contact_customer_id = any (${[...args.contactCustomerIds]}::uuid[])\n' +
+        '       and attempted_at > ${args.sinceIso}::timestamptz\n' +
+        '       and attempted_at <= ${args.untilIso}::timestamptz\n' +
+        '     order by contact_customer_id, attempted_at desc',
+      ROW_SUITE,
+      rows,
+    ),
+    'the refusal is not counted: two counted sends, not three',
+  )
+
+  // 107i. The transactional guard removed from the writer, so a booking confirmation writes a ledger row.
+  //       The cap then becomes a function of how often somebody logs in, and the marketing this business
+  //       IS allowed to do goes quiet because an OTP spent the allowance.
+  checkRejectedBy(
+    'frequency gate: a transactional send written to the ledger is caught',
+    capMutant(
+      REPO,
+      "    if (args.message.messageClass !== 'promotional') {",
+      "    if (args.message.messageClass === 'never_any_class') {",
+      ROW_SUITE,
+      rows,
+    ),
+    'and no ledger row',
+  )
+
+  // 107j. `isTransaction` forced true, so a caller handing in the POOL gets two un-transacted inserts. The
+  //       message row then survives a ledger row the database refused, and the two diverge: a promotional
+  //       send the cap will never see. Not an injected throw — the second statement failing on its own is
+  //       the shape a caller does not get to choose.
+  checkRejectedBy(
+    'frequency gate: writing the two rows outside one transaction is caught',
+    capMutant(
+      REPO,
+      "  return typeof (sql as unknown as { savepoint?: unknown }).savepoint === 'function'",
+      '  return true',
+      ROW_SUITE,
+      rows,
+    ),
+    'no message row survived the refused ledger row',
+  )
+
+  // 107k. A DUPLICATE participant entry, which is the defect a clean auto-merge really produced once. Legal
+  //       TypeScript, invisible in a diff of a flat list of near-identical objects — and a table applied
+  //       twice re-points its rows on the first pass and moves zero on the second, which violates
+  //       `merge_record_table`'s balance constraint and rolls back every merge the business attempts.
+  checkRejectedBy(
+    'frequency gate: a participant registered twice is caught at module load',
+    capMutant(
+      REGISTRY,
+      "    registeredBy: 'C-AUTO-03',\n  }),",
+      "    registeredBy: 'C-AUTO-03',\n  }),\n" +
+        "  participant({\n    schema: 'public',\n    table: 'frequency_ledger',\n" +
+        "    column: 'contact_customer_id',\n    strategy: 'union_dedupe',\n" +
+        "    conflictKey: ['send_key'],\n    activePredicate: 'counted_at is not null',\n" +
+        '    dedupeKey: null,\n    backReference: null,\n    excludeColumns: [],\n' +
+        "    retainedReason: 'a duplicate entry a clean merge left behind',\n" +
+        "    why: 'a duplicate entry a clean merge left behind',\n" +
+        "    registeredBy: 'C-AUTO-03',\n  }),",
+      ROW_SUITE,
+      rows,
+    ),
+    'more than once',
+  )
+
+  // 107l. The merge's conflict key moved to a column no unique index covers. The key would then be finer
+  //       than the index in one direction and coarser in the other, so the union would either attempt a row
+  //       the index refuses or skip one it should carry — and `assertParticipantKeyIsAUniqueIndex` is what
+  //       refuses the registration rather than letting the merge find out.
+  checkRejectedBy(
+    'frequency gate: a merge key no unique index backs is caught',
+    capMutant(
+      REGISTRY,
+      "    conflictKey: ['send_key'],",
+      "    conflictKey: ['message_id'],",
+      ROW_SUITE,
+      rows,
+    ),
+    'no unique index on that table has exactly those columns',
+  )
+
+  // 107m. The settings schema's floor dropped back to zero, which is where this unit found it. The
+  //       validator, the database and the admin panel all have to refuse the same three spellings, and this
+  //       is the one a settings route reaches first.
+  checkRejectedBy(
+    'frequency gate: a settings schema that accepts a zero cap is caught',
+    capMutant(
+      SETTINGS,
+      '    schema: z.number().int().min(1).max(14),',
+      '    schema: z.number().int().min(0).max(14),',
+      SETTINGS_SUITE,
+    ),
+    'messaging.frequency_cap_per_week = 0',
+  )
+
+  // 107n. The mirror's `countedAt` removed. Drizzle then declares a table whose most important column it
+  //       does not know about, and a query built from these definitions would compile and count nothing.
+  //       `pnpm db:drift` is the gate; this is it being seen to fire.
+  checkRejectedBy(
+    'frequency gate: a mirror missing the column the cap counts is caught by db:drift',
+    withEditedFile(
+      MIRROR,
+      (text) =>
+        replaceOnce(
+          text,
+          "    countedAt: timestamp('counted_at', { withTimezone: true }),",
+          '    // the column the cap counts, no longer mirrored',
+        ),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'frequency_ledger.counted_at: present in the database, missing from Drizzle',
+  )
+
+  // 107z. The control, and it is not a formality: every file above, UNEDITED, passes. Without it the
+  //       thirteen cases are satisfied by suites that fail whatever anybody does to them — which is how a
+  //       block of mutation cases comes to prove nothing at all (case 75x's reason).
+  for (const [name, args] of [
+    ['the core suite', unit(CORE_SUITE)],
+    ['the property suite', unit(PROPERTY_SUITE)],
+    ['the settings suite', unit(SETTINGS_SUITE)],
+    ['the row suite', rows(ROW_SUITE)],
+    ['db:drift', ['db:drift']],
+  ]) {
+    const clean = run('pnpm', args)
+    check(
+      `frequency gate control: ${name} passes unedited`,
+      !clean.failed,
+      `${name} failed with nothing broken, so every mutation case above proves nothing:\n${clean.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

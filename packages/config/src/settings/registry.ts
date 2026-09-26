@@ -262,16 +262,51 @@ export const SETTINGS = [
   define({
     key: 'messaging.frequency_cap_per_week',
     tier: 'operational',
-    schema: z.number().int().min(0).max(14),
+    /**
+     * `min(1)`, not `min(0)`, and the change is the whole of C-AUTO-03's "the cap cannot be switched off".
+     *
+     * A cap of 0 looks like the strictest possible setting and is in fact the ambiguous one: in every
+     * other `max_` setting anybody has met, 0 ALSO means "no limit", so a reader that treats it as falsy
+     * ("no cap configured, so allow") turns the strictest value into the switched-off one. Stopping
+     * promotional traffic altogether is the marketing kill switch's job (C-AUTO-05), which says so on its
+     * face and records who engaged it. `assertFrequencyCapLimit` in `@berelax/core` and migration 0080's
+     * `frequency_cap_value_is_a_cap()` refuse the same three spellings — 0, null and 'unlimited' — so the
+     * refusal holds for a `psql` session too.
+     */
+    schema: z.number().int().min(1).max(14),
     defaultValue: 2,
     label: 'Maximum marketing messages per contact per week',
-    help: 'Applies across every flow and campaign combined, not per campaign.',
+    help: 'Applies across every flow and campaign combined, not per campaign. It cannot be set to zero or switched off: to stop promotional traffic, engage the marketing kill switch.',
     editableBy: OWNER_MANAGER,
     audited: true,
     invalidates: [],
     provisional: {
       openQuestionId: 'Y9-frequency-cap',
-      note: 'No figure supplied; 2 per week assumed.',
+      note: 'No figure supplied; 2 per rolling 7 days assumed.',
+    },
+  }),
+  define({
+    /**
+     * The second half of Y9-frequency-cap, and it is not redundant with the weekly one.
+     *
+     * 2 per week alone permits 8 to 10 in a month, which is a rate nobody would agree to if they were
+     * asked in those words; a monthly cap alone permits all 6 in one afternoon. The pair is what makes
+     * "not too often" hold at both scales, and the two are counted over ROLLING windows of 7 and 30 days
+     * rather than calendar periods — see `packages/core/src/messaging/frequency-cap.ts` for why a
+     * calendar week lets four messages leave in twelve hours inside a cap of two.
+     */
+    key: 'messaging.frequency_cap_per_month',
+    tier: 'operational',
+    schema: z.number().int().min(1).max(60),
+    defaultValue: 6,
+    label: 'Maximum marketing messages per contact per 30 days',
+    help: 'Counted over a rolling 30 days, across every flow and campaign combined. Like the weekly cap it cannot be set to zero or switched off.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-frequency-cap',
+      note: 'No figure supplied; 6 per rolling 30 days assumed.',
     },
   }),
   define({

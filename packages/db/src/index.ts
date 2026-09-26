@@ -531,6 +531,20 @@ export {
   setFlowActive,
 } from './repositories/flow.ts'
 export {
+  type CountedSendRow,
+  FREQUENCY_SOURCE_KINDS,
+  type FrequencyBoundCap,
+  type FrequencyLedgerAttribution,
+  type FrequencyLedgerEntry,
+  type FrequencySourceKind,
+  type RecordedSendWithLedger,
+  readCountedSendInstants,
+  readCountedSendsByContact,
+  readFrequencyLedger,
+  recordFrequencyCapRefusal,
+  recordSendWithLedger,
+} from './repositories/frequency-ledger.ts'
+export {
   type CustomerSnapshotInput,
   INVOICE_DOCUMENT_KINDS,
   INVOICE_SQLSTATE,
@@ -1837,6 +1851,52 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ones are taken (`ZK` is the KEK's, `ZP` is consent's, `ZF` is the flow's) and what a private code has to
 // be is unique to one file, not memorable.
 //
+// 80 is 0080_frequency_ledger.sql: one rolling-window count per contact, shared by every flow and every
+// campaign (C-AUTO-03). The table exists because three unrelated journeys — a win-back sequence, a
+// birthday greeting and a February campaign — each sending "only one message" collectively spam one
+// person, every one of them inside its own rule, and docs/04 §5 says TDRA's sanction is sender-ID
+// SUSPENSION rather than a per-message fine: the penalty falls on the identity the booking confirmations
+// also leave from. So the count is per CONTACT and there is one of it; a per-campaign cap may only ever be
+// stricter (C-AUTO-10), because no arrangement of per-campaign caps adds up to this one.
+//
+// THE decision in this file is `counted_at`. A refused attempt is a row in the SAME table — B-MSG-04
+// writes no `message` row for a refused send and names this unit as where the `frequency_capped` outcome
+// is kept — and what makes that safe is a biconditional: `counted_at is not null` if and only if
+// `outcome = 'sent'`, with every count of the cap reading `counted_at` and never `attempted_at`. No range
+// predicate on a NULL is ever true, so a query that forgot `where outcome = 'sent'` still cannot count a
+// refusal. Without it the cap would be SELF-REINFORCING: the first refusal would raise the count that
+// caused it, each refusal would extend its own window, and a contact who hit the cap once would be refused
+// for ever. `refused_at` is the mirror column rather than a second copy of `attempted_at`, so a row has
+// exactly one of the two and nothing is stored twice.
+//
+// The merge strategy is `union_dedupe`, which 0069 reserved for this table and which this is the only
+// participant using. A ledger row says this contact was sent a promotional message at an instant, and
+// after a merge the contact IS the survivor — so re-pointing makes nothing untrue and makes the cap read
+// one person's real history. Both alternatives are wrong in a direction somebody pays for: rows left on
+// the tombstone are invisible to the cap, which hands the merged contact a FRESH ALLOWANCE and turns a
+// merge into a way to message past the cap; rows COPIED the way `consent` is copied would count one
+// message twice and silence the contact for a fortnight. The natural key is
+// `frequency_ledger_one_counted_send` on `(contact_customer_id, send_key)`, PARTIAL on counted rows — the
+// partiality is what lets a capped attempt retried after the window rolls become a sent row under the same
+// key, and the case the de-duplication exists for is real: pg-boss is at-least-once, a queued job carries
+// the customer id it was enqueued with, and a contact merged mid-run leaves a job pinned to the loser.
+//
+// `source_ref` is text with NO foreign key, which is `invoice`'s argument applied to a counter: a deleted
+// campaign must not delete the evidence of what it sent, nor reduce a contact's count. Neither it nor
+// `send_key` is checked against `is_placeholder_text()` either, and that is deliberate rather than the rule
+// 15 guard being forgotten — both are machine keys, that function is a SUBSTRING search, and a template key
+// spelled `payment_pending` would be refused by a guard about placeholder legal copy. The cap FIGURES are
+// provisional (`Y9-frequency-cap`: 2 per rolling 7 days, 6 per rolling 30) and live in `app_setting` where
+// the Unconfirmed Assumptions panel reads them; they are NOT seeded here, because 0010 leaves that to
+// `seedSettingDefaults` and a figure written in two places is a figure that will disagree with itself. What
+// this file does add is `frequency_cap_value_is_a_cap()`, ONE predicate called from a trigger (`ZW001`, for
+// the sentence a human can act on) and from a CHECK (the layer that still holds when
+// `session_replication_role` has triggers off, which is how a restore runs). It refuses 0 as well as null
+// and `"unlimited"`: 0 looks like the strictest setting and is the ambiguous one, because in every other
+// `max_` setting 0 ALSO means "no limit" — and a reader that treats it as falsy turns the strictest value
+// into the switched-off one. `ZW002` refuses an UPDATE that re-dates or un-counts a send, for every role
+// including the owner; `contact_customer_id` stays writable, because the merge re-points it.
+//
 // 22, 41, 44, 47, 71 and 74 are unused and will stay unused: renumbering to close a gap is how two
 // branches come to apply the same number to different SQL. 71 was allocated to B-UI-03 and 74 to
 // C-CRM-07, and both units turned out to need no migration at all — which is the good outcome, not a
@@ -1861,4 +1921,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 77 as const
+export const SCHEMA_VERSION = 80 as const

@@ -6796,11 +6796,201 @@ units:
     - Cap values are settings carrying provisional:true and appear in the Unconfirmed Assumptions query;
       a constraint rejects 0, null and 'unlimited' with a readable message, so the cap cannot be switched
       off
+    - 'NOTE: THE MANIFEST''S OWN `provisional:` FIELD IS WRONG on both counts and is left as it stands
+      rather than rewritten, because the authority is elsewhere. It says "No OPEN-QUESTIONS id covers this
+      yet - see spec_gaps", and one does: `Y9-frequency-cap` is in docs/OPEN-QUESTIONS.md §A2, has been
+      since before this unit started, and its provisional value is **2 per rolling 7 days and 6 per rolling
+      30 days** rather than the 1-and-4 this field guessed at. The build is against the OPEN-QUESTIONS
+      figures, which are the ones `app_setting` holds, the ones the Unconfirmed Assumptions panel shows and
+      the ones the owner will be asked to confirm; a settings row carrying a figure the question does not
+      name would be answered with the wrong number. The consequence for the FIRST acceptance line is stated
+      in the next note.'
+    - 'NOTE: the first acceptance line - "two flows and one campaign all firing in the same hour produces
+      exactly one promotional send; the other two record a ''frequency_capped'' outcome" - was written
+      against the manifest''s 1-per-week guess, and against the real cap of 2 three attempts produce TWO
+      sends and one refusal. Both shapes are asserted rather than one being smoothed over, and together they
+      are stronger than the line alone. `spends the whole weekly allowance and then refuses` drives the
+      three attempts with no history and asserts sent/sent/blocked, which is what proves the cap binds at
+      the COUNT it declares - a cap that refused the second attempt, or the fourth, would satisfy "one send
+      and two refusals" just as well. `produces exactly ONE send from the three when one allowance is
+      already spent` is the line''s literal shape, on a contact whose week already holds one counted send.
+      Both assert the two refusals name the bound cap and its numbers, and that they came from DIFFERENT
+      sources - which is the whole point of a global cap, since a per-campaign cap would have let each of
+      the three send once.'
+    - 'NOTE: the refusal is a row in the SAME table as the send, and `counted_at` is what makes that safe.
+      B-MSG-04 writes no `message` row for a refused send (packages/messaging/src/lifecycle.ts says why: a
+      row for a message deliberately never sent would appear in the cost report and count against this
+      cap) and names this unit as where the `frequency_capped` outcome is kept. One table rather than two,
+      because the ledger is a merge participant and two tables would be two entries for one fact. What
+      makes one table safe is the biconditional `counted_at is not null <=> outcome = ''sent''`: every count
+      reads `counted_at`, a refusal''s is NULL, and NO range predicate on a NULL is ever true - so a query
+      that forgot `where outcome = ''sent''` still cannot count a refusal. Without that the cap would be
+      SELF-REINFORCING: the first refusal would raise the count that caused it, each refusal would extend
+      its own window, and a contact who hit the cap once would be refused for ever. Gate case 107h is that
+      mutation (the read pointed at `attempted_at`) being seen to fail. `refused_at` is the mirror column
+      rather than a second copy of `attempted_at`, so nothing is stored twice.'
+    - 'NOTE: the merge strategy is `union_dedupe` and the argument is 0069''s, restated because this is the
+      participant it was reserved for and the only one that uses it. A ledger row says this contact was
+      sent a promotional message at an instant, and after a merge the contact IS the survivor - so
+      re-pointing makes nothing untrue and makes the cap read one person''s real history. Left on the
+      tombstone the rows are invisible to the cap, which hands the merged contact a FRESH ALLOWANCE and
+      turns a merge into a way to message past the cap; COPIED the way `consent` is copied, one message
+      would count twice and silence the contact for a fortnight. The natural key is
+      `frequency_ledger_one_counted_send` on `(contact_customer_id, send_key)`, PARTIAL on counted rows, so
+      a capped attempt retried after the window rolls can become a sent row under the same key. The case
+      the de-duplication exists for is real rather than theoretical: pg-boss is at-least-once, a queued job
+      carries the customer id it was enqueued with, and a contact merged mid-run leaves a job pinned to the
+      loser - a replay after the send would write a second ledger row for ONE physical message. EXACTLY ONE
+      entry was added to MERGE_PARTICIPANTS, and `registry()` in that file now throws at module load for a
+      (schema, table, column) registered twice: the duplicate a clean auto-merge left there once was legal
+      TypeScript that would have made every merge refuse, and nothing read the list for duplicates. Gate
+      case 107k is that duplicate being seen to fire.'
+    - 'NOTE: SCOPED OUT, and to which unit. (1) The CAMPAIGN half of the first acceptance line has no
+      `campaign` table - C-AUTO-10 owns one - so the campaign source is a `source_kind` and a `source_ref`
+      with nothing behind it, which is what 0080 says about `source_ref` having no foreign key anyway (a
+      deleted campaign must not delete the evidence of what it sent, nor reduce a contact''s count). The
+      absence of the table is ASSERTED in the itest, so the deferral turns red when C-AUTO-10 lands rather
+      than living only here. (2) The COMPOSITION - read caps, read ledger, decide, send, record - belongs in
+      apps/worker and is written in packages/fixtures/src/frequency-ledger.itest.ts as
+      `attemptPromotionalSend`, because C-AUTO-07 (the interpreter) and C-AUTO-10 (the campaign sender) do
+      not exist and packages/fixtures is the only package that may import both halves. Moving it into the
+      worker is C-AUTO-07''s. (3) The GATE''s own `frequencyCapReached` wiring at the application edge is
+      C-AUTO-04''s; what this unit supplies is the evaluator (`frequencyCapGateEvaluator`) and the prefetch
+      it reads, and the itest drives the real `evaluateGate` through them. (4) `hasConsent` and
+      `isSuppressed` are stubbed permissive in the itest on purpose: they are C-CRM-03''s and C-CRM-04''s,
+      proven over their own cross products, and a send refused for a second reason would make every
+      assertion here vacuous because the cap would never be reached.'
+    - 'NOTE: `Y6-sender-ids` is carried the way B-MSG-02, C-AUTO-01 and C-AUTO-02 carry it and no second
+      pattern was invented: `PROVISIONAL_SENDER_IDS` in packages/messaging/src/sender-identity.ts is one
+      constant, validated at import by `assertSenderIdRegistry`, and the itest sends through it. The
+      promotional identity is the `AD-` one, which 0061''s `message_sms_identity_matches_its_class`
+      biconditional makes unavoidable for a promotional row. Nothing in this unit invents a sender ID and
+      nothing changes when the real registrations land except that one constant.'
+    - 'NOTE: what changes when the owner answers Y9-frequency-cap: ONE audited settings change per figure
+      and nothing else. `messaging.frequency_cap_per_week` and `messaging.frequency_cap_per_month` are
+      `app_setting` rows read through `readSetting` on the send path, `writeSetting` clears
+      `is_provisional` so the row leaves the Unconfirmed Assumptions panel by being confirmed, and
+      `app_setting_history` keeps what the cap was in March. No migration, no code change, and no
+      recomputation of the past: the ledger records `bound_cap_limit` and `bound_cap_window_seconds` on each
+      refusal, so "why was this refused in March" is answered with March''s figure rather than April''s -
+      the argument `working_hours_rule` makes for versioning payroll rates, applied to the one place here
+      that needs it. What the owner CANNOT do is switch the cap off: 0, null and ''unlimited'' are refused
+      by `assertFrequencyCapLimit` in @berelax/core, by the zod schema in the settings registry (which this
+      unit changed from `min(0)` to `min(1)`), and by `frequency_cap_value_is_a_cap()` in the database, so
+      the refusal holds for a psql session too. Zero is refused although it looks strictest, because in
+      every other max_ setting zero ALSO means "no limit" and a reader that treats it as falsy turns the
+      strictest value into the switched-off one; stopping promotional traffic is the marketing kill
+      switch''s job (C-AUTO-05).'
+    - 'NOTE: the property test''s generator is STRATIFIED and says so. A plain weighted generator was
+      measured first and put 236 of 400 cases in the `clear` arm with `month_only` at 42 - 59% of a run
+      spent on the arm that proves the least, which is brief rule 22''s shape exactly. `month_only` cannot
+      be reached by luck: it needs six sends inside thirty days with at most ONE inside the last seven, and
+      any generator dense enough for six in a month is dense enough to put two in the last week. So the
+      SHAPE is drawn from four strata and the instants are drawn at random inside each; the arm is then
+      CLASSIFIED from the generated instants rather than taken from the stratum, because a stratum aiming
+      at `week_only` lands in `both` whenever its rest-of-month draw comes out high. Floors are measured
+      over twelve runs of 400 and set at roughly half of each cell''s mean: per class, out of 200 cases,
+      clear min 48 mean 57.6 floor 28, week_only min 23 mean 33.0 floor 16, month_only min 33 mean 41.8
+      floor 20, both min 53 mean 67.6 floor 32.'
+    - 'NOTE: gate block `// 107a-107n.` in scripts/test-gates.mjs, 14 cases plus a 5-command control
+      (107z), placed after `// 104a-104k.` and before `// 79a-79k.` because that file is ordered by
+      CATEGORY rather than by number. Selector: `pnpm gates:only --only ''// 107a''`. No case mutates
+      packages/db/migrations/0080_frequency_ledger.sql: the database the suites run against has already had
+      it applied, so an edit to the file changes nothing a statement can see and a PASS would be a report
+      about a file nothing read. The migration''s own refusals - ZW001 for a switched-off cap, ZW002 for a
+      re-dated or un-counted send, and the CHECK that still holds under `session_replication_role =
+      replica` - are asserted behaviourally in the itest with a control beside each.'
+    - 'NOTE: THE DEFECT WORTH READING FIRST, because it was caught by another unit''s check 34 minutes into
+      a verify rather than by this unit''s own. The fixture promotional body said "A treat for you at BE
+      RELAX. Reply STOP to opt out." `unreachableOptOutPhrasesIn` in @berelax/core forbids exactly that for
+      every template this business ships, and the reason is not style: every SMS leaves from a
+      TDRA-registered ALPHANUMERIC sender ID which CANNOT receive an inbound message, so "Reply STOP" tells
+      somebody who wants the messages to stop that they have a way to stop them, sends them into a void, and
+      leaves the business able to say it offered an opt-out while having offered none. The link to the
+      preference centre is the only functional one there is. What made it a shared failure rather than a
+      local one: an itest template row is PERMANENT (a `message` row references it ON DELETE RESTRICT), so
+      every run of this file put an offending body into the corpus that
+      apps/web/src/preference-centre.itest.ts scans - and that suite failed, in a file this unit does not
+      touch, at step 32 of 37. Fixed three ways: the body is now "A treat for you at BE RELAX this week."
+      with no opt-out claim at all, a case in THIS file asserts
+      `unreachableOptOutPhrasesIn(PROMO_BODY)` is empty with a control on the predicate beside it (so a
+      regression fails in six seconds in the file that caused it), and the unit database was recreated from
+      scratch so the rows the earlier runs committed are gone. The check was right and was NOT widened.'
+    - 'NOTE: seven more defects found in this unit''s OWN work, all by its own checks and six of the
+      session''s dominant class - a check whose stated claim was not what it measured. (1) The itest used FIXED
+      synthetic contacts. `frequency_ledger` rows cannot be deleted (no DELETE for the application role, and
+      a counted row is a send that happened), so a second run against the same database found its contacts
+      already carrying the first run''s sends: four cases failed, every one a true measurement of a contact
+      the file had not set up. Per-run `send_key`s were not enough, because what a cap reads is the CONTACT.
+      The band is now per run. (2) The shared-send merge case reused the previous case''s merge pair and
+      asserted `rowsMoved === 0`; it measured 1, because that pair still held two DISTINCT sends, one of
+      which legitimately moves. The claim was "one send recorded against both records is counted once" and
+      the measurement was "how many of this contact''s rows moved". It has its own pair now. (3) The
+      transactional case seeded its two sends at T0 and T0+1s and read the cap at T0, where the second is
+      in the FUTURE and correctly counted by nothing - so the promotional control at the end was permitted
+      and the case failed. The rule was right; the fixture was asserting against a cap state it had not
+      created. (4) A provider-call assertion read `toBeGreaterThanOrEqual(2)` under a comment saying "the
+      provider was really called twice and not three times" - three calls satisfy it too, so it measured
+      nothing about the sentence above it; it is a DELTA of exactly 2 now. (5) `seedCountedSend` hard-coded
+      `sourceKind: ''campaign''` for every row including the ones whose ref is a flow key, so a seeded row
+      said a campaign spent the allowance while naming a flow; nothing asserted on it, which is why it
+      mattered - `frequency_ledger_source_idx` exists to answer "what did this journey spend". (6)
+      `source_ref` and `send_key` were first checked against `is_placeholder_text()` like every other text
+      column here. That function is a SUBSTRING search over markers including `pending` and `tbc`, and both
+      columns are machine keys - a template key spelled `payment_pending`, or a flow named `winback_tbc`,
+      would have been refused by a guard about placeholder legal copy. Only the blank check remains, and
+      0080 says why. (7) The repository doc referred to `frequencyLedgerHorizonIso`, which does not exist;
+      the export is `frequencyLedgerHorizonSeconds`. And two caught before any run: the migration relied on
+      `and` short-circuiting to avoid casting a jsonb string to numeric, which SQL does not guarantee
+      (`case` does it now), and `frequency_cap_value_is_a_cap` was written twice, once in the trigger and
+      once in the CHECK. `pnpm purity` then refused `new Date(...)` in this module -
+      scripts/check-core-purity.mjs bans the `Date` token throughout packages/core/src/messaging - so the
+      two refusal messages that render an instant go through `instantToIso`; the gate was right and was NOT
+      widened.'
+    - 'NOTE: FOR THE INTEGRATOR - `blocked_on_owner` should also list `Y9-frequency-cap` and this unit did
+      not add it, deliberately. The convention is clear and every comparable unit follows it: B-CAT-03 lists
+      `Y9-turnaround`, B-AVAIL-05 lists `Y9-gender`, P-HR-05 lists `Y9-overtime`, and 24 units list the Y9
+      they carry. `Y9-frequency-cap` is currently listed by NO unit at all, so the question this unit is
+      built on top of is invisible in the "needs owner input" view. It was not added here because
+      `scripts/progress.py` RENDERS `blocked_on_owner` into docs/PROGRESS.md (line 41 and line 53), so the
+      one-word edit fails `pnpm progress:check` until PROGRESS.md is regenerated - and regenerating it is
+      part of marking a unit done (commit 91cda06), which is the integrator''s and not this unit''s. Adding
+      `Y9-frequency-cap` to the list and re-running `python3 scripts/progress.py` in the same step closes
+      it.'
+    - 'NOTE: two red integration steps this unit''s own chain hit in files it does not own, neither of them
+      this unit''s, recorded here for the reason C-AUTO-02 records the three it found. (1)
+      apps/web/src/breakpoint-preview.itest.ts failed `[screenshot-never-stabilised] dark-1440` with the
+      captures ALTERNATING between exactly two renderings. Run alone it passes 16/16. At the moment it
+      failed, THREE other worktrees were mid-`vitest.integration.config.ts` and two more were serving
+      `next-server`, which is the load condition that file''s own comment describes at length ("it flapped
+      for days, a byte at a time, passing in isolation every time"). Reported and not touched, per brief
+      rule 1. (2) apps/web/src/hero-lcp.itest.ts and apps/web/src/home.itest.ts can fail their "paints
+      everything at once" case with `expected [] received ["video.be-hero__video @ 0"]`. That is a
+      PerformanceObserver race in the TEST - the callback runs in a later task, so under load the hero
+      island has already written `data-hero-state="attaching"`, under which the video is deliberately
+      transparent, and the sample is a frame late. It is fixed on the branch tip in 3b46765 and 4cebad2,
+      neither of which is an ancestor of this worktree''s base d2cc809 (verified with `git merge-base
+      --is-ancestor`). A DIFFERENT failure in either file - an LCP assertion, a budget, a missing entry -
+      would be real and is not covered by this note.'
+    - 'NOTE: SCHEMA_VERSION set to 80, which is the newest migration on disk in this worktree - 0078 and
+      0079 are held by units in flight and are not here, and gate case 90a walks the migrations that EXIST
+      rather than consecutive integers, so the gap costs nothing. The migration ledger paragraph `// 80 is
+      0080_frequency_ledger.sql` was added after 77''s and before the permanent-gaps note, which is where
+      0078''s and 0079''s will slot in above it. The sentence "78 is the next number nobody holds" in that
+      note is now stale and was deliberately NOT edited: it is another unit''s prose and three branches
+      rewriting one paragraph is the clean-merge loss gate 90a exists for.'
     files:
-    - packages/db/src/schema/frequency-ledger.ts
+    - packages/db/migrations/0080_frequency_ledger.sql
     - packages/core/src/messaging/frequency-cap.ts
+    - packages/core/src/messaging/frequency-cap.test.ts
+    - packages/core/src/messaging/frequency-cap.property.test.ts
+    - packages/db/src/schema/frequency-ledger.ts
     - packages/db/src/repositories/frequency-ledger.ts
     - packages/db/src/merge-participants.ts
+    - packages/fixtures/src/frequency-ledger.itest.ts
+    - packages/config/src/settings/registry.ts
+    - packages/config/src/settings/registry.test.ts
+    - scripts/test-gates.mjs
   - id: C-AUTO-04
     order: 79
     title: 'The messaging compliance gate: one choke point, code not settings, failing closed'
