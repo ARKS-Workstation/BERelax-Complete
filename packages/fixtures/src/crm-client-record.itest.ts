@@ -937,6 +937,11 @@ describe('acceptance — every mutable table in the CRM area is audited', () => 
       'customer_acquisition_source',
       'customer_blocklist',
       'customer_lifecycle_state',
+      // C-AUTO-08's pipeline card. In the area because of its name, and named that way on purpose: its
+      // row is where a human has put a person, so a change to it that nothing recorded is exactly what
+      // this register exists to refuse. Audited by trigger — `crm.ts` states why that arm and not the
+      // repository one, although it has a repository.
+      'customer_pipeline_card',
       'customer_preference',
       'customer_tag',
       'customer_therapist_do_not_pair',
@@ -944,7 +949,7 @@ describe('acceptance — every mutable table in the CRM area is audited', () => 
     for (const row of coverage) expect(row.covered, `${row.table}: ${row.detail}`).toBe(true)
     // Both mechanisms are actually in use, so neither arm of the rule is dead code.
     expect(coverage.filter((row) => row.by === 'repository').length).toBeGreaterThan(0)
-    expect(coverage.filter((row) => row.by === 'trigger').length).toBe(2)
+    expect(coverage.filter((row) => row.by === 'trigger').length).toBe(3)
     // And the register covers exactly the area, in both directions.
     expect(Object.keys(CRM_AUDIT_COVERAGE).sort()).toEqual(coverage.map((row) => row.table))
   })

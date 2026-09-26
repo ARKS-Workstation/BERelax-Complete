@@ -65,6 +65,13 @@ export const TEST_PORT_BANDS = {
   // band chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to
   // share one. [11_500, 11_800) contains none of RESTRICTED_PORTS.
   'preference-centre': { start: 11_500, width: 300 },
+  // C-AUTO-08's pipeline board, which needs a real server for the claims a pure render cannot make: a
+  // drag is a sequence of pointer events, a card returning to its origin column is a
+  // `getBoundingClientRect`, and axe needs a rendered DOM. 12_100 rather than the next round number after
+  // `preference-centre`: 11_800 is an allocation held by a unit in flight in another worktree, and a band
+  // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
+  // one. [12_100, 12_400) contains none of RESTRICTED_PORTS.
+  pipeline: { start: 12_100, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

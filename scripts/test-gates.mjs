@@ -27932,6 +27932,214 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 104a-104k. (C-AUTO-08) The pipeline board: the board that must be ONE read, the stage change the
+//            database refuses to leave unrecorded, the positions that have to be 1..n with nothing missing,
+//            and the enrolment that must be the enrolment API rather than something shaped like it.
+//
+//            Every mutation here produces a board that renders and a drag that works. That is the whole
+//            point of the block: six columns read with six queries look right in every screenshot and
+//            disagree with each other only while somebody is moving a card; a reorder written 0-based
+//            leaves the columns in the right ORDER and the positions off by one, which nothing on the page
+//            shows; and a wrapper around `enrolOnLiveVersion` behaves identically until C-AUTO-07 puts a
+//            cap inside it.
+//
+//            The two worth reading twice are 104d and 104h. 104d removes the transition insert from
+//            `moveCard` and the card write is then refused AT COMMIT by ZU001 — which is the one case here
+//            that proves the database's own guard fires rather than proving a test asserts it. 104h wraps
+//            the enrolment writer in a lambda: every behavioural assertion in this repository still passes,
+//            and the only thing that fails is the identity the acceptance line asks for.
+//
+//            **No case here runs `apps/web/src/pipeline.itest.ts`, and that is not an omission.** That
+//            suite drives the BUILT application (`next start` serves `.next`), so a mutation to
+//            `app/(admin)/crm/pipeline/render.ts` or to anything the page imports is invisible to it until
+//            the app is rebuilt — and a gate case that mutated a served file and ran the browser suite
+//            would report "exited zero; nothing was rejected" about a mutation the server never loaded,
+//            which is a false FAIL on a rule that is fine. The render-level claims are gated through
+//            `pipeline-render.test.ts` (104j, 104k), which imports the source; the browser suite's own
+//            claims — the drag, the keyboard path, the forced 409, axe and the screenshots — are asserted
+//            there against a build, with their controls beside them in the file.
+{
+  const REPO = 'packages/db/src/repositories/pipeline.ts'
+  const RENDER = 'apps/web/app/(admin)/crm/pipeline/render.ts'
+
+  const ROW_SUITE = 'packages/fixtures/src/crm-pipeline.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/pipeline-render.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const pipelineMutant = (path, anchor, replacement, suite, runner = rows) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 104a. The merged-away filter dropped from the board read. Nothing changes for any customer who was
+  //       never merged, which is all of them until the front desk joins two records — and then the board
+  //       draws one person twice, because the loser's `customer` row survives as a tombstone and so does
+  //       its card. A drag on the wrong one moves a card nothing else reads.
+  checkRejectedBy(
+    'pipeline gate: a board that draws merged-away contacts is caught',
+    pipelineMutant(
+      REPO,
+      `       and not exists (
+             select 1 from merge_record m where m.loser_customer_id = c.customer_id
+           )`,
+      '       and true',
+      ROW_SUITE,
+    ),
+    'leaves a merged-away contact off the board',
+  )
+
+  // 104b. The archived-column filter dropped. The board then offers a column no card may be moved into, so
+  //       every drop onto it is refused by `stage_archived` for a column the page had just drawn — the
+  //       exact race the 409 case exists for, inflicted on every reader all the time.
+  checkRejectedBy(
+    'pipeline gate: a board that draws archived columns is caught',
+    pipelineMutant(REPO, '     where s.archived_at is null\n', '     where true\n', ROW_SUITE),
+    'leaves an archived column and its cards off the board',
+  )
+
+  // 104c. A second statement in the board read. One extra query is what a per-column read starts as, and
+  //       the failure it leads to is invisible in any screenshot: two reads of the same rows can disagree,
+  //       so a card moved between them appears twice or not at all.
+  checkRejectedBy(
+    'pipeline gate: a board read that issues more than one statement is caught',
+    pipelineMutant(
+      REPO,
+      'export async function readPipelineBoard(sql: Sql): Promise<PipelineBoard> {',
+      'export async function readPipelineBoard(sql: Sql): Promise<PipelineBoard> {\n' +
+        '  await sql`select 1 as warmup`',
+      ROW_SUITE,
+    ),
+    'reads every column and every card in a single statement',
+  )
+
+  // 104d. The transition insert removed from `moveCard`, leaving the card write on its own. The DATABASE
+  //       refuses it at COMMIT (ZU001), which is what this case is really about: the guard is the
+  //       migration's, not the repository's, so it holds for a `psql` session too.
+  checkRejectedBy(
+    'pipeline gate: a card moved with no transition row is caught by the database',
+    pipelineMutant(
+      REPO,
+      `  const [transition] = await sql<{ id: string }[]>\`
+    insert into pipeline_stage_transition
+      (customer_id, from_stage_key, to_stage_key, actor_kind, actor_label, occurred_at)
+    values (\${input.customerId}::uuid, \${fromStageKey}, \${input.toStageKey}, \${input.actor.kind},
+            \${input.actor.label ?? \`\${input.actor.kind} with no stated label\`}, \${input.at})
+    returning id
+  \``,
+      '  const [transition] = await sql<{ id: string }[]>`select uuid_generate_v7() as id`',
+      ROW_SUITE,
+    ),
+    'no pipeline_stage_transition recording that move',
+  )
+
+  // 104e. The actor left out of the transaction-local settings. The move still happens and the audit row is
+  //       still written — attributed to `system` with a label saying nobody was named, which is the honest
+  //       description of a psql correction and a lie about a move somebody made on a screen.
+  checkRejectedBy(
+    'pipeline gate: a move that does not name its actor to the audit trigger is caught',
+    pipelineMutant(
+      REPO,
+      "  await sql`select set_config('berelax.audit_actor_kind', ${input.actor.kind}, true)`",
+      '  // the actor is no longer declared to the trigger',
+      ROW_SUITE,
+    ),
+    'audits the card change by trigger, with the actor the move named',
+  )
+
+  // 104f. The permutation check removed. The database still refuses the result at COMMIT, so nothing
+  //       corrupt is written — what is lost is the NAMED refusal a settings screen shows somebody, which
+  //       becomes a constraint violation naming a trigger instead.
+  checkRejectedBy(
+    'pipeline gate: a reorder that accepts a non-permutation is caught',
+    pipelineMutant(
+      REPO,
+      '  const duplicated = asked.filter((key, index) => asked.indexOf(key) !== index)',
+      '  const duplicated = []',
+      ROW_SUITE,
+    ),
+    'refuses an order that is not a permutation',
+  )
+
+  // 104g. Positions written from zero. The columns come out in exactly the right ORDER and the numbers are
+  //       0..n-1, which nothing on the page shows — and the next stage appended to the board then collides
+  //       or leaves a gap. ZU003 is what catches it, which is this case's real subject.
+  checkRejectedBy(
+    'pipeline gate: positions written 0-based are caught by the gapless rule',
+    pipelineMutant(
+      REPO,
+      '      update pipeline_stage set display_order = ${index + 1} where stage_key = ${stageKey}',
+      '      update pipeline_stage set display_order = ${index} where stage_key = ${stageKey}',
+      ROW_SUITE,
+    ),
+    'leaves no duplicate and no gap after any of them',
+  )
+
+  // 104h. The enrolment writer wrapped in a lambda that calls it. Behaviourally identical today, and the
+  //       acceptance line is not about behaviour: "the same enrolment API as any other trigger — no bespoke
+  //       path". A wrapper is where a cap added inside the writer comes to be applied to eight callers and
+  //       not the ninth.
+  checkRejectedBy(
+    'pipeline gate: a wrapper standing in for the enrolment writer is caught',
+    pipelineMutant(
+      REPO,
+      '  enrol: enrolOnLiveVersion,',
+      '  enrol: (uow, input) => enrolOnLiveVersion(uow, input),',
+      ROW_SUITE,
+    ),
+    'holds the reference `@berelax/db` publishes, not a copy of it',
+  )
+
+  // 104i. The stage-entry trigger check widened to "has a trigger node at all". Every flow has one, so the
+  //       check passes for every flow — and a column wired to a win-back sequence drawn to start on a
+  //       completed appointment enrols everybody the front desk drags there, onto a graph whose own trigger
+  //       node says it starts on something else.
+  checkRejectedBy(
+    'pipeline gate: a stage-entry check that accepts any trigger is caught',
+    pipelineMutant(
+      REPO,
+      `               '$.nodes[*] ? (@.kind == "trigger" && @.event == "pipeline.stage_entered")'`,
+      `               '$.nodes[*] ? (@.kind == "trigger")'`,
+      ROW_SUITE,
+    ),
+    'refuses a column whose flow is not triggered by a stage entry',
+  )
+
+  // 104j. A card rendered as a focusable div instead of a button. It looks identical, it can be dragged,
+  //       and it can be focused — and it has no role, so a reader navigating by control does not find it,
+  //       and `Enter` on it does nothing a browser guarantees.
+  checkRejectedBy(
+    'pipeline gate: a card that is not a button is caught',
+    pipelineMutant(
+      RENDER,
+      '    \'<button type="button" class="card"\',',
+      '    \'<div class="card" tabindex="0"\',',
+      RENDER_SUITE,
+      unit,
+    ),
+    'renders each card as a button with its contact id and no pressed state',
+  )
+
+  // 104k. The unlabelled card given a label. `Customer` for a record nobody has named reads as a label
+  //       somebody set, which is brief rule 15 in the place it is easiest to break: a plausible value is
+  //       worse than a blank one, because blank is visibly unanswered.
+  checkRejectedBy(
+    'pipeline gate: an invented label on an unlabelled record is caught',
+    pipelineMutant(
+      RENDER,
+      '  return card.displayName ?? `No label recorded — ${card.phoneE164}`',
+      "  return card.displayName ?? 'Customer'",
+      RENDER_SUITE,
+      unit,
+    ),
+    'labels an unlabelled record by its number and never by an invented name',
+  )
+}
+
 // 29. The CI workflow must actually run every gate. Dropping one here is a silent loss of coverage.
 {
   const wf = readFileSync('.github/workflows/ci.yml', 'utf8')

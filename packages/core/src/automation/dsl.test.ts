@@ -35,11 +35,27 @@ describe('the trigger vocabulary is pinned to events that exist', () => {
         (event): event is string => event !== null,
       ),
     )
-    const declared = new Set(FLOW_TRIGGER_EVENTS.filter((event) => event !== 'manual'))
+    // The appointment half, which is the half the lifecycle owns. Partitioned by PREFIX rather than by
+    // subtracting a list of exceptions: a member added with an `appointment.` name has to be in the
+    // lifecycle's set, and one with any other prefix has to be accounted for below. Subtracting names
+    // would let a third non-appointment event arrive unexamined, which is the shape this assertion was in
+    // when `pipeline.stage_entered` was added (C-AUTO-08) and the only thing that failed was the count.
+    const declared = new Set(
+      FLOW_TRIGGER_EVENTS.filter((event) => event.startsWith('appointment.')),
+    )
     expect([...declared].sort(), 'a trigger naming an event nothing emits can never fire').toEqual(
       [...emitted].sort(),
     )
-    expect(FLOW_TRIGGER_EVENTS).toContain('manual')
+
+    // And the events that are NOT appointment lifecycle events, enumerated, because each one is a claim
+    // that something in this build can raise it. `manual` is an operator enrolling by hand (C-AUTO-07's
+    // API) and has no event at all; `pipeline.stage_entered` is a card entering a column, which
+    // `moveCard` in packages/db/src/repositories/pipeline.ts raises through the same enrolment writer.
+    // A trigger naming an event nothing can raise is a flow an operator draws and then waits on for ever,
+    // which is why this list is asserted rather than filtered out.
+    expect(
+      FLOW_TRIGGER_EVENTS.filter((event) => !event.startsWith('appointment.')).toSorted(),
+    ).toEqual(['manual', 'pipeline.stage_entered'])
   })
 
   it('the control: a made-up event is not in the vocabulary', () => {

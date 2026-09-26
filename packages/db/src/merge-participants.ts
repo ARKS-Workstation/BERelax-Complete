@@ -202,6 +202,36 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = Object.freeze([
   }),
   participant({
     schema: 'public',
+    table: 'customer_pipeline_card',
+    column: 'customer_id',
+    strategy: 'repoint_update',
+    // The primary key IS the customer id, so the conflict test is on no further column —
+    // `customer_preference`'s case, and for the same structural reason: one row per person.
+    conflictKey: [],
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason:
+      'The survivor already has a card. Merging two records does NOT advance a stage, and this is the ' +
+      'decision worth reading twice: the obvious rule is "keep the furthest-along of the two", and that ' +
+      'would be the SYSTEM making a claim about a person. A stage is where a human put somebody — every ' +
+      'one of them is recorded with an actor in pipeline_stage_transition — so a merge may move a card ' +
+      'and may not decide one. The survivor keeps the column somebody last dragged them to, and the ' +
+      'loser’s card stays readable on the tombstone.',
+    why:
+      'A card must follow the person, or the board draws the tombstone: the row survives a merge and so ' +
+      'does the loser’s `customer` row, so a card left behind is a second card for one human that the ' +
+      'front desk can drag — and a drag on the wrong one moves a card nothing else reads. ' +
+      '`readPipelineBoard` filters merged-away contacts out for exactly that case (the retained one), ' +
+      'and the re-point is what makes the ordinary case need no filtering at all. The move is invisible ' +
+      'to `customer_pipeline_card_records_every_move`: that trigger returns early when neither ' +
+      '`stage_key` nor `stage_entered_at` changes, which is what a re-point is, so a merge does not have ' +
+      'to fabricate a transition saying a stage was entered when nobody entered it.',
+    registeredBy: 'C-AUTO-08',
+  }),
+  participant({
+    schema: 'public',
     table: 'customer_tag',
     column: 'customer_id',
     strategy: 'repoint_update',
@@ -390,6 +420,24 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
       'resolving to the tombstone, and the suppression it writes keys on the hashed detail, so the send ' +
       'is refused for the survivor too.',
     registeredBy: 'C-CRM-05',
+  }),
+  Object.freeze({
+    schema: 'public',
+    table: 'pipeline_stage_transition',
+    column: 'customer_id',
+    reason:
+      '0077 makes this log append-only for every role including the owner (ZU002) and the application ' +
+      'role holds no UPDATE, DELETE or TRUNCATE on it, so a merge — an application operation — cannot ' +
+      'move a row here even if it wanted to. It should not want to: a transition says a NAMED actor moved ' +
+      'this record from one column to another at an instant, and re-pointing it would make the survivor’s ' +
+      'history contain a move nobody made on that card. It is the `invoice` argument for a log rather ' +
+      'than a document: what the row says happened does not stop being true because two records turned ' +
+      'out to be one person. The CARD follows the person (the participant above), which is what the board ' +
+      'reads; a history read that wants one person’s whole pipeline resolves the tombstone, exactly as ' +
+      'an invoice history does. The cost is stated rather than hidden: `readCardHistory` for the survivor ' +
+      'does not include the loser’s moves, and nothing in this build reads that history to make a ' +
+      'decision — the card is where the person is.',
+    registeredBy: 'C-AUTO-08',
   }),
   Object.freeze({
     schema: 'public',

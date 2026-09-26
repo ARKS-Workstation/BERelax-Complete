@@ -697,6 +697,36 @@ export {
   verifyOtpCode,
 } from './repositories/otp.ts'
 /*
+  C-AUTO-08's pipeline board. `PIPELINE_ENROLMENT_PATH` is exported for one assertion and it is an
+  acceptance criterion: a stage entry enrols through `enrolOnLiveVersion`, the writer C-AUTO-06 published,
+  and the test compares the reference rather than the behaviour.
+*/
+export {
+  type ArchiveStageInput,
+  archivePipelineStage,
+  type MoveCardInput,
+  type MoveCardOutcome,
+  moveCard,
+  PIPELINE_AUDIT_ACTIONS,
+  PIPELINE_ENROLMENT_PATH,
+  PIPELINE_REFUSALS,
+  PIPELINE_SQLSTATE,
+  type PipelineBoard,
+  type PipelineCard,
+  type PipelineColumn,
+  type PipelineDeps,
+  type PipelineRefusal,
+  type PipelineStageRow,
+  pipelineRefusalOf,
+  type ReorderInput,
+  readCardHistory,
+  readPipelineBoard,
+  readPipelineStages,
+  reorderPipelineStages,
+  type StageEntryEnroller,
+  type TransitionRow,
+} from './repositories/pipeline.ts'
+/*
   C-CRM-07's preference centre. `applyPreferenceCentreChange` and its two types moved here from
   `./repositories/suppression.ts` with the write itself, so C-CRM-04's endpoint keeps importing the same
   names from this barrel and nothing outside the package changed. See that module's header for why the
@@ -1705,6 +1735,42 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // cascade still works, because a referential action does not check the deleting role's privilege on the
 // referencing table.
 //
+// 77 is 0077_pipeline.sql: the pipeline board — ordered columns, one card per person, and every move
+// recorded (C-AUTO-08). 0053 built both CRM vocabularies and said why a vocabulary about a person is a
+// TABLE rather than an enum, and 0070 built the flow and the enrolment pin; nothing here re-argues either.
+// Four things ARE this file's. The stage vocabulary is NOT `customer_lifecycle_state` under another name:
+// the lifecycle is DERIVED from what has happened and a pipeline stage is where a human has PUT somebody,
+// and the two disagree on purpose — a record can be `active` in the lifecycle and `lapsed` on the board
+// because the front desk has given up on them. Positions are unique AND gapless, and both constraints are
+// DEFERRED, which is the decision that makes a reorder possible at all: every intermediate state of a
+// three-row shuffle holds either a duplicate or a gap, so an immediate UNIQUE refuses the first statement
+// and an immediate gapless check refuses the second — `reorderPipelineStages` therefore needs no scratch
+// positions, and the `set display_order = -n` pass it replaces is the one that leaves negative positions
+// behind when a transaction dies half way through. A stage change is refused BY THE DATABASE unless the
+// move is recorded: `customer_pipeline_card_records_every_move` is a deferred constraint trigger requiring
+// a `pipeline_stage_transition` row for exactly this move — same contact, same from, same to, and
+// `occurred_at` equal to the card's `stage_entered_at`, which is the equality that stops an OLDER
+// transition into the same stage satisfying a newer move — and it fires for every role including the
+// owner, because the owner is who moves a card by hand at 02:00. And the naming is the classification:
+// `customer_pipeline_card` carries the `customer_` prefix so it falls inside `CRM_TABLE_PATTERN` and must
+// be registered in `CRM_AUDIT_COVERAGE` (it is, by trigger), while `pipeline_stage` is the board's column
+// list and `pipeline_stage_transition` IS an append-only record of who moved whom, so neither is an
+// unattributable claim about a person. What this file deliberately does NOT hold: a per-column card order
+// (cards are ordered by `stage_entered_at`, and a second ordering would be a second thing a drag has to
+// get right), a `pipeline_stage.card_count` (a count beside the rows is a count that disagrees with them),
+// and a per-stage list of flows — `entry_flow_key` is one nullable column, because a join table nothing
+// writes two rows into is a table pretending to a capability, and the editor that would display several
+// is C-AUTO-09's. `pipeline_stage_transition.customer_id` is a plain uuid and NOT a foreign key, which is
+// 0056's decision for `consent` verbatim: an append-only log cannot reference a mutable parent, because
+// the cascade would fire the refusal trigger and make `delete from customer` impossible. `ZU001`,
+// `ZU002` and `ZU003` are its private SQLSTATEs; `ZU` rather than a mnemonic letter because the mnemonic
+// ones are taken (`ZK` is the KEK's, `ZP` is consent's, `ZF` is the flow's) and what a private code has to
+// be is unique to one file, not memorable.
+//
+// 76 is NOT a hole in this ledger: it is an allocation held by a unit in flight in another worktree as
+// this is written, and gate 90a walks the migrations that EXIST on disk rather than consecutive integers,
+// so a number nobody has written SQL for is not a missing paragraph.
+//
 // 71, 73 and 74 are NOT holes in this ledger. 71 will stay unused for the reason 22, 41, 44 and 47 do;
 // 73 and 74 were allocations held by units in flight when this one was written, and gate 90a walks the
 // migrations that EXIST on disk rather than consecutive integers, so a number nobody has written SQL for
@@ -1729,4 +1795,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to conflict on, and no other check reads this text — the migrations were present, `db:migrate:dry`
 // replayed them, `db:drift` matched the mirror. Gate case 90a exists because of that: it asserts an
 // unbroken run of paragraphs from 0049 up to the newest migration on disk, each naming its own file.
-export const SCHEMA_VERSION = 75 as const
+export const SCHEMA_VERSION = 77 as const
