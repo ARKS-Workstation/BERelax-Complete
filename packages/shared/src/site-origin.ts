@@ -114,3 +114,61 @@ export function reconnectLink(origin: string, connectionId?: string): string {
     ? base
     : `${base}?connectionId=${encodeURIComponent(connectionId)}`
 }
+
+/**
+ * The path the preference centre is served at. Unparameterised, with the capability in the query.
+ *
+ * ## Why the token is a query field here and a path segment for the manage-booking link
+ *
+ * `apps/web/src/routes/canonical.ts` lower-cases every path segment and 301s to the result. B-UI-05 lives
+ * with that by minting a token that is already lower-case hex; this one cannot, because C-CRM-04's
+ * `optOutTokenShape` is 43 characters of base64url — **mixed case** — and a mixed-case token in a path is
+ * destroyed by the site's own canonicalisation, for every customer, every time, with a 404 whose cause is
+ * two modules away. Widening that shape to a second alphabet is not a smaller change than this one: its
+ * exactness is what a property test over a thousand forged and mutated tokens rests on.
+ *
+ * `canonicalPath` takes a pathname alone and the proxy carries the query across unchanged, so the token
+ * survives. Two more things follow from it, and both are worth more than the tidiness of a path token: the
+ * route stays unparameterised, so `/preferences` is a URL that always exists and an unknown token can be
+ * answered with the same status and the same page shell as a valid one rather than with a distinguishable
+ * 404; and the capability is not part of the resource identity, so one page has one URL in every log line.
+ *
+ * ## Why the locale is in the link
+ *
+ * So the rendered document is a function of the URL and of nothing else. Taking it from `customer.locale`
+ * would make the response's language a fact about the record — request the page and read the `dir`
+ * attribute to learn which language a contact was greeted in — and it would make the shell of a valid
+ * page differ from the shell of a refused one, which is the equality C-CRM-07's acceptance asks for. The
+ * sender knows the customer's locale and puts it in the link; the page offers the other language as a
+ * link a reader can follow.
+ */
+export const PREFERENCE_CENTRE_PATH = '/preferences'
+
+export interface PreferenceCentreLink {
+  /** The contact the link is for. Named as well as the token, for the reason 0064's comment gives. */
+  readonly contactId: string
+  /** The token, exactly as `issueOptOutGrant` returned it. Returned once and never stored. */
+  readonly token: string
+  readonly locale: 'en' | 'ar'
+}
+
+export function preferenceCentrePath(link: PreferenceCentreLink): string {
+  // `URLSearchParams` rather than a template literal: it percent-encodes, and the one thing that must not
+  // be mangled here is the token. base64url contains `-` and `_`, neither of which it touches.
+  const query = new URLSearchParams({ c: link.contactId, t: link.token, lang: link.locale })
+  return `${PREFERENCE_CENTRE_PATH}?${query.toString()}`
+}
+
+/**
+ * The absolute link a promotional message carries.
+ *
+ * Built here and nowhere else for `manageBookingLink`'s reason, and MINTING it is a separate act on
+ * purpose: only the digest of a token is stored, so having one means having inserted a row. The mint is
+ * `issueOptOutGrant`, which takes a `UnitOfWork` — so it belongs inside the transaction that writes the
+ * message, exactly as B-UI-05 concluded for the magic link. A link minted for a message that rolled back
+ * is a live credential for something nobody received, and one that committed while the message did not is
+ * worse, because the customer never learns it exists.
+ */
+export function preferenceCentreLink(origin: string, link: PreferenceCentreLink): string {
+  return `${origin}${preferenceCentrePath(link)}`
+}

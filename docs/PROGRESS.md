@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**107 / 207 units complete.**
+**108 / 207 units complete.**
 
 ## Next up
 
@@ -100,7 +100,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |
 | [ ] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
 | [x] | 85 | `C-CRM-06` | Duplicate review queue and merge preview | `C-CRM-05`, `H04` | — | — |
-| [ ] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
+| [x] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
 | [ ] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
 | [ ] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
 | [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |

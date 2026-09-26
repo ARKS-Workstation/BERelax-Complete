@@ -59,6 +59,12 @@ export const TEST_PORT_BANDS = {
   // are allocations held by units in flight in other worktrees, and a band chosen from what this worktree
   // can see is exactly how `template-editor` and `book-flow` came to share one.
   duplicates: { start: 10_900, width: 300 },
+  // C-CRM-07's preference centre, which needs a real server for the one claim a pure render cannot make:
+  // a document loaded with JavaScript DISABLED whose form then submits. 11_500 rather than the next round
+  // number after `duplicates`: 11_200 is an allocation held by a unit in flight in another worktree, and a
+  // band chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to
+  // share one. [11_500, 11_800) contains none of RESTRICTED_PORTS.
+  'preference-centre': { start: 11_500, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

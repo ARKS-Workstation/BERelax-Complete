@@ -26675,6 +26675,239 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 99a-99l. (C-CRM-07) The preference centre, public and login-free: the page that IS the opt-out, the
+//           grid that has to be as fine as the write, the merge chain a three-week-old link walks into,
+//           and the URL the token cannot live in.
+//
+//           Every mutation here produces a page that renders and a form that submits. That is the whole
+//           point of the block: a token in the path works for months of testing and dies the day a
+//           mixed-case one is issued; a suppression that covers the whole grid instead of one pair reads
+//           correctly on the screen; a withdrawal written onto a tombstone is a withdrawal nobody can
+//           see, and the only evidence is a promotional message to somebody who opted out.
+//
+//           The two worth reading twice are 99g and 99k. 99g drops the `merge_survivor_of()` call — the
+//           whole of what C-CRM-05's NOTE (8b) and C-CRM-06's NOTE (6) deferred here — and nothing at all
+//           breaks for any customer who was never merged, which is all of them until the front desk joins
+//           two records. 99k puts the token back in the path, which is the shape the manifest's own files
+//           list assumed, and every assertion in this repository passes except the one that knows
+//           `canonicalPath` lower-cases a path and 301s to the result.
+{
+  const CORE = 'packages/core/src/consent/optout-copy.ts'
+  const REPO = 'packages/db/src/repositories/preference-centre.ts'
+  const RENDER = 'apps/web/app/(public)/preferences/render.ts'
+  const SHARED = 'packages/shared/src/site-origin.ts'
+
+  const CORE_SUITE = 'packages/core/src/consent/optout-copy.test.ts'
+  const RENDER_SUITE = 'apps/web/src/preference-centre-render.test.ts'
+  /*
+    The ROW-level suite, which starts no server. Its sibling `preference-centre-browser.itest.ts` carries the
+    JavaScript-disabled submission, twelve axe audits and twelve screenshots, and no case here runs it: a
+    production build under every mutant would cost minutes each to re-prove something none of them touches.
+    That split is the reason the two files exist, and the browser file's own header says so.
+  */
+  const PAIR_SUITE = 'apps/web/src/preference-centre.itest.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const pair = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /** One anchored edit to a shipped file, then the suite that must fail because of it. */
+  const preferenceMutant = (path, anchor, replacement, suite, runner = unit) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 99a. The forbidden-phrase list shortened to one entry. Today's corpus contains neither phrase, so the
+  //      shipped templates still pass, every other case in this area still passes, and the rule has quietly
+  //      stopped covering half of what it was written for.
+  checkRejectedBy(
+    'preference-centre gate: a shortened unreachable-opt-out phrase list is caught',
+    preferenceMutant(
+      CORE,
+      "export const UNREACHABLE_OPT_OUT_PHRASES = ['Reply STOP', 'STOP to'] as const",
+      "export const UNREACHABLE_OPT_OUT_PHRASES = ['Reply STOP'] as const",
+      CORE_SUITE,
+    ),
+    'nothing else may shorten silently',
+  )
+
+  // 99b. The match made case-SENSITIVE. It reads like a simplification and it is the difference between a
+  //      rule and a rule that catches the exact spelling somebody happened to use first: "reply stop" is the
+  //      same promise, and the sender ID still cannot receive it.
+  checkRejectedBy(
+    'preference-centre gate: a case-sensitive opt-out phrase match is caught',
+    preferenceMutant(
+      CORE,
+      '  const haystack = text.toLowerCase()',
+      '  const haystack = text',
+      CORE_SUITE,
+    ),
+    'is case-insensitive',
+  )
+
+  // 99c. The page state moved onto `<main>`, which reads like a useful hook for a test and destroys the one
+  //      property the acceptance asks for: the shell of a valid document and the shell of a refused one stop
+  //      being byte-identical, so the response tells a caller whether the contact behind a guessed id exists.
+  checkRejectedBy(
+    'preference-centre gate: the page state leaking into the shell is caught',
+    preferenceMutant(
+      RENDER,
+      '    PREFERENCE_MAIN_OPEN,',
+      '    `<main data-preference-page="preferences" data-preference-body="${\n' +
+        "      view.cells === null ? 'unavailable' : 'grid'\n" +
+        '    }">`,',
+      RENDER_SUITE,
+    ),
+    'is byte-identical outside <main>',
+  )
+
+  // 99d. Every button labelled "Stop" with no row name. The page looks tidier and is unusable by anybody
+  //      navigating it by control: six identically-named buttons, and `button-name` does not fire because
+  //      each one HAS a name.
+  checkRejectedBy(
+    'preference-centre gate: six buttons sharing one name is caught',
+    preferenceMutant(
+      RENDER,
+      "  const label = `${stop ? (copy['stopButton'] ?? '') : (copy['startButton'] ?? '')} ${name}`",
+      "  const label = stop ? (copy['stopButton'] ?? '') : (copy['startButton'] ?? '')",
+      RENDER_SUITE,
+    ),
+    'gives every button a distinct',
+  )
+
+  // 99e. The sentence that says stopping one handset row stops the number removed. Nothing about the page
+  //      breaks; what breaks is the reader's model of it, and the page would be making a promise the
+  //      suppression key cannot keep — there is no per-purpose suppression.
+  checkRejectedBy(
+    'preference-centre gate: dropping the handset consequence from the page is caught',
+    preferenceMutant(
+      RENDER,
+      "    `<p data-preference-note=\"handset\">${safeText(copy['handsetNote'] ?? '')}</p>`,",
+      "    '',",
+      RENDER_SUITE,
+    ),
+    'always prints the consequence of stopping a handset row',
+  )
+
+  // 99f. An explicit `action` on the form. It looks more correct than no attribute and it is how the
+  //      capability gets dropped: the action carries no query, so the POST arrives with no token and the
+  //      reader is told their link is not available at the moment they pressed the button.
+  checkRejectedBy(
+    'preference-centre gate: a form action that drops the capability is caught',
+    preferenceMutant(
+      RENDER,
+      '    \'<form method="post">\',\n    \'<input type="hidden" name="intent" value="pair">\',',
+      '    \'<form method="post" action="/preferences">\',\n' +
+        '    \'<input type="hidden" name="intent" value="pair">\',',
+      RENDER_SUITE,
+    ),
+    'posts every control to the page itself',
+  )
+
+  // 99g. The merge chain not followed at the write. This is C-CRM-05's NOTE (8b) un-discharged, and it
+  //      breaks nothing for any contact that has never been merged — so it is green on every database until
+  //      the front desk joins two records, and then the PDPL withdrawal lands on the tombstone's log where
+  //      `resolveConsent` for the live record will never see it.
+  checkRejectedBy(
+    'preference-centre gate: a withdrawal written onto a tombstone is caught',
+    preferenceMutant(
+      REPO,
+      '  const contactCustomerId = await mergeSurvivorOf(uow.sql, selection.contactCustomerId)',
+      '  const contactCustomerId = selection.contactCustomerId',
+      PAIR_SUITE,
+      pair,
+    ),
+    'resolves the survivor',
+  )
+
+  // 99h. The tombstone refusal renamed to another name in the same closed list. Still refused, still writes
+  //      nothing — and the page now tells the reader "we could not read that choice" instead of "your record
+  //      was joined with another one", which is the difference between a sentence they can act on and one
+  //      that reads as a broken page.
+  checkRejectedBy(
+    'preference-centre gate: the wrong name on the tombstone refusal is caught',
+    preferenceMutant(
+      REPO,
+      "    refuse(\n      'preference_grant_on_a_tombstone',",
+      "    refuse(\n      'preference_scope_unknown',",
+      PAIR_SUITE,
+      pair,
+    ),
+    'refuses a RESUBSCRIBE through the same link',
+  )
+
+  // 99i. A single toggle widened to the whole grid. The screen is unchanged — every cell reads the way it
+  //      should after the write — and what actually happened is that somebody who turned off review requests
+  //      on WhatsApp had their offers stopped on every channel. The acceptance's word for the assertion that
+  //      catches it is "byte-unchanged".
+  checkRejectedBy(
+    'preference-centre gate: one toggle writing the whole grid is caught',
+    preferenceMutant(
+      REPO,
+      "  if (scope.kind === 'everything') return PREFERENCE_GRID",
+      "  if (scope.kind === 'everything' || scope.kind === 'pair') return PREFERENCE_GRID",
+      PAIR_SUITE,
+      pair,
+    ),
+    'leaves every other pair byte-unchanged',
+  )
+
+  // 99j. The wording snapshot dropped from the withdrawal. 0056 does not REQUIRE one on a withdrawal —
+  //      deliberately, so an opt-out is never harder to record than an opt-in — so nothing raises and the
+  //      row is perfectly legal. What is lost is the evidence of which words somebody was reading when they
+  //      decided, which is the acceptance criterion this unit exists to satisfy.
+  checkRejectedBy(
+    'preference-centre gate: a withdrawal that snapshots no wording is caught',
+    preferenceMutant(
+      REPO,
+      '        wordingId: shown?.id ?? null,\n' +
+        '        wordingHashHex: shown?.contentHashHex ?? null,',
+      '        wordingId: null,\n        wordingHashHex: null,',
+      PAIR_SUITE,
+      pair,
+    ),
+    'hashes the text off both rendered pages',
+  )
+
+  // 99l. The rendered statement matched POSITIONALLY instead of by purpose. The page is unchanged, the row
+  //      is legal — `consent_grant_carries_its_wording` asks only that there IS a version and the hash
+  //      trigger only checks it against the version named — and a `review_request` grant now points at the
+  //      MARKETING statement, which is evidence of an agreement to words that say nothing about review
+  //      requests. Nothing downstream can tell; the join in the pair suite is what can.
+  checkRejectedBy(
+    'preference-centre gate: a grant recorded against another purpose\u2019s wording is caught',
+    preferenceMutant(
+      REPO,
+      '  const rendered = (purpose: string): RenderedWording | null =>\n' +
+        '    selection.wording?.find((version) => version.purpose === purpose) ?? null',
+      '  const rendered = (_purpose: string): RenderedWording | null =>\n' +
+        '    selection.wording?.[0] ?? null',
+      PAIR_SUITE,
+      pair,
+    ),
+    'records a GRANT against its own purpose',
+  )
+
+  // 99k. The token moved into a path segment, which is what the manifest's own files list assumed and what
+  //      the link would look like if B-UI-05's finding had not been read. `canonicalPath` lower-cases every
+  //      path and the proxy 301s to the result, and C-CRM-04's token is 43 characters of mixed-case
+  //      base64url — so the link works in every test that builds its own URL and dies for every customer.
+  checkRejectedBy(
+    'preference-centre gate: the opt-out token moved into a path segment is caught',
+    preferenceMutant(
+      SHARED,
+      '  const query = new URLSearchParams({ c: link.contactId, t: link.token, lang: link.locale })\n' +
+        '  return `${PREFERENCE_CENTRE_PATH}?${query.toString()}`',
+      '  const query = new URLSearchParams({ c: link.contactId, lang: link.locale })\n' +
+        '  return `${PREFERENCE_CENTRE_PATH}/${link.token}?${query.toString()}`',
+      PAIR_SUITE,
+      pair,
+    ),
+    'keeps the capability in the query',
+  )
+}
+
 // 100. (G-CONN-08) The banner a person cannot dismiss, and the ladder that cannot climb for ever.
 //
 //       Two claims, and both of them are the kind that a green test suite is happy to be wrong about.

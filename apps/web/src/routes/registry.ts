@@ -620,6 +620,36 @@ export const ROUTES = [
       'it arrive excluded rather than being indexed until somebody reads Search Console.',
   },
   {
+    id: 'preference-centre',
+    path: '/preferences',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-07s preference centre: the RENDERED half of what C-CRM-04 built the endpoint for, and the ' +
+      'page a promotional message links to. It renders a DOCUMENT and is declared a handler, which is the ' +
+      'second entry here where that reads oddly, and the reasons are B-UI-05s two plus one of its own. A ' +
+      'registry document must declare `sampleParams`, so the sample would be a live opt-out link committed ' +
+      'to this file; and it must carry a reciprocal hreflang set in both locales, which publishes the ' +
+      'capability in the head of the page for every crawler and proxy. The third is why there is no ' +
+      '`[token]` segment at all: `canonicalPath` lower-cases every path and 301s to the result, and ' +
+      'C-CRM-04s token is 43 characters of mixed-case base64url - so a token in a path is destroyed by ' +
+      'this sites own canonicalisation, for every customer, every time. The query string survives that ' +
+      'redirect untouched, which is why the contact, the capability and the language are all query ' +
+      'fields. Unparameterised also buys the acceptance criterion that a valid token and an unknown one ' +
+      'answer the same status and the same page shell: /preferences is a URL that always exists, so a 200 ' +
+      'saying the link is not available is true about the resource, where a 404 on /preferences/{token} ' +
+      'would be the oracle. Locale-neutral for /api/v1/preferences reason - one capability, one URL - and ' +
+      'the language comes from the `lang` field rather than from `customer.locale`, so the rendered ' +
+      'document is a function of the URL and not a fact about the record. Not indexable and covered by ' +
+      'NOINDEX_PATTERNS rather than a prefix, because `/preferences` claims no other route. Dynamic: the ' +
+      'page is one contacts preferences read under a capability, and a prerendered copy of it is a leaked ' +
+      'credential.',
+  },
+  {
     id: 'pricing',
     path: '/pricing',
     kind: 'document',
