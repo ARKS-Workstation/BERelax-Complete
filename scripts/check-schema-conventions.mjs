@@ -61,19 +61,136 @@ for (const dir of SCHEMA_DIRS) {
 const POSTED_AT_RULE = 'review-no-overloaded-posted-at'
 const REVIEW_TABLE = /review/
 
+/**
+ * Everything that is not code, blanked: strings, quoted identifiers, and BOTH kinds of comment.
+ *
+ * ## Why this is a character walk and not three `replace` calls
+ *
+ * It used to be two `replace` calls, written twice — `'…'` and `--…` — and both copies missed the same
+ * two things. C-CRM-08's `0082_clinical_intake.sql` was refused for "a floating-point type" on a line
+ * that declares no column at all: the sentence *"Whether real intake data may be stored at all"* sits
+ * inside a JSDoc-style block comment, which a per-line `replace` cannot see it is inside. Its reword
+ * was then refused for a naive timestamp, because `"timestamp"` in DOUBLE quotes is a quoted identifier
+ * and was not blanked either. Two rewrites of correct prose to satisfy a scanner reading English as SQL.
+ *
+ * Order matters and only a single pass gets it right. The old code blanked quotes BEFORE `--`, so an
+ * apostrophe inside a line comment opened a string that swallowed the rest of the file's line; here a
+ * quote inside a comment is just a character in a comment, which is what PostgreSQL thinks too.
+ *
+ * PostgreSQL block comments NEST, so the depth is counted rather than matched — which is also the trap
+ * C-CRM-08 hit from the other side when a `/*` inside a comment would have commented out the rest of a
+ * migration. Dollar-quoted bodies are deliberately left as CODE: a function body declares real columns
+ * and variables, and blanking it would hide them.
+ *
+ * Newlines survive, so every caller's line numbers still point at the line the reader has open.
+ */
+export function blankNonCode(sql) {
+  let out = ''
+  let i = 0
+  let depth = 0
+  while (i < sql.length) {
+    const two = sql.slice(i, i + 2)
+    if (depth > 0) {
+      if (two === '/*') {
+        depth += 1
+        out += '  '
+        i += 2
+      } else if (two === '*/') {
+        depth -= 1
+        out += '  '
+        i += 2
+      } else {
+        out += sql[i] === '\n' ? '\n' : ' '
+        i += 1
+      }
+      continue
+    }
+    if (two === '/*') {
+      depth = 1
+      out += '  '
+      i += 2
+      continue
+    }
+    if (two === '--') {
+      while (i < sql.length && sql[i] !== '\n') {
+        out += ' '
+        i += 1
+      }
+      continue
+    }
+    if (sql[i] === "'" || sql[i] === '"') {
+      const quote = sql[i]
+      out += quote === '"' ? '""' : "''"
+      i += 1
+      while (i < sql.length) {
+        if (sql[i] === quote && sql[i + 1] === quote) {
+          out += '  '
+          i += 2
+          continue
+        }
+        if (sql[i] === quote) {
+          i += 1
+          break
+        }
+        out += sql[i] === '\n' ? '\n' : ' '
+        i += 1
+      }
+      // The closing quote itself is dropped rather than emitted: the two written above stand for the
+      // whole literal, and a third would leave an unbalanced quote for a later regex to trip over.
+      continue
+    }
+    out += sql[i]
+    i += 1
+  }
+  return out
+}
+
+/*
+ * The control, run on every invocation, because a blanking function that stopped blanking would make
+ * every rule below pass on every migration and the summary would still say the conventions hold.
+ *
+ * Two directions, both needed: prose naming a banned type must vanish, and a real declaration must
+ * survive. ADR 0003 — a gate nobody has watched fail is not a gate.
+ */
+{
+  const probe = [
+    '/** Whether real intake data may be stored at all. A timestamp and a double precision. */',
+    'create table t ("timestamp" timestamptz not null, amount_fils fils not null);',
+    "-- it's a real double precision, in a comment",
+    "comment on table t is 'a naive timestamp and a real number';",
+    'alter table t add column weight real;',
+  ].join('\n')
+  const blanked = blankNonCode(probe)
+  const hidden = ['intake data', 'in a comment', 'a naive timestamp']
+  const survives = ['create table t', 'amount_fils fils not null', 'add column weight real']
+  const leaked = hidden.filter((phrase) => blanked.includes(phrase))
+  const lost = survives.filter((phrase) => !blanked.includes(phrase))
+  const lines = blanked.split('\n').length
+  if (leaked.length > 0 || lost.length > 0 || lines !== 5) {
+    console.error(
+      'check-schema-conventions.mjs: blankNonCode is broken, so every rule below would scan the ' +
+        'wrong text and report that the conventions hold.\n' +
+        `  prose that leaked through: ${leaked.join(' | ') || '(none)'}\n` +
+        `  code that was blanked away: ${lost.join(' | ') || '(none)'}\n` +
+        `  lines in: 5, lines out: ${lines}`,
+    )
+    process.exit(2)
+  }
+}
+
 // --- SQL migrations -----------------------------------------------------------------------------
 const MIGRATIONS_DIR = 'packages/db/migrations'
 for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))) {
   const path = join(MIGRATIONS_DIR, file)
   /** The table whose definition the scan is currently inside, so the rule can be table-scoped. */
   let table = null
-  readFileSync(path, 'utf8')
+  blankNonCode(readFileSync(path, 'utf8'))
     .split('\n')
     .forEach((line, i) => {
-      // `--` comments and single-quoted strings are blanked before the scan. SQL `comment on`
-      // statements are prose about the schema, and prose about a schema says the word "timestamp" —
-      // which the first version of this gate reported as a naive timestamp column.
-      const code = line.replace(/'(?:[^']|'')*'/g, "''").replace(/--.*$/, '')
+      // Blanked by `blankNonCode` over the WHOLE file before the split, because a `/* */` block spans
+      // lines and a per-line pass cannot see that it is inside one. SQL `comment on` statements are
+      // prose about the schema, and prose about a schema says the word "timestamp".
+      const code = line
       // `timestamp` not followed by `tz` or `with time zone`.
       if (/\btimestamp\b(?!tz)(?!\s+with\s+time\s+zone)/i.test(code)) {
         problems.push(`${path}:${i + 1}  naive timestamp — use timestamptz`)
@@ -266,26 +383,31 @@ const namesPrecomputedAvailability = (name) => {
 }
 
 for (const { path, sql } of migrations) {
-  sql.split('\n').forEach((line, i) => {
-    // Comments and string literals blanked first. The migrations and this repository's prose talk about
-    // slots constantly — 0012 explains why a block "must never make a single slot unavailable" — and a
-    // rule that read comments would fire on the sentence explaining why it exists.
-    const code = line.replace(/'(?:[^']|'')*'/g, "''").replace(/--.*$/, '')
-    const created =
-      /^\s*create\s+(?:or\s+replace\s+)?(?:unlogged\s+|temp\s+|temporary\s+)?(table|materialized\s+view|view)\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/i.exec(
-        code,
+  // Blanked here rather than in `migrations` itself: `allSql` above is built from the same array and the
+  // append-only and `comment on table` rules READ the string literals — the declaration they judge IS
+  // the prose. This rule is the one that must not.
+  blankNonCode(sql)
+    .split('\n')
+    .forEach((line, i) => {
+      // Already blanked by `blankNonCode`. The migrations and this repository's prose talk about slots
+      // constantly — 0012 explains why a block "must never make a single slot unavailable" — and a rule
+      // that read comments would fire on the sentence explaining why it exists.
+      const code = line
+      const created =
+        /^\s*create\s+(?:or\s+replace\s+)?(?:unlogged\s+|temp\s+|temporary\s+)?(table|materialized\s+view|view)\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/i.exec(
+          code,
+        )
+      if (created === null) return
+      const kind = created[1].toLowerCase().replace(/\s+/g, ' ')
+      const name = created[2].replace(/"/g, '')
+      if (!namesPrecomputedAvailability(name)) return
+      problems.push(
+        `${path}:${i + 1}  ${SLOT_RULE}: ${kind} "${name}" would materialise availability. Slots are ` +
+          'computed on demand from the trading window, appointments, blocks and closures ' +
+          '(packages/core/src/availability/solve.ts); a stored copy is stale from the next block, ' +
+          'closure or walk-in and offers a slot the floor cannot deliver',
       )
-    if (created === null) return
-    const kind = created[1].toLowerCase().replace(/\s+/g, ' ')
-    const name = created[2].replace(/"/g, '')
-    if (!namesPrecomputedAvailability(name)) return
-    problems.push(
-      `${path}:${i + 1}  ${SLOT_RULE}: ${kind} "${name}" would materialise availability. Slots are ` +
-        'computed on demand from the trading window, appointments, blocks and closures ' +
-        '(packages/core/src/availability/solve.ts); a stored copy is stale from the next block, ' +
-        'closure or walk-in and offers a slot the floor cannot deliver',
-    )
-  })
+    })
 }
 
 if (problems.length > 0) {
