@@ -938,6 +938,28 @@ export {
   registerInspectionCandidates,
   upsertGscDailyRows,
 } from './repositories/seo-warehouse.ts'
+/*
+  W-SYS-11's admin session (0090). `readStaffSession` is the only way a request learns who is reading, and
+  it returns `role` as a `string`: `Role` and the matrix live in `packages/core`, which `packages/db` may
+  not import, so `apps/web/src/session.ts` does the narrowing at the boundary where the matrix is in scope.
+  No function here mints a credential — the first one is an operator's INSERT with a runbook, because a
+  seeded admin account is an invented person nobody rotates (Y8-staff, brief rule 15).
+*/
+export {
+  generateStaffSessionToken,
+  hashStaffSessionToken,
+  readStaffCredentialByReference,
+  readStaffSession,
+  recordTotpCounter,
+  revokeStaffSession,
+  STAFF_SESSION_TOKEN_BYTES,
+  STAFF_SESSION_TTL_MS,
+  type StaffCredentialRecord,
+  type StaffPrincipalRow,
+  type StaffSessionResolution,
+  type StartedStaffSession,
+  startStaffSession,
+} from './repositories/staff-session.ts'
 export {
   type IssuedOptOutGrant,
   issueOptOutGrant,

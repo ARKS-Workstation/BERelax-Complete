@@ -50,6 +50,9 @@ const config: NextConfig = {
     // The API routes reach the database and the send choke point, which pull in their own workspace
     // dependencies. Every package in the chain has to be listed: a package that is only a transitive
     // dependency still arrives as untranspiled TypeScript.
+    // W-SYS-11's admin session: `apps/web/src/session.ts` imports the password, TOTP and session
+    // primitives, so they arrive as TypeScript and need compiling like every other workspace package.
+    '@berelax/auth',
     '@berelax/clinical',
     '@berelax/cms',
     '@berelax/media',
