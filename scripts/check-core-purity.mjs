@@ -83,6 +83,27 @@ const SCOPED = [
     ],
   },
   {
+    // The review estate takes every instant as an argument, and G-REV-02 made the general rule not enough for
+    // it. `email-parse.ts` reads a forwarded email and reports the instant the forward ARRIVED; `routing.ts`
+    // takes the clock instant so a verdict can be reproduced from the stored lexicon version; `prompt-builder.ts`
+    // has to be byte-identical across runs for the approval queue's screenshots to be diffable. A `new
+    // Date(instant)` here would be legitimate-looking and would be the one thing that makes a draft or a
+    // verdict depend on when it was asked for rather than on what it was asked about — and the general rule
+    // permits it, because `time.ts` needs it. `Intl` goes for the same reason the ledger's does: a locale or
+    // zone lookup in here would be a second opinion about a date the caller already resolved.
+    root: join(ROOT, 'reviews'),
+    forbidden: [
+      {
+        re: /\bDate\b/g,
+        why: 'the review estate takes every instant as an argument; a Date here makes a verdict or a draft depend on when it was asked for',
+      },
+      {
+        re: /\bIntl\b/g,
+        why: 'no zone or locale lookup in the review estate; the language is an argument and the instant is already resolved',
+      },
+    ],
+  },
+  {
     root: join(ROOT, 'ledger'),
     forbidden: [
       {
