@@ -8,7 +8,7 @@ import {
 } from '@berelax/db'
 import { AppError, isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
-import { requireAdminPrincipal } from '../../../../../src/session.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { type FlagsOutcome, type FlagsRenderDirection, renderFlagsPageHtml } from './render.ts'
 
 /**
@@ -112,6 +112,13 @@ export async function GET(
   request: Request,
   context: { readonly params: Promise<{ readonly id: string }> },
 ): Promise<Response> {
+  // The session BEFORE anything else, for the reason the intake route one directory along records: with the
+  // guard inside `withSql` an unauthenticated request could be answered by a parameter check first, and a
+  // 400 is not a refusal. Authentication precedes request validation.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
+  const { principal } = authorised
+
   try {
     const url = new URL(request.url)
     const { id: customerId } = await context.params
@@ -122,13 +129,6 @@ export async function GET(
     const direction: FlagsRenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'
 
     const html = await withSql(async (sql) => {
-      // The guard first, before any read of this client. A refused reader must cause no query at all: one
-      // whose timing or whose error could say whether there is a row is a disclosure, and there is nothing
-      // this page could do with the answer anyway.
-      const authorised = await requireAdminPrincipal(sql, request, new Date().toISOString())
-      if ('response' in authorised) return authorised.response
-      const { principal } = authorised
-
       const chrome = await adminChromeFor({
         sql,
         now: instantFromIso(new Date().toISOString()),
@@ -161,12 +161,6 @@ export async function GET(
         outcome,
       })
     })
-
-    // The guard's redirect travels back through `withSql` as a Response rather than being thrown, so it is
-    // returned unchanged here. A throw would be caught by the `catch` below and rendered as "the markers
-    // could not be read", which is a different claim from "you are not signed in" and would send an
-    // operator looking for an outage.
-    if (html instanceof Response) return html
 
     return new Response(html, {
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },

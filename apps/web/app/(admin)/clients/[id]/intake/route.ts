@@ -9,7 +9,7 @@ import {
   isAppError,
 } from '@berelax/shared'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
-import { requireAdminPrincipal } from '../../../../../src/session.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { type IntakeOutcome, type RenderDirection, renderIntakePageHtml } from './render.ts'
 
 /**
@@ -137,6 +137,14 @@ export async function GET(
   request: Request,
   context: { readonly params: Promise<{ readonly id: string }> },
 ): Promise<Response> {
+  // The session BEFORE anything else, including before `?purpose=` is validated. Ordering, not style: with
+  // the guard second, an unauthenticated request missing a purpose answered 400 rather than 303 — so the
+  // route told a caller who is not signed in about its own parameters, and the refusal-by-name assertion in
+  // session.itest.ts read a 400 where a redirect belonged. Authentication precedes request validation.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
+  const employeeId = authorised.principal.employeeId
+
   try {
     const url = new URL(request.url)
     const { id: customerId } = await context.params
@@ -144,13 +152,6 @@ export async function GET(
     const direction: RenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'
 
     const html = await withSql(async (sql) => {
-      // The guard first, before the submission lookup and before any audit row. An unauthenticated request
-      // must not reach a clinical read at all — including the refused kind, which WRITES a denial recorded
-      // against whoever was named, and naming somebody is exactly what an unauthenticated caller cannot do.
-      const authorised = await requireAdminPrincipal(sql, request, new Date().toISOString())
-      if ('response' in authorised) return authorised.response
-      const employeeId = authorised.principal.employeeId
-
       const config = loadConfig()
       const chrome = await adminChromeFor({
         sql,
@@ -178,11 +179,6 @@ export async function GET(
         residencyQuestionId: CLINICAL_OPEN_QUESTIONS.residency,
       })
     })
-
-    // The guard's redirect travels back through `withSql` as a Response rather than being thrown, so it is
-    // returned unchanged. A throw would be caught below and rendered as "the record could not be read",
-    // which is a different claim from "you are not signed in".
-    if (html instanceof Response) return html
 
     return new Response(html, {
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },

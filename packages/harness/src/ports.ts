@@ -79,6 +79,17 @@ export const TEST_PORT_BANDS = {
   // flight in another worktree", which was true when it was written: that unit is this one, and the
   // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
   'quick-book': { start: 11_800, width: 300 },
+  // W-SYS-11's admin session, which needs a real server for the claims no pure render can make. All three
+  // are about a RESPONSE rather than a return value: the `Set-Cookie` a successful POST emits and its exact
+  // attributes, the 303 an unguarded request gets from every one of 25 routes, and the bytes a receptionist
+  // receives being identical with `?role=owner` appended — which is the assertion that would catch a
+  // re-introduction of the query parameter, and it can only be made against served bytes.
+  //
+  // 12_700 rather than the next round number after `pipeline` (12_100): 12_400 is an allocation held by a
+  // unit in flight in another worktree, and a band chosen from what one worktree can see is exactly how
+  // `template-editor` and `book-flow` came to share one. [12_700, 13_000) contains none of
+  // RESTRICTED_PORTS.
+  'admin-session': { start: 12_700, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
