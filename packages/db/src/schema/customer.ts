@@ -68,6 +68,16 @@ export const customer = pgTable(
     acquisitionSource: text('acquisition_source').notNull(),
     isVip: boolean('is_vip').notNull(),
     vipSince: timestamp('vip_since', { withTimezone: true }),
+    /**
+     * When this record's identity was pseudonymised under a data-subject erasure (0085). Null when live.
+     *
+     * Tied to `phoneE164` by `customer_erasure_and_pseudonym_agree`, which is a constraint and not a
+     * convention: a row holding the `erased-...` pseudonym with this null reads as a live customer whose
+     * number happens to be unusable, and a row with this set while a real number is still in place is a
+     * completed erasure that left the person reachable. The database refuses both, so a write assembled
+     * from these definitions must move the two columns together.
+     */
+    erasedAt: timestamp('erased_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },

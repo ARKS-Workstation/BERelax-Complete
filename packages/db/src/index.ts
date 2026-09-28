@@ -106,6 +106,16 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  CONTACT_DETAIL_COLUMNS,
+  CREDENTIAL_COLUMN_PATTERN,
+  coveredTables,
+  erasureCoverage,
+  FREE_TEXT_NOTE_EXCLUSIONS,
+  FREE_TEXT_NOTE_PATTERN,
+  type ProbeAxis,
+  type ProbedColumnRow,
+} from './privacy-coverage.ts'
+export {
   type AlternativesOptions,
   type AlternativeTherapist,
   AVAILABILITY_OCCUPANCY_PAD_MINUTES,
@@ -889,6 +899,27 @@ export {
   recordReplySubmittedToApi,
   recordRoutingVerdict,
 } from './repositories/reviews.ts'
+export {
+  assertRecipesMatchRules,
+  beginRightsRequest,
+  type ErasureDeps,
+  type ErasureInput,
+  type ErasureReport,
+  EXECUTION_RECIPES,
+  type ExportInput,
+  type ExportResult,
+  eraseSubject,
+  exportSubjectData,
+  overdueRightsRequests,
+  REDACTION_MARKER,
+  RETAINING_ERASURE_ACTIONS,
+  RIGHTS_REFUSALS,
+  RIGHTS_SQLSTATE,
+  type RightsRefusal,
+  type RightsRequestInput,
+  type RightsRequestRow,
+  recordRightsRequest,
+} from './repositories/rights.ts'
 export {
   type LabourCostRuleRow,
   type PublishedRota,
@@ -2223,7 +2254,9 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 72, 73 and 75 were held by three more; every one of those has landed, and 76 and 77 landed within the
 // hour of each other after that. 78 through 82 were allocated to one batch of five units and landed
 // together, which is why no number between 78 and 82 is a gap and why none of them was ever the "next
-// free" number for long. 83 is the next number nobody holds. 55, 56 and 57 landed out of order
+// free" number for long. Which number is next free is stated ONCE, in the note immediately before
+// `SCHEMA_VERSION`, and nowhere else — this paragraph said 83 for four merges after 83 had landed.
+// 55, 56 and 57 landed out of order
 // and within an hour of one another, which is the arrangement this note exists for: the number is a
 // high-water mark, not a count, and no gap has been closed to tidy the sequence.
 //
@@ -2321,13 +2354,6 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // itself is NOT deferred with it — 2030 is credited here) and the seeded fixture packages, because what the
 // business sells is a fact nobody has stated.
 //
-// 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
-// record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
-// what makes a non-contiguous allocation cost nothing. 83, 84, 86 and 87 landed together as the second
-// batch of five; 85 was allocated to C-CRM-10, whose worktree survived a container restart with the work
-// uncommitted, so 85 is HELD rather than free and rather than a permanent gap — it will land with that
-// unit. 88 is the next number nobody holds.
-//
 // 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
 // learn about a clinical record, made into a shape that can carry nothing else. 0008 created
 // `clinical.contraindication_flag` with five booleans and 0009 built the view over it; 0082 wrote no flag
@@ -2371,8 +2397,6 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // private SQLSTATE prefix: `ZB` through `ZW` are taken, one file each, so what a private code has to be is
 // unique to one file rather than memorable, which is 0077's argument and 0082's verbatim.
 //
-// 83 and 85 through 87 are allocations held by units in flight in other worktrees, so 83 is a gap in the
-// numbers and not in the record, for the reason above.
 // 86 is 0086_attendance.sql: attendance as EVIDENCE, the timesheet approval that locks a period, and the
 // dated correction that is the only way to change what a locked period says. Every table is append-only
 // (ZX001, for every role including the owner) because payroll pays attendance: a punch that can be edited is
@@ -2412,10 +2436,6 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `ZX` is its private SQLSTATE prefix: every mnemonic letter from `ZB` to `ZW` is taken, so what a private
 // code has to be is unique to one file rather than memorable, which is 0077's argument verbatim.
 //
-// 78 through 81 were allocations held by units in flight in other worktrees, and 83 through 85 and 87 are
-// held by units in flight now, so the jump from 82 to 86 is not a gap in the record: gate case 90a walks the
-// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
-// allocation cost nothing.
 // 87 is 0087_compliance_gate.sql: the promotional send window cannot be switched off, and the refusal holds
 // for a `psql` session (C-AUTO-04). It adds no table and seeds no row. `messaging.promotional_window` is an
 // `app_setting` row, and before this file the ONLY thing refusing `{"startHour": 0, "endHour": 24}` was
@@ -2442,6 +2462,58 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // one private SQLSTATE, and `ZX` was chosen because it is unowned: `ZW001` is currently raised by BOTH 0080
 // and 0081, which is exactly the collision the private-class convention exists to prevent, since a probe
 // asserting `ZW001` cannot tell which statement it bounced off.
+//
+//
+// 85 is 0085_data_subject_rights.sql: the five rights as a policy engine with a deadline and an audit
+// trail, and the erasure/retention conflict resolved with neither side silently winning. The tables are
+// `rights_request` (the subject, the type, the instant it was received, the SLA it was taken under, the
+// derived due instant, the verification method and the lifecycle), `rights_resolution` (one per completed
+// request: which regulatory_profile VERSION decided it, the pseudonym the identity became, the regime and
+// that the regime is an assumption, the OPEN-QUESTIONS ids that would change it, the stated position on
+// backups, and whether the written response could be issued), `rights_resolution_class` (per table and
+// column: the rows that were there, the rows acted on, the rows retained and why), `rights_export` (with
+// the subject count that drives docs/06 D4's insider-threat alert) and `legal_hold`. The claim of the whole
+// file is one CHECK: `rows_before = rows_acted + rows_retained`, so an erasure that could not account for a
+// row cannot store its own report and the refusal rolls it back inside its own transaction — 0069's
+// `merge_record_table` argument applied to the operation whose defects are quieter still, because a merge
+// that leaves rows behind surfaces as a record nobody reads and an erasure that leaves rows behind surfaces
+// as a message to somebody who asked to be forgotten. A retained row needs `retained_reason`, and
+// `retain_statutory` additionally needs the profile COLUMN naming the obligation and the figure, so no
+// years number is ever a literal. `rights_request` freezes the columns an SLA is measured against (ZY002)
+// and permits only the transitions the policy declares (ZY003), because a request answered on day forty is
+// compliant if `received_at` can be edited and nothing about the row would look wrong afterwards. Erasure
+// of the CRM identity is a PSEUDONYM in `customer.phone_e164`, which had to widen that column's E.164 check:
+// every value matching it is a plausible phone number and a plausible number may be a real stranger's, so
+// the pseudonym is `erased-` plus 32 letters from a to p — digit-free, so `phone_match_key` derives to the
+// empty string and an erased record can never surface as a merge candidate — tied to `erased_at` by
+// `customer_erasure_and_pseudonym_agree`, which refuses both halves of the disagreement and whose second
+// half IS this unit's defining failure: a real number still in place on a record marked erased. Clinical
+// data is crypto-erased through `public.destroy_customer_deks`, SECURITY DEFINER because 0009 revokes the
+// clinical schema from the application role, refusing (ZY006) unless an `in_progress` erasure request names
+// that customer — so a bug cannot shred a clinical record, because a bug does not first insert a request
+// saying it may. It is in `public` and not in `clinical` because EXECUTE on a function also needs USAGE on
+// the schema holding it, and granting `berelax_app` usage on `clinical` would make "the application role
+// holds no privilege on the clinical schema" stop being literally true — without letting it read a table,
+// so it would have been a weakening no test could see. The destroyed marker is a ZERO-LENGTH `wrapped_data_key` (a real one is always 60 bytes), and a
+// CHECK asserting that length was written and REMOVED: `intake.itest.ts` inserts one-byte placeholder keys
+// in the cases that prove C-CRM-08's consent gate and version guard, and a CHECK fires before both, so two
+// of that unit's passing tests would have failed with this file's error instead of the one they assert.
+// `clinical.dek_destruction` is the authority instead. `ZY` is this file's private SQLSTATE prefix, and it
+// is the SECOND one this file had. It was written as `ZA`, on the reasoning that ZB through ZW were taken
+// and that a unit continuing the alphabet from ZW would reach for ZX next — sound reasoning that still
+// collided, because 0084 was a held allocation in another worktree at the time and had taken ZA for
+// itself. Nothing either unit could read said so. The merge is where it became real: `ZA001` stood for
+// "this flag row claims a template version its source submission does not have" AND for "rights_request
+// refuses DELETE", and `ZA002` for "this flag cites another customer's submission" AND for "a frozen SLA
+// column changed" — two pairs of unrelated rules under one code each, which every translator in
+// `packages/db` matches on alone. `packages/db/src/sqlstate-uniqueness.test.ts` caught it on the first run
+// after the merge, which is the whole reason it exists. This file's eight codes moved to ZY001-ZY008
+// rather than 0084's two, because 0084 merged first and its codes are asserted by C-CRM-09's suite; the
+// move is a rename within one file's own family and changes no rule. ZZ is now the last free class, so the
+// convention that a class identifies a FILE has one allocation left in it — W-SYS-12 owns replacing it
+// with an allocator. That sentence was true when it was written and 0091 is where it stopped being true:
+// see the ZY011-ZY014 paragraph below, which took a SUBCLASS RANGE rather than the last class, on
+// W-SYS-12's provisional answer. ZZ is still unspent.
 //
 // 91 is 0091_flow_run.sql: the run, the idempotency key, and the step log that answers one question in one
 // query (C-AUTO-07). 0070 built the flow, its immutable versions and the enrolment pin and stated in its own
@@ -2472,7 +2544,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // enum would be a third statement of an already-computed list and would be the thing refusing to store the
 // ninth exit reason somebody draws. The three vocabularies that ARE enums -- `flow_run_mode`,
 // `flow_run_status`, `flow_node_outcome` -- are compared against their `@berelax/shared` lists through
-// `pg_enum` in both directions by `flow-interpreter.itest.ts`, which is what makes two statements of one
+// `pg_enum` in both directions by `apps/worker/src/automation/interpreter.itest.ts`, which is what makes two
 // vocabulary safe rather than latent.
 //
 // A DRY RUN leaves nothing behind, and that is the database's claim rather than the worker's care:
@@ -2501,26 +2573,37 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // honest row unstorable. A `sent` row with zero attempts is still refused, which is what gate case 39c
 // measures and which is the rule that constraint was written for.
 //
-// Four private SQLSTATEs, in class `ZY`, and the class is forced rather than chosen:
-// `sqlstate-uniqueness.test.ts` records that ZA through ZX are taken and that thirteen codes already stand
-// for two unrelated rules each, so only ZY and ZZ were free. ZY001 a flow_step_log row was UPDATEd or
-// DELETEd; ZY002 a flow_node_effect row was DELETEd or UPDATEd in any way but a merge re-pointing its
-// contact; ZY003 a dry run tried to leave a side effect behind; ZY004 a run's mode or enrolment changed.
-// Four and not one because each has a different runbook answer, which is the whole argument for a private
-// class (0061's, restated).
+// Four private SQLSTATEs, and they are `ZY011`-`ZY014` because the CLASS no longer identifies a file.
+// This paragraph was written twice. The first version argued that ZY was free, on the reading
+// `sqlstate-uniqueness.test.ts` supported at the time -- ZA through ZX taken, thirteen codes already standing
+// for two unrelated rules each, ZY and ZZ left -- and took ZY001-ZY004. By the merge that reading was false
+// in three directions at once: 0085 had moved its eight codes to ZY001-ZY008 (its own header records why),
+// and two further units in flight had reached for ZY001 as well. Four migrations claiming ZY001 is precisely
+// the failure the convention existed to prevent, restated one level up: it is not the code that was scarce,
+// it is the CLASS, and a convention that hands out 26 of anything across 90-odd migrations runs out.
+// So the replacement, which is W-SYS-12's provisional answer taken as the strictest safe reading of the
+// question its own manifest entry poses: a refusal is identified by all FIVE characters, two unrelated rules
+// may share a class as long as they never share a code, and a unit takes a SUBCLASS range rather than a
+// class. This file's range is ZY011-ZY014, allocated by the integrator against the ranges other units in
+// flight already hold, and it deliberately leaves ZY001-ZY008 to 0085 and ZY015 onward to the units that
+// asked before this one. ZY011 a flow_step_log row was UPDATEd or DELETEd; ZY012 a flow_node_effect row was
+// DELETEd or UPDATEd in any way but a merge re-pointing its contact; ZY013 a dry run tried to leave a side
+// effect behind; ZY014 a run's mode or enrolment changed. Four and not one because each has a different
+// runbook answer, which is the whole argument for a private code (0061's, restated); the argument for a
+// private CLASS is over, and W-SYS-12 owns the allocator that makes the new rule enforceable rather than
+// agreed.
 //
-// 88, 89 and 90 are allocations held by units in flight in other worktrees, so 0091 following 0087 on disk is
-// not a gap in the record: gate case 90a walks the migrations that EXIST rather than consecutive integers.
-// They are not renumbered to close the gap either -- a gap is permanent by convention, like 22, 41, 44, 47,
-// 71 and 74, because renumbering is how two branches come to apply one number to different SQL.
+// Every number allocated through 87 has now landed, and 91 has landed on top of it: the run on disk is
+// 1..87 less the permanent gaps above, plus 91. 85 — held while C-CRM-10's worktree carried the work
+// uncommitted — arrived with that unit rather than becoming a gap, and 91 arrived out of order for the same
+// reason. 88, 89, 90 and 92 are allocations held by units in flight in other worktrees, so 93 is the next
+// number nobody holds; if one of the four turns out to need no migration it becomes a permanent gap like 22,
+// 41, 44, 47, 71 and 74 and is NOT renumbered, because renumbering to close a gap is how two branches come
+// to apply one number to different SQL. Gate case 90a walks the migrations that EXIST on disk rather than
+// consecutive integers, which is what makes a non-contiguous allocation cost nothing.
 //
-// 83, 84, 85 and 86 are allocations held by units in flight in other worktrees, which is why 0087 follows
-// 0082 on disk. Gate case 90a walks the migrations that EXIST rather than consecutive integers, so the run
-// is 49..82 plus 87 and the four held numbers cost nothing. If any of them turns out to need no migration
-// it becomes a permanent gap like 22, 41, 44, 47, 71 and 74, and is not renumbered: renumbering to close a
-// gap is how two branches come to apply the same number to different SQL.
-//
-// 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
-// record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
-// what makes a non-contiguous allocation cost nothing.
+// This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
+// both sides, and four of the five surviving copies then described a set of held numbers that had since
+// landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
+// the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
 export const SCHEMA_VERSION = 91 as const

@@ -34,7 +34,7 @@
 --
 -- *"Dry run writes a full projected step log ... and exactly zero message rows and zero provider calls."*
 -- A code path that is careful is a code path somebody edits. So `flow_node_effect` refuses an INSERT for a
--- dry run outright and `flow_step_log` refuses one carrying a `message_id` (both ZY003), for every role
+-- dry run outright and `flow_step_log` refuses one carrying a `message_id` (both ZY013), for every role
 -- including the owner. The row-count assertions in the suite then measure a rule the database holds rather
 -- than a habit the worker has.
 --
@@ -74,19 +74,39 @@
 -- constraint would have made the honest row unstorable. A `sent` row with zero attempts is still refused,
 -- which is what gate case 39c measures.
 --
--- ## The private SQLSTATE class
+-- ## The four private SQLSTATEs, and why a class no longer identifies a file
 --
--- Class `ZY`, and the choice is forced: `packages/db/src/sqlstate-uniqueness.test.ts` records that `ZA`
--- through `ZX` are taken and only `ZY` and `ZZ` are free, and thirteen codes already stand for two
--- unrelated rules each. Four codes, because four different refusals have four different runbook answers:
+-- `ZY011` through `ZY014`. This section was written twice, and the first version is worth stating because
+-- the correction is the point. It said: class `ZY`, and the choice is forced —
+-- `packages/db/src/sqlstate-uniqueness.test.ts` records that `ZA` through `ZX` are taken and only `ZY` and
+-- `ZZ` are free — and it took `ZY001`-`ZY004`. Every word of that was true of the tree it was written
+-- against and none of it survived the merge: `0085` had already moved its eight codes into `ZY001`-`ZY008`
+-- (its own header records the `ZA` collision that pushed them there), and two further migrations in flight
+-- in other worktrees had reached for `ZY001` as well. FOUR files claiming one code, each one reasoning
+-- correctly from the migrations it could see.
 --
---   ZY001  a flow_step_log row was UPDATEd or DELETEd — the evidence is the record, and a support
+-- That is not a mistake any of the four could have avoided, which is what makes it a convention failure
+-- rather than an error. The scarce thing was never the code: it was the CLASS, and a rule that spends one
+-- of 26 classes per migration is exhausted at 26 migrations and this schema is past ninety. So the rule
+-- changes here, taking W-SYS-12's provisional answer as the strictest safe reading (docs/12 §1): **a
+-- refusal is identified by all five characters**, two unrelated rules may share a class as long as they
+-- never share a code, and a unit is allocated a SUBCLASS RANGE rather than a class. This file's range is
+-- `ZY011`-`ZY014`, allocated against the ranges the units in flight already held; `ZY001`-`ZY008` stay
+-- 0085's and `ZY015` onward belongs to units that asked before this one. What makes the new rule
+-- enforceable rather than merely agreed is the registry W-SYS-12 owns, and until that lands
+-- `packages/db/src/sqlstate-uniqueness.test.ts` is the only thing that would catch the next collision — at
+-- a merge, which is late, which is why it caught this one.
+--
+-- Still four codes and not one, because four different refusals have four different runbook answers, and a
+-- code is the only part of a refusal every translator in `packages/db` matches on:
+--
+--   ZY011  a flow_step_log row was UPDATEd or DELETEd — the evidence is the record, and a support
 --          question answered from an edited log is answered from nothing
---   ZY002  a flow_node_effect row was DELETEd, or UPDATEd in any way other than a merge re-pointing its
+--   ZY012  a flow_node_effect row was DELETEd, or UPDATEd in any way other than a merge re-pointing its
 --          contact — removing the token is how a node comes to execute twice
---   ZY003  a DRY RUN tried to leave something behind: a node effect at all, or a step log row naming a
+--   ZY013  a DRY RUN tried to leave something behind: a node effect at all, or a step log row naming a
 --          message. "A dry run sends nothing" has to hold for a psql session too
---   ZY004  a run's mode or its enrolment changed — a dry run turned into a live one would send every
+--   ZY014  a run's mode or its enrolment changed — a dry run turned into a live one would send every
 --          message it had only projected
 
 begin;
@@ -107,7 +127,7 @@ create type flow_run_mode as enum ('live', 'dry_run');
 
 comment on type flow_run_mode is
   'Whether a run performs its side effects or only projects them. A dry run has no enrolment and may '
-  'leave behind no node effect and no message (ZY003).';
+  'leave behind no node effect and no message (ZY013).';
 
 create type flow_run_status as enum ('running', 'completed', 'loop_detected', 'cancelled');
 
@@ -143,7 +163,7 @@ create table flow_run (
   -- deleted. `flow_enrolment.customer_id` cascades from `customer` — 0070 chose that deliberately, so
   -- `delete from customer` keeps working for the four suites that clear the table — so a cascading key
   -- here would carry that delete into `flow_run`, from there into `flow_step_log`, and the append-only
-  -- trigger would raise ZY001. The symptom is not a flow bug: it is `delete from customer` failing for
+  -- trigger would raise ZY011. The symptom is not a flow bug: it is `delete from customer` failing for
   -- every caller, with a SQLSTATE about an automation log. Found by running the suite, which is the only
   -- thing that could have found it.
   --
@@ -258,22 +278,22 @@ as $$
 begin
   if new.mode is distinct from old.mode then
     raise exception
-      'ZY004: a flow_run''s mode may not change. Turning a dry run into a live one would send every '
+      'ZY014: a flow_run''s mode may not change. Turning a dry run into a live one would send every '
       'message it had only projected, from a row whose step log says nothing was sent.'
-      using errcode = 'ZY004';
+      using errcode = 'ZY014';
   end if;
   if new.enrolment_id is distinct from old.enrolment_id then
     raise exception
-      'ZY004: a flow_run''s enrolment may not change. The run''s idempotency tokens are keyed on the run, '
+      'ZY014: a flow_run''s enrolment may not change. The run''s idempotency tokens are keyed on the run, '
       'so moving it onto another enrolment would hand that enrolment a set of nodes it is recorded as '
       'having already executed.'
-      using errcode = 'ZY004';
+      using errcode = 'ZY014';
   end if;
   return new;
 end $$;
 
 comment on function refuse_flow_run_reidentification() is
-  'Raises ZY004 when an UPDATE would change flow_run.mode or flow_run.enrolment_id. Everything else on '
+  'Raises ZY014 when an UPDATE would change flow_run.mode or flow_run.enrolment_id. Everything else on '
   'the row stays writable, because the interpreter has to be able to advance a run.';
 
 create trigger flow_run_identity_is_immutable before update on flow_run
@@ -299,7 +319,7 @@ create table flow_node_effect (
   -- token has to move or the node would execute again under the survivor's key.
   --
   -- NOT a foreign key, for the reason `flow_run.enrolment_id` gives above: DELETE on this table raises
-  -- ZY002, so a cascade from `customer` reaching it would make `delete from customer` fail. 0056 took the
+  -- ZY012, so a cascade from `customer` reaching it would make `delete from customer` fail. 0056 took the
   -- same decision about `consent.contact_customer_id` and said so in its own header.
   contact_customer_id uuid            not null,
   claimed_at          timestamptz     not null,
@@ -313,13 +333,13 @@ create table flow_node_effect (
 comment on table flow_node_effect is
   'The idempotency token for one node of one run, reaching one contact on one channel. Inserted before '
   'any transport is called, so a replayed job reads the conflict as a typed duplicate outcome and asks '
-  'no vendor anything. Every UPDATE except a merge re-pointing contact_customer_id raises ZY002, and so '
+  'no vendor anything. Every UPDATE except a merge re-pointing contact_customer_id raises ZY012, and so '
   'does every DELETE: removing a token is how a node comes to execute twice. A dry run may not insert '
-  'one at all (ZY003).';
+  'one at all (ZY013).';
 comment on column flow_node_effect.contact_customer_id is
   'The contact the node reached. Re-pointed by a customer merge and by nothing else, which is what makes '
   '"a contact merged mid-run continues on the survivor exactly once" hold: the token moves with the '
-  'person, so the survivor''s key finds it. NOT a foreign key: DELETE here raises ZY002, so a cascade '
+  'person, so the survivor''s key finds it. NOT a foreign key: DELETE here raises ZY012, so a cascade '
   'from customer reaching it would make `delete from customer` fail for every caller (0056''s decision).';
 
 -- ---------------------------------------------------------------------------------------------
@@ -342,13 +362,13 @@ create table flow_step_log (
   branch               text              not null
     constraint flow_step_log_branch_is_a_label check (branch ~ '^[a-z][a-z0-9_]{0,31}$'),
   outcome              flow_node_outcome not null,
-  -- NOT a foreign key: this table refuses DELETE for every role (ZY001), so a cascade from `customer`
+  -- NOT a foreign key: this table refuses DELETE for every role (ZY011), so a cascade from `customer`
   -- reaching it would make `delete from customer` raise. 0056's decision about `consent`, restated.
   contact_customer_id  uuid              not null,
   channel              message_channel,
   template_key         text,
   -- The message this step produced. NULL for a node that sends nothing, for a refusal (B-MSG-04's rule:
-  -- a refused send writes no message row) and for every dry-run row (ZY003 refuses one).
+  -- a refused send writes no message row) and for every dry-run row (ZY013 refuses one).
   message_id           uuid              references message (id) on delete restrict,
   -- The consent record the gate's answer actually rested on, by id. `resolveConsent` returns it
   -- (`ConsentResolution.recordId`); the gate reduces the same resolution to a boolean, and recording the
@@ -397,7 +417,7 @@ create table flow_step_log (
 );
 
 comment on table flow_step_log is
-  'One row per node one run took, live or projected. Append-only: UPDATE and DELETE raise ZY001 for '
+  'One row per node one run took, live or projected. Append-only: UPDATE and DELETE raise ZY011 for '
   'every role including the owner, because this is the evidence a support question is answered from and '
   'an edited log answers nothing. Every row names the definition version, the node, the resolved consent '
   'record and the gate decision, so "why did this contact get this message" is one SELECT with no join.';
@@ -425,15 +445,15 @@ language plpgsql
 as $$
 begin
   raise exception
-    'ZY001: flow_step_log is append-only; % is refused. This is what "why did this contact get this '
+    'ZY011: flow_step_log is append-only; % is refused. This is what "why did this contact get this '
     'message" is answered from, so a row that can be edited is an answer nobody can rely on. A step that '
     'was wrong is corrected by the next run''s rows, not by rewriting this one.',
     tg_op
-    using errcode = 'ZY001';
+    using errcode = 'ZY011';
 end $$;
 
 comment on function refuse_flow_step_log_change() is
-  'Raises ZY001 (FlowStepLogAppendOnly) for flow_step_log, for every role including the owner.';
+  'Raises ZY011 (FlowStepLogAppendOnly) for flow_step_log, for every role including the owner.';
 
 create trigger flow_step_log_no_update before update on flow_step_log
   for each row execute function refuse_flow_step_log_change();
@@ -449,10 +469,10 @@ as $$
 begin
   if tg_op = 'DELETE' then
     raise exception
-      'ZY002: a flow_node_effect row may not be deleted. It is the record that this node has already '
+      'ZY012: a flow_node_effect row may not be deleted. It is the record that this node has already '
       'reached this contact on this channel, so removing it is how a message comes to be sent twice. A '
       'run that should not continue is ended on flow_run, not by clearing its tokens.'
-      using errcode = 'ZY002';
+      using errcode = 'ZY012';
   end if;
   if new.flow_run_id is distinct from old.flow_run_id
      or new.node_id is distinct from old.node_id
@@ -460,16 +480,16 @@ begin
      or new.claimed_at is distinct from old.claimed_at
      or new.id is distinct from old.id then
     raise exception
-      'ZY002: a flow_node_effect row may only ever have its contact_customer_id changed, and only by a '
+      'ZY012: a flow_node_effect row may only ever have its contact_customer_id changed, and only by a '
       'customer merge re-pointing it onto the survivor. Moving the run, the node, the channel or the '
       'instant would make the token describe an execution that never happened.'
-      using errcode = 'ZY002';
+      using errcode = 'ZY012';
   end if;
   return new;
 end $$;
 
 comment on function refuse_flow_node_effect_change() is
-  'Raises ZY002 (FlowNodeEffectImmutable) for a DELETE, and for an UPDATE of anything but '
+  'Raises ZY012 (FlowNodeEffectImmutable) for a DELETE, and for an UPDATE of anything but '
   'contact_customer_id — which a customer merge re-points and nothing else does.';
 
 create trigger flow_node_effect_no_delete before delete on flow_node_effect
@@ -495,23 +515,23 @@ begin
   end if;
   if tg_table_name = 'flow_node_effect' then
     raise exception
-      'ZY003: a dry run may not claim an idempotency token. A token is the record that a side effect '
+      'ZY013: a dry run may not claim an idempotency token. A token is the record that a side effect '
       'happened, and a dry run has none — one left behind would make the LIVE run of the same flow skip '
       'the node as a duplicate and send nothing at all.'
-      using errcode = 'ZY003';
+      using errcode = 'ZY013';
   end if;
   if new.message_id is not null then
     raise exception
-      'ZY003: a dry run''s step log row may not name a message. The whole claim is zero message rows, '
+      'ZY013: a dry run''s step log row may not name a message. The whole claim is zero message rows, '
       'and a projection pointing at one is either a message that was sent or a reference to somebody '
       'else''s.'
-      using errcode = 'ZY003';
+      using errcode = 'ZY013';
   end if;
   return new;
 end $$;
 
 comment on function refuse_dry_run_side_effect() is
-  'Raises ZY003 when a dry run would leave a side effect behind: any flow_node_effect row, or a '
+  'Raises ZY013 when a dry run would leave a side effect behind: any flow_node_effect row, or a '
   'flow_step_log row naming a message. Fires for every role including the owner.';
 
 create trigger flow_node_effect_not_for_a_dry_run before insert on flow_node_effect

@@ -51,6 +51,7 @@ import {
 } from './jobs/package-expiry.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
+import { RETENTION_PURGE_JOB_DEFINITION } from './jobs/retention-purge.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
 import {
   REBUILD_SCHEDULED_STEPS_JOB,
@@ -435,6 +436,11 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   COMPLIANCE_CALENDAR_JOB,
   SEND_OBLIGATION_NOTICE_JOB,
   REBUILD_OBLIGATION_NOTICES_JOB,
+  // C-CRM-10's retention purge. 05:15, after trading closes at 02:00 and after the other three nightly
+  // passes, because the nightly work should not contend and this one takes row locks on tables the booking
+  // path writes to. Its declared interval in 0085 is 24 hours, which is what makes the watchdog's "no
+  // success within twice the interval" alert mean something for it.
+  RETENTION_PURGE_JOB_DEFINITION,
   // C-AUTO-07's one queue, and the same shape again: a tick is ANNOUNCED — by the enrolment that started
   // the run, by the previous tick's own delay, or by the instant the GATE named when it held a message —
   // so a cron here would be a poller looking for work an enqueue already named. No cron therefore no

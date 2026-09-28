@@ -12,7 +12,7 @@ meta:
   contract: docs/12-autonomous-delivery.md
   # 208 rather than 207 since W-SYS-11 was added: the admin session, which 56 references deferred to a
   # unit that is `done` and never owned it. See W-SYS-11's own NOTEs for the evidence.
-  units_total: 208
+  units_total: 210
 
 units:
   - id: F01
@@ -3408,6 +3408,131 @@ units:
       must refuse every login rather than fall back to anything. P-HR-14''s therapist portal needs a staff
       session too and is a separate unit; this one owns the ADMIN estate, and the two should share the
       session reader rather than each building one.'
+  - id: W-SYS-12
+    order: 41.6
+    title: 'Private SQLSTATE allocation: one code, one rule, with an allocator'
+    summary: Every refusal in this schema carries a private SQLSTATE and every translator in packages/db
+      matches on the code ALONE, so a code standing for two rules reports one refusal as the other and lets
+      a probe pass on a statement it never touched. Thirteen codes already do. The cause is a convention
+      with no allocator - a unit picks a class by reading the migrations it can see, and units in flight
+      cannot see each other. This unit makes the five characters the identity, allocates them from a
+      registry a gate enforces, and resolves the thirteen.
+    owner: claude
+    status: todo
+    size: L
+    depends_on: []
+    blocked_on_owner: []
+    provisional: 'The namespace decision, taken as the strictest safe option: the CLASS stops identifying a
+      migration file and a refusal is identified by all five characters, so ZZ plus the unused subclasses of
+      every existing class are enough for the remaining units and only the colliding codes move. The
+      alternative - a fresh class per file - is what exhausted 24 of 26 classes in 87 migrations and has one
+      allocation left.'
+    acceptance:
+    - '`packages/db/src/sqlstate-registry.ts` is the allocator: one entry per private code, naming the rule
+      in one sentence, the migration that raises it and the translator that reports it. A gate fails in
+      three directions - two entries sharing a code, a code raised by a migration with no entry, and an
+      entry naming a code no migration raises - the third being what lets the registry shrink'
+    - The gate reads the migration files themselves rather than any hand-written list of codes, and a
+      known-bad fixture per ADR 0003 proves each of the three directions fires, asserted by rule name
+    - Each of the thirteen entries in `KNOWN_COLLISIONS` is resolved by moving exactly ONE side to a freshly
+      registered code, with a migration that `create or replace`s only the function raising it; the map is
+      DELETED rather than emptied, so the allowlist cannot be re-grown
+    - '`ZL002` is proven to be one rule raised in two places rather than moved: a test drives both call
+      sites and asserts the same rule, which is the distinction the collision detector was built to make'
+    - Every translator in packages/db that matched a moved code is updated in the same commit, and a test
+      drives each moved refusal end to end asserting the NEW code and that rule's own message - not the
+      code alone, because a code with no message assertion is what let these collide unnoticed
+    - The uniqueness test keeps both directions it already has (a new collision fails, a stale allowlist
+      entry fails) and gains the registry direction, so the next unit cannot take a code silently
+    - 'An ADR records the decision, the alternative rejected and the consequence: two unrelated rules may
+      share a CLASS and never a CODE, which is the sentence that makes ZZ sufficient'
+    - The allocator is a registered `pnpm verify` step and appears in gate case 29's array, so dropping it
+      fails the build rather than the convention quietly returning
+    - 'Codes taken by units in flight when this unit starts are adopted as inventory rather than
+      reallocated, and the unit''s report lists them: a class cannot be recalled from a worktree that has
+      already raised it'
+    files:
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/sqlstate-registry.test.ts
+    - packages/db/src/sqlstate-uniqueness.test.ts
+    - packages/db/migrations/00xx_sqlstate_reallocation.sql
+    - scripts/check-sqlstate-registry.mjs
+    - scripts/test-gates.mjs
+    - 'NOTE: this unit was ADDED by the integrator and the manifest went from 208 units to 209. It is not
+      new scope. `packages/db/src/sqlstate-uniqueness.test.ts` says the reallocation "is unit-sized and is
+      recorded as such in the manifest rather than improvised here" - and nothing in the manifest owned it,
+      which is the exact drift that file was written to catch, in that file. This unit makes the sentence
+      true, and the sentence now names it.'
+    - 'NOTE: the measured inventory at the time of writing, taken by scanning every `errcode` in
+      packages/db/migrations rather than by reading headers: 116 private codes across 24 classes, of which
+      15 codes are raised by more than one migration file. Two of those 15 were the C-CRM-09/C-CRM-10
+      collision (0084 and 0085 both took class ZA in worktrees that could not see each other) and were
+      resolved at that merge by moving 0085''s eight codes to ZY, which leaves exactly the thirteen this
+      unit owns. `ZL002` is one rule raised in two places and is not one of them; ZZ is the only free class
+      left.'
+    - 'NOTE: order 41.6 is deliberate, immediately after W-SYS-11 and before B-M1. This unit depends on
+      nothing, so any order is topologically valid - but 89 units remain and a unit that needs a private
+      class today has one to take, so the allocator existing BEFORE more of them land is the whole point.
+      Every batch merged so far has added a collision.'
+    - 'NOTE: the migration number is a placeholder. `00xx_sqlstate_reallocation.sql` must be allocated a
+      real number when this unit starts and not before, because five units in flight hold 0088 through 0092
+      and a number allocated at plan time is a number two branches can claim.'
+  - id: W-SYS-13
+    order: 41.7
+    title: 'Test isolation: a suite may delete only what it created'
+    summary: The integration suites run sequentially against one database in an order no file controls, and
+      67 unqualified delete and truncate statements across them remove rows they did not create - including
+      rows `pnpm seed` writes. One emptied the `customer` table for every suite that ran afterwards and for
+      every later run, which skipped all 21 cases of a file it had never heard of. Sort the legitimate
+      owners from the harmful ones, scope the rest, and extend the guard from one table to the seeded set.
+    owner: claude
+    status: todo
+    size: M
+    depends_on: []
+    blocked_on_owner: []
+    provisional: 'The rule, as the strictest safe reading: a suite may remove rows it created, or every row
+      of a table it owns outright and DECLARES that it owns; anything else carries a predicate. Truncating
+      the invoice family as its owner stays legitimate - `invoice` refuses DELETE for every role - and
+      becomes a declaration rather than a convention.'
+    acceptance:
+    - 'Every unqualified delete or truncate in a test file is either scoped to rows the suite created or
+      listed in a declared-owners table naming the file, the table and why that suite owns it; the check
+      derives the offending set by scanning the suites, never from a written list of known sites'
+    - 'The seeded table set is DERIVED from the seed - its loaders, or the row counts it reports - and not
+      restated in the check, because a hand-written list of seeded tables is the second statement of a fact
+      that will drift the first time a loader is added'
+    - A known-bad fixture per ADR 0003 in both directions - a bare delete of a seeded table fails by rule
+      name, and a delete scoped to the suite's own rows passes - with the scan proven to read code rather
+      than prose, since six files describe this hazard in comments
+    - 'An invariant over a full integration run: the seeded row counts are identical before and after, per
+      table, so a suite that removes a seeded row fails the run that did it rather than the next one'
+    - The six files that carried workaround comments keep their own local reason and stop restating what
+      another file does; a file that documents another file's cleanup is a statement that drifts when that
+      file is fixed, which is exactly what happened to all six
+    - '`packages/db/src/seeded-row-deletes.test.ts` is extended rather than duplicated: it already holds the
+      `customer` line with an EMPTY allowlist, and that allowlist may only stay empty'
+    files:
+    - packages/db/src/seeded-row-deletes.test.ts
+    - scripts/test-gates.mjs
+    - docs/adr/00xx-a-suite-may-delete-only-what-it-created.md
+    - 'NOTE: this unit was ADDED by the integrator and the manifest went from 209 units to 210. It is not
+      new scope. It was found by fixing the failure it describes: `customer-identity.itest.ts` and
+      `otp-route.itest.ts` both held `delete from customer` with no predicate, which removed the four
+      customers the seed creates, and `sell-package.itest.ts` skipped all 21 of its cases with "the seed
+      creates customers". Both are fixed and guarded for that one table. The measured remainder is 67
+      unqualified statements against `premises`, `business_day`, `app_setting`, `message_template`,
+      `premises_hours`, `working_hours_rule` and others, and sorting them needs per-site judgement across
+      dozens of files in units that are all `done` - which is what makes it a unit rather than a fix.'
+    - 'NOTE: and `pnpm seed` does not repair it. Measured: on a database whose customers had been removed by
+      a suite, re-running the seed left the four missing rows missing — the customer loader does not insert
+      into a table that already holds rows, so once a suite has deleted them nothing short of rebuilding the
+      database brings them back. That is why one bare `delete` broke every subsequent RUN and not merely
+      every subsequent suite, and a loader that cannot repair what it created is part of this unit.'
+    - 'NOTE: the defect hid behind another one. The bare delete raised on an `ON DELETE RESTRICT` foreign
+      key for as long as an earlier suite leaked a child row, so it never completed and the seeded customers
+      survived by accident. Six files ordered their own cleanup around that hazard and described it in
+      comments. Fixing the leak let the delete succeed. Expect the same shape here: a site that looks
+      harmless may be harmless only because something else is broken.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'
@@ -8128,17 +8253,24 @@ units:
       packages/fixtures/src/crm-pipeline.itest.ts and packages/fixtures/src/flow-versioning.itest.ts and
       packages/fixtures/src/frequency-ledger.itest.ts (deferral comments that my unit makes false), and
       scripts/test-gates.mjs (block 118a-118z, 28 cases).'
-    - 'NOTE: SQLSTATE codes taken, all in the previously unused class ZY - ZA through ZX are taken and
-      thirteen codes already stand for two unrelated rules each (packages/db/src/sqlstate-uniqueness.test.ts).
-      ZY001 flow_step_log is append-only. ZY002 a flow_node_effect row may be DELETEd by nothing and UPDATEd
-      only in its contact_customer_id, by a customer merge. ZY003 a dry run may leave no side effect behind:
-      no token at all, and no step log row naming a message. ZY004 a run''s mode and its enrolment are
-      immutable. Four and not one because each has a different runbook answer.'
+    - 'NOTE: SQLSTATE codes taken: ZY011, ZY012, ZY013, ZY014. ZY011 flow_step_log is append-only. ZY012 a
+      flow_node_effect row may be DELETEd by nothing and UPDATEd only in its contact_customer_id, by a
+      customer merge. ZY013 a dry run may leave no side effect behind: no token at all, and no step log row
+      naming a message. ZY014 a run''s mode and its enrolment are immutable. Four and not one because each
+      has a different runbook answer, and a code is the only part of a refusal every translator in packages/db
+      matches on. They were first written as ZY001-ZY004, under the convention that a private CLASS
+      identifies a migration file, and that is where this unit met the failure W-SYS-12 exists to fix: by the
+      merge, FOUR migrations claimed ZY001 - 0085 (which had itself moved out of ZA after colliding with
+      0084), two units in flight in other worktrees, and this one - each having reasoned correctly from the
+      migrations it could see. The rule that changed, taken as the strictest safe reading of W-SYS-12''s
+      provisional answer: a refusal is identified by all FIVE characters, two unrelated rules may share a
+      class as long as they never share a code, and a unit takes a subclass RANGE. ZY001-ZY008 stay 0085''s
+      and ZY015 onward belongs to units that asked before this one.'
     - 'NOTE: FOUR DEFECTS FOUND BY RUNNING THE TESTS, each fixed here and each worth recording because none
       of them is visible in a diff. (1) The append-only step log hung off a chain that CASCADES from customer
       - flow_enrolment.customer_id cascades by 0070''s deliberate choice so `delete from customer` keeps
       working for the four suites that clear the table - so a delete would have reached flow_step_log and
-      raised ZY001 for every caller. Three columns are therefore not foreign keys (flow_run.enrolment_id,
+      raised ZY011 for every caller. Three columns are therefore not foreign keys (flow_run.enrolment_id,
       flow_node_effect.contact_customer_id, flow_step_log.contact_customer_id), which is 0056''s decision
       about consent restated for the third time in this schema. (2) The SendContext''s clock read Date.now()
       rather than the tick''s instant, so a tick driven at 02:00 Asia/Dubai was judged against whatever hour
@@ -8957,7 +9089,7 @@ units:
       the financial record under the FTA five-year obligation and records the conflict and its legal basis.
       Retention purge jobs run per data class and respect legal hold.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-CRM-04
@@ -8987,6 +9119,55 @@ units:
       class, and a row under legal hold is skipped and reported rather than silently retained'
     - Every rights request carries a due date derived from the configured SLA and is returned by the overdue
       query once the frozen clock passes it
+    - 'NOTE: what landed, where. Migration packages/db/migrations/0085_data_subject_rights.sql and
+      SCHEMA_VERSION 85, which is the newest migration on the base this unit was built on; 0083, 0084,
+      0086 and 0087 landed on the tip afterwards, so that one line conflicts and resolves to 87. ADR 0034
+      records the enumeration argument and the four things a row-level erasure cannot do. Gate block
+      // 112a-112z, 26 cases, selector `pnpm gates:only --only ''// 112a''`. No port band: nothing in this
+      unit needs a real server, and packages/harness/src/ports.test.ts refuses a band declared and not
+      used. SQLSTATE prefix ZA, codes ZA001-ZA008.'
+    - 'NOTE: the FIRST acceptance line is NOT delivered and is the one thing outstanding on this unit. The
+      export writes its audit row and enqueues the bulk-export alert in one transaction (the fifth line,
+      docs/06 D4, done and asserted both ways), but it reads `customer` plus three counts - it does not
+      read the subject''s bookings, invoices, consents, preferences or package sales, and there is NO
+      committed exclusion allowlist and no completeness test over it. What exists on the erasure axis is
+      the whole mechanism that line asks for, one axis over: packages/db/src/privacy-coverage.ts
+      enumerates every table holding a customer reference from pg_catalog, every column must be classified
+      BY NAME, an unclassified one makes the engine refuse, and a rolled-back
+      `__gate_fixture_unregistered` table proves the failure. Pointing that same enumeration at the export
+      is the remaining work. It was scoped out rather than half-built because an exclusion allowlist is a
+      list of REASONS a data subject is not being given something, twenty-odd of them, and several depend
+      on which regime applies (Y1-entity, open): whether the existence of a legal_hold row is disclosable
+      to its subject, and whether an encrypted clinical payload is released through this export or through
+      the clinical boundary''s own authorised path (ADR 0010, Y5-residency). Reasons written to fill a list
+      would read as configured positions, which is brief rule 15 in the place it costs most. Stays on
+      C-CRM-10; no other unit owns subject export, and A-FIRST-08, A-MEAS-02, R-REP-01, H-HARD-07 and
+      H-MIG-04 - the five units that depend on this one - are each about something else.'
+    - 'NOTE: the "analytics schemas" half of that same line is not satisfiable yet and needs no work when it
+      becomes so. There is no analytics schema in the database: R-REP-01 (Reporting schema: dims, facts,
+      materialised views, status todo) is what creates it. The coverage probe takes its schema exclusions
+      from MERGE_CATALOGUE_EXCLUDED_SCHEMAS and otherwise enumerates every schema present, so an analytics
+      table holding a customer reference is enumerated - and demands a rule - on the commit that creates
+      it, with no edit here.'
+    - 'NOTE: two privilege gaps this unit found in earlier units'' work and did NOT work around. 0067
+      revokes UPDATE on booking_manage_grant from berelax_app ("there is no legitimate edit to a
+      capability") and names DELETE as the revocation path; 0070 (flow_enrolment) and 0077
+      (customer_pipeline_card) each revoke DELETE with the reason that "the cascade from `customer` still
+      works". That premise does not hold for an erasure, which cannot delete the customer row because a
+      retained tax invoice references it, so the cascade never runs. The credential rule became a
+      delete_row, which is what 0067 already called revocation; the other two go through
+      public.erase_customer_workflow_rows, SECURITY DEFINER and gated on an in-progress erasure request,
+      so those two migrations get a named authorised CALLER rather than a widened privilege. Nothing in
+      0067, 0070 or 0077 was edited.'
+    - 'NOTE: one defect fixed in another unit''s gate, because it blocked `pnpm verify` and the rule''s
+      owner is done. scripts/check-schema-conventions.mjs case 87 takes an append-only table''s name from
+      its own SQL comment, STRIPS the schema, then looks for a trigger `on <table>` - but a trigger on a
+      table outside `public` must be written `on clinical.<table>`, because SQL has no other spelling. So
+      the rule could never pass for any append-only table in the clinical schema, and
+      clinical.dek_destruction is the first one to carry the declaration marker, which is why the hole had
+      never been reachable. Fixed by one optional qualifier group used in three places, with gate case
+      112z as its known-bad: remove the group and the check fails naming dek_destruction. The rule was not
+      wrong about anything - it was silent about a whole schema.'
     files:
     - packages/core/src/privacy/rights-policy.ts
     - packages/db/src/repositories/rights.ts

@@ -602,7 +602,7 @@ export interface DryRunResult {
  * Because it walks the SAME planner (`projectDryRun` drives `planFlowStep`) and performs none of the
  * effects — so there is no branch inside a node handler that a later edit could get the wrong way round.
  * The guarantee is not this function's care either: `flow_run.mode = 'dry_run'` makes an idempotency token
- * unstorable and a step log row naming a message unstorable (ZY003), for every role including the owner. The
+ * unstorable and a step log row naming a message unstorable (ZY013), for every role including the owner. The
  * suite asserts zero message rows AND spies on the transport, and both of those measure a rule rather than
  * a habit.
  *

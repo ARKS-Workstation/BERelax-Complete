@@ -23,16 +23,16 @@ import { message } from './message.ts'
  * definitions instead of calling `packages/db/src/repositories/flow-run.ts`:
  *
  *   - **`flowStepLog` is append-only.** UPDATE and DELETE are revoked from `berelax_app` AND refused by a
- *     BEFORE trigger for every role including the owner (ZY001). `db.update(flowStepLog)` typechecks
+ *     BEFORE trigger for every role including the owner (ZY011). `db.update(flowStepLog)` typechecks
  *     perfectly and raises at run time, which is the right outcome: a step that was wrong is corrected by
  *     the next run's rows.
- *   - **`flowNodeEffect` may only ever have its `contactCustomerId` changed.** DELETE raises ZY002 and so
+ *   - **`flowNodeEffect` may only ever have its `contactCustomerId` changed.** DELETE raises ZY012 and so
  *     does an UPDATE of anything else; the application role holds `update (contact_customer_id)` and
  *     nothing more. The one legitimate caller is a customer merge re-pointing the token onto the survivor.
- *   - **A DRY RUN may leave nothing behind.** Inserting a `flowNodeEffect` for a dry run raises ZY003, and
+ *   - **A DRY RUN may leave nothing behind.** Inserting a `flowNodeEffect` for a dry run raises ZY013, and
  *     so does a `flowStepLog` row naming a message. That is how "zero message rows and zero provider
  *     calls" holds for a `psql` session as well as for the worker.
- *   - **`flowRun.mode` and `flowRun.enrolmentId` are immutable** (ZY004) while everything else on the row
+ *   - **`flowRun.mode` and `flowRun.enrolmentId` are immutable** (ZY014) while everything else on the row
  *     moves, because the interpreter has to be able to advance a run.
  *   - **`maxNodeExecutions` has no default.** The writer supplies `MAX_FLOW_NODE_EXECUTIONS`, so the
  *     ceiling a run was judged by is stored on its own row and is not a number written twice.
@@ -67,7 +67,7 @@ export const flowRun = pgTable(
      * NULL for a dry run, which nobody is enrolled on. UNIQUE, so one live run per enrolment.
      *
      * Deliberately NOT a foreign key (0056's decision, restated in 0091's own comment): the append-only
-     * step log hangs off this run, and a cascade from `customer` reaching it would raise ZY001 and make
+     * step log hangs off this run, and a cascade from `customer` reaching it would raise ZY011 and make
      * `delete from customer` fail for every caller.
      */
     enrolmentId: uuid('enrolment_id'),
@@ -134,7 +134,7 @@ export const flowNodeEffect = pgTable(
     /**
      * Re-pointed by a customer merge and by nothing else. That is what makes "exactly once" survive one.
      *
-     * Not a foreign key: DELETE here raises ZY002, so a cascade from `customer` would fail.
+     * Not a foreign key: DELETE here raises ZY012, so a cascade from `customer` would fail.
      */
     contactCustomerId: uuid('contact_customer_id').notNull(),
     claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull(),
@@ -166,7 +166,7 @@ export const flowStepLog = pgTable(
     /** The branch this run took out of the node: a split's choice is a fact about this run. */
     branch: text('branch').notNull(),
     outcome: flowNodeOutcome('outcome').notNull(),
-    /** Not a foreign key: this table refuses DELETE (ZY001), so a cascade from `customer` would fail. */
+    /** Not a foreign key: this table refuses DELETE (ZY011), so a cascade from `customer` would fail. */
     contactCustomerId: uuid('contact_customer_id').notNull(),
     /** `message_channel`, or NULL for a node that sends nothing. */
     channel: text('channel'),

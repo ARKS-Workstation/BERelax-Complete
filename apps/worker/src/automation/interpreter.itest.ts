@@ -81,7 +81,7 @@ import { STORABLE_TAG } from './nodes/index.ts'
  * file takes 61_001 upward and its five-thousand-enrolment case takes 62_001-67_000 and removes them again.
  *
  * `message` rows cannot be deleted (an ON DELETE RESTRICT out of an append-only receipt table) and
- * `flow_step_log` refuses DELETE for every role (ZY001), so nothing here cleans those up: every assertion is
+ * `flow_step_log` refuses DELETE for every role (ZY011), so nothing here cleans those up: every assertion is
  * narrowed to a run id this run of the suite created, which is what makes a second run append rather than
  * collide.
  *
@@ -313,9 +313,12 @@ beforeAll(async () => {
   // foreign key (0056), so its records outlive the identity they are about — which is correct, and harmless
   // here because the recreated contacts get new uuids and therefore no consent at all until this file grants
   // it. `flow_run` and `flow_step_log` survive too, for the reason 0091 states: neither hangs off `customer`.
+  // The predicate is on the same LINE as the delete deliberately. `seeded-row-deletes.test.ts` reads
+  // `delete from customer` at the end of a line as an unqualified delete of the seeded contacts, which is
+  // the defect that suite exists to stop; a scoped delete whose `where` has been wrapped onto the next line
+  // reads the same to it. Keeping them together is free, and it puts the scope where a reader sees it first.
   await sql`
-    delete from customer
-     where phone_e164 between ${syntheticPerson(CONTACT_BAND_FIRST).phone}
+    delete from customer where phone_e164 between ${syntheticPerson(CONTACT_BAND_FIRST).phone}
        and ${syntheticPerson(CONTACT_BAND_FIRST + CONTACTS - 1).phone}
   `
   // Generated in SQL and PAIRED with `syntheticPerson` on the read, so the two cannot drift into a band
@@ -902,7 +905,7 @@ describe('acceptance — a dry run writes a full projected step log and sends no
   }, 60_000)
 
   it('the DATABASE refuses a dry run that tries to leave a side effect behind', async () => {
-    // The guarantee is not the projection's care. ZY003 fires for every role including the owner, so "zero
+    // The guarantee is not the projection's care. ZY013 fires for every role including the owner, so "zero
     // message rows" holds for a `psql` session too — and both halves of the trigger are driven.
     const { flowId, version } = flowOf(KEYS.dry)
     const result = await projectFlowDryRun(runtime, {
@@ -917,7 +920,7 @@ describe('acceptance — a dry run writes a full projected step log and sends no
       insert into flow_node_effect (flow_run_id, node_id, channel, contact_customer_id, claimed_at)
       values (${result.runId}::uuid, 'tell_them', 'sms', ${contact(7)}::uuid, now())
     `)
-    expect(sqlstateOf(token)).toBe('ZY003')
+    expect(sqlstateOf(token)).toBe('ZY013')
 
     // And a step log row naming a message. The message is a real one from an earlier case, which is what
     // makes the refusal about the DRY RUN rather than about a dangling reference.
@@ -937,9 +940,9 @@ describe('acceptance — a dry run writes a full projected step log and sends no
         'executed', ${contact(7)}::uuid, ${existing.id}::uuid, now()
       )
     `)
-    expect(sqlstateOf(named)).toBe('ZY003')
+    expect(sqlstateOf(named)).toBe('ZY013')
 
-    // The control: the same token insert against a LIVE run is accepted, so ZY003 is about the mode and not
+    // The control: the same token insert against a LIVE run is accepted, so ZY013 is about the mode and not
     // about the statement.
     const liveRunId = await enrolAndStart(KEYS.dry, contact(10), INSIDE_WINDOW_ISO)
     await sql`
@@ -1091,7 +1094,7 @@ describe('acceptance — a contact merged mid-run continues on the survivor exac
     })
 
     // The enrolment moved and its run followed it: nothing about the run had to be touched, because the run
-    // hangs off the enrolment and `flow_run.enrolment_id` is immutable (ZY004).
+    // hangs off the enrolment and `flow_run.enrolment_id` is immutable (ZY014).
     const [owner] = await sql<{ customerId: string }[]>`
       select e.customer_id as "customerId" from flow_enrolment e
        where e.id = (select enrolment_id from flow_run where id = ${runId}::uuid)

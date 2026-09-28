@@ -56,10 +56,10 @@ export type FlowRunRefusal = (typeof FLOW_RUN_REFUSALS)[number]
  * off something else entirely.
  */
 export const FLOW_RUN_SQLSTATE = {
-  stepLogAppendOnly: 'ZY001',
-  nodeEffectImmutable: 'ZY002',
-  dryRunSideEffect: 'ZY003',
-  runIdentityImmutable: 'ZY004',
+  stepLogAppendOnly: 'ZY011',
+  nodeEffectImmutable: 'ZY012',
+  dryRunSideEffect: 'ZY013',
+  runIdentityImmutable: 'ZY014',
 } as const
 
 /** The audit actions this module writes. Named, so a coverage test can enumerate them. */
@@ -390,7 +390,7 @@ export interface StepLogRow {
 }
 
 /**
- * Appends one step. Never updated: a step that was wrong is corrected by the next run's rows (ZY001).
+ * Appends one step. Never updated: a step that was wrong is corrected by the next run's rows (ZY011).
  *
  * Takes the caller's `sql` so the row commits with the side effect it describes. A store bound to the pool
  * would write the log in its own transaction, and a tick that rolled back afterwards would leave a step log

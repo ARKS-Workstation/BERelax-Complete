@@ -38,6 +38,7 @@ a decision the table does not list.
 | [0026](0026-period-reopen-requires-migration.md) | Reopening a closed accounting period requires a migration | — |
 | [0031](0031-clinical-intake-consent-gate.md) | The intake consent gate is a refusal; the AAD binds the template version; residency is a setting | — |
 | [0033](0033-contraindication-flag-crossing.md) | The crossing carries a flag and never an answer; `false` means "not affirmed"; an answer nobody can read escalates | — |
+| [0034](0034-erasure-is-enumerated-and-bounded.md) | Erasure enumerates the catalogue and refuses an unclassified column; its four boundaries are stated in the row | — |
 | [0040](0040-flow-interpreter-idempotency-and-one-window.md) | The interpreter owns no window; its idempotency key is a unique constraint; its bounds live on the run | — |
 
 ## Writing one

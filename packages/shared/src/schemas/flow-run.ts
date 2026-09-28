@@ -72,7 +72,7 @@ export const MAX_DRY_RUN_PROJECTED_ROWS = 1_000
  * What a run is doing. `flow_run_mode` in migration 0091.
  *
  * Two members, and the distinction is enforced by the database rather than by the interpreter's care: a
- * `dry_run` row may not carry a node effect or a message id at all (ZY003), so "a dry run sends nothing"
+ * `dry_run` row may not carry a node effect or a message id at all (ZY013), so "a dry run sends nothing"
  * is a statement `psql` cannot get round either.
  */
 export const FLOW_RUN_MODES = ['live', 'dry_run'] as const

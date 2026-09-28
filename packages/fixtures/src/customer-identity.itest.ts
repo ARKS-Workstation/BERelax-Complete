@@ -39,6 +39,10 @@ const FRONT_DESK: Actor = { kind: 'staff', label: 'Front desk' }
 
 const PERSON = syntheticPerson(42)
 
+/** The control: a DIFFERENT number, so an assertion about one person cannot be satisfied by an upsert
+ * that ignores its argument. Person 43 rather than 5, because 1 through 4 are the seeded salon's. */
+const CONTROL = syntheticPerson(43)
+
 /**
  * One number, five spellings. Two are the forms a customer types, one is what the front desk writes
  * down, one arrives from a WhatsApp paste and one is already canonical.
@@ -53,6 +57,9 @@ const SPELLINGS = [
 
 const sql: Sql = createConnection({ url, max: 4 })
 
+/** Customers in the table at the start of the current case — the seed's, and any other suite's. */
+let baseline = 0
+
 const guestBooking = (spelling: string) =>
   withUnitOfWork(sql, FRONT_DESK, (uow) =>
     ensureCustomer(uow, {
@@ -64,9 +71,39 @@ const guestBooking = (spelling: string) =>
     }),
   )
 
-async function customerCount(): Promise<number> {
+/**
+ * The two people this suite creates, by the match key the DATABASE generates for them.
+ *
+ * Everything below is about persons 42 and 43. The seeded salon's customers are `syntheticPerson(1)`
+ * through `syntheticPerson(4)`, so these two keys cannot collide with a seeded row — which is what makes
+ * the scoped delete below both safe and sufficient.
+ */
+const OWN_MATCH_KEYS = [
+  phoneMatchKey(normalisePhone(PERSON.phone)),
+  phoneMatchKey(normalisePhone(CONTROL.phone)),
+] as const
+
+/** Removes only this suite's own rows. See the NOTE above `beforeEach`. */
+async function clearOwnCustomers(): Promise<void> {
+  await sql`delete from customer where phone_match_key = any (${[...OWN_MATCH_KEYS]}::text[])`
+}
+
+async function totalCustomers(): Promise<number> {
   const [row] = await sql<{ n: string }[]>`select count(*)::text as n from customer`
   return Number(row?.n ?? '0')
+}
+
+/**
+ * How many customers exist that did not exist at the start of this case.
+ *
+ * A DELTA against a baseline taken per case, not a count of the whole table. The claim each assertion
+ * needs is "one number produced exactly one row, and nothing else appeared either" — and a delta states
+ * that whether or not the database also holds the four customers the seed creates. A total that expected
+ * the table to hold nothing but this suite's rows is the same claim plus an assumption about every other
+ * suite, which is how this file came to empty a table fourteen other suites read.
+ */
+async function customersCreated(): Promise<number> {
+  return (await totalCustomers()) - baseline
 }
 
 async function auditCount(action: string): Promise<number> {
@@ -85,12 +122,25 @@ async function columnsMatching(table: string, pattern: string): Promise<string[]
   return rows.map((row) => row.column_name)
 }
 
+/**
+ * NOTE: this hook used to be `delete from customer`, unqualified, and so did `afterAll` and one case.
+ *
+ * That emptied the table of the four customers `pnpm seed` creates, permanently, for every suite that ran
+ * afterwards and for every later run against the same database. `sell-package.itest.ts` reads a seeded
+ * customer and skipped all 21 of its cases with "the seed creates customers"; roughly fourteen files read
+ * that table. The failure was invisible for as long as another suite's leaked rows made this file's
+ * cleanup raise on a foreign key — fixing that leak is what surfaced this, which is the ordinary shape of
+ * a masked defect rather than a new one.
+ *
+ * A suite may delete what it created. It may not delete what it found.
+ */
 beforeEach(async () => {
-  await sql`delete from customer`
+  await clearOwnCustomers()
+  baseline = await totalCustomers()
 })
 
 afterAll(async () => {
-  await sql`delete from customer`
+  await clearOwnCustomers()
   await sql.end({ timeout: 5 })
 })
 
@@ -104,13 +154,13 @@ describe('one number is one customer', () => {
       expect(again.created).toBe(false)
       expect(again.customer.id).toBe(first.customer.id)
     }
-    expect(await customerCount()).toBe(1)
+    expect(await customersCreated()).toBe(1)
 
     // The control. A different number must produce a different customer, or the assertion above is
     // satisfied by an upsert that ignores its argument.
-    const other = await guestBooking(syntheticPerson(43).phone)
+    const other = await guestBooking(CONTROL.phone)
     expect(other.customer.id).not.toBe(first.customer.id)
-    expect(await customerCount()).toBe(2)
+    expect(await customersCreated()).toBe(2)
   })
 
   it('refuses a second row for the same number at the database, not only in the repository', async () => {
@@ -125,7 +175,7 @@ describe('one number is one customer', () => {
       caught = error
     }
     expect((caught as { code?: string } | undefined)?.code).toBe('23505')
-    expect(await customerCount()).toBe(1)
+    expect(await customersCreated()).toBe(1)
   })
 
   it('refuses an un-normalised number rather than storing a second spelling', async () => {
@@ -144,7 +194,7 @@ describe('one number is one customer', () => {
 describe('the match keys', () => {
   it('agrees with packages/core on the generated phone match key', async () => {
     for (const spelling of SPELLINGS) {
-      await sql`delete from customer`
+      await clearOwnCustomers()
       const e164 = normalisePhone(spelling)
       const { customer } = await guestBooking(spelling)
       // The database generates the column; core computes the same key for the lookup side. This is
@@ -161,7 +211,10 @@ describe('the match keys', () => {
     // about the same nine digits.
     let caught: unknown
     try {
-      await sql`update customer set phone_match_key = '000000000'`
+      await sql`
+        update customer set phone_match_key = '000000000'
+         where phone_match_key = any (${[...OWN_MATCH_KEYS]}::text[])
+      `
     } catch (error) {
       caught = error
     }

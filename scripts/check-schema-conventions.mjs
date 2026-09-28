@@ -237,9 +237,25 @@ const migrations = migrationFiles.map((file) => ({
 // per-file check would report a defect that a later migration had already fixed.
 const allSql = migrations.map((m) => m.sql).join('\n')
 
+/**
+ * `(?:[a-z0-9_]+\.)?` because the name reaching here has had its schema STRIPPED and a trigger on a table
+ * outside `public` has to be written schema-qualified — SQL offers no other spelling.
+ *
+ * Without the optional prefix this rule could never pass for any table in the `clinical` schema: the
+ * declaration marker matched, the trigger existed as `before update on clinical.dek_destruction`, and the
+ * pattern looked for `on dek_destruction`. C-CRM-10 was the first append-only table outside `public` to
+ * carry the marker, so the hole had never been reachable — the rule was not wrong about anything, it was
+ * silent about a whole schema. `createTableBody` below had the same gap for the same reason, which made the
+ * updated_at half of this rule silently inapplicable there too.
+ */
+const QUALIFIER = '(?:[a-z0-9_]+\\.)?'
+
 /** The body of `create table <name> ( ... )`, by matching parentheses rather than a closing line. */
 function createTableBody(name) {
-  const opened = new RegExp(`create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${name}\\s*\\(`, 'i')
+  const opened = new RegExp(
+    `create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${QUALIFIER}${name}\\s*\\(`,
+    'i',
+  )
   const match = opened.exec(allSql)
   if (match === null) return null
   let depth = 1
@@ -253,9 +269,10 @@ function createTableBody(name) {
 }
 
 const hasTrigger = (event, table) =>
-  new RegExp(`create\\s+trigger\\s+\\w+\\s+before\\s+${event}\\s+on\\s+${table}\\b`, 'i').test(
-    allSql,
-  )
+  new RegExp(
+    `create\\s+trigger\\s+\\w+\\s+before\\s+${event}\\s+on\\s+${QUALIFIER}${table}\\b`,
+    'i',
+  ).test(allSql)
 
 /**
  * `comment on table <name> is '<prose>' '<more>' …;` with the adjacent string literals JOINED and the
@@ -341,7 +358,8 @@ for (const { path, sql } of migrations) {
     }
     if (
       new RegExp(
-        `create\\s+trigger\\s+\\w+[\\s\\S]{0,120}?on\\s+${table}\\b[\\s\\S]{0,120}?set_updated_at`,
+        `create\\s+trigger\\s+\\w+[\\s\\S]{0,120}?on\\s+${QUALIFIER}${table}\\b` +
+          '[\\s\\S]{0,120}?set_updated_at',
         'i',
       ).test(allSql)
     ) {

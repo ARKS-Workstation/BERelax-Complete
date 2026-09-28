@@ -284,6 +284,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
+      '@berelax/clinical':
+        specifier: workspace:*
+        version: link:../clinical
       '@berelax/media':
         specifier: workspace:*
         version: link:../media
