@@ -2027,9 +2027,9 @@ units:
       frequency cap are injected evaluators; their stores are C-CRM-03/04 and C-AUTO-03'
     files:
     - packages/messaging/src/send.ts
-    - packages/messaging/src/gate.ts
+    - packages/messaging/src/gate/index.ts
     - packages/messaging/src/send.test.ts
-    - packages/messaging/src/gate.fail-closed.test.ts
+    - packages/messaging/src/gate/fail-closed.test.ts
     - packages/messaging/src/transports/smsala.ts
     - .dependency-cruiser.cjs
     - scripts/test-boundaries.mjs
@@ -15705,7 +15705,7 @@ units:
       Google changes its template; a daily Places call reading only aggregate rating and count so an increase
       can be detected; and a Monday 09:00 nudge when nothing has been reported.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -15740,12 +15740,77 @@ units:
       on a frozen clock in both the fired and not-fired branches, and writes a heartbeat either way
     - 'packages/core/src/reviews/email-parse.ts is pure: a dependency-cruiser assertion plus the core-must-be-pure
       gate prove it takes the raw body as an argument and performs no I/O and no clock read'
+    - 'NOTE: the paste form is `route.ts` + `handler.ts` + `render.ts` + `view.ts` under
+      apps/web/app/(admin)/reviews/paste/, not the `page.tsx` this entry names. Every admin surface in this
+      build has made the same choice and records the same reason: apps/web/src/routes/registry.ts requires
+      every registry DOCUMENT to be served in both locales, so a page.tsx here would need an Arabic admin
+      document that W-SYS-01 has not built and would join a screenshot matrix whose RTL half must be a real
+      Arabic route. The three HR screens, the two settings screens, the diary, the pipeline board, the
+      Messages inbox, the template editor, the duplicate queue and the quick-book screen all give it'
+    - 'NOTE: this entry names no migration and needed one — 0094_review_fallback_intake.sql, SCHEMA_VERSION
+      94. G-REV-01''s tables were checked first and `google_reviews` can hold neither shape: a forwarded
+      notification nothing could read has no rating, so it could not satisfy `rating` NOT NULL and inventing
+      one is the guess docs/12 §1 forbids; and an aggregate reading is two numbers whose whole value is that
+      yesterday''s are still there to compare against, which a column on `google_capabilities` would lose.
+      So `review_intake_email` holds the forwarded bodies and `google_place_aggregate` one reading per
+      listing per TRADING DATE, plus the two `agent_definition` rows 0021''s contract requires of a cron'
+    - 'NOTE: no private SQLSTATE was taken, deliberately. 116 codes exist across 24 classes and `ZZ` was the
+      last free class when this unit ran, with W-SYS-12 holding it. The refusals that need a name are raised
+      in application code instead — `PLACES_ANSWERED_ABOUT_ANOTHER_PLACE`,
+      `review-inbound-ambiguous-listing`, `review-inbound-no-listing` and the four
+      `REVIEW_EMAIL_PARSE_REFUSALS` — and each is asserted by name. The database''s own refusals here are
+      ordinary `check_violation`s, which is what a CHECK over one row reads perfectly well as'
+    - 'NOTE deferred to Y8-inbound-review-address: the HTTP transport for the forwarded email refuses every
+      request. `POST /api/v1/reviews/inbound` answers 503 `inbound_not_configured` until
+      `REVIEW_INBOUND_SECRET` is set, because there is no verified receiving domain (Y6-email-sender) and no
+      way to know a request is the relay''s — and an unauthenticated endpoint that feeds review text into a
+      drafting pipeline is the injection path docs/10 §7 names about an unverified Pub/Sub webhook. The parse
+      and the write behind it are complete and exercised end to end against real PostgreSQL
+      (packages/google/src/reviews/inbound-email.ts and its itest), and the paste form is the intake path
+      that works meanwhile. No unit owned an inbound webhook, so this unit built it and the question is the
+      credential rather than the code'
+    - 'NOTE deferred to Y7-owner-notification-address: no table in this build holds a contact address for the
+      owner, so the shipped tripwire and nudge record their decision, report `no_recipient_on_file` and send
+      nothing. Migration 0075 had to record the same gap for the Google re-auth ladder and P-HR-06 for the
+      rota notice. `google_connections.google_email` is deliberately NOT used: docs/10 §5 says the listing
+      may still be held by a former agency, so emailing it would be a disclosure to a third party chosen by
+      the build rather than by the owner. Both branches of both passes are asserted against a fixture address
+      on a `.invalid` domain, and `NO_OWNER_CONTACT_ON_FILE` answering null is asserted as the shipped state'
+    - 'NOTE: `review:record` was added to the F07 permission catalogue and granted to the front desk, because
+      no existing permission meant "may record a published review". It deliberately does NOT cover approving
+      a REPLY — a reply is published under the business''s name and docs/07 §4 requires a human with the
+      authority to say it — and G-REV-05 owns that permission. The paste route is the first admin route in
+      apps/web/src/routes/registry.ts that is authenticated: it reads Payload''s own verified session through
+      `principalForRequest` and refuses on `can()` in BOTH verbs, with no `?role=` parameter anywhere, so it
+      survives W-SYS-11''s repository-wide scan rather than becoming what fails it'
+    - 'NOTE: ADR 0043 records the aggregate-only decision; gate block 121a-121z in scripts/test-gates.mjs is
+      this unit''s, with 21 known-bad fixtures; the port band `reviews-paste` is 13_500 in
+      @berelax/harness/ports. Two defects this unit''s own checks found in its own work are recorded in the
+      gate block''s header and in the suites: a 401 page that rendered the forwarded review''s full text, the
+      connection id and the Google account email (caught by asserting the BYTES of the refusal document), and
+      four gate cases that mutated apps/web sources and ran the e2e — which serves the last BUILD, so all
+      four reported "nothing was rejected" against a stale one. The row claims moved to
+      apps/web/src/reviews-paste-handler.itest.ts, which sees an edit immediately'
     files:
-    - apps/web/app/(admin)/reviews/paste/page.tsx
+    - apps/web/app/(admin)/reviews/paste/route.ts
+    - apps/web/app/(admin)/reviews/paste/handler.ts
+    - apps/web/app/(admin)/reviews/paste/render.ts
+    - apps/web/app/(admin)/reviews/paste/view.ts
+    - apps/web/app/api/v1/reviews/inbound/route.ts
+    - apps/web/src/reviews-paste.itest.ts
+    - apps/web/src/reviews-paste-handler.itest.ts
     - packages/google/src/adapters/places-aggregate.ts
+    - packages/google/src/reviews/inbound-email.ts
     - packages/core/src/reviews/email-parse.ts
+    - packages/core/src/reviews/notification-fixtures.ts
+    - packages/core/src/reviews/count-phrase.ts
+    - packages/db/migrations/0094_review_fallback_intake.sql
+    - packages/db/src/repositories/review-intake.ts
+    - packages/providers/src/google/fake-places.ts
     - apps/worker/src/jobs/review-count-tripwire.ts
     - apps/worker/src/jobs/review-monday-nudge.ts
+    - apps/worker/src/jobs/review-notice-sender.ts
+    - apps/worker/src/jobs/review-fallback-intake.itest.ts
   - id: G-REV-03
     order: 163
     title: The safety routing table as executable, settings-proof policy
