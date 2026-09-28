@@ -32128,6 +32128,872 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 116a-116z. (M-VAT-07) The VAT201 return: the mapping that must be ROWS, the box that must equal its own
+//            drill-down to the fils, and the arithmetic that must not exist.
+//
+//            Four parts, because the unit's claims are of four kinds.
+//
+//            The PROBES are known-bad fixtures against real PostgreSQL. Every rule
+//            `0089_vat201_mapping.sql` adds is a DATABASE rule — two triggers raising ZY001 and ZY002, four
+//            CHECKs, and seven functions that ARE the return engine — and a constraint is only a gate once
+//            something has been seen to bounce off it (ADR 0003). Each asserts what refused it BY NAME,
+//            because a bare non-zero exit is also what a typo in a column name produces. `VERBOSITY=verbose`
+//            so psql prints the SQLSTATE, and every probe runs inside `begin; … ; rollback;` — which is also
+//            the only way most of them can be written: `journal_entry` and `journal_line` refuse DELETE for
+//            every role (ZL001), so a probe entry that committed could never be swept.
+//
+//            The MEASUREMENTS are the acceptance lines as SQL a `psql` session reproduces: a box total
+//            against a sum over the ledger computed a second way inside the probe itself, a box total
+//            against its own drill-down, and the exhaustive partition. Each is written as a probe that
+//            raises when the two DISAGREE, and each has a companion case that requires that raise to be
+//            able to fire — because a probe whose `raise` can never happen is a case measuring nothing, and
+//            these are written the way round where that is easy to miss.
+//
+//            The SOURCE cases are the two claims no runtime test can make, and both are about something
+//            being ABSENT. `NO_ARITHMETIC_BEYOND_ADDITION` is why the answer to [UNVERIFIED] Y11-rounding
+//            cannot move a box total by one fils: the engine sums fils as they were POSTED and applies no
+//            rate, so the convention decides only how an invoice split its gross when it was issued. And no
+//            box NUMBER may be written into the code, because Y11-vat201-boxes' recorded answer is that the
+//            mapping is data — a literal `1` would be the second, uncorrectable copy. Both are checked over
+//            the real files AND over deliberately broken ones, so the scan is seen to fail.
+//
+//            The MUTANTS break `packages/core/src/tax/vat201.ts` and
+//            `packages/db/src/queries/vat201-working-papers.ts` and watch this unit's own suites go red.
+//            Five go through the core suite, which needs no database and runs in about two seconds; five
+//            need the integration suite, which is the only place a working paper exists.
+//
+//            Every source case edits a shipped file and restores it in a `finally`, and every anchor goes
+//            through `replaceOnce` (brief rule 20). The local helpers are named `vat201*` rather than
+//            `probe`/`mutant`, because blocks 106 and 107 both had a `…Mutant` of the same shape and git
+//            interleaved them.
+{
+  const vat201DbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  /**
+   * A year outside `VAT201_RESERVED_SPAN` (2150-2199), which is the fixture suite's.
+   *
+   * These probes roll back, so they consume nothing — but a probe dated inside the span would make the
+   * fixture's own `max(entry_date)` window search read a month as used while the probe was open, and two
+   * things racing for one month is the failure the span exists to avoid. 2145 is used by no suite and no
+   * other gate block.
+   */
+  const VAT201_YEAR = 2145
+  const VAT201_FROM = `${VAT201_YEAR}-06-01`
+  const VAT201_TO = `${VAT201_YEAR}-06-30`
+  const VAT201_DAY = `${VAT201_YEAR}-06-15`
+  const VAT201_MARKER = 'GATE-VAT201'
+
+  const vat201Probe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      vat201DbUrl ?? '',
+      '-c',
+      `begin; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /**
+   * A balanced three-line sale in the probe month: gross to the drawer, net to revenue, VAT to 2030.
+   *
+   * 21,000 fils splits exactly at 5% into 20,000 and 1,000, so every figure below is checkable by eye and a
+   * change to the rounding convention could not hide inside a remainder.
+   */
+  const VAT201_SALE =
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${VAT201_MARKER}-SALE', '${VAT201_DAY}'::date, 'Gate probe sale', 'sale'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils) values ' +
+    `('${VAT201_MARKER}-SALE', 1, '1010', 21000); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${VAT201_MARKER}-SALE', 2, '4010', 20000); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${VAT201_MARKER}-SALE', 3, '2030', 1000)`
+
+  /**
+   * A discount on the same sale: a DEBIT to 4095, the contra revenue account.
+   *
+   * The one shape that tells a correct `contribution` from the plausible wrong one. 4095's normal_balance
+   * is 'debit' and its contribution is `credit_less_debit` all the same, so this must REDUCE the
+   * standard-rated value by 500. Derived from `normal_balance` it would add 500, on a ledger that balances.
+   */
+  const VAT201_DISCOUNT =
+    'insert into journal_entry (entry_id, entry_date, narrative, source) values ' +
+    `('${VAT201_MARKER}-DISC', '${VAT201_DAY}'::date, 'Gate probe discount', 'adjustment'); ` +
+    'insert into journal_line (entry_id, line_no, account_code, debit_fils) values ' +
+    `('${VAT201_MARKER}-DISC', 1, '4095', 500); ` +
+    'insert into journal_line (entry_id, line_no, account_code, credit_fils) values ' +
+    `('${VAT201_MARKER}-DISC', 2, '1010', 500)`
+
+  /**
+   * A lock over the probe month removed first.
+   *
+   * `journal.itest.ts`, `period-close.itest.ts` and gate block 98 all reset themselves by deleting
+   * `period_lock` rows, so what survives depends on which ran last. A leftover lock over this month would
+   * refuse every INSERT here by ZL002 and every probe would report a rule it is not about. Scoped to one
+   * year so it cannot remove a lock any suite relies on, and rolled back with the rest either way.
+   */
+  const VAT201_NO_LOCKS =
+    `delete from period_lock where starts_on >= '${VAT201_YEAR}-01-01' ` +
+    `and ends_on <= '${VAT201_YEAR}-12-31'`
+
+  /** The box a grouping's column lands in, read from the ROWS. Never a literal 1, 3 or 10. */
+  const vat201BoxOf = (grouping, measure) =>
+    `(select m.box_no from vat201_box_mapping m join account a on a.code = m.account_code ` +
+    `where a.vat_box = '${grouping}' and m.measure = '${measure}' and m.box_no is not null ` +
+    'order by m.box_no limit 1)'
+
+  const vat201RaiseIf = (condition, marker) =>
+    `do $x$ begin if ${condition} then raise exception '${marker}'; end if; end $x$`
+
+  const vat201Total = (column, box) =>
+    `(select ${column} from vat201_box_total('${VAT201_FROM}'::date, '${VAT201_TO}'::date) ` +
+    `where box_no = ${box})`
+
+  const vat201DrillSum = (measure, box) =>
+    `(select coalesce(sum(signed_fils), 0) from ` +
+    `vat201_box_line('${VAT201_FROM}'::date, '${VAT201_TO}'::date) ` +
+    `where box_no = ${box} and measure = '${measure}')`
+
+  /** The same figure summed a SECOND way, inside the probe, straight off journal_line. */
+  const vat201LedgerSum = (accountCode) =>
+    '(select coalesce(sum(l.credit_fils - l.debit_fils), 0) from journal_line l ' +
+    'join journal_entry e on e.entry_id = l.entry_id ' +
+    `where e.entry_date between '${VAT201_FROM}'::date and '${VAT201_TO}'::date ` +
+    `and l.account_code = '${accountCode}')`
+
+  const vat201Probes = [
+    {
+      // THE rule. An account feeds the return or it does not, and the absence of a mapping row is the one
+      // state that means nothing — the line drops out of every box and out of the census that is supposed
+      // to notice. Deferred, so the refusal arrives at COMMIT rather than at the DELETE.
+      name: 'vat201 gate rejects an account whose attribution has been deleted',
+      rule: 'ZY001',
+      sql: "delete from vat201_box_mapping where account_code = '4010'",
+    },
+    {
+      // Named, not counted. "One account is untagged" sends somebody through 62 rows.
+      name: 'vat201 gate names the untagged account rather than counting it',
+      rule: 'nothing says which: 4010',
+      sql: "delete from vat201_box_mapping where account_code = '4010'",
+    },
+    {
+      // The other direction, and a different defect arriving by a different route: an account inserted by a
+      // later migration that never wrote its attribution. This is what makes "a test enumerates the chart
+      // and fails on an untagged account" a property of the DATABASE rather than of a test run.
+      name: 'vat201 gate rejects a new account inserted with no attribution',
+      rule: 'ZY001',
+      sql:
+        'insert into account (chart_id, code, name, type, normal_balance, contra, vat_box, ' +
+        "input_vat_recoverable) values ('standard-spa-uae', '4099', 'Gate probe revenue', 'revenue', " +
+        "'credit', false, 'standard_rated_supplies', false)",
+    },
+    {
+      // Double entry, not a VAT question, which is why it is refused and not merely reported: 4010 holds
+      // the NET of a sale, so measure = 'tax' would report the whole net as VAT — about twenty-one times
+      // the right figure, on a return whose drill-down still reconciles to it.
+      name: 'vat201 gate rejects a revenue account mapped as tax',
+      rule: 'ZY002',
+      sql: "update vat201_box_mapping set measure = 'tax' where account_code = '4010'",
+    },
+    {
+      // The mirror, and the reason the rule is stated in both directions: 2030 carries tax and no supply
+      // value, so mapping it as a supply would report the tax as though it were turnover.
+      name: 'vat201 gate rejects a VAT control account mapped as a supply value',
+      rule: 'ZY002',
+      sql: "update vat201_box_mapping set measure = 'net_supplies' where account_code = '2030'",
+    },
+    {
+      // Brief rule 15, as a constraint. While the numbering is provisional the LABEL has to say so in the
+      // words `is_placeholder_text` recognises (0026), so no working paper can present "Box 1
+      // Standard-rated supplies" as settled. Both directions: the flag cannot be cleared while the marker
+      // is in the label, which is the half that stops a migration half-answering the question.
+      name: 'vat201 gate rejects a box that claims to be settled while its label carries the marker',
+      rule: 'vat201_box_provisional_label_is_marked',
+      sql: `update vat201_box set is_provisional = false where box_no = ${vat201BoxOf('output_tax', 'tax')}`,
+    },
+    {
+      // And the other half of the same CHECK: a label cleaned up while the flag still stands.
+      name: 'vat201 gate rejects a settled-looking label on a box still flagged provisional',
+      rule: 'vat201_box_provisional_label_is_marked',
+      sql:
+        "update vat201_box set label = 'Standard-rated supplies' where box_no = " +
+        vat201BoxOf('output_tax', 'tax'),
+    },
+    {
+      // The shape. A 'box' attribution with no box is an account the return believes it has placed and has
+      // not, which is worse than an unallocated one: the unallocated bucket is reported and this would be
+      // silently zero.
+      name: 'vat201 gate rejects a box attribution with no box number',
+      rule: 'vat201_box_mapping_shape',
+      sql: "update vat201_box_mapping set box_no = null where account_code = '4010'",
+    },
+    {
+      // An unallocated attribution is an OPEN QUESTION and names it. Without the id it is a shrug, and a
+      // shrug is what the Unconfirmed Assumptions panel cannot list.
+      name: 'vat201 gate rejects an unallocated attribution that names no open question',
+      rule: 'vat201_box_mapping_unallocated_names_its_question',
+      sql: "update vat201_box_mapping set open_question_id = null where account_code = '6090'",
+    },
+    {
+      // The GRANT, run as `berelax_app`. The test pool connects as OWNER, so a rule that is a privilege
+      // rather than a trigger is invisible to every itest — the gap that has caught five units. A
+      // classification is a migration and not a settings screen (`account`'s own argument, 0018), and
+      // "correctable by a deploy" is a very different thing from "writable by a request".
+      name: 'vat201 gate refuses the application role any write on the mapping',
+      rule: '42501',
+      sql:
+        'set local role berelax_app; ' +
+        "update vat201_box_mapping set box_no = null where account_code = '2030'",
+    },
+    {
+      // The same for the boxes themselves, because they are where the NUMBER lives.
+      name: 'vat201 gate refuses the application role any write on the boxes',
+      rule: '42501',
+      sql: "set local role berelax_app; update vat201_box set label = 'anything'",
+    },
+  ]
+
+  try {
+    if (!vat201DbUrl) {
+      check(
+        'vat201 constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      // 116a-116k. One case per probe, each asserting the rule that refused it by name.
+      for (const { name, rule, sql: statement } of vat201Probes) {
+        checkRejectedBy(name, vat201Probe(`${VAT201_NO_LOCKS}; ${statement}`), rule)
+      }
+
+      // 116l. The control for all eleven: an account and its attribution written TOGETHER in one
+      //       transaction is accepted, and so is the probe month's own sale. Without it a connection that
+      //       could not reach the database, or a deferred trigger that refused everything, would read as
+      //       eleven passing cases.
+      const vat201Accepted = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ` +
+          'insert into account (chart_id, code, name, type, normal_balance, contra, vat_box, ' +
+          "input_vat_recoverable) values ('standard-spa-uae', '4099', 'Gate probe revenue', " +
+          "'revenue', 'credit', false, 'standard_rated_supplies', false); " +
+          'insert into vat201_box_mapping (account_code, disposition, box_no, measure, contribution, ' +
+          "note) values ('4099', 'box', " +
+          `${vat201BoxOf('standard_rated_supplies', 'net_supplies')}, 'net_supplies', ` +
+          "'credit_less_debit', 'gate probe')",
+      )
+      check(
+        'vat201 gate: an account and its attribution written together ARE accepted',
+        !vat201Accepted.failed,
+        'the control probe was refused, so every vat201 probe above may be passing for the wrong ' +
+          `reason:\n${vat201Accepted.output}`,
+      )
+
+      // 116m. A box total against the ledger summed a SECOND way inside the probe. The acceptance line is
+      //       "exact to the fils", and the only honest check of it is an independent sum: the engine's own
+      //       aggregate compared against the engine's own drill-down is structurally equal by
+      //       construction, which is worth having and is not evidence on its own.
+      const vat201AgreesWithLedger = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ${VAT201_DISCOUNT}; ` +
+          vat201RaiseIf(
+            `${vat201Total('tax_fils', vat201BoxOf('output_tax', 'tax'))} <> ` +
+              `${vat201LedgerSum('2030')}`,
+            'BOX-DISAGREES-WITH-THE-LEDGER',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `${vat201Total('net_supplies_fils', vat201BoxOf('standard_rated_supplies', 'net_supplies'))} <> ` +
+              `${vat201LedgerSum('4010')} + ${vat201LedgerSum('4095')}`,
+            'VALUE-DISAGREES-WITH-THE-LEDGER',
+          ),
+      )
+      check(
+        'vat201 gate: every box equals the ledger summed independently, to the fils',
+        !vat201AgreesWithLedger.failed,
+        'BOX-DISAGREES-WITH-THE-LEDGER or VALUE-DISAGREES-WITH-THE-LEDGER means the engine and a direct ' +
+          'sum over journal_line do not agree. The value case also covers the contra account: 4095 is ' +
+          'DEBITED 500 here and must REDUCE the standard-rated value, which is what a contribution ' +
+          `derived from normal_balance instead of from the account type gets backwards:\n${vat201AgreesWithLedger.output}`,
+      )
+
+      // 116n. And the control for it, because the two probes above are written the way round where a
+      //       `raise` that can never fire reports PASS. A ONE-FILS difference deliberately: that is the size
+      //       of the disagreement this unit exists to prevent, and a comparison that cannot see one fils is
+      //       not a comparison.
+      //
+      //       The obvious control — move 2030's attribution to another box and expect the figures to stop
+      //       agreeing — was written first and PASSED VACUOUSLY. `vat201BoxOf` reads the box out of the
+      //       mapping rows, so it FOLLOWS the row that was just moved: the probe compared the new box
+      //       against the same ledger sum and they still agreed. A control that moves the thing it looks
+      //       the answer up BY cannot fail, which is brief rule 3's hazard with the lookup inside it.
+      checkRejectedBy(
+        'vat201 gate: the box-against-the-ledger probe sees a ONE-FILS difference',
+        vat201Probe(
+          `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ${VAT201_DISCOUNT}; ` +
+            vat201RaiseIf(
+              `${vat201Total('tax_fils', vat201BoxOf('output_tax', 'tax'))} <> ` +
+                `${vat201LedgerSum('2030')} + 1`,
+              'BOX-DISAGREES-WITH-THE-LEDGER',
+            ),
+        ),
+        'BOX-DISAGREES-WITH-THE-LEDGER',
+      )
+
+      // 116o. A box total against its own drill-down. Structural, because `vat201_box_total()` aggregates
+      //       over `vat201_box_line()` — and asserted anyway, because that is the sentence a reviewer has
+      //       to be able to check and because a later `create or replace` could quietly make it a second
+      //       query over the journal.
+      const vat201MatchesDrillDown = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ${VAT201_DISCOUNT}; ` +
+          vat201RaiseIf(
+            `${vat201Total('tax_fils', vat201BoxOf('output_tax', 'tax'))} <> ` +
+              `${vat201DrillSum('tax', vat201BoxOf('output_tax', 'tax'))}`,
+            'TOTAL-DISAGREES-WITH-ITS-DRILLDOWN',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `${vat201Total('net_supplies_fils', vat201BoxOf('standard_rated_supplies', 'net_supplies'))} <> ` +
+              `${vat201DrillSum('net_supplies', vat201BoxOf('standard_rated_supplies', 'net_supplies'))}`,
+            'VALUE-DISAGREES-WITH-ITS-DRILLDOWN',
+          ),
+      )
+      check(
+        'vat201 gate: a box total equals the sum of the lines it drills down to',
+        !vat201MatchesDrillDown.failed,
+        'a preparer who clicks a box is shown lines that do not add up to it, which is the defect this ' +
+          `unit exists to prevent:\n${vat201MatchesDrillDown.output}`,
+      )
+
+      // 116p. The control for 116o, and the one-fils case named explicitly. A drill-down off by a single
+      //       fils is the failure that survives review, so the comparison is shown to see one.
+      checkRejectedBy(
+        'vat201 gate: the total-against-its-drilldown probe sees a ONE-FILS difference',
+        vat201Probe(
+          `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ` +
+            vat201RaiseIf(
+              `${vat201Total('tax_fils', vat201BoxOf('output_tax', 'tax'))} <> ` +
+                `${vat201DrillSum('tax', vat201BoxOf('output_tax', 'tax'))} + 1`,
+              'TOTAL-DISAGREES-WITH-ITS-DRILLDOWN',
+            ),
+        ),
+        'TOTAL-DISAGREES-WITH-ITS-DRILLDOWN',
+      )
+
+      // 116q. The exhaustive partition, as three separate failures. `lines_enumerated` greater than the
+      //       population is a DUPLICATED line — which the LATERAL document join can produce, and which
+      //       makes a box total silently too large; `lines_distinct` short of it is a DROPPED one; and
+      //       `unattributed` is an account ZY001 should have refused. A single boolean cannot tell them
+      //       apart and they are fixed in different places.
+      const vat201Partition = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ${VAT201_DISCOUNT}; ` +
+          vat201RaiseIf(
+            `(select lines_enumerated <> lines_in_period from vat201_partition_census(` +
+              `'${VAT201_FROM}'::date, '${VAT201_TO}'::date))`,
+            'A-LINE-WAS-COUNTED-TWICE',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `(select lines_distinct <> lines_in_period from vat201_partition_census(` +
+              `'${VAT201_FROM}'::date, '${VAT201_TO}'::date))`,
+            'A-LINE-WAS-DROPPED',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `(select unattributed > 0 from vat201_partition_census(` +
+              `'${VAT201_FROM}'::date, '${VAT201_TO}'::date))`,
+            'A-LINE-WAS-UNATTRIBUTED',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            '(select boxed + unallocated + out_of_scope + unattributed <> lines_in_period ' +
+              `from vat201_partition_census('${VAT201_FROM}'::date, '${VAT201_TO}'::date))`,
+            'THE-BUCKETS-ARE-NOT-THE-POPULATION',
+          ),
+      )
+      check(
+        'vat201 gate: every journal line in the period is attributed exactly once',
+        !vat201Partition.failed,
+        'the union of the boxes and the out-of-scope bucket is not the period. Each marker is its own ' +
+          `defect — a duplicate, a drop, an untagged account, or buckets that do not add up:\n${vat201Partition.output}`,
+      )
+
+      // 116r. The control, and the failing case the acceptance line needs to be representable at all. The
+      //       trigger fires at COMMIT, so inside an open transaction the hole is visible to a query — which
+      //       is the only way an unattributed line can be seen without committing one.
+      checkRejectedBy(
+        'vat201 gate: the partition census SEES an unattributed line when one exists',
+        vat201Probe(
+          `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ` +
+            "delete from vat201_box_mapping where account_code = '1010'; " +
+            vat201RaiseIf(
+              `(select unattributed > 0 from vat201_partition_census(` +
+                `'${VAT201_FROM}'::date, '${VAT201_TO}'::date))`,
+              'A-LINE-WAS-UNATTRIBUTED',
+            ),
+        ),
+        'A-LINE-WAS-UNATTRIBUTED',
+      )
+
+      // 116s. The acceptance line the whole unit turns on: the mapping is DATA. One UPDATE of one row and
+      //       the figure is in a different box, with no function replaced and no TypeScript touched.
+      //
+      //       Three raises, and the first two are the controls. It has to have BEEN in the first box (or
+      //       "it is not there now" is satisfied by a box that was always empty), it has to be in the
+      //       second, and the TOTAL across the boxes has to be unchanged — because an edit that DUPLICATED
+      //       the line rather than moving it satisfies the first two.
+      const vat201StdBox = vat201BoxOf('standard_rated_supplies', 'net_supplies')
+      const vat201RcBox = vat201BoxOf('reverse_charge', 'net_supplies')
+      const vat201AllBoxes =
+        `(select coalesce(sum(net_supplies_fils + tax_fils), 0) from vat201_box_total(` +
+        `'${VAT201_FROM}'::date, '${VAT201_TO}'::date))`
+      const vat201DataNotCode = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ` +
+          `create temporary table gate_vat201 as select ${vat201Total('net_supplies_fils', vat201StdBox)} ` +
+          `as was, ${vat201AllBoxes} as total; ` +
+          vat201RaiseIf(
+            '(select was from gate_vat201) <> 20000',
+            'THE-FIGURE-WAS-NEVER-IN-THE-FIRST-BOX',
+          ) +
+          '; ' +
+          `update vat201_box_mapping set box_no = ${vat201RcBox} where account_code = '4010'; ` +
+          vat201RaiseIf(
+            `${vat201Total('net_supplies_fils', vat201StdBox)} <> 0`,
+            'THE-FIGURE-DID-NOT-LEAVE-THE-FIRST-BOX',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `${vat201Total('net_supplies_fils', vat201RcBox)} <> 20000`,
+            'THE-FIGURE-DID-NOT-ARRIVE-IN-THE-SECOND-BOX',
+          ) +
+          '; ' +
+          vat201RaiseIf(
+            `${vat201AllBoxes} <> (select total from gate_vat201)`,
+            'THE-FIGURE-WAS-DUPLICATED-RATHER-THAN-MOVED',
+          ),
+      )
+      check(
+        'vat201 gate: changing one mapping ROW moves a figure to another box, with no code edit',
+        !vat201DataNotCode.failed,
+        'Y11-vat201-boxes\' recorded answer is "held in a data table with a test proving the mapping is ' +
+          'data not code", and this is that test. THE-FIGURE-WAS-NEVER-IN-THE-FIRST-BOX means the control ' +
+          'failed and the rest of the case proves nothing; THE-FIGURE-WAS-DUPLICATED means the row was ' +
+          `read twice rather than moved:\n${vat201DataNotCode.output}`,
+      )
+
+      // 116t. And the control for THAT probe: with no UPDATE in between, the "did not leave" comparison
+      //       must raise. A probe whose raise can never fire is a case that measures nothing.
+      checkRejectedBy(
+        'vat201 gate: the mapping-is-data probe can actually fire',
+        vat201Probe(
+          `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ` +
+            vat201RaiseIf(
+              `${vat201Total('net_supplies_fils', vat201StdBox)} <> 0`,
+              'THE-FIGURE-DID-NOT-LEAVE-THE-FIRST-BOX',
+            ),
+        ),
+        'THE-FIGURE-DID-NOT-LEAVE-THE-FIRST-BOX',
+      )
+    }
+  } catch (err) {
+    check('vat201 constraints reject their known-bad fixtures', false, String(err))
+  }
+
+  // --- the source claims: two things that must be ABSENT ----------------------------------------
+  const VAT201_CORE = 'packages/core/src/tax/vat201.ts'
+  const VAT201_QUERY = 'packages/db/src/queries/vat201-working-papers.ts'
+  const VAT201_MIGRATION = 'packages/db/migrations/0089_vat201_mapping.sql'
+
+  /**
+   * TypeScript with its comments removed and its strings blanked.
+   *
+   * Comments FIRST and strings second, in that order and not the other way round: the comments in these
+   * files are prose and full of apostrophes, so blanking strings first would treat "nobody's" as the start
+   * of one and swallow everything to the next quote. It is the same trap `scripts/check-core-purity.mjs`
+   * solved with a character walk, and the reason this is a function rather than three inline `replace`
+   * calls at each call site.
+   */
+  const vat201Code = (text) =>
+    text
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+      .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+
+  /** SQL with its `--` comments removed and its string literals blanked. */
+  const vat201Sql = (text) => text.replace(/^\s*--.*$/gm, '').replace(/'(?:[^']|'')*'/g, "''")
+
+  /**
+   * The arithmetic the engine is claimed not to contain, as patterns over the stripped source.
+   *
+   * This is why the answer to [UNVERIFIED] Y11-rounding cannot move a box total by one fils: a sum of fils
+   * as they were POSTED cannot be re-rounded, so the convention decides only how an invoice split its gross
+   * at the moment it was issued — M-TILL's — and a filed period cannot be restated by re-reading it. The
+   * claim is stated as a VALUE in `packages/core/src/tax/vat201.ts` (`NO_ARITHMETIC_BEYOND_ADDITION`) so
+   * that rewording it is a visible edit rather than this check quietly measuring nothing.
+   *
+   * `*` is checked in TypeScript and NOT in SQL, for one dull reason: `count(*)`.
+   */
+  const VAT201_FORBIDDEN_TS = [
+    { re: /\//, why: 'division' },
+    { re: /\*/, why: 'multiplication' },
+    { re: /\bround/i, why: 'rounding' },
+    { re: /\bMath\./, why: 'Math' },
+    { re: /\b\d+_?\d*\s*[%]/, why: 'a rate' },
+  ]
+  const VAT201_FORBIDDEN_SQL = [
+    { re: /\//, why: 'division' },
+    { re: /\bround\s*\(/i, why: 'rounding' },
+    { re: /\bnumeric\b/i, why: 'a non-integer money type' },
+    { re: /\bvat_rate/i, why: 'a rate' },
+  ]
+
+  const vat201Arithmetic = (path, strip, forbidden) => {
+    const code = strip(readFileSync(path, 'utf8'))
+    return forbidden.filter(({ re }) => re.test(code)).map(({ why }) => why)
+  }
+
+  // 116u. The claim over the real files.
+  {
+    const found = [
+      ...vat201Arithmetic(VAT201_CORE, vat201Code, VAT201_FORBIDDEN_TS),
+      ...vat201Arithmetic(VAT201_MIGRATION, vat201Sql, VAT201_FORBIDDEN_SQL),
+    ]
+    check(
+      'vat201 gate: the return engine adds and subtracts integer fils and does nothing else',
+      found.length === 0,
+      `found ${found.join(', ')} in the VAT201 engine. The engine sums fils as they were POSTED, which ` +
+        'is the whole reason the answer to Y11-rounding cannot move a box total: a rate applied here ' +
+        'would make a filed period restatable by re-reading it.',
+    )
+    // The control: the scan is reading real source and is not matching an empty string.
+    check(
+      'vat201 gate: the arithmetic scan is reading the real source',
+      vat201Code(readFileSync(VAT201_CORE, 'utf8')).includes('export function vat201SignedFils') &&
+        vat201Sql(readFileSync(VAT201_MIGRATION, 'utf8')).includes(
+          'create function vat201_box_line',
+        ),
+      'the strippers removed the code as well as the comments, so the case above measured nothing',
+    )
+  }
+
+  // 116v. And the scan seen to FAIL, in both languages. A division inserted into each file must be found;
+  //       without this the case above is a check that has never fired (ADR 0003).
+  {
+    const withDivision = withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'return line.creditFils - line.debitFils',
+          'return (line.creditFils - line.debitFils) / 100n',
+        ),
+      () => vat201Arithmetic(VAT201_CORE, vat201Code, VAT201_FORBIDDEN_TS),
+    )
+    check(
+      'vat201 gate: the arithmetic scan catches a division inserted into the sign rule',
+      withDivision.includes('division'),
+      `the scan reported ${JSON.stringify(withDivision)} for a file containing an explicit division`,
+    )
+
+    const sqlWithRound = withEditedFile(
+      VAT201_MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "when 'credit_less_debit' then l.credit_fils::bigint - l.debit_fils::bigint",
+          "when 'credit_less_debit' then round((l.credit_fils - l.debit_fils)::numeric, 0)::bigint",
+        ),
+      () => vat201Arithmetic(VAT201_MIGRATION, vat201Sql, VAT201_FORBIDDEN_SQL),
+    )
+    check(
+      'vat201 gate: the arithmetic scan catches a round() inserted into the SQL engine',
+      sqlWithRound.includes('rounding') && sqlWithRound.includes('a non-integer money type'),
+      `the scan reported ${JSON.stringify(sqlWithRound)} for SQL containing round(…::numeric)`,
+    )
+  }
+
+  /**
+   * A box NUMBER written into code rather than read from a row.
+   *
+   * Y11-vat201-boxes' recorded answer is that the mapping is data, so a literal `1`, `3` or `10` reached
+   * through a box variable in the engine or in the reader is the second, uncorrectable copy — and the one
+   * that keeps working after somebody UPDATEs the table, which is the failure that would be hardest to
+   * find. Patterns over the stripped source rather than over the module's values: a number written into a
+   * default, a comparison or a fallback is invisible to a test that imports it.
+   */
+  const VAT201_HARD_CODED_BOX = [
+    /\bboxNo\s*[:=]\s*\d/,
+    /\bbox_?[Nn]o\s*===?\s*\d/,
+    /\bbox\s*[:=]\s*\d/,
+    /\bboxNumbers\s*[:=]\s*\[\s*\d/,
+  ]
+  const vat201HardCodedBoxes = (path) => {
+    const code = vat201Code(readFileSync(path, 'utf8'))
+    return VAT201_HARD_CODED_BOX.filter((re) => re.test(code)).map(String)
+  }
+
+  // 116w. No box number in the engine or in the reader, and the scan seen to fail on one.
+  {
+    const found = [...vat201HardCodedBoxes(VAT201_CORE), ...vat201HardCodedBoxes(VAT201_QUERY)]
+    check(
+      'vat201 gate: no box number is written into the engine or the reader',
+      found.length === 0,
+      `a box number is hard-coded (${found.join(', ')}). Y11-vat201-boxes is open and its recorded ` +
+        'answer is that the mapping is DATA; a literal here is the copy that keeps working after ' +
+        'somebody updates the table.',
+    )
+
+    // `const boxNo = 1` and not `const standardRatedBox = 1`, which is what this was written as first and
+    // which the scan correctly did NOT find: the patterns anchor on a word boundary before `box`, so they
+    // cannot match the middle of `standardRatedBox`. A fixture the check is right to ignore is not a
+    // fixture, and the case reported a scan that had never fired when the scan was fine.
+    const planted = withEditedFile(
+      VAT201_QUERY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export async function vat201BoxForGrouping(',
+          'const boxNo = 1\nexport async function vat201BoxForGrouping(',
+        ),
+      () => vat201HardCodedBoxes(VAT201_QUERY),
+    )
+    check(
+      'vat201 gate: the hard-coded-box scan catches a planted box number',
+      planted.length > 0,
+      'a planted `const boxNo = 1` was not found, so the case above has never fired',
+    )
+  }
+
+  // 116x. Every question this unit says it stands on is in `docs/OPEN-QUESTIONS.md`, and the scan
+  //       discriminates. A question the module claims and the document does not carry is a question
+  //       nobody will ever be asked — which is §1.4 of docs/12 failing silently.
+  {
+    const questions = readFileSync('docs/OPEN-QUESTIONS.md', 'utf8')
+    const claimed = [...readFileSync(VAT201_CORE, 'utf8').matchAll(/questionId:\s*'([^']+)'/g)].map(
+      (match) => match[1],
+    )
+    const missing = claimed.filter((id) => !questions.includes(`| ${id} |`))
+    check(
+      'vat201 gate: every open question the return declares is in OPEN-QUESTIONS.md',
+      claimed.length >= 4 && missing.length === 0,
+      claimed.length < 4
+        ? `only ${claimed.length} question id(s) found in ${VAT201_CORE}; the return stands on four`
+        : `${missing.join(', ')} is declared by the return and absent from docs/OPEN-QUESTIONS.md`,
+    )
+    // The control: the same scan must NOT find an id the document does not carry, or it is matching
+    // anything and the case above is satisfied by a document full of prose.
+    check(
+      'vat201 gate: the open-question scan discriminates',
+      !questions.includes('| Y11-vat201-boxes-that-does-not-exist |'),
+      'the OPEN-QUESTIONS scan matches an id nobody wrote, so it would pass for any claim at all',
+    )
+  }
+
+  // --- the mutants: this unit's own suites must go red ------------------------------------------
+  const vat201Unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const vat201Itest = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const VAT201_CORE_SUITE = 'packages/core/src/tax/vat201.test.ts'
+  const VAT201_PAIR_SUITE = 'packages/fixtures/src/vat201.itest.ts'
+  // The contra account, which is the one shape that tells the correct rule from the plausible one. A
+  // discount DEBITED to 4095 must REDUCE the standard-rated value; this mutant makes it add.
+  checkRejectedBy(
+    'vat201 gate: a sign rule that adds a debit to the output side is caught',
+    withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    case 'credit_less_debit':\n      return line.creditFils - line.debitFils",
+          "    case 'credit_less_debit':\n      return line.debitFils - line.creditFils",
+        ),
+      () => runExpectingFailure('pnpm', vat201Unit(VAT201_CORE_SUITE)),
+    ),
+    'REDUCE the output box',
+  )
+
+  // A line attributed to a box nobody is reporting, dropped instead of refused. It disappears from the
+  // return without reducing any total, which is the quietest way for a figure to go missing.
+  checkRejectedBy(
+    'vat201 gate: silently dropping a line whose box is not reported is caught',
+    withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      if (bucket === undefined) {\n        throw new AppError(',
+          '      if (bucket === undefined) {\n        continue\n      }\n      if (false as boolean) {\n        throw new AppError(',
+        ),
+      () => runExpectingFailure('pnpm', vat201Unit(VAT201_CORE_SUITE)),
+    ),
+    // The TEST's name, not the error message. The mutation REMOVES the throw, so the message is not in
+    // the output at all and a case asserting on it reports "did not report not one of the boxes" about a
+    // suite that failed for exactly the right reason — M-TILL-10's recorded defect (8). The anchor has to
+    // be something the edit does not delete.
+    'refuses a figure attributed to a box the return was not asked for',
+  )
+
+  // The out-of-scope bucket measured as a NET. M-TILL-09's probePackageSalePosting did exactly this and
+  // read the zero as "no revenue posted": 4010 credited against the contra 4095 by the same figure nets
+  // to zero and HAS recognised revenue.
+  checkRejectedBy(
+    'vat201 gate: an out-of-scope bucket measured as a net rather than as movement is caught',
+    withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          'movementFils: (previous?.movementFils ?? 0n) + line.debitFils + line.creditFils,',
+          'movementFils: (previous?.movementFils ?? 0n) + line.creditFils - line.debitFils,',
+        ),
+      () => runExpectingFailure('pnpm', vat201Unit(VAT201_CORE_SUITE)),
+    ),
+    'debits PLUS credits',
+  )
+
+  // Two attributions for one account, accepted. Every line on it is then counted in two boxes.
+  checkRejectedBy(
+    'vat201 gate: accepting two attributions for one account is caught',
+    withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if (byAccount.has(attribution.accountCode)) {',
+          '    if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', vat201Unit(VAT201_CORE_SUITE)),
+    ),
+    'two attributions for one account',
+  )
+
+  // A box nobody posted to left OUT of the answer. An absent row is indistinguishable from a box nobody
+  // computed, which is the argument PAYABLES_AGING_BUCKETS makes about an empty bucket.
+  checkRejectedBy(
+    'vat201 gate: dropping a zero box from the answer is caught',
+    withEditedFile(
+      VAT201_CORE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    boxes: [...boxes.entries()]\n      .map(([boxNo, bucket]) => ({',
+          '    boxes: [...boxes.entries()]\n      .filter(([, bucket]) => bucket.count > 0)\n      .map(([boxNo, bucket]) => ({',
+        ),
+      () => runExpectingFailure('pnpm', vat201Unit(VAT201_CORE_SUITE)),
+    ),
+    'ZERO row',
+  )
+
+  // 116z. Five mutants through the integration suite, which is the only place a working paper exists, and
+  //       then the control: every file edited above, UNEDITED, passes. Without the control a stale anchor,
+  //       a suite that had stopped importing the module, or a database that could not be reached would all
+  //       report as twenty passing cases.
+  {
+    // A working paper produced for an OPEN period. It is the strictest safe option and it is the one that
+    // matters: a paper for a period a posting can still reach is a paper that changes after it is filed.
+    checkRejectedBy(
+      'vat201 gate: producing working papers for an OPEN period is caught',
+      withEditedFile(
+        VAT201_QUERY,
+        (text) => replaceOnce(text, '    if (!status.closed) {', '    if (false as boolean) {'),
+        () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
+      ),
+      'Vat201PeriodNotClosed',
+    )
+
+    // The canonical form losing its bigint branch. `JSON.stringify` THROWS on a bigint, which is the good
+    // failure — but a mutation to `Number(value)` would silently round a box total in the artefact
+    // somebody compares, so the branch is what the case is about.
+    checkRejectedBy(
+      'vat201 gate: a canonical form that rounds a bigint figure is caught',
+      withEditedFile(
+        VAT201_QUERY,
+        (text) =>
+          replaceOnce(
+            text,
+            "    if (typeof value === 'bigint') return value.toString()",
+            "    if (typeof value === 'bigint') return Number(value) + 1",
+          ),
+        () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
+      ),
+      'vat201',
+    )
+
+    // The reasons a return may not be filed, emptied. `fileable` would still be false, so nothing about
+    // the flag changes — what is lost is every question the agent is supposed to be asked.
+    checkRejectedBy(
+      'vat201 gate: losing the not-fileable reasons is caught',
+      withEditedFile(
+        VAT201_QUERY,
+        (text) =>
+          replaceOnce(
+            text,
+            '  const reasons: Vat201NotFileableReason[] = []',
+            '  const reasons: Vat201NotFileableReason[] = []\n  return reasons',
+          ),
+        () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
+      ),
+      'box_numbering_unconfirmed',
+    )
+
+    // The drill-down stopping to filter by box. Every box would then drill down to the whole period, which
+    // is the shape in which "a box equals the sum of its lines" becomes false without anything looking
+    // wrong on either side on its own.
+    checkRejectedBy(
+      'vat201 gate: a drill-down that ignores the box it was asked for is caught',
+      withEditedFile(
+        VAT201_QUERY,
+        (text) =>
+          replaceOnce(
+            text,
+            '    where (${box}::integer is null or box_no = ${box}::integer)',
+            '    where (${box}::integer is null or true)',
+          ),
+        () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
+      ),
+      'vat201',
+    )
+
+    // The input-tax reconciliation taking only the supplier-invoice half of 1080. Both claims live on the
+    // same account in the ledger and in two columns on the bill, so dropping one makes the reconciliation
+    // report a difference that is really the reverse charge — the identity M-VAT-03 said somebody had to own.
+    checkRejectedBy(
+      'vat201 gate: a reconciliation that forgets the reverse-charge half of the claim is caught',
+      withEditedFile(
+        VAT201_QUERY,
+        (text) =>
+          replaceOnce(
+            text,
+            "    BigInt(billSide?.recoverable ?? '0') + BigInt(billSide?.reverse_charge_input ?? '0')",
+            "    BigInt(billSide?.recoverable ?? '0')",
+          ),
+        () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
+      ),
+      'vat201',
+    )
+
+    const vat201CoreGreen = run('pnpm', vat201Unit(VAT201_CORE_SUITE))
+    check(
+      'vat201 gate: the core suite passes unedited',
+      !vat201CoreGreen.failed,
+      vat201CoreGreen.output,
+    )
+    const vat201PairGreen = run('pnpm', vat201Itest(VAT201_PAIR_SUITE))
+    check(
+      'vat201 gate: the pair suite passes unedited',
+      !vat201PairGreen.failed,
+      vat201PairGreen.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

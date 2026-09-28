@@ -94,8 +94,10 @@ if (!url)
  * here can be undone. A fixed month would DOUBLE every figure on a second run against the same database —
  * M-TILL-10's recorded defect (7), which reported 430,003 fils where 33,334 was expected, from its own
  * first run. So the suite finds a virgin three-month window inside {@link VAT201_RESERVED_SPAN}
- * (2080-01..2082-12, which nothing else in this build posts into) and the committed figures are absolute
- * for whichever window it got. Twelve runs per database, and the thirteenth throws with the remedy. The period locks are removed in `afterAll` by `period_id` prefix so a later
+ * (2150-01..2199-12, six hundred months that nothing else in this build posts into) and the committed
+ * figures are absolute for whichever window it got. The span is that wide on purpose: gate block 116 runs
+ * this suite once per mutant, so a span of a few years would be exhausted inside one `pnpm gates:only` and
+ * the failure would arrive as "the fixture threw" in a case about something else. The period locks are removed in `afterAll` by `period_id` prefix so a later
  * run is not refused its own dates.
  */
 
@@ -148,7 +150,13 @@ async function virginWindow(): Promise<readonly [Month, Month, Month]> {
     where entry_date between ${VAT201_RESERVED_SPAN.from}::date and ${VAT201_RESERVED_SPAN.to}::date
   `
   const used = row?.used ?? null
-  const first = used === null ? { year: 2080, month: 1 } : nextMonthAfter(used)
+  const first =
+    used === null
+      ? {
+          year: Number(VAT201_RESERVED_SPAN.from.slice(0, 4)),
+          month: Number(VAT201_RESERVED_SPAN.from.slice(5, 7)),
+        }
+      : nextMonthAfter(used)
   const months = [0, 1, 2].map((offset) => {
     const zeroBased = first.month - 1 + offset
     return monthAt(first.year + Math.floor(zeroBased / 12), (zeroBased % 12) + 1)
@@ -866,6 +874,32 @@ describe('acceptance — the papers, and the period they are produced against', 
     expect(canonicaliseVat201WorkingPapers(await vat201WorkingPapers(sql, saleMonth))).not.toBe(
       canonicaliseVat201WorkingPapers(first),
     )
+  })
+
+  it('carries every box figure into the bytes as an exact decimal string', async () => {
+    // FOUND BY GATE CASE 116z, which is what the mutants are for. Replacing the canonical form's bigint
+    // branch with `Number(value) + 1` left the byte-identical case above GREEN: two runs of an equally
+    // wrong serialiser agree perfectly, and "the bytes are stable" says nothing about what is in them. So
+    // the figures are asserted INTO the bytes — a rounded or altered figure is then a missing string.
+    //
+    // Not self-comparing: the left side is what the paper object holds and the right side is what the
+    // serialiser wrote, and a serialiser that changed a figure breaks the pair.
+    const paper = await vat201WorkingPapers(sql, returnMonth)
+    const bytes = canonicaliseVat201WorkingPapers(paper)
+    let asserted = 0
+    for (const box of paper.boxes) {
+      for (const figure of [box.netSuppliesFils, box.taxFils]) {
+        if (figure === 0n) continue
+        expect(bytes, `box ${box.boxNo} figure ${figure}`).toContain(`"${figure}"`)
+        asserted += 1
+      }
+    }
+    // A vacuity floor: the return month carries six non-zero box figures, so the loop cannot have passed
+    // by finding nothing to check.
+    expect(asserted).toBe(6)
+    // And a bigint is never written as a JSON number, which is the form that would round silently at
+    // 2^53: every figure is a quoted decimal string.
+    expect(bytes).not.toMatch(/"(?:netSuppliesFils|taxFils)":\s*-?\d/)
   })
 
   it('carries the ledger evidence hash M-VAT-06 computes, and it is the ledger’s not the paper’s', async () => {

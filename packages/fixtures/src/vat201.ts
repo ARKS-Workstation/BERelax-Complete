@@ -36,19 +36,26 @@ import { ACCOUNTS } from '@berelax/core'
  */
 
 /**
- * The span this fixture may use. Nothing else in the build posts a journal entry into any of the three
- * years, measured rather than assumed: `2080`, `2081` and `2082` appear nowhere in `packages`, `apps` or
- * `scripts` as a date. The nearest neighbours are 2083 (`hr-attendance`) and 2084
- * (`package-redemption.itest.ts`).
+ * The span this fixture may use, and it is deliberately enormous.
  *
- * THIRTY-SIX months, which is TWELVE runs of the suite against one database and not more. The journal
- * refuses DELETE for every role, so each run consumes its three months for good; when the span is used up
- * the suite throws with the remedy rather than wrapping onto a month that already holds a previous run's
- * entries, which would read as every committed figure being double. Three months is the minimum the
- * acceptance lines need: a sale month BEFORE the return month, and a correction month AFTER it, because a
- * dated reversal posts into the first OPEN period and the return month is shut by then.
+ * `journal_entry` and `journal_line` refuse DELETE for every role including the owner (ZL001), so every run
+ * of the suite consumes its months FOR GOOD. A narrow span is therefore not a tidiness question: gate block
+ * 116 runs this suite once per mutant, so a span of a few years would be exhausted inside a single
+ * `pnpm gates:only` and the failure would arrive as "the fixture threw" in a case about something else.
+ *
+ * 2150-01 to 2199-12 is six hundred months — two hundred runs against one database. Measured free rather
+ * than assumed: no date in `packages`, `apps` or `scripts` falls in the 2100s except three unrelated
+ * expiry dates in 2100 itself, and the fixture suites cluster in 2083-2099. Nothing bounds a date this far
+ * out: `journal_entry.entry_date` is a plain `date` with no FK to `business_day` (0018 says why), and
+ * `business_day` carries no range CHECK (0011).
+ *
+ * Three months is the MINIMUM the acceptance lines need: a sale month BEFORE the return month, and a
+ * correction month AFTER it, because a dated reversal posts into the first OPEN period and the return month
+ * is shut by then. When the span is used up the suite throws with the remedy rather than wrapping onto a
+ * month that already holds a previous run's entries, which would read as every committed figure being
+ * double — M-TILL-10's recorded defect (7).
  */
-export const VAT201_RESERVED_SPAN = { from: '2080-01-01', to: '2082-12-31' } as const
+export const VAT201_RESERVED_SPAN = { from: '2150-01-01', to: '2199-12-31' } as const
 
 /** Bills the return month contains, as drafts `deriveBill` turns into figures. */
 export interface Vat201FixtureBill {
