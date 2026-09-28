@@ -11144,7 +11144,7 @@ units:
       → confirmed → attended → paid, and the mapping from domain events to funnel steps with no-show carrying
       an exclusion reason. No I/O and no clock.'
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - B-LIFE-01
@@ -11175,11 +11175,49 @@ units:
       maps to no step and sets excluded_reason=''no_show'''
     - 'pnpm purity and pnpm boundaries pass: these modules import nothing beyond @berelax/shared and never
       read the clock'
+    - 'NOTE: what was built beyond the files list, and why each edit was needed. (1) Two GATES were widened,
+      because the vocabulary had to live in packages/shared — packages/db holds the analytics schema whose
+      funnel_step.stage and excluded_reason are these words and db must never import core (ADR 0001) — and
+      the move that made it reachable also moved it out from under packages/core''s purity rules.
+      scripts/check-core-purity.mjs now reads packages/shared/src/analytics as its ONE root outside
+      packages/core, with the scoped no-Date/no-Intl treatment the ledger and the till already get, plus a
+      per-root floor that fails rather than printing a green tick over a root it examined no files under
+      (ADR 0002). .dependency-cruiser.cjs gains analytics-taxonomy-must-be-pure, which closes the import
+      path shared-must-not-import-siblings never covered: that rule forbids the other first-party packages
+      and says nothing about a Node builtin, so the tree with the strictest purity requirement in the build
+      was the only one with no import rule about it. (2) AppError, ErrorKind and isAppError MOVED from
+      packages/shared/src/index.ts into packages/shared/src/app-error.ts, re-exported from the barrel so no
+      consumer changed. UnknownEventError has to be an AppError subclass — isAppError is instanceof, so a
+      refusal raised as a plain Error reaches a visitor as a 500 rather than the 422 it is — and a submodule
+      of shared importing the barrel that re-exports it closes a cycle no-circular refuses. (3) The barrel
+      itself (packages/shared/src/index.ts) exports the taxonomy, and packages/core/src/index.ts exports
+      ./analytics/index.ts, so a downstream unit finds the vocabulary where it would look rather than
+      restating it. (4) scripts/test-gates.mjs block 124a-124w, 34 cases. (5) docs/OPEN-QUESTIONS.md gains
+      Y5-funnel-gap-bucket in section D2 and docs/adr/README.md links ADR 0046.'
+    - 'NOTE: no migration, no table, no column name and no SQLSTATE was taken. A-FIRST-01 owns the analytics
+      SCHEMA and is in flight in parallel; this unit exports the vocabulary its columns are spelled from
+      (FUNNEL_STAGES, FUNNEL_EXCLUSION_REASONS, ANALYTICS_EVENT_NAMES, ANALYTICS_TAXONOMY_VERSION) from
+      @berelax/shared so the schema imports rather than restates it, and asserts nothing about what the
+      columns are called. No port band was needed: nothing here starts a server.'
+    - 'NOTE: deferred — the collect route must set the page_view payload''s `entry` flag on the session''s
+      FIRST page view only, because the landing stage is one per session and this unit decides it from the
+      validated payload rather than from anything it could derive on its own. That belongs to A-FIRST-05,
+      which creates the session row and is where session stitching lives.'
+    - 'NOTE: deferred — which trading date a funnel step in the daytime gap belongs to. Trading runs
+      11:00–02:00, so between 02:00 and 11:00 resolveTradingDate correctly answers "no trading date" while
+      web traffic carries on. FunnelBucket therefore carries either a trading date or the named
+      OutsideTradingReason plus the calendar date, with no tradingDate field on the outside-trading shape, so
+      the calendar date cannot be used as one by accident; the step is still produced, so the cohort is
+      visible rather than dropped. The decision is a business one, recorded as Y5-funnel-gap-bucket, and the
+      unit that has to act on it is A-FIRST-09, which keys daily_funnel on business_day.'
     files:
     - packages/shared/src/analytics/taxonomy.ts
+    - packages/shared/src/analytics/taxonomy.test.ts
+    - packages/shared/src/app-error.ts
     - packages/core/src/analytics/funnel.ts
     - packages/core/src/analytics/funnel.test.ts
-    - docs/adr/NNNN-first-party-measurement-plan.md
+    - packages/core/src/analytics/index.ts
+    - docs/adr/0046-first-party-measurement-plan.md
   - id: A-FIRST-03
     order: 106
     title: Origination resolver and click-id persistence, pure
