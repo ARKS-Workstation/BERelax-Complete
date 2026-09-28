@@ -1039,7 +1039,22 @@ describe('the credential class, which no other assertion in this file reached', 
 describe('erasing a customer with clinical data', () => {
   it('destroys the data keys, so decrypting fails with a KEY error rather than returning nothing', async () => {
     const customerId = ids.clinical
-    const kek = generateKek('v1')
+    // The ACTIVE version, read from the database, and not the literal `'v1'`.
+    //
+    // `packages/clinical/src/crypto/rotation.itest.ts` rotates the KEK for real and deliberately leaves the
+    // new version active — retirement is one-way, so removing it would leave a database nothing may seal
+    // into — and 0009's `KekRetiredCannotEncrypt` then refuses an insert sealed under `v1`. This case used
+    // to pass only when it happened to run BEFORE that suite, which vitest does not order by the `include`
+    // list, so G-REV-02 adding files to the tree was enough to flip it. `intake.itest.ts` and
+    // `flags-view.itest.ts` already read the active version; this is the same three lines.
+    const [activeKek] = await sql<{ v: string | null }[]>`select clinical.active_kek_version() as v`
+    const kekVersion = activeKek?.v
+    if (kekVersion === null || kekVersion === undefined) {
+      throw new Error(
+        'No active KEK version, so nothing in the clinical schema could be sealed at all',
+      )
+    }
+    const kek = generateKek(kekVersion)
 
     // A template, the consent that authorises an answer against it (0082's deferred gate refuses without
     // one), and a real sealed payload — so the decryption assertions are about a payload that genuinely
@@ -1170,7 +1185,10 @@ describe('erasing a customer with clinical data', () => {
         from clinical.dek_destruction
        where target_table = 'intake_submission' and record_id = ${submissionId}::uuid
     `
-    expect(destruction?.kekVersion).toBe('v1')
+    // The version the row was SEALED under, whichever that was. Asserted against the value read above
+    // rather than against a literal, which is the whole of the fix: the two must agree, and which one it is
+    // depends on whether the rotation suite has run.
+    expect(destruction?.kekVersion).toBe(kekVersion)
     expect(destruction?.requestId).toBeDefined()
 
     // The consent that authorised the processing is RETAINED: it holds no health content, and destroying
