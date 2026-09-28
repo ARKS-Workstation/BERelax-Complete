@@ -215,7 +215,16 @@ describe('the erasure rule registry', () => {
         // a row that is deleted would be a reason for keeping data that is not there.
         expect(rule.subjectReason, rule.key).toBeUndefined()
       }
-      expect(rule.registeredBy, rule.key).toBe('C-CRM-10')
+      // A unit id, and not one literal. This assertion used to be `toBe('C-CRM-10')`, which made the
+      // registry closed to every other unit — W-SITE-10 was the first to add a rule and the first to find
+      // out, by a failure that named the right field and the wrong reason. `registeredBy` exists "so a
+      // question about an entry has somewhere to go" (its own doc comment); a check that every entry says
+      // C-CRM-10 measures who wrote the registry rather than whether each entry is attributed.
+      //
+      // The shape, therefore, plus a floor below. `packages/core` cannot read `build/manifest.yaml` — it may
+      // do no I/O — so the pattern is the strongest available claim: the four unit-id shapes this build
+      // uses, and nothing free-text.
+      expect(rule.registeredBy, rule.key).toMatch(/^(?:[A-Z]-[A-Z]{2,4}-\d{2}|[A-Z]\d{2})$/)
       if (rule.action === 'retain_statutory') {
         // A statutory retention names the PROFILE COLUMN the figure comes from, never a literal number, so
         // the years cannot go stale against the profile.
@@ -225,6 +234,15 @@ describe('the erasure rule registry', () => {
         expect(rule.parent, rule.key).toBeDefined()
       }
     }
+    // The control on the pattern above, in both directions. A regex assertion over an empty registry passes,
+    // and a regex that stopped discriminating would too — so the unit that BUILT the registry must still
+    // account for most of it, and the set of registering units must be small enough to read.
+    const registrars = [...new Set([...ERASURE_RULES.values()].map((r) => r.registeredBy))]
+    expect(registrars).toContain('C-CRM-10')
+    expect(registrars.length).toBeLessThan(6)
+    expect(
+      [...ERASURE_RULES.values()].filter((r) => r.registeredBy === 'C-CRM-10').length,
+    ).toBeGreaterThan(ERASURE_RULES.size / 2)
   })
 
   it('keeps the four retaining actions distinct, because their justifications are different', () => {
