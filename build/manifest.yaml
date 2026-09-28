@@ -5588,22 +5588,33 @@ units:
       with `duplicate key value violates unique constraint "journal_entry_pkey"`: that file re-runs every
       loader on a warm database, and the packages loader now writes no journal entry at all, so the collision
       cannot arise from `pnpm seed` any more.'
-    - 'NOTE: DEFECT FOUND IN ANOTHER UNIT''S WORK, reported and NOT fixed —
-      `apps/web/src/otp-route.itest.ts` destroys the fixture salon''s customers. It clears the table with a
-      bare `delete from customer` in beforeEach and again in afterAll, with no predicate, so it removes the
-      four rows `pnpm seed` creates along with its own and restores none of them. `pnpm seed` is not re-run
-      between suites, so after ONE integration run `customer` is empty for the life of that database:
-      measured, 0 rows, after the chain that found this. Every suite that reads a seeded customer by phone is
-      therefore order-dependent and passes only until that file runs before it. Eighteen other suites scope
-      their cleanup (`delete from customer where phone_e164 = ...`), which is the convention; this one and
-      `packages/fixtures/src/customer-identity.itest.ts` do not. It is not fixed here because it is another
-      unit''s file, but this unit stopped depending on it: apps/web/src/till.itest.ts and
-      packages/fixtures/src/till-receipt.itest.ts now INSERT their own probe customer on a phone number
-      nothing else in the repository uses (+971559990131, +971559990132 — deliberately not a seeded number,
-      because they delete it) and `seedPackageDrawdownStates` takes the customer ids from its caller instead of
-      reading the seeded four. The wider hazard for whoever fixes it: the first unit to seed a BOOKING hits the
-      same wall from the other side, because `booking.customer_id` is `on delete restrict` too (0024) and
-      docs/12 promises the fixture salon has appointments.'
+    - 'NOTE: DEFECT FOUND IN ANOTHER UNIT''S WORK, reported and not fixed here — and independently fixed
+      upstream while this unit was building, which is why the note now names the commit rather than a
+      workaround. `apps/web/src/otp-route.itest.ts` and `packages/fixtures/src/customer-identity.itest.ts` each
+      held a bare `delete from customer` with no predicate, in a beforeEach and an afterAll, so they removed
+      the four rows `pnpm seed` creates along with their own and restored none. Found here because this unit''s
+      loader seeded package sales against those four customers and NINE of otp-route''s cases then failed on
+      `package_sale_customer_id_fkey`: 0078 makes `customer_id` `on delete restrict` and refuses DELETE on the
+      sale, so the customer was pinned for the life of the database. Removing the pin made the delete succeed
+      again and showed the other half — `customer` measured 0 rows afterwards. Not fixed here, per the brief;
+      `fdb2d39` on the integration branch fixes both files from the integrating verify''s own failure
+      (`sell-package.itest.ts` skipping all 21 cases), and `packages/db/src/seeded-row-deletes.test.ts` now
+      fails any suite that empties the table. This unit does not rely on either: apps/web/src/till.itest.ts and
+      packages/fixtures/src/till-receipt.itest.ts INSERT their own probe customer on +971559990132 and
+      +971559990131, numbers nothing else in the repository uses and deliberately NOT seeded ones since both
+      files delete them, and `seedPackageDrawdownStates` takes its customer ids from the caller. Both guard
+      tests pass on the merged tree. The wider hazard for whoever meets this next: `booking.customer_id` is
+      `on delete restrict` too (0024), so the first unit to seed an APPOINTMENT hits the same wall from the
+      other side, and docs/12 promises the fixture salon has them.'
+    - 'NOTE: no migration, and 0088_till_screens.sql is a PERMANENT GAP. The allocation reserved it and said a
+      screens unit may well not need one, and this one does not: every table these three screens read and write
+      already exists (0011 business_day, 0076 cash_session, 0078/0083 the package family, the invoice family,
+      and `payment.package_sale_id` which M-TILL-10 added for exactly this). So this unit raises no private
+      SQLSTATE and takes none — not ZY041 and nothing else — and there is nothing for
+      `packages/db/src/sqlstate-uniqueness.test.ts` to collide with; it passes on the merged tree. SCHEMA_VERSION
+      stays 87, which is the newest migration on disk after the merge brought 0085/0086/0087 in. ADR 0037 was
+      reserved and is also unused: nothing here decides anything an ADR would record that
+      Y9-package-catalogue, Y11-vat-package and Y1-trn do not already own.'
     - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
       used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
       12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires
