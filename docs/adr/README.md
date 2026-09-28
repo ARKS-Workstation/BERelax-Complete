@@ -38,6 +38,7 @@ a decision the table does not list.
 | [0026](0026-period-reopen-requires-migration.md) | Reopening a closed accounting period requires a migration | — |
 | [0031](0031-clinical-intake-consent-gate.md) | The intake consent gate is a refusal; the AAD binds the template version; residency is a setting | — |
 | [0033](0033-contraindication-flag-crossing.md) | The crossing carries a flag and never an answer; `false` means "not affirmed"; an answer nobody can read escalates | — |
+| [0041](0041-leave-approval-never-cancels-an-appointment.md) | Approving leave never cancels an appointment; the coverage refusal is a difference; a leave period is stored over trading-session instants | — |
 
 ## Writing one
 
