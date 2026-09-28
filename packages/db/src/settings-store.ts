@@ -355,6 +355,18 @@ export async function unconfirmedAssumptionRows(
       select 'attendance_grace_rule', 'attendance effective ' || effective_from::text,
              open_question_id, provisional_note
         from attendance_grace_rule where is_provisional
+      -- The VAT201 box numbers (0089). Here for the reason docs/12 §2 gives and the sharpest instance of
+      -- it in this build: a box number is a value that ends up on a return filed with a tax authority, and
+      -- Y11-vat201-boxes is open while Y11-tax-agent records the agent's review as not optional. A
+      -- placeholder box number that did not appear on this screen would be indistinguishable from one
+      -- somebody had confirmed, and the thing it would be indistinguishable from is a filing. Per BOX and
+      -- not per table, because an agent can confirm the standard-rated box without confirming the reverse
+      -- charge. The label itself is constrained to carry a placeholder marker for exactly as long as the
+      -- flag is set (vat201_box_provisional_label_is_marked, using is_placeholder_text from 0026), so the
+      -- row leaves this panel by a migration clearing the flag AND cleaning the label in one statement.
+      union all
+      select 'vat201_box', box_no::text, open_question_id, provisional_note
+        from vat201_box where is_provisional
       union all
       select 'consent_purpose', purpose, open_question_id, provisional_note
         from consent_purpose where is_provisional
