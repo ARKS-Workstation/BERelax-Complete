@@ -1,4 +1,16 @@
 export * from './agents.ts'
+/*
+ * The `analytics` schema, as a NAMESPACE rather than flattened into this one (A-FIRST-01).
+ *
+ * Every other line in this file is a `export *` because every other mirror is of a table in `public`, and
+ * `public` is one namespace in Postgres and one here. `analytics` is a second Postgres schema, and its
+ * tables are called `session`, `event` and `visitor` — the names the migration gives them, which is what
+ * every mirror in this directory does and what a reader comparing the two expects. Flattening those into
+ * this namespace would put `session` next to `bookingSession` and `staffSession` with nothing saying which
+ * schema it is in, and the day a migration adds `public.session` the `export *` would collide and the fix
+ * would be somebody else's. `schema.analytics.session` reads the way the SQL does.
+ */
+export * as analytics from './analytics.ts'
 export * from './attendance.ts'
 export * from './bill.ts'
 export * from './booking.ts'

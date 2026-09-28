@@ -36354,6 +36354,302 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 123a-123z. (A-FIRST-01) The analytics schema: the drift gate that had never seen a second schema, the
+// partition a month has to have, the retention nobody would notice had stopped, and the erasure catalogue
+// that has to keep looking in a schema nobody has classified anything in.
+//
+// Every case here breaks something and requires the named check to fire. Four of them are about a check
+// this unit had to CHANGE rather than add, and those are the ones worth reading: `pnpm db:drift` paired one
+// mirror DIRECTORY with one Postgres schema, so the `analytics` mirrors living beside the `public` ones
+// would have been attributed to `public` — nine tables reported as declared-but-missing and nine more as
+// present-but-unmirrored, on a schema that matched its migration exactly. A gate that fires on a correct
+// tree is a gate somebody turns off.
+{
+  const DRIFT_MIRROR = 'packages/db/src/schema/analytics.ts'
+  const MIGRATION = 'packages/db/migrations/0096_analytics_schema.sql'
+  const JOBS_MODULE = 'apps/worker/src/jobs/analytics-partitions.ts'
+  const ANALYTICS_REGISTRY = 'apps/worker/src/registry.ts'
+  const COVERAGE = 'packages/db/src/privacy-coverage.ts'
+  const MERGE_REGISTRY = 'packages/db/src/merge-participants.ts'
+  const DB_SUITE = 'packages/db/src/analytics.itest.ts'
+  const PRIVACY_SUITE = 'packages/fixtures/src/analytics-privacy.itest.ts'
+  const WORKER_SUITE = 'apps/worker/src/jobs/analytics-partitions.itest.ts'
+  const SCHEDULE_SUITE = 'apps/worker/src/jobs/analytics-partitions.test.ts'
+
+  // Named for this block rather than `unit` and `integration`, which several other blocks declare: the
+  // slicer concatenates whichever blocks it was asked for into ONE file, so two blocks sharing a helper
+  // name is a `SyntaxError` in any run that names both — and the failure points at neither of them.
+  const analyticsUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const analyticsIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 123a. A column dropped from the analytics mirror must be caught by `pnpm db:drift`.
+  //
+  //       This is the case that proves the gate reaches the new schema at all. Before this unit the drift
+  //       check could not have produced this message for any table outside `public` or `clinical`, because
+  //       it derived the schema from the DIRECTORY — so the whole `analytics` schema would have been
+  //       unmirrored and unchecked with a green tick over it, which is ADR 0002 exactly.
+  checkRejectedBy(
+    'analytics gate: a column missing from the analytics mirror is caught by db:drift',
+    withEditedFile(
+      DRIFT_MIRROR,
+      (text) =>
+        replaceOnce(
+          text,
+          "    lastEventAt: timestamp('last_event_at', { withTimezone: true }).notNull(),",
+          '    // the column the retention purge measures a session by, no longer mirrored',
+        ),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'analytics.session.last_event_at: present in the database, missing from Drizzle',
+  )
+
+  // 123b. And the other direction: a mirror for an analytics table the database does not have. Without
+  //       this, 123a is satisfied by a gate that reports every analytics table as missing all the time.
+  check(
+    'analytics gate: a Drizzle analytics table the database lacks is caught by db:drift',
+    withFixture(
+      'packages/db/src/schema/__gate_fixture_analytics__.ts',
+      [
+        "import { pgSchema, text } from 'drizzle-orm/pg-core'",
+        "const ghostSchema = pgSchema('analytics')",
+        "export const ghost = ghostSchema.table('ghost_measurement', { phantom: text('phantom') })",
+      ].join('\n'),
+      () => {
+        const result = runExpectingFailure('pnpm', ['db:drift'])
+        return (
+          result.failed &&
+          result.output.includes(
+            'Drizzle declares table "analytics.ghost_measurement" but the database has no such table',
+          )
+        )
+      },
+    ),
+  )
+
+  // 123c. A mirror whose schema the gate cannot resolve must be REFUSED, not silently treated as `public`.
+  //
+  //       Refusing is the only answer that cannot be mistaken for a finding about the database: a mirror
+  //       attributed to the wrong schema reports every one of its columns as drift in both directions at
+  //       once, and the reader then goes looking at a migration that is perfectly correct.
+  checkRejectedBy(
+    'analytics gate: a mirror qualified by a name that is not a pgSchema binding is refused',
+    withFixture(
+      'packages/db/src/schema/__gate_fixture_unresolved__.ts',
+      [
+        "import { text } from 'drizzle-orm/pg-core'",
+        'const notASchema = { table: (_name, columns) => columns }',
+        "export const orphan = notASchema.table('orphan_measurement', { phantom: text('phantom') })",
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'is qualified by a name that is not a pgSchema(...) binding in the same file',
+  )
+
+  // 123d. A naive timestamp in the analytics mirror must be caught by `pnpm db:conventions`.
+  //
+  //       `business_day` runs 11:00-02:00 and crosses midnight, so a naive timestamp does not merely read
+  //       back differently — it moves a measurement between trading dates, and therefore between the
+  //       numbers the analytics page reports.
+  checkRejectedBy(
+    'analytics gate: a naive timestamp in the analytics mirror is caught by db:conventions',
+    withEditedFile(
+      DRIFT_MIRROR,
+      (text) =>
+        replaceOnce(
+          text,
+          "    resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull(),",
+          "    resolvedAt: timestamp('resolved_at').notNull(),",
+        ),
+      () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']),
+    ),
+    'timestamp() without { withTimezone: true }',
+  )
+
+  // 123e. `analytics.event`'s comment CLAIMS that UPDATE and DELETE raise. Remove one of the two triggers
+  //       and `pnpm db:conventions` must say so by name.
+  //
+  //       This is why the migration declares two triggers instead of one `before update or delete`: the
+  //       rule reads the table's own comment for the marker and then looks for a BEFORE trigger per event,
+  //       so a combined trigger would leave the table claiming a guarantee no gate had checked. The rule
+  //       exists because somebody wrote one trigger and copied it without changing the word.
+  checkRejectedBy(
+    'analytics gate: analytics.event claiming append-only with one trigger missing is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger event_refuse_delete\n  before delete on analytics.event\n',
+          'create trigger event_refuse_delete_disabled\n  before insert on analytics.event\n',
+        ),
+      () => runExpectingFailure('node', ['scripts/check-schema-conventions.mjs']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  // 123f. Either analytics cron with its agent removed must be caught by `pnpm jobs`.
+  //
+  //       A cron with no `agent_definition` has no declared interval and no budget, so nothing is watching
+  //       it and nothing is capping it. For these two the consequence is the one nobody sees: partition
+  //       creation stopping is a refused insert three months later, and retention stopping is a table that
+  //       grows for ever with nothing saying why.
+  checkRejectedBy(
+    'analytics gate: the retention cron with no agent is caught by pnpm jobs',
+    withEditedFile(
+      JOBS_MODULE,
+      (text) => replaceOnce(text, '  agent: ANALYTICS_RETENTION_AGENT,', '  // no agent'),
+      () => runExpectingFailure('pnpm', ['jobs']),
+    ),
+    'cron-without-an-agent',
+  )
+
+  // 123g. A job module nothing imports is a cron that never fires, and `pnpm jobs` cannot see it — it
+  //       validates what the REGISTRY holds. So the registration itself is a test, and this is it failing.
+  //
+  //       "A documented policy with no job is not retention" is the acceptance line, and a `JobDefinition`
+  //       exported from a module the registry does not import is exactly that: correct, complete, and never
+  //       run once.
+  checkRejectedBy(
+    'analytics gate: removing the two passes from JOB_REGISTRY fails the schedule test',
+    withEditedFile(
+      ANALYTICS_REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          '  ANALYTICS_PARTITIONS_JOB_DEFINITION,\n  ANALYTICS_RETENTION_JOB_DEFINITION,\n]',
+          ']',
+        ),
+      () => runExpectingFailure('pnpm', analyticsUnit(SCHEDULE_SUITE)),
+    ),
+    'is not in JOB_REGISTRY',
+  )
+
+  // 123h. The two passes sharing one agent must be caught.
+  //
+  //       Naming an existing agent is always VALID — every `agent_definition` row is a legal value — and
+  //       the consequence is silent: the watchdog measures the absence of a success per agent, so two crons
+  //       sharing a heartbeat report as healthy whenever either of them runs and a pass that has stopped
+  //       entirely is invisible for ever. Migration 0033's finding, and the reason there are two agents.
+  checkRejectedBy(
+    'analytics gate: the two analytics passes sharing one agent is caught',
+    withEditedFile(
+      JOBS_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const ANALYTICS_RETENTION_AGENT = 'analytics_retention'",
+          "export const ANALYTICS_RETENTION_AGENT = 'analytics_partitions'",
+        ),
+      () => runExpectingFailure('pnpm', analyticsUnit(SCHEDULE_SUITE)),
+    ),
+    'must be claimed by exactly one cron',
+  )
+
+  // 123i. An action the SQL reports and `RETENTION_ACTIONS` does not know must be caught.
+  //
+  //       `countByAction` deliberately IGNORES an unknown action, which is right — incrementing whatever
+  //       key arrives would let a typo create a sixth count nobody reads while the figure it belonged to
+  //       stayed at zero. It is also how an action added in SQL alone becomes a figure that silently stops
+  //       being logged, so the set is held equal against the live function and this is that failing.
+  checkRejectedBy(
+    'analytics gate: an action the pass reports and RETENTION_ACTIONS omits is caught',
+    withEditedFile(
+      JOBS_MODULE,
+      (text) => replaceOnce(text, "  'guarded_default_partition',\n", ''),
+      () => runExpectingFailure('pnpm', analyticsIntegration(WORKER_SUITE)),
+    ),
+    'must be the same set',
+  )
+
+  // 123j. And the reverse: `countByAction` counting an action nobody reports must be caught by the unit
+  //       test, without which 123i is satisfied by a suite that fails whatever anybody does to it.
+  checkRejectedBy(
+    'analytics gate: countByAction counting an unknown action is caught',
+    withEditedFile(
+      JOBS_MODULE,
+      (text) =>
+        replaceOnce(
+          text,
+          '    if ((RETENTION_ACTIONS as readonly string[]).includes(row.action)) {\n' +
+            '      counts[row.action as RetentionActionName] += 1\n' +
+            '    }',
+          '    counts[row.action as RetentionActionName] =\n' +
+            '      (counts[row.action as RetentionActionName] ?? 0) + 1',
+        ),
+      () => runExpectingFailure('pnpm', analyticsUnit(SCHEDULE_SUITE)),
+    ),
+    'ignores an action it does not know',
+  )
+
+  // 123k. The erasure catalogue must keep looking in the `analytics` schema.
+  //
+  //       The single most valuable case in this block. C-CRM-10's engine enumerates every schema present
+  //       and refuses an erasure when a column has no classification rule; A-FIRST-01 adds a whole schema
+  //       and classifies nothing, on the grounds that there is nothing in it for the five probes to find.
+  //       That answer is worth nothing unless the probes can SEE the schema — otherwise "nothing to
+  //       classify" and "the probe does not look here" are the same passing test. Excluding `analytics`
+  //       from the merge catalogue is how a later unit would quietly make it the second one.
+  checkRejectedBy(
+    'analytics gate: excluding the analytics schema from the erasure probes is caught',
+    withEditedFile(
+      MERGE_REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          "  /** Payload's own tables. See the header: not migration-created, and not writable by a statement. */\n  'payload',\n])",
+          "  /** Payload's own tables. See the header: not migration-created, and not writable by a statement. */\n  'payload',\n  'analytics',\n])",
+        ),
+      () => runExpectingFailure('pnpm', analyticsIntegration(PRIVACY_SUITE)),
+    ),
+    'IS enumerated by the probes',
+  )
+
+  // 123l. And the name-based probes must keep looking there too. Probe 1 alone reaching the schema would
+  //       leave a contact detail or a credential added to it invisible, which is the exact shape of the
+  //       failure `privacy-coverage.ts` records for the CMS schema — right about the wrong thing.
+  checkRejectedBy(
+    'analytics gate: excluding analytics from the name-based probes is caught',
+    withEditedFile(
+      COVERAGE,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze(['payload'])",
+          "export const COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze([\n  'payload',\n  'analytics',\n])",
+        ),
+      () => runExpectingFailure('pnpm', analyticsIntegration(PRIVACY_SUITE)),
+    ),
+    'IS enumerated by the probes',
+  )
+
+  // 123z. The control, and it is not a formality: every file above, UNEDITED, passes every check the cases
+  //       used. Without it the twelve mutations are satisfied by suites and gates that fail whatever
+  //       anybody does to them — case 75x's reason, and the way a whole block comes to prove nothing.
+  for (const [name, args] of [
+    ['db:drift', ['db:drift']],
+    ['db:conventions', ['db:conventions']],
+    ['pnpm jobs', ['jobs']],
+    ['the schedule test', analyticsUnit(SCHEDULE_SUITE)],
+    ['the schema suite', analyticsIntegration(DB_SUITE)],
+    ['the privacy suite', analyticsIntegration(PRIVACY_SUITE)],
+    ['the worker suite', analyticsIntegration(WORKER_SUITE)],
+  ]) {
+    const clean = run('pnpm', args)
+    check(
+      `analytics gate control: ${name} passes unedited`,
+      !clean.failed,
+      `${name} failed with nothing broken, so every mutation case above proves nothing:\n${clean.output}`,
+    )
+  }
+}
+
 // 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
 //            event name that must not compile, the funnel that must not be dated on a calendar day, and
 //            the two gates that were widened so the taxonomy's purity is measured rather than asserted.

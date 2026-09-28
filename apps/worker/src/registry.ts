@@ -23,6 +23,10 @@ import type { Job, PgBoss } from 'pg-boss'
 import { FLOW_TICK_JOB } from './automation/interpreter.ts'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
+import {
+  ANALYTICS_PARTITIONS_JOB_DEFINITION,
+  ANALYTICS_RETENTION_JOB_DEFINITION,
+} from './jobs/analytics-partitions.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
 import { CREDENTIAL_SWEEP_AGENT, runCredentialSweep } from './jobs/credential-sweep.ts'
@@ -448,6 +452,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // worker outage is self-healing in the same way B-MSG-03's `scheduled_step` rows are — nothing moved,
   // and `flow_run.resume_at` says what was owed.
   FLOW_TICK_JOB,
+  // A-FIRST-01's two, and they are the other half of what `audit.ensure-partitions` does for `audit_event`.
+  // Partition creation at 03:20 and retention at 05:50, each with its OWN agent: sharing one heartbeat
+  // between them would keep it fresh while one of the two was dead (0033's reason). Neither is announced by
+  // a caller — they are obligations of the STORAGE rather than of anything a request did — so each declares
+  // a cron and therefore an agent, and what the watchdog watches is the absence of a success.
+  ANALYTICS_PARTITIONS_JOB_DEFINITION,
+  ANALYTICS_RETENTION_JOB_DEFINITION,
 ]
 
 /**

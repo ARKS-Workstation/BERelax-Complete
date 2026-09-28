@@ -21,16 +21,30 @@ if (!url) {
 }
 
 /**
- * Each Postgres schema and the directory holding its Drizzle mirrors.
+ * Every directory holding Drizzle mirrors.
  *
  * The `clinical` schema's mirrors live in @berelax/clinical, not @berelax/db, because the package
  * that owns the boundary owns its own shape. Leaving it out of this gate would have left an entire
  * schema — the most sensitive one — undrift-checked.
+ *
+ * A DIRECTORY and not a directory-per-schema, which it used to be. That pairing was wrong as soon as one
+ * directory held two schemas: A-FIRST-01's `analytics` mirrors live beside the `public` ones in
+ * `packages/db/src/schema`, and under the old mapping every one of them would have been attributed to
+ * `public` — nine tables reported as declared-but-missing and nine more as present-but-unmirrored, on a
+ * schema that matched the migration exactly. The schema now comes from the `pgSchema(...)` call each table
+ * is built on, which is where the database gets it from too.
  */
-const MIRROR_DIRS = [
-  { schema: 'public', dir: 'packages/db/src/schema' },
-  { schema: 'clinical', dir: 'packages/clinical/src/schema' },
-]
+const MIRROR_DIRS = ['packages/db/src/schema', 'packages/clinical/src/schema']
+
+/**
+ * The schemas this build owns, and therefore the ones a mirror is required for.
+ *
+ * `payload` is the CMS's own storage, created and migrated by Payload rather than by
+ * `packages/db/migrations` (ADR 0019), and `pgboss` belongs to the queue library — neither is this
+ * repository's to mirror. Stated as the schemas that ARE checked rather than as the ones that are not, so
+ * a schema added by a migration and never mirrored is a failure here rather than an omission nobody sees.
+ */
+const OWNED_SCHEMAS = ['public', 'clinical', 'analytics']
 const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intentionally not mirrored
 
 // --- what Drizzle declares -------------------------------------------------------------------
@@ -42,15 +56,36 @@ const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intent
  * which made a single-line table definition invisible to this gate — caught by the known-bad
  * fixture in scripts/test-gates.mjs, which is exactly what that fixture is for.
  */
-// Matches both `pgTable('x', {` and `someSchema.table('x', {`.
-const TABLE_OPEN_RE = /(?:pgTable|\.table)\(\s*'([a-z0-9_]+)'\s*,\s*\{/g
+// Matches both `pgTable('x', {` and `someSchema.table('x', {`, capturing the qualifier so the schema can
+// be resolved from the `pgSchema(...)` the qualifier was bound to.
+const TABLE_OPEN_RE = /(?:pgTable|([A-Za-z_$][\w$]*)\.table)\(\s*'([a-z0-9_]+)'\s*,\s*\{/g
 const COLUMN_RE =
   /(?:^|[,{]|\n)\s*(?:'[^']+'|[A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$]*\(\s*'([a-z0-9_]+)'/g
+/** `export const clinicalSchema = pgSchema('clinical')` — the binding a `.table(...)` is qualified by. */
+const SCHEMA_BINDING_RE =
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*pgSchema\(\s*'([a-z0-9_]+)'/g
+
+/**
+ * Which Postgres schema each `pgSchema(...)` binding in this file stands for.
+ *
+ * Read from the source rather than assumed from the file's directory, for the reason MIRROR_DIRS gives.
+ * A `.table(...)` whose qualifier is not a binding in the same file is left unresolved and reported below,
+ * which is deliberate: silently defaulting it to `public` is exactly the mistake this replaced.
+ */
+function schemaBindings(src) {
+  const out = new Map()
+  for (const match of src.matchAll(SCHEMA_BINDING_RE)) out.set(match[1], match[2])
+  return out
+}
 
 function extractTables(src) {
+  const bindings = schemaBindings(src)
   const out = new Map()
   for (const match of src.matchAll(TABLE_OPEN_RE)) {
-    const table = match[1]
+    const qualifier = match[1]
+    const table = match[2]
+    // `pgTable(...)` has no qualifier and is the `public` schema, which is what Drizzle does with it.
+    const schema = qualifier === undefined ? 'public' : bindings.get(qualifier)
     const bodyStart = match.index + match[0].length
     let depth = 1
     let i = bodyStart
@@ -63,17 +98,34 @@ function extractTables(src) {
     const body = src.slice(bodyStart, i - 1)
     const cols = new Set()
     for (const col of body.matchAll(COLUMN_RE)) cols.add(col[1])
-    out.set(table, cols)
+    out.set(table, { schema, cols })
   }
   return out
 }
 
 const declared = new Map() // "schema.table" -> Set(column)
-for (const { schema, dir } of MIRROR_DIRS) {
+const unresolved = []
+for (const dir of MIRROR_DIRS) {
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))) {
     const src = readFileSync(join(dir, file), 'utf8')
-    for (const [table, cols] of extractTables(src)) declared.set(`${schema}.${table}`, cols)
+    for (const [table, { schema, cols }] of extractTables(src)) {
+      if (schema === undefined) {
+        unresolved.push(
+          `${join(dir, file)}: table "${table}" is qualified by a name that is not a ` +
+            'pgSchema(...) binding in the same file, so this gate cannot tell which Postgres schema ' +
+            'it belongs to',
+        )
+        continue
+      }
+      declared.set(`${schema}.${table}`, cols)
+    }
   }
+}
+
+if (unresolved.length > 0) {
+  console.error(`Schema drift — ${unresolved.length} mirror(s) whose schema could not be resolved:`)
+  for (const problem of unresolved) console.error(`  ${problem}`)
+  process.exit(1)
 }
 
 if (declared.size === 0) {
@@ -91,13 +143,30 @@ const psql = (sqlText) =>
     },
   )
 
+/*
+ * pg_catalog rather than information_schema, for two reasons and both of them were live.
+ *
+ * **A partition is a table.** `relispartition` is the only honest way to say "not one of those", and
+ * information_schema does not expose it. This used to be a NAME pattern — `audit_event_\d{4}_\d{2}$` —
+ * which worked for the one partitioned table that existed and would have needed a second line per new one:
+ * A-FIRST-01 adds `analytics.event` and `analytics.funnel_step`, whose partitions are created monthly by a
+ * cron, so the name list would have gone stale on the first of a month rather than at a commit. A partition
+ * is never separately mirrored; its parent is enumerated in its own right and the mirror applies to both.
+ *
+ * **And information_schema is filtered to what the CURRENT ROLE holds a privilege on**, which is the trap
+ * `privacy-coverage.ts` records paying for: a schema the connecting role cannot see reads as a schema with
+ * no tables, and every mirror for it would be reported as declared-but-missing — or, worse, its absence
+ * from the database would go unreported. pg_catalog is not privilege-filtered.
+ */
 const rows = psql(`
-  select c.table_schema || '.' || c.table_name as qualified, c.column_name
-  from information_schema.columns c
-  join information_schema.tables t
-    on t.table_name = c.table_name and t.table_schema = c.table_schema
-  where c.table_schema in ('public', 'clinical') and t.table_type = 'BASE TABLE'
-  order by c.table_schema, c.table_name, c.ordinal_position
+  select n.nspname || '.' || c.relname as qualified, a.attname as column_name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+  where n.nspname in (${OWNED_SCHEMAS.map((s) => `'${s}'`).join(', ')})
+    and c.relkind in ('r', 'p')
+    and not c.relispartition
+  order by n.nspname, c.relname, a.attnum
 `)
   .trim()
   .split('\n')
@@ -129,12 +198,16 @@ for (const [table, cols] of declared) {
   }
 }
 
-// Partitions of audit_event appear as base tables; they are not separately mirrored.
-// Monthly partitions of audit_event are created by a scheduled job and are not separately mirrored.
-const ignorable = (qualified) => {
-  const bare = qualified.replace(/^[a-z_]+\./, '')
-  return IGNORED_TABLES.has(bare) || /^audit_event_\d{4}_\d{2}$/.test(bare)
-}
+/*
+ * Partitions are excluded by the query above (`not c.relispartition`) rather than by name, so nothing here
+ * has to know that `audit_event`, `analytics.event` and `analytics.funnel_step` are partitioned or that a
+ * cron adds a partition to the last two every month.
+ *
+ * `IGNORED_TABLES` is kept and is belt-and-braces rather than load-bearing: `relkind in ('r', 'p')` already
+ * excludes the view it names, and it is retained so that widening the query to include one does not
+ * silently start demanding a mirror for it.
+ */
+const ignorable = (qualified) => IGNORED_TABLES.has(qualified.replace(/^[a-z_]+\./, ''))
 for (const table of actual.keys()) {
   if (!declared.has(table) && !ignorable(table)) {
     problems.push(`Database has table "${table}" with no Drizzle mirror`)

@@ -11913,7 +11913,7 @@ units:
       and retention jobs. Rollup tables are created here and explicitly exempted from retention so they
       are kept indefinitely.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -11945,11 +11945,78 @@ units:
     - analytics.event rejects UPDATE and DELETE outside the retention role (rule plus grant test), so a
       collected event cannot be edited after the fact
     - pnpm db:drift reports no drift between the Drizzle schema and the migration
+    - 'NOTE: migration 0096, SCHEMA_VERSION 96, gate block `// 123a-123z.`, ADR 0045, private SQLSTATEs
+      ZY061-ZY066 of the ZY061-ZY070 band (ZY067-ZY070 left free). The allocated port band 14_000 was NOT
+      taken: no suite in this unit starts a server, and `apps/web/src/test-ports.test.ts` fails a band that
+      is declared and not used, so declaring it would have been a red check rather than a reservation.'
+    - 'NOTE: a BEFORE INSERT guard on a partitioned PARENT cannot be the named refusal for a month with no
+      partition, and this was measured rather than reasoned about. On PostgreSQL 16 a row is ROUTED first and
+      the trigger then fires on the partition it landed in (tg_relid is the partition, never the parent), so
+      tuple routing raises 23514 before any guard of ours runs — the guard is unreachable code on exactly the
+      day it is needed, and it would have shipped green because every insert into a month that DOES exist
+      fires the clone and finds a partition. Each raw parent therefore has a DEFAULT partition whose BEFORE
+      INSERT trigger raises ZY061 naming the month, the parent and analytics.ensure_partitions(); nothing is
+      ever stored there and the suite asserts both the emptiness and the trigger that keeps it so. This
+      contradicts 0005 and is recorded in ADR 0045 for that reason.'
+    - 'NOTE: pnpm db:drift had to CHANGE, not merely be run. It paired one mirror DIRECTORY with one Postgres
+      schema, so the analytics mirrors living beside the public ones in packages/db/src/schema would have been
+      attributed to public — nine tables reported as declared-but-missing and nine more as
+      present-but-unmirrored, on a schema matching its migration exactly. It now derives the schema from the
+      pgSchema(...) binding each table is built on, refuses a mirror whose qualifier is not one rather than
+      defaulting it to public, and reads pg_catalog with `not relispartition` instead of an
+      `audit_event_YYYY_MM` name pattern — which is what stops the monthly analytics partitions needing a
+      second line in that gate every month. Gate cases 123a, 123b and 123c are the known-bad fixtures.'
+    - 'NOTE: `whatsapp_ref` is deliberately NOT created in this schema although the summary lists it. 0079
+      (B-UI-04) already created public.whatsapp_ref and public.booking_whatsapp_ref_capture, and its
+      session_reference column is documented there as "A-FIRST''s opaque handle for the conversation" — it is
+      analytics.session.session_id. A second analytics.whatsapp_ref would be a second statement of one fact.
+      The itest asserts the table exists in `public` so the absence reads as a decision.'
+    - 'NOTE: no customer or booking reference exists anywhere in this schema, and the itest asserts it by
+      pattern. That is deferred to A-FIRST-08, whose own acceptance line names attribution onto customer and
+      booking and the merge repointing — a customer_id here would enter C-CRM-05''s merge participant
+      registry and C-CRM-10''s erasure catalogue on this commit with no unit owning either decision, and an
+      unclassified column in the latter REFUSES every customer erasure. packages/fixtures/src/analytics-privacy.itest.ts
+      holds that answer honest from both ends: no analytics column is probed, AND a fixture table with a
+      customer_id, a phone_e164, a token and a notes column IS enumerated and reported unclassified, so
+      "nothing to classify" cannot be confused with "the probe does not look here". Gate cases 123k and 123l
+      break the two exclusion lists and require that suite to fail.'
+    - 'NOTE: daily_funnel is keyed on (trading_date, step, source, medium, campaign) and carries entered plus
+      excluded. The ref-capture numerator and denominator A-FIRST-07''s acceptance line asks to be written to
+      daily_funnel are day-level rather than step-level figures, so their shape is deferred to A-FIRST-07
+      rather than guessed at here — repeating a day-level count on every step row is the drift this build
+      warns about most.'
+    - 'NOTE: event.event_name is text with no CHECK, deliberately: the closed versioned taxonomy belongs to
+      A-FIRST-02 and a list here plus a Zod enum there is two lists. The FUNNEL is different and IS in the
+      database, as the enum analytics.funnel_step_name with its eight members in docs/03 order, because the
+      order is the measurement (paid / landing, never booking_created / landing) and pg_enum.enumsortorder is
+      the only place a database stores an order. A-FIRST-02 pins its ordered enum against that catalogue
+      instead of restating it, which is how whatsapp_ref_capture_outcome is pinned to REF_CAPTURE_OUTCOMES.'
+    - 'NOTE: retention is enforced by two registered crons with their own agent_definition and
+      agent_heartbeat rows (analytics_partitions at 03:20, analytics_retention at 05:50 Asia/Dubai, 24-hour
+      declared intervals). Two agents and not one for 0033''s reason. The schedule and the registry membership
+      are asserted in apps/worker/src/jobs/analytics-partitions.test.ts, because a JobDefinition the registry
+      does not import is a cron that never fires and pnpm jobs cannot see it — gate case 123g removes both
+      entries and requires that test to fail.'
+    - 'NOTE: three defects in this unit''s own work, each named with what found it. (1) The partition-guard
+      trigger was first written on the partitioned parent; a scratch probe with a RAISE NOTICE showed it
+      fires on the ROUTED PARTITION and never before routing, so it could never have refused the case it was
+      written for. (2) run_retention''s report printed the bare oid — "3828561, upper bound …" — for the
+      partition it dropped, because regclass::text resolves through the catalogue on every render and the
+      string was built after the DROP; found by running the pass and reading its output. (3) The retention
+      fixture first used a fixed future as_of, which put every live partition past the window and dropped six
+      instead of one; found by the suite, and the fixture now anchors on the real clock so as_of - 89 days
+      can never reach the current month''s partition.'
     files:
-    - packages/db/migrations/NNNN_analytics_schema.sql
+    - packages/db/migrations/0096_analytics_schema.sql
     - packages/db/src/schema/analytics.ts
+    - packages/db/src/schema/index.ts
     - apps/worker/src/jobs/analytics-partitions.ts
+    - apps/worker/src/jobs/analytics-partitions.test.ts
+    - apps/worker/src/jobs/analytics-partitions.itest.ts
     - packages/db/src/analytics.itest.ts
+    - packages/fixtures/src/analytics-privacy.itest.ts
+    - scripts/check-schema-drift.mjs
+    - docs/adr/0045-analytics-retention-is-a-policy-table-and-a-guarded-default-partition.md
   - id: A-FIRST-02
     order: 105
     title: Event taxonomy and the funnel contract, pure

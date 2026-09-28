@@ -9,6 +9,7 @@ import {
 } from './automation/runtime.ts'
 import { createBoss, shutdown } from './boss.ts'
 import { enqueue, transactionalEnqueue } from './enqueue.ts'
+import { setAnalyticsMaintenanceSql } from './jobs/analytics-partitions.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import {
@@ -104,6 +105,11 @@ async function main(): Promise<void> {
   // which is a row on the calendar rather than a renewal notice sent to a number somebody invented.
   setObligationNoticeRuntime(obligationNoticeRuntimeFor(sql))
   setRetentionPurgeSql(sql)
+  // A-FIRST-01's partition and retention passes, before `startWorkers` for the reason every runtime above
+  // is: a handler that attached first would take a job off the queue and fail on a missing connection,
+  // burning a retry on nothing. Both passes are DDL against the analytics schema and neither reads the
+  // clock itself — the instant comes from the job context, which is what lets the suite drive them frozen.
+  setAnalyticsMaintenanceSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first

@@ -2886,6 +2886,92 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
 // `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
 //
+// 92 is 0092_leave_approval.sql: approving leave — who may decide it, what it costs the floor, and what it
+// may never do to a booking. It is the first writer of `leave_request` in the build. 0030 created the table
+// and left ONE decision to P-HR, and 0066 took it in `leaveCoveragePeriod()` while saying in its own header
+// that "writing and approving that period is P-HR-09's"; until this file nothing had written one, which is
+// why the trading-day alignment finally has a caller. The consequence a reader meets first: a day of leave
+// on the 17th is stored as 11:00 on the 17th to 02:00 on the 18th, so the 01:30 appointment in the tail is a
+// REPORTED CONFLICT rather than a booking somebody discovers on the day. No arithmetic for that is in this
+// file or in the SQL — ZY019 compares the approval's period against the request's, which is a comparison and
+// not a second derivation, for the reason 0066 gives: `resolveTradingDate` is the one reading of where a
+// trading day ends. What the file deliberately does NOT do is three things. It stores no CONFLICT REPORT:
+// the report is a read recomputed on every attempt, because a stored one is a snapshot of a world a
+// reassignment has since changed and the approval would then commit against rows nobody looked at; what is
+// stored is the one thing a read cannot recover, the DECISION a human took about a conflict they chose not
+// to resolve (`leave_conflict_override`, whose role and reason are refused by ZY016 rather than by a
+// TypeScript guard alone, so the refusal holds for a `psql` session — 0080's division of labour). It moves
+// NO LEAVE BALANCE, because 0066 is explicit that a request reserves when it is MADE and approval only makes
+// the reservation final; the reservation belongs to the submission path, which is P-HR-14's, so this unit
+// writes neither a `reserved` nor a `released` movement — symmetrically, since a release with no reservation
+// creates leave out of nothing, which `decideRequest` in @berelax/core refuses. And it TOUCHES NO
+// APPOINTMENT: that is ADR 0041, and the proof is not a promise but an enumeration out of the source —
+// `packages/fixtures/src/hr-leave-approval.test.ts` walks the modules reachable from the approval entry
+// points, collects every appointment status any of them can write, and asserts `cancelled_by_salon` and
+// `no_show` are not among them, with the same scan shown firing over `cancel.ts` so an empty answer means
+// something. `leave_coverage_lock` is the table that looks unnecessary and is not: two approvals for two
+// DIFFERENT therapists on one day conflict on no row, so each transaction reads a floor that still holds the
+// other therapist, both coverage checks pass, and the floor ends up short with every check having said yes.
+// `approveLeaveRequest` takes `select ... for update` over one row per trading date in ascending order, so
+// the second transaction BLOCKS, re-reads `employee_approved_leave` and is refused BY THE COVERAGE CHECK
+// inside the transaction — which is the acceptance line's own wording, and why a row nobody can see would
+// have been the wrong mechanism (ADR 0023's row-locked counter is the precedent). The coverage answer itself
+// is P-HR-06's `validateRota` called TWICE over identical arguments bar the leave, and the refusal is the
+// set DIFFERENCE: the segments covered without this leave and not with it. An absolute reading would refuse
+// every approval on any database whose `shift` table is empty, which is every seeded one, and it would name
+// a segment the requester cannot do anything about. `leave_approval` snapshots the `rota_coverage_rule`
+// version that judged the floor, which is 0081's argument taken a fifth time and exactly as true here: "was
+// the floor covered when this leave was approved?" is a question about a decision taken months ago, and
+// raising the minimum in April must not make March's approval retroactively wrong. Withdrawing an approval
+// is a `leave_approval_cancellation` row rather than a column, because the approval table is append-only for
+// the same reason as the rest, and `leave_approval_live` is the view that joins the two — `employee_approved_leave`'s
+// precedent (0030): a predicate held in a view cannot be forgotten, and forgetting this one shows a
+// therapist as blocked after their holiday was withdrawn. Its private SQLSTATEs are `ZY015` through `ZY020`,
+// and the allocation is worth reading because the CONVENTION changed under it. "One private class per
+// migration" has run out — `ZA` through `ZY` are in use and `ZZ` is another unit's — and this file first took
+// `ZY001`-`ZY006` on the reasoning every previous file used: read the migrations you can see, take a class
+// nobody raises. Three other units reasoned identically in the same week, and `0085` had already moved its
+// eight codes INTO `ZY` after it and `0084` both landed on `ZA`. Four migrations claimed `ZY001` at once. So
+// the rule is now W-SYS-12's provisional answer — a refusal is identified by all FIVE characters, and two
+// unrelated rules may share a class as long as they never share a code — and `sqlstate-uniqueness.test.ts`
+// was already keyed on the exact five, which is what makes the new convention checkable rather than a hope:
+// a shared class is not a finding, a shared code is. What has not changed is why: a code standing for two
+// rules makes one file's translator report the other file's refusal, and makes a probe asserting it pass
+// when the statement bounced off something else.
+//
+
+//
+// 96 is 0096_analytics_schema.sql: the `analytics` schema, its monthly partitions, and the 90-day raw
+// retention as a thing that RUNS (A-FIRST-01). Nine tables — `visitor`, `session`, `event`, `funnel_step`,
+// `attribution`, the three daily rollups and `retention_policy` — with `event` and `funnel_step` RANGE
+// partitioned by month on `occurred_at`. `whatsapp_ref` is NOT among them although the unit summary lists
+// it: 0079 already created `public.whatsapp_ref`, whose `session_reference` is documented there as
+// "A-FIRST's opaque handle for the conversation", and a second one would be a second statement of one fact.
+// Four things in it are worth knowing before reading it. **There IS a default partition on each raw
+// parent**, against 0005's advice and for 0005's reason: measured on PostgreSQL 16, a row is ROUTED before
+// any row-level trigger fires, so tuple routing raises `23514 no partition of relation "event" found for
+// row` before a guard on the parent could run — a guard that is unreachable code on exactly the day it is
+// needed. Each raw parent therefore has a default partition whose BEFORE INSERT trigger raises `ZY061`
+// naming the month, the parent and `analytics.ensure_partitions()`, and stores nothing, so there is no row
+// in it for anybody to forget to prune. **`analytics.retention_policy` is load-bearing**: one row per base
+// table in the schema, and `analytics.run_retention` REFUSES the whole pass on a table with no row
+// (`ZY062`) or a row for a relation that is not there (`ZY063`) — the same two directions C-CRM-10's
+// erasure registry is checked in — which is what makes the three rollups' exemption an explicit list rather
+// than an omission. **A partition's upper bound is only readable as the TEXT of
+// `pg_get_expr(relpartbound, …)`**, so `analytics.partition_bounds` parses it and raises `ZY064` on a bound
+// it cannot read rather than skipping the partition: a parser that stopped matching would make every
+// partition look un-droppable and the pass would report success having dropped nothing. **And
+// `analytics.event` is append-only for every role but `berelax_retention`** (`ZY065`), by two BEFORE
+// triggers declared on the partitioned parent so PostgreSQL clones them onto every partition — a direct
+// `delete from analytics.event_2026_09` is refused too, which a grant on the parent alone would not do; the
+// refusal tests `current_user` by NAME rather than `pg_has_role`, because `berelax` is a superuser and
+// `pg_has_role` answers true for it. `ZY066` is the negative look-ahead that would create nothing while
+// reporting success. The file adds no customer or booking reference anywhere in the schema and no IP
+// address or user-agent string, both deliberately and both recorded in its header: a `customer_id` here
+// would enter C-CRM-05's merge registry and C-CRM-10's erasure catalogue with no unit owning the decision,
+// and A-FIRST-08's acceptance line is what names it. Its private SQLSTATEs are `ZY061`-`ZY066` from the
+// band W-SYS-12's allocator handed this unit; `ZY067`-`ZY070` are still free within it.
+//
 
 //
 // 98 is 0098_messaging_controls.sql: the marketing kill switch has ONE home, and no control row can ever name
@@ -2929,8 +3015,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
 // becoming a gap, as did 89, 91 and 93. 88, 90 and 92 are allocations held by units in flight in other
-// worktrees, as are 94 through 97, and 98 is this file, C-AUTO-05's, which has landed. So 99 is the next
-// number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than consecutive
+// worktrees: 94 is G-REV-02's, 97 is P-HR-11's and 99 is W-SYS-12's, while 96 (A-FIRST-01) and 98
+// (C-AUTO-05) have landed. So 100 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than consecutive
 // integers, which is what makes a non-contiguous allocation cost nothing — and it is why 88 through 97
 // arriving after 98 needs no renumbering here.
 //
