@@ -1,4 +1,12 @@
-import { entryId, filsFrom, formatMoney, localDate, money, type TenderLine } from '@berelax/core'
+import {
+  entryId,
+  filsFrom,
+  formatMoney,
+  isPlaceholderText,
+  localDate,
+  money,
+  type TenderLine,
+} from '@berelax/core'
 import {
   currentPackageTemplateVersion,
   packageError,
@@ -52,6 +60,15 @@ export interface PackageDeps {
   readonly sql: Sql
   readonly now: () => number
 }
+
+/**
+ * The question that owns "what does this business sell as a package".
+ *
+ * Spelled here rather than imported from `@berelax/fixtures`, which is a devDependency of `@berelax/web` and
+ * must not reach a route (see `src/till/mapping.ts`). `apps/web/src/till-render.test.ts` holds the two equal,
+ * which is the check a second spelling needs.
+ */
+export const FIXTURE_PACKAGE_OPEN_QUESTION = 'Y9-package-catalogue'
 
 /** The obligation a redemption creates and the system cannot discharge. Shown on every load. */
 export const DOCUMENT_OBLIGATION = {
@@ -166,7 +183,13 @@ async function buildView(args: {
       unredeemedBalancePolicy: template.unredeemedBalancePolicy,
       version: template.version,
       isProvisional: template.isProvisional,
-      openQuestionId: template.openQuestionId,
+      // The row's question, or `Y9-package-catalogue` when the row carries none and the NAME is marked. A
+      // template whose terms were typed in is not flagged `is_provisional` — that is what the flag means — but
+      // a fixture package is still not a product this business sells, and a screenshot of a package with no
+      // question beside it is exactly what a reviewer could mistake for real.
+      openQuestionId:
+        template.openQuestionId ??
+        (isPlaceholderText(template.publicDisplayName) ? FIXTURE_PACKAGE_OPEN_QUESTION : null),
       salesCount: template.salesCount,
       sessionsRedeemed: template.sessionsRedeemed,
       sessionsSold: template.sessionsSold,

@@ -53,6 +53,7 @@ import {
   FIXTURE_OPEN,
   FIXTURE_TODAY,
 } from './clock.ts'
+import { seedPackages } from './package-seed.ts'
 import type { FixtureSalon } from './salon.ts'
 import { fixtureSuppressionPeppers } from './suppression.ts'
 import { assertSynthetic, syntheticPerson } from './synthetic.ts'
@@ -462,6 +463,27 @@ function shift(date: string, offsetDays: number) {
   return localDate(value.toISOString().slice(0, 10))
 }
 
+/**
+ * The fixture salon's packages, at four drawdown states (M-TILL-13).
+ *
+ * After `catalogue` because every template line names a live `service_variant`, and after `consent` because the
+ * four customers a package is sold to are the ones that loader inserts — a package is an entitlement somebody
+ * walks in and uses, so it is always attached to a record.
+ *
+ * docs/12 §5 promised this and nothing wrote it. See `package-seed.ts` for how a package is made demonstrable
+ * without inventing a product the business does not sell, which is the whole difficulty: M-TILL-09 and
+ * M-TILL-10 each declined to seed one for exactly that reason and both named this unit.
+ */
+const packageLoader: Loader = {
+  name: 'packages',
+  after: ['catalogue', 'consent', 'business-days'],
+  async load(sql, salon) {
+    void salon
+    const result = await seedPackages(sql)
+    return result.templates + result.sales + result.balances + result.redemptions
+  },
+}
+
 const LOADERS: Loader[] = [
   premisesLoader,
   catalogueLoader,
@@ -471,6 +493,7 @@ const LOADERS: Loader[] = [
   consentLoader,
   suppressionLoader,
   messageTemplateLoader,
+  packageLoader,
 ]
 
 /** Registers a loader. Called by the unit that owns the tables it writes. */
