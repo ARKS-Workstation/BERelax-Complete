@@ -13,6 +13,7 @@ import { createCallLog } from '@berelax/providers/call-log'
 import { FailureScript } from '@berelax/providers/failure'
 import { createFakeGoogleOAuth, type GoogleOAuthProvider } from '@berelax/providers/google'
 import { AppError, isAppError, RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
  * The owner's Google consent, start and callback, on one URL.
@@ -149,6 +150,10 @@ function problem(error: unknown): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const url = new URL(request.url)
   const isCallback = url.searchParams.has('code') || url.searchParams.has('error')
 

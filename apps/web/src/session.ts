@@ -6,14 +6,17 @@ import {
   verifyPassword,
   verifyTotp,
 } from '@berelax/auth'
+import { loadConfig } from '@berelax/config'
 import { ROLES, type Role, requiresTotp } from '@berelax/core'
 import {
+  createConnection,
   readStaffCredentialByReference,
   readStaffSession,
   type Sql,
   STAFF_SESSION_TTL_MS,
   type StaffCredentialRecord,
 } from '@berelax/db'
+import { isAppError } from '@berelax/shared'
 import {
   ADMIN_LOGIN_PATH,
   ADMIN_SESSION_COOKIE,
@@ -196,6 +199,65 @@ export async function requireAdminPrincipal(
   const outcome = await principalForRequest(sql, request, nowIso)
   if (outcome.kind === 'principal') return { principal: outcome.principal }
   return { response: adminLoginRedirect(request) }
+}
+
+/**
+ * The same guard, for a route with no connection in hand.
+ *
+ * {@link requireAdminPrincipal} is the right shape for a handler that already opens a pool and can resolve
+ * the session inside it. Most admin routes are not that shape: several open their connection deep inside a
+ * `withSql` closure after work this check has to precede, and three — the two revalidate endpoints and
+ * `test-connection` — never touch the database at all. Threading a connection out to the top of each of
+ * those was the alternative, and it would have meant restructuring twenty-odd handlers written by other
+ * units to add a check, which is how a mechanical change acquires real defects.
+ *
+ * So this opens a connection of its own, resolves, and closes it. The cost is one short-lived connection
+ * per admin request on the routes that also open one — `max: 1`, because it issues exactly one query. That
+ * is a real cost and it is the right trade here: these are back-office screens used by a handful of staff,
+ * and the alternative was a riskier diff across handlers this unit does not own.
+ *
+ * It takes the clock from `Date.now()` rather than an argument, which is the one thing in this module that
+ * is not injected. Every route below it already reads the wall clock for its own `adminChromeFor` call, and
+ * expiry under a FROZEN clock is asserted against `readStaffSession` directly — which does take the instant
+ * — so nothing is made untestable by it.
+ */
+export async function guardAdminRoute(
+  request: Request,
+): Promise<{ readonly principal: AdminPrincipal } | { readonly response: Response }> {
+  let sql: Sql | null = null
+  try {
+    const config = loadConfig()
+    sql = createConnection({ url: config.DATABASE_URL, max: 1 })
+    return await requireAdminPrincipal(sql, request, new Date().toISOString())
+  } catch (error) {
+    /*
+      It FAILS CLOSED, and it never throws.
+
+      Not throwing is what lets this be the first statement of a handler, before its own `try`. If it threw,
+      every call site would have to be inside the route's existing `catch` — which maps an error to that
+      route's own 400 or 503 and would report a failed session check as "the page could not be read".
+
+      Failing closed is the part that matters. If the database is unreachable this cannot tell a live session
+      from a forged one, and the only safe answer to "I cannot check" is "no". The tempting alternative — let
+      the request through and rely on the route's own query failing — is how an outage becomes an
+      authorisation bypass on the one route that happens not to need the database.
+
+      503 and not the login redirect, because the two are different facts: a redirect tells an operator to
+      sign in, and they would, and it would fail again. This says the check itself could not be made.
+    */
+    const detail = isAppError(error) || error instanceof Error ? error.message : 'Unexpected'
+    return {
+      response: new Response(
+        `Your session could not be verified, so this page is refused: ${detail}\n`,
+        {
+          status: 503,
+          headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+        },
+      ),
+    }
+  } finally {
+    if (sql !== null) await sql.end({ timeout: 5 })
+  }
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { appMediaStorage } from '../../../../../src/media/storage.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 
 /**
  * `GET /compliance/evidence/{evidenceId}?grant=…` — one filed evidence file, privately.
@@ -81,6 +82,10 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ evidenceId: string }> },
 ): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const { evidenceId } = await context.params
   try {
     const grant = new URL(request.url).searchParams.get('grant')

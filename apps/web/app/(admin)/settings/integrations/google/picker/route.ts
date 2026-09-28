@@ -25,6 +25,7 @@ import {
   type SearchConsoleProvider,
 } from '@berelax/providers/google'
 import { AppError, isAppError } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
  * The account and location picker: what this Google account can serve, and which resource it will.
@@ -181,6 +182,10 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const connectionId = new URL(request.url).searchParams.get('connectionId')
     return await withSql(async (sql) => {
@@ -209,6 +214,10 @@ interface SelectionRequest {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const body = (await request.json().catch(() => ({}))) as SelectionRequest
     const connectionId = typeof body.connectionId === 'string' ? body.connectionId : null

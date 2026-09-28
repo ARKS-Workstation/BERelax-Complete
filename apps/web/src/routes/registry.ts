@@ -709,6 +709,29 @@ export const ROUTES = [
       'derived from this registry, so docs/09 §1s eleven planned routes appear in it the day they land.',
   },
   {
+    id: 'admin-login',
+    path: '/login',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-11s staff sign-in, and the ONE route in the (admin) group that is not behind the session ' +
+      'guard - which is why ADMIN_UNGUARDED_PATHS names it explicitly rather than the guards absence in ' +
+      'its handler being indistinguishable from a route that forgot one. A handler rather than a document ' +
+      'for the reason every admin surface gives: this registry requires every DOCUMENT in both locales, so ' +
+      'a page.tsx would need an Arabic admin document and a root layout to render it, and would join a ' +
+      'screenshot matrix whose RTL half has to be a real Arabic route. It renders NO admin chrome and ' +
+      'reads nothing from the database on GET, because a page served to somebody who is not signed in must ' +
+      'not carry facts about the business - the re-authorisation banner every other admin screen shows ' +
+      'says whether the Google connection needs attention, which an unauthenticated visitor is not owed. ' +
+      'Dynamic and never cached: a stored copy of the POST response would be served with somebody elses ' +
+      'session in it. Not indexable and covered by NOINDEX_PATTERNS rather than a prefix, because /login ' +
+      'claims no other route and a prefix would be a claim on paths nothing serves.',
+  },
+  {
     id: 'derivative',
     path: '/m/[mediaId]/[contentHash]/[filename]',
     kind: 'handler',

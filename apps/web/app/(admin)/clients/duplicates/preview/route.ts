@@ -23,6 +23,7 @@ import {
 } from '@berelax/db'
 import { AppError, isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { atFrom, directionFrom, idFrom } from '../params.ts'
 import { type RenderDirection, scopeQuery } from '../render.ts'
 import { type MergePreviewView, type PreviewConsentView, renderMergePreviewHtml } from './render.ts'
@@ -208,6 +209,10 @@ const PREVIEW_ARGS = {
 } as const
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const url = new URL(request.url)
     const survivorId = idFrom(url.searchParams.get('survivor'), 'survivor')
@@ -287,6 +292,10 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const form = await request.formData()
     const survivorId = idFrom(form.get('survivor'), 'survivor')

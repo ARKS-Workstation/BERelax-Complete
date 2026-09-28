@@ -38,6 +38,7 @@ import {
 } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import { type RotaPageView, type RotaShortfallView, renderRotaHtml } from './render.ts'
 
 /**
@@ -116,6 +117,10 @@ const asWorkingHoursRules = (row: WorkingHoursRuleRow): WorkingHoursRules => ({
 })
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const url = new URL(request.url)
     const readAtIso = new Date().toISOString()

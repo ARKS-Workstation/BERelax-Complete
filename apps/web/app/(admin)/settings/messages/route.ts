@@ -3,6 +3,7 @@ import type { Instant } from '@berelax/core'
 import { createConnection, type InboxFilter, listMessageInbox, type Sql } from '@berelax/db'
 import { isAppError, MESSAGE_STATUSES, type MessageStatus } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import { renderInboxHtml } from './render.ts'
 
 /**
@@ -66,6 +67,10 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const config = loadConfig()
     const filter = parseFilter(new URL(request.url))
