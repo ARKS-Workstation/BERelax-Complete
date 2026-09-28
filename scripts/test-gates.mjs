@@ -34360,6 +34360,487 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 119a-119z. (P-HR-09) Leave approval: every refusal shown to be about the thing it says it is about, and
+//            the boundary shown to be a property of the code rather than a promise.
+//
+//            The defects this unit is exposed to are all the same shape — an approval that goes through when
+//            it should not, leaving a plausible-looking record. A coverage check whose delta is computed the
+//            wrong way round, a conflict report that a reassignment silently empties, a leave period aligned
+//            to the calendar so the 01:30 in the session tail falls outside it: every one of them produces a
+//            screen that looks right and a therapist who is either bookable on their holiday or not bookable
+//            at all. So each case here mutates ONE decision and names the ONE test that has to notice.
+//
+//            Three of the mutations are ones this unit actually shipped and are marked. 119f is the one worth
+//            reading: the conflict report's `reassigned` arm originally said "the therapist is no longer the
+//            one on leave", which is true and useless — a reassignment makes the row stop matching the report
+//            altogether, so the label could never be produced and `leave_approval.conflicts_reassigned` was a
+//            figure that was always zero with nothing failing. The integration run found it; nothing else
+//            could have.
+//
+//            **119c, 119e, 119f, 119h, 119j and 119k run the integration suite and need a database.** They are
+//            the claims the pure suites cannot make — that the period the DATABASE holds covers the tail, that
+//            the availability read drops the therapist, that the report survives a reassignment, that the
+//            second of two concurrent approvals is refused by the coverage check — and all of them are about
+//            the write path. None mutates anything the built web application serves, so 104's warning about
+//            browser suites does not apply: `hr-leave-approval.itest.ts` imports the sources directly.
+{
+  const CORE = 'packages/core/src/hr/leave-approval.ts'
+  const REPO = 'packages/db/src/repositories/leave-request.ts'
+  const ELIGIBILITY = 'packages/db/src/repositories/eligibility.ts'
+  const MIGRATION = 'packages/db/migrations/0092_leave_approval.sql'
+  const RENDER = 'apps/web/app/(admin)/hr/leave/[id]/render.ts'
+
+  const PURE_SUITE = 'packages/core/src/hr/leave-approval.test.ts'
+  const SCAN_SUITE = 'packages/fixtures/src/hr-leave-approval.test.ts'
+  const ROWS_SUITE = 'packages/fixtures/src/hr-leave-approval.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/hr-leave-approval-render.test.ts'
+
+  const leaveUnitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const leaveRowsRun = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block rather than `…Mutant` or `…Fixture`, deliberately: blocks 106 and 107 both defined a
+   * helper called `…Mutant` with this exact shape, git found the two bodies as shared context and interleaved
+   * the blocks, and the merge had to rebuild both from whole sides. 113 records the same fix. A distinct name
+   * is all it takes.
+   */
+  const leaveApprovalRegression = (path, anchor, replacement, suite, runner = leaveUnitRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 119a. The coverage delta computed as an ABSOLUTE. Every segment short WITH the leave is reported as
+  //       caused by it, so an approval is refused for a shortfall that was there before anybody asked —
+  //       naming a segment the requester cannot do anything about, and making leave unapprovable on any
+  //       database whose `shift` table is empty, which is every seeded one.
+  checkRejectedBy(
+    'leave gate: a coverage refusal computed as an absolute rather than as a delta is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const known = new Set(preexisting.map(breachKey))',
+      '  const known = new Set([])',
+      PURE_SUITE,
+    ),
+    'reports a pre-existing breach rather than attributing it to the approval',
+  )
+
+  // 119b. The delta computed the other way round: the floor judged WITHOUT the leave subtracted from both
+  //       halves, so `caused` is always empty and the coverage check can never fire. The version that looks
+  //       like a tidy-up — one `validateRota` call instead of two — and it approves everything.
+  checkRejectedBy(
+    'leave gate: a coverage answer that never subtracts the leave is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const withLeave = validateRota({ ...rota, assignments: asRosteredShifts(after.presence) })',
+      '  const withLeave = validateRota({ ...rota, assignments: asRosteredShifts(presence) })',
+      PURE_SUITE,
+    ),
+    'refuses when the leave is what drops the floor below the minimum',
+  )
+
+  // 119c. The leave period stored over CALENDAR midnights instead of the trading session's bounds — the
+  //       plausible wrong implementation, and the one 0030 left the decision about. The 01:30 appointment in
+  //       the tail then falls outside the leave, so the therapist stays bookable for it on a day they are
+  //       away, and nothing on any screen says so.
+  //
+  //       Mutated in `leave-accrual.ts`, which is P-HR-08's file and this unit's dependency: the edit is
+  //       restored in a `finally` like every other, and it is the only place the decision is taken.
+  checkRejectedBy(
+    'leave gate: a leave period aligned to the calendar day rather than to the trading session is caught',
+    leaveApprovalRegression(
+      'packages/core/src/hr/leave-accrual.ts',
+      '    openingHours === undefined ? midnight(from) : tradingBounds(from, openingHours, zone).opensAt',
+      '    openingHours === undefined ? midnight(from) : midnight(from)',
+      PURE_SUITE,
+    ),
+    'contains 01:30 on the following calendar date',
+  )
+
+  // 119d. The conflict report's `holds_resources` predicate dropped, so a cancelled booking is listed as
+  //       something to resolve. The looser direction and the one that looks harmless: an operator is sent
+  //       looking for an appointment that no longer exists, and the approval will not commit until they
+  //       resolve it, which they cannot.
+  checkRejectedBy(
+    'leave gate: a conflict report that lists appointments holding no resources is caught',
+    leaveApprovalRegression(
+      REPO,
+      '      join appointment a on a.period && request.period and a.holds_resources',
+      '      join appointment a on a.period && request.period',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'excludes a cancelled appointment',
+  )
+
+  // 119e. The report widened to every therapist's appointments in the period, not just the one going on
+  //       leave. It then lists the whole diary, the approval never commits, and the first thing anybody does
+  //       is look for a way to switch the check off.
+  checkRejectedBy(
+    'leave gate: a conflict report that is not narrowed to the therapist on leave is caught',
+    leaveApprovalRegression(
+      REPO,
+      '             a.therapist_id = request.employee_id\n',
+      '             a.therapist_id is not null\n',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'excludes a cancelled appointment',
+  )
+
+  // 119f. The defect this unit shipped and the integration run found. `reassigned` decided by "the therapist
+  //       is no longer the one on leave" is true and unreachable: a reassignment makes the row stop matching
+  //       the report's own WHERE, so the arm never fires and `conflicts_reassigned` is a stored figure that is
+  //       always zero. The mutation puts the original reading back.
+  checkRejectedBy(
+    'leave gate: a reassigned conflict inferred from an absence rather than from the audit row is caught',
+    leaveApprovalRegression(
+      REPO,
+      "                  and h.reason = 'leave_approved'\n             ) then 'reassigned'",
+      "                  and h.reason = 'never_raised_by_anything'\n             ) then 'reassigned'",
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'resolves one by a P-HR-04 reassignment and one by an audited override',
+  )
+
+  // 119g. The approval committing while a conflict is unresolved. The refusal order is the whole of this
+  //       unit's first acceptance line, and the mutation is the one somebody writes to make a stuck screen
+  //       move: treat an unresolved conflict as a warning.
+  checkRejectedBy(
+    'leave gate: an approval that commits over an unresolved conflict is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (unresolved.length > 0) {',
+      '  if (unresolved.length > 99) {',
+      PURE_SUITE,
+    ),
+    'refuses while any conflict is unresolved',
+  )
+
+  // 119h. **ADR 0003's known-bad fixture for the availability block.** The leave subtraction removed from
+  //       `tp_net` in `eligibility.ts`, which is B-AVAIL-04's file and the one place the predicate lives. A
+  //       therapist on approved leave is then still offered, and the suite must fail naming the RULE —
+  //       `on_approved_leave` — rather than merely reporting that somebody was offered: a therapist excluded
+  //       for a credential or for gender would satisfy "not offered" while the leave predicate had stopped
+  //       working entirely.
+  checkRejectedBy(
+    'leave gate: the availability leave predicate removed is caught, by rule name',
+    leaveApprovalRegression(
+      ELIGIBILITY,
+      '             case when t.leave is null then r.rostered else r.rostered - t.leave end as net',
+      '             r.rostered as net',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'on_approved_leave',
+  )
+
+  // 119i. The delegation window ignored, so a named deputy may decide for ever. "Time-bounded" is the
+  //       acceptance line's own word, and a deputy whose cover ended last month approving today is the case
+  //       the bound exists for.
+  checkRejectedBy(
+    'leave gate: a delegation that is not time-bounded is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const covering = live.find(\n    (delegation) => delegation.period.startsAt <= at && at < delegation.period.endsAt,\n  )',
+      '  const covering = live[0]',
+      PURE_SUITE,
+    ),
+    'an approval outside the window is refused',
+  )
+
+  // 119j. The coverage lock dropped. Two approvals for two DIFFERENT therapists on one day conflict on no
+  //       row, so without it both transactions read a floor that still holds the other therapist, both
+  //       coverage checks pass, and the floor ends up short with every check having said yes. The mutation
+  //       removes the `for update`, which leaves the statement syntactically fine and the race open — the
+  //       shape of the defect rather than a broken query.
+  checkRejectedBy(
+    'leave gate: two concurrent approvals left to a race rather than serialised is caught',
+    leaveApprovalRegression(
+      REPO,
+      '     order by trading_date\n       for update\n  `',
+      '     order by trading_date\n  `',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    // The case that measures the LOCK, and it names it: with the `for update` gone, nothing queues and both
+    // approvals commit. The rule string used to name a test that no longer exists — the case was rewritten
+    // when the previous version turned out to be measuring a connection handshake — and a stale rule string
+    // reports "exited non-zero but did not report", which is a gate case failing about a mutation it caught.
+    'waits for the coverage lock',
+  )
+  // 119j's own note: the suite it names starts both approvals with no stagger, deliberately. An earlier
+  // version slept 150 ms before the second, which let the first COMMIT first — so the second's read saw the
+  // committed leave whether or not a lock existed, and this case reported "exited zero" about a repository
+  // with the serialisation removed.
+
+  // 119k. The withdrawal leaving the approval live. `leave_approval_live` is where the predicate lives, for
+  //       `employee_approved_leave`'s reason (0030), and an approval that stayed live after the leave was
+  //       withdrawn shows a therapist as blocked after their holiday was cancelled — with availability
+  //       correctly restored beside it, so the two halves of the screen disagree.
+  //
+  //       Mutated as the READ rather than as the write, and that is the sharper version of the same defect:
+  //       `readLiveLeaveApproval` asking `leave_approval` instead of `leave_approval_live` is the `not
+  //       exists` forgotten, which is exactly what `employee_approved_leave` exists as a view to prevent
+  //       (0030). The first version of this case added a SQL COMMENT to the cancellation insert, which
+  //       changed nothing and reported FAIL about a repository that was fine — `withEditedFile`'s no-op
+  //       guard cannot catch that, because the edit does change bytes.
+  checkRejectedBy(
+    'leave gate: a withdrawal that does not clear what the approval created is caught',
+    leaveApprovalRegression(
+      REPO,
+      '      from leave_approval_live\n     where leave_request_id = ${leaveRequestId}::uuid',
+      '      from leave_approval\n     where leave_request_id = ${leaveRequestId}::uuid',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'proves both halves',
+  )
+
+  // 119l. The approval taken on somebody's own request. A manager approving their own holiday is the one case
+  //       where holding `leave:approve` is not the question anybody is asking, and it is refused in code
+  //       rather than by a constraint — so the mutation is a one-line removal and nothing in the database
+  //       would catch it.
+  checkRejectedBy(
+    'leave gate: a self-approval permitted is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (approver.employeeId === requestEmployeeId) {',
+      '  if (approver.employeeId === undefined) {',
+      PURE_SUITE,
+    ),
+    'may still not approve their own leave',
+  )
+
+  // 119m. The two refusals collapsed into one, so a deputy whose window closed is told they may not approve
+  //       leave at all. The refusals are a CONTRACT — a caller branches on them — and a deputy sent to ask
+  //       for a permission instead of for an extension is the cost.
+  checkRejectedBy(
+    'leave gate: delegation_not_in_window collapsed into approver_not_authorised is caught',
+    leaveApprovalRegression(
+      CORE,
+      "    refusal: 'delegation_not_in_window',",
+      "    refusal: 'approver_not_authorised',",
+      PURE_SUITE,
+    ),
+    'refused DIFFERENTLY',
+  )
+
+  // 119n. The override role list widened. Y9-coverage's provisional answer names owner and manager; a
+  //       receptionist leaving an appointment standing inside approved leave is a decision about somebody
+  //       else's booking taken by somebody who may not take it. The scan suite holds the list against the
+  //       migration's own predicate in BOTH directions, so widening one side fails.
+  checkRejectedBy(
+    'leave gate: an override role list wider than the migration enforces is caught',
+    leaveApprovalRegression(
+      CORE,
+      "export const LEAVE_OVERRIDE_ROLES: readonly Role[] = Object.freeze(['owner', 'manager'])",
+      "export const LEAVE_OVERRIDE_ROLES: readonly Role[] = Object.freeze([\n  'owner',\n  'manager',\n  'receptionist',\n])",
+      SCAN_SUITE,
+    ),
+    'names an override role set the database also enforces',
+  )
+
+  // 119o. The same rule from the other side: the MIGRATION's predicate widened while the vocabulary stays.
+  //       This is the direction that catches a trigger relaxed in SQL and left alone in TypeScript, which is
+  //       the half a code review reads past.
+  checkRejectedBy(
+    'leave gate: a migration override predicate wider than the vocabulary is caught',
+    leaveApprovalRegression(
+      MIGRATION,
+      "  if new.actor_role not in ('owner', 'manager') then",
+      "  if new.actor_role not in ('owner', 'manager', 'receptionist') then",
+      SCAN_SUITE,
+    ),
+    'names an override role set the database also enforces',
+  )
+
+  // 119p. The override reason floor removed. A blank reason is indistinguishable from a conflict nobody
+  //       looked at, and the row is the only record that anybody did.
+  checkRejectedBy(
+    'leave gate: an override accepted with no written reason is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (args.reason.trim().length < LEAVE_OVERRIDE_REASON_MINIMUM_LENGTH) {',
+      '  if (args.reason.trim().length < 0) {',
+      PURE_SUITE,
+    ),
+    'refuses a blank, whitespace or too-short reason',
+  )
+
+  // 119q. The source enumeration's per-symbol resolution replaced by a whole-package one. That is the
+  //       mutation that makes the transition claim meaningless without making it fail: following
+  //       `@berelax/core`'s `export *` barrel reaches `lifecycle/transitions.ts` from any file importing
+  //       anything at all, so the closure becomes the whole state machine — and the case in the scan suite
+  //       that asserts the walk did NOT reach it is what says so.
+  checkRejectedBy(
+    'leave gate: a transition enumeration that follows a whole barrel is caught',
+    leaveApprovalRegression(
+      SCAN_SUITE,
+      '  const reached: string[] = []\n  for (const name of site.names) {',
+      '  const reached: string[] = [...new Set([...index.values()].flat())]\n  for (const name of site.names) {',
+      SCAN_SUITE,
+    ),
+    'did NOT reach the lifecycle state machine',
+  )
+
+  // 119r. The enumeration's comment strip removed, so the prose explaining why this unit must not cancel an
+  //       appointment reads as the appointment being cancelled. The mirror of the mistake
+  //       `check-schema-conventions.mjs` records — reporting the word "timestamp" in a sentence about
+  //       timestamps — and it would report the approval path as a cancellation path.
+  checkRejectedBy(
+    'leave gate: a transition scan that reads comments as code is caught',
+    leaveApprovalRegression(
+      SCAN_SUITE,
+      "  return source.replace(/\\/\\*[\\s\\S]*?\\*\\//g, ' ').replace(/(^|[^:])\\/\\/[^\\n]*/g, '$1')",
+      '  return source',
+      SCAN_SUITE,
+    ),
+    'the strip is load-bearing',
+  )
+
+  // 119s. The `?role=` narrowing turned into a widening: `&&` becomes `||`, which is the one-character
+  //       version of the escalation — a marketer would be served the conflict report, which names a client
+  //       and a service.
+  //
+  //       Mutated in `@berelax/core` and run against the PURE suite, and the first version of this case is
+  //       why. It edited the ROUTE and ran the web suite, and reported "exited zero; nothing was rejected"
+  //       — because `next start` serves whatever `.next` was last built, so editing a route source changes
+  //       nothing an HTTP request can see. That is rule 17's warning arriving as a gate case that could
+  //       never fire. `/clients/[id]/flags` had already recorded the remedy: the ceiling and the narrowing
+  //       live in core, "so the property that matters — this can only NARROW — is proved by a pure test
+  //       rather than by serving the page. A ceiling whose only test needs a server is a ceiling somebody
+  //       removes without ever seeing it fail."
+  checkRejectedBy(
+    'leave gate: a ?role= narrowing that widens instead is caught',
+    leaveApprovalRegression(
+      CORE,
+      '    maySeeConflicts: claimed.maySeeConflicts && ceiling.maySeeConflicts,',
+      '    maySeeConflicts: claimed.maySeeConflicts || ceiling.maySeeConflicts,',
+      PURE_SUITE,
+    ),
+    // The CLAIMED direction, not the ceiling one, and the difference is worth stating: the ceiling holds all
+    // three capabilities, so `claimed || ceiling` never exceeds IT — the property that catches a disjunction
+    // is the one saying the answer is never wider than what the claimed role itself holds. Naming the
+    // ceiling case reported "exited non-zero but did not report" while two other cases were red.
+    'never wider than the CLAIMED role',
+  )
+
+  // 119t. The conflict table kept for a reader who may not see it, with only the wording changed. A render
+  //       that emptied the section would satisfy a check for the sentence while printing the customer, which
+  //       is why the render suite asserts the absence of the ROWS and of the id rather than the presence of
+  //       the wording.
+  checkRejectedBy(
+    'leave gate: a withheld report that still prints the rows is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '    view.access.maySeeConflicts\n      ? [',
+      '    true\n      ? [',
+      RENDER_SUITE,
+    ),
+    'withholds the whole report from a reader who may not see a booking',
+  )
+
+  // 119u. The period printed as a date instead of as two instants. The alignment is the whole subject of this
+  //       unit and it is invisible to anybody looking at "17 March" beside a conflict at 01:30 on the 18th —
+  //       which reads as a bug in the report rather than as the trading day crossing midnight.
+  checkRejectedBy(
+    'leave gate: a screen that prints a leave day as a date rather than as two instants is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '`<dt>Covers</dt><dd data-field="period">${safeText(view.startsAt)} to ${safeText(view.endsAt)}</dd>`,',
+      '`<dt>Covers</dt><dd data-field="period">${safeText(view.fromTradingDate)}</dd>`,',
+      RENDER_SUITE,
+    ),
+    'prints both ends of the period',
+  )
+
+  // 119v. The customer label manufactured when nobody has recorded one. `Customer 0042` is what the fixtures
+  //       package MINTS for a synthetic record, and generating the same shape for a real row makes an invented
+  //       label indistinguishable from a recorded one — brief rule 15 applied to a person.
+  checkRejectedBy(
+    'leave gate: an invented customer label is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '        ? `no name recorded · ${safeText(conflict.customerId)}`',
+      '        ? `Customer ${safeText(conflict.customerId).slice(0, 4)}`',
+      RENDER_SUITE,
+    ),
+    'names a customer nobody has named as unnamed',
+  )
+
+  // 119w. The sentence that approval never cancels a booking removed from the screen. The operator who cannot
+  //       find the cancel button is the person who asks for it, and the sentence is the answer to that
+  //       question rather than decoration — ADR 0041 is not on the screen.
+  checkRejectedBy(
+    'leave gate: a screen that does not say approval never cancels a booking is caught',
+    leaveApprovalRegression(
+      RENDER,
+      "'Approving leave never cancels a booking and never marks one a no-show: a customer learning '",
+      "'Resolve each conflict before approving. '",
+      RENDER_SUITE,
+    ),
+    'says on its face that approval never cancels a booking',
+  )
+
+  // 119x. The pre-existing shortfall folded into the caused breaches on the screen. A manager told that six
+  //       segments are short when this leave caused two of them goes looking for four shifts that are nothing
+  //       to do with it — and the refusal and the screen then disagree about what the approval did.
+  //
+  //       The first version of this case removed the sentence AFTER the one the assertion reads, so the
+  //       suite passed and the case reported FAIL about a render that was fine. The anchor now carries the
+  //       wording the test actually looks for.
+  checkRejectedBy(
+    'leave gate: a screen that attributes a pre-existing shortfall to the approval is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '        `${view.preexistingBreachCount} segment(s) are already short without this leave. They are ` +',
+      '        `${view.preexistingBreachCount} more segment(s) are short. They are ` +',
+      RENDER_SUITE,
+    ),
+    'reports a pre-existing shortfall separately',
+  )
+
+  // 119y. The outbox key taken from something other than the row id. `outbox_event.idempotency_key` is UNIQUE
+  //       and `publishEvent` resolves a collision with `on conflict do nothing`, so a key that can repeat
+  //       silently drops the second event — and here the drop is turned into a refusal by
+  //       `event_not_enqueued`, which is what this case watches fire.
+  checkRejectedBy(
+    'leave gate: an outbox key that is not the row id is caught',
+    leaveApprovalRegression(
+      REPO,
+      'idempotencyKey: `leave.approved:${input.leaveRequestId}`,',
+      "idempotencyKey: 'leave.approved',",
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'resolves one by a P-HR-04 reassignment and one by an audited override',
+  )
+
+  // 119z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scan that had stopped matching
+  //       would all report as twenty-five passing cases.
+  {
+    for (const suite of [PURE_SUITE, SCAN_SUITE, RENDER_SUITE]) {
+      const green = run('pnpm', leaveUnitRun(suite))
+      check(`leave approval: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const rows = run('pnpm', leaveRowsRun(ROWS_SUITE))
+    check(`leave approval: ${ROWS_SUITE} passes unedited`, !rows.failed, rows.output)
+  }
+}
+
 // 120a-120z. (W-SITE-10) The publication control plane: the lint that must be the profile's, the machine
 //            the DATABASE enforces, the hash that must be of the approved content, and the weight check
 //            that must measure something.

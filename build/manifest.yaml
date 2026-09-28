@@ -10832,7 +10832,7 @@ units:
       availability over `business_day` instants — with a proof that no code path cancels an appointment
       as a side effect.'
     owner: claude
-    status: todo
+    status: done
     size: L
     milestone: M6
     depends_on:
@@ -10862,12 +10862,162 @@ units:
       restores availability and clears the flags it created, proven by a round-trip test
     - 'two overlapping approvals for different therapists run concurrently: the second is refused by the
       coverage check inside the transaction, not left to a race'
+    - 'NOTE: the concrete files this list left as placeholders or got wrong, and one it omitted. The web
+      surface is apps/web/app/(admin)/hr/leave/[id]/route.ts plus render.ts and NOT page.tsx: registry.ts is
+      in exact bijection with the filesystem and requires every DOCUMENT to be served in both locales, so a
+      page.tsx would need an Arabic admin document that does not exist in either locale and would join a
+      screenshot matrix whose RTL half must be a real Arabic route. P-HR-02''s NOTE records that as the arrangement every HR
+      surface takes, and P-HR-06 corrected the same placeholder for the rota screen. There is no
+      packages/core/src/availability/eligibility.ts and never was: the eligibility PORT is
+      packages/core/src/availability/eligibility-port.ts and the leave predicate this unit''s availability
+      claim is about is in packages/db/src/repositories/eligibility.ts, which this unit does not own and does
+      not change - the known-bad fixture edits it in a finally-restored withEditedFile and requires the
+      failure to name `on_approved_leave`. The migration is 0092_leave_approval.sql, the gate block is
+      // 119a-119z, and the port band is 13_300.'
+    - 'NOTE: the coverage refusal is a DELTA and the word in the acceptance line is why. "An approval that
+      would DROP floor coverage below the configured minimum" is not "an approval on a day that is short":
+      an absolute reading refuses every approval on any database whose `shift` table is empty, which is
+      every seeded one, and it names a segment the requester cannot do anything about. So
+      coverageBreachesCausedBy calls P-HR-06''s validateRota TWICE over identical arguments bar the leave and
+      returns the set difference - both halves are that validator''s, which is what reusing it has to mean.
+      The other direction is tested too, because a delta that could never fire would be worse than no check:
+      one case has the segment ALREADY short and the approval allowed, one has the leave making it short and
+      the approval refused, over the same rota. Both segment rules are returned, not only the floor minimum,
+      because docs/12 section 2 asks for the strictest safe option and leaving the bath with nobody able to
+      run it is the same class of breach.'
+    - 'NOTE: a finding in code this unit does not own, reported rather than repaired. validateRota counts a
+      therapist as on the floor from the shift assignments it is handed, and publishRota (P-HR-06) hands it
+      raw `shift_assignment` rows - so a therapist rostered on a day they are already on APPROVED LEAVE for
+      is counted towards minimum_floor_coverage at publish time. That is right for the question a publish
+      asks (is this DRAFT publishable) and wrong for "is the floor covered", and it is why this unit reads
+      presence NET of leave through readFloorPresence and hands the fragments in. The subtraction is
+      PostgreSQL''s multirange difference, the same operator `tp_net` in eligibility.ts uses, so there is one
+      implementation of "presence net of leave" in the system rather than a TypeScript second opinion. Not
+      repaired here because it is another unit''s transaction and the repair needs a decision about whether a
+      rota that is publishable today should stop being publishable when leave is approved against it - which
+      is a question about what a published version MEANS, and P-HR-06 made that version immutable on purpose.'
+    - 'NOTE: this unit writes NO leave_movement row, in either direction, and that is 0066''s decision rather
+      than an omission. "A request reserves when it is MADE and approval only makes the reservation final, so
+      an approval writes no row" - so the `reserved` movement belongs to the submission path and the
+      `released` one to a cancellation of it. The submission path is P-HR-14''s (its acceptance: "a leave
+      request submitted from the portal enters the same validator as the admin path"), so this unit writes
+      neither half - symmetrically, because a release with no reservation creates leave out of nothing, which
+      decideRequest in @berelax/core refuses by name. DEFERRED to P-HR-14: the reserved movement on
+      submission and the released movement on cancellation, plus the actual SENDING of the staff
+      notification. leave_approval_notice records one row per approval with outcome `skipped` and reason
+      `no_recipient_on_file`, which is rota_publication_notice''s arrangement (0081) and for its reason:
+      every seeded employee has no recipient on file, and a notice table that recorded nothing would be
+      indistinguishable from a notification path that does not exist. `message_id` is the column P-HR-14
+      fills in.'
+    - 'NOTE: the transition enumeration is derived from the SOURCE and not from a list, and the resolution
+      that took. The acceptance line asks for "a test [that] enumerates every transition the approval path
+      can trigger"; a hand-written list of the statuses this unit does not write would still pass if the
+      approval path started cancelling appointments tomorrow, and would pass with the approval module
+      deleted. hr-leave-approval.test.ts therefore walks the module graph from four entry points - the core
+      decision, the repository, the route and P-HR-04''s reassignAppointment, which IS part of the approval
+      path because it is how a conflict resolves - resolving imports PER SYMBOL. That precision is the whole
+      answer: @berelax/core''s barrel is `export *`, so following it wholesale reaches lifecycle/transitions.ts
+      from any file importing anything at all, and the enumeration would be the entire state machine for
+      every unit in the build. An unresolved symbol FAILS the test rather than being skipped, because a hole
+      in the walk is how an enumeration comes to be smaller than the truth, and a case asserts the walk did
+      NOT reach transitions.ts so a regression in the resolution is visible. The answer is that the approval
+      path writes no appointment status at all - a stronger claim than "not those two" - and the scan is shown
+      firing over cancel.ts and over the approval path with a cancellation spliced in, because every
+      assertion it makes is an empty result (ADR 0002). The runtime half is beside it: the round-trip case
+      reads the overridden appointment back and asserts its status and therapist are unchanged.'
+    - 'NOTE: ZY020 is a trigger on leave_request, which is 0030''s table, and that is flagged rather than
+      done quietly. The acceptance line says "leave periods are stored over business_day open/close
+      instants", and until this trigger the only thing making that true was the caller having used
+      leaveCoveragePeriod(). leave_request takes a bare tstzrange, the submission path is P-HR-14''s, and a
+      caller that wrote two calendar midnights would produce a row that looks completely ordinary and
+      silently leaves two tails rostered. The rule is stated as what it FORBIDS - a bound at LOCAL MIDNIGHT
+      may not fall inside an open trading session - rather than as an equality against opens_at, because a
+      date the premises does not trade on has no session to align to and leaveCoveragePeriod correctly falls
+      back to calendar midnights there. It shipped for an hour as the broader "no bound may fall strictly
+      inside a session", which is the same claim in a more plausible costume and is WRONG: a partial day off
+      is stored as 11:00-15:00 and five existing suites store one, so the broad rule refused them all.
+      availability-perf.itest.ts - a file this unit never touched - is what said so, from a gate run, which is
+      the only thing that could have. It constrains every future writer of the table, which is the point: a
+      second writer is how the first writer''s rule gets lost.'
+    - 'NOTE: the ?role= narrowing lives in @berelax/core (narrowLeaveApprovalAccess) and not in the route, and
+      the reason is a gate case that could never fire. The first version intersected the claimed role with the
+      ceiling inside route.ts and the known-bad fixture mutated that expression and drove the built
+      application - which reported "exited zero; nothing was rejected", because `next start` serves whatever
+      .next was last built, so editing a route source changes nothing an HTTP request can see. That is brief
+      rule 17 arriving as a check whose stated claim is not what it measures. /clients/[id]/flags had already
+      recorded the remedy in its own words: the ceiling and the narrowing live in core, "so the property that
+      matters - this can only NARROW - is proved by a pure test rather than by serving the page. A ceiling
+      whose only test needs a server is a ceiling somebody removes without ever seeing it fail." The property
+      is asserted over EVERY role in both directions, with a case proving the ceiling is not vacuous.'
+    - 'NOTE: the private SQLSTATEs are ZY015-ZY020, and the CONVENTION changed under this unit rather than
+      the unit changing its mind. 0092 first took ZY001-ZY006 on the reasoning every migration before it
+      used: read the migrations you can see, and take a class nobody raises. ZA through ZX were taken and ZY
+      was free. That was correct when it was written and false by the time it merged - 0085 had moved its
+      eight codes INTO ZY after it and 0084 both landed on ZA, and two other units in flight reasoned their
+      way to ZY001 in the same week, so four migrations claimed ZY001 at once. There is no free class left:
+      ZA through ZY are in use and ZZ is W-SITE-10''s. So the rule is now W-SYS-12''s provisional answer - a
+      refusal is identified by all FIVE characters, and two unrelated rules may share a class as long as they
+      never share a code - and packages/db/src/sqlstate-uniqueness.test.ts was already keyed on the exact
+      five, which is what makes the new convention checkable rather than a hope: a shared class is not a
+      finding, a shared code is. The prose in 0092''s header and in the ledger paragraph was rewritten with
+      the codes, because a header arguing for a class it does not have is the second-statement defect in its
+      purest form. What did NOT change is why the five characters matter, which is 0080''s sentence: a code
+      standing for two rules makes one file''s translator report the other file''s refusal with a plausible
+      message and the wrong cause, and makes a probe asserting the code pass when the statement bounced off
+      something else.'
+    - 'NOTE: leave_conflict_override.appointment_id is a PLAIN column with no foreign key, which is the one
+      referential decision in 0092 that looks like an omission. 0081 records both halves of why neither
+      action works for an append-only row: ON DELETE SET NULL arrives as an UPDATE, which ZY015 refuses, and
+      ON DELETE RESTRICT pins the parent for ever because nothing in the table can be deleted to release it.
+      In production an appointment is cancelled and never deleted, so RESTRICT would cost nothing there - and
+      it made every fixture appointment this unit overrode permanently undeletable, which presented as an
+      integration suite that could not sweep its own rows and then ran against three runs'' worth of shifts,
+      making a floor of nine where the fixture needed two. 0077 took the same decision for
+      pipeline_stage_transition.customer_id. What holds the reference honest instead is stronger than a key:
+      recordLeaveConflictOverride refuses an appointment that is not one the leave overlaps for that
+      therapist, where a foreign key would accept any appointment in the diary.'
+    - 'NOTE: two things about the screen that are deliberate and one that is a deferral. It is READ-ONLY, and
+      the reason is specific rather than "authentication is not built": packages/auth exists and is done, and
+      nothing in apps/web imports it - so a write would have to invent a staff member, and 0092 refuses
+      exactly that (approver_role, actor_label and cancelled_by are all refused a placeholder). ?role= can
+      only NARROW: the decision is taken for the claimed role and intersected with a MANAGER ceiling in one
+      expression, so there is nowhere for a widening to hide, and a marketer is refused the conflict report -
+      which names a client and a service - while the count is withheld with it, because a number is enough to
+      tell somebody whether a named colleague has bookings. An unrecognised role STRING is a 400 rather than
+      a fall back to the ceiling. DEFERRAL SATISFIED - W-SYS-11 went done while this unit was in flight,
+      and what it satisfied is the thing the deferral was waiting for: an admin session an actor and a reason
+      can be attributed to now exists, so the approve, override and withdraw controls are no longer blocked
+      on a principal that has to be invented. Two things follow, and the second is work rather than a note.
+      The controls themselves are not in W-SYS-11''s file list and are not built by it, so they are not
+      re-pointed at it - they are simply unbuilt, and the route was written so that landing them changes
+      nothing else, which is why the role and the reader are arguments. And W-SYS-11''s FIRST acceptance line
+      is a repository-wide scan that finds no ?role= used to choose a principal, a role or a permission
+      anywhere in apps/web, with a known-bad fixture that reintroduces one - so this route''s ?role= is a
+      merge-time conflict rather than a surviving interim: on the merged tree the claimed role must come from
+      W-SYS-11''s session reader instead of the query string. That change could not be made here, because
+      apps/web/src/session.ts does not exist in this worktree and importing it would fail typecheck. What
+      makes the swap small is where the narrowing lives: resolveLeaveApprovalAccess and
+      narrowLeaveApprovalAccess are in @berelax/core and take the claimed role as an argument, so only the
+      line that reads the role changes and the ceiling intersection it feeds is untouched.'
     files:
     - packages/core/src/hr/leave-approval.ts
     - packages/core/src/hr/leave-approval.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0092_leave_approval.sql
     - packages/db/src/repositories/leave-request.ts
-    - packages/core/src/availability/eligibility.ts
-    - apps/web/app/(admin)/hr/leave/[id]/page.tsx
+    - packages/db/src/schema/leave-approval.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/index.ts
+    - packages/harness/src/ports.ts
+    - packages/fixtures/src/hr-leave-approval.test.ts
+    - packages/fixtures/src/hr-leave-approval.itest.ts
+    - apps/web/app/(admin)/hr/leave/[id]/route.ts
+    - apps/web/app/(admin)/hr/leave/[id]/render.ts
+    - apps/web/src/hr-leave-approval-render.test.ts
+    - apps/web/src/leave-approval.itest.ts
+    - apps/web/src/routes/registry.ts
+    - docs/adr/0041-leave-approval-never-cancels-an-appointment.md
+    - docs/adr/README.md
     - scripts/test-gates.mjs
   - id: P-HR-10
     order: 99
