@@ -402,11 +402,35 @@ function tradingDays(): LocalDate[] {
 }
 
 /**
- * The published rota.
+ * The rota this generator builds and **nothing loads**.
  *
- * Every therapist works most days, and the shift runs the full trading window. A more elaborate rota
- * would be more realistic and would make the fixture harder to read; what matters here is that the
- * availability engine has coverage to work with and that `HR` has shifts to accrue leave against.
+ * Every therapist works most days, and the shift runs the full trading window. A more elaborate rota would
+ * be more realistic and would make the fixture harder to read.
+ *
+ * ## What this comment used to claim, and why the correction matters
+ *
+ * It said the shifts exist "so that the availability engine has coverage to work with and that `HR` has
+ * shifts to accrue leave against". Neither is true today. `loadSalon` runs the eight loaders registered in
+ * `load.ts` — premises, catalogue, settings, business days, the therapist roster, message templates,
+ * consent and suppression — and **not one of them inserts `salon.shifts`.** A freshly seeded database holds
+ * zero `shift` and zero `shift_assignment` rows; measured, not inferred.
+ *
+ * P-HR-07 found it the expensive way: its acceptance line asks for an equality "asserted on the seeded
+ * month", which cannot be satisfied because there is no seeded rota, so it had to publish one inside its
+ * own suite. docs/12 §5's promise of "a published rota" is written by nothing. Any already-`done` HR or
+ * availability unit whose criteria referenced the seeded roster has quietly scoped around the same hole.
+ *
+ * The shape is kept rather than deleted because inserting it is the right fix and is somebody's next piece
+ * of work — the generator already produces a coherent rota, and several downstream units' criteria become
+ * satisfiable as written the moment it reaches the database. It is NOT done here because a suddenly
+ * non-empty `shift` table changes what every one of 119 `done` units' suites sees, which needs its own
+ * integrating verify rather than a change slipped in beside one.
+ *
+ * `salon.test.ts` is the only consumer of this collection, and that is the whole shape of the defect: the
+ * generator's own test asserts the rota is coherent, so the rota IS coherent and is also nowhere. A test
+ * pinning "a seeded database has no shifts" was written and deleted rather than shipped — asserting the
+ * defect as an expectation is worse than leaving it stated here, where the next reader of `FixtureSalon`
+ * will see it.
  */
 function buildShifts(
   rng: Rng,
