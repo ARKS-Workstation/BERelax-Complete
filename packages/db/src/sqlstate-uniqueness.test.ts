@@ -43,9 +43,13 @@ const MIGRATIONS = 'packages/db/migrations'
  * decision, a migration per offender to `create or replace` its functions, and every translator and probe
  * updated with it. That is unit-sized and is **W-SYS-12** in the manifest, which is where the namespace
  * decision is taken: the CLASS stops identifying a migration file, a refusal is identified by all five
- * characters, and the registry allocates them. Until that unit lands, `ZZ` is the only free class — `ZY`
- * went to 0085 when C-CRM-09 and C-CRM-10 turned out to have taken `ZA` in worktrees that could not see
- * each other, which this check caught on the first run after that merge and is the reason it exists.
+ * characters, and the registry allocates them. `ZY` went to 0085 when C-CRM-09 and C-CRM-10 turned out to
+ * have taken `ZA` in worktrees that could not see each other, which this check caught on the first run
+ * after that merge and is the reason it exists. `ZZ` was the last free class after that and **0093
+ * (W-SITE-10) has taken it**, ZZ001-ZZ005 — so there is now NO free class, and a migration needing a
+ * private code before W-SYS-12 lands must either extend an existing family, which is what this check
+ * refuses, or wait for the allocator. That is the point at which the convention has run out rather than
+ * merely become awkward.
  *
  * This sentence used to say the work was "recorded as such in the manifest" when nothing in the manifest
  * owned it. The file was added to catch a code standing for two rules; it carried a claim standing for
