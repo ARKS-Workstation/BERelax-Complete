@@ -215,7 +215,12 @@ describe('the erasure rule registry', () => {
         // a row that is deleted would be a reason for keeping data that is not there.
         expect(rule.subjectReason, rule.key).toBeUndefined()
       }
-      expect(rule.registeredBy, rule.key).toBe('C-CRM-10')
+      // Every rule names the UNIT that registered it, in the manifest's own id shape. It used to be pinned
+      // to the literal `C-CRM-10`, which was true of every rule that existed and became false the moment
+      // another unit added a table: G-REV-02's `review_intake_email` is caught by the credential probe and
+      // has to be classified here, and the erasure REFUSES to run until it is (ADR 0034). What is worth
+      // asserting is that the field names somebody, so a rule cannot arrive anonymous.
+      expect(rule.registeredBy, rule.key).toMatch(/^[A-Z][A-Z0-9-]*-\d{2}$/)
       if (rule.action === 'retain_statutory') {
         // A statutory retention names the PROFILE COLUMN the figure comes from, never a literal number, so
         // the years cannot go stale against the profile.
@@ -225,6 +230,17 @@ describe('the erasure rule registry', () => {
         expect(rule.parent, rule.key).toBeDefined()
       }
     }
+  })
+
+  it('is still mostly C-CRM-10, and every other registering unit is one that had to classify a table', () => {
+    // The control the widened assertion above needs. `registeredBy` is a string, so a typo would satisfy the
+    // shape; this says the set of units is small, deliberate and led by the unit that built the engine.
+    const units = new Set([...ERASURE_RULES.values()].map((rule) => rule.registeredBy))
+    expect(units.has('C-CRM-10')).toBe(true)
+    const byCcrm10 = [...ERASURE_RULES.values()].filter((rule) => rule.registeredBy === 'C-CRM-10')
+    expect(byCcrm10.length).toBeGreaterThan(ERASURE_RULES.size / 2)
+    // And the others are named rather than counted, so a unit added here is a diff somebody reads.
+    expect([...units].sort()).toEqual(['C-CRM-10', 'G-REV-02'])
   })
 
   it('keeps the four retaining actions distinct, because their justifications are different', () => {

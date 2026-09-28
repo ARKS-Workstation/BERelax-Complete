@@ -1423,6 +1423,24 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     registeredBy: 'C-CRM-10',
   }),
   rule({
+    key: 'public.review_intake_email.raw_body_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The sha256 of a forwarded Google review notification (migration 0094), caught by the CREDENTIAL ' +
+      'probe on the `_sha256` column-name family. It is a digest and not a credential: nothing resolves ' +
+      'it, nothing authenticates against it, and it exists so a parsed intake row can be tied to the ' +
+      'bytes it came from without holding a second copy of them. ' +
+      'It is not customer data either, for the reason `google_reviews.reviewer_display_name` gives one ' +
+      'entry along and on the same grounds: a review is left by a member of the public on a PUBLISHED ' +
+      'Google listing, this table carries no customer id and no foreign key to one — checked, not ' +
+      'assumed — and a reviewer exercising a right does so against Google. ' +
+      'The `raw_body` column beside it is deliberately NOT named here, because no probe finds it and a ' +
+      'rule for a column nobody probes would make this registry read as broader than it is. If a probe ' +
+      'ever reaches it, the answer is the same one and it needs its own entry saying so.',
+    registeredBy: 'G-REV-02',
+  }),
+  rule({
     key: 'public.invoice.issuer_phone',
     dataClass: 'not_customer_data',
     action: 'not_customer_data',
