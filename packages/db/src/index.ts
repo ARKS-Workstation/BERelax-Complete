@@ -2418,4 +2418,11 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 87 as const
+//
+// 0090 is W-SYS-11's `staff_credential` and `staff_session` — the admin session. 88, 89, 91 and 92 are
+// allocations held by units in flight in other worktrees, and 85 is C-CRM-10's, so on this branch the
+// newest migration on disk is 0090 and this constant is 90 rather than 88. That is the allocation working
+// as intended rather than a gap in the record: this number tracks the newest migration that EXISTS, which
+// is what `pnpm db:drift` and gate case 90c both compare it against, and a branch that lowered it to match
+// a consecutive count would fail both against its own database.
+export const SCHEMA_VERSION = 90 as const
