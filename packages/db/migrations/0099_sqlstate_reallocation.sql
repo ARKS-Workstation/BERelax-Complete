@@ -1,4 +1,12 @@
--- 0094 — one private SQLSTATE, one rule: the nine codes that stood for two rules each are separated.
+-- 0099 — one private SQLSTATE, one rule: the nine codes that stood for two rules each are separated.
+--
+-- 99 and not 94, which this file was allocated and named for most of its life. 94 had already been allocated
+-- to G-REV-02 in an earlier wave, in a worktree this one could not see, and that unit keeps it because it was
+-- first and had it committed. Worth a sentence here rather than only in the ledger, because it is this file's
+-- own subject arriving in migration numbers instead of refusal codes: the scarce thing was handed out by
+-- reading what a worktree could see. The difference is that a duplicated migration number is caught by the
+-- first integrator who lists the directory, where a duplicated SQLSTATE class was caught by nothing for
+-- thirteen codes — which is the argument for the registry below, made from the other side.
 --
 -- W-SYS-12. Nothing here creates a table, a column or a constraint. It `create or replace`s nine trigger
 -- functions and changes one thing in each: the five characters the refusal carries. Everything else in
@@ -102,7 +110,7 @@ comment on function refuse_merge_record_change() is
   'Raises ZT005 for EVERY role including the owner: privileges cover the application role, and a '
   'migration or a psql session does not connect as the application role. A trigger and not `create '
   'rule ... do instead nothing`, which reports success and lets the caller go on believing the edit '
-  'happened (0018''s argument). ZT005 and not ZT001, which 0068''s overpayment ceiling holds: 0094 '
+  'happened (0018''s argument). ZT005 and not ZT001, which 0068''s overpayment ceiling holds: 0099 '
   'separated the two.';
 
 create or replace function assert_merge_survivor_is_live() returns trigger
@@ -132,7 +140,7 @@ end $$;
 comment on function assert_merge_survivor_is_live() is
   'Raises ZT006 when the survivor of a new merge is itself a tombstone. Also the reason cycles are '
   'impossible, which is why merge_survivor_of()''s depth bound is a guard rather than a limit. ZT006 and '
-  'not ZT002, which 0068''s tender rules hold: 0094 separated the two.';
+  'not ZT002, which 0068''s tender rules hold: 0099 separated the two.';
 
 create or replace function merge_survivor_of(p_customer_id uuid) returns uuid
 language plpgsql
@@ -174,7 +182,7 @@ comment on function merge_survivor_of(uuid) is
   'repository because the readers that need it are not all in one place: the clinical schema cannot '
   'call TypeScript, and 0009 revokes all privileges on `clinical` from the application role, so a '
   'clinical read resolving a merged-away customer has to do it here. Its depth bound raises ZT007 and '
-  'not ZT003, which 0068''s tender rules hold: 0094 separated the two.';
+  'not ZT003, which 0068''s tender rules hold: 0099 separated the two.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 0077 — the CRM pipeline. ZU001 -> ZU008, ZU002 -> ZU009, ZU003 -> ZU010.
@@ -210,7 +218,7 @@ comment on function assert_pipeline_stage_positions_are_gapless() is
   'Raises ZU010 when pipeline_stage.display_order is not 1..n. Deferred to COMMIT, so a reorder may pass '
   'through states that hold a gap; distinctness comes from pipeline_stage_display_order_unique, which is '
   'what makes three aggregates a sufficient test. ZU010 and not ZU003, which 0076''s cash session holds: '
-  '0094 separated the two.';
+  '0099 separated the two.';
 
 create or replace function refuse_pipeline_transition_change() returns trigger
 language plpgsql
@@ -227,7 +235,7 @@ end $$;
 comment on function refuse_pipeline_transition_change() is
   'Raises ZU009 (PipelineTransitionImmutable) for pipeline_stage_transition, for every role including '
   'the owner. A correction is a new move, not an edit to the record of the old one. ZU009 and not ZU002, '
-  'which 0076''s cash session holds: 0094 separated the two.';
+  'which 0076''s cash session holds: 0099 separated the two.';
 
 create or replace function assert_pipeline_card_move_is_recorded() returns trigger
 language plpgsql
@@ -269,7 +277,7 @@ comment on function assert_pipeline_card_move_is_recorded() is
   'pipeline_stage_transition row - same contact, same from, same to, same instant. Deferred to COMMIT, '
   'because the log cannot be written before the card it describes exists; and for every role including '
   'the owner, because the owner is who moves a card by hand at 02:00. ZU008 and not ZU001, which 0076''s '
-  'cash session holds: 0094 separated the two.';
+  'cash session holds: 0099 separated the two.';
 
 -- Three of 0077's table and column comments named the old codes, and they are re-issued here with the new
 -- ones. A `comment on` is schema STATE — `\d+` shows it, and it is what the next person reads — so unlike
@@ -311,7 +319,7 @@ end $$;
 comment on function refuse_published_rota_change() is
   'Raises ZW006 (PublishedRotaImmutable) for rota_version and rota_version_assignment, for every role '
   'including the owner. An edit is a new version, not an UPDATE of the old one. ZW006 and not ZW001, '
-  'which 0080''s frequency cap holds: 0094 separated the two.';
+  'which 0080''s frequency cap holds: 0099 separated the two.';
 
 create or replace function refuse_rota_change_request_edit() returns trigger
 language plpgsql
@@ -328,7 +336,7 @@ end $$;
 comment on function refuse_rota_change_request_edit() is
   'Raises ZW007 (RotaChangeRequestImmutable) for every role including the owner. A refused request is '
   'answered by a new request, not by editing the record of the old one. ZW007 and not ZW002, which '
-  '0080''s frequency ledger holds: 0094 separated the two.';
+  '0080''s frequency ledger holds: 0099 separated the two.';
 
 -- ---------------------------------------------------------------------------------------------
 -- 0087 — the messaging compliance gate. ZX001 -> ZX006.
@@ -365,6 +373,6 @@ comment on function assert_promotional_window_is_a_narrowing() is
   'Raises ZX006 when messaging.promotional_window is set to anything but an object of two whole hours with '
   '7 <= startHour < endHour <= 21. The CHECK constraint beside it calls the same predicate and is the layer '
   'that still holds when session_replication_role has triggers off, which is how a restore runs. ZX006 and '
-  'not ZX001, which 0086''s attendance tables hold: 0094 separated the two.';
+  'not ZX001, which 0086''s attendance tables hold: 0099 separated the two.';
 
 commit;

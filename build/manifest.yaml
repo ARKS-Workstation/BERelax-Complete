@@ -3500,7 +3500,7 @@ units:
     - packages/db/src/sqlstate-registry.test.ts
     - packages/db/src/sqlstate-uniqueness.test.ts
     - packages/db/src/sqlstate-allocation.itest.ts
-    - packages/db/migrations/0094_sqlstate_reallocation.sql
+    - packages/db/migrations/0099_sqlstate_reallocation.sql
     - scripts/check-sqlstate-registry.mjs
     - scripts/test-gates.mjs
     - docs/adr/0043-a-private-sqlstate-is-five-characters-and-comes-from-a-registry.md
@@ -3522,10 +3522,16 @@ units:
       Every batch merged so far has added a collision.'
     - 'NOTE: the migration number is a placeholder. `00xx_sqlstate_reallocation.sql` must be allocated a
       real number when this unit starts and not before, because five units in flight hold 0088 through 0092
-      and a number allocated at plan time is a number two branches can claim. ALLOCATED: 0094, with
-      SCHEMA_VERSION 94, gate block `// 121a-121z.` and ADR 0043. On the rebase before the final run 0092
-      had landed with P-HR-09 and 0088 had been released as a permanent gap by M-TILL-13, so the run on
-      disk is 1..94 less the permanent gaps and 0095-0098 are held by units in flight.'
+      and a number allocated at plan time is a number two branches can claim - which is exactly what
+      happened to this one. ALLOCATED 0094, then RENUMBERED to 0099 by the integrator: 0094 had already been
+      allocated to G-REV-02 in an earlier wave, in a worktree this one could not see, and G-REV-02 keeps it
+      because it was first and had it committed. So `0099_sqlstate_reallocation.sql`, SCHEMA_VERSION 99, gate
+      block `// 121a-121z.` and ADR 0043. The unit''s own subject arriving in migration numbers rather than
+      refusal codes, and the difference worth recording: a duplicated migration number is caught by the first
+      integrator who lists the directory, where a duplicated SQLSTATE class was caught by nothing for
+      thirteen codes. On the rebases before the final run 0092 landed with P-HR-09, 0088 was released as a
+      permanent gap by M-TILL-13, and 0094-0098 are held or landed elsewhere, so 0100 is the next free
+      number.'
     - 'NOTE: the inventory NOTE above was WRONG about which of the thirteen were collisions, and the
       correction is the unit''s main finding. Measured on the tree this unit ran against: 129 private codes
       across 26 classes (not 116 across 24 - 0086, 0087, 0089, 0091 and 0093 had landed since; 144 after
@@ -3544,10 +3550,14 @@ units:
     - 'NOTE: codes adopted as inventory rather than reallocated, because a class cannot be recalled from a
       worktree that has already raised it: ZY001-ZY008 (0085, landed), ZY009-ZY010 (0089, landed),
       ZY011-ZY014 (0091, landed), ZZ001-ZZ005 (0093, landed), and the sub-bands the integrator reserved to
-      units in flight - plus ZY041+, ZY051+, ZY061+, ZY071+ and ZY081+. ZY015-ZY020 (0092, P-HR-09)
-      landed on the integration branch while this unit ran and were adopted into the registry on the
-      rebase, which is the gate doing its job: `pnpm sqlstate` named all six by code and by migration.
-      This unit
+      units in flight. ZY015-ZY020 (0092, P-HR-09) landed on the integration branch while this unit ran and
+      were adopted into the registry on the rebase, which is the gate doing its job: `pnpm sqlstate` named
+      all six by code and by migration. The bands still OUTSIDE the registry because no migration on this
+      tree raises them are ZY051-ZY057 (0095, M-VAT-08, with ZY058-ZY060 left free) and ZY041+, which
+      M-TILL-13 did not use at all. They are recorded here and NOT registered, because an entry for a code
+      no migration raises is exactly what the third gate direction refuses: a reservation is not an
+      allocation. Whichever branch merges them adds the entries, and `pnpm sqlstate` names each missing code
+      and its migration. This unit
       allocated NONE of those bands: the nine moved codes are the next free subclass of the class each rule
       already sat in, which takes nothing from anybody in flight. The reserved bands are NOT in the registry,
       because a registry entry for a code no migration raises is exactly what the third gate direction

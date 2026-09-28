@@ -72,7 +72,7 @@ run.
   `ZZ` sufficient, and it is a smaller cost than it looks: what a reader actually has is a five-character
   code from a log, and the registry answers that in one lookup where a class never did.
 
-- **Nine codes moved, and every translator, probe and comment naming them moved with them.** `0094` is the
+- **Nine codes moved, and every translator, probe and comment naming them moved with them.** `0099` is the
   migration: it `create or replace`s nine trigger functions and changes one token in each.
   `ZT001`→`ZT005`, `ZT002`→`ZT006`, `ZT003`→`ZT007` (0069's merge record, survivor-is-live and chain bound,
   leaving 0068's tender rules on the originals); `ZU001`→`ZU008`, `ZU002`→`ZU009`, `ZU003`→`ZU010` (0077's
@@ -80,11 +80,11 @@ run.
   frequency ledger); `ZX001`→`ZX006` (0087's promotional window, leaving 0086's attendance). The later
   migration moved in all nine, which is not a coincidence: the second unit to reach for a class is the one
   whose worktree could not see the first. **Anybody reading a log or a runbook written before this date will
-  find the old code**, which is why `0094`'s header carries the table and the old migrations are left saying
+  find the old code**, which is why `0099`'s header carries the table and the old migrations are left saying
   what they said.
 
 - **The migrations that defined those functions are deliberately NOT edited.** `0069`, `0077`, `0081` and
-  `0087` still contain `errcode = 'ZT001'` and its siblings, inside definitions `0094` supersedes. A
+  `0087` still contain `errcode = 'ZT001'` and its siblings, inside definitions `0099` supersedes. A
   numbered migration is a record of what was applied; editing an applied file makes the history of a refusal
   unreadable, and the gate reads the live definition so the dead text costs nothing. What it does cost is
   that grepping the migrations for a code now returns both the live raise and the superseded one, and the

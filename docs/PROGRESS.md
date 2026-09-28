@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**127 / 211 units complete.**
+**128 / 211 units complete.**
 
 ## Next up
 
-1. **W-SYS-12 — Private SQLSTATE allocation: one code, one rule, with an allocator**
 1. **W-SYS-13 — Test isolation: a suite may delete only what it created**
 1. **W-SYS-14 — Private document storage: the signed URL, and the audited download**
+1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
 
 ## All units
 
@@ -57,7 +57,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 40 | `B-UI-04` | Quick-book, walk-in entry and the WhatsApp ref field | `B-LIFE-02`, `B-UI-03` | M1 | Y12-ref-loop |
 | [x] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
 | [x] | 41.5 | `W-SYS-11` | The admin session — mounting F07's auth in the web app | `F07`, `W-SYS-01` | — | — |
-| [ ] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
+| [x] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
 | [ ] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
 | [ ] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |

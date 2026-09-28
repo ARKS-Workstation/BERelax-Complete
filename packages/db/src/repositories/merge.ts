@@ -89,7 +89,7 @@ export type MergeRefusal = (typeof MERGE_REFUSALS)[number]
  * for class `ZT` in worktrees that could not see each other, so for eleven merges these three constants
  * named the overpayment ceiling, a tender that gives no change and a missing tender reference as well as
  * the three rules below — and `mergeRefusalOf` would have reported an overpayment as an append-only
- * violation. 0094 moved this side; `packages/db/src/sqlstate-registry.ts` is what now refuses the next one.
+ * violation. 0099 moved this side; `packages/db/src/sqlstate-registry.ts` is what now refuses the next one.
  */
 export const MERGE_SQLSTATE = {
   mergeRecordImmutable: 'ZT005',

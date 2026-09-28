@@ -110,7 +110,7 @@ const NOT_A_TRANSLATOR = /\.(test|itest)\.ts$|sqlstate-registry\.ts$/
  * A migration with its `--` and nested block comments blanked, newlines and string literals intact.
  *
  * The gate has to read CODE rather than prose, and in this repository that is not a theoretical
- * distinction: `0094_sqlstate_reallocation.sql` explains itself with the line ``errcode = 'ZT001'`` inside
+ * distinction: `0099_sqlstate_reallocation.sql` explains itself with the line ``errcode = 'ZT001'`` inside
  * a comment, and a scanner that saw it would report a collision in the file that resolved nine of them.
  * Strings survive because `errcode = '…'` IS a string — blanking them, which is what the schema-convention
  * scanner does for the opposite reason, would blank the only thing this reads.
@@ -1019,21 +1019,21 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
   {
     code: 'ZT005',
     rule: 'A merge record and its per-table reports are append-only: an un-merge is a new operation.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['refuse_merge_record_change'],
     translators: ['packages/db/src/repositories/merge.ts'],
   },
   {
     code: 'ZT006',
     rule: 'The survivor of a new merge may not itself be a tombstone.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['assert_merge_survivor_is_live'],
     translators: ['packages/db/src/repositories/merge.ts'],
   },
   {
     code: 'ZT007',
     rule: 'Resolving a merge chain may not take more than 32 hops, which would mean the cycle guard is gone.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['merge_survivor_of'],
     translators: ['packages/db/src/repositories/merge.ts'],
   },
@@ -1093,21 +1093,21 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
   {
     code: 'ZU008',
     rule: "A pipeline card's stage may not change without a transition row recording exactly that move.",
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['assert_pipeline_card_move_is_recorded'],
     translators: ['packages/db/src/repositories/pipeline.ts'],
   },
   {
     code: 'ZU009',
     rule: 'The pipeline stage transition log is append-only: a correction is a new move.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['refuse_pipeline_transition_change'],
     translators: ['packages/db/src/repositories/pipeline.ts'],
   },
   {
     code: 'ZU010',
     rule: 'Pipeline stage positions must be 1..n with no duplicate and no gap.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['assert_pipeline_stage_positions_are_gapless'],
     translators: ['packages/db/src/repositories/pipeline.ts'],
   },
@@ -1205,14 +1205,14 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
   {
     code: 'ZW006',
     rule: 'A published rota version and its assignments are immutable: an edit is a new version.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['refuse_published_rota_change'],
     translators: [],
   },
   {
     code: 'ZW007',
     rule: 'A rota change request is append-only: a refused request is answered by a new request.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['refuse_rota_change_request_edit'],
     translators: [],
   },
@@ -1254,7 +1254,7 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
   {
     code: 'ZX006',
     rule: 'The promotional send window may only ever be narrowed inside 07:00-21:00, and must actually open.',
-    migration: '0094',
+    migration: '0099',
     raisedBy: ['assert_promotional_window_is_a_narrowing'],
     translators: [],
   },

@@ -2023,7 +2023,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // C, is an ordinary sequence of events and each row is unalterable), and `assert_merge_survivor_is_live`
 // refuses an edge INTO a tombstone (ZT006) — which is also why a cycle cannot be constructed at all, so
 // the depth bound raising ZT007 would mean that trigger had been dropped. Both tables are append-only
-// for every role (ZT005). Those three were ZT001-ZT003 until 0094: this file and 0068 both reached for
+// for every role (ZT005). Those three were ZT001-ZT003 until 0099: this file and 0068 both reached for
 // class ZT in worktrees that could not see each other, so for eleven merges one code stood for the
 // overpayment ceiling AND for this table being append-only. What it does NOT do is touch the `clinical` schema: 0009 revokes every
 // privilege on it from the application role, and 0043's AAD binds a ciphertext to its `customer_id`, so
@@ -2192,7 +2192,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the cascade would fire the refusal trigger and make `delete from customer` impossible. `ZU008`,
 // `ZU009` and `ZU010` are its private SQLSTATEs; `ZU` rather than a mnemonic letter because the mnemonic
 // ones are taken (`ZK` is the KEK's, `ZP` is consent's, `ZF` is the flow's) and what a private code has to
-// be is unique to one RULE, not memorable and not unique to a file. They were ZU001-ZU003 until 0094,
+// be is unique to one RULE, not memorable and not unique to a file. They were ZU001-ZU003 until 0099,
 // which is the correction: 0076's cash session held those three, so a probe asserting `ZU002` was as
 // happily satisfied by a closed drawer refusing an edit as by this log refusing one.
 //
@@ -2373,7 +2373,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // EMPLOYEE per version, unique on the pair, and its outcome today is `skipped` with
 // `no_recipient_on_file`: nothing in this build holds a staff phone or email, and 0075 had to record the
 // same gap for the Google re-auth ladder. `ZW006` (published rota immutable), `ZW007` (change request
-// append-only) — both moved off `ZW001`/`ZW002` by 0094, which 0080's frequency ledger holds — `ZW003` (an
+// append-only) — both moved off `ZW001`/`ZW002` by 0099, which 0080's frequency ledger holds — `ZW003` (an
 // unchanged re-publish, refused at COMMIT by a deferred constraint trigger, which
 // is how "re-publishing an unchanged version emits no notification" is a property of the database rather
 // than of whichever caller remembered to compare), `ZW004` (notice append-only) and `ZW005` (a version that
@@ -2663,7 +2663,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // (`Y9-queued-staleness`, provisionally 12 hours), which is a constant in `@berelax/core`. `ZX006` is its
 // one private SQLSTATE. It was `ZX001`, chosen here because `ZX` looked unowned while `ZW001` was known to
 // be raised by BOTH 0080 and 0081 — and `ZX001` was 0086's attendance rule, taken in a worktree this one
-// could not see, so the paragraph naming the collision it was avoiding created another. 0094 moved this
+// could not see, so the paragraph naming the collision it was avoiding created another. 0099 moved this
 // side to `ZX006` and `packages/db/src/sqlstate-registry.ts` is what now answers "is this code free".
 //
 //
@@ -2851,7 +2851,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // (append-only), `ZZ002` (a state that does not follow the one before it), `ZZ003` (a correction naming no
 // superseded record, the wrong one, or another surface's), `ZZ004` (a published record with no audit row at
 // COMMIT) and `ZZ005` (over the weight budget, with both numbers in the message) are its private
-// SQLSTATEs. `ZZ` because it was the LAST free class: 0094 is what replaced the convention that made a
+// SQLSTATEs. `ZZ` because it was the LAST free class: 0099 is what replaced the convention that made a
 // class scarce, and `packages/db/src/sqlstate-registry.ts` is where a code is taken now.
 //
 //
@@ -2859,7 +2859,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 94 as const
+export const SCHEMA_VERSION = 99 as const
 // 92 is 0092_leave_approval.sql: approving leave — who may decide it, what it costs the floor, and what it
 // may never do to a booking. It is the first writer of `leave_request` in the build. 0030 created the table
 // and left ONE decision to P-HR, and 0066 took it in `leaveCoveragePeriod()` while saying in its own header
@@ -2913,7 +2913,7 @@ export const SCHEMA_VERSION = 94 as const
 // rules makes one file's translator report the other file's refusal, and makes a probe asserting it pass
 // when the statement bounced off something else.
 //
-// 94 is 0094_sqlstate_reallocation.sql: one private SQLSTATE, one rule (W-SYS-12). The file creates no
+// 99 is 0099_sqlstate_reallocation.sql: one private SQLSTATE, one rule (W-SYS-12). The file creates no
 // table, column or constraint. It `create or replace`s nine trigger functions and changes exactly one token
 // in each — the five characters the refusal carries — and re-issues three of 0077's table and column
 // comments that named an old code.
@@ -2952,19 +2952,27 @@ export const SCHEMA_VERSION = 94 as const
 // functions back onto its old code fails `pnpm sqlstate` rather than quietly re-creating the collision.
 //
 
-// Every number allocated through 94 has now landed: the run on disk is 1..94 less the permanent gaps
-// above, less 88, which M-TILL-13 released as a permanent gap because every table its screens touch
-// already existed. 85, 89, 91, 92 and 93 arrived out of order, each with the unit that held it, and 94
-// arrives with W-SYS-12. 95 through 98 are allocations held by units in flight (M-VAT-08, A-FIRST-01,
-// P-HR-11, C-AUTO-05 — 0095 through 0098 in that order), so 99 is the next number nobody holds. Gate case
-// 90a walks the migrations that EXIST on disk rather than consecutive integers, which is what makes a
+// Every number allocated through 93 has now landed, and 99 has landed on top of it: the run on disk is
+// 1..93 less the permanent gaps above, less 88, which M-TILL-13 released as a permanent gap because every
+// table its screens touch already existed, plus 99. 85, 89, 91, 92 and 93 arrived out of order, each with
+// the unit that held it, and 99 arrives with W-SYS-12. 94 is G-REV-02's, 95 is M-VAT-08's and 96, 97 and 98
+// are held by A-FIRST-01, P-HR-11 and C-AUTO-05, so 100 is the next number nobody holds. Gate case 90a
+// walks the migrations that EXIST on disk rather than consecutive integers, which is what makes a
 // non-contiguous allocation cost nothing; a held number that turns out to need no migration becomes a
 // permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is NOT renumbered, because renumbering to
 // close a gap is how two branches come to apply one number to different SQL.
 //
+// 99 and not 94, and the reason belongs in this note rather than in a commit message: 94 was allocated to
+// W-SYS-12 and had ALREADY been allocated to G-REV-02, in two waves, and neither worktree could see the
+// other. G-REV-02 keeps it because it was first and had it committed. That is this unit's own subject
+// arriving in migration numbers instead of refusal codes — the scarce thing allocated by reading what a
+// worktree can see — and the difference is that a duplicated migration number is caught by the first
+// integrator who lists the directory, where a duplicated SQLSTATE class was caught by nothing for thirteen
+// codes. Which is the argument for the registry, made from the other side.
+//
 // Private SQLSTATEs are no longer allocated in this note, or by reading the migrations a worktree can
 // see. `packages/db/src/sqlstate-registry.ts` holds one entry per code and `pnpm sqlstate` refuses a
-// second claim on one, which is ADR 0043 and 0094 — the migration number and the refusal code stopped
+// second claim on one, which is ADR 0043 and 0099 — the migration number and the refusal code stopped
 // being the same kind of thing the moment a class ran out.
 //
 // There is ONE of these notes, and `packages/db/src/allocation-note.test.ts` now fails if a merge leaves a

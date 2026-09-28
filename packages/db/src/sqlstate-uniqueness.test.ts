@@ -168,7 +168,7 @@ describe('the detector detects', () => {
   })
 
   it('reads code and not prose: a commented-out raise is not a raise', () => {
-    // Not hypothetical, and the reason the scanner blanks comments. 0094's own header explains itself with
+    // Not hypothetical, and the reason the scanner blanks comments. 0099's own header explains itself with
     // `errcode = 'ZT001'` written inside a `--` comment; a scanner reading the file as text would report
     // the migration that resolved nine collisions as having created one.
     const commented = new Map([
@@ -177,9 +177,9 @@ describe('the detector detects', () => {
     ])
     const byCode = liveRaisesByCode(commented)
     expect([...byCode.keys()].sort()).toEqual(['ZZ904', 'ZZ905'])
-    // The control on the control: the real 0094 header carries that line, so the real scan must not hold
-    // a ZT001 raise in 0094. If comment blanking regressed, this is where it shows.
-    expect(corpus.get('0094_sqlstate_reallocation.sql')).toContain("errcode = 'ZT001'")
+    // The control on the control: the real 0099 header carries that line, so the real scan must not hold
+    // a ZT001 raise in 0099. If comment blanking regressed, this is where it shows.
+    expect(corpus.get('0099_sqlstate_reallocation.sql')).toContain("errcode = 'ZT001'")
     expect((raises.get('ZT001') ?? []).map((site) => site.migration)).toEqual(['0083'])
   })
 

@@ -69,7 +69,7 @@ export type PipelineRefusal = (typeof PIPELINE_REFUSALS)[number]
  * `ZU008`-`ZU010` and not `ZU001`-`ZU003`, which 0076's cash session holds: both files took class `ZU` in
  * worktrees that could not see each other, so "private, so a probe cannot be satisfied by another trigger"
  * was false for all three of them — a probe asserting `ZU002` was satisfied by a closed drawer refusing an
- * edit. 0094 moved this side; the allocator that refuses the next one is
+ * edit. 0099 moved this side; the allocator that refuses the next one is
  * `packages/db/src/sqlstate-registry.ts`.
  */
 export const PIPELINE_SQLSTATE = {

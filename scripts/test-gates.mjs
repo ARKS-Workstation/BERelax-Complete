@@ -35885,6 +35885,9 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       'sqlstate gate: no fixture was left behind',
       !existsSync(FIXTURE_MIGRATION),
       `${FIXTURE_MIGRATION} survived a fixture, and every later gate reading the migrations will now fail`,
+    )
+  }
+}
 
 // 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
 //            event name that must not compile, the funnel that must not be dated on a calendar day, and

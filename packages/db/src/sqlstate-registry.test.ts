@@ -94,7 +94,7 @@ describe('the private SQLSTATE registry', () => {
   it('the nine codes W-SYS-12 moved are one migration, and each is a different rule from the code it left', () => {
     // The unit's own claim, asserted against the registry rather than restated: each pair is two rules that
     // shared one code, and they now differ in code, in rule and in the function that raises them. The
-    // migration number is DERIVED — a merge that renumbers 0094 must not have to edit a test as well.
+    // migration number is DERIVED — a merge that renumbers 0099 must not have to edit a test as well.
     const pairs = [
       ['ZT001', 'ZT005'],
       ['ZT002', 'ZT006'],
@@ -189,7 +189,7 @@ describe('the scanner reads code, not prose', () => {
       'refuse_rota_change_request_edit',
       'assert_promotional_window_is_a_narrowing',
     ]) {
-      expect(live.get(fn), `${fn}'s live definition`).toBe('0094_sqlstate_reallocation.sql')
+      expect(live.get(fn), `${fn}'s live definition`).toBe('0099_sqlstate_reallocation.sql')
     }
   })
 

@@ -20,7 +20,7 @@ import { PRIVATE_SQLSTATES } from './sqlstate-registry.ts'
  *   1. the SQLSTATE is the new code;
  *   2. the message is THIS rule's, matched on wording only this rule has;
  *   3. the message is NOT the wording of the rule that KEPT the old code. That is the assertion that would
- *      have failed before 0094 and the one that makes the other two more than a rename — a translator
+ *      have failed before 0099 and the one that makes the other two more than a rename — a translator
  *      matching on the code alone cannot tell the two apart, so the message is the only evidence that the
  *      statement bounced off the rule the test names.
  *
@@ -109,7 +109,7 @@ const rotaVersion = (tx: Sql, from: string, to: string, digest: string) => tx`
   returning id
 `
 
-/** The nine rules 0094 moved, each with the rule that KEPT the code it left. */
+/** The nine rules 0099 moved, each with the rule that KEPT the code it left. */
 const MOVED = [
   {
     code: 'ZT005',
@@ -262,7 +262,7 @@ beforeAll(async () => {
   firstStage = stage.stageKey
 })
 
-describe('every refusal 0094 moved reports its NEW code and its OWN message', () => {
+describe('every refusal 0099 moved reports its NEW code and its OWN message', () => {
   it('drives all nine, and nine is the number the migration moved', () => {
     // ADR 0002: without this, deleting a case from the table above silently reduces the coverage of the
     // acceptance line to whatever is left, and every remaining case still passes.
@@ -289,7 +289,7 @@ describe('every refusal 0094 moved reports its NEW code and its OWN message', ()
       if (refused === NOTHING) return
       expect(refused.code, `${moved.code}: the SQLSTATE`).toBe(moved.code)
       expect(refused.message, `${moved.code}: its own message`).toMatch(moved.mine)
-      // The assertion that would have failed before 0094, and the reason the message is asserted at all:
+      // The assertion that would have failed before 0099, and the reason the message is asserted at all:
       // the rule that kept the old code has a different message, and a translator matching on the code
       // alone cannot tell them apart.
       expect(
