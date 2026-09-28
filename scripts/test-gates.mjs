@@ -32342,7 +32342,11 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       ROWS_SUITE,
       leaveRowsRun,
     ),
-    'refuses the second by the coverage check INSIDE its transaction',
+    // The case that measures the LOCK, and it names it: with the `for update` gone, nothing queues and both
+    // approvals commit. The rule string used to name a test that no longer exists — the case was rewritten
+    // when the previous version turned out to be measuring a connection handshake — and a stale rule string
+    // reports "exited non-zero but did not report", which is a gate case failing about a mutation it caught.
+    'waits for the coverage lock',
   )
   // 119j's own note: the suite it names starts both approvals with no stagger, deliberately. An earlier
   // version slept 150 ms before the second, which let the first COMMIT first — so the second's read saw the
