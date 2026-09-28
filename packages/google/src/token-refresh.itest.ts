@@ -64,6 +64,25 @@ const REFRESH_TOKEN = '1//09-GCONN04-refresh-token-that-must-never-reach-a-paylo
 const POOL = 14
 const CONCURRENT_CALLS = 10
 
+/**
+ * Releases its callers only once all `CONCURRENT_CALLS` of them have arrived.
+ *
+ * Used by the no-lock control below, so that the ten calls are concurrent because the test made them so and
+ * not because the machine happened to be idle.
+ */
+function barrierFor(count: number): () => Promise<void> {
+  let arrived = 0
+  let release = (): void => {}
+  const open = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return async () => {
+    arrived += 1
+    if (arrived >= count) release()
+    await open
+  }
+}
+
 /** A queue owned by this file, so nothing here depends on the shipped registry's contents. */
 const QUEUE = 'gconn04-refresh-probe'
 
@@ -379,9 +398,26 @@ describe('acceptance — ten simultaneous calls produce exactly one refresh', ()
     // somewhere between six and ten from run to run. An unserialised refresh being NON-DETERMINISTIC is
     // exactly the complaint, and pinning the number would make this control flaky while proving nothing
     // beyond "not one".
+    const arriveAndWait = barrierFor(CONCURRENT_CALLS)
     const connectionId = await seed(60)
     const { deps, profile, log } = rig({
-      lock: () => ({ withConnectionLock: (_id, body) => body({ store }) }),
+      // A BARRIER in place of the lock, not merely its absence. The ten callers arrive, wait for the last
+      // one, and are released together — so the unserialised arrangement this control exists to demonstrate
+      // is produced deliberately instead of being left to the scheduler. Without it the control reports 1 on
+      // a loaded machine, which does not mean "flake": it means something other than the lock serialised the
+      // ten calls, and therefore that the assertion ABOVE passed without the lock doing anything. Two agents
+      // hit exactly that today with seven verify chains sharing four cores.
+      //
+      // What this does NOT close, said plainly: the barrier releases before each body READS, so a machine
+      // slow enough to let one caller commit before another reads could still produce 1. Closing that needs
+      // a second barrier between the read and the write, which is inside the code under test and not
+      // something a control may reach into.
+      lock: () => ({
+        withConnectionLock: async (_id, body) => {
+          await arriveAndWait()
+          return body({ store })
+        },
+      }),
     })
 
     await Promise.all(
@@ -390,7 +426,12 @@ describe('acceptance — ten simultaneous calls produce exactly one refresh', ()
       ),
     )
 
-    expect(refreshCount(log)).toBeGreaterThan(1)
+    expect(
+      refreshCount(log),
+      'the ten unlocked calls spent ONE refresh token, so something other than the lock serialised them — ' +
+        'which means the acceptance case above passed without the lock doing any work on this run, not that ' +
+        'this control is flaky',
+    ).toBeGreaterThan(1)
     // Every one of those refreshes is a chance for Google to hand back a rotated refresh token that the
     // next write overwrites, which is the failure the lock exists to prevent — and the append-only log
     // records each one, so the two counters have to agree.
