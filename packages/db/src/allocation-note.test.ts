@@ -62,15 +62,40 @@ describe('the migration ledger', () => {
       three: I wrote what was easy to match instead of what I meant.
     */
     const source = readFileSync(LEDGER, 'utf8')
+
+    /*
+      Comment continuations joined first, keeping a map back to the original offsets.
+
+      A claim is a SENTENCE, and every sentence in this file is wrapped across `//` lines at 120 columns — the
+      one in the note reads "So 99 is the next" / "// number nobody holds." So a pattern that refuses a
+      newline cannot see it, and the vacuity floor is what reported that: the fourth version of this case in
+      one afternoon, and the fourth time the reason was that I matched the text's SHAPE rather than what it
+      says. Same remedy as the `delete from customer` guard, which had to collapse whitespace for the same
+      reason: normalise, then match.
+    */
+    const flat: string[] = []
+    const origin: number[] = []
+    for (let at = 0; at < source.length; at += 1) {
+      const continuation = /^\n\/\/ ?/.exec(source.slice(at, at + 4))
+      if (continuation !== null) {
+        flat.push(' ')
+        origin.push(at)
+        at += continuation[0].length - 1
+        continue
+      }
+      flat.push(source[at] as string)
+      origin.push(at)
+    }
+    const joined = flat.join('')
     const claims = [
-      ...source.matchAll(
+      ...joined.matchAll(
         // `first` as well as `next`, because the note itself says "100 is the first number nobody holds" and
         // the vacuity floor below caught the pattern matching nothing at all — which is the whole reason that
         // floor is there. A claim is a number beside a phrase nominating one, whichever of the two words it
         // reaches for.
         /\b\d{2,3}\b[^.\n]{0,40}?(?:is the (?:next|first) (?:number|free)|(?:next|first) number nobody holds)|(?:next|first) (?:free number|number nobody holds)[^.\n]{0,40}?\b\d{2,3}\b/gi,
       ),
-    ]
+    ].map((match) => ({ index: origin[match.index ?? 0] ?? 0 }))
     const note = source.indexOf('// Every number allocated through')
     expect(
       note,

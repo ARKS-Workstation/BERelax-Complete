@@ -117,6 +117,68 @@ const PERMITTED_MESSAGE_SENDS = new Map([
  */
 const PERMITTED_CONSTANT_EVALUATORS = new Set([])
 
+/**
+ * The gate module whose structure makes the marketing kill switch unable to reach transactional traffic.
+ *
+ * C-AUTO-05. The acceptance line is *"structurally cannot touch transactional traffic"*, and the thing a type
+ * cannot say is WHERE the switch is read. `evaluateGate` answers `allow` for a transactional message and then
+ * delegates to `evaluatePromotionalGate`, whose `message` is a `PromotionalOutboundMessage`; the switch is
+ * read inside that second function and nowhere else. Every one of those four facts is a position in this file,
+ * and one of them slipping is how stopping marketing becomes stopping booking confirmations.
+ */
+const GATE_DECISION = 'packages/messaging/src/gate/decide.ts'
+
+/**
+ * The ONE module that may write `messaging_control`.
+ *
+ * The switch's state has one home (migration 0098) and one writer, because a second writer is a second
+ * statement of the fact — and the symptom of a second statement is an admin console that says "stopped" over
+ * a sender that is still sending. `toggleMessagingControl` also writes the `audit_event` carrying the actor,
+ * the direction and the reason in the same transaction; a write from anywhere else is a toggle with no record
+ * of who made it.
+ */
+const KILL_SWITCH_WRITER = 'packages/db/src/repositories/messaging-controls.ts'
+
+/**
+ * The runtimes that may hard-code `marketingKillSwitch: false`, and why each one may.
+ *
+ * Every entry sends TRANSACTIONAL traffic only — a booking confirmation, an OTP, an appointment reminder, a
+ * compliance-obligation notice, a Google re-auth prompt — so the switch has nothing to decide for them, and
+ * reading it would be worse than useless: `readMessagingControls` refuses a missing control row rather than
+ * answering "disengaged", so an unreadable marketing control table would stop a booking confirmation. That is
+ * the marketing-problem-becomes-operational-outage failure ADR 0016 exists to remove.
+ *
+ * The second half of the argument is what makes this list safe rather than merely convenient: all five wire
+ * gate evaluators that THROW, because none has a recipient list to prefetch for, so a promotional message
+ * that somehow reached one of them is refused `blocked_unevaluable` before the switch would have mattered.
+ *
+ * A NEW entry is a diff somebody has to justify, which is the whole point. A runtime that can send a
+ * promotional message reads the switch from its one home — `apps/worker/src/automation/runtime.ts` is the
+ * worked example.
+ */
+const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
+  [
+    'apps/web/app/api/v1/book/route.ts',
+    'The booking confirmation. Transactional, and the one message a marketing decision must never stop.',
+  ],
+  [
+    'apps/web/app/api/v1/otp/route.ts',
+    'The OTP. Transactional, and the message whose absence locks a customer out of their own booking.',
+  ],
+  [
+    'apps/worker/src/jobs/send-scheduled-step.ts',
+    'Appointment reminders (B-MSG-03). Transactional: every step it sends is about a booking that exists.',
+  ],
+  [
+    'apps/worker/src/jobs/obligation-reminders.ts',
+    'Compliance-obligation notices to staff. Transactional, and internal — no consent model applies.',
+  ],
+  [
+    'apps/worker/src/jobs/google-reauth-notify.ts',
+    'The Google re-auth ladder. Transactional, and the message that says an integration has stopped.',
+  ],
+])
+
 /** Files that carry these patterns as DATA. Scanning either would make the gate report itself. */
 const EXEMPT = new Set(['scripts/check-send-chokepoint.mjs', 'scripts/test-gates.mjs'])
 
@@ -163,8 +225,28 @@ const MESSAGE_SEND =
 const CONSTANT_EVALUATOR =
   /\b(hasConsent|isSuppressed|frequencyCapReached)\s*:\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*(true|false)\b/g
 
+/** A `marketingKillSwitch:` written as a literal rather than resolved from the control row. */
+const LITERAL_KILL_SWITCH = /\bmarketingKillSwitch\s*:\s*(true|false)\b/g
+
+/**
+ * A write to the control table, however it is spelled across a line break.
+ *
+ * Matched against a DIFFERENT stripping of the file from every other rule here, and the first version of this
+ * rule could not fire at all because it was not. SQL in this repository lives inside template literals, and
+ * `blankStrings: true` replaces string CONTENTS with `x` — so `sql\`update messaging_control …\`` is
+ * `sql\`xxxxxxxx…\`` by the time the other rules read it, and a rule looking for the statement matched nothing
+ * in the whole tree while reporting a clean scan. ADR 0002's failure exactly, in the check written to prevent
+ * a different one.
+ *
+ * So this rule reads the file with comments blanked and strings KEPT, and the counter below is what would
+ * catch it happening again: the one permitted writer has to be seen writing.
+ */
+const CONTROL_TABLE_WRITE = /\b(insert\s+into|update)\s+messaging_control\b/gi
+
 let scanned = 0
 let permittedSendsSeen = 0
+let permittedLiteralKillSwitchesSeen = 0
+let controlWritesInTheWriterSeen = 0
 
 for (const root of ROOTS) {
   try {
@@ -175,7 +257,10 @@ for (const root of ROOTS) {
   for (const file of walk(root)) {
     if (EXEMPT.has(file)) continue
     scanned += 1
-    const code = stripNonCode(readFileSync(file, 'utf8'), { blankStrings: true })
+    const source = readFileSync(file, 'utf8')
+    const code = stripNonCode(source, { blankStrings: true })
+    /** Comments blanked, strings KEPT. The only rule that needs this is 4 — see CONTROL_TABLE_WRITE. */
+    const codeWithStrings = stripNonCode(source)
     const lineOf = (index) => code.slice(0, index).split('\n').length
 
     // 1. A second send path. See the header for what the import rule cannot see.
@@ -238,6 +323,49 @@ for (const root of ROOTS) {
         )
       }
     }
+
+    // 4. The kill switch's state has ONE home and ONE writer. See KILL_SWITCH_WRITER.
+    if (file === KILL_SWITCH_WRITER) {
+      controlWritesInTheWriterSeen += [...codeWithStrings.matchAll(CONTROL_TABLE_WRITE)].length
+    } else if (!isTest(file)) {
+      for (const match of codeWithStrings.matchAll(CONTROL_TABLE_WRITE)) {
+        record(
+          'marketing-kill-switch-state-has-one-home',
+          file,
+          lineOf(match.index),
+          'this writes messaging_control, and toggleMessagingControl() in ' +
+            `${KILL_SWITCH_WRITER} is the only thing that may. That function writes the audit_event ` +
+            'carrying the actor, the direction and the reason in the SAME transaction, so a write from ' +
+            'anywhere else is a marketing kill switch moved with no record of who moved it or why — and ' +
+            "a second writer is a second statement of the switch's state, whose symptom is a console " +
+            'that says "stopped" over a sender that is still sending.',
+        )
+      }
+    }
+
+    // 5. A hard-coded switch value, outside the transactional-only runtimes that declare why.
+    if (!isTest(file)) {
+      const reason = PERMITTED_LITERAL_KILL_SWITCHES.get(file)
+      for (const match of code.matchAll(LITERAL_KILL_SWITCH)) {
+        if (reason !== undefined) {
+          permittedLiteralKillSwitchesSeen += 1
+          continue
+        }
+        record(
+          'marketing-kill-switch-state-has-one-home',
+          file,
+          lineOf(match.index),
+          `marketingKillSwitch: ${match[1]} is the switch with the answer written in, which is exactly ` +
+            'what C-AUTO-07 called "a false that looks like a read is the switch nobody notices is not ' +
+            'wired". Resolve it from its one home instead — readMessagingControls() in @berelax/db, ' +
+            'through resolveMarketingKillSwitch(), which also applies the non-production default. If this ' +
+            'runtime genuinely sends transactional traffic only, add it to ' +
+            'PERMITTED_LITERAL_KILL_SWITCHES with the reason, because reading the control row on a ' +
+            'transactional path is worse than not reading it: an unreadable marketing table would stop a ' +
+            'booking confirmation.',
+        )
+      }
+    }
   }
 }
 
@@ -291,6 +419,78 @@ for (const root of ROOTS) {
   }
 }
 
+/**
+ * Where the kill switch is read, which is a statement about four positions in one file.
+ *
+ * Read from `decide.ts` rather than asserted in a test for the reason the order check above is: a behavioural
+ * test proves it for the cases it drives. The mutation that matters here leaves a system that WORKS — move the
+ * kill-switch check above the transactional return and every promotional send is still refused, every existing
+ * suite is still green, and booking confirmations, reminders and OTPs stop the next time somebody engages it.
+ */
+{
+  const source = readFileSync(GATE_DECISION, 'utf8')
+  // POSITIONS come from the stripped text, so a needle cannot match inside a comment. The transactional
+  // return is additionally matched WHOLE against the raw source, because `blankStrings` turns
+  // `'transactional'` into `'xxxxxxxxxxxxx'` — so a stripped-text search for the whole line finds nothing,
+  // and a search for the part before the string cannot tell which class the branch answers for. The first
+  // version of this rule searched the stripped text for the whole line and reported it as missing.
+  const code = stripNonCode(source, { blankStrings: true })
+  const at = (needle) => code.indexOf(needle)
+
+  const promotionalEntry = at('export function evaluatePromotionalGate(')
+  const promotionalParameter = at('message: PromotionalOutboundMessage,')
+  const transactionalReturn = source.includes(
+    "if (message.messageClass === 'transactional') return ALLOW",
+  )
+    ? at('if (message.messageClass ===')
+    : -1
+  const delegation = at('return evaluatePromotionalGate(ctx, promotional,')
+  const reads = [...code.matchAll(/\bctx\s*\.\s*marketingKillSwitch\b/g)]
+
+  const absent = [
+    ['export function evaluatePromotionalGate(', promotionalEntry],
+    ['message: PromotionalOutboundMessage,', promotionalParameter],
+    ["if (message.messageClass === 'transactional') return ALLOW", transactionalReturn],
+    ['return evaluatePromotionalGate(ctx, promotional,', delegation],
+  ].filter(([, index]) => index === -1)
+
+  if (absent.length > 0) {
+    record(
+      'kill-switch-cannot-reach-transactional-traffic',
+      GATE_DECISION,
+      1,
+      `the gate no longer contains ${absent.map(([name]) => name).join(', ')}. Each one is part of what ` +
+        'makes the marketing kill switch unable to reach a booking confirmation: the promotional-only ' +
+        'parameter type, the transactional answer that comes first, and the delegation between them. One ' +
+        'that is gone is not a refactor.',
+    )
+  } else if (reads.length !== 1) {
+    record(
+      'kill-switch-cannot-reach-transactional-traffic',
+      GATE_DECISION,
+      reads.length > 0 ? lineOf(code, reads[0].index) : 1,
+      `ctx.marketingKillSwitch is read ${reads.length} time(s) in this file and must be read exactly ONCE. ` +
+        'Zero means the switch is no longer consulted at all, so an engaged switch stops nothing. More than ' +
+        'one means there is a second place the answer is decided, and the second place is the one that ' +
+        'eventually runs before the transactional return.',
+    )
+  } else if (!(transactionalReturn < delegation && promotionalEntry < reads[0].index)) {
+    record(
+      'kill-switch-cannot-reach-transactional-traffic',
+      GATE_DECISION,
+      lineOf(code, Math.min(transactionalReturn, reads[0].index)),
+      'the kill switch is read outside evaluatePromotionalGate, or the transactional answer no longer ' +
+        'comes before the delegation. The required shape is: evaluateGate returns ALLOW for a ' +
+        'transactional message, then delegates; evaluatePromotionalGate — whose message parameter is ' +
+        'PromotionalOutboundMessage, so a transactional message is not assignable to it — reads the ' +
+        'switch. A read above the transactional return stops every booking confirmation, reminder and OTP ' +
+        'in the system the next time marketing is stopped, and no existing test would notice. Found at ' +
+        `transactionalReturn=${transactionalReturn}, delegation=${delegation}, ` +
+        `evaluatePromotionalGate=${promotionalEntry}, killSwitchRead=${reads[0].index}.`,
+    )
+  }
+}
+
 function lineOf(code, index) {
   return code.slice(0, index).split('\n').length
 }
@@ -306,13 +506,23 @@ function lineOf(code, index) {
  * number declared is a failure of the scanner rather than a pass for the tree.
  */
 const declaredSends = [...PERMITTED_MESSAGE_SENDS.values()].reduce((n, m) => n + m.size, 0)
-if (scanned < 100 || permittedSendsSeen < declaredSends) {
+const declaredLiteralKillSwitches = PERMITTED_LITERAL_KILL_SWITCHES.size
+if (
+  scanned < 100 ||
+  permittedSendsSeen < declaredSends ||
+  permittedLiteralKillSwitchesSeen < declaredLiteralKillSwitches ||
+  controlWritesInTheWriterSeen < 1
+) {
   console.error(
-    `Send choke-point scanner did not read what it thinks it read: ${scanned} file(s) scanned and ` +
-      `${permittedSendsSeen} of ${declaredSends} declared message sends found. Every rule here is a ` +
-      'difference against an allowlist, and a difference against nothing is empty — so this is reported ' +
-      'as a failure rather than as a clean tree. Check the MESSAGE_SEND discriminator against ' +
-      `${CHOKE_POINT}.`,
+    `Send choke-point scanner did not read what it thinks it read: ${scanned} file(s) scanned, ` +
+      `${permittedSendsSeen} of ${declaredSends} declared message sends found, ` +
+      `${permittedLiteralKillSwitchesSeen} of ${declaredLiteralKillSwitches} declared literal kill ` +
+      `switches found, and ${controlWritesInTheWriterSeen} write(s) to messaging_control seen in ` +
+      `${KILL_SWITCH_WRITER}, which must be at least one. Every rule here is a difference against an ` +
+      'allowlist, and a difference against nothing is empty — so this is reported as a failure rather ' +
+      'than as a clean tree. Check the MESSAGE_SEND, LITERAL_KILL_SWITCH and CONTROL_TABLE_WRITE ' +
+      `discriminators against ${CHOKE_POINT}, ` +
+      `${[...PERMITTED_LITERAL_KILL_SWITCHES.keys()][0]} and ${KILL_SWITCH_WRITER}.`,
   )
   process.exit(1)
 }
@@ -333,6 +543,9 @@ if (violations.length > 0) {
 
 console.log(
   `Every outbound message goes through the choke point: ${scanned} files scanned across ` +
-    `${ROOTS.join(', ')}, ${declaredSends} declared message send(s) all accounted for, and ` +
-    `${CHOKE_POINT} runs the gate before the staging guard.`,
+    `${ROOTS.join(', ')}, ${declaredSends} declared message send(s) all accounted for, ` +
+    `${CHOKE_POINT} runs the gate before the staging guard, and the marketing kill switch is read once, ` +
+    `inside ${GATE_DECISION}'s promotional-only path, from its one home — written in ` +
+    `${KILL_SWITCH_WRITER} and nowhere else (${controlWritesInTheWriterSeen} write(s) seen there, ` +
+    `${declaredLiteralKillSwitches} transactional-only runtime(s) declaring a literal).`,
 )

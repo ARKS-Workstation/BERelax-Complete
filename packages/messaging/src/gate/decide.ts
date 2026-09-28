@@ -34,6 +34,16 @@
  * unreachable consent store, an engaged marketing kill switch or a suspended promotional identity must
  * not stop a booking confirmation or an OTP. A marketing problem that becomes an operational outage is
  * the failure ADR 0016 exists to remove.
+ *
+ * C-AUTO-05 turned that paragraph into a structure. The body moved into {@link evaluatePromotionalGate},
+ * whose `message` is a {@link PromotionalOutboundMessage}, and `evaluateGate` is now the two-line function
+ * that answers `allow` for transactional traffic and delegates everything else. So "the kill switch cannot
+ * touch transactional traffic" is not a comment about line order any more: the function that reads the switch
+ * **cannot be handed a transactional message**, and a caller that tries does not compile.
+ *
+ * The three layers and the case that breaks each are in `./kill-switch.ts`. The one worth repeating here is
+ * why the split was worth making at all: with a single function, stopping every booking confirmation in the
+ * system was moving one `if` block up four lines, and the diff would have read as tidying.
  */
 import {
   ASIA_DUBAI,
@@ -44,11 +54,22 @@ import {
   toLocal,
 } from '@berelax/core'
 import type { OutboundMessage } from '../port.ts'
+import { killSwitchVerdict } from './kill-switch.ts'
 import {
   type DatedPromotionalOverride,
   decideSendWindow,
   type PromotionalWindow,
 } from './window.ts'
+
+/**
+ * An `OutboundMessage` that is promotional, by type.
+ *
+ * The one parameter type in this package that the kill switch and the four compliance evaluators are reached
+ * through. `MessageClass` has two members, so `message.messageClass === 'transactional'` narrows the other
+ * branch to this automatically and no cast is needed — which matters, because `as PromotionalOutboundMessage`
+ * is exactly what somebody writes when they want to push the other class through.
+ */
+export type PromotionalOutboundMessage = OutboundMessage & { readonly messageClass: 'promotional' }
 
 // --- the gate ----------------------------------------------------------------------------------
 
@@ -113,8 +134,13 @@ export interface GateEvaluators {
 
 export interface GateContext {
   /**
-   * Stops every promotional send. Structurally unable to touch transactional traffic, because
-   * `evaluateGate` returns before reading it for a transactional message.
+   * Stops every promotional send. Structurally unable to touch transactional traffic, because the only
+   * function that reads it takes a message that is promotional by type — see `./kill-switch.ts`.
+   *
+   * A value, not a reader: the state's one home is the `messaging_control` row (migration 0098), resolved at
+   * the application edge by `resolveMarketingKillSwitch` from that row and `APP_ENV`. The gate holding its own
+   * reader would be a second statement of the switch's state, and the symptom of a second statement is a
+   * console that says "stopped" over a sender that is still sending.
    */
   readonly marketingKillSwitch: boolean
   readonly promotionalWindow: PromotionalWindow
@@ -181,11 +207,14 @@ const ALLOW: GateDecision = { kind: 'allow' }
 /**
  * The gate. Order matters and is asserted:
  *
- * 1. transactional traffic is out of scope entirely;
+ * 1. transactional traffic is out of scope entirely — and that is this function's whole body;
  * 2. the marketing kill switch, before any store is read, so a stopped campaign reads nothing;
  * 3. consent, suppression, frequency cap — each failing closed;
  * 4. the window, which queues rather than refuses, because a promotional message at 01:00 is not
  *    wrong, it is early — or expires it, if it has been held too long to be worth sending.
+ *
+ * Steps 2 to 4 are {@link evaluatePromotionalGate}. The split is C-AUTO-05's and is the point of that unit:
+ * step 1 being FIRST used to be a fact about line order, and is now a fact about a parameter type.
  */
 export function evaluateGate(
   ctx: GateContext,
@@ -193,16 +222,45 @@ export function evaluateGate(
   instant: Instant,
   attempt?: GateAttempt,
 ): GateDecision {
+  // Step 1, and the only step this function performs itself. Everything below it is about a promotional
+  // message and lives in a function that cannot be given any other kind — see `./kill-switch.ts`.
   if (message.messageClass === 'transactional') return ALLOW
+  // The one narrowing in the system, and it is a VALUE rather than a cast.
+  //
+  // `OutboundMessage` is an interface and not a discriminated union, so narrowing `message.messageClass` does
+  // not narrow `message`. The available options were a type predicate — `m is PromotionalOutboundMessage`,
+  // which is a cast wearing a signature and would let a transactional message through if the body were ever
+  // wrong — and rebuilding the object with the narrowed discriminant, which is what this is. `tsc` checks it:
+  // if `message.messageClass` stopped being `'promotional'` on this branch, this line would not compile.
+  //
+  // `OutboundMessage` is deliberately NOT turned into a union of the two classes. `buildMessage` in `send.ts`
+  // reads the class off a template row, where it is a `MessageClass`, so a union would be unconstructible
+  // there and every call site would need its own narrowing — the opposite of one place.
+  const promotional: PromotionalOutboundMessage = { ...message, messageClass: message.messageClass }
+  return evaluatePromotionalGate(ctx, promotional, instant, attempt)
+}
 
-  if (ctx.marketingKillSwitch) {
-    return {
-      kind: 'refuse',
-      reason: 'marketing_kill_switch',
-      detail:
-        'The marketing kill switch is engaged. Promotional sends are stopped; transactional ' +
-        'traffic is unaffected by design.',
-    }
+/**
+ * Steps 2 to 4, for a message that is promotional by TYPE.
+ *
+ * Exported so `kill-switch.test.ts` can assert the constraint that makes this unit's acceptance line
+ * structural: `evaluatePromotionalGate(ctx, transactionalMessage, at)` is a compile error, asserted with
+ * `@ts-expect-error`. It is deliberately NOT exported from the package barrel — `sendMessage` calls
+ * `evaluateGate`, the send choke-point scanner's `promotional-gate-evaluated-outside-the-choke-point` rule
+ * holds that shut, and a second entry point reachable by autocomplete would be a way into the gate that skips
+ * the transactional answer entirely.
+ */
+export function evaluatePromotionalGate(
+  ctx: GateContext,
+  message: PromotionalOutboundMessage,
+  instant: Instant,
+  attempt?: GateAttempt,
+): GateDecision {
+  // Step 2. Before any store is read, so a stopped campaign reads nothing — and read HERE, in the function
+  // whose parameter type cannot be a transactional message, rather than in `evaluateGate`.
+  const killSwitch = killSwitchVerdict(ctx.marketingKillSwitch, message)
+  if (killSwitch.kind === 'stop') {
+    return { kind: 'refuse', reason: killSwitch.reason, detail: killSwitch.detail }
   }
 
   const consent = evaluate('consent', () => ctx.evaluators.hasConsent(message))

@@ -21,7 +21,15 @@
  *     wrapper that turns a throw or a non-boolean into `blocked_unevaluable` rather than into permission;
  *   - `window.ts` — the promotional window as a SETTING (its bounded change rule, read by the admin surface
  *     as well as by the gate) and the adaptor onto the pure rule in `@berelax/core`;
- *   - `wire.ts` — the edge wiring: the three real evaluators assembled over one prefetch at one instant.
+ *   - `wire.ts` — the edge wiring: the three real evaluators assembled over one prefetch at one instant;
+ *   - `kill-switch.ts` — C-AUTO-05's marketing kill switch: the promotional-only parameter type that makes
+ *     "structurally cannot touch transactional traffic" a compile error rather than a comment, the
+ *     non-production default, who may toggle it, and the held/refused classification a recipient list is
+ *     counted in.
+ *
+ * `evaluatePromotionalGate` is deliberately NOT re-exported here. It is exported from `decide.ts` so its
+ * promotional-only parameter can be asserted by a test, and keeping it out of the barrel keeps `evaluateGate`
+ * the only way into the gate that autocomplete offers — the alternative is an entry point that skips step 1.
  */
 
 export {
@@ -32,7 +40,25 @@ export {
   type GateEvaluatorName,
   type GateEvaluators,
   type GateRefusal,
+  type PromotionalOutboundMessage,
 } from './decide.ts'
+export {
+  assertMayToggleMessagingControl,
+  type KillSwitchVerdict,
+  killSwitchVerdict,
+  MARKETING_KILL_SWITCH_REASON,
+  type MarketingKillSwitchSource,
+  type MarketingKillSwitchState,
+  PROMOTIONAL_HOLD_REASONS,
+  type PromotionalOnly,
+  type PromotionalSendDisposition,
+  type PromotionalSendingBanner,
+  type PromotionalSendingBannerState,
+  promotionalSendDisposition,
+  promotionalSenderSuspensionSuspected,
+  promotionalSendingBanner,
+  resolveMarketingKillSwitch,
+} from './kill-switch.ts'
 export {
   asPromotionalWindow,
   assertPromotionalWindowChange,

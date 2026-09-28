@@ -27,13 +27,14 @@ import {
   costOf,
   type DeliveryDeps,
   deliverMessage,
+  type MarketingKillSwitchState,
   type MessageId,
   type MessageLifecycleStore,
   promotionalGateEvaluators,
   releaseHeldMessage,
   type SendContext,
 } from '@berelax/messaging'
-import type { MessageChannel } from '@berelax/shared'
+import type { MessageChannel, MessageClass } from '@berelax/shared'
 import { asConsentLog, asSuppressionLogs } from '../reads.ts'
 import type { NodeContext, NodeEffect } from './effect.ts'
 
@@ -111,7 +112,29 @@ export interface MessageNodeDeps {
     readonly sql: Sql
     readonly evaluators: ReturnType<typeof promotionalGateEvaluators>
     readonly atIso: string
+    /**
+     * The kill switch as {@link MessageNodeDeps.marketingKillSwitchFor} resolved it for THIS message.
+     *
+     * An argument rather than something the runtime resolves inside `sendContextFor`, because resolving it
+     * requires a database read and this function is synchronous — and making it asynchronous to hide the read
+     * would mean every send paid for it, including the booking confirmations the switch must never touch.
+     */
+    readonly marketingKillSwitch: boolean
   }) => SendContext
+  /**
+   * The marketing kill switch, from its one home, for one message.
+   *
+   * C-AUTO-07 left `marketingKillSwitch: false` a literal here and said why: *"a `false` that looks like a
+   * read is the switch nobody notices is not wired"*. This is the read, and it is on this type rather than
+   * inlined because `runtime.ts` is where `APP_ENV` lives — the switch is engaged in every non-production
+   * environment and that answer is not stored in any row (see `resolveMarketingKillSwitch`).
+   *
+   * Called per message and not per boot: engaging the switch has to stop the next tick, not the next deploy.
+   */
+  readonly marketingKillSwitchFor: (input: {
+    readonly sql: Sql
+    readonly messageClass: MessageClass
+  }) => Promise<MarketingKillSwitchState>
   /** The caps in force, read from settings by the runtime rather than assumed here. */
   readonly caps: readonly FrequencyCap[]
   /**
@@ -343,7 +366,21 @@ async function attempt(
   }
   const delivery: DeliveryDeps = {
     store: ledgerBackedStore(sql, attribution, context.atIso),
-    send: deps.sendContextFor({ sql, evaluators, atIso: context.atIso }),
+    send: deps.sendContextFor({
+      sql,
+      evaluators,
+      atIso: context.atIso,
+      // Resolved from the template's immutable class, which is the only place the class exists, and NOT read
+      // at all for a transactional message — see `marketingKillSwitchFor`. The gate would ignore it either
+      // way; what the conditional buys is that a control table that cannot be read stops marketing rather
+      // than stopping a booking confirmation.
+      marketingKillSwitch: (
+        await deps.marketingKillSwitchFor({
+          sql,
+          messageClass: classified.template.messageClass,
+        })
+      ).engaged,
+    }),
     // A retry inside the tick would hold the run's row lock for the length of the declared backoff. The
     // queue is the thing that waits, which is `send-scheduled-step.ts`'s decision and for its reason.
     waitUntil: async () => {},

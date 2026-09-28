@@ -96,10 +96,18 @@ export const TEST_PORT_BANDS = {
   // it weighs are the bytes the route produces rather than a fixture's. 13_400 is the band this unit was
   // allocated; 12_400 through 13_300 are allocations held by units in flight in other worktrees, and a band
   // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
-  // one. [13_400, 13_700) contains none of RESTRICTED_PORTS — the highest entry in that table below the
+  // one. [13_700, 14_000) contains none of RESTRICTED_PORTS — the highest entry in that table below the
   // ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the floor — so the
   // browser-unsafe exclusion this registry keeps costs this band nothing and `usableWidth` is the full 300.
-  publication: { start: 13_400, width: 300 },
+  //
+  // MOVED from 13_400, which overlapped `leave-approval` at [13_300, 13_600). Not two units picking
+  // independently this time: the integrator issued 13_400 to W-SITE-10 and 13_300 to P-HR-09 a few minutes
+  // apart, 100 apart, in a registry whose bands are 300 wide — so the overlap was allocated rather than
+  // stumbled into. Two suites sharing a band is worse than a collision that fails to start, because the
+  // second `next start` cannot bind and the suite answers from the FIRST one's server, at which point green
+  // and red both mean nothing. 13_700 was M-VAT-08's allocation and it declined the band, having started no
+  // server. Found independently by A-FIRST-01 and by `ports.test.ts`, which is the check that exists for it.
+  publication: { start: 13_700, width: 300 },
   // P-HR-09's leave request screen, which needs a real server for the claims a pure render cannot make: the
   // `?role=` narrowing has to be refused by the running route rather than by a view object a test built, the
   // noindex header is the proxy's and not the document's, and axe needs a rendered DOM. 13_300 rather than
@@ -115,6 +123,15 @@ export const TEST_PORT_BANDS = {
   // the screenshot matrix both need a rendered page. 12_400 is the band this unit was allocated; it is the
   // next start above `pipeline` [12_100, 12_400) and [12_400, 12_700) contains none of RESTRICTED_PORTS.
   till: { start: 12_400, width: 300 },
+  // C-AUTO-05's promotional controls console, which needs a real server for the claims no pure render can
+  // make. All three are about a RESPONSE rather than a return value: the 403 a marketer's POST gets and the
+  // 200 a manager's gets are status codes, the audit row a successful POST leaves is written by a handler in
+  // another process, and axe needs a rendered DOM. 14_600 is the band this unit was allocated; 13_700 through
+  // 14_500 are allocations held by units in flight in other worktrees, and a band chosen from what one
+  // worktree can see is exactly how `template-editor` and `book-flow` came to share one. [14_600, 14_900)
+  // contains none of RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697 —
+  // so `usableWidth` is the full 300.
+  'marketing-kill-switch': { start: 14_600, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

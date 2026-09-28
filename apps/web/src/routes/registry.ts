@@ -801,6 +801,26 @@ export const ROUTES = [
       'immutable and already public. Absent from the sitemap because a sitemap lists documents.',
   },
   {
+    id: 'messaging-controls',
+    path: '/messaging/controls',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-05s promotional controls console: the marketing kill switch and the promotional sender-ID ' +
+      'suspension, each showing the actor, the instant and the reason of its last change, above the one ' +
+      'banner every admin surface reads through promotionalSendingBanner. GET renders and POST toggles, ' +
+      'on one URL so the permission decision, the write and the screen that shows the result cannot ' +
+      'disagree about what happened. A handler rather than a document for the reason B-MSG-04s inbox ' +
+      'gives two directories along: a document must be served in both locales, which needs an Arabic ' +
+      'admin document and the W-SYS-01 shell. Authenticated (W-SYS-11), and the /messaging prefix in ' +
+      'ADMIN_GROUP_PREFIXES is what makes it noindex. Dynamic because a cached copy of a kill switchs ' +
+      'state is the one stale answer this screen must never give.',
+  },
+  {
     id: 'template-editor',
     path: '/messaging/templates/editor',
     kind: 'handler',

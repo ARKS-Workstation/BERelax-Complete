@@ -20,6 +20,7 @@ import {
   listMessageInbox,
   readCurrentTemplate,
   readMandatoryDocumentTypes,
+  readMessagingControls,
   rebuildScheduledSteps,
   rescheduleAppointmentTx,
   type ScheduledStepMaintainer,
@@ -32,6 +33,7 @@ import {
   type TradingDateResolver,
   type TransitionActor,
   type TransitionDecider,
+  toggleMessagingControl,
   transitionAppointmentTx,
   withUnitOfWork,
   writeSetting,
@@ -178,6 +180,16 @@ function runtimeWith(options: {
   readonly nowIso: string
   /** `staging` exercises F03's guard, which diverts to the local outbox and writes no message row. */
   readonly appEnv?: 'production' | 'staging'
+  /**
+   * The marketing kill switch, engaged (C-AUTO-05).
+   *
+   * Reminders are TRANSACTIONAL, so the answer must be that nothing changes — and "nothing changes" is only
+   * worth asserting against a context where the switch really is on. The shipped runtime hard-codes `false`
+   * here and is allowed to by `check-send-chokepoint.mjs`'s `PERMITTED_LITERAL_KILL_SWITCHES`, because
+   * reading the control row on a path that sends only confirmations and reminders would let an unreadable
+   * marketing table stop one. This option is how the engaged state is reachable from a test anyway.
+   */
+  readonly killSwitch?: boolean
 }): {
   readonly runtime: ScheduledStepRuntime
   readonly calls: () => number
@@ -194,7 +206,7 @@ function runtimeWith(options: {
     outbox: new InMemoryOutbox(),
     clock,
     gate: {
-      marketingKillSwitch: false,
+      marketingKillSwitch: options.killSwitch ?? false,
       promotionalWindow: TDRA_PROMOTIONAL_WINDOW,
       evaluators: {
         hasConsent: () => true,
@@ -1355,5 +1367,115 @@ describe('acceptance — changing the reminder timing rebuilds the forward book'
         ),
       ),
     ).toEqual({ appointments: 0, superseded: 0, built: 0 })
+  })
+})
+
+// --- C-AUTO-05 -----------------------------------------------------------------------------------
+
+/**
+ * Engaging the marketing kill switch disturbs no scheduled transactional step.
+ *
+ * C-AUTO-05's acceptance line, asserted in the file that owns reminders rather than in that unit's own suite,
+ * for the reason every fixture argument in this build comes down to: the appointments, the trading days, the
+ * rooms, the therapists and the reminder plan already exist here, and a second copy of that setup would be a
+ * second thing to keep in step with `reminderPlanFor`. The rows this block reads are built by the same
+ * maintainer every other case here uses.
+ *
+ * Two claims, and the second is the one that costs something if it slips. The keys and the release instants
+ * are byte-unchanged across the toggle, which says the switch touches nothing it should not; and a reminder
+ * still SENDS with the switch engaged, which says the switch cannot stop the traffic it must never stop —
+ * through the real drain, the real choke point and the real fake vendor.
+ */
+describe('acceptance (C-AUTO-05) — the kill switch leaves scheduled transactional steps alone', () => {
+  it('keeps every key and release instant byte-unchanged, and still sends a reminder', async () => {
+    const first = await bookConfirmed({
+      key: 'killswitch-a',
+      startsAt: at(TRADING_DATE, '19'),
+      endsAt: at(TRADING_DATE, '19') + 45 * 60_000,
+    })
+    const second = await bookConfirmed({
+      key: 'killswitch-b',
+      startsAt: at(NEXT_TRADING_DATE, '19'),
+      endsAt: at(NEXT_TRADING_DATE, '19') + 45 * 60_000,
+      tradingDate: NEXT_TRADING_DATE,
+      therapist: 1,
+    })
+    const appointments = [first.appointmentId, second.appointmentId]
+
+    /** Every step of both appointments: identity, key, release instant and state. What must not move. */
+    const snapshot = async (): Promise<readonly StepRow[]> => {
+      const rows: StepRow[] = []
+      for (const id of appointments) rows.push(...(await stepsOf(id)))
+      return rows
+    }
+
+    const before = await snapshot()
+    // Not vacuous: there are steps to be unchanged. An empty list compares equal to an empty list for ever,
+    // which is ADR 0002's failure wearing a deep-equal.
+    expect(before.length).toBeGreaterThanOrEqual(4)
+    for (const step of before) expect(step.state).toBe('pending')
+
+    const engagedAt = Date.parse('2099-11-15T09:00:00.000Z')
+    try {
+      const moved = await withUnitOfWork(sql, SETTINGS_OWNER, (uow) =>
+        toggleMessagingControl(uow, {
+          controlKey: 'marketing_kill_switch',
+          engaged: true,
+          role: 'manager',
+          actorLabel: MARKER,
+          reason: 'Complaints about the weekend blast; stopping marketing until Monday.',
+          at: engagedAt,
+        }),
+      )
+      expect(moved.direction).toBe('engage')
+      // Engaged in the DATABASE, not only in the return value. The gate's argument is resolved from this row,
+      // so a toggle that answered `engage` without moving it would leave everything below measuring a
+      // disengaged switch.
+      expect((await readMessagingControls(sql)).marketing_kill_switch.engaged).toBe(true)
+
+      const after = await snapshot()
+      expect(after).toEqual(before)
+
+      // The control on the COMPARISON, which the assertion above needs in order to mean anything: move one
+      // release instant by a single millisecond and the same deep-equal must fail. Without it,
+      // "byte-unchanged" would also be reported by a comparison that cannot see a change at all.
+      const perturbed = before.map((step, index) =>
+        index === 0
+          ? { ...step, sendAtIso: new Date(Date.parse(step.sendAtIso) + 1).toISOString() }
+          : step,
+      )
+      expect(perturbed).not.toEqual(after)
+
+      // And the containment, at the layer that matters most: the reminder still leaves. Same drain, same
+      // choke point, same fake vendor as every other case in this file — with the gate's switch on.
+      const step = (await stepsOf(first.appointmentId)).find(
+        (candidate) => candidate.stepType === 'reminder_2h',
+      ) as StepRow
+      const nowIso = step.sendAtIso
+      const { runtime, calls } = runtimeWith({ magicLink: true, nowIso, killSwitch: true })
+      const outcome = await drainScheduledStep(runtime, { stepId: step.id, atIso: nowIso })
+      expect(outcome.kind).toBe('sent')
+      expect(calls()).toBe(1)
+      const settled = (await stepsOf(first.appointmentId)).find(
+        (candidate) => candidate.id === step.id,
+      ) as StepRow
+      expect(settled.state).toBe('sent')
+      expect(settled.messageId).not.toBeNull()
+    } finally {
+      // Restored in a `finally`, because the row is shared: every promotional send in this database reads it,
+      // and a suite that left it engaged would refuse the interpreter's promotional cases in a file nobody
+      // touched. The restore is an UPDATE rather than a DELETE — 0098 refuses DELETE (ZY084) precisely
+      // because removing the row is an unaudited disengagement.
+      await withUnitOfWork(sql, SETTINGS_OWNER, (uow) =>
+        toggleMessagingControl(uow, {
+          controlKey: 'marketing_kill_switch',
+          engaged: false,
+          role: 'owner',
+          actorLabel: MARKER,
+          reason: 'Test teardown: restoring the seeded disengaged state.',
+          at: engagedAt + 60_000,
+        }),
+      )
+    }
   })
 })
