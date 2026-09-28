@@ -162,6 +162,14 @@ jobs:
       - name: No invoice mutation
         run: pnpm no-invoice-mutation
 
+      # There is no way to file a tax return from this codebase, and the absence is a claim about what the
+      # build CANNOT do — so it needs a check that fails on the day the ability appears (ADR 0052). Four
+      # scans: the identifier anywhere in the tree, the network-capable GLOBALS over the tax estate (which
+      # dependency-cruiser cannot see at all), the export reading no credentials, and the boundary rule
+      # still covering every module this one names.
+      - name: No auto-file capability
+        run: pnpm no-autofile
+
       # Every JSON-LD block this site serves is built by one function, and an invalid graph fails the build
       # rather than warning. The rules a review does not catch: a plausible coordinate nothing stands behind,
       # an aggregateRating with no reviews, a Service with no price, and an OpeningHoursSpecification that

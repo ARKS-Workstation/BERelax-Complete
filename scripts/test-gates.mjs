@@ -38163,6 +38163,526 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 130a-130z. (M-VAT-09) The absence of a filing capability, proven, and the bytes of the Zoho export.
+//
+//            An absence is a claim about what the build CANNOT do, so it cannot be tested by a passing
+//            assertion — only by a check that is seen to FAIL on the day the ability appears. That is the
+//            whole subject of this block, and it is why there are four scans and a boundary rule rather
+//            than one: docs/01 decision 13 and ADR 0017 say the codebase has no capability to file a
+//            return, *"absent, not disabled, because a future maintainer will eventually switch a flag
+//            on"*, and until this unit every enforcement of that sentence was the sentence.
+//
+//            Each of the five mechanisms is broken separately, because each is one expression and a typo
+//            in one branch is invisible while the other four still fire — the defect the ledger fixture in
+//            `scripts/test-boundaries.mjs` caught for `core-must-be-pure`:
+//
+//              * the IDENTIFIER scan (130a-130e), including the two directions its matcher must
+//                discriminate in. The negative direction is not a formality: `efile` as a substring hits
+//                `writeFileSync`, `readFileSync`, `sourceFiles` and `captureFilename`, which this
+//                repository uses about forty times between them, so a matcher without segment alignment
+//                fails the tree and gets switched off rather than fixed;
+//              * the NETWORK-GLOBAL scan (130f), which exists because `fetch` is a global and a module
+//                graph is blind to it;
+//              * the CREDENTIAL scan (130g) and the runtime half of the same claim (130u);
+//              * the ONE-WAY and THROUGH-THE-DOOR scans (130h-130j), which are about the export module's
+//                own surface and its refusal to hold a raw query;
+//              * the BOUNDARY rule (130k-130o), in both directions — a rule narrowed until it covers
+//                nothing and a rule widened until it covers everything are the same dead rule.
+//
+//            The BYTES are the other half (130p-130t). The deliverable is a file an accountant is handed,
+//            so the contract is `packages/db/src/services/zoho-export.fixture.csv`: a reordered section, a
+//            lost line and a `1000` that became `1000.0` are all invisible to a field-by-field assertion.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const SCANNER = 'scripts/test-no-autofile.mjs'
+  const EXPORT_MODULE = 'packages/db/src/services/zoho-export.ts'
+  const CONFIG = '.dependency-cruiser.cjs'
+  const FIXTURE = 'packages/db/src/services/zoho-export.fixture.csv'
+  const UNIT_SUITE = 'packages/db/src/services/zoho-export.test.ts'
+  const ITEST_SUITE = 'packages/db/src/services/zoho-export.itest.ts'
+  const BOUNDARY_RULE = 'tax-and-filing-must-not-reach-the-network'
+
+  const scan = () => run('pnpm', ['no-autofile'])
+  const scanExpectingFailure = () => runExpectingFailure('pnpm', ['no-autofile'])
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const cruise = () => ['exec', 'depcruise', '--config', CONFIG, 'packages', 'apps']
+
+  // 130a. The name a submission helper would carry, written where one would actually be written: a
+  //       repository module rather than the tax estate. The scan is tree-wide for exactly this reason —
+  //       a job, a route or a script is where somebody puts "just post the figures" and none of them is
+  //       under packages/core/src/tax.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      [
+        'export async function submitReturn(returnId: string): Promise<void> {',
+        '  await Promise.resolve(returnId)',
+        '}',
+      ].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a submitReturn export is caught',
+      result,
+      'no-autofile-identifier',
+    )
+  }
+
+  // 130b. The kebab spelling, which is the one a route path arrives in and the one a JavaScript-identifier
+  //       tokeniser would never see. `-` is a token character in this scan for this case alone.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      ["export const ROUTE = '/api/tax/auto-file'"].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an auto-file route path is caught',
+      result,
+      'no-autofile-identifier',
+    )
+  }
+
+  // 130c. And `efile` as a whole segment of a longer name, which is the alternative most likely to be
+  //       removed by somebody "fixing the false positives" — see 130e for what the false positives are.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      ['export const efileEndpoint = null'].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy('no-autofile: an efile segment is caught', result, 'no-autofile-identifier')
+  }
+
+  // 130d. A TERM DROPPED from the pattern is caught by the scan's own control. The pattern is quoted in
+  //       ADR 0052 and in the manifest acceptance line, so a shortened one makes the three disagree in
+  //       the direction nobody reads.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          '/(auto[_-]?file|submitReturn|fta[_-]?api|efile|file[_-]?return)/i',
+          '/(auto[_-]?file|submitReturn|fta[_-]?api|file[_-]?return)/i',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: dropping a term from the pattern fails the scan own control',
+      result,
+      'no longer flags "efile"',
+    )
+  }
+
+  // 130e. And the other direction, which is the one that decides whether this gate can exist at all. With
+  //       segment alignment removed, `efile` matches the `eFile` inside `writeFileSync` — so the scan
+  //       reports its own negative control rather than forty false positives. A gate that fires on
+  //       `readFileSync` is a gate somebody deletes.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const aligned = ranges.some(([start]) => start === from) && ranges.some(([, end]) => end === to)',
+          '  const aligned = true',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a matcher without segment alignment flags writeFileSync',
+      result,
+      'flags "writeFileSync"',
+    )
+  }
+
+  // 130f. The network-capable global. This is the half `tax-and-filing-must-not-reach-the-network` cannot
+  //       hold: `fetch` is a global, so a module graph has nothing to draw an edge to, and 130m-130o would
+  //       all pass for an export that called it.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filename = zohoExportFilename(filing)',
+          '  const filename = zohoExportFilename(filing)\n  await fetch(filing.returnId)',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: the export calling fetch is caught although depcruise cannot see it',
+      result,
+      'no-autofile-network-global',
+    )
+  }
+
+  // 130g. A credential read. The acceptance line is that the export "succeeds with no environment
+  //       variables or credentials set", and a module that reads one has somewhere for a credential to
+  //       arrive — which is the first half of a filing path, before any network call is written.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          "    line('amount_unit', 'fils'),",
+          "    line('amount_unit', process.env['ZOHO_UNIT'] ?? 'fils'),",
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: the export reading process.env is caught',
+      result,
+      'no-autofile-export-reads-no-credentials',
+    )
+  }
+
+  // 130h. A read path back from the accounting package, as a name. "The module exposes no read path from
+  //       Zoho" is an acceptance line about an absence, and this is the enumeration that makes it a check.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          'export function zohoExportFilename(',
+          'export function importFromZoho(): void {}\n\nexport function zohoExportFilename(',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an importFromZoho export is caught',
+      result,
+      'no-autofile-export-is-one-way',
+    )
+  }
+
+  // 130i. A raw query, which is how the sign-off gate would stop applying without any check being deleted.
+  //       `vat_return` is deliberately readable — a preparer must see what they are about to sign — so a
+  //       `select … from vat_return` here answers the same question with no refusal attached to it.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filename = zohoExportFilename(filing)',
+          '  const filename = zohoExportFilename(filing)\n' +
+            '  await uow.sql`select 1 from vat_return`',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a raw query in the export is caught',
+      result,
+      'no-autofile-export-goes-through-the-filing-door',
+    )
+  }
+
+  // 130j. And the other direction of the same rule, because 130i is satisfied by a module that reads
+  //       nothing at all: the door has to be seen to be USED. An export rewritten to take its figures from
+  //       its caller would otherwise pass every scan in this block.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId)',
+          '  const filing = input as unknown as VatReturnForFiling',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an export that never calls the filing door is caught',
+      result,
+      'no-autofile-export-goes-through-the-filing-door',
+    )
+  }
+
+  // 130k. The boundary rule NARROWED until it no longer covers the export. The rule and the scan hold the
+  //       same list of modules in two files, so the failure mode is one of them moving — and a rule that
+  //       names a file it no longer matches reads exactly like a rule that works.
+  {
+    const result = withEditedFile(
+      CONFIG,
+      (source) => replaceOnce(source, 'services/zoho-export', 'services/zoho-export-moved'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a boundary rule that stops covering the export is caught',
+      result,
+      'no-autofile-boundary-covers-the-estate',
+    )
+  }
+
+  // 130l. And WIDENED until it covers everything, which is the same dead rule from the other side: it
+  //       would satisfy "covers the estate" while saying nothing about what it is aimed at. `pnpm
+  //       boundaries` was once reduced to zero modules while reporting success (ADR 0002); a rule reduced
+  //       to "all of them" is the same class of silence.
+  {
+    const result = withEditedFile(
+      CONFIG,
+      (source) => replaceOnce(source, "'^packages/core/src/tax/|' +", "'^packages/|' +"),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a boundary rule widened to every package is caught',
+      result,
+      'no-autofile-boundary-covers-the-estate',
+    )
+  }
+
+  // 130m. The boundary rule itself, on a Node builtin, in the tax estate. The acceptance line asks for
+  //       exactly this: `scripts/test-gates.mjs` proves the rule rejects a deliberately illegal fixture
+  //       import BY RULE NAME. An ordinary module rather than a `.test.ts`, because the rule exempts the
+  //       test files — `zoho-export.itest.ts` imports node:http in order to replace it with a throwing
+  //       stub, which is the opposite of using it.
+  {
+    const result = withFixture(
+      'packages/core/src/tax/__gate_fixture__.ts',
+      ["import { request } from 'node:https'", 'export const illegal = request'].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'no-autofile: the tax estate reaching node:https is refused',
+      result,
+      BOUNDARY_RULE,
+    )
+  }
+
+  // 130n. The CLIENT-LIBRARY branch of the same alternation, which `core-must-be-pure` does not cover at
+  //       all: that rule forbids http, https and net and none of the seven packages. Uninstalled, so it
+  //       resolves to its bare name — the third of the three resolution shapes core-must-be-pure's comment
+  //       records, and the one that left `no-lucide-outside-the-icon-wrapper` configured, green and dead.
+  {
+    const result = withFixture(
+      'packages/core/src/tax/__gate_fixture__.ts',
+      ["import axios from 'axios'", 'export const illegal = axios'].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy('no-autofile: the tax estate reaching axios is refused', result, BOUNDARY_RULE)
+  }
+
+  // 130o. And the outward-facing-package branch, as an edit to the export itself — the branch a real
+  //       gateway would arrive through, and the one no other rule in the config covers for packages/db.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          "import { AppError } from '@berelax/shared'\nimport * as google from '@berelax/google'",
+        ),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'no-autofile: the export reaching an outward-facing package is refused',
+      result,
+      BOUNDARY_RULE,
+    )
+  }
+
+  // 130p. The bytes are the contract. One character of the committed fixture, and the suite that asserts
+  //       it must fail — otherwise the fixture is a file nobody compares and every claim about the
+  //       deliverable is unheld.
+  {
+    const result = withEditedFile(
+      FIXTURE,
+      (source) => replaceOnce(source, 'net_tax_due_fils,600', 'net_tax_due_fils,601'),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: a one-fils edit to the export fixture fails the byte suite',
+      result,
+      'renders the committed fixture',
+    )
+  }
+
+  // 130q. The row order taken out of the renderer. The file's order must be a property of the figures
+  //       rather than of the order a JSON parser walked an array in: a snapshot lists its boxes in
+  //       whatever order the working papers built them, and two exports of one return that differ only in
+  //       row order are two different file hashes for one artefact.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    boxes: [...boxes].sort((a, b) => a.displayOrder - b.displayOrder || a.boxNo - b.boxNo),',
+          '    boxes,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an unsorted box list fails the order suite',
+      result,
+      'orders boxes by display order',
+    )
+  }
+
+  // 130r. The totals made wrong in the one direction that still looks plausible: a SUM where the return
+  //       needs a difference. Output tax plus input tax is a number, it is positive, it moves when the
+  //       ledger moves, and it is what the business would pay if somebody typed it into a return.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    netTaxDueFils: output.tax - input.tax,',
+          '    netTaxDueFils: output.tax + input.tax,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: net tax due as a sum fails the reconciliation suite',
+      result,
+      'sums each side and subtracts',
+    )
+  }
+
+  // 130s. RFC 4180 quoting removed. A label with a comma in it then shifts every column after it, and the
+  //       figures an accountant reads land under the wrong headings — a corruption that no total would
+  //       reveal, because the totals are correct.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const needsQuoting = /[",\\r\\n]/.test(raw) || raw !== raw.trim()',
+          '  const needsQuoting = false',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an unquoted field fails the CSV suite',
+      result,
+      'quotes a field that would otherwise break the row',
+    )
+  }
+
+  // 130t. The refusal wrapped in a generic error, which is the realistic way "runs only for a signed
+  //       return" stops being reportable: the export still refuses, and a screen can no longer tell
+  //       "two people have not signed this" from "the database is down".
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId)',
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId).catch(() => {\n' +
+            "    throw new Error('the export failed')\n" +
+            '  })',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: a swallowed ZY055 fails the sign-off suite',
+      result,
+      'refuses an unsigned return by name',
+    )
+  }
+
+  // 130u. The audit row without the file hash. The acceptance line names three things it must carry, and
+  //       the hash is the one that makes the row answer a question: without it the trail records that
+  //       somebody exported something, which is what a log already does.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      returnVersion: filing.version,\n      fileHash,',
+          '      returnVersion: filing.version,',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an audit row without the file hash fails the audit suite',
+      result,
+      'carrying the user, the version and the file hash',
+    )
+  }
+
+  // 130v. A credential the export REQUIRES, which is the runtime half of 130g. The scan catches the read;
+  //       this catches the dependency — an export that cannot run without something configured is an
+  //       export somebody will configure, and the thing they will configure it with is a token.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const document = renderZohoVatReturn(filing)',
+          "  if (process.env['ZOHO_TOKEN'] === undefined) throw new Error('no Zoho credentials')\n" +
+            '  const document = renderZohoVatReturn(filing)',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an export needing a credential fails the cleared-environment suite',
+      result,
+      'succeeds with the environment emptied',
+    )
+  }
+
+  // 130w. Dropping the step from `pnpm verify`. The failure mode of the convention this whole block
+  //       enforces is that nothing fails when it is ignored, so the registration has to be load-bearing
+  //       too: case 29's array and the workflow are what stop a gate being quietly removed from CI.
+  {
+    const result = withEditedFile(
+      'package.json',
+      (source) => replaceOnce(source, ' && pnpm no-autofile', ''),
+      () => runExpectingFailure('pnpm', ['gate-registry']),
+    )
+    checkRejectedBy(
+      'no-autofile: dropping the step from verify fails the gate registry',
+      result,
+      'pnpm no-autofile',
+    )
+  }
+
+  // 130z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as a block of passing cases — which is the shape of every gate this file
+  //       has caught dying.
+  {
+    const clean = scan()
+    check('no-autofile: the unedited repository passes the scanner', !clean.failed, clean.output)
+
+    const cruised = run('pnpm', cruise())
+    check(
+      'no-autofile: the unedited repository passes the boundary rule',
+      !cruised.failed,
+      cruised.output,
+    )
+
+    const bytes = run('pnpm', unit(UNIT_SUITE))
+    check('no-autofile: the byte suite passes unedited', !bytes.failed, bytes.output)
+
+    const behaviour = run('pnpm', integration(ITEST_SUITE))
+    check('no-autofile: the export suite passes unedited', !behaviour.failed, behaviour.output)
+
+    const registry = run('pnpm', ['gate-registry'])
+    check('no-autofile: the gate registry passes unedited', !registry.failed, registry.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -39000,6 +39520,9 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // against a document table — the half of "an issued invoice is never edited" that is a rule about the
     // repository rather than a rule in the database.
     'pnpm no-invoice-mutation',
+    // M-VAT-09's. The proof that no filing capability exists: an absence is a claim about what the build
+    // cannot do, so dropping this step from CI would leave the claim made only in prose (ADR 0052).
+    'pnpm no-autofile',
     'pnpm structured-data',
     'pnpm audit:online',
     'pnpm palette',

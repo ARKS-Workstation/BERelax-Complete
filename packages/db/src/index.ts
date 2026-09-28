@@ -1644,6 +1644,26 @@ export {
   vatReturnSigningRoles,
   vatReturnSignOffState,
 } from './services/vat-return-signoff.ts'
+// M-VAT-09. The one-way Zoho Books export, beside the return it reads: bytes a person carries into the
+// accounting package, never a call. `renderZohoVatReturn` and `zohoExportFilename` are exported beside the
+// service because a screen has to be able to name the download before asking for it; what is NOT exported
+// anywhere is a way to reach the figures except through `vatReturnForFiling` (ADR 0052).
+export {
+  type ExportVatReturnForZohoInput,
+  exportVatReturnForZoho,
+  renderZohoVatReturn,
+  ZOHO_EXPORT_FORMAT_VERSION,
+  ZOHO_EXPORT_MEDIA_TYPE,
+  ZOHO_EXPORT_SURFACE,
+  type ZohoExportBoxRow,
+  type ZohoExportNotFileableRow,
+  ZohoExportSnapshotUnreadable,
+  type ZohoExportSurfaceEntry,
+  type ZohoExportTotals,
+  type ZohoVatReturnDocument,
+  type ZohoVatReturnExport,
+  zohoExportFilename,
+} from './services/zoho-export.ts'
 export {
   type AvailabilityLimits,
   GENDER_MATCHING_SETTING_KEY,

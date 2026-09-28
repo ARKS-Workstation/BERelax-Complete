@@ -6959,7 +6959,9 @@ units:
       the itest, so an export added and not classified fails — and the two that require sign-off are asserted to
       be exactly finaliseVatReturn and vatReturnForFiling, so a third arriving without its own behavioural case
       fails there rather than passing silently. The one-way Zoho export itself is deferred to M-VAT-09, which
-      owns it and reads vat_return_for_filing(); a VAT return SCREEN is deferred to M-VAT-12, whose
+      owns it and reads vat_return_for_filing() — DEFERRAL SATISFIED: M-VAT-09 landed it as
+      packages/db/src/services/zoho-export.ts, whose one read is vatReturnForFiling and whose refusal is the
+      same ZY055; a VAT return SCREEN is deferred to M-VAT-12, whose
       closed-month report is the nearest surface and which depends on this unit.'
     - 'NOTE: a snapshot may not make an unfileable return look fileable, and that is a CHECK rather than a
       service guard: vat_return_fileable_only_when_nothing_in_it_refuses_filing reads the HASHED BYTES, so
@@ -7041,7 +7043,7 @@ units:
       plus a repository-wide identifier grep. The Zoho Books export is one-way, allowed only for a signed
       return.'
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - M-VAT-08
@@ -7058,12 +7060,55 @@ units:
     - every export writes an audit_event carrying the exporting user, the return version and the file hash
     - an ADR records that the absence is structural and that re-adding a network dependency to the tax modules
       fails the boundary gate
+    - 'NOTE: the acceptance line names ReturnNotSigned, and no such class was added. That refusal already
+      exists: M-VAT-08 shipped it as VatReturnNotSignedOff, raised by ZY055 from vat_return_for_filing()
+      itself (migration 0095), and the export simply lets it through. Two error classes for one database
+      rule is the second-statement-of-a-fact problem in the place it reads worst, because a caller
+      branching on the wrong one is a screen that cannot tell a missing signature from an unknown failure.
+      packages/db/src/services/zoho-export.itest.ts asserts the name AND the SQLSTATE, so the refusal is
+      identified by the rule rather than by a message.'
+    - 'NOTE: this unit takes NO migration and raises NO new private SQLSTATE, and that is a decision rather
+      than an omission - migration number 0102 and the codes ZY121 to ZY130 allocated to it are left unused
+      and free for a later unit. Every other refusal around the VAT return is a trigger or a CHECK, for the
+      reason ADR 0044 and migration 0087 record, and the argument does not transfer here: an export WRITES NO
+      ROW.
+      Its whole content is a read plus formatting, so there is nothing a psql session could write for a
+      trigger to refuse - which is exactly why 0095 put the sign-off refusal on a READ. The evidence of an
+      export is therefore an audit_event, append-only in the database (ADR 0008), written by the same
+      function that produces the bytes and in the same transaction, so the file and the evidence of it
+      cannot separate. The cost, stated in ADR 0052: the audit trail is the only index of exports, and
+      "which returns have been handed over" is a query over audit_event by action rather than a join. A
+      later unit that needs exports as first-class records adds the table and the deferred audit trigger.'
+    - 'NOTE: the file is NOT Zoho Books own import format, and nothing guessed one. Which columns that
+      package expects for a VAT return is unanswered by every document in the handover, so it is recorded
+      as [UNVERIFIED] Y11-zoho-import and the export declares its own tag, berelax.vat201.zoho.v1: four
+      labelled CSV sections carrying the signed snapshot box figures in integer fils, its content hash and
+      its own reasons against filing, with no TRN, registered name, address or authority reference (brief
+      rule 15). Answering that question adds a new format version beside this one rather than changing what
+      every previously exported file meant, and the bytes are frozen against
+      packages/db/src/services/zoho-export.fixture.csv so any change is visible in a diff.'
+    - 'NOTE: the identifier pattern is enforced exactly as this entry states it, and where it is porous is
+      written down rather than widened: submitVatReturn has Vat between the two words it joins, and e-file
+      spelled with a hyphen is not in it. A check quietly enforcing something broader than its own
+      specification makes the two disagree in the direction nobody reads. That porosity is why the unit has
+      six refusals and not one - the boundary rule and the network-global scan are what close it, because a
+      filing path has to reach the network under SOME name.'
     files:
     - scripts/test-no-autofile.mjs
     - .dependency-cruiser.cjs
     - packages/db/src/services/zoho-export.ts
+    - packages/db/src/services/zoho-export.test.ts
     - packages/db/src/services/zoho-export.itest.ts
-    - docs/adr/00xx-no-autofile-is-structural.md
+    - packages/db/src/services/zoho-export.fixture.csv
+    - package.json
+    - .github/workflows/ci.yml
+    - scripts/test-gates.mjs
+    - scripts/test-boundaries.mjs
+    - packages/db/src/index.ts
+    - build/secret-inventory.json
+    - docs/adr/0052-no-autofile-is-structural.md
+    - docs/adr/README.md
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-10
     order: 65
     title: Compliance calendar engine and blocking obligations
