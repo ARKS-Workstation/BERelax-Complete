@@ -102,6 +102,20 @@ export const PERMISSIONS = [
   'template:write',
   'template:approve',
 
+  // Reviews (G-REV-02). ONE permission, and what it does NOT cover is the point of it.
+  //
+  // `review:record` is recording a review that has already been published on the Google listing: the paste
+  // form, and the inbound-email parse that files one for you. docs/10 SS6 measures it in ninety seconds and it
+  // is data entry at the front desk — the reviewer's words are already public, and the alternative to the
+  // desk doing it is nobody doing it, which is the state the whole fallback exists to remove.
+  //
+  // It is deliberately NOT the permission that approves a REPLY. A reply is published under the business's
+  // name on a public listing, docs/07 SS4 requires a human to approve every one, and the linter that guards it
+  // refuses medical claims, named therapists and discount promises. Folding the two together would mean the
+  // role that types in a one-star review could also publish the answer to it, which is exactly the decision
+  // docs/07 SS4 reserves for somebody with the authority to make it. G-REV-05 owns that permission.
+  'review:record',
+
   // Content and SEO
   'content:write',
   'content:publish',
@@ -206,6 +220,9 @@ const RECEPTIONIST_PERMISSIONS = [
   'customer:write',
   // Sees THAT there is a contraindication, never the note behind it.
   'clinical_flags:read',
+  // Recording a published review, which is the desk's ninety seconds (docs/10 SS6). NOT the reply approval:
+  // see the catalogue entry for `review:record`.
+  'review:record',
   'till:operate',
   'invoice:issue',
   'rota:read',

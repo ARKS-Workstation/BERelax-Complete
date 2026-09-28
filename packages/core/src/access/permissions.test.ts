@@ -103,6 +103,20 @@ describe('the receptionist boundary — the case route-level checks cannot expre
     expect(can('receptionist', 'payroll:read')).toBe(false)
   })
 
+  it('CAN record a published review, and CANNOT approve the reply to it', () => {
+    // G-REV-02 added `review:record` and granted it to the desk. The second half is the assertion that
+    // matters and is why it is a permission of its own: a reply is published under the business's name and
+    // docs/07 SS4 reserves approving one for somebody with the authority to say it. `content:publish` is the
+    // nearest thing to a publish permission this catalogue holds, and the desk does not have it.
+    expect(can('receptionist', 'review:record')).toBe(true)
+    expect(can('receptionist', 'content:publish')).toBe(false)
+    expect(can('owner', 'review:record')).toBe(true)
+    // The roles that have no business at the front desk do not get it by accident.
+    expect(can('marketer', 'review:record')).toBe(false)
+    expect(can('therapist', 'review:record')).toBe(false)
+    expect(can('auditor', 'review:record')).toBe(false)
+  })
+
   it('CANNOT export the client list — the insider-threat path', () => {
     expect(can('receptionist', 'customer:export')).toBe(false)
   })

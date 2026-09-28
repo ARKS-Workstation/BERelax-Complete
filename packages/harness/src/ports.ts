@@ -79,6 +79,14 @@ export const TEST_PORT_BANDS = {
   // flight in another worktree", which was true when it was written: that unit is this one, and the
   // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
   'quick-book': { start: 11_800, width: 300 },
+  // G-REV-02's paste form, which needs a real server for the one claim a pure render cannot make: that the
+  // form completes in a SINGLE POST. Counting requests is a property of a browser submitting a real form to a
+  // real handler, and the 303 that follows it is what makes "one POST" different from "one request". 13_500
+  // is the band this unit was allocated rather than the next round number after `pipeline`: 12_400 through
+  // 13_400 are allocations held by units in flight in other worktrees, and a band chosen from what one
+  // worktree can see is exactly how `template-editor` and `book-flow` came to share one. [13_500, 13_800)
+  // contains none of RESTRICTED_PORTS.
+  'reviews-paste': { start: 13_500, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

@@ -247,6 +247,27 @@ export const ROUTES = [
       'token part of the resource identity and appear in every log line and Referer for one page.',
   },
   {
+    id: 'reviews-inbound',
+    path: '/api/v1/reviews/inbound',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-02s inbound intake: where a forwarded Google review notification arrives. The owner forwards ' +
+      'the email and the parse reads the reviewer, the rating and the text - or, when Google has changed the ' +
+      'template, files the body byte for byte as a job for a person (docs/10 SS6). It REFUSES every request ' +
+      'today with 503 inbound_not_configured, because REVIEW_INBOUND_SECRET is unset in every environment ' +
+      'and there is no verified receiving domain (Y8-inbound-review-address, Y6-email-sender): an ' +
+      'unauthenticated endpoint here is an injection path into the drafting pipeline, which is what docs/10 ' +
+      'SS7 says about an unverified Pub/Sub webhook. Under /api rather than beside the paste form for the ' +
+      'three reasons the media publish endpoint records - /api is exempt from proxy.ts canonicalisation so a ' +
+      'trailing slash is a 308 rather than a 301 that would drop the POST body, it is locale-neutral, and it ' +
+      'is somewhere a relay naturally posts. Dynamic because it reads the clock once and writes.',
+  },
+  {
     id: 'book',
     path: '/book',
     kind: 'document',
@@ -821,6 +842,31 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'reviews-paste',
+    path: '/reviews/paste',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-02s paste form: the review intake path that always works. The Business Profile API is not ' +
+      'approved (Y3-gbp-api), so nothing polls Google - a review reaches this system because somebody ' +
+      'forwarded the notification email or typed it in here, and docs/10 SS6 measures the typing at ninety ' +
+      'seconds. A handler rather than a document for the reason the diary, the pipeline board, the Messages ' +
+      'inbox, the template editor, the compliance calendar, the duplicate queue and the quick-book screen ' +
+      'all give: a registry document must be served in BOTH locales, which needs an Arabic admin document ' +
+      'and the W-SYS-01 shell. It WRITES - one POST creates the review, its audit row and the resolution of ' +
+      'the forwarded message it came from, in one transaction - and it IS authenticated, which makes it the ' +
+      'first admin route in this registry that is: it reads Payloads own verified session through ' +
+      'principalForRequest and refuses on the F07 matrix with `review:record`, in BOTH verbs, because the ' +
+      'page shows a forwarded reviews full text. There is deliberately no ?role= parameter, which is what ' +
+      'keeps it on the right side of W-SYS-11s scan. Dynamic because the row it writes carries an instant ' +
+      'derived from a typed date and the future-date refusal reads the clock. Covered by the new /reviews ' +
+      'noindex prefix in ADMIN_GROUP_PREFIXES.',
+  },
+  {
     id: 'robots-txt',
     path: '/robots.txt',
     kind: 'handler',
@@ -1125,6 +1171,9 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/crm',
   '/hr',
   '/messaging',
+  // G-REV-02's paste form. A prefix rather than a bare path because the reviews admin will grow a queue and
+  // an approval screen (G-REV-04, G-REV-05), and a prefix added with the first route covers them all.
+  '/reviews',
   '/settings',
 ]
 
