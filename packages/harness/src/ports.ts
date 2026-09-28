@@ -79,6 +79,13 @@ export const TEST_PORT_BANDS = {
   // flight in another worktree", which was true when it was written: that unit is this one, and the
   // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
   'quick-book': { start: 11_800, width: 300 },
+  // M-TILL-13's till, cash-up and package screens, which need a real server for the claims a pure render
+  // cannot make: the twelve-interaction walk-in is a real keyboard driving real `<form>` POSTs, "genuinely
+  // mirrored" is a `getBoundingClientRect` on the keypad and the total column in both directions, the
+  // palette rule is read off the COMPUTED style of a rendered DOM rather than off a CSS string, and axe and
+  // the screenshot matrix both need a rendered page. 12_400 is the band this unit was allocated; it is the
+  // next start above `pipeline` [12_100, 12_400) and [12_400, 12_700) contains none of RESTRICTED_PORTS.
+  till: { start: 12_400, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
