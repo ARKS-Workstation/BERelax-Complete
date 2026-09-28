@@ -22,7 +22,7 @@ import {
 } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { assertMappingReconciles, checkoutMapping } from './checkout.ts'
-import { truncateInvoiceFamily } from './invoice-family.ts'
+import { truncateInvoiceFamily, truncatePackageFamily } from './invoice-family.ts'
 import { packageSaleMapping } from './package.ts'
 import { packageRedemptionMapping } from './package-redemption.ts'
 import {
@@ -359,10 +359,7 @@ afterAll(async () => {
     states in its own `beforeAll` and truncates them again afterwards, so nothing here is photographing rows
     this statement takes away.
   */
-  await sql?.unsafe(
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-      'package_template_version, package_template',
-  )
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`

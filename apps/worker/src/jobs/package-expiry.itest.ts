@@ -4,6 +4,7 @@ import {
   PACKAGE_REDEMPTION_REVENUE_ACCOUNT,
 } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
+import { truncatePackageFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PACKAGE_EXPIRY_ACTOR, runPackageExpirySweep } from './package-expiry.ts'
 
@@ -54,10 +55,6 @@ let variantId: string
 const RUN = Date.now().toString(36)
 let nonce = 0
 
-const TRUNCATE =
-  'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-  'package_template_version, package_template'
-
 beforeAll(async () => {
   sql = createConnection({ url, max: 4 })
   await sql`
@@ -83,12 +80,12 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql?.unsafe(TRUNCATE)
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
-  await sql.unsafe(TRUNCATE)
+  await truncatePackageFamily(sql)
   nonce += 1
 })
 

@@ -1001,7 +1001,7 @@ export const ROUTES = [
       'and the W-SYS-01 shell. It WRITES - one POST creates the review, its audit row and the resolution of ' +
       'the forwarded message it came from, in one transaction - and it IS authenticated, which makes it the ' +
       'first admin route in this registry that is: it reads Payloads own verified session through ' +
-      'principalForRequest and refuses on the F07 matrix with `review:record`, in BOTH verbs, because the ' +
+      'the admin session through `guardAdminRoute` and refuses on the F07 matrix with `review:record`, in BOTH verbs, because the ' +
       'page shows a forwarded reviews full text. There is deliberately no ?role= parameter, which is what ' +
       'keeps it on the right side of W-SYS-11s scan. Dynamic because the row it writes carries an instant ' +
       'derived from a typed date and the future-date refusal reads the clock. Covered by the new /reviews ' +

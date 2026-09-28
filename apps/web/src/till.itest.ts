@@ -8,6 +8,7 @@ import {
   seedPackageDrawdownStates,
   seedPackageTemplates,
   truncateInvoiceFamily,
+  truncatePackageFamily,
 } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
 import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
@@ -367,10 +368,7 @@ afterAll(async () => {
     package suites end with this same list. `payment` is named because it references `package_sale` and
     PostgreSQL refuses a truncate while a referencing table is left out.
   */
-  await sql?.unsafe(
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-      'package_template_version, package_template',
-  )
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`

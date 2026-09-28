@@ -30,6 +30,7 @@ import {
   withUnitOfWork,
 } from '@berelax/db'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { truncatePackageFamily } from './invoice-family.ts'
 import { packageSaleMapping } from './package.ts'
 import {
   assertPackageRedemptionMappingReconciles,
@@ -81,10 +82,6 @@ let variants: readonly { id: string; grossPriceFils: number }[]
 const RUN = Date.now().toString(36)
 let nonce = 0
 
-const TRUNCATE =
-  'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-  'package_template_version, package_template'
-
 beforeAll(async () => {
   sql = createConnection({ url, max: 8 })
   for (const day of [SOLD_ON, REDEEMED_ON, AFTER_EXPIRY]) {
@@ -122,12 +119,12 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql?.unsafe(TRUNCATE)
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
-  await sql.unsafe(TRUNCATE)
+  await truncatePackageFamily(sql)
   nonce += 1
 })
 

@@ -284,7 +284,10 @@ describe('acceptance — one form submission creates the review', () => {
     `
     expect(audit?.actor_kind).toBe('staff')
     expect(audit?.actor_id).not.toBeNull()
-    expect(audit?.actor_label).toContain('cms_user')
+    // `employee` and not `cms_user`: the principal comes from the admin session now, and the label names what
+    // it is. The assertion is on the SOURCE rather than on the id, because the id is a uuid either way and a
+    // label naming the wrong authority would otherwise read as correct.
+    expect(audit?.actor_label).toContain('employee')
     expect(audit?.actor_label).toContain('receptionist')
   }, 60_000)
 
@@ -360,8 +363,11 @@ describe('authorisation is server-side and both verbs are guarded', () => {
     const location = response.headers.get('location') ?? ''
     // The POSITIVE claim, so the absences below are about a real answer rather than about an empty response:
     // the redirect names the login screen and carries this path to come back to.
-    expect(new URL(location).pathname).toBe('/login')
-    expect(new URL(location).searchParams.get('returnTo')).toBe(REVIEWS_PASTE_PATH)
+    // Parsed against BASE, because a `Location` may be absolute or path-relative and both are legal: the first
+    // run of this case died on `TypeError: Invalid URL` rather than on anything about the redirect.
+    const redirect = new URL(location, BASE)
+    expect(redirect.pathname).toBe('/login')
+    expect(redirect.searchParams.get('returnTo')).toBe(REVIEWS_PASTE_PATH)
     // And the BYTES, which is the claim that found a real defect: the first version of the handler rendered
     // the same page for every refusal, so its 401 document carried the forwarded text, the connection id and
     // the Google account email. A refusal that shows what it refuses is not a refusal — and a redirect can
@@ -394,7 +400,7 @@ describe('authorisation is server-side and both verbs are guarded', () => {
     // 303, and the row count is the claim that matters: a redirect that had already written the review would
     // be the worst of both answers.
     expect(response.status).toBe(303)
-    expect(new URL(response.headers.get('location') ?? '').pathname).toBe('/login')
+    expect(new URL(response.headers.get('location') ?? '', BASE).pathname).toBe('/login')
     const [row] = await sql<{ n: string }[]>`
       select count(*)::text as n from google_reviews where place_id = ${PLACE}
     `

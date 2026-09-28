@@ -1,6 +1,11 @@
 import { createConnection, type Sql } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { INVOICE_FAMILY_TABLES, truncateInvoiceFamily } from './invoice-family.ts'
+import {
+  INVOICE_FAMILY_TABLES,
+  PACKAGE_FAMILY_TABLES,
+  truncateInvoiceFamily,
+  truncatePackageFamily,
+} from './invoice-family.ts'
 
 /**
  * The written list and the live schema, held equal.
@@ -58,13 +63,44 @@ describe('the invoice family', () => {
     ).toEqual(derived)
   })
 
-  it('empties the family, which is what the ten callers need it to do', async () => {
+  it('names every table that holds a foreign key into the package family, transitively', async () => {
+    // The same derivation from the package roots. Two roots and not one: a suite empties the templates too,
+    // because 0078 pins a sale to its template version with `on delete restrict`, and a template that outlives
+    // its sales is a row the next run can neither remove nor reuse.
+    const rows = await sql<{ table_name: string }[]>`
+      with recursive family(oid) as (
+        select oid from (values ('package_template'::regclass::oid), ('package_sale'::regclass::oid)) as r(oid)
+        union
+        select c.conrelid
+        from pg_constraint c
+        join family f on c.confrelid = f.oid
+        where c.contype = 'f'
+      )
+      select oid::regclass::text as table_name from family
+    `
+    const derived = rows.map((row) => row.table_name).sort()
+    expect(
+      derived.length,
+      'the recursive walk found nothing in the package family',
+    ).toBeGreaterThan(5)
+    expect(
+      [...PACKAGE_FAMILY_TABLES].sort(),
+      'the written package list and the live schema disagree. This is the list P-HR-11 broke by pointing ' +
+        '`commission_line` at `package_redemption`: six suites truncated the family and four failed in their ' +
+        'own teardown, after their assertions had passed.',
+    ).toEqual(derived)
+  })
+
+  it('empties both families, which is what the sixteen callers need them to do', async () => {
     // Driven for real rather than asserted about: a helper that named the right tables and built a statement
     // PostgreSQL refuses would pass the case above and fail every caller. Empty is the state a seeded database
     // is already in for these tables, so this proves the statement RUNS, not that it deleted something — the
     // suites that write invoices are where the removal itself is exercised.
     await truncateInvoiceFamily(sql)
-    const [row] = await sql<{ n: string }[]>`select count(*)::text as n from invoice`
-    expect(row?.n).toBe('0')
+    await truncatePackageFamily(sql)
+    const [invoices] = await sql<{ n: string }[]>`select count(*)::text as n from invoice`
+    const [sales] = await sql<{ n: string }[]>`select count(*)::text as n from package_sale`
+    expect(invoices?.n).toBe('0')
+    expect(sales?.n).toBe('0')
   })
 })

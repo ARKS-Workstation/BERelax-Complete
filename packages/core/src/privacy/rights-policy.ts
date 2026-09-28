@@ -1019,6 +1019,22 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
 
   // --- financial: the documents a regulator reads ------------------------------------------------
   rule({
+    key: 'public.commission_line.invoice_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.invoice.customer_id',
+    why:
+      'A commission line points at the invoice the commission was earned on. It carries no identity of its ' +
+      'own — the employee is named by `staff_reference` and the customer appears nowhere on the row — so the ' +
+      'column is a pointer at a document whose own rule decides the matter, which is what ' +
+      '`inherits_parent` means here: whatever happens to `public.invoice.customer_id` happens to this, and ' +
+      'a second answer beside it would be a second answer about one invoice. It is classified at all ' +
+      "because the catalogue's foreign-key child probe finds it and the erasure REFUSES to run with an " +
+      "unclassified column (ADR 0034) — it was P-HR-11 landing 0097 that made nine of this suite's cases " +
+      'fail, which is the probe working rather than a gap in it.',
+    registeredBy: 'P-HR-11',
+  }),
+  rule({
     key: 'public.invoice.customer_id',
     dataClass: 'financial',
     action: 'retain_statutory',

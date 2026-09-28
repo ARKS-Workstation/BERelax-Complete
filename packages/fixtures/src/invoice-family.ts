@@ -47,3 +47,40 @@ export const INVOICE_FAMILY_TABLES: readonly string[] = Object.freeze([
 export async function truncateInvoiceFamily(sql: Sql): Promise<void> {
   await sql.unsafe(`truncate ${INVOICE_FAMILY_TABLES.join(', ')}`)
 }
+
+/**
+ * The package family, on the same terms, and it broke in the same merge for the same reason.
+ *
+ * Six suites carried the identical `truncate package_redemption, payment, package_balance, package_sale,
+ * package_template_line, package_template_version, package_template`, and P-HR-11's `commission_line` took a
+ * foreign key to `package_redemption` as well as to `invoice` — a commission line is earned on a treatment
+ * that was either invoiced or drawn down from a package, so it points at both. Four suites then failed in
+ * teardown, and the first fix (adding `commission_line` to the invoice family only) moved the failure from one
+ * statement to the other rather than removing it: the two families overlap in `payment` and now in
+ * `commission_line`, and a list per suite cannot be kept in step with a schema.
+ *
+ * `payment` is in BOTH lists deliberately. It references `invoice` and `package_sale`, so whichever family is
+ * emptied first has to take it, and naming it twice is how each statement stays legal on its own. TRUNCATE is
+ * idempotent over an empty table.
+ */
+export const PACKAGE_FAMILY_TABLES: readonly string[] = Object.freeze([
+  'commission_line',
+  'package_redemption',
+  'payment',
+  'package_balance',
+  'package_sale',
+  'package_template_line',
+  'package_template_version',
+  'package_template',
+])
+
+/**
+ * Empties the package family, templates included, as the OWNER.
+ *
+ * Templates are in the set because the suites that seed their own templates must leave none behind: 0078 pins
+ * a sale to its template version with `on delete restrict`, so a template that outlives its sales is a row the
+ * next run cannot remove and cannot reuse.
+ */
+export async function truncatePackageFamily(sql: Sql): Promise<void> {
+  await sql.unsafe(`truncate ${PACKAGE_FAMILY_TABLES.join(', ')}`)
+}
