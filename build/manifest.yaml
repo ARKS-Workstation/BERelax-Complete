@@ -10291,8 +10291,8 @@ units:
     - 'NOTE: the concrete files this list left as placeholders or got wrong, and one it omitted. The web
       surface is apps/web/app/(admin)/hr/leave/[id]/route.ts plus render.ts and NOT page.tsx: registry.ts is
       in exact bijection with the filesystem and requires every DOCUMENT to be served in both locales, so a
-      page.tsx would need an Arabic admin document W-SYS-11 has not built and would join a screenshot matrix
-      whose RTL half must be a real Arabic route. P-HR-02''s NOTE records that as the arrangement every HR
+      page.tsx would need an Arabic admin document that does not exist in either locale and would join a
+      screenshot matrix whose RTL half must be a real Arabic route. P-HR-02''s NOTE records that as the arrangement every HR
       surface takes, and P-HR-06 corrected the same placeholder for the rota screen. There is no
       packages/core/src/availability/eligibility.ts and never was: the eligibility PORT is
       packages/core/src/availability/eligibility-port.ts and the leave predicate this unit''s availability
@@ -10410,9 +10410,21 @@ units:
       expression, so there is nowhere for a widening to hide, and a marketer is refused the conflict report -
       which names a client and a service - while the count is withheld with it, because a number is enough to
       tell somebody whether a named colleague has bookings. An unrecognised role STRING is a 400 rather than
-      a fall back to the ceiling. DEFERRED to W-SYS-11: the approve, override and withdraw controls, which
-      need the admin session an actor and a reason can be attributed to. Nothing else in the route changes
-      when it lands, which is why the role and the reader are arguments now.'
+      a fall back to the ceiling. DEFERRAL SATISFIED - W-SYS-11 went done while this unit was in flight,
+      and what it satisfied is the thing the deferral was waiting for: an admin session an actor and a reason
+      can be attributed to now exists, so the approve, override and withdraw controls are no longer blocked
+      on a principal that has to be invented. Two things follow, and the second is work rather than a note.
+      The controls themselves are not in W-SYS-11''s file list and are not built by it, so they are not
+      re-pointed at it - they are simply unbuilt, and the route was written so that landing them changes
+      nothing else, which is why the role and the reader are arguments. And W-SYS-11''s FIRST acceptance line
+      is a repository-wide scan that finds no ?role= used to choose a principal, a role or a permission
+      anywhere in apps/web, with a known-bad fixture that reintroduces one - so this route''s ?role= is a
+      merge-time conflict rather than a surviving interim: on the merged tree the claimed role must come from
+      W-SYS-11''s session reader instead of the query string. That change could not be made here, because
+      apps/web/src/session.ts does not exist in this worktree and importing it would fail typecheck. What
+      makes the swap small is where the narrowing lives: resolveLeaveApprovalAccess and
+      narrowLeaveApprovalAccess are in @berelax/core and take the claimed role as an argument, so only the
+      line that reads the role changes and the ceiling intersection it feeds is untouched.'
     files:
     - packages/core/src/hr/leave-approval.ts
     - packages/core/src/hr/leave-approval.test.ts
