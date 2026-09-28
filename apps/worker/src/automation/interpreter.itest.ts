@@ -1196,10 +1196,12 @@ describe('a run whose enrolment was erased', () => {
     const [enrolment] = await sql<{ id: string }[]>`
       select enrolment_id as id from flow_run where id = ${runId}::uuid
     `
-    expect(enrolment?.id, 'a live run always names an enrolment').toBeDefined()
+    const enrolmentId = enrolment?.id
+    expect(enrolmentId, 'a live run always names an enrolment').toBeDefined()
+    if (enrolmentId === undefined) return
 
     // The one statement the erasure issues against this table, at the privilege it issues it with.
-    await sql`delete from flow_enrolment where id = ${enrolment?.id}::uuid`
+    await sql`delete from flow_enrolment where id = ${enrolmentId}::uuid`
 
     const outcome = await runFlowTick(runtime, { runId, atIso: INSIDE_WINDOW_ISO })
     expect(outcome.kind, 'a state, not a throw — this tick used to raise invariant_violated').toBe(
