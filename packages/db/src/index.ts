@@ -2529,7 +2529,10 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // what makes a non-contiguous allocation cost nothing. 83, 84, 86 and 87 landed together as the second
 // batch of five; 85 was allocated to C-CRM-10, whose worktree survived a container restart with the work
 // uncommitted, so 85 is HELD rather than free and rather than a permanent gap — it will land with that
-// unit. 88 is the next number nobody holds.
+// unit. **Which number is next free is stated ONCE, in the allocation note immediately before
+// `SCHEMA_VERSION`, and nowhere else.** This paragraph carried its own answer — 88 — for nine migrations
+// after 88 had landed, which is exactly the drift that note exists to prevent, one paragraph away from the
+// sentence saying so.
 //
 // 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
 // learn about a clinical record, made into a shape that can carry nothing else. 0008 created
