@@ -9,6 +9,7 @@ import {
   isAppError,
 } from '@berelax/shared'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
+import { requireAdminPrincipal } from '../../../../../src/session.ts'
 import { type IntakeOutcome, type RenderDirection, renderIntakePageHtml } from './render.ts'
 
 /**
@@ -24,24 +25,37 @@ import { type IntakeOutcome, type RenderDirection, renderIntakePageHtml } from '
  * criterion and it is also the reason this is a route rather than a cached page: a cached clinical record
  * is a record read once and shown many times, with one audit row for the first reader.
  *
- * ## Not authenticated, and what stands in for it
+ * ## Authenticated, and the database still authorises independently (W-SYS-11)
  *
- * There is no admin session until W-SYS-01, exactly as every route under `/compliance`, `/hr`, `/settings`
- * and `/clients/duplicates` records. So the authorisation this page enforces is the DATABASE's: the read
- * needs a live `clinical.step_up_grant` for the employee id in the query, matching the stated purpose, and
- * migration 0082 refuses a grant longer than fifteen minutes however it was minted. When the session
- * arrives, `employee` and `purpose` stop being query parameters and become the session's — and the shape of
- * the store call does not change, which is the point of taking them as arguments now.
+ * This route used to take `?employee=` from the query string because there was no admin session. It now
+ * takes the reader from one, and the shape of the store call is unchanged — which was the point of taking
+ * it as an argument then.
  *
- * `?employee=` is therefore NOT a way to read somebody else's records: without a grant of their own it is
- * refused, and the refusal is recorded against whoever was named.
+ * The database's authorisation has NOT been replaced by the session and must not be: the read still needs a
+ * live `clinical.step_up_grant` for the reading employee, matching the stated purpose, and migration 0082
+ * refuses a grant longer than fifteen minutes however it was minted. So there are two independent gates and
+ * the session is the weaker one. That ordering is deliberate — being signed in is not a reason to open a
+ * health record, and the grant is what says somebody had one.
+ *
+ * ## `purpose` is still a query parameter, and that is correct rather than left over
+ *
+ * The manifest NOTE on C-CRM-08 says that when the session arrives "`employee` and `purpose` stop being
+ * query parameters and become the session's". Half of that is wrong, and this is the unit that has to say
+ * so: a session knows **who** is reading and cannot know **why**. A purpose taken from the session would be
+ * a purpose nobody stated, which is precisely the unattributable read `clinical.step_up_grant` exists to
+ * refuse — and the store matches the stated purpose against the grant, so inventing one here would either
+ * fail every read or make the match meaningless.
+ *
+ * `purpose` is therefore not a principal, a role or a permission, and it stays. W-SYS-11's acceptance is
+ * about the READER, and the reader now comes from the session.
  *
  * ## The query parameters
  *
- *   - `employee` — who is reading. Required: there is no default reader, and a default would be an
- *     unattributable read in the one table whose purpose is answering "who opened this".
- *   - `purpose` — why. Required for the same reason, and matched against the grant.
+ *   - `purpose` — why this record is being opened. Required: there is no default, because an
+ *     unattributable read is worse than a refused one, and it is matched against the grant.
  *   - `dir=rtl` mirrors the layout. A direction axis rather than a locale, as every admin handler records.
+ *
+ * `employee` is gone. Nothing here reads a reader, a role or a permission from the URL.
  */
 export const dynamic = 'force-dynamic'
 
@@ -126,11 +140,17 @@ export async function GET(
   try {
     const url = new URL(request.url)
     const { id: customerId } = await context.params
-    const employeeId = required(url, 'employee')
     const statedPurpose = required(url, 'purpose')
     const direction: RenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'
 
     const html = await withSql(async (sql) => {
+      // The guard first, before the submission lookup and before any audit row. An unauthenticated request
+      // must not reach a clinical read at all — including the refused kind, which WRITES a denial recorded
+      // against whoever was named, and naming somebody is exactly what an unauthenticated caller cannot do.
+      const authorised = await requireAdminPrincipal(sql, request, new Date().toISOString())
+      if ('response' in authorised) return authorised.response
+      const employeeId = authorised.principal.employeeId
+
       const config = loadConfig()
       const chrome = await adminChromeFor({
         sql,
@@ -158,6 +178,11 @@ export async function GET(
         residencyQuestionId: CLINICAL_OPEN_QUESTIONS.residency,
       })
     })
+
+    // The guard's redirect travels back through `withSql` as a Response rather than being thrown, so it is
+    // returned unchanged. A throw would be caught below and rendered as "the record could not be read",
+    // which is a different claim from "you are not signed in".
+    if (html instanceof Response) return html
 
     return new Response(html, {
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
