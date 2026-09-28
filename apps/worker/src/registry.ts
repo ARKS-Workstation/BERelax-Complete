@@ -52,6 +52,8 @@ import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
 import { RETENTION_PURGE_JOB_DEFINITION } from './jobs/retention-purge.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
+import { REVIEW_COUNT_TRIPWIRE_JOB } from './jobs/review-count-tripwire.ts'
+import { REVIEW_MONDAY_NUDGE_JOB } from './jobs/review-monday-nudge.ts'
 import {
   REBUILD_SCHEDULED_STEPS_JOB,
   SCHEDULED_STEP_SWEEP_JOB,
@@ -440,6 +442,14 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // path writes to. Its declared interval in 0085 is 24 hours, which is what makes the watchdog's "no
   // success within twice the interval" alert mean something for it.
   RETENTION_PURGE_JOB_DEFINITION,
+  // G-REV-02's two, and they are the first crons in this registry whose subject is something that happened
+  // OUTSIDE the system. The tripwire at 06:15 reads the Places aggregate and reports an increase; the nudge at
+  // 09:00 on a Monday reports a week of silence. Separate agents rather than one, for migration 0033's reason:
+  // a shared heartbeat would be minutes old for ever and would make a dead weekly pass invisible behind a
+  // healthy daily one. Their declared intervals in 0094 are 24 hours and 7 days respectively, which is what
+  // makes the watchdog's "no success within twice the interval" alert mean something for each.
+  REVIEW_COUNT_TRIPWIRE_JOB,
+  REVIEW_MONDAY_NUDGE_JOB,
 ]
 
 /**

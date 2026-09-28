@@ -458,6 +458,101 @@ export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
     body: 'تم نشر جدول عملك لفترة {{dates}}. اطلب نسختك من مكتب الاستقبال.',
     variables: ['dates'],
   },
+  /*
+    The fallback intake's two notices (G-REV-02, docs/10 §6).
+
+    Both transactional, and immutably so. A review is a fact about the business that somebody has to answer,
+    the nudge is a reminder about work, and neither is marketing: the marketing kill switch must not be able
+    to suppress either and neither may leave from the AD- promotional identity. `review.request` two entries
+    below is the promotional one, and the contrast is deliberate — asking a customer for a review is
+    marketing, telling the owner one arrived is not.
+
+    Email and not SMS, which is the opposite of the rota notice's choice and for the stated reason: the next
+    step in both is *open a link and read something*, and a link is what an email can carry. The re-auth SMS
+    exists because a dead credential needs somebody at a screen now; a new review needs somebody at a screen
+    today.
+
+    `{{reviews}}` holds the whole phrase — *2 new reviews* — and not the number, because `{{count}} new
+    reviews` reads "1 new reviews" and an increase of one is the commonest case there is. `reviewCountPhrase`
+    in `@berelax/core` renders it, in four cases for Arabic and two for English; the template owns the
+    sentence around it, so the copy stays editable without a deploy.
+
+    `{{link}}` is the Google Maps deep link built from the STORED placeId (`placeReviewsDeepLink`), never a
+    URL written here. docs/10 §6 asks for exactly that, and migration 0020 denormalises `place_id` onto every
+    review row for the same reason: a link built from configuration keeps working after the configuration is
+    re-pointed at another listing, and then sends the owner to the wrong business's reviews.
+
+    Neither body names a reviewer, a rating or a word of review text, and the tripwire could not supply one if
+    it wanted to: it reads the Places aggregate, which is two numbers (ADR 0043). The nudge knows even less —
+    its whole content is that nothing has been reported for a week.
+
+    The Arabic variants exist for M-VAT-11's reason and carry its caveat, verbatim from the re-auth
+    templates: no table in this build records which language a member of staff reads, so the selector asks
+    for `en`, and picking a locale per ROLE would be a guess about a person (ADR 0020). Seeding the Arabic
+    half now means the day a staff locale exists the words are already approved.
+  */
+  {
+    key: 'review.count_increase',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells the owner that the Google review count on the listing has gone up, and by how much, with a ' +
+      'deep link to the reviews (G-REV-02, docs/10 SS6). Names no reviewer, no rating and no review text: ' +
+      'the aggregate is all this path can see.',
+    channel: 'email',
+    locale: 'en',
+    subject: 'New reviews on your Google listing',
+    body:
+      'Google shows {{reviews}} on your listing since we last looked. Open {{link}} to read them, then ' +
+      'paste each one into Reviews so a reply can be drafted for you.',
+    variables: ['reviews', 'link'],
+  },
+  {
+    key: 'review.count_increase',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'Tells the owner that the Google review count on the listing has gone up, and by how much, with a ' +
+      'deep link to the reviews (G-REV-02, docs/10 SS6). Names no reviewer, no rating and no review text: ' +
+      'the aggregate is all this path can see.',
+    channel: 'email',
+    locale: 'ar',
+    subject: 'تقييمات جديدة على نشاطك في جوجل',
+    body:
+      'يُظهر جوجل {{reviews}} على نشاطك منذ آخر مرة تحققنا فيها. افتح {{link}} لقراءتها، ثم الصق كل ' +
+      'تقييم في صفحة التقييمات ليُصاغ لك رد عليه.',
+    variables: ['reviews', 'link'],
+  },
+  {
+    key: 'review.nudge',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The Monday 09:00 Asia/Dubai nudge: nothing has been reported for seven days, here is the link ' +
+      '(G-REV-02, docs/10 SS6). Low tech, and it turns an invisible task into a habit.',
+    channel: 'email',
+    locale: 'en',
+    subject: 'Anything new on your Google reviews?',
+    body:
+      'Nothing new has been recorded on your Google reviews for a week. Open {{link}} to check, and paste ' +
+      'anything you find into Reviews so a reply can be drafted for you.',
+    variables: ['link'],
+  },
+  {
+    key: 'review.nudge',
+    messageClass: 'transactional',
+    approvalState: 'approved',
+    purpose:
+      'The Monday 09:00 Asia/Dubai nudge: nothing has been reported for seven days, here is the link ' +
+      '(G-REV-02, docs/10 SS6). Low tech, and it turns an invisible task into a habit.',
+    channel: 'email',
+    locale: 'ar',
+    subject: 'هل هناك جديد في تقييماتك على جوجل؟',
+    body:
+      'لم يُسجَّل أي جديد في تقييماتك على جوجل منذ أسبوع. افتح {{link}} للتحقق، والصق ما تجده في صفحة ' +
+      'التقييمات ليُصاغ لك رد عليه.',
+    variables: ['link'],
+  },
   {
     key: 'review.request',
     messageClass: 'promotional',
