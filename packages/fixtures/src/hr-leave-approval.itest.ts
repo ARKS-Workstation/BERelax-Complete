@@ -1309,11 +1309,29 @@ describe('acceptance — two overlapping approvals for different therapists, con
       (error: unknown) => leaveRequestRefusalOf(error) ?? 'unknown refusal',
     )
 
+    // Whether the approval has SETTLED, watched from here, because it is what separates the two things a
+    // poll that finds nothing could mean. An approval that runs to completion without ever waiting is the
+    // defect this case is about; an approval whose first statement the machine has not scheduled yet is not
+    // one. The first version could not tell them apart: it polled sixty times at 50 ms and called a bare
+    // three seconds the end of the matter, so on a loaded box it printed "the approval read the floor
+    // without queueing for anything" about an approval that had not reached the floor yet. That is a check
+    // whose stated claim is not what it measures, in the same file that exists to refuse them, and it was
+    // found by the gate block's own unedited control — the twenty-sixth run of this suite in a row.
+    //
+    // So the loop now ends on one of three things, and only one of them is a pass: the waiter appears, the
+    // approval settles without ever waiting, or a deadline long enough that reaching it means the wait is
+    // absent rather than late. The settle arm is what keeps the mutation caught quickly as well — with the
+    // `for update` removed nothing queues, the approval finishes, and this returns at once instead of
+    // spending the deadline.
+    let settled = false
+    void blocked.then(() => {
+      settled = true
+    })
+
     let queued = 0
+    const deadline = Date.now() + 45_000
     try {
-      // Polled for the CONDITION rather than slept for a duration, and bounded so a failure is a failure
-      // rather than a hang.
-      for (let attempt = 0; attempt < 60 && queued === 0; attempt += 1) {
+      while (queued === 0 && !settled && Date.now() < deadline) {
         queued = await backendsWaitingOnALock()
         if (queued === 0) await new Promise((resolve) => setTimeout(resolve, 50))
       }
