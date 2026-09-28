@@ -2800,15 +2800,48 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
 // `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
 //
+// 96 is 0096_analytics_schema.sql: the `analytics` schema, its monthly partitions, and the 90-day raw
+// retention as a thing that RUNS (A-FIRST-01). Nine tables — `visitor`, `session`, `event`, `funnel_step`,
+// `attribution`, the three daily rollups and `retention_policy` — with `event` and `funnel_step` RANGE
+// partitioned by month on `occurred_at`. `whatsapp_ref` is NOT among them although the unit summary lists
+// it: 0079 already created `public.whatsapp_ref`, whose `session_reference` is documented there as
+// "A-FIRST's opaque handle for the conversation", and a second one would be a second statement of one fact.
+// Four things in it are worth knowing before reading it. **There IS a default partition on each raw
+// parent**, against 0005's advice and for 0005's reason: measured on PostgreSQL 16, a row is ROUTED before
+// any row-level trigger fires, so tuple routing raises `23514 no partition of relation "event" found for
+// row` before a guard on the parent could run — a guard that is unreachable code on exactly the day it is
+// needed. Each raw parent therefore has a default partition whose BEFORE INSERT trigger raises `ZY061`
+// naming the month, the parent and `analytics.ensure_partitions()`, and stores nothing, so there is no row
+// in it for anybody to forget to prune. **`analytics.retention_policy` is load-bearing**: one row per base
+// table in the schema, and `analytics.run_retention` REFUSES the whole pass on a table with no row
+// (`ZY062`) or a row for a relation that is not there (`ZY063`) — the same two directions C-CRM-10's
+// erasure registry is checked in — which is what makes the three rollups' exemption an explicit list rather
+// than an omission. **A partition's upper bound is only readable as the TEXT of
+// `pg_get_expr(relpartbound, …)`**, so `analytics.partition_bounds` parses it and raises `ZY064` on a bound
+// it cannot read rather than skipping the partition: a parser that stopped matching would make every
+// partition look un-droppable and the pass would report success having dropped nothing. **And
+// `analytics.event` is append-only for every role but `berelax_retention`** (`ZY065`), by two BEFORE
+// triggers declared on the partitioned parent so PostgreSQL clones them onto every partition — a direct
+// `delete from analytics.event_2026_09` is refused too, which a grant on the parent alone would not do; the
+// refusal tests `current_user` by NAME rather than `pg_has_role`, because `berelax` is a superuser and
+// `pg_has_role` answers true for it. `ZY066` is the negative look-ahead that would create nothing while
+// reporting success. The file adds no customer or booking reference anywhere in the schema and no IP
+// address or user-agent string, both deliberately and both recorded in its header: a `customer_id` here
+// would enter C-CRM-05's merge registry and C-CRM-10's erasure catalogue with no unit owning the decision,
+// and A-FIRST-08's acceptance line is what names it. Its private SQLSTATEs are `ZY061`-`ZY066` from the
+// band W-SYS-12's allocator handed this unit; `ZY067`-`ZY070` are still free within it.
+//
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
-// becoming a gap. 88 through 92 are allocations held by five units in flight in other worktrees, and 93 is
-// this file, W-SITE-10's, which has landed. So 94 is the next number nobody holds. Gate case 90a walks the
-// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
-// allocation cost nothing — and it is why 88 through 92 arriving after 93 needs no renumbering here.
+// becoming a gap. 89, 91 and 93 have landed on top of it, and 96 is this file, A-FIRST-01's, which has
+// landed. 88, 90, 92, 94 and 95 are allocations held by units in flight in other worktrees, so 97 is the
+// next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than consecutive
+// integers, which is what makes a non-contiguous allocation cost nothing — and it is why 88, 90, 92, 94 and
+// 95 arriving after 96 needs no renumbering here; if one of the five turns out to need no migration it
+// becomes a permanent gap like 22, 41, 44, 47, 71 and 74 and is NOT renumbered.
 //
 // This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 93 as const
+export const SCHEMA_VERSION = 96 as const

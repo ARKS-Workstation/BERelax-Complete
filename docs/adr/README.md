@@ -42,6 +42,7 @@ a decision the table does not list.
 | [0039](0039-the-admin-session-is-an-opaque-token.md) | The admin session cookie carries 32 random bytes and no role; the role is reached by join on every request, and no deployment seeds an account | — |
 | [0040](0040-flow-interpreter-idempotency-and-one-window.md) | The interpreter owns no window; its idempotency key is a unique constraint; its bounds live on the run | — |
 | [0042](0042-publication-is-refused-at-the-permission-layer-and-in-the-database.md) | Publication is refused at the permission layer and in the database, never by a prompt | — |
+| [0045](0045-analytics-retention-is-a-policy-table-and-a-guarded-default-partition.md) | Analytics retention is a policy table the job reads; the missing partition is a guarded default that refuses every row | — |
 
 ## Writing one
 
