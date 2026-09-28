@@ -205,22 +205,18 @@ beforeAll(async () => {
   const packageVariantId = seededVariant?.id as string
   packagePriceFils = Number(seededVariant?.gross_price_fils) * PACKAGE_SESSIONS
 
-  const saved = await withUnitOfWork(sql, TILL, async (uow) =>
-    savePackageTemplateVersion(uow, {
-      templateKey: TEMPLATE_KEY,
-      internalName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
-      publicDisplayName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
-      priceFils: packagePriceFils,
-      lines: [{ serviceVariantId: packageVariantId, sessionCount: PACKAGE_SESSIONS }],
-    }),
-  )
   /*
-    Re-use an existing probe balance if one is left over, and sell only when there is none.
+    Re-use an existing probe balance if one is left over, and save-and-sell only when there is none.
 
     Not tidiness: `package_sale` refuses DELETE for every role, so a file that sold unconditionally would add
     one permanent sale and one permanent balance on every run — and `pnpm verify` runs the integration suite on
     every unit by every agent. One probe package with two sessions covers two runs; a third run sells again,
     which is the bound rather than an unbounded leak.
+
+    The TEMPLATE VERSION is inside the same branch, and that was a defect found by reading the rows back after
+    six runs: `savePackageTemplateVersion` is an EDIT — it inserts version + 1 — so calling it unconditionally
+    left six versions of one probe template, each one undeletable (ZG001). Nothing read the extra versions,
+    because every reader takes `max(version)`, which is exactly why nothing noticed.
   */
   const [spare] = await sql<{ id: string }[]>`
     select pb.id
@@ -235,6 +231,15 @@ beforeAll(async () => {
   if (spare !== undefined) {
     balanceId = spare.id
   } else {
+    const saved = await withUnitOfWork(sql, TILL, async (uow) =>
+      savePackageTemplateVersion(uow, {
+        templateKey: TEMPLATE_KEY,
+        internalName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
+        publicDisplayName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
+        priceFils: packagePriceFils,
+        lines: [{ serviceVariantId: packageVariantId, sessionCount: PACKAGE_SESSIONS }],
+      }),
+    )
     const saleMapping = packageSaleMapping({
       entryId: entryId(`mtill13-receipt-pkg-sale-${nonce}`),
       tradingDate: localDate(TRADING_DATE),

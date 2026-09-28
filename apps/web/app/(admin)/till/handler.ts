@@ -285,6 +285,17 @@ function priceTill(args: {
   if (discount === null) return { refusal: 'not_a_figure', detail: 'The discount is not a figure.' }
   if (discount > 0) {
     if (args.form.discountReason === '') return { refusal: 'discount_needs_a_reason' }
+    /*
+      ONE discount, off the FIRST chargeable line, and that is a stated limitation rather than an oversight.
+
+      `discountLine` requires a `targetLineId` because the figure depends on the running gross of its target,
+      which only `buildBasket` knows — so a discount is per line by construction and there is no basket-wide
+      one to offer. The screen gives the desk one discount field because that is what a single-treatment
+      checkout needs; a basket with two treatments puts it on the first. A per-line discount is a column of
+      fields and a per-line reason, which is a screen decision nobody has asked for, and inventing it here
+      would be inventing a workflow. The refusal a wrong guess would produce is visible either way: the basket
+      panel shows which line the discount came off, at the reduced gross, on the same page.
+    */
     const target = lines[0]
     if (target === undefined) return { refusal: 'nothing_to_bill' }
     try {

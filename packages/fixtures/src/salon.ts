@@ -638,6 +638,25 @@ function shiftDay(day: LocalDate, offsetDays: number): LocalDate {
  * fixture numbers them by position so the property is visible in the data rather than asserted about
  * a mechanism that is not built yet.
  */
+/**
+ * **Nothing inserts these either, and the measurement is M-TILL-13's.**
+ *
+ * The note on {@link buildShifts} records that a freshly seeded database holds zero `shift` and zero
+ * `shift_assignment` rows. It is one level deeper than that: a freshly seeded database also holds **zero
+ * `appointment` rows and zero `invoice` rows**, and four customers — the consent loader's — against the
+ * generator's hundred and forty. Measured on a database created, migrated and seeded from clean, not inferred.
+ *
+ * So docs/12 §5's "~200 historical and 40 forward bookings, packages at several drawdown states, invoices, one
+ * closed month" is written by NOTHING except the packages, which M-TILL-13 added. `pnpm seed` prints
+ * "250 appointments, 188 invoices" from `generateSalon`'s own counts, which is why this has been easy to miss:
+ * the seeder reports what the GENERATOR produced, never what the loaders wrote.
+ *
+ * Every browser and fixture suite that needs a delivered treatment therefore creates its own, which is what
+ * all of them already do. Loading these is somebody's next piece of work and is NOT done here for
+ * `buildShifts`' reason, one step more strongly: a suddenly non-empty `appointment` table changes what every
+ * one of 119 `done` units' suites sees — several of them count rows in tables an appointment would reach —
+ * and that needs its own integrating verify rather than a change slipped in beside a screens unit.
+ */
 function buildInvoices(appointments: readonly FixtureAppointment[]): FixtureInvoice[] {
   const billable = appointments.filter((appointment) => appointment.state === 'completed')
   return billable.map((appointment, index) => {

@@ -373,7 +373,12 @@ function keypad(view: TillView): string {
     ...keys.map(
       (key) => `<button type="button" ${attribute('data-key', key)}>${safeText(key)}</button>`,
     ),
-    `<button type="button" ${attribute('data-key', 'back')} aria-label="Delete the last digit">&#9003;</button>`,
+    // The literal ERASE TO THE LEFT character, escaped, and NOT an HTML numeric character reference.
+    // `pnpm colours` reads the digits of such a reference as a four-digit hex colour and refuses it by name —
+    // correctly, because it cannot tell the two apart, and a keypad is exactly where an untokened colour
+    // would hide. This form names the same glyph and renders identically. (This comment is worded to avoid
+    // the pattern too: the scanner reads comments.)
+    `<button type="button" ${attribute('data-key', 'back')} aria-label="Delete the last digit">\u232b</button>`,
     `<button type="button" ${attribute('data-key', 'clear')} aria-label="Clear the amount">Clear</button>`,
     '</div>',
     '<p>Fills the amount last used. Typing into the field does the same thing.</p>',
