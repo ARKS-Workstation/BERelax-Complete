@@ -24,6 +24,7 @@ import {
   AuditWriter,
   assertRecipesMatchRules,
   beginRightsRequest,
+  CMS_SCHEMA,
   coveredTables,
   createConnection,
   type ErasureDeps,
@@ -33,6 +34,7 @@ import {
   erasureCoverage,
   exportSubjectData,
   issueInvoice,
+  MERGE_CATALOGUE_EXCLUDED_SCHEMAS,
   moveCard,
   overdueRightsRequests,
   publishEvent,
@@ -313,6 +315,24 @@ describe('erasure coverage', () => {
     // `pnpm boundaries` once reduced to zero modules while reporting success.
     expect(probed.length).toBeGreaterThan(80)
     expect(coverage.classified.length).toBe(probed.length)
+  })
+
+  it('enumerates no column of a schema this repository does not define', async () => {
+    // G-REV-02 found this one: the probes enumerated `payload.cms_user.email`,
+    // `payload.cms_user.reset_password_token` and three collection bodies, and `eraseSubject` then REFUSED
+    // for want of a rule — but only on a database Payload had already booted against, because the schema is
+    // empty until it does. The failure named five tables nobody had touched and moved with the file
+    // ORDERING, since only an `apps/web` suite boots Payload.
+    //
+    // `CMS_SCHEMA` is excluded for the reason `MERGE_CATALOGUE_EXCLUDED_SCHEMAS` spells out. This asserts
+    // it, and it is a real assertion rather than a tautology on any database an admin suite has run
+    // against: remove the exclusion there and the probes return those five columns again.
+    const probed = await erasureCoverage(sql)
+    expect(probed.filter((column) => column.schema === CMS_SCHEMA)).toEqual([])
+    expect(MERGE_CATALOGUE_EXCLUDED_SCHEMAS).toContain(CMS_SCHEMA)
+    // The control: the exclusion is narrow. `public` is still enumerated in bulk, so this is not a probe
+    // that has quietly stopped returning anything.
+    expect(probed.filter((column) => column.schema === 'public').length).toBeGreaterThan(80)
   })
 
   it('finds every one of the five probes to be carrying its weight', async () => {

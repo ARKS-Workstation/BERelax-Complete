@@ -118,6 +118,37 @@ async function auditCount(action: string): Promise<number> {
   return Number(row?.n ?? '0')
 }
 
+/**
+ * Picks this file's own listing, whichever control the page is offering.
+ *
+ * The page offers hidden inputs for ONE listing and a `<select>` for two or more, and two is a real
+ * configuration rather than a test artefact: docs/10 §2 says the account that owns the listing need not be
+ * the one verified on the site. It is also the ORDINARY case in the integration suite, because earlier files
+ * leave connections behind (brief rule 12) and `listReviewIntakeTargets` returns every listing this system
+ * manages rather than only this file's. The first version of this file asserted the hidden input
+ * unconditionally: green on its own, and three timeouts in the full chain waiting for an input the page was
+ * right not to render.
+ *
+ * Narrowing what the page can SEE was the alternative — disconnecting the other connections, as
+ * `with-google.itest.ts` does — and it is the wrong one here: those rows are other suites' and this file
+ * runs in the middle of them. Driving whichever control is on the page exercises production behaviour in
+ * both configurations instead.
+ */
+async function chooseThisListing(page: Page): Promise<void> {
+  const hidden = page.locator(`input[name="${REVIEWS_PASTE_FIELDS.connection}"]`)
+  if ((await hidden.count()) > 0) {
+    expect(await hidden.inputValue()).toBe(connectionId)
+    expect(await page.locator(`input[name="${REVIEWS_PASTE_FIELDS.placeId}"]`).inputValue()).toBe(
+      PLACE,
+    )
+    return
+  }
+  await page.selectOption(`select[name="${REVIEWS_PASTE_FIELDS.connection}"]`, connectionId)
+  expect(await page.locator(`select[name="${REVIEWS_PASTE_FIELDS.connection}"]`).inputValue()).toBe(
+    connectionId,
+  )
+}
+
 /** A page that counts every POST it makes, with the cookie of one role. */
 async function pageAs(role: string): Promise<{ page: Page; posts: () => readonly string[] }> {
   const context = await browser.newContext({ baseURL: BASE })
@@ -186,11 +217,9 @@ describe('acceptance — one form submission creates the review', () => {
     const { page, posts } = await pageAs('receptionist')
     await page.goto(`${BASE}${REVIEWS_PASTE_PATH}`, { waitUntil: 'networkidle' })
 
-    // The listing arrives as hidden inputs, because there is one. Read back rather than assumed, so a page
-    // that offered no listing would fail here rather than silently posting an empty connection id.
-    expect(
-      await page.locator(`input[name="${REVIEWS_PASTE_FIELDS.connection}"]`).inputValue(),
-    ).toBe(connectionId)
+    // Read back rather than assumed, so a page that offered no listing fails here rather than silently
+    // posting an empty connection id.
+    await chooseThisListing(page)
 
     await page.check(`input[name="${REVIEWS_PASTE_FIELDS.rating}"][value="4"]`)
     await page.fill(`input[name="${REVIEWS_PASTE_FIELDS.reviewer}"]`, 'A Google user')
@@ -255,6 +284,7 @@ describe('acceptance — one form submission creates the review', () => {
   it('records a star-only review as NULL text rather than as an empty string', async () => {
     const { page, posts } = await pageAs('receptionist')
     await page.goto(`${BASE}${REVIEWS_PASTE_PATH}`, { waitUntil: 'networkidle' })
+    await chooseThisListing(page)
     await page.check(`input[name="${REVIEWS_PASTE_FIELDS.rating}"][value="5"]`)
     await page.fill(`input[name="${REVIEWS_PASTE_FIELDS.reviewer}"]`, 'A Google user')
     await page.fill(`input[name="${REVIEWS_PASTE_FIELDS.reviewedOn}"]`, REVIEWED_ON)
@@ -284,6 +314,7 @@ describe('acceptance — one form submission creates the review', () => {
       `${BASE}${REVIEWS_PASTE_PATH}?${REVIEWS_PASTE_FIELDS.intake}=${intake?.id ?? ''}`,
       { waitUntil: 'networkidle' },
     )
+    await chooseThisListing(page)
     await page.check(`input[name="${REVIEWS_PASTE_FIELDS.rating}"][value="4"]`)
     await page.fill(`input[name="${REVIEWS_PASTE_FIELDS.reviewer}"]`, 'A Google user')
     await page.fill(`input[name="${REVIEWS_PASTE_FIELDS.reviewedOn}"]`, REVIEWED_ON)

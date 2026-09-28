@@ -669,15 +669,48 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
 export const MERGE_ID_COLUMN_PATTERN = '^(.*_)?(customer|contact)_id$'
 
 /**
- * Schemas the catalogue enumerates: every schema in the database except the system ones and pg-boss's.
+ * Payload CMS's own schema.
+ *
+ * Declared here rather than only in `apps/web/payload.config.ts` because `packages/db`'s catalogue probes
+ * have to name it and may not import `@berelax/cms` or reach into an app. Migration `0023_payload_schema.sql`
+ * creates the schema and deliberately nothing in it; the config's `schemaName` imports this constant, so the
+ * three places that have to agree about the spelling agree by construction.
+ */
+export const CMS_SCHEMA = 'payload' as const
+
+/**
+ * Schemas the catalogue enumerates: every schema in the database except the system ones, pg-boss's and the
+ * CMS's.
  *
  * Discovered rather than listed, so a schema added later is covered by default. pg-boss's tables are
  * excluded by name because they are the queue library's own — a column in one of them is a job payload
  * rather than a customer record, and a strategy cannot be registered on a table this build does not own.
+ *
+ * {@link CMS_SCHEMA} is excluded for the same reason and it is worth spelling out, because it looks at first
+ * like a schema full of exactly what these probes are for — `cms_user.email` is a real email address and
+ * three collections have a `body`. Three things decide it:
+ *
+ *   - **This repository does not define those tables.** Payload migrates them on its own release cycle, and
+ *     `apps/web/payload.config.ts` puts them in their own schema precisely so `pnpm db:drift` does not
+ *     compare them against a hand-written mirror. A rule per column here would be a rule against a
+ *     definition nothing in `packages/db/migrations/` owns.
+ *   - **The set of columns changes with no migration.** A Payload collection gains a field and the schema
+ *     follows on the next boot, so a coverage list over it would go red on a CMS edit, on a branch nobody
+ *     had touched — the same failure the `relispartition` line above exists to prevent.
+ *   - **The tables hold STAFF accounts and PUBLISHED content, never a customer.** A `cms_user` is an
+ *     operator's login (staff PII is ADR 0025's), and `pages.body` is copy on the public site. A customer
+ *     erasure has nothing to do with either, and `payload.cms_user.reset_password_token` is one credential
+ *     it must certainly not revoke.
+ *
+ * And the mechanical reason a rule could not have been written instead: the schema is EMPTY until Payload
+ * boots against the database, so on a freshly migrated one those tables do not exist — a rule naming them
+ * would be a stale key, which `classifyErasureCoverage` reports and `rights.itest.ts` refuses. There is no
+ * spelling of "classify them" that is true in both states; the exclusion is true in both.
  */
 export const MERGE_CATALOGUE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze([
   'information_schema',
   PGBOSS_SCHEMA,
+  CMS_SCHEMA,
 ])
 
 export interface MergeCoverageRow {
