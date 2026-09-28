@@ -43,6 +43,24 @@ const known = (n: number): string => `+971${SYNTHETIC_MOBILE_PREFIX}1${String(n)
 const unknown = (n: number): string =>
   `+971${SYNTHETIC_MOBILE_PREFIX}2${String(n).padStart(6, '0')}`
 
+/**
+ * The two number bands this file creates customers in, as `like` patterns.
+ *
+ * `known` uses `…1……` and `unknown` uses `…2……`, while the seeded salon's customers are
+ * `syntheticPerson(1)` through `syntheticPerson(4)` — `…0000001` through `…0000004`. So these patterns
+ * match every row this suite can create and no row it did not.
+ *
+ * NOTE: the hooks below used to be `delete from customer`, unqualified. That removes the four customers
+ * `pnpm seed` creates, for every suite that runs afterwards and for every later run against the same
+ * database, and `sell-package.itest.ts` reads one — it skipped all 21 of its cases with "the seed creates
+ * customers". A suite may delete what it created; it may not delete what it found. Proven by control:
+ * with the bare delete restored, a seeded database holds 0 customers after this file runs.
+ */
+const OWN_PHONE_PATTERNS = [
+  `+971${SYNTHETIC_MOBILE_PREFIX}1%`,
+  `+971${SYNTHETIC_MOBILE_PREFIX}2%`,
+] as const
+
 const sql: Sql = createConnection({ url, max: 4 })
 
 interface Harness {
@@ -175,14 +193,18 @@ function mediansWithinTolerance(a: readonly number[], b: readonly number[]): boo
   return (slow ?? 0) - (fast ?? 0) <= allowed
 }
 
+async function clearOwnCustomers(): Promise<void> {
+  await sql`delete from customer where phone_e164 like any (${[...OWN_PHONE_PATTERNS]}::text[])`
+}
+
 beforeEach(async () => {
   await sql`delete from otp_challenge`
   await sql`delete from otp_phone_lock`
-  await sql`delete from customer`
+  await clearOwnCustomers()
 })
 
 afterAll(async () => {
-  await sql`delete from customer`
+  await clearOwnCustomers()
   await sql.end({ timeout: 5 })
 })
 
@@ -250,7 +272,13 @@ describe('enumeration resistance', () => {
         knownNumbers.map((phone) => ({ phone_e164: phone, locale: 'en' })),
       )}
     `
-    const [customers] = await sql<{ n: string }[]>`select count(*)::text as n from customer`
+    // The fifty rows THIS case inserted, counted by their own numbers rather than by emptying the table
+    // first. A bare `count(*) from customer` was the same claim plus an assumption that nothing else had
+    // ever written a customer — which held only because this file used to delete every row in the table,
+    // including the four `pnpm seed` creates. See the NOTE above `beforeEach`.
+    const [customers] = await sql<{ n: string }[]>`
+      select count(*)::text as n from customer where phone_e164 = any (${knownNumbers}::text[])
+    `
     expect(Number(customers?.n)).toBe(ENUMERATION_SAMPLES)
 
     const knownTimes: number[] = []

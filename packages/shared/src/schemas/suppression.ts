@@ -21,9 +21,9 @@
  * and a provisional value must carry `is_provisional`, an OPEN-QUESTIONS id and a note, which an enum
  * label cannot (brief rule 15). These five sources are not a guess: each names a MECHANISM that exists —
  * a member of staff typing, a recipient complaining, a mail provider rejecting an address, the national
- * register, the preference centre — and a sixth would be new code rather than a new opinion. So the
- * closed set is enforced by a type in the database and by `z.enum` here, and there is no vocabulary row
- * for a seed to fail to write.
+ * register, the preference centre, and (C-CRM-10) a data-subject erasure request — and a seventh would be
+ * new code rather than a new opinion. So the closed set is enforced by a type in the database and by
+ * `z.enum` here, and there is no vocabulary row for a seed to fail to write.
  */
 import { z } from 'zod'
 import { PLACEHOLDER_MARKERS } from './consent.ts'
@@ -43,6 +43,17 @@ export const SUPPRESSION_SOURCES = [
   'hard_bounce',
   'dnc_register',
   'preference_centre',
+  /**
+   * An erasure completed under C-CRM-10, which WRITES a suppression rather than preserving one.
+   *
+   * A sixth mechanism and not a sixth opinion: somebody who asks to be forgotten and never opted out has
+   * no entry to keep, so re-importing their number from a spreadsheet would create a fresh record with a
+   * clean sheet and the business would message them. None of the other five labels would be true of it —
+   * nobody typed it, nobody complained, nothing bounced, they are not on the national register and they
+   * did not use the preference centre — and using one anyway would put a fact on the record that never
+   * happened. It is deliberately absent from UNSUPPRESSION_SOURCES: an erasure is never lifted.
+   */
+  'erasure_request',
 ] as const
 export type SuppressionSource = (typeof SUPPRESSION_SOURCES)[number]
 

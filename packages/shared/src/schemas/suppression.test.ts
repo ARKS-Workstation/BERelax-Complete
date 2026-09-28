@@ -42,13 +42,21 @@ const issuePaths = (result: ReturnType<typeof parse>): readonly string[] =>
   result.success ? [] : result.error.issues.flatMap((issue) => issue.path.map(String))
 
 describe('the vocabularies', () => {
-  it('is the closed set of five sources, and the two kinds', () => {
+  it('is the closed set of six sources, and the two kinds', () => {
     expect(SUPPRESSION_SOURCES).toEqual([
       'manual',
       'complaint',
       'hard_bounce',
       'dnc_register',
       'preference_centre',
+      // Six since C-CRM-10, and the label is a MECHANISM rather than a sixth opinion. An erasure WRITES a
+      // suppression: somebody who asks to be forgotten and never opted out has no entry to preserve, so
+      // re-importing their number from a spreadsheet would create a fresh record with a clean sheet and the
+      // business would message them. None of the other five would be true of it — nobody typed it, nobody
+      // complained, nothing bounced, they are not on the national register, they did not use the preference
+      // centre — and reusing one would put a fact on the record that never happened. Migration 0085 adds
+      // the enum label; this list is what a `psql` session is held to through `suppression_source`.
+      'erasure_request',
     ])
     expect(SUPPRESSION_KINDS).toEqual(['suppressed', 'unsuppressed'])
     // The same two labels `customer_blocklist.key_kind` uses (0053), not a second vocabulary: a key is
@@ -59,12 +67,14 @@ describe('the vocabularies', () => {
   it('restricts an unsuppression to the three sources with a decision behind them', () => {
     expect(UNSUPPRESSION_SOURCES).toEqual(['manual', 'preference_centre', 'dnc_register'])
     for (const source of UNSUPPRESSION_SOURCES) expect(isUnsuppressionSource(source)).toBe(true)
-    // A complaint and a hard bounce happened and cannot un-happen.
-    for (const event of ['complaint', 'hard_bounce']) {
+    // A complaint and a hard bounce happened and cannot un-happen. Nor can an erasure: the sixth source is
+    // deliberately absent from this list, because a suppression written because somebody asked to be
+    // forgotten is the one entry that must never be liftable — lifting it is the erasure being undone.
+    for (const event of ['complaint', 'hard_bounce', 'erasure_request']) {
       expect(isUnsuppressionSource(event)).toBe(false)
     }
     expect(isUnsuppressionSource('whatever_the_admin_typed')).toBe(false)
-    // Every unsuppression source must be a source at all: a fourth label here that was not in
+    // Every unsuppression source must be a source at all: a label here that was not in
     // SUPPRESSION_SOURCES would be a value the enum refuses and zod accepts.
     for (const source of UNSUPPRESSION_SOURCES) {
       expect(SUPPRESSION_SOURCES as readonly string[]).toContain(source)

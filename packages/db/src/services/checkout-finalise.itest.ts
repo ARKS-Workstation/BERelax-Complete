@@ -59,8 +59,10 @@ if (!url)
  *     already-finalised;
  *   - `afterAll` truncates the invoice family as the OWNER before deleting the customer, which is
  *     `tax-document.itest.ts`'s reason and decision: `invoice.customer_id` is ON DELETE RESTRICT and
- *     `customer-identity.itest.ts` clears the table with a bare `delete from customer`, so a document
- *     left pointing at this file's customer would fail THAT suite's statement. The journal entries are
+ *     `customer-identity.itest.ts` used to clear the table with a bare `delete from customer`, so a
+ *     document left pointing at this file's customer would fail THAT suite's statement. It scopes its
+ *     cleanup now, and the reason to truncate here is unchanged: a document nobody removes fails whoever
+ *     touches the row next. The journal entries are
  *     left: they are append-only, and every suite that reads the journal reads a delta.
  */
 
@@ -318,8 +320,9 @@ async function sweepOrphanedDocumentEvents(): Promise<void> {
 afterAll(async () => {
   // The invoice family goes first, as the OWNER. `invoice` refuses DELETE for every role including the
   // owner (ZI003), so `truncate` is the only legal removal — and it has to happen before the customer
-  // is deleted, because `invoice.customer_id` is ON DELETE RESTRICT and `customer-identity.itest.ts`
-  // clears the table with a bare `delete from customer`. Every referencing table is NAMED rather than
+  // is deleted, because `invoice.customer_id` is ON DELETE RESTRICT — and because this file's own customer
+  // has to go at all, so a document outliving it fails whoever touches the row next. Every referencing
+  // table is NAMED rather than
   // reached with CASCADE, so the next one to reference `invoice` fails loudly here instead of having
   // its rows removed by a statement that never mentioned it.
   await sql?.unsafe(

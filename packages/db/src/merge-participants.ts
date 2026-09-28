@@ -602,6 +602,61 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
       'across to edit one.',
     registeredBy: 'C-CRM-05',
   }),
+  // --- C-CRM-10's three, and this check is why they are here at all ------------------------------
+  //
+  // Migration 0085 added three tables carrying a customer reference and registered none of them. Nothing
+  // in C-CRM-10's own suite could see that; `merge.itest.ts` failed on the next full run with "a table
+  // carrying a customer id that nothing in the registry accounts for", naming all three. That is this
+  // registry's entire purpose working, from the other side.
+  Object.freeze({
+    schema: 'public',
+    table: 'rights_request',
+    column: 'subject_customer_id',
+    reason:
+      'A merge may not re-point a request, and the refusal is structural rather than preferential: ' +
+      '`rights_request_guard` (ZY002) freezes `subject_customer_id` along with the type, the instant it ' +
+      'was received, the due instant and the verification method, because the DEADLINE is measured ' +
+      'against those columns — a request answered on day forty becomes compliant the moment one of them ' +
+      'can be edited. A request re-pointed at another person is also simply a different request, and the ' +
+      'record of one outlives the record it was about (there is no foreign key here for the same reason). ' +
+      'The read side resolves the tombstone: 0085’s three SECURITY DEFINER functions each authorise ' +
+      'their customer id through `merge_survivor_of`, and the erasure engine walks the whole lineage, so ' +
+      'a request naming the survivor covers every record merged into it.',
+    registeredBy: 'C-CRM-10',
+  }),
+  Object.freeze({
+    schema: 'public',
+    table: 'legal_hold',
+    column: 'subject_customer_id',
+    reason:
+      'The one entry here whose reason is about this registry’s own machinery. A hold MUST keep ' +
+      'applying across a merge, so re-pointing looks right — but `legal_hold_one_live_per_scope` is a ' +
+      'partial unique index over two `coalesce` EXPRESSIONS (null means "every subject" and null means ' +
+      '"every data class", both of which are real values here rather than absent ones), and a ' +
+      '`repoint_update`’s conflict test is a list of plain COLUMNS compared with `=`. Two live ' +
+      'all-subject holds would therefore collide on the index while the skip that exists to prevent ' +
+      'exactly that never fired, because `null = null` is unknown. So the tombstone is resolved on READ ' +
+      'instead, and that is not a promise made here and kept nowhere: `apps/worker/src/jobs/' +
+      'retention-purge.ts` wraps BOTH sides of the hold comparison in `merge_survivor_of` — the hold’s ' +
+      'subject and the candidate row’s — so a hold placed before a merge still protects the ' +
+      'survivor’s rows and a hold placed after it still protects rows captured under the loser’s ' +
+      'id.',
+    registeredBy: 'C-CRM-10',
+  }),
+  Object.freeze({
+    schema: 'clinical',
+    table: 'dek_destruction',
+    column: 'customer_id',
+    reason:
+      'Unreachable from the application role (0009), append-only for every role including the owner ' +
+      '(ZY005), and it must keep the id the destruction ACTUALLY happened under. It is the authority on ' +
+      'whether a record was crypto-erased — the empty wrapped key is only the mechanism — and its rows ' +
+      'name the customer id whose keys were destroyed at the time. Re-pointing them would make the ' +
+      'record say a destruction happened for an id it did not, which is the one thing this table exists ' +
+      'to be able to answer. Its siblings in this schema resolve the tombstone on read for the same ' +
+      'reason, through the grant of `merge_survivor_of` to berelax_clinical.',
+    registeredBy: 'C-CRM-10',
+  }),
 ])
 
 /**

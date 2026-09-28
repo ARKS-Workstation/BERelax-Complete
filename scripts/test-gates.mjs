@@ -31504,6 +31504,546 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 112a-112z. (C-CRM-10) The data-subject rights engine: the probe that must not miss a table, the erasure
+//            that must not complete while somebody is still reachable, and the retention that must not be
+//            silent about why it kept something.
+//
+//            Every mutation in this block leaves a system that WORKS. That is the block's subject twice
+//            over, because this unit's defects are quieter than most: an erasure that missed a table
+//            reports success, closes the request, writes a resolution and satisfies every constraint —
+//            and surfaces months later as a promotional message to somebody who asked to be forgotten. A
+//            retention with no reason recorded is a row nobody can defend, and it looks like every other
+//            row. None of it is visible in a screenshot, in a typecheck, or in any assertion about what
+//            the engine does when it is used correctly.
+//
+//            The four worth reading twice are 112a, 112j, 112m and 112r.
+//
+//            **112a** removes the PARTITION exclusion from the catalogue probe. It is here because
+//            leaving it out was a live defect rather than a hypothetical: `audit_event` is partitioned
+//            monthly, `information_schema.tables` reports every partition as a BASE TABLE, and the
+//            coverage test would have gone RED on the first of every month — on a branch nobody had
+//            touched, about a table nobody had changed.
+//
+//            **112j** removes the identity-last ordering from the erasure. Nothing fails, nothing logs,
+//            and the resolution balances: `message` rows are found BY the recipient address and the
+//            suppression key is an HMAC of the phone number, so pseudonymising first silently redacts no
+//            messages and writes no suppression. The engine then reports a complete erasure having left
+//            every message unredacted and the person messageable on a re-import. It is the single most
+//            dangerous mutation in this block and it changes one comparator.
+//
+//            **112m** puts back the defect the integration test found while this unit was being written:
+//            the rule looked up by TABLE rather than by column. `public.invoice` has six probed columns
+//            under three rules, so every line was written with whichever the map held last — and the
+//            resolution said the salon's own telephone number was retained under the FTA obligation, or
+//            worse, that the customer's was not customer data.
+//
+//            **112r is not a mutation case.** It drops `customer_erasure_and_pseudonym_agree` from the
+//            database with `psql`, runs the rights suite, and restores it in a `finally` — because the
+//            criterion is about a CHECK constraint, and a constraint removed only in the migration source
+//            is invisible to a database that has already had the migration applied. That constraint is
+//            this unit's defining guard: its second half refuses a record marked erased whose real phone
+//            number is still in place, which is a completed erasure that left the person reachable.
+{
+  const POLICY = 'packages/core/src/privacy/rights-policy.ts'
+  const COVERAGE = 'packages/db/src/privacy-coverage.ts'
+  const ENGINE = 'packages/db/src/repositories/rights.ts'
+  const ENVELOPE = 'packages/clinical/src/envelope.ts'
+  const KEY_STORE = 'packages/clinical/src/crypto/postgres-key-store.ts'
+  const PURGE = 'apps/worker/src/jobs/retention-purge.ts'
+  const PRIVACY_RENDER = 'apps/web/app/(admin)/settings/privacy/render.ts'
+  const CONVENTIONS = 'scripts/check-schema-conventions.mjs'
+
+  const POLICY_SUITE = 'packages/core/src/privacy/rights-policy.test.ts'
+  const RIGHTS_SUITE = 'packages/fixtures/src/rights.itest.ts'
+  const PURGE_SUITE = 'apps/worker/src/jobs/retention-purge.itest.ts'
+  const PRIVACY_RENDER_SUITE = 'apps/web/src/privacy-render.test.ts'
+
+  const pureRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rowRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named `rightsMutant` and not `…Mutant`, deliberately: blocks 106 and 107 both defined a helper of that
+   * shape under the same name, git found the two bodies as shared context and interleaved the blocks, and
+   * the merge had to rebuild both from whole sides.
+   */
+  const rightsMutant = (path, anchor, replacement, suite, runner = rowRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 112a. The partition exclusion removed from the catalogue probe. Every audit partition then arrives as
+  //       its own unclassified table — which is the symptom, and the reason the exclusion exists is the
+  //       other direction: without it this suite goes red on the first of every month.
+  checkRejectedBy(
+    'rights gate: a catalogue probe that enumerates table partitions is caught',
+    rightsMutant(
+      COVERAGE,
+      '         and not pc.relispartition',
+      '         and pc.relispartition is not null',
+      RIGHTS_SUITE,
+    ),
+    'audit_event_',
+  )
+
+  // 112b. The phone column dropped from the contact-detail probe. `otp_challenge` and `otp_phone_lock` are
+  //       keyed by the NUMBER and hold no customer id, so the merge registry's axis cannot see them at all
+  //       — and an erasure built on that axis alone reports success with the number still in two tables.
+  checkRejectedBy(
+    'rights gate: a contact probe that cannot see a phone column is caught',
+    rightsMutant(
+      COVERAGE,
+      "export const CONTACT_DETAIL_COLUMNS: readonly string[] = Object.freeze([\n  'phone_e164',",
+      'export const CONTACT_DETAIL_COLUMNS: readonly string[] = Object.freeze([',
+      RIGHTS_SUITE,
+    ),
+    'otp_challenge.phone_e164',
+  )
+
+  // 112c. The credential probe narrowed so it no longer matches `token_sha256`. `booking_manage_grant` is
+  //       then invisible to all five probes: it has no customer id, no contact detail and no foreign key to
+  //       `booking`, and it holds a live token that lets its bearer cancel a booking. Pseudonymising the
+  //       customer does not make that link stop working.
+  checkRejectedBy(
+    'rights gate: a credential probe that misses the booking-manage token is caught',
+    rightsMutant(
+      COVERAGE,
+      "export const CREDENTIAL_COLUMN_PATTERN = '(^|_)(token|code_hash|sha256|hmac|secret)(_|$)'",
+      "export const CREDENTIAL_COLUMN_PATTERN = '(^|_)(code_hash|hmac|secret)(_|$)'",
+      RIGHTS_SUITE,
+    ),
+    'booking_manage_grant.token_sha256',
+  )
+
+  // 112d. `public.customer` dropped from the free-text probe's subject set. Its primary key is `id`, so it
+  //       has no `customer_id` column and is a subject table only because it is NAMED as one — and
+  //       `customer.notes` is where the front desk types a person's relationships and allergies in prose.
+  checkRejectedBy(
+    'rights gate: a free-text probe blind to the customer table itself is caught',
+    rightsMutant(
+      COVERAGE,
+      "      select distinct table_schema, table_name from reference\n      union\n      select 'public', 'customer'",
+      '      select distinct table_schema, table_name from reference',
+      RIGHTS_SUITE,
+    ),
+    'customer.notes',
+  )
+
+  // 112e. The unclassified list emptied. The catalogue is still enumerated and every rule still applies;
+  //       what is lost is the report of what nothing classified — so a table nobody registered reads as
+  //       covered, which is the entire failure this unit is built against.
+  checkRejectedBy(
+    'rights gate: a coverage report that cannot name an unclassified column is caught',
+    rightsMutant(
+      POLICY,
+      '    if (resolved === undefined) {\n      unclassified.push(column)',
+      '    if (resolved === undefined) {\n      if (false as boolean) unclassified.push(column)',
+      RIGHTS_SUITE,
+    ),
+    '__gate_fixture_unregistered',
+  )
+
+  // 112f. The pseudonym encoded in HEX instead of letters. It is still stable, still unique, still visibly
+  //       not a phone number — and `phone_match_key` is GENERATED as the trailing nine digits of that
+  //       column, so an erased record acquires a match key that can equal a living person's and surfaces as
+  //       a merge candidate for them. Caught by a pure test, which is why the derivation is pure.
+  checkRejectedBy(
+    'rights gate: a pseudonym carrying digits is caught',
+    rightsMutant(
+      POLICY,
+      '    letters += HEX_TO_LETTER[character]',
+      '    letters += character',
+      POLICY_SUITE,
+      pureRun,
+    ),
+    'no digits',
+  )
+
+  // 112g. `planClinicalErasure` made unconditional. Every synthetic case still passes — they are the only
+  //       ones exercisable today — and what is lost is the READING of the profile: a real health record is
+  //       then destroyed although `erasure_overrides_retention` says a retention obligation prevails.
+  //       Caught only by the control that requires the two real cases to DISAGREE.
+  checkRejectedBy(
+    'rights gate: a clinical decision that ignores the regulatory profile is caught',
+    rightsMutant(
+      POLICY,
+      '  if (input.erasureOverridesRetention) {',
+      '  if (true as boolean) {',
+      POLICY_SUITE,
+      pureRun,
+    ),
+    'not.toBe',
+  )
+
+  // 112h. The blank-authority branch deleted from the response decision — "we cannot say where to
+  //       complain" falling through to "issue the letter", in one line. The letter then names whatever is
+  //       in the setting, which is the empty string, so a data subject is told to complain to nobody.
+  checkRejectedBy(
+    'rights gate: a response issued with no supervisory authority is caught',
+    rightsMutant(
+      POLICY,
+      '  if (authority.length === 0) {',
+      '  if (false as boolean) {',
+      POLICY_SUITE,
+      pureRun,
+    ),
+    // The test's NAME and not the refusal constant: vitest truncates the printed source snippet
+    // (`'rights_response_auth…'`), so a case keyed on the constant reports FAIL about a mutation it
+    // actually caught. Three cases in this block were keyed that way in their first draft.
+    'refuses to issue a response',
+  )
+
+  // 112i. The overdue comparison relaxed from "past the deadline" to "on it". A request is then overdue on
+  //       the instant it falls due, which is a day early for every request — the safer direction, still
+  //       wrong, and only the boundary case catches it.
+  checkRejectedBy(
+    'rights gate: an overdue check that fires ON the deadline is caught',
+    rightsMutant(
+      POLICY,
+      '  return now.getTime() > request.dueAt.getTime()',
+      '  return now.getTime() >= request.dueAt.getTime()',
+      POLICY_SUITE,
+      pureRun,
+    ),
+    'PASSED',
+  )
+
+  // 112j. The phone numbers read from the ALREADY-ERASED records instead of the live ones. THE most
+  //       dangerous mutation in this block, and it changes one comparator. `message` rows are found by the
+  //       recipient address and the suppression key is an HMAC of the number, so an erasure holding no
+  //       numbers redacts no messages and writes no suppression — and reports a complete erasure, closes
+  //       the request and writes a balanced resolution.
+  //
+  //       This case first tried to break the SAME property by reversing the identity-last ordering, and it
+  //       reported PASS about a mutation that changed nothing: the numbers are captured before any statement
+  //       runs, so the order is irrelevant. The engine's comment claiming the ordering was load-bearing was
+  //       corrected at the same time — the capture is the safeguard, so the capture is what this breaks.
+  checkRejectedBy(
+    'rights gate: an erasure that captures no live phone number is caught',
+    rightsMutant(
+      ENGINE,
+      '    livePhones: identities.filter((i) => i.erasedAt === null).map((i) => i.phone),',
+      '    livePhones: identities.filter((i) => i.erasedAt !== null).map((i) => i.phone),',
+      RIGHTS_SUITE,
+    ),
+    'still refuses a send',
+  )
+
+  // 112k. The suppression WRITE removed. Every existing suppression survives — the list is keyed on the
+  //       hashed detail and an erasure re-points nothing — so a test that only checked an opted-out
+  //       subject would pass. What is lost is the case that matters: somebody who never opted out has no
+  //       entry, so re-importing their number from a spreadsheet creates a record with a clean sheet.
+  checkRejectedBy(
+    'rights gate: an erasure that does not write a suppression is caught',
+    rightsMutant(
+      ENGINE,
+      '  for (const phone of livePhones) {\n    await recordSuppression(uow, deps.keying, {',
+      '  for (const phone of [] as readonly string[]) {\n    await recordSuppression(uow, deps.keying, {',
+      RIGHTS_SUITE,
+    ),
+    'still refuses a send',
+  )
+
+  // 112l. The merged-away records dropped from the erasure's lineage. A merge leaves a TOMBSTONE rather
+  //       than deleting (0069), so those `customer` rows still exist and each still holds its own live
+  //       phone number — and an erasure naming only the survivor leaves the person reachable through a row
+  //       the request never mentioned. Caught because the identity count changes.
+  checkRejectedBy(
+    'rights gate: an erasure that ignores records merged into the subject is caught',
+    rightsMutant(
+      ENGINE,
+      '      select m.loser_customer_id from merge_record m join lineage l on m.survivor_customer_id = l.id',
+      '      select m.loser_customer_id from merge_record m join lineage l on false',
+      RIGHTS_SUITE,
+    ),
+    'leaves the invoice byte-identical',
+  )
+
+  // 112m. The rule looked up by TABLE rather than by column — the defect the integration test found while
+  //       this unit was being written, put back. `public.invoice` has six probed columns under three rules,
+  //       so every line is written with whichever the map held last, and the resolution says the salon's
+  //       own telephone number was retained under the FTA obligation.
+  checkRejectedBy(
+    'rights gate: a resolution that attributes a rule by table rather than by column is caught',
+    rightsMutant(
+      ENGINE,
+      '    const rule = line.rule\n',
+      '    const rule =\n      ctx.classes.find((other) => other.participant === line.participant)?.rule ?? line.rule\n',
+      RIGHTS_SUITE,
+    ),
+    // `public.invoice`'s first probed column is `customer_address_snapshot`, a `financial` rule, so the
+    // issuer line's DATA CLASS becomes financial while its action stays `not_customer_data` — which is the
+    // original defect exactly: the resolution recording the salon's own number as customer data retained
+    // under the FTA obligation.
+    'financial',
+  )
+
+  // 112n. `assertRecipesMatchRules` made a no-op. Every rule still classifies and every statement still
+  //       runs; what is lost is the equality between the two, and the asymmetry is what bites — adding a
+  //       rule is the half somebody remembers, and a rule with no statement reports its rows as acted on
+  //       while changing nothing.
+  checkRejectedBy(
+    'rights gate: a rule with no statement to carry it out is caught',
+    rightsMutant(
+      ENGINE,
+      '  if (missingRecipe.length > 0 || orphanRecipe.length > 0) {',
+      '  if (false as boolean) {',
+      RIGHTS_SUITE,
+    ),
+    'no statement',
+  )
+
+  // 112o. The destroyed-key branch removed from `open()`. Decryption still FAILS — an empty wrapped key
+  //       cannot be unwrapped — so a test asserting "it does not decrypt" would pass. What is lost is the
+  //       DISTINCTION between an honoured erasure and a tampered ciphertext, and a caller that cannot tell
+  //       them apart reports an attack as an erasure, which closes an incident.
+  checkRejectedBy(
+    'rights gate: a destroyed data key indistinguishable from tampering is caught',
+    rightsMutant(
+      ENVELOPE,
+      '  if (isDataKeyDestroyed(sealed.wrappedDataKey)) {\n    // Named, and not left to fall through',
+      '  if (false as boolean) {\n    // Named, and not left to fall through',
+      RIGHTS_SUITE,
+    ),
+    'ClinicalDataKeyDestroyed',
+  )
+
+  // 112p. The destroyed rows put back into the KEK rotation's work queue. Nothing about an erasure changes
+  //       and every assertion about one still passes; what breaks is UNBOUNDED and arrives later — `rewrap`
+  //       cannot unwrap a destroyed key, so the row never moves off the old KEK and every rotation from
+  //       then on fails on the same row. One honoured erasure request would make rotation impossible for
+  //       ever.
+  checkRejectedBy(
+    'rights gate: a rotation queue that selects crypto-erased rows is caught',
+    rightsMutant(
+      KEY_STORE,
+      '             and length(wrapped_data_key) > 0\n           order by id\n           limit ${limit - found.length}',
+      '             and length(wrapped_data_key) >= 0\n           order by id\n           limit ${limit - found.length}',
+      RIGHTS_SUITE,
+    ),
+    'not.toContain',
+  )
+
+  // 112q. The legal hold folded in with the rows that are simply too young. The row is still not purged, so
+  //       a test that checked the table afterwards would pass — and nothing says the hold bit, so the next
+  //       person asking "did the purge touch this" has to reason about dates instead of reading an answer.
+  //       The acceptance line is explicit that it must be skipped AND REPORTED.
+  checkRejectedBy(
+    'rights gate: a purge that keeps a held row without reporting the hold is caught',
+    rightsMutant(
+      POLICY,
+      "    if (held) return { rowId: candidate.rowId, outcome: 'skip', because: 'legal_hold' }",
+      "    if (held) return { rowId: candidate.rowId, outcome: 'keep', because: 'within_retention' }",
+      POLICY_SUITE,
+      pureRun,
+    ),
+    'legal_hold',
+  )
+
+  // 112s. The suppression class given a retention period. It reads as tidying up — the rows are old, they
+  //       hold an HMAC and no recipient, and nothing would look wrong — and it would make everybody who
+  //       ever unsubscribed messageable again after a while. The worst thing a scheduled job in this
+  //       system could do, and it is one `null` becoming a number.
+  checkRejectedBy(
+    'rights gate: a purge that ages out a suppression is caught',
+    rightsMutant(
+      PURGE,
+      "      dataClass: 'suppression_record' as DataClass,\n      retainDays: null,",
+      "      dataClass: 'suppression_record' as DataClass,\n      retainDays: 365,",
+      PURGE_SUITE,
+    ),
+    'suppression_record',
+  )
+
+  // 112t. The operational retention written as a literal instead of read from the profile. Today's figure
+  //       is identical, so nothing changes — until the owner confirms a different financial retention, at
+  //       which point the purge removes a booking an invoice line points at and breaks the document the
+  //       FTA requires be kept.
+  checkRejectedBy(
+    'rights gate: a retention period that ignores the regulatory profile is caught',
+    rightsMutant(
+      PURGE,
+      '      retainDays: 365 * profile.financialRetentionYears,',
+      '      retainDays: 365 * 5,',
+      PURGE_SUITE,
+    ),
+    'FINANCIAL obligation',
+  )
+
+  // 112u. The withheld-response notice removed from the privacy screen. Every heading, every class and
+  //       every retention still renders and nothing looks broken — and the first person to read the page
+  //       concludes the business can answer a data subject in writing, which it cannot.
+  checkRejectedBy(
+    'rights gate: a privacy screen that hides the withheld response is caught',
+    rightsMutant(
+      PRIVACY_RENDER,
+      '      : \'<div class="withheld"><p><strong>Written responses are withheld, and requests are still carried ',
+      '      : \'<div class="withheld"><p><strong>All responses issue normally, and requests are still carried ',
+      PRIVACY_RENDER_SUITE,
+      pureRun,
+    ),
+    'Written responses are withheld',
+  )
+
+  // 112v. The unclassified count rendered as a tidy-up task rather than as a refusal. The number is still
+  //       on the page, so a test asserting it appears would pass; what is lost is that the engine WILL NOT
+  //       RUN, which is the difference between a backlog item and an outage.
+  checkRejectedBy(
+    'rights gate: a privacy screen that reports an unclassified column as a backlog item is caught',
+    rightsMutant(
+      PRIVACY_RENDER,
+      "          'REFUSE to run until each one is.</strong>')",
+      "          'and will be classified shortly.</strong>')",
+      PRIVACY_RENDER_SUITE,
+      pureRun,
+    ),
+    'REFUSE to run',
+  )
+
+  // 112w. The credential delete's subject scoping thrown away, so it finds nothing. `booking_manage_grant`
+  //       has NO customer id — that is the fact the credential probe exists for — so the subject is reached
+  //       through `booking`. Comparing `booking_id` against a list of CUSTOMER ids instead matches nothing,
+  //       every statement still runs, every count still balances, and the resolution still says the
+  //       credential class was acted on. What survives is a live bearer token that lets whoever holds the
+  //       link view and cancel the booking of somebody who asked to be forgotten.
+  checkRejectedBy(
+    'rights gate: an erasure that leaves the subject\u2019s booking-manage token working is caught',
+    rightsMutant(
+      ENGINE,
+      "    subjectKey: 'booking_of_customer',",
+      "    subjectKey: 'customer_id',",
+      RIGHTS_SUITE,
+    ),
+    'booking-manage token',
+  )
+
+  // 112x. The same predicate widened the OTHER way, which is the worse half and the reason that case
+  //       carries a control. A delete with no subject predicate removes every live link in the salon —
+  //       every customer's, not this one's — and it satisfies "the subject's token is gone" perfectly. The
+  //       control is a stranger's grant on a stranger's booking, and it is the only thing that can tell an
+  //       erasure from an outage.
+  checkRejectedBy(
+    'rights gate: a credential delete that revokes every customer\u2019s link is caught',
+    rightsMutant(
+      ENGINE,
+      'select id from booking where customer_id = any (${[...ctx.customerIds]}::uuid[]))',
+      'select id from booking)',
+      RIGHTS_SUITE,
+    ),
+    'booking-manage token',
+  )
+
+  // 112y. The privileged route removed, so the two workflow deletes are issued directly. This is the ONLY
+  //       case in the block that cannot fail as the database owner: the owner holds DELETE on both tables,
+  //       so every other assertion in the suite is green either way. 0070 and 0077 revoke DELETE on
+  //       `flow_enrolment` and `customer_pipeline_card` from `berelax_app` on the stated grounds that
+  //       removal happens by cascade from `customer` — which an erasure cannot do, because a retained tax
+  //       invoice references that row. The app-role case is what fails, and it is the reason that case
+  //       exists.
+  checkRejectedBy(
+    'rights gate: an erasure issuing a delete the application role may not is caught',
+    rightsMutant(
+      ENGINE,
+      "    if (r.via === 'definer') {",
+      '    if (false as boolean) {',
+      RIGHTS_SUITE,
+    ),
+    'permission denied',
+  )
+
+  // 112z. The schema qualifier removed from case 87's append-only rule, which is where this unit found a
+  //       gate that was silent about a whole schema rather than wrong about anything. The rule takes the
+  //       table name from the table's own comment and STRIPS the schema, then looks for a trigger `on
+  //       <table>` — but a trigger on a table outside `public` must be written `on clinical.<table>`,
+  //       because SQL offers no other spelling. So for any append-only table in the `clinical` schema the
+  //       rule could never pass, and `clinical.dek_destruction` is the first one to carry the declaration
+  //       marker, which is why the hole had never been reachable.
+  //
+  //       This is not a mutation of this unit's own code: it is the known-bad fixture for a one-line fix
+  //       made to somebody else's gate, and it fails by naming the table, which is what says the fix is
+  //       load-bearing rather than cosmetic.
+  checkRejectedBy(
+    'rights gate: an append-only table outside `public` with no refusal trigger is caught',
+    withEditedFile(
+      CONVENTIONS,
+      (text) =>
+        replaceOnce(text, "const QUALIFIER = '(?:[a-z0-9_]+\\\\.)?'", "const QUALIFIER = ''"),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'dek_destruction',
+  )
+
+  // 112r. The pseudonym/erasure agreement dropped, for real (the criterion's known-bad fixture).
+  //
+  //       `customer_erasure_and_pseudonym_agree` is this unit's defining guard and it refuses two things.
+  //       The half worth dropping is the second: a row with `erased_at` set while a REAL PHONE NUMBER is
+  //       still in place — a completed erasure that left the person reachable, recorded as complete. A
+  //       constraint removed only in the migration source is invisible to a database that has already had
+  //       the migration applied, which is why this is applied with `psql` rather than mutated in a file.
+  {
+    const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
+    const CONSTRAINT = 'customer_erasure_and_pseudonym_agree'
+    const psql = (statement) =>
+      run('psql', ['--no-psqlrc', '-v', 'ON_ERROR_STOP=1', '-q', url, '-c', statement])
+
+    if (url === '') {
+      // Loudly, not silently. A gate that skips when its environment is absent is the ADR 0002 failure.
+      check(
+        'rights gate: an erased record keeping a real phone number is caught',
+        false,
+        'TEST_DATABASE_URL is not set, so the constraint cannot be dropped and restored',
+      )
+    } else {
+      const dropped = psql(`alter table customer drop constraint ${CONSTRAINT}`)
+      try {
+        check(
+          'rights gate: the pseudonym-agreement constraint was actually dropped',
+          !dropped.failed,
+          `psql could not drop the constraint, so the case below measured nothing:\n${dropped.output}`,
+        )
+        // With the constraint gone, the fixture below is accepted: a record marked erased whose real number
+        // is still on the row. The suite's identity assertions are what catch it.
+        const planted = psql(
+          'update customer set erased_at = now() ' +
+            "where phone_e164 = '+971590009606' and erased_at is null",
+        )
+        check(
+          'rights gate: the unreachable-record fixture was planted',
+          !planted.failed,
+          `psql could not plant the fixture row:\n${planted.output}`,
+        )
+        checkRejectedBy(
+          'rights gate: an erased record keeping a real phone number is caught',
+          runExpectingFailure('pnpm', rowRun(RIGHTS_SUITE)),
+          'leaves no record marked erased',
+        )
+      } finally {
+        // The fixture FIRST, or the constraint cannot go back on: the row it planted is the one the
+        // constraint refuses, so restoring in the other order fails and leaves the schema without its
+        // defining guard for every later run.
+        psql("update customer set erased_at = null where phone_e164 = '+971590009606'")
+        psql(
+          `alter table customer add constraint ${CONSTRAINT} ` +
+            "check ((erased_at is not null) = (phone_e164 ~ '^erased-[a-p]{32}$'))",
+        )
+      }
+      // The control on the teardown, and not a formality: this constraint left off fails nothing visibly
+      // and removes the one guard that refuses a reachable record marked erased.
+      const restored = psql(
+        `select count(*) as n from pg_constraint where conname = '${CONSTRAINT}'`,
+      )
+      check(
+        'rights gate: the pseudonym-agreement constraint was restored',
+        !restored.failed && /\b1\b/.test(restored.output),
+        `customer may be missing ${CONSTRAINT}:\n${restored.output}`,
+      )
+    }
+  }
+}
+
 // 113a-113s. (P-HR-07) Attendance: every figure shown to come from the version that judged it, and every
 //            refusal shown to be about the thing it says it is about.
 //
