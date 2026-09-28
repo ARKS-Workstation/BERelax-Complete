@@ -631,26 +631,27 @@ describe('acceptance — axe reports nothing serious or critical, in forty-eight
 
 describe('acceptance — every till route photographed twice is byte-identical', () => {
   /*
-    WHAT "ZERO PIXEL DIFF ACROSS TWO CONSECUTIVE RUNS" DOES AND DOES NOT HOLD FOR, measured.
+    WHAT THIS CASE ESTABLISHES, stated exactly, because its name used to promise more than it checks.
 
     `captureUntilStable` takes the same cell repeatedly and requires two CONSECUTIVE captures to be
     byte-identical, which is what makes an image diffable and what catches a page printing a clock, a generated
-    id or a row order nothing pins. That holds for all forty-eight cells, and the whole file has been run twice
-    back to back on one database with every case green.
+    id or a row order nothing pins. That is asserted for all forty-eight cells, and four cross-cell
+    comparisons below assert the captures are not simply the same bytes every time.
 
-    Across two separate RUNS of this file it holds for /till, /till?view=preview and /till/cash-up and NOT for
-    /packages, and the cause is a rule rather than a flake: part 3 of the M2 slice SELLS a package through the
-    browser, `package_sale` refuses DELETE for every role (0078 — "a sale is a contract") and `package_balance`
-    hangs off it, so the balance that sale opens is permanent and the next run's "Outstanding entitlements"
-    table is one row longer. The screenshots are captured before part 3 writes, so within a run the gallery is
-    consistent; between runs the packages page grows by exactly what the previous run bought.
+    It does NOT compare against a PREVIOUS RUN's files, and the name said "zero pixel diff between runs", which
+    nothing here measured — there is no prior-run baseline on disk to compare with, and the gallery directory
+    is gitignored. So the name now says what the assertions say.
 
-    Not worked around, because every way of doing so costs more than it buys: a sale the browser does not make
-    stops testing the one money path the till can complete today, and a paged or day-scoped balances list would
-    hide the four drawdown states this screen exists to show. Recorded here and in the unit's NOTE so the
-    critique pass knows which image to expect to move.
+    An earlier version of this comment also recorded that /packages could not be stable across runs, because
+    part 3 sells a package, `package_sale` refuses DELETE and `package_balance` hangs off it, so each run's
+    "Outstanding entitlements" table was one row longer than the last. That cause is GONE, and not for
+    cosmetic reasons: `afterAll` now truncates the package family, because a surviving sale pins its customer
+    through 0078's `on delete restrict` and made nine cases in `apps/web/src/otp-route.itest.ts` fail. Each run
+    therefore starts from the same four seeded drawdown states. Whether that makes the bytes identical across
+    runs is not claimed here, since the balance rows are re-created with fresh v7 uuids each time and this file
+    has not measured it.
   */
-  it('captures 4 screens x 3 viewports x 2 themes x 2 directions, with zero pixel diff between runs', async () => {
+  it('captures 4 screens x 3 viewports x 2 themes x 2 directions, each settled and each its own cell', async () => {
     mkdirSync(SCREENS, { recursive: true })
     const shots = new Map<string, Uint8Array>()
     for (const screen of SCREEN_PATHS) {
