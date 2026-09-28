@@ -94,7 +94,16 @@ const PASTE_CSS = `
   }
   legend { font-weight: 600; padding: 0 var(--space-2); }
   .ratings { display: flex; flex-wrap: wrap; gap: var(--space-5); }
-  .ratings label { flex-direction: row; align-items: center; gap: var(--space-2); font-weight: 400; }
+  /* 48px, because docs/08 §4's floor is the TARGET and the label is the target: clicking the word "4
+     stars" selects the radio, so the whole row has to be thumb-sized and not just the control in it. */
+  .ratings label {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 400;
+    min-height: 3rem;
+    padding-inline-end: var(--space-2);
+  }
   .ratings input { min-width: 1.5rem; min-height: 1.5rem; }
   button {
     font: inherit;

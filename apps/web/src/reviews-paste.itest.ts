@@ -4,7 +4,7 @@ import { getPayload, type Payload } from 'payload'
 import { type Browser, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEWS_PASTE_FIELDS, REVIEWS_PASTE_PATH } from '../app/(admin)/reviews/paste/view.ts'
-import config from '../payload.config.ts'
+import config, { PAYLOAD_PLACEHOLDER_SECRET } from '../payload.config.ts'
 
 /**
  * G-REV-02 — the paste form, driven by a real browser against the built application.
@@ -150,8 +150,7 @@ beforeAll(async () => {
       // The same secret the in-process Payload below signs the session with. Without it the spawned server
       // rejects every cookie this file presents and every assertion reads as a 401 — which
       // `breakpoint-preview.itest.ts` had to record for the same reason.
-      PAYLOAD_SECRET:
-        process.env['PAYLOAD_SECRET'] ?? 'berelax-placeholder-payload-secret-not-for-serving',
+      PAYLOAD_SECRET: process.env['PAYLOAD_SECRET'] ?? PAYLOAD_PLACEHOLDER_SECRET,
     },
   })
   BASE = server.origin
