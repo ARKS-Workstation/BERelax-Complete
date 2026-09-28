@@ -35691,6 +35691,669 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 122a-122z. (M-VAT-08) The sealed VAT return: the row that cannot be edited, the two signatures that
+//            cannot be one person, and the figures that must not follow the ledger.
+//
+//            Four parts, because the unit's claims are of four kinds.
+//
+//            The PROBES are known-bad fixtures against real PostgreSQL. Every rule `0095_vat_return.sql`
+//            adds is a DATABASE rule — seven private SQLSTATEs, nine CHECKs, two UNIQUE constraints and a
+//            REVOKE — and a constraint is only a gate once something has been seen to bounce off it (ADR
+//            0003). Each asserts what refused it BY NAME, because a bare non-zero exit is also what a typo
+//            in a column name produces. `VERBOSITY=verbose` so psql prints the SQLSTATE, and every probe
+//            runs inside `begin; … ; set constraints all immediate; rollback;` — the `set constraints` is
+//            what makes the DEFERRED audit trigger (ZY057) reachable at all, and the rollback is what lets
+//            a probe write a return without leaving one behind.
+//
+//            Two of the probes are the only cases in this repository that can see this unit's PRIVILEGE
+//            layer. The integration suite connects as OWNER, so `revoke update, delete on vat_return from
+//            berelax_app` is invisible to every itest — the gap that has now caught five units.
+//
+//            The probe's snapshot body is a FIXTURE shape and says so: it is the smallest JSON the CHECKs
+//            accept, not a real working paper. What a real paper's bytes look like, and that the stored
+//            hash is the sha256 of them, is asserted by
+//            `packages/db/src/services/vat-return-signoff.itest.ts` against a real closed period. A probe
+//            that had to build real working papers could not run inside one rolled-back transaction.
+//
+//            The SOURCE cases are the claim no runtime test can make, and it is about something being
+//            ABSENT: the two views that expose the figures must reach NO ledger relation. That absence is
+//            the snapshot — a view that joined `vat201_box_line` would recompute the return on every read,
+//            which is what M-VAT-07's working paper is for and what a filed return must never be. The scan
+//            runs over the real migration AND over a copy with such a join planted in it, so it is seen to
+//            fail. Two more source cases hold the SQLSTATE band and the translator: a code the service
+//            names and the migration never raises is a branch that never runs, and a code the migration
+//            raises with no translator arrives at a caller as a raw driver error.
+//
+//            The MUTANTS break `packages/db/src/services/vat-return-signoff.ts` and watch this unit's own
+//            suites go red. Six through the db suite, one through the fixtures pair suite, and the controls
+//            at the end: both suites, unedited, must pass.
+//
+//            Every source case edits a shipped file and restores it in a `finally`, and every anchor goes
+//            through `replaceOnce` (brief rule 20). The local helpers are named `vatReturn*` rather than
+//            `probe`/`mutant`, because blocks 106 and 107 both had a `…Mutant` of the same shape and git
+//            interleaved them.
+{
+  const vatReturnDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const VAT_RETURN_MIGRATION = 'packages/db/migrations/0095_vat_return.sql'
+  const VAT_RETURN_SERVICE = 'packages/db/src/services/vat-return-signoff.ts'
+
+  /**
+   * A period label no suite uses, and no `period_lock` is taken for it.
+   *
+   * The probes never call `vat201WorkingPapers()`, so they need no closed period at all — which is the
+   * reason they can run inside one transaction. 2128 is used by no suite and no other gate block;
+   * `vat-return-signoff.itest.ts` picks a month inside 2120-2139 from `max(entry_date)`, and these probes
+   * write no journal entry, so they cannot move that search.
+   */
+  const VAT_RETURN_PERIOD = 'GATE-VAT-RETURN-2128-05'
+
+  /**
+   * The smallest snapshot body the CHECKs accept: one box, one reason, and the seven scalars the columns
+   * are tied to. A FIXTURE and not a working paper — see the block header.
+   *
+   * Key order is `JSON.stringify`-over-sorted-keys, matching `canonicaliseVat201WorkingPapers()`, because
+   * two of the probes edit it by string replacement and a differently ordered copy would make those edits
+   * silently miss.
+   */
+  const VAT_RETURN_BODY =
+    '{"boxes":[{"boxNo":1,"displayOrder":1,"isProvisional":true,"label":"Standard-rated supplies — box ' +
+    'number to be confirmed","lineCount":2,"netSuppliesFils":"20000","openQuestionId":' +
+    '"Y11-vat201-boxes","side":"output","taxFils":"1000"}],"closedPeriodId":"' +
+    VAT_RETURN_PERIOD +
+    '","fileable":false,"formatVersion":"vat201-wp1","notFileableReasons":[{"detail":"An FTA-registered ' +
+    'tax agent has not reviewed this mapping.","openQuestionId":"Y11-tax-agent","reason":' +
+    '"tax_agent_review_outstanding"}],"period":{"endsOn":"2128-05-31","periodId":"' +
+    VAT_RETURN_PERIOD +
+    '","startsOn":"2128-05-01"},"trialBalanceHash":' +
+    '"0000000000000000000000000000000000000000000000000000000000000000"}'
+
+  const VAT_RETURN_COLUMNS =
+    'period_id, starts_on, ends_on, version, closed_period_id, format_version, engine_signature, ' +
+    'trial_balance_hash, content_hash, snapshot_json, fileable, prepared_by_actor_kind, ' +
+    'prepared_by_actor_label, snapshotted_at'
+
+  const VAT_RETURN_SIGN_OFF_COLUMNS =
+    'return_id, capacity, signatory_user_id, signatory_display_name, signatory_role, signed_at'
+
+  /** The return id, by period rather than by a temporary view — see `vatReturnAsApp` below. */
+  const VAT_RETURN_ID = `(select id from vat_return where period_id = '${VAT_RETURN_PERIOD}')`
+
+  /**
+   * One snapshot and one PREPARER signature, with the audit row ZY057 requires.
+   *
+   * The audit row is part of the setup rather than part of each case for a reason worth stating: without
+   * it, `set constraints all immediate` fires ZY057 at the end of EVERY probe, and each one then reports
+   * the audit rule instead of the rule it is about. That happened while these probes were being written —
+   * six of them reported `VatReturnSignOffNotAudited` about statements that had already been refused for
+   * the right reason, and the codes looked consistent enough to believe.
+   */
+  const VAT_RETURN_SETUP =
+    `insert into vat_return (${VAT_RETURN_COLUMNS}) values ('${VAT_RETURN_PERIOD}', ` +
+    `'2128-05-01'::date, '2128-05-31'::date, 1, '${VAT_RETURN_PERIOD}', 'vat201-wp1', ` +
+    `vat201_engine_signature(), ` +
+    `'0000000000000000000000000000000000000000000000000000000000000000', ` +
+    `encode(sha256(convert_to($b$${VAT_RETURN_BODY}$b$, 'UTF8')), 'hex'), ` +
+    `$b$${VAT_RETURN_BODY}$b$, false, 'system', 'gate probe', now()); ` +
+    `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+    "'preparer', 'gate-preparer', 'Gate Preparer', 'accountant', now()); " +
+    'insert into audit_event (actor_kind, actor_label, action, entity_type, entity_id, operation) ' +
+    "select 'system', 'gate probe', 'vat_return.sign_off', 'vat_return_sign_off', s.id::text, 'create' " +
+    `from vat_return_sign_off s where s.return_id = ${VAT_RETURN_ID}`
+
+  const vatReturnProbe = (statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=verbose',
+      '-q',
+      vatReturnDbUrl ?? '',
+      '-c',
+      `begin; ${VAT_RETURN_SETUP}; ${statements}; set constraints all immediate; rollback;`,
+    ])
+
+  /**
+   * A probe run as `berelax_app`, and the one trap in writing one.
+   *
+   * The first version named the return through a TEMPORARY VIEW created by the owner, and `berelax_app`
+   * was refused that view — so the case reported `42501` while saying nothing whatever about the grant it
+   * claimed to measure. It is the dominant defect class in this build, arriving inside the case that
+   * exists to catch it. So the statement names the table directly and filters on a literal.
+   */
+  const vatReturnProbeAsApp = (statements) =>
+    vatReturnProbe(`set local role berelax_app; ${statements}`)
+
+  const vatReturnProbes = [
+    {
+      // THE rule. A filed return is a statement made on a date; a row that can be edited afterwards is not
+      // one. For the OWNER as well, because a migration and a psql session are not the application.
+      name: 'vat return gate rejects an UPDATE of a sealed snapshot',
+      rule: 'ZY051',
+      sql: `update vat_return set fileable = true where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      name: 'vat return gate rejects a DELETE of a sealed snapshot',
+      rule: 'ZY051',
+      sql: `delete from vat_return where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // The signature is the part somebody would want to edit: a name spelt wrong, a role corrected. Both
+      // are a new version of the return, because "who signed this" cannot be answered by a row anybody can
+      // rewrite.
+      name: 'vat return gate rejects an UPDATE of a signature',
+      rule: 'ZY051',
+      sql:
+        "update vat_return_sign_off set signatory_display_name = 'Somebody else' " +
+        `where return_id = ${VAT_RETURN_ID}`,
+    },
+    {
+      name: 'vat return gate rejects a DELETE of a finalisation',
+      rule: 'ZY051',
+      sql: 'delete from vat_return_finalisation',
+    },
+    {
+      // The refusal names the table AND the remedy, because "append-only" on its own sends somebody
+      // looking for the UPDATE they are allowed to make, and there is not one.
+      name: 'vat return gate says a correction is a new version rather than an edit',
+      rule: 'a NEW version naming the one it supersedes',
+      sql: `update vat_return set fileable = true where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // Two people, refused in the DATABASE. The acceptance criterion names the code by name.
+      name: 'vat return gate rejects one person signing as both preparer and reviewer',
+      rule: 'ZY052',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-preparer', 'Gate Preparer Again', 'owner', now())",
+    },
+    {
+      // Named, not counted. "This person has already signed" sends somebody to the wrong screen; the
+      // capacity they already hold is what says which half is missing.
+      name: 'vat return gate names the capacity the same person already signed in',
+      rule: 'has already signed return',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-preparer', 'Gate Preparer Again', 'owner', now())",
+    },
+    {
+      // Deny-by-default, and the two roles the acceptance criterion names. A receptionist takes bookings
+      // and a therapist gives treatments; neither makes a statement to the FTA.
+      name: 'vat return gate refuses the receptionist role a reviewer signature',
+      rule: 'ZY053',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-desk', 'Gate Desk', 'receptionist', now())",
+    },
+    {
+      name: 'vat return gate refuses the therapist role a reviewer signature',
+      rule: 'ZY053',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-room', 'Gate Room', 'therapist', now())",
+    },
+    {
+      // And the refusal carries the permitted set, so nobody has to go and read a migration to find out
+      // who can.
+      name: 'vat return gate names the roles that MAY sign when it refuses one that may not',
+      rule: 'accountant, owner',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-desk', 'Gate Desk', 'receptionist', now())",
+    },
+    {
+      // Marked final with one signature. The whole value of two is that a second person looked at it.
+      name: 'vat return gate refuses a finalisation while only one person has signed',
+      rule: 'ZY055',
+      sql:
+        'insert into vat_return_finalisation (return_id, finalised_at, actor_kind, actor_label) ' +
+        `values (${VAT_RETURN_ID}, now(), 'system', 'gate probe')`,
+    },
+    {
+      // And the same refusal on a READ, which is what makes M-VAT-09's export unable to skip it. A
+      // privilege cannot express this and a TypeScript guard would be a rule for the callers that came
+      // through the guard.
+      name: 'vat return gate refuses to read an unsigned return for filing',
+      rule: 'ZY055',
+      sql: `select count(*) from vat_return_for_filing(${VAT_RETURN_ID})`,
+    },
+    {
+      // A fork of the chain: superseding a version that is not the one in force. 0093's ZZ003 rule, and
+      // its reason — two returns would claim to be in force for one period.
+      name: 'vat return gate rejects a second amendment of the same version',
+      rule: 'ZY054',
+      sql:
+        `insert into vat_return (${VAT_RETURN_COLUMNS}, supersedes_id, amendment_reason) ` +
+        `select period_id, starts_on, ends_on, 2, closed_period_id, format_version, engine_signature, ` +
+        "trial_balance_hash, encode(sha256(convert_to(snapshot_json || ' ', 'UTF8')), 'hex'), " +
+        `snapshot_json || ' ', fileable, 'system', 'gate probe', now(), id, 'first amendment' ` +
+        `from vat_return where period_id = '${VAT_RETURN_PERIOD}'; ` +
+        `insert into vat_return (${VAT_RETURN_COLUMNS}, supersedes_id, amendment_reason) ` +
+        `select period_id, starts_on, ends_on, 2, closed_period_id, format_version, engine_signature, ` +
+        "trial_balance_hash, encode(sha256(convert_to(snapshot_json || '  ', 'UTF8')), 'hex'), " +
+        `snapshot_json || '  ', fileable, 'system', 'gate probe', now(), id, 'a fork' ` +
+        `from vat_return where period_id = '${VAT_RETURN_PERIOD}' and version = 1`,
+    },
+    {
+      // An amendment restates ONE period. Superseding another quarter's return would make one quarter's
+      // filed history read as another's.
+      name: 'vat return gate rejects an amendment that describes another period',
+      rule: 'An amendment restates ONE period',
+      sql:
+        `insert into vat_return (${VAT_RETURN_COLUMNS}, supersedes_id, amendment_reason) ` +
+        `select period_id || '-OTHER', starts_on, ends_on, 2, closed_period_id, format_version, ` +
+        'engine_signature, trial_balance_hash, content_hash, snapshot_json, fileable, ' +
+        "'system', 'gate probe', now(), id, 'a cross-period amendment' " +
+        `from vat_return where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // THE trap this unit could most easily have walked into: a snapshot that makes an unfileable return
+      // look fileable. Refused by a CHECK reading the HASHED BYTES, so it holds during a restore with
+      // triggers off and cannot be satisfied by a flag beside them.
+      name: 'vat return gate rejects a snapshot claiming to be fileable while a reason stands',
+      rule: 'vat_return_fileable_only_when_nothing_in_it_refuses_filing',
+      sql:
+        `insert into vat_return (${VAT_RETURN_COLUMNS}) select period_id || '-F', starts_on, ends_on, 1, ` +
+        'closed_period_id, format_version, engine_signature, trial_balance_hash, ' +
+        'encode(sha256(convert_to(replace(replace(snapshot_json, \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '"\', \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        "-F\"'), '\"fileable\":false', '\"fileable\":true'), 'UTF8')), 'hex'), " +
+        'replace(replace(snapshot_json, \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '"\', \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '-F"\'), \'"fileable":false\', \'"fileable":true\'), ' +
+        `true, 'system', 'gate probe', now() from vat_return where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // The hash must be the hash of the bytes beside it. Without this the snapshot is a blob with a
+      // number next to it, and "is this the return I filed" has no answer.
+      name: 'vat return gate rejects a content hash that is not the hash of the snapshot',
+      rule: 'vat_return_snapshot_hash_is_the_hash_of_the_snapshot',
+      sql:
+        `insert into vat_return (${VAT_RETURN_COLUMNS}) select period_id || '-H', starts_on, ends_on, 1, ` +
+        'closed_period_id, format_version, engine_signature, trial_balance_hash, ' +
+        "encode(sha256(convert_to('tampered', 'UTF8')), 'hex'), " +
+        'replace(snapshot_json, \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '"\', \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        "-H\"'), fileable, 'system', 'gate probe', now() " +
+        `from vat_return where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // A snapshot with no figures in it would store, hash and verify perfectly and say nothing. ADR 0002
+      // applied to the artefact rather than to a test.
+      name: 'vat return gate rejects a snapshot carrying no box figures at all',
+      rule: 'vat_return_snapshot_carries_its_figures',
+      sql:
+        `insert into vat_return (${VAT_RETURN_COLUMNS}) select period_id || '-E', starts_on, ends_on, 1, ` +
+        'closed_period_id, format_version, engine_signature, trial_balance_hash, ' +
+        'encode(sha256(convert_to(replace(replace(snapshot_json, \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '"\', \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        "-E\"'), '\"boxes\":[{', '\"boxes\":[],\"wasBoxes\":[{'), 'UTF8')), 'hex'), " +
+        'replace(replace(snapshot_json, \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '"\', \'"periodId":"' +
+        VAT_RETURN_PERIOD +
+        '-E"\'), \'"boxes":[{\', \'"boxes":[],"wasBoxes":[{\'), ' +
+        `fileable, 'system', 'gate probe', now() from vat_return where period_id = '${VAT_RETURN_PERIOD}'`,
+    },
+    {
+      // The GENERATING CODE VERSION, and the one way it could have been quietly wrong. Renaming an engine
+      // function would leave the signature a hash of six definitions out of seven — a column whose whole
+      // job is to differ when the code differs, agreeing when it had changed. DDL is transactional, so the
+      // rename rolls back with everything else.
+      name: 'vat return gate rejects an engine signature over an incomplete engine',
+      rule: 'ZY056',
+      sql:
+        'alter function vat201_box_line(date, date) rename to vat201_box_line_renamed; ' +
+        'select vat201_engine_signature()',
+    },
+    {
+      // A statutory signature whose only evidence is the signature itself. Deferred to COMMIT, so the
+      // audit row may be written either side of it and neither may be written in a later transaction.
+      name: 'vat return gate rejects a signature with no audit_event in the same transaction',
+      rule: 'ZY057',
+      sql:
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+        "'reviewer', 'gate-owner', 'Gate Owner', 'owner', now())",
+    },
+  ]
+
+  try {
+    if (!vatReturnDbUrl) {
+      check(
+        'vat return constraints reject their known-bad fixtures',
+        false,
+        'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+      )
+    } else {
+      // 122a-122t. One case per probe, each asserting the rule that refused it by name.
+      for (const { name, rule, sql: statement } of vatReturnProbes) {
+        checkRejectedBy(name, vatReturnProbe(statement), rule)
+      }
+
+      // 122u. The PRIVILEGE layer, run as `berelax_app`. The test pool connects as OWNER, so this is
+      //       invisible to every itest — the gap that has caught five units. Three tables, two verbs.
+      for (const table of ['vat_return', 'vat_return_sign_off', 'vat_return_finalisation']) {
+        checkRejectedBy(
+          `vat return gate refuses the application role an UPDATE on ${table}`,
+          vatReturnProbeAsApp(`update ${table} set created_at = created_at`),
+          '42501',
+        )
+        checkRejectedBy(
+          `vat return gate refuses the application role a DELETE on ${table}`,
+          vatReturnProbeAsApp(`delete from ${table}`),
+          '42501',
+        )
+      }
+
+      // 122v. The control for all twenty-six above, and the case without which they are all worthless: the
+      //       happy path IS accepted. A snapshot, two signatures from two different people in two permitted
+      //       roles, both audited, a finalisation, and a read for filing — in one transaction, with the
+      //       deferred triggers made immediate at the end.
+      const vatReturnAccepted = vatReturnProbe(
+        `insert into vat_return_sign_off (${VAT_RETURN_SIGN_OFF_COLUMNS}) values (${VAT_RETURN_ID}, ` +
+          "'reviewer', 'gate-owner', 'Gate Owner', 'owner', now()); " +
+          'insert into audit_event (actor_kind, actor_label, action, entity_type, entity_id, operation) ' +
+          "select 'system', 'gate probe', 'vat_return.sign_off', 'vat_return_sign_off', s.id::text, " +
+          `'create' from vat_return_sign_off s where s.return_id = ${VAT_RETURN_ID} ` +
+          "and s.capacity = 'reviewer'; " +
+          'insert into vat_return_finalisation (return_id, finalised_at, actor_kind, actor_label) ' +
+          `values (${VAT_RETURN_ID}, now(), 'system', 'gate probe'); ` +
+          'insert into audit_event (actor_kind, actor_label, action, entity_type, entity_id, operation) ' +
+          "select 'system', 'gate probe', 'vat_return.finalised', 'vat_return_finalisation', f.id::text, " +
+          `'create' from vat_return_finalisation f where f.return_id = ${VAT_RETURN_ID}; ` +
+          `select count(*) from vat_return_for_filing(${VAT_RETURN_ID})`,
+      )
+      check(
+        'vat return gate: a signed, audited, finalised return IS accepted and readable for filing',
+        !vatReturnAccepted.failed,
+        'the control probe was refused, so every vat return probe above may be passing for the wrong ' +
+          `reason:\n${vatReturnAccepted.output}`,
+      )
+
+      // 122w. The complement of the privilege cases, and the half that is easy to forget: the application
+      //       must be able to READ the snapshot, both views and both functions. A missing SELECT anywhere
+      //       in that set is a VAT return screen answering 500, and no itest can see it because the test
+      //       pool connects as owner.
+      const vatReturnAppCanRead = vatReturnProbeAsApp(
+        `select count(*) from vat_return where period_id = '${VAT_RETURN_PERIOD}'; ` +
+          'select count(*) from vat_return_box_figure; ' +
+          'select count(*) from vat_return_not_fileable_reason; ' +
+          `select signed from vat_return_sign_off_state(${VAT_RETURN_ID}); ` +
+          'select vat_return_signing_roles()',
+      )
+      check(
+        'vat return gate: the application role can READ the snapshot, both views and both functions',
+        !vatReturnAppCanRead.failed,
+        'the role a screen connects as cannot read the sealed return, so the VAT return page would ' +
+          `answer 500:\n${vatReturnAppCanRead.output}`,
+      )
+    }
+  } catch (err) {
+    check('vat return constraints reject their known-bad fixtures', false, String(err))
+  }
+
+  // --- the source claim: the figures must reach NO ledger relation ------------------------------
+
+  /** SQL with its `--` comments removed and its string literals blanked. */
+  const vatReturnSql = (text) => text.replace(/^\s*--.*$/gm, '').replace(/'(?:[^']|'')*'/g, "''")
+
+  /**
+   * The body of one `create view <name> as … ;`, out of the stripped migration.
+   *
+   * Read to the first `;`, which is exact here because neither view body contains one and the literals
+   * have already been blanked. Returns `null` when the view is not found at all, which the control below
+   * requires NOT to happen — a scan over an empty string finds no forbidden relation and reports success.
+   */
+  const vatReturnViewBody = (name) => {
+    const sqlText = vatReturnSql(readFileSync(VAT_RETURN_MIGRATION, 'utf8'))
+    const opening = sqlText.indexOf(`create view ${name} as`)
+    if (opening === -1) return null
+    const end = sqlText.indexOf(';', opening)
+    return end === -1 ? null : sqlText.slice(opening, end)
+  }
+
+  /**
+   * What a snapshot's figures may never be read from.
+   *
+   * Every one of these would turn the view into a recomputation of the return, which is exactly what
+   * M-VAT-07's working paper already is and what a FILED return must never be: the figures would follow
+   * the ledger, and a return already signed would restate itself the day anybody posted a correction.
+   */
+  const VAT_RETURN_FORBIDDEN_IN_VIEWS = [
+    { re: /\bjournal_line\b/, why: 'journal_line' },
+    { re: /\bjournal_entry\b/, why: 'journal_entry' },
+    { re: /\bvat201_/, why: 'a vat201 engine function or mapping table' },
+    { re: /\bvat_box\b/, why: 'the chart grouping' },
+    { re: /\bbill_line\b/, why: 'bill_line' },
+    { re: /\bperiod_lock\b/, why: 'period_lock' },
+  ]
+
+  const vatReturnViewReach = (body) =>
+    body === null
+      ? ['THE VIEW WAS NOT FOUND']
+      : VAT_RETURN_FORBIDDEN_IN_VIEWS.filter(({ re }) => re.test(body)).map(({ why }) => why)
+
+  const VAT_RETURN_VIEWS = ['vat_return_box_figure', 'vat_return_not_fileable_reason']
+
+  // 122x. The claim over the real migration.
+  {
+    const found = VAT_RETURN_VIEWS.flatMap((name) => vatReturnViewReach(vatReturnViewBody(name)))
+    check(
+      'vat return gate: the figure views read the snapshot and never the ledger',
+      found.length === 0,
+      `found ${found.join(', ')} inside a vat_return view. The snapshot stores the FIGURES; a view that ` +
+        'reached the ledger would recompute them on every read, and a return already signed would ' +
+        'restate itself the day anybody posted a correction into the period.',
+    )
+    // The control, in two halves: the extraction found a real view body, and the stripper did not remove
+    // the code along with the comments. Without it the case above passes over an empty string.
+    const body = vatReturnViewBody('vat_return_box_figure')
+    check(
+      'vat return gate: the view scan is reading the real view definition',
+      body?.includes('snapshot_json') === true &&
+        body.includes('jsonb_array_elements') &&
+        body.includes('vat_return r'),
+      `the extracted body was ${JSON.stringify(body?.slice(0, 120) ?? null)}, so the case above ` +
+        'measured nothing',
+    )
+  }
+
+  // 122y. And the scan seen to FAIL. A join to `vat201_box_line` planted in the view — the exact edit
+  //       somebody would make to "fix" a figure that looked stale — must be found.
+  {
+    const planted = withEditedFile(
+      VAT_RETURN_MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "    cross join lateral jsonb_array_elements((r.snapshot_json::jsonb) -> 'boxes') as box;",
+          '    cross join lateral vat201_box_line(r.starts_on, r.ends_on) as box;',
+        ),
+      () => vatReturnViewReach(vatReturnViewBody('vat_return_box_figure')),
+    )
+    check(
+      'vat return gate: the view scan catches a ledger join planted in the figure view',
+      planted.includes('a vat201 engine function or mapping table'),
+      `the scan reported ${JSON.stringify(planted)} for a view that joins vat201_box_line`,
+    )
+  }
+
+  // 122z(i). The SQLSTATE band and the translator, both directions.
+  //
+  //          A code the service names and the migration never raises is a `case` that can never run — the
+  //          shape a copied translator arrives in. A code the migration raises with no translator reaches
+  //          a caller as a raw driver error, which is how `SamePersonSignOff` would present as a 500. And
+  //          the band matters because the CLASS no longer identifies a file: ZY001-ZY014 belong to three
+  //          other migrations, so a code outside 051-060 here is a collision waiting for
+  //          `sqlstate-uniqueness.test.ts` to find it in somebody else's worktree.
+  const vatReturnCodesRaised = (text) => [
+    ...new Set([...text.matchAll(/errcode = '([A-Z0-9]{5})'/g)].map((match) => match[1])),
+  ]
+  const vatReturnCodesNamed = (text) => [
+    ...new Set([...text.matchAll(/'(ZY0\d\d)'/g)].map((match) => match[1])),
+  ]
+
+  {
+    const raised = vatReturnCodesRaised(readFileSync(VAT_RETURN_MIGRATION, 'utf8')).sort()
+    const named = vatReturnCodesNamed(readFileSync(VAT_RETURN_SERVICE, 'utf8')).sort()
+    check(
+      'vat return gate: every code the migration raises has a translator, and no translator is dead',
+      raised.length >= 6 && named.join(',') === raised.join(','),
+      `the migration raises ${raised.join(', ') || '(none)'} and the service names ` +
+        `${named.join(', ') || '(none)'}. A code with no translator reaches a caller as a raw driver ` +
+        'error; a translator for a code nothing raises is a branch that can never run.',
+    )
+    const outside = raised.filter((code) => !/^ZY0(5[1-9]|60)$/.test(code))
+    check(
+      'vat return gate: every private code is inside this unit’s allocated band ZY051-ZY060',
+      raised.length >= 6 && outside.length === 0,
+      `${outside.join(', ')} is outside ZY051-ZY060. The class no longer identifies a file — 0085 holds ` +
+        'ZY001-ZY008, 0089 ZY009-ZY010 and 0091 ZY011-ZY014 — so a code outside the band is a collision ' +
+        'that surfaces in another unit’s worktree.',
+    )
+  }
+
+  // 122z(ii). The scan seen to fail, in both directions at once: a translator removed from the service
+  //           must be reported.
+  {
+    const withoutTranslator = withEditedFile(
+      VAT_RETURN_SERVICE,
+      (text) => replaceOnce(text, "  notAudited: 'ZY057',", '  notAudited: (0, String)(0),'),
+      () => vatReturnCodesNamed(readFileSync(VAT_RETURN_SERVICE, 'utf8')),
+    )
+    check(
+      'vat return gate: the translator scan notices a code the service stops naming',
+      !withoutTranslator.includes('ZY057'),
+      `the scan still reported ZY057 after it was removed from the service: ${withoutTranslator.join(', ')}`,
+    )
+  }
+
+  // --- the mutants: this unit's own suites must go red ------------------------------------------
+  const vatReturnItest = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const VAT_RETURN_DB_SUITE = 'packages/db/src/services/vat-return-signoff.itest.ts'
+  const VAT_RETURN_PAIR_SUITE = 'packages/fixtures/src/vat-return-signoff.itest.ts'
+
+  const vatReturnMutant = (find, into, suite = VAT_RETURN_DB_SUITE) =>
+    withEditedFile(
+      VAT_RETURN_SERVICE,
+      (text) => replaceOnce(text, find, into),
+      () => runExpectingFailure('pnpm', vatReturnItest(suite)),
+    )
+
+  // The canonical bytes and the hash taken over DIFFERENT objects. The paper carries its own contentHash
+  // and a hash over a value containing itself has no fixed point, so one of the two has to strip it —
+  // storing bytes that include it while hashing bytes that do not is the mistake that leaves a snapshot
+  // whose hash describes something else.
+  checkRejectedBy(
+    'vat return gate: bytes and hash taken over different objects are caught',
+    vatReturnMutant(
+      'return { body: canonicaliseVat201WorkingPapers(rest), hash: vat201ContentHash(rest) }',
+      'return { body: canonicaliseVat201WorkingPapers(paper), hash: vat201ContentHash(rest) }',
+    ),
+    'vat_return_snapshot_hash_is_the_hash_of_the_snapshot',
+  )
+
+  // A snapshot claiming to be fileable. The type of `paper.fileable` is the literal `false` today, so this
+  // is the shape the mistake would take when the type widens and somebody defaults it the convenient way.
+  checkRejectedBy(
+    'vat return gate: a snapshot that claims to be fileable is caught',
+    vatReturnMutant('        ${paper.fileable},', '        ${true},'),
+    'vat_return_fileable_only_when_nothing_in_it_refuses_filing',
+  )
+
+  // "Is this signed" computed in TypeScript instead of read from the one SQL function that answers it.
+  // One signature would read as signed, which is the state the whole unit exists to refuse — and the
+  // database would still refuse the finalisation, so the only symptom is a screen offering an action that
+  // fails.
+  checkRejectedBy(
+    'vat return gate: a second answer to "is this signed" is caught',
+    vatReturnMutant('    signed: row.signed,', '    signed: row.preparer_user_id !== null,'),
+    // The TEST's name, not a message: the mutation changes a value rather than removing a throw, so there
+    // is no error text to anchor on (M-TILL-10's recorded defect 8).
+    'records the preparer with their display name and role snapshotted',
+  )
+
+  // The audit row dropped from the signature. ZY057 refuses it at COMMIT, which is the point: a statutory
+  // signature whose only evidence is the signature itself.
+  //
+  // Anchored on a TEST NAME and not on `ZY057`, and the difference is not cosmetic. The mutation makes the
+  // sign-off itself fail, so six cases go red at once, and `detailExcerpt` shows the head and the tail of
+  // that output with the middle elided — the refusal's own message was in the elided part, so the case
+  // reported "did not report ZY057" about a suite that had failed for exactly the right reason. Vitest's
+  // summary lists every failing test name and is always in the head, so a name is the anchor that can be
+  // relied on (M-TILL-10's recorded defect 8, arriving by a different route).
+  checkRejectedBy(
+    'vat return gate: a signature written with no audit row is caught',
+    vatReturnMutant(
+      "    action: 'vat_return.sign_off',",
+      "    action: 'vat_return.sign_off_written_elsewhere',",
+    ),
+    'writes an audit row for each signature',
+  )
+
+  // The filing read going to the base table instead of through `vat_return_for_filing()`. An unsigned
+  // return would then be exportable, and nothing about the code would look wrong.
+  checkRejectedBy(
+    'vat return gate: a filing read that bypasses the sign-off check is caught',
+    vatReturnMutant(
+      '      from vat_return_for_filing(${returnId}::uuid)',
+      '      from (select r.id as return_id, r.period_id, r.starts_on, r.ends_on, r.version,\n' +
+        '                   r.content_hash, r.engine_signature, r.format_version, r.snapshot_json,\n' +
+        '                   now() as finalised_at\n' +
+        '              from vat_return r where r.id = ${returnId}::uuid) as bypassed',
+    ),
+    'refuses to mark a return final while only one person has signed',
+  )
+
+  // A consumer dropped from the enumeration. The acceptance line is that every path consuming the return
+  // is enumerated FROM the export surface, so an export that stops being classified has to fail.
+  checkRejectedBy(
+    'vat return gate: an unclassified export is caught',
+    vatReturnMutant(
+      "    export: 'vatReturnForFiling',\n    requiresSignOff: true,",
+      "    export: 'vatReturnForFilingRenamedAway',\n    requiresSignOff: true,",
+    ),
+    'enumerates every export of this module',
+  )
+
+  // And the pair suite: the permitted roles read from anywhere but the database. A hard-coded list here
+  // would agree with itself for ever, which is the whole reason the list lives in SQL and is read out.
+  checkRejectedBy(
+    'vat return gate: signing roles read from a constant rather than the database are caught',
+    vatReturnMutant(
+      'select vat_return_signing_roles() as roles',
+      "select array['accountant','owner','manager']::text[] as roles",
+      VAT_RETURN_PAIR_SUITE,
+    ),
+    'permits exactly the roles holding vat_return:prepare',
+  )
+
+  // The control: every file edited above, UNEDITED, passes. Without it a stale anchor, a suite that had
+  // stopped importing the module, or a database that could not be reached would all report as seven
+  // passing cases.
+  {
+    const dbGreen = run('pnpm', vatReturnItest(VAT_RETURN_DB_SUITE))
+    check('vat return gate: the db suite passes unedited', !dbGreen.failed, dbGreen.output)
+    const pairGreen = run('pnpm', vatReturnItest(VAT_RETURN_PAIR_SUITE))
+    check('vat return gate: the pair suite passes unedited', !pairGreen.failed, pairGreen.output)
+  }
+}
+
 // 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
 //            event name that must not compile, the funnel that must not be dated on a calendar day, and
 //            the two gates that were widened so the taxonomy's purity is measured rather than asserted.

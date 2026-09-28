@@ -384,8 +384,12 @@ export const VAT201_OPEN_QUESTIONS: readonly Vat201OpenQuestion[] = [
     whatChanges:
       'Nothing computed. The agent either confirms the mapping — in which case is_provisional is ' +
       'cleared, the placeholder markers come out of the labels, and fileable stops being refused for ' +
-      'that reason — or supplies different numbers, which is Y11-vat201-boxes. The review itself is ' +
-      "recorded by M-VAT-08's sign-off, not here.",
+      'that reason — or supplies different numbers, which is Y11-vat201-boxes. The INTERNAL review is ' +
+      "recorded by M-VAT-08's sign-off — a preparer and a reviewer who must be two different people — " +
+      "and the AGENT'S OWN review is stored nowhere yet: it is an owner-side step, and M-VAT-08 " +
+      'declined to add a sign-off capacity nothing could write (brief rule 15). This sentence read ' +
+      '"the review itself is recorded by M-VAT-08\'s sign-off", which building that sign-off made ' +
+      'untrue.',
   },
   {
     questionId: 'Y11-vat-package',

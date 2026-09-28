@@ -1566,6 +1566,38 @@ export {
   sellPackage,
 } from './services/sell-package.ts'
 export {
+  type AmendVatReturnInput,
+  amendVatReturn,
+  type FinaliseVatReturnInput,
+  finaliseVatReturn,
+  readVatReturn,
+  SamePersonSignOff,
+  type SignOffVatReturnInput,
+  type SnapshotVatReturnInput,
+  type StoredVatReturn,
+  signOffVatReturn,
+  snapshotVatReturn,
+  VAT_RETURN_CONSUMERS,
+  VAT_RETURN_SIGN_OFF_CAPACITIES,
+  VAT_RETURN_SQLSTATE,
+  type VatReturnBoxFigure,
+  type VatReturnConsumer,
+  type VatReturnFinalisation,
+  type VatReturnForFiling,
+  type VatReturnNotFileableReasonRow,
+  VatReturnNotSignedOff,
+  type VatReturnSignature,
+  type VatReturnSignOff,
+  type VatReturnSignOffCapacity,
+  type VatReturnSignOffState,
+  vatReturnBoxFigures,
+  vatReturnError,
+  vatReturnForFiling,
+  vatReturnNotFileableReasons,
+  vatReturnSigningRoles,
+  vatReturnSignOffState,
+} from './services/vat-return-signoff.ts'
+export {
   type AvailabilityLimits,
   GENDER_MATCHING_SETTING_KEY,
   MAX_ADVANCE_SETTING_KEY,
@@ -2548,7 +2580,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // what makes a non-contiguous allocation cost nothing. 83, 84, 86 and 87 landed together as the second
 // batch of five; 85 was allocated to C-CRM-10, whose worktree survived a container restart with the work
 // uncommitted, so 85 is HELD rather than free and rather than a permanent gap — it will land with that
-// unit. 88 is the next number nobody holds.
+// unit. Which number is next free is stated ONCE, in the note before `SCHEMA_VERSION`, and nowhere else.
 //
 // 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
 // learn about a clinical record, made into a shape that can carry nothing else. 0008 created
@@ -2847,78 +2879,27 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
 // `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
 //
+
 //
 // This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 93 as const
-// 92 is 0092_leave_approval.sql: approving leave — who may decide it, what it costs the floor, and what it
-// may never do to a booking. It is the first writer of `leave_request` in the build. 0030 created the table
-// and left ONE decision to P-HR, and 0066 took it in `leaveCoveragePeriod()` while saying in its own header
-// that "writing and approving that period is P-HR-09's"; until this file nothing had written one, which is
-// why the trading-day alignment finally has a caller. The consequence a reader meets first: a day of leave
-// on the 17th is stored as 11:00 on the 17th to 02:00 on the 18th, so the 01:30 appointment in the tail is a
-// REPORTED CONFLICT rather than a booking somebody discovers on the day. No arithmetic for that is in this
-// file or in the SQL — ZY019 compares the approval's period against the request's, which is a comparison and
-// not a second derivation, for the reason 0066 gives: `resolveTradingDate` is the one reading of where a
-// trading day ends. What the file deliberately does NOT do is three things. It stores no CONFLICT REPORT:
-// the report is a read recomputed on every attempt, because a stored one is a snapshot of a world a
-// reassignment has since changed and the approval would then commit against rows nobody looked at; what is
-// stored is the one thing a read cannot recover, the DECISION a human took about a conflict they chose not
-// to resolve (`leave_conflict_override`, whose role and reason are refused by ZY016 rather than by a
-// TypeScript guard alone, so the refusal holds for a `psql` session — 0080's division of labour). It moves
-// NO LEAVE BALANCE, because 0066 is explicit that a request reserves when it is MADE and approval only makes
-// the reservation final; the reservation belongs to the submission path, which is P-HR-14's, so this unit
-// writes neither a `reserved` nor a `released` movement — symmetrically, since a release with no reservation
-// creates leave out of nothing, which `decideRequest` in @berelax/core refuses. And it TOUCHES NO
-// APPOINTMENT: that is ADR 0041, and the proof is not a promise but an enumeration out of the source —
-// `packages/fixtures/src/hr-leave-approval.test.ts` walks the modules reachable from the approval entry
-// points, collects every appointment status any of them can write, and asserts `cancelled_by_salon` and
-// `no_show` are not among them, with the same scan shown firing over `cancel.ts` so an empty answer means
-// something. `leave_coverage_lock` is the table that looks unnecessary and is not: two approvals for two
-// DIFFERENT therapists on one day conflict on no row, so each transaction reads a floor that still holds the
-// other therapist, both coverage checks pass, and the floor ends up short with every check having said yes.
-// `approveLeaveRequest` takes `select ... for update` over one row per trading date in ascending order, so
-// the second transaction BLOCKS, re-reads `employee_approved_leave` and is refused BY THE COVERAGE CHECK
-// inside the transaction — which is the acceptance line's own wording, and why a row nobody can see would
-// have been the wrong mechanism (ADR 0023's row-locked counter is the precedent). The coverage answer itself
-// is P-HR-06's `validateRota` called TWICE over identical arguments bar the leave, and the refusal is the
-// set DIFFERENCE: the segments covered without this leave and not with it. An absolute reading would refuse
-// every approval on any database whose `shift` table is empty, which is every seeded one, and it would name
-// a segment the requester cannot do anything about. `leave_approval` snapshots the `rota_coverage_rule`
-// version that judged the floor, which is 0081's argument taken a fifth time and exactly as true here: "was
-// the floor covered when this leave was approved?" is a question about a decision taken months ago, and
-// raising the minimum in April must not make March's approval retroactively wrong. Withdrawing an approval
-// is a `leave_approval_cancellation` row rather than a column, because the approval table is append-only for
-// the same reason as the rest, and `leave_approval_live` is the view that joins the two — `employee_approved_leave`'s
-// precedent (0030): a predicate held in a view cannot be forgotten, and forgetting this one shows a
-// therapist as blocked after their holiday was withdrawn. Its private SQLSTATEs are `ZY015` through `ZY020`,
-// and the allocation is worth reading because the CONVENTION changed under it. "One private class per
-// migration" has run out — `ZA` through `ZY` are in use and `ZZ` is another unit's — and this file first took
-// `ZY001`-`ZY006` on the reasoning every previous file used: read the migrations you can see, take a class
-// nobody raises. Three other units reasoned identically in the same week, and `0085` had already moved its
-// eight codes INTO `ZY` after it and `0084` both landed on `ZA`. Four migrations claimed `ZY001` at once. So
-// the rule is now W-SYS-12's provisional answer — a refusal is identified by all FIVE characters, and two
-// unrelated rules may share a class as long as they never share a code — and `sqlstate-uniqueness.test.ts`
-// was already keyed on the exact five, which is what makes the new convention checkable rather than a hope:
-// a shared class is not a finding, a shared code is. What has not changed is why: a code standing for two
-// rules makes one file's translator report the other file's refusal, and makes a probe asserting it pass
-// when the statement bounced off something else.
 //
-
-// Every number allocated through 93 has now landed: the run on disk is 1..93 less the permanent gaps above,
-// less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
-// existed. 85, 89, 91, 92 and 93 arrived out of order, each with the unit that held it. 94 is the next
-// number nobody holds, and 95 through 98 are allocations held by units in flight (W-SYS-12, M-VAT-08,
-// A-FIRST-01, P-HR-11, C-AUTO-05 — 0094 through 0098 in that order). Gate case 90a walks the migrations that
-// EXIST on disk rather than consecutive integers, which is what makes a non-contiguous allocation cost
-// nothing; a held number that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47,
-// 71, 74 and now 88, and is NOT renumbered, because renumbering to close a gap is how two branches come to
-// apply one number to different SQL.
+// Every number allocated through 95 has now landed, out of order and each with the unit that held it: the run
+// on disk is 1..95 less the permanent gaps above and less 88, which M-TILL-13 released as a permanent gap
+// because every table its screens touch already existed. 94 is G-REV-02's and 96, 97, 98 and 99 are held by
+// units in flight (A-FIRST-01, P-HR-11, C-AUTO-05 and W-SYS-12 in that order), so 100 is the first number
+// nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which
+// is what makes a non-contiguous allocation cost nothing; a held number needing no migration becomes a
+// permanent gap like 22, 41, 44, 47, 71, 74 and 88, and is NOT renumbered, because renumbering to close a gap
+// is how two branches come to apply one number to different SQL.
 //
-// There is ONE of these notes, and `packages/db/src/allocation-note.test.ts` now fails if a merge leaves a
-// second. Four separate merges today each resolved this paragraph by keeping both sides, and at one point
-// SIX copies existed, four of them describing held numbers that had already landed — in the file whose own
-// rule is that a second statement of a fact drifts. Collapsing them by hand four times was the evidence
-// that a rule nothing checks is a rule that will be broken again.
+// This is the ONLY place that says which number is next free, and `packages/db/src/allocation-note.test.ts`
+// fails if a second appears anywhere in the file, in any wording, or if SCHEMA_VERSION stops matching the
+// highest migration on disk. The history is the argument: this paragraph reached SIX copies, four of them
+// naming numbers that had already landed; a merge then deleted it outright, which the check caught; and
+// M-VAT-08 found three further next-free claims hiding INSIDE per-migration paragraphs, in different words,
+// which the first version of the check could not see. 0094 was issued twice by the integrator on the same
+// afternoon — to G-REV-02 and to W-SYS-12 — for exactly the reason this note exists.
+export const SCHEMA_VERSION = 95 as const
