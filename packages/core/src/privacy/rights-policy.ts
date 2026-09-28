@@ -1304,8 +1304,8 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     why:
       'The request is the evidence that a right was exercised and answered within its deadline, so it has ' +
       'to outlive the record it was about — a subject who later disputes the answer has nothing else ' +
-      'to point at, and neither does a regulator. DELETE raises for every role (ZA001) and the columns an ' +
-      'SLA is measured against are frozen (ZA002). It holds a uuid, a type, two instants and a stated ' +
+      'to point at, and neither does a regulator. DELETE raises for every role (ZY001) and the columns an ' +
+      'SLA is measured against are frozen (ZY002). It holds a uuid, a type, two instants and a stated ' +
       'reason; no contact detail reaches it, which is why `request_detail` is the subject’s words ' +
       'about what they want rather than their details.',
     subjectReason:
@@ -1320,7 +1320,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     action: 'inherits_parent',
     parent: 'public.rights_request',
     why:
-      'The resolution and its per-class accounting. Append-only for every role (ZA004) and retained with ' +
+      'The resolution and its per-class accounting. Append-only for every role (ZY004) and retained with ' +
       'the request: it is the row that says what was retained and on what basis, so erasing it would ' +
       'destroy the reasons this engine exists to record.',
     registeredBy: 'C-CRM-10',
@@ -1331,7 +1331,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     action: 'inherits_parent',
     parent: 'public.rights_request',
     why:
-      'The export log. Append-only (ZA004), and it is the insider-threat trail — a record that could ' +
+      'The export log. Append-only (ZY004), and it is the insider-threat trail — a record that could ' +
       'be erased on request would let somebody who exported the client list have the evidence removed.',
     registeredBy: 'C-CRM-10',
   }),
@@ -1356,7 +1356,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'The record that this person’s health data was destroyed and on whose authority. It has to ' +
       'outlive every other trace of the data it is about, which is the one retention in this unit that is ' +
       'a DIRECT consequence of the erasure rather than something surviving it. Append-only for every role ' +
-      '(ZA005). It holds two uuids, an instant and a KEK version label — no health content and no ' +
+      '(ZY005). It holds two uuids, an instant and a KEK version label — no health content and no ' +
       'contact detail.',
     subjectReason:
       'We keep the record that your health information was destroyed, when, and under which request. It ' +

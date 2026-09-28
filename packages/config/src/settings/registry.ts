@@ -1064,7 +1064,7 @@ export const SETTINGS = [
     invalidates: [],
     // No `rerunJobs`, and the absence is the decision. A deadline is stored per request precisely so that
     // changing this setting cannot move one, and 0085's `rights_request_guard` freezes `due_at` and
-    // `sla_days` (ZA002) so no job could move one even if it were written. An earlier draft named
+    // `sla_days` (ZY002) so no job could move one even if it were written. An earlier draft named
     // `rebuild-rights-due-dates` here; no worker registered it, which is the defect
     // `send-scheduled-step.test.ts` catches for the reminder settings and nothing catches for this one.
     // Requests taken after the change take the new figure; requests already open keep theirs, which is

@@ -40,10 +40,16 @@ const MIGRATIONS = 'packages/db/migrations'
  * Codes already shared when this check was written, with the two rules each one stands for.
  *
  * Every entry is a latent defect, not an exemption on the merits. Reallocating them needs a namespace
- * decision — `ZA` through `ZX` are taken and only `ZY` and `ZZ` are free, so three unrelated pairs cannot
- * all be given a fresh class — plus a migration per offender to `create or replace` its functions, and
- * every translator and probe updated with it. That is unit-sized and is recorded as such in the manifest
- * rather than improvised here.
+ * decision, a migration per offender to `create or replace` its functions, and every translator and probe
+ * updated with it. That is unit-sized and is **W-SYS-12** in the manifest, which is where the namespace
+ * decision is taken: the CLASS stops identifying a migration file, a refusal is identified by all five
+ * characters, and the registry allocates them. Until that unit lands, `ZZ` is the only free class — `ZY`
+ * went to 0085 when C-CRM-09 and C-CRM-10 turned out to have taken `ZA` in worktrees that could not see
+ * each other, which this check caught on the first run after that merge and is the reason it exists.
+ *
+ * This sentence used to say the work was "recorded as such in the manifest" when nothing in the manifest
+ * owned it. The file was added to catch a code standing for two rules; it carried a claim standing for
+ * nothing, six lines under the paragraph explaining why an unallocated convention drifts.
  *
  * REMOVE an entry when its collision is resolved. Never add one.
  */

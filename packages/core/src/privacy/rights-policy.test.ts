@@ -103,7 +103,7 @@ describe('the request lifecycle', () => {
     expect(canTransition('received', 'in_progress')).toBe(true)
     expect(canTransition('in_progress', 'partially_completed')).toBe(true)
     // The control, and it is the transition somebody would write by accident: straight from received to
-    // completed, skipping the state the clinical functions require (ZA006 refuses without `in_progress`).
+    // completed, skipping the state the clinical functions require (ZY006 refuses without `in_progress`).
     expect(canTransition('received', 'completed')).toBe(false)
   })
 

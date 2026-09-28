@@ -614,7 +614,7 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
     column: 'subject_customer_id',
     reason:
       'A merge may not re-point a request, and the refusal is structural rather than preferential: ' +
-      '`rights_request_guard` (ZA002) freezes `subject_customer_id` along with the type, the instant it ' +
+      '`rights_request_guard` (ZY002) freezes `subject_customer_id` along with the type, the instant it ' +
       'was received, the due instant and the verification method, because the DEADLINE is measured ' +
       'against those columns — a request answered on day forty becomes compliant the moment one of them ' +
       'can be edited. A request re-pointed at another person is also simply a different request, and the ' +
@@ -649,7 +649,7 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
     column: 'customer_id',
     reason:
       'Unreachable from the application role (0009), append-only for every role including the owner ' +
-      '(ZA005), and it must keep the id the destruction ACTUALLY happened under. It is the authority on ' +
+      '(ZY005), and it must keep the id the destruction ACTUALLY happened under. It is the authority on ' +
       'whether a record was crypto-erased — the empty wrapped key is only the mechanism — and its rows ' +
       'name the customer id whose keys were destroyed at the time. Re-pointing them would make the ' +
       'record say a destruction happened for an id it did not, which is the one thing this table exists ' +

@@ -2445,8 +2445,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // that leaves rows behind surfaces as a record nobody reads and an erasure that leaves rows behind surfaces
 // as a message to somebody who asked to be forgotten. A retained row needs `retained_reason`, and
 // `retain_statutory` additionally needs the profile COLUMN naming the obligation and the figure, so no
-// years number is ever a literal. `rights_request` freezes the columns an SLA is measured against (ZA002)
-// and permits only the transitions the policy declares (ZA003), because a request answered on day forty is
+// years number is ever a literal. `rights_request` freezes the columns an SLA is measured against (ZY002)
+// and permits only the transitions the policy declares (ZY003), because a request answered on day forty is
 // compliant if `received_at` can be edited and nothing about the row would look wrong afterwards. Erasure
 // of the CRM identity is a PSEUDONYM in `customer.phone_e164`, which had to widen that column's E.164 check:
 // every value matching it is a plausible phone number and a plausible number may be a real stranger's, so
@@ -2455,7 +2455,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // `customer_erasure_and_pseudonym_agree`, which refuses both halves of the disagreement and whose second
 // half IS this unit's defining failure: a real number still in place on a record marked erased. Clinical
 // data is crypto-erased through `public.destroy_customer_deks`, SECURITY DEFINER because 0009 revokes the
-// clinical schema from the application role, refusing (ZA006) unless an `in_progress` erasure request names
+// clinical schema from the application role, refusing (ZY006) unless an `in_progress` erasure request names
 // that customer — so a bug cannot shred a clinical record, because a bug does not first insert a request
 // saying it may. It is in `public` and not in `clinical` because EXECUTE on a function also needs USAGE on
 // the schema holding it, and granting `berelax_app` usage on `clinical` would make "the application role
@@ -2464,10 +2464,20 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // CHECK asserting that length was written and REMOVED: `intake.itest.ts` inserts one-byte placeholder keys
 // in the cases that prove C-CRM-08's consent gate and version guard, and a CHECK fires before both, so two
 // of that unit's passing tests would have failed with this file's error instead of the one they assert.
-// `clinical.dek_destruction` is the authority instead. `ZA` is this file's private SQLSTATE prefix: ZB
-// through ZW are taken, and ZA rather than ZX because a unit continuing the alphabet from ZW reaches for ZX
-// next, and 0083, 0084, 0086 and 0087 were allocations held by units in flight when this file was
-// written.
+// `clinical.dek_destruction` is the authority instead. `ZY` is this file's private SQLSTATE prefix, and it
+// is the SECOND one this file had. It was written as `ZA`, on the reasoning that ZB through ZW were taken
+// and that a unit continuing the alphabet from ZW would reach for ZX next — sound reasoning that still
+// collided, because 0084 was a held allocation in another worktree at the time and had taken ZA for
+// itself. Nothing either unit could read said so. The merge is where it became real: `ZA001` stood for
+// "this flag row claims a template version its source submission does not have" AND for "rights_request
+// refuses DELETE", and `ZA002` for "this flag cites another customer's submission" AND for "a frozen SLA
+// column changed" — two pairs of unrelated rules under one code each, which every translator in
+// `packages/db` matches on alone. `packages/db/src/sqlstate-uniqueness.test.ts` caught it on the first run
+// after the merge, which is the whole reason it exists. This file's eight codes moved to ZY001-ZY008
+// rather than 0084's two, because 0084 merged first and its codes are asserted by C-CRM-09's suite; the
+// move is a rename within one file's own family and changes no rule. ZZ is now the last free class, so the
+// convention that a class identifies a FILE has one allocation left in it — W-SYS-12 owns replacing it
+// with an allocator, and until then a unit taking a class is taking the last one.
 //
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than

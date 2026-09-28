@@ -78,12 +78,12 @@ export type RightsRefusal = (typeof RIGHTS_REFUSALS)[number]
 
 /** SQLSTATEs 0085 raises, so a caller can tell one refusal from any other conflict. */
 export const RIGHTS_SQLSTATE = {
-  requestNotDeletable: 'ZA001',
-  requestFrozenColumn: 'ZA002',
-  transitionRefused: 'ZA003',
-  recordImmutable: 'ZA004',
-  dekDestructionImmutable: 'ZA005',
-  clinicalNotAuthorised: 'ZA006',
+  requestNotDeletable: 'ZY001',
+  requestFrozenColumn: 'ZY002',
+  transitionRefused: 'ZY003',
+  recordImmutable: 'ZY004',
+  dekDestructionImmutable: 'ZY005',
+  clinicalNotAuthorised: 'ZY006',
 } as const
 
 function refuse(
@@ -177,7 +177,7 @@ function recipeRegistry(recipes: readonly ExecutionRecipe[]): readonly Execution
       problems.push(`${r.ruleKey}: a redaction must say what replaces the value`)
     }
     // `erase_customer_workflow_rows` holds two static DELETEs and admits no other target, so a recipe
-    // routed through it that is not one of them would raise ZA008 mid-erasure. Refused here instead.
+    // routed through it that is not one of them would raise ZY008 mid-erasure. Refused here instead.
     if (r.via === 'definer' && !(r.action === 'delete_row' && DEFINER_TARGETS.includes(r.table))) {
       problems.push(
         `${r.ruleKey}: only a delete of ${DEFINER_TARGETS.join(' or ')} goes through the definer function`,
@@ -576,7 +576,7 @@ export async function overdueRightsRequests(
   `
 }
 
-/** Moves a request from `received` to `in_progress`. The database refuses any other transition (ZA003). */
+/** Moves a request from `received` to `in_progress`. The database refuses any other transition (ZY003). */
 export async function beginRightsRequest(uow: UnitOfWork, requestId: string): Promise<void> {
   const rows = await uow.sql`
     update rights_request set state = 'in_progress'
@@ -840,7 +840,7 @@ async function loadAuthority(
     refuse(
       'rights_request_not_actionable',
       `Request ${rightsRequestId} is not an erasure in progress. The clinical functions refuse without ` +
-        'one too (ZA006), so this check is the readable half of a guard the database also keeps.',
+        'one too (ZY006), so this check is the readable half of a guard the database also keeps.',
       { requestId: rightsRequestId, state: request?.state ?? null },
     )
   }
@@ -1251,7 +1251,7 @@ async function actOnClinicalSchema(
   return { decision, classes: lines }
 }
 
-/** The `clinical.dek_destruction` accounting line. Retained because the table is append-only (ZA005). */
+/** The `clinical.dek_destruction` accounting line. Retained because the table is append-only (ZY005). */
 function destructionLine(rows: number, rule: ErasureRuleView): ClassLine {
   return {
     participant: 'clinical.dek_destruction',

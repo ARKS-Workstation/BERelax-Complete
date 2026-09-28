@@ -66,13 +66,25 @@
 -- the sentence in its own row and a reader never has to infer it from silence. This is the manifest's
 -- provisional position and it is marked as such.
 --
--- ## `ZA` is this file's private SQLSTATE prefix
+-- ## `ZY` is this file's private SQLSTATE prefix, and `ZA` was
 --
--- `ZB` through `ZW` are taken (0082's header lists most of them and ZV and ZW went to 0080 and 0081), so
--- the alphabet is exhausted in the direction everybody walks it. `ZA` rather than `ZX` for exactly that
--- reason: 0083, 0084, 0086 and 0087 are allocations held by units in flight, and a unit continuing the
--- sequence from ZW reaches for ZX next. What a private code has to be is unique to one file, not
--- memorable, which is 0077's argument verbatim.
+-- `ZB` through `ZW` were taken (0082's header lists most of them and ZV and ZW went to 0080 and 0081), so
+-- the alphabet was exhausted in the direction everybody walks it. This file therefore took `ZA` rather
+-- than `ZX`, reasoning that a unit continuing the sequence from ZW would reach for ZX next while 0083,
+-- 0084, 0086 and 0087 sat in other worktrees.
+--
+-- 0084 had taken `ZA`. Neither file could see the other, and the collision did not exist until both
+-- merged: `ZA001` then meant both "this flag row claims a template version its source submission does not
+-- have" and "rights_request refuses DELETE", `ZA002` both "this flag cites another customer's submission"
+-- and "a frozen SLA column changed". Every translator in `packages/db` matches on the code ALONE, so an
+-- erasure refusal would have been reported as a clinical provenance defect, and a probe asserting either
+-- code would have passed on the other rule entirely.
+--
+-- So this file's codes are ZY001-ZY008. 0084's did not move: it merged first and its two codes are
+-- asserted by C-CRM-09's suite, while this file's were a day old and referenced only by its own unit. What
+-- a private code has to be is unique to one file, not memorable, which is 0077's argument verbatim — and
+-- `ZZ` is now the only free class, so this is the last time that sentence can be satisfied by taking a
+-- fresh one. W-SYS-12 owns the allocator that replaces the convention.
 
 -- ---------------------------------------------------------------------------------------------
 -- New enum label — OUTSIDE the transaction, and that is the point
@@ -211,7 +223,7 @@ begin
       'RightsRequestNotDeletable: rights_request refuses DELETE. The record of a request is the evidence '
       'that it was answered within its deadline, and deleting it would remove the only thing that says '
       'so. A request taken in error is closed as refused, with the reason.'
-      using errcode = 'ZA001';
+      using errcode = 'ZY001';
   end if;
 
   select key into v_changed
@@ -227,7 +239,7 @@ begin
       'these columns, so a request answered late becomes compliant the moment one of them can be '
       'edited — and nothing about the row would look wrong afterwards.',
       v_changed
-      using errcode = 'ZA002';
+      using errcode = 'ZY002';
   end if;
 
   if new.state is distinct from old.state then
@@ -240,7 +252,7 @@ begin
         'terminal state: a request answered wrongly is answered by a NEW request with its own deadline, '
         'so the record of what was done to which rows is never rewritten.',
         old.state, new.state
-        using errcode = 'ZA003';
+        using errcode = 'ZY003';
     end if;
   end if;
 
@@ -248,7 +260,7 @@ begin
 end $$;
 
 comment on function refuse_rights_request_rewrite() is
-  'Raises ZA001 (DELETE), ZA002 (a frozen column changed) or ZA003 (a transition the policy does not '
+  'Raises ZY001 (DELETE), ZY002 (a frozen column changed) or ZY003 (a transition the policy does not '
   'declare). A trigger and not privileges alone, because a migration or a psql session does not connect '
   'as the application role.';
 
@@ -264,7 +276,7 @@ create trigger rights_request_no_delete before delete on rights_request
 create table rights_resolution (
   id                    uuid        primary key default uuid_generate_v7(),
   -- A real foreign key, unlike the customer ids: the parent is this migration's own table and nothing
-  -- deletes from it (ZA001), so no cascade can ever fire.
+  -- deletes from it (ZY001), so no cascade can ever fire.
   rights_request_id     uuid        not null references rights_request (id)
                           constraint rights_resolution_one_per_request unique,
   resolved_at           timestamptz not null,
@@ -518,11 +530,11 @@ begin
     'retained for a reason. An erasure that was wrong is not corrected by editing the row that records '
     'it: it is answered by a new request with its own deadline.',
     tg_table_schema, tg_table_name, tg_op
-    using errcode = 'ZA004';
+    using errcode = 'ZY004';
 end $$;
 
 comment on function refuse_rights_record_change() is
-  'Raises ZA004 for UPDATE and DELETE on rights_resolution, rights_resolution_class and rights_export, '
+  'Raises ZY004 for UPDATE and DELETE on rights_resolution, rights_resolution_class and rights_export, '
   'for every role including the owner.';
 
 create trigger rights_resolution_no_update before update on rights_resolution
@@ -639,7 +651,7 @@ begin
     'that a person''s health data was destroyed and on whose authority, and it has to outlive every '
     'other trace of the data it is about.',
     tg_op
-    using errcode = 'ZA005';
+    using errcode = 'ZY005';
 end $$;
 
 create trigger dek_destruction_no_update before update on clinical.dek_destruction
@@ -721,7 +733,7 @@ begin
       'under a request that records who asked and how they were verified; there is no path that destroys '
       'one without.',
       p_rights_request_id, p_customer_id
-      using errcode = 'ZA006';
+      using errcode = 'ZY006';
   end if;
 
   -- `wrapped_data_key = ''` is the destroyed marker: a real wrapped key is always 60 bytes (12-byte
@@ -772,7 +784,7 @@ end $$;
 
 comment on function public.destroy_customer_deks(uuid, uuid, timestamptz) is
   'Crypto-erases one customer''s clinical payloads: the ciphertext is left byte-identical and the wrapped '
-  'data key is replaced with zero bytes, so nothing can decrypt it. Raises ZA006 unless an in-progress '
+  'data key is replaced with zero bytes, so nothing can decrypt it. Raises ZY006 unless an in-progress '
   'erasure request names that customer. Idempotent. SECURITY DEFINER, and in `public` rather than in '
   '`clinical`, because EXECUTE needs USAGE on the holding schema and granting that would make "the '
   'application role holds no privilege on the clinical schema" stop being true.';
@@ -819,7 +831,7 @@ begin
       'ClinicalContraindicationDeleteNotAuthorised: no in-progress erasure request % names customer % '
       'as its subject, or the survivor of the merge chain it belongs to.',
       p_rights_request_id, p_customer_id
-      using errcode = 'ZA006';
+      using errcode = 'ZY006';
   end if;
 
   delete from clinical.contraindication_flag where customer_id = p_customer_id;
@@ -829,7 +841,7 @@ end $$;
 
 comment on function public.delete_customer_contraindications(uuid, uuid) is
   'Deletes the derived contraindication booleans for one customer under a verified erasure request. '
-  'Raises ZA006 without one. SECURITY DEFINER: 0009 revokes DELETE from berelax_clinical and every '
+  'Raises ZY006 without one. SECURITY DEFINER: 0009 revokes DELETE from berelax_clinical and every '
   'privilege from berelax_app.';
 
 grant execute on function public.delete_customer_contraindications(uuid, uuid) to berelax_app;
@@ -891,7 +903,7 @@ begin
       'the survivor of the merge chain it belongs to. The clinical schema is not readable by the '
       'application role outside a verified erasure request.',
       p_rights_request_id, p_customer_id
-      using errcode = 'ZA006';
+      using errcode = 'ZY006';
   end if;
 
   return query
@@ -978,7 +990,7 @@ begin
       'tables from the application role; this function is the one authorised caller, not a way around '
       'that.',
       p_rights_request_id, p_customer_id
-      using errcode = 'ZA007';
+      using errcode = 'ZY007';
   end if;
 
   if p_target = 'flow_enrolment' then
@@ -990,7 +1002,7 @@ begin
       'ErasureWorkflowTargetUnknown: % is not one of the two tables this function removes rows from. '
       'The target chooses a static statement; it is not an identifier this function will interpolate.',
       p_target
-      using errcode = 'ZA008';
+      using errcode = 'ZY008';
   end if;
 
   get diagnostics v_deleted = row_count;
@@ -1001,8 +1013,8 @@ comment on function public.erase_customer_workflow_rows(uuid, uuid, text) is
   'Deletes one customer''s flow_enrolment or customer_pipeline_card rows under a verified in-progress '
   'erasure request. SECURITY DEFINER because 0070 and 0077 revoke DELETE on those tables from '
   'berelax_app on the stated grounds that removal happens by cascade from `customer` - which an erasure '
-  'cannot do, because a retained tax invoice references that row. Raises ZA007 without an authorising '
-  'request and ZA008 for an unknown target.';
+  'cannot do, because a retained tax invoice references that row. Raises ZY007 without an authorising '
+  'request and ZY008 for an unknown target.';
 
 grant execute on function public.erase_customer_workflow_rows(uuid, uuid, text) to berelax_app;
 

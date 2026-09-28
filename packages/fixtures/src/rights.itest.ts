@@ -184,7 +184,7 @@ beforeAll(async () => {
     ids[key] = await ensure(SUBJECTS[key])
   }
   // Close any request an earlier RUN of this file left open. `rights_request` refuses DELETE for every role
-  // (ZA001), and `rights_request_one_open_per_subject_and_type` refuses a second open request of a type —
+  // (ZY001), and `rights_request_one_open_per_subject_and_type` refuses a second open request of a type —
   // so without this the second run of the suite fails on a unique index, which is the worst kind of red:
   // green once, red for ever after, and about nothing. Closed through the real state machine
   // (`received -> refused`) rather than by editing the row, because that is the only transition the
@@ -252,7 +252,7 @@ afterAll(async () => {
      * reference the submission (`source_submission_id`), and 0082's consent gate is a DEFERRED constraint
      * trigger, so the consents must go in the same transaction as the submissions they authorise or COMMIT
      * refuses. `clinical.dek_destruction` is deliberately NOT swept — it refuses DELETE for every role
-     * including the owner (ZA005) — and it does not need to be: it holds no wrapped key, so it is invisible
+     * including the owner (ZY005) — and it does not need to be: it holds no wrapped key, so it is invisible
      * to the count above, and it carries no foreign key that a swept submission would break.
      */
     await sql.begin(async (tx) => {

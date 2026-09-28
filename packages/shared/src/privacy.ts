@@ -48,7 +48,7 @@ export type RightsRequestType = (typeof RIGHTS_REQUEST_TYPES)[number]
  * `rerunJobs`, and it was wrong twice: no worker ever registered it, so it was a rebuild that could never
  * happen — the failure `send-scheduled-step.test.ts` exists to catch on the reminder settings and which
  * nothing checked here — and migration 0085 makes it IMPOSSIBLE, because `rights_request_guard` freezes
- * `due_at` and `sla_days` (ZA002) for exactly the reason the figure is stored per row in the first place.
+ * `due_at` and `sla_days` (ZY002) for exactly the reason the figure is stored per row in the first place.
  * A deadline a job may move is a deadline somebody may move, and then a request answered on day forty is
  * compliant. Keeping the original is also the stricter reading whenever the new figure is longer.
  *

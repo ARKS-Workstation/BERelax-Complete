@@ -12,7 +12,7 @@ meta:
   contract: docs/12-autonomous-delivery.md
   # 208 rather than 207 since W-SYS-11 was added: the admin session, which 56 references deferred to a
   # unit that is `done` and never owned it. See W-SYS-11's own NOTEs for the evidence.
-  units_total: 208
+  units_total: 209
 
 units:
   - id: F01
@@ -3408,6 +3408,75 @@ units:
       must refuse every login rather than fall back to anything. P-HR-14''s therapist portal needs a staff
       session too and is a separate unit; this one owns the ADMIN estate, and the two should share the
       session reader rather than each building one.'
+  - id: W-SYS-12
+    order: 41.6
+    title: 'Private SQLSTATE allocation: one code, one rule, with an allocator'
+    summary: Every refusal in this schema carries a private SQLSTATE and every translator in packages/db
+      matches on the code ALONE, so a code standing for two rules reports one refusal as the other and lets
+      a probe pass on a statement it never touched. Thirteen codes already do. The cause is a convention
+      with no allocator - a unit picks a class by reading the migrations it can see, and units in flight
+      cannot see each other. This unit makes the five characters the identity, allocates them from a
+      registry a gate enforces, and resolves the thirteen.
+    owner: claude
+    status: todo
+    size: L
+    depends_on: []
+    blocked_on_owner: []
+    provisional: 'The namespace decision, taken as the strictest safe option: the CLASS stops identifying a
+      migration file and a refusal is identified by all five characters, so ZZ plus the unused subclasses of
+      every existing class are enough for the remaining units and only the colliding codes move. The
+      alternative - a fresh class per file - is what exhausted 24 of 26 classes in 87 migrations and has one
+      allocation left.'
+    acceptance:
+    - '`packages/db/src/sqlstate-registry.ts` is the allocator: one entry per private code, naming the rule
+      in one sentence, the migration that raises it and the translator that reports it. A gate fails in
+      three directions - two entries sharing a code, a code raised by a migration with no entry, and an
+      entry naming a code no migration raises - the third being what lets the registry shrink'
+    - The gate reads the migration files themselves rather than any hand-written list of codes, and a
+      known-bad fixture per ADR 0003 proves each of the three directions fires, asserted by rule name
+    - Each of the thirteen entries in `KNOWN_COLLISIONS` is resolved by moving exactly ONE side to a freshly
+      registered code, with a migration that `create or replace`s only the function raising it; the map is
+      DELETED rather than emptied, so the allowlist cannot be re-grown
+    - '`ZL002` is proven to be one rule raised in two places rather than moved: a test drives both call
+      sites and asserts the same rule, which is the distinction the collision detector was built to make'
+    - Every translator in packages/db that matched a moved code is updated in the same commit, and a test
+      drives each moved refusal end to end asserting the NEW code and that rule's own message - not the
+      code alone, because a code with no message assertion is what let these collide unnoticed
+    - The uniqueness test keeps both directions it already has (a new collision fails, a stale allowlist
+      entry fails) and gains the registry direction, so the next unit cannot take a code silently
+    - 'An ADR records the decision, the alternative rejected and the consequence: two unrelated rules may
+      share a CLASS and never a CODE, which is the sentence that makes ZZ sufficient'
+    - The allocator is a registered `pnpm verify` step and appears in gate case 29's array, so dropping it
+      fails the build rather than the convention quietly returning
+    - 'Codes taken by units in flight when this unit starts are adopted as inventory rather than
+      reallocated, and the unit''s report lists them: a class cannot be recalled from a worktree that has
+      already raised it'
+    files:
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/sqlstate-registry.test.ts
+    - packages/db/src/sqlstate-uniqueness.test.ts
+    - packages/db/migrations/00xx_sqlstate_reallocation.sql
+    - scripts/check-sqlstate-registry.mjs
+    - scripts/test-gates.mjs
+    - 'NOTE: this unit was ADDED by the integrator and the manifest went from 208 units to 209. It is not
+      new scope. `packages/db/src/sqlstate-uniqueness.test.ts` says the reallocation "is unit-sized and is
+      recorded as such in the manifest rather than improvised here" - and nothing in the manifest owned it,
+      which is the exact drift that file was written to catch, in that file. This unit makes the sentence
+      true, and the sentence now names it.'
+    - 'NOTE: the measured inventory at the time of writing, taken by scanning every `errcode` in
+      packages/db/migrations rather than by reading headers: 116 private codes across 24 classes, of which
+      15 codes are raised by more than one migration file. Two of those 15 were the C-CRM-09/C-CRM-10
+      collision (0084 and 0085 both took class ZA in worktrees that could not see each other) and were
+      resolved at that merge by moving 0085''s eight codes to ZY, which leaves exactly the thirteen this
+      unit owns. `ZL002` is one rule raised in two places and is not one of them; ZZ is the only free class
+      left.'
+    - 'NOTE: order 41.6 is deliberate, immediately after W-SYS-11 and before B-M1. This unit depends on
+      nothing, so any order is topologically valid - but 89 units remain and a unit that needs a private
+      class today has one to take, so the allocator existing BEFORE more of them land is the whole point.
+      Every batch merged so far has added a collision.'
+    - 'NOTE: the migration number is a placeholder. `00xx_sqlstate_reallocation.sql` must be allocated a
+      real number when this unit starts and not before, because five units in flight hold 0088 through 0092
+      and a number allocated at plan time is a number two branches can claim.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'

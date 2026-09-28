@@ -19,14 +19,14 @@ import {
  *
  *   - **Three of these tables are append-only.** `rightsResolution`, `rightsResolutionClass` and
  *     `rightsExport` refuse UPDATE and DELETE by BEFORE triggers for EVERY role including the owner
- *     (ZA004), and `update`/`delete`/`truncate` are revoked from `berelax_app` as well.
+ *     (ZY004), and `update`/`delete`/`truncate` are revoked from `berelax_app` as well.
  *     `db.update(rightsResolution)` typechecks perfectly and raises at run time, which is the correct
  *     outcome: the resolution is the evidence that a request was answered and what was retained on what
  *     basis, and evidence that can be edited is not evidence.
  *   - **`rightsRequest` is mutable in exactly one column.** `state` moves along the machine
- *     `refuse_rights_request_rewrite` declares (ZA003); the type, the subject, `receivedAt`, `dueAt`,
- *     `slaDays` and `verifiedVia` are FROZEN (ZA002) because an SLA nobody can edit is the only kind worth
- *     having, and DELETE raises for every role (ZA001).
+ *     `refuse_rights_request_rewrite` declares (ZY003); the type, the subject, `receivedAt`, `dueAt`,
+ *     `slaDays` and `verifiedVia` are FROZEN (ZY002) because an SLA nobody can edit is the only kind worth
+ *     having, and DELETE raises for every role (ZY001).
  *   - **`rightsResolutionClass` CHECKs its own arithmetic.** `rows_before = rows_acted + rows_retained`,
  *     `retained_reason` is required exactly when rows were retained, and `retain_statutory` must name the
  *     `regulatory_profile` column its years figure came from. A row assembled here with plausible-looking
@@ -51,7 +51,7 @@ export const rightsRequest = pgTable(
     requestType: text('request_type').notNull(),
     /** A plain uuid, not a foreign key; see the header. */
     subjectCustomerId: uuid('subject_customer_id').notNull(),
-    /** When the subject asked. Supplied, never defaulted. Frozen after insert (ZA002). */
+    /** When the subject asked. Supplied, never defaulted. Frozen after insert (ZY002). */
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
     /** The SLA this request was taken under, stored so a later setting change cannot retroactively move it. */
     slaDays: smallint('sla_days').notNull(),

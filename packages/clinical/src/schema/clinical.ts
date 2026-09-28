@@ -217,10 +217,10 @@ export const stepUpGrant = clinicalSchema.table(
  * The zero-byte key is the mechanism — a real wrapped key is always 60 bytes, so zero is a value `seal()`
  * cannot produce — and a mechanism with no record beside it cannot say who decided or when.
  *
- * Append-only: UPDATE and DELETE raise for every role including the owner (ZA005). It has to outlive every
+ * Append-only: UPDATE and DELETE raise for every role including the owner (ZY005). It has to outlive every
  * other trace of the data it is about, which is the one retention in that unit that is a CONSEQUENCE of the
  * erasure rather than something surviving it. Written only by `public.destroy_customer_deks`, which
- * refuses (ZA006) unless an `in_progress` erasure request names the customer — so there is no path that
+ * refuses (ZY006) unless an `in_progress` erasure request names the customer — so there is no path that
  * destroys a key without a row saying who asked and how they were verified.
  *
  * `customerId` and `rightsRequestId` are plain uuids and NOT foreign keys, which is 0008's decision for
