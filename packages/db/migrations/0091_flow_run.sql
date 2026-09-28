@@ -569,7 +569,13 @@ alter table message add constraint message_sent_counts_an_attempt check (
   -- An expiry is the one terminal state with no attempt: nothing was ever handed to a vendor, which is
   -- the whole difference between it and a failure. A `sent` row with no attempt is still refused, which
   -- is the rule this constraint was written for (docs/12 §1: a stub must never look like it worked).
-  or last_failure_reason in ('stale_outside_window', 'refused_after_hold')
+  --
+  -- `coalesce` and not a bare `in`, and this cost a red gate case. `last_failure_reason in (...)` is NULL
+  -- for a NULL column, `false or false or NULL` is NULL, and a CHECK whose expression is NULL is
+  -- SATISFIED — so the widening would have admitted the exact row this constraint exists to refuse: a
+  -- `sent` message with zero attempts and no reason. 0080's header names the same trap about a strict
+  -- function, and gate case 39c is the one that has been asserting this rule since B-MSG-04.
+  or coalesce(last_failure_reason, '') in ('stale_outside_window', 'refused_after_hold')
 );
 
 comment on constraint message_sent_counts_an_attempt on message is
