@@ -5421,6 +5421,25 @@ units:
       that does not exist — which is exactly the miss M-TILL-11 found on M-VAT-11 and predicted for this unit
       by name. Nothing in the manifest declares an artifacts/screens path today; asserted rather than assumed,
       by walking every unit''s files list.'
+    - 'NOTE: the seeded packages are DESTROYED before the screen that shows them is asked to, and the browser
+      suite re-seeds them. Five integration suites run
+      `truncate package_redemption, payment, package_balance, package_sale, package_template_line,
+      package_template_version, package_template` to get an empty table for their own probes
+      (packages/fixtures/src/package.itest.ts and package-redemption.itest.ts,
+      packages/db/src/services/sell-package.itest.ts twice over, apps/worker/src/jobs/package-expiry.itest.ts),
+      and two of them do it in afterAll as well, so the four fixture drawdown states `pnpm seed` wrote are gone
+      by the time apps/web/src/till.itest.ts runs. The three package cases passed in isolation, twice back to
+      back, and failed in the full `pnpm test:integration` — brief rule 12 exactly, found by running the chain
+      rather than the file. apps/web/src/till.itest.ts therefore calls seedPackages(sql, nonce) in beforeAll:
+      the loader is guarded on `count(*) from package_template`, so on a run where nothing truncated it that is
+      one count and no writes, and the outcome is checked against the TABLE rather than the return value
+      because seedPackages returns a silent no-op when a prerequisite is missing and a silent no-op would
+      resurface as three unexplained assertion failures 200 seconds later. The nonce is load-bearing:
+      `journal_entry` is append-only and is NOT in that truncate list and could not be — it refuses DELETE for
+      every role — so the entries the first seeding posted outlive the package rows they were posted for, and a
+      re-seed deriving `fixture-pkg-sale-<key>` again would collide on the primary key. seedPackages therefore
+      takes a `run` suffix defaulting to the empty string, which leaves `pnpm seed` as deterministic as every
+      other loader.'
     - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
       used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
       12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires

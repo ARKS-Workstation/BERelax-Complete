@@ -205,8 +205,17 @@ const NOTHING: SeededPackages = Object.freeze({
  * Idempotent per table, like every other loader: a database that already holds a `package_template` row is
  * left alone. That matters more here than elsewhere because a second run would issue a second set of journal
  * entries, and `journal_entry` is append-only.
+ *
+ * `run` distinguishes one CALL of this loader from another, and it exists because the guard above is not the
+ * whole story. Five integration suites end with
+ * `truncate ... package_template_version, package_template` to get an empty table for their own probes, and
+ * `journal_entry` is not in that list and could not be — it refuses DELETE. So the guard opens again while
+ * the entries the first seeding posted are still there, and a second seeding deriving the same entry id from
+ * the same template key collides on `journal_entry`'s primary key. The default keeps `pnpm seed` exactly as
+ * deterministic as every other loader; a caller re-seeding a truncated database passes something that
+ * distinguishes its call, and the entries it posts sit beside the first set instead of failing against them.
  */
-export async function seedPackages(sql: Sql): Promise<SeededPackages> {
+export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> {
   const [existing] = await sql<{ n: string }[]>`select count(*)::text as n from package_template`
   if (existing !== undefined && Number(existing.n) > 0) return NOTHING
 
@@ -270,7 +279,7 @@ export async function seedPackages(sql: Sql): Promise<SeededPackages> {
     if (customer === undefined) continue
 
     const saleMapping = packageSaleMapping({
-      entryId: entryId(`fixture-pkg-sale-${shape.templateKey}`),
+      entryId: entryId(`fixture-pkg-sale-${shape.templateKey}${run}`),
       tradingDate: localDate(shape.soldOn),
       customerId: customer.id,
       templateVersionId: version.versionId,
@@ -321,7 +330,7 @@ export async function seedPackages(sql: Sql): Promise<SeededPackages> {
       `
       if (derived === undefined) break
       const redemptionMapping = packageRedemptionMapping({
-        entryId: entryId(`fixture-pkg-redeem-${shape.templateKey}-${step}`),
+        entryId: entryId(`fixture-pkg-redeem-${shape.templateKey}-${step}${run}`),
         tradingDate: localDate(shape.soldOn),
         balance: {
           balanceId: balanceRow.id,

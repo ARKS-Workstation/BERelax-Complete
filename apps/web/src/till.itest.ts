@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, readTillIssuer, type Sql } from '@berelax/db'
-import { FIXTURE_ISSUER } from '@berelax/fixtures'
+import { FIXTURE_ISSUER, FIXTURE_PACKAGE_SHAPES, seedPackages } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
 import {
   captureUntilStable,
@@ -158,6 +159,42 @@ beforeAll(async () => {
   // rather than about the leftovers. Cleared first, by this file's own marker only.
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from rooms where notes = ${MARKER}`
+
+  /*
+   * The seeded packages are re-seeded here, and this is not belt-and-braces.
+   *
+   * `pnpm seed` loads the four drawdown states through `packageLoader`, and five suites that run before this
+   * one in the integration order then `truncate ... package_template_version, package_template` to get a
+   * clean table for their own probes (packages/fixtures/src/package-{redemption,}.itest.ts,
+   * packages/db/src/services/sell-package.itest.ts, apps/worker/src/jobs/package-expiry.itest.ts). The
+   * fixtures are therefore GONE by the time the packages screen is asked to show them: the three package
+   * cases passed in isolation and failed in the full run, which is brief rule 12 exactly.
+   *
+   * `seedPackages` is the loader's own body and is guarded on `count(*) from package_template`, so on a run
+   * where nothing truncated it this is one cheap count and no writes — which matters, because a second pass
+   * would issue a second set of journal entries and `journal_entry` is append-only.
+   *
+   * It returns a no-op silently when its prerequisites are missing (no fixture variant, no fixture
+   * customers), and a silent no-op here would resurface as three unexplained assertion failures 200 seconds
+   * later. So the outcome is checked against the table rather than against the return value.
+   *
+   * The nonce is not decoration. `journal_entry` is append-only and is NOT in those suites' truncate list —
+   * it could not be, it refuses DELETE — so the entries the first seeding posted outlive the rows they were
+   * posted for, and a re-seed deriving the same entry id from the same template key would collide on the
+   * primary key. One per run, so this file can be run against the same database as often as it likes.
+   */
+  const reseeded = await seedPackages(sql, `-${randomUUID()}`)
+  const [templates] = await sql<{ n: string }[]>`
+    select count(*)::text as n from package_template where name like ${'%[confirm]%'}
+  `
+  if (Number(templates?.n ?? '0') < FIXTURE_PACKAGE_SHAPES.length) {
+    throw new Error(
+      `The four fixture packages are absent: ${templates?.n ?? '0'} marked template rows, and this run's ` +
+        `re-seed wrote ${reseeded.templates}. Either \`pnpm seed\` has not run against this database, or a ` +
+        'prerequisite of `seedPackages` (the fixture service variant, the four fixture customers) was ' +
+        'truncated with the package family and has not come back.',
+    )
+  }
 
   const [day] = await sql<{ trading_date: string }[]>`
     select to_char(trading_date, 'YYYY-MM-DD') as trading_date
