@@ -8,6 +8,10 @@
  *
  * W-SITE-05 and W-SITE-10 reuse this for page copy; it is deliberately not scoped to the catalogue.
  *
+ * `banned-claims.ts` is W-SITE-10's reuse of it at the moment of publication, and it adds no vocabulary:
+ * it reports a finding per REGION of a page, and it counts how many terms the pass actually compared
+ * against so `publication_lint_pass.terms_checked` records the real number rather than a constant.
+ *
  * `obligation.ts` is the other half of the same subject and the same shape: the rule is pure and the rows
  * are `@berelax/db`'s. It answers when a statutory obligation falls due, whether an overdue one is
  * blocking, and which behaviour a breach stops — a therapist leaving bookable availability, or publishing
@@ -19,6 +23,7 @@
  * with no deadline on file, and an actual breach.
  */
 
+export * from './banned-claims.ts'
 export * from './lexicon.ts'
 export * from './obligation.ts'
 export * from './obligation-notice.ts'
