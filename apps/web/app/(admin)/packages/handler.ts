@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   entryId,
   filsFrom,
@@ -8,12 +9,13 @@ import {
   type TenderLine,
 } from '@berelax/core'
 import {
+  cashSessionError,
   currentPackageTemplateVersion,
   packageError,
   packageRedemptionError,
   readBillableAppointments,
+  readPackageBalances,
   readPackageTemplates,
-  readRedeemableBalances,
   redeemPackage,
   type Sql,
   sellPackage,
@@ -146,7 +148,7 @@ async function buildView(args: {
 
   const [templates, balances, appointments, customers] = await Promise.all([
     readPackageTemplates(deps.sql),
-    readRedeemableBalances(deps.sql, tradingDate),
+    readPackageBalances(deps.sql, tradingDate),
     readBillableAppointments(deps.sql, tradingDate),
     deps.sql<{ id: string; label: string | null }[]>`
       select id, display_name as label from customer order by created_at, id limit 20
@@ -203,6 +205,7 @@ async function buildView(args: {
       const expired = balance.expiresOn < tradingDate
       return {
         balanceId: balance.balanceId,
+        redeemable: !expired && balance.sessionsRedeemed < balance.sessionsTotal,
         label: balance.publicDisplayName,
         customerLabel: balance.customerLabel ?? 'no label recorded',
         sessionsTotal: balance.sessionsTotal,
@@ -318,7 +321,17 @@ export async function handlePackagesWrite(
         })
       }
       const mapping = tillPackageSaleMapping({
-        entryId: entryId(`pkg-sale-${tradingDate}-${templateKey}-${cash}-${card}`),
+        /*
+          A FRESH id per sale, and not a digest of the sale's own fields.
+
+          `journal_entry.entry_id` is unique, and a desk legitimately sells the same package twice on one
+          business day to one customer — a couple buying a course each, or somebody topping up. A deterministic
+          id made the second sale fail with a raw unique violation the screen could only report as
+          "Unexpected.", which is how this was found: the browser suite sold once, passed, and failed on its
+          next run. There is no idempotency key on `sellPackage` to be honoured instead; the checkout has one
+          because a document must not be issued twice, and a package sale has no document.
+        */
+        entryId: entryId(`pkg-sale-${randomUUID()}`),
         tradingDate: localDate(tradingDate),
         customerId,
         templateVersionId: version.versionId,
@@ -366,8 +379,11 @@ export async function handlePackagesWrite(
         const message = 'A redemption consumes at least one whole session.'
         return answer(message, message, 409)
       }
-      const balances = await readRedeemableBalances(deps.sql, tradingDate)
-      const row = balances.find((balance) => balance.balanceId === balanceId)
+      const balances = await readPackageBalances(deps.sql, tradingDate)
+      const row = balances.find(
+        (balance) =>
+          balance.balanceId === balanceId && balance.sessionsRedeemed < balance.sessionsTotal,
+      )
       if (row === undefined) {
         const message = 'That entitlement has no sessions left, or does not exist.'
         return answer(message, message, 409)
@@ -419,7 +435,10 @@ export async function handlePackagesWrite(
     // The services' own named refusals first — `PackageExpired`, `PackageBalanceUnavailable`,
     // `ArchivedServiceReferenced`, and the SQLSTATE translations of the ZG rules — so the screen says what the
     // ledger said rather than "something went wrong".
-    const named = packageRedemptionError(error) ?? packageError(error)
+    // `cashSessionError` as well, for the till handler's reason: a package sale inserts `payment` rows, and
+    // ZU006 refuses cash dated on a business day whose drawer has been counted. Without it the screen answered
+    // "Unexpected." for a refusal whose own message says what to do instead.
+    const named = packageRedemptionError(error) ?? packageError(error) ?? cashSessionError(error)
     const message = named?.message ?? (isAppError(error) ? error.message : 'Unexpected.')
     return answer(message, message, 409)
   }

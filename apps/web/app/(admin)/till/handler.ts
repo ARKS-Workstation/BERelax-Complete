@@ -32,6 +32,7 @@ import {
 } from '@berelax/core'
 import {
   type Actor,
+  cashSessionError,
   checkoutError,
   finaliseCheckout,
   readBillableAppointments,
@@ -803,7 +804,17 @@ export async function handleTillWrite(request: TillRequest, deps: TillDeps): Pro
       200,
     )
   } catch (error) {
-    const named = checkoutError(error)
+    /*
+      `cashSessionError` as well as `checkoutError`, and it is not defensive padding.
+
+      A checkout inserts `payment` rows, and 0076's ZU006 refuses cash dated on a business day whose drawer has
+      already been counted — "Cash recorded after the count makes a signed reconciliation wrong and leaves the
+      next float unexplainable; take it on the open business day, or correct the closed session". That refusal
+      arrives from the payment insert inside `finaliseCheckout`, so `checkoutError` does not know it, and
+      without this line the screen answered "Unexpected." for the one failure that has a clear instruction in
+      it. Found by this unit's browser suite taking cash after its own cash-up case had closed the drawer.
+    */
+    const named = checkoutError(error) ?? cashSessionError(error)
     const refusal: TillRefusal = {
       code: 'refused_by_the_ledger',
       sentence: tillRefusalSentence(

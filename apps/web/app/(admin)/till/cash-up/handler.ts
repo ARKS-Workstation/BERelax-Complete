@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   accountCode,
   cashDropPosting,
@@ -296,7 +297,10 @@ export async function handleCashUpWrite(
       const drawer = (await readCashDrawers(deps.sql)).find((row) => row.code === drawerCode)
       const posting = cashDropPosting(
         {
-          entryId: entryId(`cash-drop-${sessionId}-${amount}`),
+          // A FRESH id per drop, for the reason the package sale records: two drops of the same amount out of
+          // one drawer in one shift is an ordinary evening, and a digest of the drop's own fields would make
+          // the second one fail with a raw unique violation on `journal_entry.entry_id`.
+          entryId: entryId(`cash-drop-${randomUUID()}`),
           businessDay: localDate(tradingDate),
           drawerCode,
           drawerAccount: accountCode(drawer?.postingAccountCode ?? '1010'),

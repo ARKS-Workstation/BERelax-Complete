@@ -242,7 +242,7 @@ export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-ex
 export {
   readBillableAppointments,
   readPackageTemplates,
-  readRedeemableBalances,
+  readPackageBalances,
   readTillIssuer,
   type TillBillableAppointmentRow,
   type TillIssuerRow,

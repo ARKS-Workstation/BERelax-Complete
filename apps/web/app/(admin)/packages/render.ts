@@ -76,6 +76,8 @@ export interface PackageTemplateOption {
 
 export interface PackageBalanceRow {
   readonly balanceId: string
+  /** Whether the REDEEM control may offer it: sessions left, and inside its validity. */
+  readonly redeemable: boolean
   readonly label: string
   readonly customerLabel: string
   readonly sessionsTotal: number
@@ -272,13 +274,14 @@ function sellForm(view: PackageView): string {
 }
 
 function redeemForm(view: PackageView): string {
-  if (view.balances.length === 0 || view.appointments.length === 0) {
+  const offerable = view.balances.filter((balance) => balance.redeemable)
+  if (offerable.length === 0 || view.appointments.length === 0) {
     return [
       '<div class="panel" data-testid="packages-redeem-unavailable">',
       '<h2>Redeem a session</h2>',
       `<p>${
-        view.balances.length === 0
-          ? 'No entitlement is outstanding, so there is nothing to draw against.'
+        offerable.length === 0
+          ? 'No entitlement has a session left inside its validity, so there is nothing to draw against.'
           : 'No delivered treatment on this business day is still unsettled, so there is nothing to draw it against.'
       }</p>`,
       '</div>',
@@ -295,11 +298,16 @@ function redeemForm(view: PackageView): string {
     '<span class="label">Entitlement</span>',
     `<select ${attribute('id', 'packages-balance')} data-testid="packages-balance" ` +
       `${attribute('name', PACKAGE_FIELDS.balance)}>`,
-    ...view.balances.map(
-      (balance) =>
-        `<option ${attribute('value', balance.balanceId)}>${safeText(balance.label)} — ` +
-        `${safeText(balance.customerLabel)}, ${safeText(balance.stateLabel)}</option>`,
-    ),
+    // Only the ones a redemption would be ACCEPTED for. Offering a fully drawn or expired balance is offering
+    // a control known to fail, which is the reasoning B-UI-01's therapist selector records; the refusals
+    // themselves are `redeemPackage`'s (PackageExpired) and ZG009's, and M-TILL-10's suites assert them.
+    ...view.balances
+      .filter((balance) => balance.redeemable)
+      .map(
+        (balance) =>
+          `<option ${attribute('value', balance.balanceId)}>${safeText(balance.label)} — ` +
+          `${safeText(balance.customerLabel)}, ${safeText(balance.stateLabel)}</option>`,
+      ),
     '</select>',
     '</label>',
     '<label class="field" for="packages-appointment">',

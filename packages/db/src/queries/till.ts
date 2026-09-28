@@ -168,16 +168,24 @@ export interface TillRedeemableBalanceRow {
 }
 
 /**
- * Every balance with sessions left, expired ones included.
+ * EVERY balance — expired ones and fully drawn ones included — with what it has released.
  *
- * The expired ones are returned on purpose and the screen marks them. `redeemPackage` refuses a redemption
- * past `expires_on` with `PackageExpired` and ZG010 refuses it again in SQL, and under the provisional
- * retained-balance policy (Y9-package-policy) the customer is still owed the treatments — so a balance that
- * vanished from the screen the day it expired would leave the desk unable to see the thing it has to
- * explain. Filtering them out here would also make the "expired with balance" drawdown state the fixture
- * salon seeds invisible on the one screen built to show it.
+ * Deliberately unfiltered, and the two exclusions a "redeemable" reader would make are both wrong here:
+ *
+ *   - an EXPIRED balance still shows, because under the provisional retained-balance policy
+ *     (Y9-package-policy) the customer is still owed the treatments. A balance that vanished the day it
+ *     expired would leave the desk unable to see the thing it has to explain, and `redeemPackage` refuses the
+ *     redemption anyway — with `PackageExpired`, and ZG010 refuses it again in SQL;
+ *   - a FULLY DRAWN balance still shows, because `fully used` is one of the four drawdown states docs/12 §5
+ *     asks the fixture salon to hold, and filtering it out makes that state invisible on the one screen built
+ *     to display it. The first version of this reader filtered `sessions_redeemed < sessions_total` and the
+ *     browser suite caught it: the state was seeded, correct in the rows, and unreachable on the page.
+ *
+ * Which of them the REDEEM control may offer is the caller's decision, not this reader's: `/packages` narrows
+ * the select to the ones a redemption would be accepted for, because offering a control known to fail is
+ * worse than not offering it.
  */
-export async function readRedeemableBalances(
+export async function readPackageBalances(
   sql: Sql,
   onDate: string,
 ): Promise<readonly TillRedeemableBalanceRow[]> {
@@ -200,7 +208,6 @@ export async function readRedeemableBalances(
       join package_sale ps on ps.id = pb.package_sale_id
       join package_template_version tv on tv.id = ps.template_version_id
       left join customer c on c.id = ps.customer_id
-     where pb.sessions_redeemed < pb.sessions_total
      order by (ps.expires_on < ${onDate}::date), ps.expires_on, pb.id
   `
 }

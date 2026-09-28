@@ -235,7 +235,14 @@ function tillNav(view: TillView): string {
   ].join('')
 }
 
-/** The basket form: which treatments, the gratuity, and the discount that must say why. */
+/**
+ * The basket form: which treatments, the gratuity, and the discount that must say why.
+ *
+ * `autofocus` lands on the first appointment ONLY while the basket is empty. Two `autofocus` attributes in one
+ * document are not two focuses: the browser takes the first in DOM order, so leaving it on the checkbox once
+ * the tender form exists would put the operator back at the top of the screen after every price — and the
+ * twelve-interaction walk would spend its budget on Tab. Focus follows the next thing the operator needs.
+ */
 function basketForm(view: TillView): string {
   const rows =
     view.billable.length === 0
@@ -248,7 +255,7 @@ function basketForm(view: TillView): string {
             `<div class="choice" ${attribute('data-appointment', row.appointmentId)}>` +
             `<input type="checkbox" ${attribute('id', id)} ${attribute('name', TILL_FIELDS.appointment)} ` +
             `${attribute('value', row.appointmentId)}${row.inBasket ? ' checked' : ''}` +
-            `${index === 0 ? ' autofocus' : ''}>` +
+            `${index === 0 && view.basket === null ? ' autofocus' : ''}>` +
             `<label ${attribute('for', id)}>${safeText(row.description)} — ` +
             `<strong>${safeText(row.grossLabel)}</strong>, ${safeText(row.startLabel)}, ` +
             `${safeText(row.customerLabel)}</label>` +
