@@ -32389,7 +32389,29 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
           `reason:\n${vat201Accepted.output}`,
       )
 
-      // 116m. A box total against the ledger summed a SECOND way inside the probe. The acceptance line is
+      // 116m. The complement of the two 42501 cases, and the half that is easy to forget: the application
+      //       role may not WRITE the mapping and it absolutely must be able to READ the return. Every
+      //       function in the engine reaches `journal_line`, `journal_entry`, `account`, both new tables and
+      //       nine document tables, none is SECURITY DEFINER, and a missing SELECT anywhere in that set is a
+      //       drill-down screen that answers 500 — which is M-VAT-12's screen, and which no itest can see
+      //       because the test pool connects as OWNER.
+      const vat201AppCanRead = vat201Probe(
+        `${VAT201_NO_LOCKS}; ${VAT201_SALE}; set local role berelax_app; ` +
+          `select count(*) from vat201_box_total('${VAT201_FROM}'::date, '${VAT201_TO}'::date); ` +
+          `select count(*) from vat201_box_line('${VAT201_FROM}'::date, '${VAT201_TO}'::date); ` +
+          `select count(*) from vat201_unboxed_total('${VAT201_FROM}'::date, '${VAT201_TO}'::date); ` +
+          `select count(*) from vat201_partition_census('${VAT201_FROM}'::date, '${VAT201_TO}'::date); ` +
+          'select count(*) from vat201_mapping_disagreement()',
+      )
+      check(
+        'vat201 gate: the application role can READ every part of the return',
+        !vat201AppCanRead.failed,
+        'the role a screen connects as cannot run the return engine, so the drill-down would answer 500. ' +
+          'A missing SELECT on any of the nine document tables the resolver unions is enough, and no itest ' +
+          `can see it because the test pool connects as owner:\n${vat201AppCanRead.output}`,
+      )
+
+      // 116n. A box total against the ledger summed a SECOND way inside the probe. The acceptance line is
       //       "exact to the fils", and the only honest check of it is an independent sum: the engine's own
       //       aggregate compared against the engine's own drill-down is structurally equal by
       //       construction, which is worth having and is not evidence on its own.
@@ -32416,7 +32438,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
           `derived from normal_balance instead of from the account type gets backwards:\n${vat201AgreesWithLedger.output}`,
       )
 
-      // 116n. And the control for it, because the two probes above are written the way round where a
+      // 116o. And the control for it, because 116n is written the way round where a
       //       `raise` that can never fire reports PASS. A ONE-FILS difference deliberately: that is the size
       //       of the disagreement this unit exists to prevent, and a comparison that cannot see one fils is
       //       not a comparison.
@@ -32439,7 +32461,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         'BOX-DISAGREES-WITH-THE-LEDGER',
       )
 
-      // 116o. A box total against its own drill-down. Structural, because `vat201_box_total()` aggregates
+      // 116p. A box total against its own drill-down. Structural, because `vat201_box_total()` aggregates
       //       over `vat201_box_line()` — and asserted anyway, because that is the sentence a reviewer has
       //       to be able to check and because a later `create or replace` could quietly make it a second
       //       query over the journal.
@@ -32464,7 +32486,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
           `unit exists to prevent:\n${vat201MatchesDrillDown.output}`,
       )
 
-      // 116p. The control for 116o, and the one-fils case named explicitly. A drill-down off by a single
+      // 116q. The control for 116p, and the one-fils case named explicitly. A drill-down off by a single
       //       fils is the failure that survives review, so the comparison is shown to see one.
       checkRejectedBy(
         'vat201 gate: the total-against-its-drilldown probe sees a ONE-FILS difference',
@@ -32479,7 +32501,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         'TOTAL-DISAGREES-WITH-ITS-DRILLDOWN',
       )
 
-      // 116q. The exhaustive partition, as three separate failures. `lines_enumerated` greater than the
+      // 116r. The exhaustive partition, as four separate failures. `lines_enumerated` greater than the
       //       population is a DUPLICATED line — which the LATERAL document join can produce, and which
       //       makes a box total silently too large; `lines_distinct` short of it is a DROPPED one; and
       //       `unattributed` is an account ZY001 should have refused. A single boolean cannot tell them
@@ -32517,7 +32539,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
           `defect — a duplicate, a drop, an untagged account, or buckets that do not add up:\n${vat201Partition.output}`,
       )
 
-      // 116r. The control, and the failing case the acceptance line needs to be representable at all. The
+      // 116s. The control, and the failing case the acceptance line needs to be representable at all. The
       //       trigger fires at COMMIT, so inside an open transaction the hole is visible to a query — which
       //       is the only way an unattributed line can be seen without committing one.
       checkRejectedBy(
@@ -32534,7 +32556,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         'A-LINE-WAS-UNATTRIBUTED',
       )
 
-      // 116s. The acceptance line the whole unit turns on: the mapping is DATA. One UPDATE of one row and
+      // 116t. The acceptance line the whole unit turns on: the mapping is DATA. One UPDATE of one row and
       //       the figure is in a different box, with no function replaced and no TypeScript touched.
       //
       //       Three raises, and the first two are the controls. It has to have BEEN in the first box (or
@@ -32580,7 +32602,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
           `read twice rather than moved:\n${vat201DataNotCode.output}`,
       )
 
-      // 116t. And the control for THAT probe: with no UPDATE in between, the "did not leave" comparison
+      // 116u. And the control for THAT probe: with no UPDATE in between, the "did not leave" comparison
       //       must raise. A probe whose raise can never fire is a case that measures nothing.
       checkRejectedBy(
         'vat201 gate: the mapping-is-data probe can actually fire',
@@ -32653,7 +32675,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     return forbidden.filter(({ re }) => re.test(code)).map(({ why }) => why)
   }
 
-  // 116u. The claim over the real files.
+  // 116v. The claim over the real files.
   {
     const found = [
       ...vat201Arithmetic(VAT201_CORE, vat201Code, VAT201_FORBIDDEN_TS),
@@ -32677,7 +32699,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 
-  // 116v. And the scan seen to FAIL, in both languages. A division inserted into each file must be found;
+  // 116w. And the scan seen to FAIL, in both languages. A division inserted into each file must be found;
   //       without this the case above is a check that has never fired (ADR 0003).
   {
     const withDivision = withEditedFile(
@@ -32733,7 +32755,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     return VAT201_HARD_CODED_BOX.filter((re) => re.test(code)).map(String)
   }
 
-  // 116w. No box number in the engine or in the reader, and the scan seen to fail on one.
+  // 116x. No box number in the engine or in the reader, and the scan seen to fail on one.
   {
     const found = [...vat201HardCodedBoxes(VAT201_CORE), ...vat201HardCodedBoxes(VAT201_QUERY)]
     check(
@@ -32765,7 +32787,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     )
   }
 
-  // 116x. Every question this unit says it stands on is in `docs/OPEN-QUESTIONS.md`, and the scan
+  // 116y. Every question this unit says it stands on is in `docs/OPEN-QUESTIONS.md`, and the scan
   //       discriminates. A question the module claims and the document does not carry is a question
   //       nobody will ever be asked — which is §1.4 of docs/12 failing silently.
   {
@@ -32802,6 +32824,13 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   ]
   const VAT201_CORE_SUITE = 'packages/core/src/tax/vat201.test.ts'
   const VAT201_PAIR_SUITE = 'packages/fixtures/src/vat201.itest.ts'
+
+  // 116z(i). Five mutants through the core suite, which needs no database and runs in about two seconds.
+  //
+  //          This label was written as a lone `{ … }` block like its siblings, and Biome's
+  //          `noUselessLoneBlockStatements` fix removed the braces — the block scoped no binding — and
+  //          took the comment with them, silently, in the commit that added the block. So it is a
+  //          standalone comment now: a formatter cannot carry away a comment attached to nothing.
   // The contra account, which is the one shape that tells the correct rule from the plausible one. A
   // discount DEBITED to 4095 must REDUCE the standard-rated value; this mutant makes it add.
   checkRejectedBy(
@@ -32891,7 +32920,8 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'ZERO row',
   )
 
-  // 116z. Five mutants through the integration suite, which is the only place a working paper exists, and
+  // 116z(ii). Five mutants through the integration suite, which is the only place a working paper exists,
+  //           and
   //       then the control: every file edited above, UNEDITED, passes. Without the control a stale anchor,
   //       a suite that had stopped importing the module, or a database that could not be reached would all
   //       report as twenty passing cases.
