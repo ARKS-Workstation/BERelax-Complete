@@ -10907,7 +10907,7 @@ units:
       it was computed from, computed only from completed-and-paid till values in integer fils, with a per-appointment
       derivation a therapist can read for themselves — and shipping disabled but exercised, per Y9-commission.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-01
@@ -10945,12 +10945,100 @@ units:
       proven by test against a package at partial drawdown
     - 'integer-only arithmetic with an explicit asserted rounding direction: a property test compares percentage
       commission against an integer oracle across a wide fils range'
+    - 'NOTE: NOTHING IS SEEDED, and that is the unit''s largest decision rather than an omission.
+      Y9-commission''s provisional answer is not a rate: it is that no commission structure is configured. So
+      commission_rule holds no version - unlike working_hours_rule (0059), leave_entitlement_rule (0066),
+      rota_coverage_rule (0081) and attendance_grace_rule (0086), each of which seeds the build''s strictest
+      reading of a law that exists to be read. There is no law about commission and no figure in the handover,
+      so the empty table is the strictest safe option: commissionRuleFor throws, planCommissionRun reports
+      no_rule_version, and nothing can be paid at a rate this build invented. Every figure in every test
+      belongs to a FIXTURE rule set the suite publishes. The module ships disabled behind
+      hr.commission_enabled in the settings registry (false, OWNER_ONLY, provisional against Y9-commission, so
+      it reaches the Unconfirmed Assumptions panel), which is docs/12 SS1.3''s "flipped by config, never by a
+      code change"; commission_run.module_enabled is recorded on every run so that "no lines because the
+      module is off" is never reported as "no commission is due".'
+    - 'NOTE: what makes a run reproducible, because the acceptance line is the whole unit. commission_run
+      stores rule_version_id (NOT NULL) and source_as_of, the instant the source figures were READ at;
+      commission_line carries the same version and a COMPOSITE foreign key
+      (run_id, rule_version_id) -> commission_run (id, rule_version_id) makes the two ONE fact rather than a
+      copy somebody keeps in step. recomputeCommissionRun in @berelax/hr is a SEPARATE function from
+      executeCommissionRun and finds the version BY ID; only a first run resolves by date. For a period a
+      period_lock covers, source_as_of is the lock''s own locked_at and ZY076 refuses anything else - so a
+      payment applied after the close, or a sale backdated into a filed month, cannot move a figure that has
+      been paid. That is P-HR-07''s timesheet_approval snapshot and P-HR-09''s leave_approval snapshot of
+      coverage_rule_effective_from, applied to money. The itest publishes a superseding version
+      effective-dated BEFORE the closed month, so a fresh resolve really would pick it: the reproduction is a
+      claim about the pin and not about the calendar, and the control asserts the fresh run DIFFERS.'
+    - 'NOTE: the concrete files this list left as placeholders or got wrong. The migration is
+      packages/db/migrations/0097_hr_commission.sql. The web surface is
+      apps/web/app/(admin)/hr/commission/route.ts plus render.ts and NOT page.tsx, for the reason P-HR-02,
+      P-HR-06 and P-HR-07 each recorded: registry.ts is in exact bijection with the filesystem and requires
+      every DOCUMENT to be served in both locales, so a page.tsx would need an Arabic admin document nobody
+      has built and would join a screenshot matrix whose RTL half must be a real Arabic route. The
+      arithmetic lives in packages/core/src/hr/commission.ts (pure) and the rows in
+      packages/db/src/repositories/commission.ts, and the two meet in packages/hr/src/commission-run.ts -
+      packages/db may not import packages/core (brief rule 4), so no single package can perform a run, and
+      packages/hr already depends on both for P-HR-01''s reason. @berelax/hr is added to
+      packages/fixtures'' devDependencies so the pair suite can import both halves. The gate block is
+      // 125a-125v, selector `pnpm gates:only --only ''// 125a''`. The port band is `commission` at 14_300,
+      claimed by apps/web/src/hr-commission.itest.ts for the one claim no pure render can make: the bytes an
+      owner receives and the bytes a therapist receives differ in the derivation''s scope, and that
+      difference is produced by a cookie.'
+    - 'NOTE: the RBAC refusal lives at the FUNCTION boundary and not on a query parameter, and that is a
+      consequence of W-SYS-11 rather than a reduction in scope. The acceptance line asks that "another
+      employee''s id returns a refusal"; apps/web/src/admin-guard.test.ts refuses a ?employee= parameter
+      across the whole of apps/web and caught this route the first time it was written, so the subject comes
+      from the session and a request for somebody else''s derivation is not something the estate can express.
+      readCommissionDerivationFor in @berelax/hr takes a subject id and throws forbidden for one the viewer
+      may not read, asserted against real rows in packages/fixtures/src/hr-commission.itest.ts and over the
+      matrix in packages/core/src/hr/commission.test.ts. That is the right layer: P-HR-12''s payroll run
+      reads a derivation for an employee it names, and the refusal has to hold for THAT caller. The rule is
+      derived from the matrix rather than a role list - commission:read says whether a role sees commission
+      at all and payroll:read says whose, which the owner and the accountant hold and the floor manager
+      deliberately does not (ROLE_DEFINITIONS: "Pay is different").'
+    - 'NOTE: what the schema deliberately CANNOT express, recorded on Y9-commission rather than guessed.
+      commission_rule_band holds rates as ordered rows over the value of the APPOINTMENT, which covers flat
+      (one band from zero) and value-tiered (several ascending bands). A tier over the MONTH''S RUNNING TOTAL
+      and a PER-SERVICE rate are different rules and each is a new column and a NEW version; the
+      monthly-total reading is the one worth knowing about, because the figure then depends on the ORDER the
+      month is walked in. Whether a credit note raised after a commission was paid CLAWS IT BACK is also
+      nobody''s rule: the earnings read excludes a document that has been credited, which is the strictest
+      safe reading, and a clawback would be a new dated record because a run is immutable. Both are written
+      into the Y9-commission row as part of what answering it must state.'
+    - 'NOTE: a defect this unit shipped and the check that now holds it. ${iso}::timestamptz in a postgres.js
+      template is sent as an OID 1184 parameter and serialised by the driver''s own date serialiser,
+      new Date(v).toISOString() - MILLISECOND precision - while a timestamptz column holds microseconds. The
+      locked_at the repository had just read out of period_lock arrived 633 microseconds early and ZY076
+      refused every run over the filed month; three cases failed and all three looked like a trigger bug. psql
+      with the same literal is exact either way, so it cannot be found without going through the driver. Every
+      instant parameter is now ${iso}::text::timestamptz and packages/fixtures/src/hr-commission.test.ts scans
+      for the bare form. ADR 0047 records it, because the next instant parameter added there would have the
+      same defect and the symptom would again name the trigger rather than the cast.'
+    - 'NOTE: the private SQLSTATEs are ZY071-ZY077, a SUBCLASS RANGE of the shared ZY class under 0091''s
+      rule that the class no longer identifies a file. ZY071 a published rule version or band was UPDATEd or
+      DELETEd; ZY072 a run or line was; ZY073 a version''s bands do not cover the value range from zero
+      upwards in ascending order; ZY074 a run''s header total or line count disagrees with its lines; ZY075 a
+      run names a version that had not commenced when its period began; ZY076 a run over a locked period does
+      not read the figures as filed, or an open period''s run names a lock; ZY077 a line''s band, rate or
+      figure does not follow from the version it names. ZY078-ZY080 of the allocated band are unused and are
+      left to the next unit that needs a code in it. ZY077 is the one worth naming twice: without it a run
+      could store any figure at all and satisfy every other constraint, so "recomputing reproduces the stored
+      line" would be a claim about whichever program wrote the row.'
     files:
-    - packages/db/migrations/*_hr_commission.sql
+    - packages/db/migrations/0097_hr_commission.sql
+    - packages/db/src/schema/commission.ts
     - packages/core/src/hr/commission.ts
     - packages/core/src/hr/commission.test.ts
+    - packages/core/src/hr/commission.property.test.ts
     - packages/db/src/repositories/commission.ts
-    - apps/web/app/(admin)/hr/commission/page.tsx
+    - packages/hr/src/commission-run.ts
+    - packages/fixtures/src/hr-commission.test.ts
+    - packages/fixtures/src/hr-commission.itest.ts
+    - apps/web/app/(admin)/hr/commission/route.ts
+    - apps/web/app/(admin)/hr/commission/render.ts
+    - apps/web/src/hr-commission-render.test.ts
+    - apps/web/src/hr-commission.itest.ts
+    - docs/adr/0047-commission-is-reproducible-by-pinning-its-version-and-its-as-of.md
   - id: P-HR-12
     order: 101
     title: Payroll run, bilingual payslips and the WPS export

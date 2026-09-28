@@ -568,6 +568,33 @@ export const ROUTES = [
       'the address of whichever photograph was there at build time.',
   },
   {
+    id: 'hr-commission',
+    path: '/hr/commission',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-11s commission screen: which rule version judged each run of a period, when that runs source ' +
+      'figures were read (for a closed month, the instant the lock was taken), and the per-appointment ' +
+      'derivation a therapist can read for themselves. Its first job today is to say on its face that the ' +
+      'MODULE IS DISABLED and why - Y9-commission is open and no structure is configured, so an empty ' +
+      'screen would be indistinguishable from a month in which nobody earned anything, and the acceptance ' +
+      'line is "no silent success". A handler answering text/html rather than a document, for the reason the ' +
+      'four HR screens beside it give: a document must be served in both locales, which would need an ' +
+      'Arabic admin document nobody has built and would join a screenshot matrix whose RTL half has to be a ' +
+      'real Arabic route. READ-ONLY on purpose - computing a run is a write whose result nothing can delete ' +
+      '(ZY072), and a run recorded by a curious click is a permanent row; executeCommissionRun in ' +
+      '@berelax/hr is the entry point and P-HR-12s payroll run is its first real caller. It names no ' +
+      'therapist: staff_reference is the handle, and nineteen employees have no name recorded (ADR 0020). ' +
+      'The derivation is scoped by mayReadCommissionDerivation in @berelax/core and another employees id is ' +
+      'a 403 rather than an empty list, because a filtered read answers "they earned nothing" about ' +
+      'somebody elses money. Dynamic because the answer is a claim about runs computed minutes ago. The /hr ' +
+      'prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and authenticated since W-SYS-11.',
+  },
+  {
     id: 'hr-credentials',
     path: '/hr/credentials',
     kind: 'handler',

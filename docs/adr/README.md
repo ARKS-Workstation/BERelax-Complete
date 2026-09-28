@@ -42,6 +42,7 @@ a decision the table does not list.
 | [0039](0039-the-admin-session-is-an-opaque-token.md) | The admin session cookie carries 32 random bytes and no role; the role is reached by join on every request, and no deployment seeds an account | — |
 | [0040](0040-flow-interpreter-idempotency-and-one-window.md) | The interpreter owns no window; its idempotency key is a unique constraint; its bounds live on the run | — |
 | [0042](0042-publication-is-refused-at-the-permission-layer-and-in-the-database.md) | Publication is refused at the permission layer and in the database, never by a prompt | — |
+| [0047](0047-commission-is-reproducible-by-pinning-its-version-and-its-as-of.md) | A commission run pins the rule version that judged it and the instant it read the books at; nothing is seeded, because no structure is configured | — |
 
 ## Writing one
 

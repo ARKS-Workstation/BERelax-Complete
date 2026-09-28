@@ -393,6 +393,46 @@ export {
   setPublicDisplayName,
   TREATMENTS_INDEX_PATH,
 } from './repositories/catalogue.ts'
+/*
+  P-HR-11's commission side (0097). Reads and writes only: the arithmetic is
+  `packages/core/src/hr/commission.ts`'s, this package may not import it, and `packages/hr` is where the two
+  halves meet.
+
+  `readCommissionEarnings` takes a `sourceAsOf` INSTANT and every clause of it filters on `created_at <=` that
+  instant, which is what makes a recompute reproduce. For a period a `period_lock` covers,
+  `commissionPeriodSource` answers with the lock's own `locked_at` — the books as filed — so a payment applied
+  after the close, or a sale backdated into the month, cannot move a figure that has already been paid.
+  `assert_commission_run_reads_the_lock` (ZY076) refuses a run that disagrees.
+
+  No function here answers "is this period closed?". That is `periodStatusOn` (M-VAT-06), which
+  `commissionPeriodSource` calls; the `locked_at` it then reads is a column of the row that call has already
+  identified, fetched by primary key.
+
+  There is no update and no delete: a published version is immutable (ZY071) and a run is evidence (ZY072).
+  A rate that is wrong is a NEW version; a run that is wrong is a NEW run, whose purpose is to be compared
+  with the first.
+*/
+export {
+  COMMISSION_SQLSTATE,
+  type CommissionDerivationRow,
+  type CommissionEarningRow,
+  type CommissionLineToRecord,
+  type CommissionPeriodSource,
+  type CommissionRuleBandRow,
+  type CommissionRuleVersionRow,
+  type CommissionRunRow,
+  commissionError,
+  commissionPeriodSource,
+  type PublishCommissionRuleVersionInput,
+  publishCommissionRuleVersion,
+  type RecordCommissionRunInput,
+  type RecordedCommissionRun,
+  readCommissionDerivation,
+  readCommissionEarnings,
+  readCommissionRuleVersions,
+  readCommissionRuns,
+  recordCommissionRun,
+} from './repositories/commission.ts'
 export {
   CONSENT_AUDIT_ACTIONS,
   CONSENT_REFUSALS,
@@ -2758,15 +2798,6 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // private CLASS is over, and W-SYS-12 owns the allocator that makes the new rule enforceable rather than
 // agreed.
 //
-// Every number allocated through 87 has now landed, and 91 has landed on top of it: the run on disk is
-// 1..87 less the permanent gaps above, plus 89 and 91. 85 — held while C-CRM-10's worktree carried the work
-// uncommitted — arrived with that unit rather than becoming a gap, and 89 and 91 arrived out of order for
-// the same reason. 88, 90, 92 and 93 are allocations held by units in flight in other worktrees, so 94 is
-// the next number nobody holds; if one of the four turns out to need no migration it becomes a permanent gap like 22,
-// 41, 44, 47, 71 and 74 and is NOT renumbered, because renumbering to close a gap is how two branches come
-// to apply one number to different SQL. Gate case 90a walks the migrations that EXIST on disk rather than
-// consecutive integers, which is what makes a non-contiguous allocation cost nothing.
-//
 // 93 is 0093_publication.sql: nothing reaches the public without a lint pass, a named approval against a
 // content hash, and an append-only record — and none of those four facts is a promise a caller keeps
 // (W-SITE-10). Three of the four halves already existed and were correct: `access/publication.ts`
@@ -2797,18 +2828,53 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // (append-only), `ZZ002` (a state that does not follow the one before it), `ZZ003` (a correction naming no
 // superseded record, the wrong one, or another surface's), `ZZ004` (a published record with no audit row at
 // COMMIT) and `ZZ005` (over the weight budget, with both numbers in the message) are its private
-// SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
-// `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
+// SQLSTATEs. `ZZ` because it was the LAST free class: see the allocation note at the foot of this region
+// and `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing. 0091 then replaced
+// the convention — a refusal is identified by all five characters and a unit takes a subclass RANGE — which
+// is what 0097 below is allocated under.
+//
+// 97 is 0097_hr_commission.sql: a commission figure that cannot be recomputed into a different answer
+// (P-HR-11). The subject is narrower than it sounds — anybody can compute a commission; what a therapist
+// disputing a payslip needs is that the same period computed again comes back byte-identical — and four
+// tables make it so. `commission_rule` is one published, IMMUTABLE version (which figure a percentage
+// applies to, and how it rounds) with `commission_rule_band` holding its rates as ordered rows, so one band
+// from zero is a flat percentage and several ascending bands are a tiered one. `commission_run` names the
+// version that judged it (NOT NULL) and carries `source_as_of`, the instant the source figures were READ
+// at; `commission_line` pins the SAME version through a composite foreign key rather than through a second
+// column somebody keeps in step. Four refusals make the claims properties of the database rather than of
+// the program that wrote the rows: ZY071 and ZY072 refuse every UPDATE and DELETE for every role including
+// the owner, so a rate that is wrong is a new VERSION and a run that is wrong is a new RUN; ZY073 holds a
+// version's bands to covering the value range from zero upwards, so "some band applies" is true by
+// construction and the engine has no unanswered case to invent behaviour for; ZY076 refuses a run over a
+// closed accounting period whose `source_as_of` is not the lock's own `locked_at`, which is the whole trap —
+// a payment applied after the close, or a sale backdated into a filed month, is correct arithmetic over
+// facts that postdate the payslip; and ZY077 holds every line's band, rate and figure to
+// `commission_fils_for()`, the arithmetic in SQL, mirrored by `commissionFilsFor` in `@berelax/core` and
+// held equal to it over a census for the reason 0083 gives about `package_release_through_fils`. ZY074 is
+// the deferred trigger holding the run header to its lines, which is what makes the `commission_derivation`
+// view's "rows summing exactly to the header total" a claim about two independent figures rather than about
+// a sum agreeing with itself. **NOTHING IS SEEDED**, unlike 0059, 0066, 0081 and 0086: there is no law
+// about commission and no figure in the handover, Y9-commission's provisional answer is "none configured;
+// the module ships disabled", and an empty table is therefore the strictest safe option — with no version
+// published the engine produces zero lines and nothing can be paid at a rate nobody chose. The module being
+// off is `hr.commission_enabled` in the settings registry, `false` and flagged provisional, so it appears on
+// the Unconfirmed Assumptions panel rather than being a fact only the code knows. Private SQLSTATEs
+// ZY071-ZY077, a subclass range of the shared `ZY` class per 0091's rule; ZY078-ZY080 are unused.
 //
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
-// becoming a gap. 88 through 92 are allocations held by five units in flight in other worktrees, and 93 is
-// this file, W-SITE-10's, which has landed. So 94 is the next number nobody holds. Gate case 90a walks the
-// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
-// allocation cost nothing — and it is why 88 through 92 arriving after 93 needs no renumbering here.
+// becoming a gap. 89, 91 and 93 have landed since, out of order, for the same reason. 88, 90, 92 and 94
+// through 96 are allocations held by units in flight in other worktrees, and 97 is this file, P-HR-11's,
+// which has landed. So 98 is the next number nobody holds; if one of the held numbers turns out to need no
+// migration it becomes a permanent gap like 22, 41, 44, 47, 71 and 74 and is NOT renumbered, because
+// renumbering to close a gap is how two branches come to apply one number to different SQL. Gate case 90a
+// walks the migrations that EXIST on disk rather than consecutive integers, which is what makes a
+// non-contiguous allocation cost nothing — and it is why 97 arriving before 94, 95 and 96 needs no
+// renumbering here.
 //
-// This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
-// both sides, and four of the five surviving copies then described a set of held numbers that had since
-// landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
-// the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 93 as const
+// This note replaced five copies of itself, and then a sixth: the W-SITE-10 merge left TWO allocation
+// sentences in this region, one saying 94 was next and one saying the same thing forty lines later, in the
+// file whose own rule is that a second statement of a fact drifts. P-HR-11 deleted the earlier one. There is
+// one now, it is the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one
+// instead.
+export const SCHEMA_VERSION = 97 as const

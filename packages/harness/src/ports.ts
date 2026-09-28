@@ -100,6 +100,16 @@ export const TEST_PORT_BANDS = {
   // ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the floor — so the
   // browser-unsafe exclusion this registry keeps costs this band nothing and `usableWidth` is the full 300.
   publication: { start: 13_400, width: 300 },
+  // P-HR-11's commission screen, which needs a real server for the one claim no pure render can make: the
+  // bytes an OWNER receives and the bytes a THERAPIST receives differ in the derivation's scope, and that
+  // difference is produced by the session — there is no `?employee=` to drive it with, because
+  // `admin-guard.test.ts` refuses one across the whole of `apps/web`. A render test can be handed either
+  // view; only a served response proves which view a cookie actually gets. 14_300 is the band this unit was
+  // allocated; 13_700 through 14_200 are allocations held by units in flight in other worktrees, and a band
+  // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
+  // one. [14_300, 14_600) contains none of RESTRICTED_PORTS — the highest entry in that table below the
+  // ephemeral floor is 6697 — so `usableWidth` is the full 300.
+  commission: { start: 14_300, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
