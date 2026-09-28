@@ -37,6 +37,7 @@ a decision the table does not list.
 | [0025](0025-staff-field-level-encryption.md) | Staff PII under a third KEK; the employment record is a closed field map | — |
 | [0026](0026-period-reopen-requires-migration.md) | Reopening a closed accounting period requires a migration | — |
 | [0031](0031-clinical-intake-consent-gate.md) | The intake consent gate is a refusal; the AAD binds the template version; residency is a setting | — |
+| [0034](0034-erasure-is-enumerated-and-bounded.md) | Erasure enumerates the catalogue and refuses an unclassified column; its four boundaries are stated in the row | — |
 
 ## Writing one
 

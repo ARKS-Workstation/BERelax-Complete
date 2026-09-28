@@ -106,6 +106,16 @@ export {
   type StoredEvent,
 } from './outbox.ts'
 export {
+  CONTACT_DETAIL_COLUMNS,
+  CREDENTIAL_COLUMN_PATTERN,
+  coveredTables,
+  erasureCoverage,
+  FREE_TEXT_NOTE_EXCLUSIONS,
+  FREE_TEXT_NOTE_PATTERN,
+  type ProbeAxis,
+  type ProbedColumnRow,
+} from './privacy-coverage.ts'
+export {
   type AlternativesOptions,
   type AlternativeTherapist,
   AVAILABILITY_OCCUPANCY_PAD_MINUTES,
@@ -852,6 +862,27 @@ export {
   recordReplySubmittedToApi,
   recordRoutingVerdict,
 } from './repositories/reviews.ts'
+export {
+  assertRecipesMatchRules,
+  beginRightsRequest,
+  type ErasureDeps,
+  type ErasureInput,
+  type ErasureReport,
+  EXECUTION_RECIPES,
+  type ExportInput,
+  type ExportResult,
+  eraseSubject,
+  exportSubjectData,
+  overdueRightsRequests,
+  REDACTION_MARKER,
+  RETAINING_ERASURE_ACTIONS,
+  RIGHTS_REFUSALS,
+  RIGHTS_SQLSTATE,
+  type RightsRefusal,
+  type RightsRequestInput,
+  type RightsRequestRow,
+  recordRightsRequest,
+} from './repositories/rights.ts'
 export {
   type LabourCostRuleRow,
   type PublishedRota,
@@ -2179,4 +2210,44 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 82 as const
+//
+// 85 is 0085_data_subject_rights.sql: the five rights as a policy engine with a deadline and an audit
+// trail, and the erasure/retention conflict resolved with neither side silently winning. The tables are
+// `rights_request` (the subject, the type, the instant it was received, the SLA it was taken under, the
+// derived due instant, the verification method and the lifecycle), `rights_resolution` (one per completed
+// request: which regulatory_profile VERSION decided it, the pseudonym the identity became, the regime and
+// that the regime is an assumption, the OPEN-QUESTIONS ids that would change it, the stated position on
+// backups, and whether the written response could be issued), `rights_resolution_class` (per table and
+// column: the rows that were there, the rows acted on, the rows retained and why), `rights_export` (with
+// the subject count that drives docs/06 D4's insider-threat alert) and `legal_hold`. The claim of the whole
+// file is one CHECK: `rows_before = rows_acted + rows_retained`, so an erasure that could not account for a
+// row cannot store its own report and the refusal rolls it back inside its own transaction — 0069's
+// `merge_record_table` argument applied to the operation whose defects are quieter still, because a merge
+// that leaves rows behind surfaces as a record nobody reads and an erasure that leaves rows behind surfaces
+// as a message to somebody who asked to be forgotten. A retained row needs `retained_reason`, and
+// `retain_statutory` additionally needs the profile COLUMN naming the obligation and the figure, so no
+// years number is ever a literal. `rights_request` freezes the columns an SLA is measured against (ZA002)
+// and permits only the transitions the policy declares (ZA003), because a request answered on day forty is
+// compliant if `received_at` can be edited and nothing about the row would look wrong afterwards. Erasure
+// of the CRM identity is a PSEUDONYM in `customer.phone_e164`, which had to widen that column's E.164 check:
+// every value matching it is a plausible phone number and a plausible number may be a real stranger's, so
+// the pseudonym is `erased-` plus 32 letters from a to p — digit-free, so `phone_match_key` derives to the
+// empty string and an erased record can never surface as a merge candidate — tied to `erased_at` by
+// `customer_erasure_and_pseudonym_agree`, which refuses both halves of the disagreement and whose second
+// half IS this unit's defining failure: a real number still in place on a record marked erased. Clinical
+// data is crypto-erased through `public.destroy_customer_deks`, SECURITY DEFINER because 0009 revokes the
+// clinical schema from the application role, refusing (ZA006) unless an `in_progress` erasure request names
+// that customer — so a bug cannot shred a clinical record, because a bug does not first insert a request
+// saying it may. It is in `public` and not in `clinical` because EXECUTE on a function also needs USAGE on
+// the schema holding it, and granting `berelax_app` usage on `clinical` would make "the application role
+// holds no privilege on the clinical schema" stop being literally true — without letting it read a table,
+// so it would have been a weakening no test could see. The destroyed marker is a ZERO-LENGTH `wrapped_data_key` (a real one is always 60 bytes), and a
+// CHECK asserting that length was written and REMOVED: `intake.itest.ts` inserts one-byte placeholder keys
+// in the cases that prove C-CRM-08's consent gate and version guard, and a CHECK fires before both, so two
+// of that unit's passing tests would have failed with this file's error instead of the one they assert.
+// `clinical.dek_destruction` is the authority instead. `ZA` is this file's private SQLSTATE prefix: ZB
+// through ZW are taken, and ZA rather than ZX because a unit continuing the alphabet from ZW reaches for ZX
+// next and 0083, 0084, 0086 and 0087 are allocations held by units in flight.
+//
+// 83 and 84 are two of those allocations, so 85 is not a gap in the record either.
+export const SCHEMA_VERSION = 85 as const

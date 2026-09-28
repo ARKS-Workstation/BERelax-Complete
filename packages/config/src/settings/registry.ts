@@ -32,6 +32,8 @@ import {
   PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
   PROVISIONAL_LINT_QUESTION_COPY,
   PROVISIONAL_REAL_INTAKE_PERMITTED,
+  PROVISIONAL_RIGHTS_SLA_DAYS,
+  PROVISIONAL_SUPERVISORY_AUTHORITY,
   PROVISIONAL_WHATSAPP_REF_EXPECTED,
   REBUILD_OBLIGATION_NOTICES_JOB,
   REBUILD_SCHEDULED_STEPS_JOB,
@@ -40,9 +42,14 @@ import {
   REVIEW_AUTOSEND_SETTING_KEY,
   REVIEW_COOLING_OFF_SETTING_KEY,
   REVIEW_REPLY_LANGUAGES_SETTING_KEY,
+  RIGHTS_SLA_DAYS_SETTING_KEY,
+  RIGHTS_SLA_PROVENANCE,
+  RIGHTS_SUPERVISORY_AUTHORITY_SETTING_KEY,
   reviewAutosendEnabledSchema,
   reviewCoolingOffHoursSchema,
   reviewReplyLanguagesSchema,
+  rightsSlaDaysSchema,
+  rightsSupervisoryAuthoritySchema,
   STRICT_GENDER_MATCHING,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
 } from '@berelax/shared'
@@ -991,6 +998,86 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y1-licence',
       note: 'Is the licence a commercial wellness activity or a healthcare one? Unanswered, so the narrower vocabulary applies to everything a client reads on an intake form and not only to what the form asserts. Answering it healthcare widens this twice over: this setting goes off, and regulatory_profile.medical_claims_permitted going true stops the claim list applying to the title and the consent wording as well. Both are configuration changes.',
+    },
+  }),
+  /**
+   * The two data-subject rights settings (C-CRM-10). They are a matched pair of OPPOSITE decisions about
+   * an unanswered question, which is why they read best together.
+   *
+   * Both hang off `Y1-entity` — mainland, DIFC or ADGM, which decides which privacy law applies. For the
+   * deadline the build CAN choose a strictest-safe answer, so it does, and marks it. For the supervisory
+   * authority it cannot, so it refuses, and marks that. docs/12 §2 says a provisional value is always the
+   * strictest safe option; this is what that looks like when there is no safe option to pick.
+   */
+  define({
+    /**
+     * How many days a rights request must be answered in. Thirty, provisional.
+     *
+     * The shortest deadline of the regimes this build can see, because answering late is a breach and
+     * answering early never is. It is NOT presented as a statutory figure anywhere — `RIGHTS_SLA_PROVENANCE`
+     * is the sentence the panel shows, and it says in words that the build chose this because the question
+     * that decides it is open, so nobody quotes it as something somebody looked up.
+     *
+     * `min(1)` and not `min(0)`, for the reason the frequency cap gives: zero looks like the strictest
+     * value and is in fact the ambiguous one, and here it is simply incoherent — a request is overdue the
+     * instant it is taken. Migration 0085 refuses it too (`rights_request_sla_is_a_deadline`), so the floor
+     * holds for a `psql` session as well.
+     *
+     * Stored ON each request as `sla_days`, so lowering this does not retroactively make an answered
+     * request late, and raising it does not make a late one punctual.
+     */
+    key: RIGHTS_SLA_DAYS_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: rightsSlaDaysSchema,
+    defaultValue: PROVISIONAL_RIGHTS_SLA_DAYS,
+    label: 'Days to answer a data-subject request',
+    help: 'Every export, rectification, erasure, objection and withdrawal request gets a due date this many days after it was received, and the overdue list is driven from it. Thirty days is the shortest deadline of the privacy regimes this build can see, chosen because the entity type that decides which regime applies has not been confirmed. It is not a figure this build looked up and must not be quoted as one. It cannot be set to zero.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    // No `rerunJobs`, and the absence is the decision. A deadline is stored per request precisely so that
+    // changing this setting cannot move one, and 0085's `rights_request_guard` freezes `due_at` and
+    // `sla_days` (ZA002) so no job could move one even if it were written. An earlier draft named
+    // `rebuild-rights-due-dates` here; no worker registered it, which is the defect
+    // `send-scheduled-step.test.ts` catches for the reminder settings and nothing catches for this one.
+    // Requests taken after the change take the new figure; requests already open keep theirs, which is
+    // also the stricter reading whenever the new figure is longer.
+    rerunJobs: [],
+    provisional: {
+      openQuestionId: 'Y1-entity',
+      note: RIGHTS_SLA_PROVENANCE,
+    },
+  }),
+  define({
+    /**
+     * Which supervisory authority a dissatisfied data subject complains to. **Blank, and no default.**
+     *
+     * The one setting in this build that is deliberately EMPTY rather than provisionally filled, and the
+     * distinction is brief rule 15 at its sharpest. Every other unanswered question here has a strictest
+     * safe answer that can be chosen and corrected later. This one does not: `Y1-entity` decides whether
+     * the regulator is the federal one, DIFC's or ADGM's, and a plausible regulator named in a letter to a
+     * data subject is indistinguishable from the right one — it would send somebody with a genuine
+     * complaint to an office that cannot hear it, and it would be this build's own invention. docs/04 §8
+     * records the question as open in as many words.
+     *
+     * So while this is empty the engine PERFORMS every right and REFUSES to issue the written response,
+     * by name (`rights_response_authority_absent`), and the refusal is recorded on the resolution row. The
+     * erasure still happens; the letter that would have to contain a fact this build does not have does
+     * not. `google.cloud_quota_page_url` is blank for the same reason and the weaker version of it: a
+     * wrong console link opens the wrong project, and a wrong regulator misdirects a complaint.
+     */
+    key: RIGHTS_SUPERVISORY_AUTHORITY_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: rightsSupervisoryAuthoritySchema,
+    defaultValue: PROVISIONAL_SUPERVISORY_AUTHORITY,
+    label: 'Supervisory authority for privacy complaints',
+    help: 'The authority a data subject complains to if they are unhappy with how a request was answered, named exactly as it should appear in a letter. It is blank because the entity type that decides which authority has jurisdiction has not been confirmed, and a plausible-looking authority would send a real complaint to an office that cannot hear it. While it is blank, requests are still carried out in full and the written response is withheld with that reason recorded.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y1-entity',
+      note: 'Mainland, DIFC or ADGM? Each has its own authority and the build has not been told which. Deliberately blank rather than assumed: a response naming an invented supervisory authority is worse than no response, because it looks complete.',
     },
   }),
 ] as const

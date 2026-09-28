@@ -932,6 +932,30 @@ export const ROUTES = [
       'Google routes beside it; dynamic because it reads the message rows on every request.',
   },
   {
+    id: 'privacy-rights',
+    path: '/settings/privacy',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-CRM-10s data-subject rights screen: every open request with its deadline, which are overdue, how ' +
+      'the erasure/retention conflict resolves under the profile in force, and what is RETAINED with the ' +
+      'reason it is lawful to keep it. A handler answering text/html rather than a document, for the reason ' +
+      'the Messages inbox gives one directory along: a document must be served in both locales, which would ' +
+      'need an Arabic admin document and the W-SYS-01 shell, and would join a screenshot matrix whose RTL ' +
+      'half has to be a real Arabic route. READ-ONLY on purpose — recording a request is a write with an ' +
+      'actor and a verification method, there is no admin session until W-SYS-01, and ' +
+      'rights_request_actor_is_stated refuses a placeholder rather than taking one. It names no customer: a ' +
+      'subject is its record id until it has a pseudonym, and a customer with no display name is Customer ' +
+      '0042 (ADR 0020). DYNAMIC and no-store for a reason beyond freshness: the page renders the live ' +
+      'catalogue through the same classification the erasure runs, so a prerendered copy would go on saying ' +
+      'every column is accounted for after somebodys migration made that untrue. Covered by the /settings ' +
+      'noindex prefix.',
+  },
+  {
     id: 'spa',
     path: '/spa',
     kind: 'document',
