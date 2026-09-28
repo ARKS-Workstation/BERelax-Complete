@@ -2501,13 +2501,32 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // convention that a class identifies a FILE has one allocation left in it — W-SYS-12 owns replacing it
 // with an allocator, and until then a unit taking a class is taking the last one.
 //
+// 90 is 0090_admin_session.sql: the admin session's storage — `staff_credential`, holding what a member of
+// staff signs in with, and `staff_session`, the row a cookie names. It is W-SYS-11's, the unit that exists
+// because 56 manifest references deferred the whole admin estate to W-SYS-01, a `done` unit that never owned
+// a session. `staff_credential` REFERENCES an existing `employee` row rather than introducing a second
+// answer to "who is this member of staff" — the seam B-AVAIL-04's NOTE hands every later unit and 0050
+// already took. `staff_session` holds the SHA-256 of the 32 random bytes the cookie carries and NO ROLE, and
+// that absence is the whole design: a request's role is reached only by joining a live session to its
+// credential, so a tampered cookie names nothing rather than asserting something, a demotion takes effect on
+// the next request with nothing to invalidate, and there is no representable state in which a session's
+// authority disagrees with its credential's. A signed cookie carrying `{role}` would need neither table and
+// would lose all three (ADR 0039). NO ROW IS SEEDED in any environment: `Y8-staff` is open, so a seeded
+// admin account would be an invented person with an invented password (brief rule 15) and the account
+// nobody rotates because nobody knows it exists — a deployment with no credential row refuses every login,
+// and there is deliberately no bootstrap account, no `APP_ENV` branch and no environment variable standing
+// in for a row. The TOTP seed is in a readable column and the migration header says why it is not sealed
+// under `STAFF_PII_KEK`: 0050 records that `scripts/rotate-kek.mjs` cannot rotate the staff estate, so
+// sealing an authentication secret there trades a readable column for an unrotatable one and makes that key
+// a hard dependency of logging in at all. Both tables are revoked from `berelax_readonly` at TABLE level,
+// because a column-level REVOKE does not subtract from a table-level grant — the fact 0050 paid to learn. It
+// raises NO private SQLSTATE and takes no class, which is deliberate given that ZZ is the last one free: a
+// session lookup needs no private code, because every refusal it makes is a row that is ABSENT rather than a
+// rule that fired.
+//
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
-// becoming a gap. 90 is 0090_admin_session.sql: W-SYS-11's `staff_credential` and `staff_session`, the
-// storage behind the admin session that 56 manifest references had deferred to a `done` unit. It raises NO
-// private SQLSTATE and takes no class, which is deliberate given that ZZ is the last one free — a session
-// lookup needs no private code, because every refusal it makes is a row that is absent rather than a rule
-// that fired. 88, 89, 91 and 92 remain allocations held by units in flight in other worktrees, so 93 is
+// becoming a gap. 88, 89, 91 and 92 remain allocations held by units in flight in other worktrees, so 93 is
 // still the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than
 // consecutive integers, which is what makes a non-contiguous allocation cost nothing.
 //
