@@ -177,6 +177,12 @@ const PERMITTED_LITERAL_KILL_SWITCHES = new Map([
     'apps/worker/src/jobs/google-reauth-notify.ts',
     'The Google re-auth ladder. Transactional, and the message that says an integration has stopped.',
   ],
+  [
+    'apps/worker/src/jobs/review-notice-sender.ts',
+    'The fallback review notices (G-REV-02). Transactional, and internal: the recipient is the owner, the ' +
+      'shipped resolver returns null for every caller, and the three consent evaluators beside the literal ' +
+      'THROW — so a promotional send through this runtime fails closed rather than reading a false.',
+  ],
 ])
 
 /** Files that carry these patterns as DATA. Scanning either would make the gate report itself. */
