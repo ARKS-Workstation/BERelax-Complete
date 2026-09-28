@@ -100,6 +100,15 @@ export const TEST_PORT_BANDS = {
   // ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the floor — so the
   // browser-unsafe exclusion this registry keeps costs this band nothing and `usableWidth` is the full 300.
   publication: { start: 13_400, width: 300 },
+  // C-AUTO-05's promotional controls console, which needs a real server for the claims no pure render can
+  // make. All three are about a RESPONSE rather than a return value: the 403 a marketer's POST gets and the
+  // 200 a manager's gets are status codes, the audit row a successful POST leaves is written by a handler in
+  // another process, and axe needs a rendered DOM. 14_600 is the band this unit was allocated; 13_700 through
+  // 14_500 are allocations held by units in flight in other worktrees, and a band chosen from what one
+  // worktree can see is exactly how `template-editor` and `book-flow` came to share one. [14_600, 14_900)
+  // contains none of RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697 —
+  // so `usableWidth` is the full 300.
+  'marketing-kill-switch': { start: 14_600, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

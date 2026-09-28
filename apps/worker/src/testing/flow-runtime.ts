@@ -21,6 +21,13 @@ import { interpreterCaps, messageNodeDepsFor } from '../automation/runtime.ts'
  *     gate still runs first (`check-send-chokepoint.mjs` asserts that order for every case, not just the
  *     driven ones), so the compliance path is exercised as it is in production; what changes is only that
  *     the transport is reached.
+ *
+ *     It is now passed to `messageNodeDepsFor` rather than patched onto the SendContext afterwards, and
+ *     C-AUTO-05 is why: the marketing kill switch is engaged in every non-production environment, resolved
+ *     from the runtime's `APP_ENV`, so a patch applied after the fact would have left the switch reading
+ *     `test` — engaged — and refused every promotional send in `interpreter.itest.ts` while the SendContext
+ *     said `production`. One value, used by the guard and the switch, so the two cannot disagree about which
+ *     environment this is.
  *   - **The suppression pepper is the fixture's.** `loadSuppressionPeppers(config)` refuses loudly when the
  *     environment has none, and every row keyed under the fixture pepper says `fixture` in
  *     `suppression.pepper_version` — the column that exists to say which pepper keyed a row.
@@ -38,12 +45,14 @@ export async function buildTestInterpreterRuntime(args: {
   readonly transport: ClassRoutedTransport
   readonly spies: TestRuntimeSpies
 }): Promise<InterpreterRuntime> {
-  const base = messageNodeDepsFor(args.sql, { transport: args.transport })
+  const base = messageNodeDepsFor(args.sql, {
+    transport: args.transport,
+    appEnv: 'production',
+  })
   return {
     sql: args.sql,
     messageDeps: {
       ...base,
-      sendContextFor: (input) => ({ ...base.sendContextFor(input), appEnv: 'production' }),
       caps: await interpreterCaps(args.sql),
       suppressionKeying: () => ({
         peppers: fixtureSuppressionPeppers(process.env),

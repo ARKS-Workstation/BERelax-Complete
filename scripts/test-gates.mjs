@@ -34849,6 +34849,343 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 126a-126z. (C-AUTO-05) The marketing kill switch: the one it must not be able to stop, and the state it
+//            must not hold twice.
+//
+//            The unit's acceptance line is the specification and it is STRUCTURAL: the switch *"stops every
+//            promotional send and structurally cannot touch transactional traffic"*. Every case here breaks
+//            one of the three layers that makes the second half true, because a switch that merely CHECKS a
+//            flag before a promotional send is one edit away from stopping every booking confirmation,
+//            reminder and OTP in the system — and the edit does not look like a mistake.
+//
+//            126c is the one worth reading twice, because it is the mutation the unit exists against. Move
+//            the kill-switch block above the transactional return — while tidying, while adding a fifth
+//            check, while "checking the cheap thing first" — and the system still works: every promotional
+//            send is still refused, every refusal test still passes, and the only thing in the build that
+//            would have noticed before this unit was ONE assertion in `fail-closed.test.ts` about one
+//            template, which somebody could delete for looking redundant. The first evidence in production
+//            is a day of customers not being told their appointments are confirmed, in the hour after
+//            somebody stopped a campaign. So the claim is now a parameter type plus a scanner rule, and 126a
+//            and 126c break the two halves separately.
+//
+//            126a and 126b are `scripts/check-send-chokepoint.mjs`'s
+//            `kill-switch-cannot-reach-transactional-traffic` rule being seen to fire, from two directions:
+//            the transactional answer stops coming first, and the switch is read twice. Both are asserted BY
+//            RULE NAME, because a fixture rejected by some other rule would leave the one under test free to
+//            have stopped matching anything (ADR 0003).
+//
+//            126g and 126h are the `marketing-kill-switch-state-has-one-home` rule, and 126h is the case
+//            that found a defect in the rule itself: SQL in this repository lives in template literals, and
+//            the scanner's other rules read the file with string CONTENTS blanked — so the first version of
+//            the control-table rule matched nothing in the whole tree while reporting a clean scan. It now
+//            reads a stripping that keeps strings, and the scanner counts the writes it sees in the one
+//            permitted writer so the same thing cannot happen again silently.
+//
+//            126e is the containment half. Collapsing the SMSala transport's two `FailureScript`s into one
+//            shared script is the exact defect two registered sender identities exist to prevent: arming a
+//            promotional suspension would then arm every SMS call, and a marketing sanction would stop
+//            booking confirmations. It leaves a system that looks right and a suite that goes red.
+//
+//            126f moves the kill switch out of `PROMOTIONAL_HOLD_REASONS`, which makes a stopped recipient
+//            read as REFUSED rather than HELD. Nothing fails obviously: the campaign reports every recipient
+//            dealt with, `held + sent == total` stops holding, and the release C-AUTO-10 owes them has
+//            nothing to release.
+//
+//            126d drives migration 0098's four refusals as statements, and the role predicate against the
+//            role matrix's own answers — which is the only thing tying the two places "who may toggle" is
+//            written down. No case mutates `packages/db/migrations/0098_messaging_controls.sql`: the database
+//            the suites run against has already had it applied, so an edit to the file changes nothing a
+//            statement can see and a PASS would be a report about a file nothing read (114's finding).
+{
+  const DECIDE = 'packages/messaging/src/gate/decide.ts'
+  const KILL_SWITCH = 'packages/messaging/src/gate/kill-switch.ts'
+  const SMSALA = 'packages/messaging/src/transports/smsala.ts'
+  const WORKER_RUNTIME = 'apps/worker/src/automation/runtime.ts'
+
+  const SWITCH_SUITE = 'packages/messaging/src/gate/kill-switch.test.ts'
+  const SUSPENSION_SUITE = 'packages/messaging/src/transports/sender-suspension.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const scan = () => ['send-chokepoint']
+
+  /**
+   * One anchored edit to a shipped file, then the command that must fail because of it.
+   *
+   * Named for this block rather than like block 114's `withChokeEdit` or block 107's `…Mutant`, because two
+   * blocks defining a helper of the same shape is how git found the bodies as shared context and INTERLEAVED
+   * two blocks at a merge. This block's subject overlaps C-AUTO-04's more than any other.
+   */
+  const withSwitchEdit = (path, anchor, replacement, args) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', args),
+    )
+
+  // 126a. The transactional answer stops coming first. Written as the realistic version — the early return
+  //       deleted, so `evaluateGate` falls straight through to the promotional path for every message.
+  checkRejectedBy(
+    'kill switch: the transactional answer removed from the gate is caught',
+    withSwitchEdit(
+      DECIDE,
+      "  if (message.messageClass === 'transactional') return ALLOW\n",
+      '',
+      scan(),
+    ),
+    'kill-switch-cannot-reach-transactional-traffic',
+  )
+
+  // 126b. A SECOND read of the switch, in `evaluateGate` itself. This is what the mutation actually looks
+  //       like when somebody adds a fast path rather than deleting a line: the promotional read stays
+  //       exactly where it is, so nothing about it looks wrong.
+  checkRejectedBy(
+    'kill switch: a second read of the switch above the transactional return is caught',
+    withSwitchEdit(
+      DECIDE,
+      '  // Step 1, and the only step this function performs itself.',
+      '  if (ctx.marketingKillSwitch && false) return ALLOW\n' +
+        '  // Step 1, and the only step this function performs itself.',
+      scan(),
+    ),
+    'kill-switch-cannot-reach-transactional-traffic',
+  )
+
+  // 126c. The mutation the unit exists against, run against the BEHAVIOUR rather than the scanner: the
+  //       kill-switch refusal moved above the transactional return, in a form that compiles. Every
+  //       promotional send is still refused; the corpus sweep is what notices that the transactional half
+  //       stopped going out.
+  checkRejectedBy(
+    'kill switch: a switch that also stops transactional traffic fails the corpus sweep',
+    withSwitchEdit(
+      DECIDE,
+      "  if (message.messageClass === 'transactional') return ALLOW\n",
+      '  if (ctx.marketingKillSwitch) {\n' +
+        "    return { kind: 'refuse', reason: 'marketing_kill_switch', detail: 'stopped' }\n" +
+        '  }\n' +
+        "  if (message.messageClass === 'transactional') return ALLOW\n",
+      unit(SWITCH_SUITE),
+    ),
+    'refuses the whole promotional corpus by name while the transactional corpus still goes out',
+  )
+
+  // 126e. The two failure scripts collapsed into one. A promotional suspension then arms every SMS call,
+  //       which is the outage two registrations exist to remove (ADR 0016).
+  checkRejectedBy(
+    'kill switch: one shared failure script for both sender identities is caught',
+    withSwitchEdit(
+      SMSALA,
+      '  const failures: Record<MessageClass, FailureScript> = {\n' +
+        '    transactional: new FailureScript(),\n' +
+        '    promotional: new FailureScript(),\n' +
+        '  }',
+      '  const shared = new FailureScript()\n' +
+        '  const failures: Record<MessageClass, FailureScript> = {\n' +
+        '    transactional: shared,\n' +
+        '    promotional: shared,\n' +
+        '  }',
+      unit(SUSPENSION_SUITE),
+    ),
+    'halts every promotional send and leaves the transactional count untouched',
+  )
+
+  // 126f. A stopped recipient reclassified as refused. The campaign then reports them dealt with, and the
+  //       conservation property the release depends on stops holding.
+  checkRejectedBy(
+    'kill switch: a stopped recipient counted as refused rather than held is caught',
+    withSwitchEdit(
+      KILL_SWITCH,
+      "  MARKETING_KILL_SWITCH_REASON,\n  'queued_for_window',\n",
+      "  'queued_for_window',\n",
+      unit(SWITCH_SUITE),
+    ),
+    'holds every remaining recipient when the switch is engaged mid-campaign, losing none',
+  )
+
+  // 126g. The switch hard-coded in the one runtime that CAN send promotional traffic. This is C-AUTO-07's
+  //       own sentence made checkable: "a `false` that looks like a read is the switch nobody notices is not
+  //       wired".
+  checkRejectedBy(
+    'kill switch: a hard-coded switch in a promotional runtime is caught',
+    withSwitchEdit(
+      WORKER_RUNTIME,
+      '        marketingKillSwitch,\n',
+      '        marketingKillSwitch: false,\n',
+      scan(),
+    ),
+    'marketing-kill-switch-state-has-one-home',
+  )
+
+  // 126h. A second writer of the control table, in the place it would actually be written: a worker module
+  //       that already holds a connection. See the block header on why this case is also the one that found
+  //       the rule reading a stripping in which its own pattern could never appear.
+  checkRejectedBy(
+    'kill switch: a second writer of messaging_control is caught',
+    withSwitchEdit(
+      WORKER_RUNTIME,
+      'export async function interpreterCaps(',
+      'export async function stopMarketing(sql: Sql): Promise<void> {\n' +
+        '  await sql`update messaging_control set engaged = true`\n' +
+        '}\n' +
+        'export async function interpreterCaps(',
+      scan(),
+    ),
+    'marketing-kill-switch-state-has-one-home',
+  )
+
+  // 126d. Migration 0098 driven as statements, and the role predicate against the role matrix.
+  //
+  //       Every probe runs inside begin/rollback, so one that is wrongly ACCEPTED leaves nothing behind —
+  //       and an UPDATE rather than an INSERT, because 0098 revokes INSERT from `berelax_app` and because
+  //       both control rows are seeded by the migration, so the UPDATE always matches a row. An UPDATE
+  //       matching no row exits ZERO and `checkRejectedBy` would then report "nothing was rejected" about a
+  //       database that simply had not been migrated.
+  //
+  //       `VERBOSITY=verbose` is what makes the assertion possible at all: psql's default verbosity prints
+  //       the message and NOT the SQLSTATE, so a probe would bounce off the right trigger and be reported as
+  //       "did not report ZY082". That is 114h's finding, restated because this block repeats its shape.
+  //
+  //       `withTriggersOff` is the second layer. The triggers are BEFORE INSERT/UPDATE so they always win,
+  //       which means the CHECK constraints beside them are never exercised by an ordinary probe — and the
+  //       CHECKs are the layer that matters most, because they are the ones that hold under
+  //       `session_replication_role = 'replica'`, which is how a restore from a dump runs.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    const controlProbe = (set, withTriggersOff = false) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${withTriggersOff ? "set local session_replication_role = 'replica'; " : ''}` +
+          `update messaging_control set ${set} where control_key = 'marketing_kill_switch'; rollback;`,
+      ])
+
+    const engaged = (role, reason) =>
+      `engaged = true, direction = 'engage', changed_by_role = '${role}', ` +
+      `changed_by = 'psql', reason = '${reason}', changed_at = now()`
+
+    // The role, which is the acceptance line's own list. The marketer is the one that matters: `campaign:send`
+    // is theirs and un-stopping their own campaign must not be.
+    for (const role of [
+      'receptionist',
+      'marketer',
+      'therapist',
+      'accountant',
+      'auditor',
+      'system',
+    ]) {
+      checkRejectedBy(
+        `kill switch: the database refuses a toggle by ${role}`,
+        controlProbe(engaged(role, 'getting the campaign out')),
+        'ZY082',
+      )
+    }
+
+    checkRejectedBy(
+      'kill switch: the database refuses a toggle with a blank reason',
+      controlProbe(engaged('owner', '  ')),
+      'ZY083',
+    )
+
+    // A key outside the closed set, which is the storage half of "cannot touch transactional traffic": the
+    // realistic version is somebody adding a control for the traffic that must never be stoppable.
+    checkRejectedBy(
+      'kill switch: the database refuses a control key naming transactional traffic',
+      controlProbe("control_key = 'transactional_kill_switch'"),
+      'ZY081',
+    )
+
+    // The DELETE, which is a disengagement that writes no audit row.
+    checkRejectedBy(
+      'kill switch: the database refuses a DELETE of a control row',
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        "begin; delete from messaging_control where control_key = 'marketing_kill_switch'; rollback;",
+      ]),
+      'ZY084',
+    )
+
+    // The CHECKs, with the triggers out of the way, as a restore runs.
+    checkRejectedBy(
+      'kill switch: the CHECK refuses a marketer with triggers off, as a restore runs',
+      controlProbe(engaged('marketer', 'getting the campaign out'), true),
+      'messaging_control_role_may_toggle',
+    )
+    checkRejectedBy(
+      'kill switch: the CHECK refuses a transactional control key with triggers off',
+      controlProbe("control_key = 'transactional_kill_switch'", true),
+      'messaging_control_key_is_promotional_only',
+    )
+    // The redundancy that must not be able to drift: `direction` and `engaged` are tied by a CHECK, so a row
+    // saying "disengaged by an engage" is unstorable rather than merely unlikely.
+    checkRejectedBy(
+      'kill switch: the CHECK refuses a direction that disagrees with the state',
+      controlProbe(
+        "engaged = true, direction = 'disengage', changed_by_role = 'owner', " +
+          "changed_by = 'psql', reason = 'a row that lies', changed_at = now()",
+        true,
+      ),
+      'messaging_control_direction_matches_state',
+    )
+
+    // The control, which must PASS. A predicate that refused a manager engaging the switch would satisfy
+    // every case above while making the product unusable — which is the version of this rule somebody
+    // deletes.
+    const permitted = controlProbe(engaged('manager', 'complaints about the blast'))
+    check(
+      'kill switch: the database accepts a manager engaging the switch with a reason',
+      !permitted.failed,
+      permitted.output,
+    )
+
+    // And the pair the two places "who may toggle" is written down have to agree on, driven with the role
+    // matrix's own answers rather than with a list this case composed.
+    const matrix = run('psql', [
+      '--no-psqlrc',
+      '-t',
+      '-A',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      "select string_agg(role, ',' order by role) from (values ('owner'),('manager'),('accountant')," +
+        "('receptionist'),('therapist'),('marketer'),('auditor'),('system')) as r(role) " +
+        'where messaging_control_role_may_toggle(role)',
+    ])
+    check(
+      'kill switch: the database permits exactly the two roles holding settings:write',
+      !matrix.failed && matrix.output.trim() === 'manager,owner',
+      `messaging_control_role_may_toggle() answered ${JSON.stringify(matrix.output.trim())} and must ` +
+        'answer exactly manager,owner — the two roles ROLE_DEFINITIONS grants settings:write. SQL cannot ' +
+        'read the permission matrix, so this pair is held equal behaviourally or not at all.',
+    )
+  }
+
+  // 126z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as a block of passing cases.
+  {
+    const clean = run('pnpm', scan())
+    check('kill switch: the unedited repository passes the scanner', !clean.failed, clean.output)
+
+    for (const suite of [SWITCH_SUITE, SUSPENSION_SUITE]) {
+      const green = run('pnpm', unit(suite))
+      check(`kill switch: ${suite} passes unedited`, !green.failed, green.output)
+    }
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -743,6 +743,13 @@ export {
   templateRefusalOf,
 } from './repositories/message-template.ts'
 export {
+  type MessagingControlRow,
+  readMessagingControls,
+  type ToggleMessagingControlInput,
+  type ToggleMessagingControlResult,
+  toggleMessagingControl,
+} from './repositories/messaging-controls.ts'
+export {
   type AllocatedDocumentNumber,
   allocateDocumentNumber,
   DOCUMENT_SERIES_CODES,
@@ -2800,15 +2807,54 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
 // `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
 //
+// 98 is 0098_messaging_controls.sql: the marketing kill switch has ONE home, and no control row can ever name
+// transactional traffic (C-AUTO-05). `messaging_control` holds one row per promotional operator control —
+// `marketing_kill_switch` and `promotional_sender_suspended` — with `engaged`, the actor, the actor's role, the
+// direction and the reason, which is exactly what the console renders and what the audit row must agree with.
+// A TABLE rather than an `app_setting` row, and the argument is the one `agent_definition` already makes two
+// tables along: *"a disabled agent is silent by design, a killed one is an incident, and the two want
+// different audit stories"*. A toggle has a direction and a reason, and the tier system has no honest place
+// for it — `compliance_locked` is owner-only through `assertRoleMayEdit`, which would stop the floor manager
+// engaging the switch at 22:00, and `operational` would file "stop all marketing" beside a turnaround time.
+// The sender-ID suspension is not a setting in any reading: nobody CONFIGURES a TDRA suspension.
+//
+// Both rows are SEEDED here, disengaged, so no reader needs a default for a missing row — a default in the
+// reader is the second statement of the switch's state, and the default would be the permissive one.
+// `readMessagingControls` therefore REFUSES a missing row rather than answering "disengaged". What is NOT
+// stored is the provisional rule that the switch is engaged in every non-production environment: that is a
+// property of `APP_ENV` applied by `resolveMarketingKillSwitch` in `@berelax/messaging`, and seeding `true`
+// into staging's row would make it disengageable by an UPDATE that looks entirely legitimate.
+//
+// Two predicate functions, called from a CHECK and from a trigger apiece — 0080's and 0087's division of
+// labour, because the reasons are the same: the trigger gives a human a sentence they can act on, and the
+// CHECK is the layer that still holds under `session_replication_role = 'replica'`, which is how a restore
+// from a dump runs. `messaging_control_is_promotional_only()` is the storage half of "the switch structurally
+// cannot touch transactional traffic": there is deliberately no control key naming transactional traffic and
+// this is what makes one unstorable rather than merely absent. `messaging_control_role_may_toggle()` restates
+// `settings:write` — owner and manager — where SQL can read it, which is the ONE figure in this file that
+// exists in two places, held equal behaviourally by gate case 126d rather than trusted (0087's arrangement for
+// the window's ceiling).
+//
+// Four private SQLSTATEs, `ZY081`-`ZY084`, from the range this unit was allocated (`ZY081`-`ZY090`). `ZY081` a
+// control key outside the closed set — worse than a missing row, because a missing row reads as "not engaged",
+// so a misspelled key is a switch a screen shows as engaged and the gate never reads. `ZY082` a role that may
+// not toggle, which is the layer that holds for a `psql` session, a seed, or an import of another
+// environment's rows. `ZY083` a blank reason, refused by SHAPE before the role so the message says "this has
+// no reason" rather than "not you". `ZY084` a DELETE, and it is the subtle one: removing the row is a
+// DISENGAGEMENT that writes no audit event, because no UPDATE happened for one to hang off. Four codes and not
+// one because each has a different runbook answer, which is 0061's argument for a private code at all; the
+// CLASS identifies nothing any more, which is 0091's paragraph above and W-SYS-12's subject.
+//
 // Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
 // and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
-// becoming a gap. 88 through 92 are allocations held by five units in flight in other worktrees, and 93 is
-// this file, W-SITE-10's, which has landed. So 94 is the next number nobody holds. Gate case 90a walks the
-// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
-// allocation cost nothing — and it is why 88 through 92 arriving after 93 needs no renumbering here.
+// becoming a gap, as did 89, 91 and 93. 88, 90 and 92 are allocations held by units in flight in other
+// worktrees, as are 94 through 97, and 98 is this file, C-AUTO-05's, which has landed. So 99 is the next
+// number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than consecutive
+// integers, which is what makes a non-contiguous allocation cost nothing — and it is why 88 through 97
+// arriving after 98 needs no renumbering here.
 //
 // This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 93 as const
+export const SCHEMA_VERSION = 98 as const

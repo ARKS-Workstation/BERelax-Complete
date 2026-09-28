@@ -1,3 +1,4 @@
+import type { AppEnv } from '@berelax/config'
 import { loadConfig } from '@berelax/config'
 import {
   type FrequencyCap,
@@ -10,6 +11,7 @@ import {
   loadSuppressionPeppers,
   publishEvent,
   readCurrentTemplate,
+  readMessagingControls,
   readSetting,
   type Sql,
   type SuppressionKeying,
@@ -19,7 +21,9 @@ import {
   type ClassRoutedTransport,
   costOf,
   InMemoryOutbox,
+  type MarketingKillSwitchState,
   PROVISIONAL_SENDER_IDS,
+  resolveMarketingKillSwitch,
   type SendContext,
   TDRA_PROMOTIONAL_WINDOW,
 } from '@berelax/messaging'
@@ -61,15 +65,28 @@ export function messageNodeDepsFor(
      * the configured one, which is the shipped path.
      */
     readonly transport?: ClassRoutedTransport
+    /**
+     * The environment this runtime behaves as, overriding `APP_ENV`.
+     *
+     * One value, used by BOTH the staging send guard and the kill switch's non-production default, so the two
+     * cannot disagree about which environment this is. It exists for `buildTestInterpreterRuntime`, which has
+     * to run as production for F03's guard to let the transport be reached at all — and which used to achieve
+     * that by patching `appEnv` on the SendContext after the fact. That patch worked and would have been a
+     * latent defect the moment a second thing was derived from the environment: C-AUTO-05's kill switch is
+     * that second thing, and with the patch it would have read `test`, engaged, and refused every promotional
+     * flow send in the interpreter's own suite.
+     */
+    readonly appEnv?: AppEnv
   } = {},
 ): MessageNodeDeps {
   const config = loadConfig()
+  const appEnv = options.appEnv ?? config.APP_ENV
   const now = (): string => new Date().toISOString()
   const transport = options.transport ?? createSmsalaTransport({ config, now }).transport
 
   return {
-    sendContextFor: ({ evaluators, atIso }): SendContext => ({
-      appEnv: config.APP_ENV,
+    sendContextFor: ({ evaluators, atIso, marketingKillSwitch }): SendContext => ({
+      appEnv,
       outboundAllowlist: config.OUTBOUND_ALLOWLIST,
       senderIds: PROVISIONAL_SENDER_IDS,
       transports: [transport],
@@ -79,14 +96,35 @@ export function messageNodeDepsFor(
       // the process is running rather than the moment the run reached the node.
       clock: { now: () => instantFromIso(atIso) },
       gate: {
-        // Still a literal `false`: making it a real audited read is C-AUTO-05's, which owns the switch and
-        // the record of who engaged it. Stated rather than left to be inferred, because a `false` that
-        // looks like a read is the switch nobody notices is not wired.
-        marketingKillSwitch: false,
+        // No longer a literal. C-AUTO-05 owns the switch, and the value arrives from `marketingKillSwitchFor`
+        // below — one home (`messaging_control`), read per message, never captured at boot.
+        marketingKillSwitch,
         promotionalWindow: TDRA_PROMOTIONAL_WINDOW,
         evaluators,
       },
     }),
+    /**
+     * The switch, read from `messaging_control` for a promotional message and NOT read at all otherwise.
+     *
+     * The conditional is the point and it is not an optimisation. `readMessagingControls` REFUSES a missing
+     * control row rather than answering "disengaged" — which is right, because answering "disengaged" for a
+     * row somebody deleted would silently restart promotional sending — and a refusal is a throw. An
+     * unconditional read would therefore make an unreadable marketing control table stop a booking
+     * confirmation, which is the marketing-problem-becomes-operational-outage failure ADR 0016 exists to
+     * remove and the exact thing this unit's acceptance line forbids.
+     *
+     * So the transactional answer is produced without touching the database at all, and the gate would ignore
+     * it in any case (`evaluateGate` returns `allow` on its first line). Two independent layers, and this is
+     * the one that holds when the database is the thing that is broken.
+     */
+    marketingKillSwitchFor: async ({ sql: connection, messageClass }) => {
+      if (messageClass === 'transactional') return TRANSACTIONAL_TRAFFIC_HAS_NO_KILL_SWITCH
+      const controls = await readMessagingControls(connection)
+      return resolveMarketingKillSwitch({
+        stored: controls.marketing_kill_switch.engaged,
+        appEnv,
+      })
+    },
     // The provisional pair until `capsFor` is called with a connection; see `interpreterCaps`.
     caps: PROVISIONAL_FREQUENCY_CAPS,
     suppressionKeying: (): SuppressionKeying => ({
@@ -103,6 +141,17 @@ export function messageNodeDepsFor(
     },
   }
 }
+
+/**
+ * The answer for a transactional message: there is no kill switch on this path.
+ *
+ * A named constant rather than an inline object literal, so the one place it is produced can be found by
+ * grep and so it reads as a statement rather than as a default somebody forgot to fill in.
+ */
+const TRANSACTIONAL_TRAFFIC_HAS_NO_KILL_SWITCH: MarketingKillSwitchState = Object.freeze({
+  engaged: false,
+  source: 'disengaged',
+})
 
 /**
  * The caps as the DATABASE holds them, read per send rather than captured at boot.

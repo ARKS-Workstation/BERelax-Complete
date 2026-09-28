@@ -251,3 +251,42 @@ export const MESSAGE_ROW_FAILURE_REASONS = [
 ] as const
 
 export type MessageRowFailureReason = (typeof MESSAGE_ROW_FAILURE_REASONS)[number]
+
+/**
+ * The two operator controls that stop PROMOTIONAL traffic, and the reason there is no third.
+ *
+ * C-AUTO-05. Both are operator state rather than business configuration, which is the distinction
+ * `agent_definition` already draws one table along: *"`enabled` is configuration — this agent is part of
+ * the product. `kill_switch` is an operator stopping a running thing now."* A marketing kill switch is the
+ * second kind, and so is the record that TDRA has suspended the promotional sender ID.
+ *
+ * The list lives in `@berelax/shared` because both ends need it and neither may import the other:
+ * `@berelax/db` owns the `messaging_control` row and its CHECK, and `@berelax/messaging` owns the gate that
+ * reads it. A second spelling of these two strings is a control the database stores and the gate never
+ * looks at — which reads exactly like a disengaged switch.
+ *
+ * **There is deliberately no key for transactional traffic, and the CHECK in migration 0098 is what makes
+ * one unstorable.** That is the whole of "structurally cannot touch transactional traffic" at the storage
+ * layer: a control row that could name the transactional class would be one UPDATE away from stopping
+ * booking confirmations and OTPs, and the two registered sender identities exist precisely so a marketing
+ * decision or a marketing sanction never becomes an operational outage (ADR 0016, docs/04 §5).
+ */
+export const MESSAGING_CONTROL_KEYS = [
+  /** An operator stopping every promotional send now. Engaged by owner or manager, with a reason. */
+  'marketing_kill_switch',
+  /**
+   * The promotional sender ID is suspended by the vendor, so promotional sends bounce.
+   *
+   * Recorded rather than inferred per send, because the banner staff are shown has to outlive the process
+   * that discovered it — and because "promotional sending is suspended" is a different sentence from
+   * "that one send failed".
+   */
+  'promotional_sender_suspended',
+] as const
+
+export type MessagingControlKey = (typeof MESSAGING_CONTROL_KEYS)[number]
+
+/** Which way a control was moved. Stored on the audit row, because "toggled" alone is unreadable. */
+export const MESSAGING_CONTROL_DIRECTIONS = ['engage', 'disengage'] as const
+
+export type MessagingControlDirection = (typeof MESSAGING_CONTROL_DIRECTIONS)[number]

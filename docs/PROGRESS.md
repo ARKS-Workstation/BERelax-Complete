@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**124 / 210 units complete.**
+**125 / 210 units complete.**
 
 ## Next up
 
@@ -97,7 +97,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 77 | `C-CRM-05` | Merge as a first-class transactional operation, with a participant registry | `C-CRM-02`, `C-CRM-03`, `C-CRM-04` | — | — |
 | [x] | 78 | `C-AUTO-03` | Frequency ledger and a global cap across every flow and campaign | `C-AUTO-01`, `C-CRM-05` | — | Y6-sender-ids, Y9-frequency-cap |
 | [x] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
-| [ ] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
+| [x] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
 | [x] | 81 | `C-AUTO-07` | The interpreter on pg-boss: idempotency, loop detection and dry run | `C-AUTO-04`, `C-AUTO-06`, `F06` | — | — |
 | [ ] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
 | [ ] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |

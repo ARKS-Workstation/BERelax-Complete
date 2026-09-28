@@ -8442,7 +8442,7 @@ units:
       identities is that a marketing decision or a marketing sanction never becomes an operational outage
       that stops booking confirmations.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - C-AUTO-04
@@ -8465,11 +8465,99 @@ units:
       == total, that no held recipient was sent, and that none were lost'
     - 'Playwright: the agent console shows the switch with its last-changed actor and timestamp, and axe
       reports zero serious or critical violations on that screen'
+    - 'NOTE: TWO PATHS IN THE PLANNED FILES LIST DID NOT EXIST AND ARE CORRECTED BELOW, which gate case 101
+      would otherwise have failed on. (1) `packages/messaging/src/adapters/fake-smsala.ts` is not a file in
+      this repository and never was: the SMSala fake is `packages/providers/src/sms/fake-smsala.ts` (H02)
+      behind the port `packages/messaging/src/transports/smsala.ts` wires, and `.dependency-cruiser.cjs`
+      forbids a provider import anywhere else - so an adapter inside `packages/messaging/src/adapters/` would
+      be the boundary violation ADR 0022 exists to prevent. Nothing was added to the fake: the suspension is
+      modelled with the `FailureScript` per registered identity that transport already holds, and the new file
+      is the suite that drives it. (2) The console is at `apps/web/app/(admin)/messaging/controls/` and NOT at
+      `apps/web/app/(admin)/agents/`. No agent console exists - `agent_definition` has a registry, a watchdog
+      and no screen - so `/agents` would have been a new top-level admin path needing an entry in
+      ADMIN_STANDALONE_PATHS or a new prefix in ADMIN_GROUP_PREFIXES, and `admin-guard.test.ts` refuses a
+      prefix that claims URLs nothing serves. `/messaging` is an existing prefix, so the route arrived noindex
+      and session-guarded on the commit that created it, which is what that prefix is for.'
+    - 'NOTE: what was built beyond the files list. It also edits packages/messaging/src/gate/decide.ts (the
+      split into `evaluateGate` + `evaluatePromotionalGate`, the `PromotionalOutboundMessage` type and the one
+      value-level narrowing), packages/messaging/src/gate/index.ts and packages/messaging/src/index.ts (the
+      new exports, and the statement that `evaluatePromotionalGate` is deliberately NOT in the barrel),
+      packages/messaging/src/chokepoint-surface.test.ts (five names added to the frozen export set),
+      packages/shared/src/messaging.ts and packages/shared/src/index.ts (MESSAGING_CONTROL_KEYS and
+      MESSAGING_CONTROL_DIRECTIONS - in `shared` because `db` owns the row and `messaging` owns the gate and
+      neither may import the other), packages/db/src/schema/index.ts and packages/db/src/index.ts (the mirror
+      export, the repository export, SCHEMA_VERSION 98 and the 0098 ledger paragraph - the single allocation
+      note before SCHEMA_VERSION was edited, not duplicated), apps/worker/src/automation/runtime.ts (the
+      literal `false` C-AUTO-07 left becomes a read from the one home, plus an `appEnv` option),
+      apps/worker/src/automation/nodes/message.ts (`marketingKillSwitchFor` on MessageNodeDeps and the
+      `marketingKillSwitch` argument to `sendContextFor`), apps/worker/src/testing/flow-runtime.ts (passes
+      `appEnv: ''production''` to `messageNodeDepsFor` instead of patching the SendContext afterwards - see
+      the defects NOTE), apps/worker/src/jobs/send-scheduled-step.itest.ts (a `killSwitch` option on
+      `runtimeWith` and the byte-unchanged case), apps/web/src/routes/registry.ts (the `messaging-controls`
+      route), packages/harness/src/ports.ts (band 14_600), scripts/check-send-chokepoint.mjs (two new rules
+      and a third counter), scripts/test-gates.mjs (block 126a-126z, 24 cases), docs/adr/README.md.'
+    - 'NOTE: SQLSTATE codes taken: ZY081, ZY082, ZY083, ZY084, from the allocated range ZY081-ZY090. ZY081 a
+      control key outside the closed set - worse than a missing row, because a missing row reads as "not
+      engaged", so a misspelled key is a switch a screen shows as engaged and the gate never reads, and the
+      same predicate is what makes a control naming TRANSACTIONAL traffic unstorable rather than merely
+      absent. ZY082 a role that may not toggle, which is the layer that holds for a psql session, a seed, or
+      an import of another environment''s rows. ZY083 a blank reason. ZY084 a DELETE of a control row, and it
+      is the one worth reading twice: removing the row is a DISENGAGEMENT that writes no audit event, because
+      no UPDATE happened for one to hang off. Four codes and not one because each has a different runbook
+      answer, which is 0061''s argument for a private code at all. ZY085-ZY090 are left unused.'
+    - 'NOTE: THREE DEFECTS FOUND IN MY OWN WORK, each by a check in this unit and none visible in a diff.
+      (1) The scanner rule `marketing-kill-switch-state-has-one-home` could not fire. Its control-table half
+      matched against the file with string CONTENTS blanked (`blankStrings: true`, which every other rule in
+      that scanner needs), and SQL in this repository lives in template literals - so an `update
+      messaging_control` inside one was a run of `x` characters by the time the rule read it, and the rule
+      matched nothing in the whole tree while reporting a clean scan. ADR 0002''s failure inside a check
+      written to prevent a different one. It now reads a stripping that keeps strings, and the scanner COUNTS
+      the writes it sees in the one permitted writer so the same thing fails loudly next time. Found by
+      writing gate case 126h.
+      (2) The console answered 403 to a toggle with a blank reason. `assertMayToggleMessagingControl` refuses
+      two different things - a role that may not toggle and a missing reason - and the route mapped every
+      throw from it to 403, so a manager who left the reason box empty was told "not you" and sent to find
+      the owner for a form that would not have worked for the owner either. The status now comes from the
+      error''s kind. Found by apps/web/src/marketing-kill-switch.itest.ts.
+      (3) `buildTestInterpreterRuntime` patched `appEnv: ''production''` onto the SendContext AFTER
+      `messageNodeDepsFor` had built it. That was correct while only one thing was derived from the
+      environment; the kill switch is engaged in every non-production environment, so the patch would have
+      left the switch reading `test` - engaged - and refused every promotional send in `interpreter.itest.ts`
+      while the SendContext said `production`. `messageNodeDepsFor` now takes `appEnv`, so the staging guard
+      and the switch cannot disagree about which environment this is.'
+    - 'NOTE: what is NOT in this unit, and to which unit, each checked still todo. (1) The durable
+      `campaign_recipient` row a HELD recipient becomes. C-AUTO-10 owns `packages/db/src/schema/campaign.ts`
+      and its own acceptance line already says "a campaign exceeding its cap at recipient 120 of 200 halts
+      with 80 held". What exists here is the classification (`promotionalSendDisposition`, where a kill-switch
+      stop is `held` and a missing consent record is `refused`) and the conservation property asserted over a
+      batch driven through the real `sendMessage`: held + sent == total, the keys compared as a SET so a lost
+      recipient fails rather than being absorbed by two counts that add up, and no held recipient in the
+      transport''s own call log. (2) The WORKER that notices a suspension and records it. What exists is
+      `promotionalSenderSuspensionSuspected`, the one home of "this rejection is what a suspension looks
+      like", and the operator path that sets the control. Turning that into an automatic write belongs with
+      the campaign sender that produces the rejections in bulk - C-AUTO-10 - because a per-send writer would
+      record a suspension from one bad number. (3) The RELEASE of held recipients when the switch is
+      disengaged. C-AUTO-10 again: there is nothing durable to release until `campaign_recipient` exists, and
+      `releaseHeldMessage` already exists for the window''s holds (C-AUTO-07).'
+    - 'NOTE: the console''s placement and what it does NOT show. It renders the two controls and the banner
+      `promotionalSendingBanner` produces, and nothing about campaigns: the campaign list and the
+      per-campaign spend are C-AUTO-10''s. The switch''s state it shows is the one the GATE sees -
+      `resolveMarketingKillSwitch` over the row and APP_ENV - and not the row alone, because a staging console
+      saying "sending" while the gate refused every send would be the second statement of the switch''s state
+      this unit exists to remove. Axe is asserted at 390px and 1440px in both themes, with a known-bad control
+      in the same file that adds an unlabelled button and asserts rejection by the rule id `button-name`; a
+      count is not evidence.'
     files:
     - packages/messaging/src/gate/kill-switch.ts
+    - packages/messaging/src/gate/kill-switch.test.ts
+    - packages/messaging/src/transports/sender-suspension.test.ts
+    - packages/db/migrations/0098_messaging_controls.sql
     - packages/db/src/schema/messaging-controls.ts
-    - apps/web/app/(admin)/agents/
-    - packages/messaging/src/adapters/fake-smsala.ts
+    - packages/db/src/repositories/messaging-controls.ts
+    - apps/web/app/(admin)/messaging/controls/
+    - apps/web/src/marketing-kill-switch.itest.ts
+    - packages/fixtures/src/marketing-kill-switch.itest.ts
+    - docs/adr/0048-the-marketing-kill-switch-cannot-reach-transactional-traffic.md
   - id: C-AUTO-07
     order: 81
     title: 'The interpreter on pg-boss: idempotency, loop detection and dry run'
