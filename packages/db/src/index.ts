@@ -535,6 +535,36 @@ export {
   setFlowActive,
 } from './repositories/flow.ts'
 export {
+  type AdvanceFlowRunInput,
+  advanceFlowRun,
+  applyCustomerTag,
+  type ClaimedFlowRun,
+  type ContactStepLogEntry,
+  claimFlowRun,
+  claimNodeEffect,
+  countNodeEffects,
+  type EndFlowRunInput,
+  endFlowRun,
+  FLOW_RUN_AUDIT_ACTIONS,
+  FLOW_RUN_REFUSALS,
+  FLOW_RUN_SQLSTATE,
+  type FlowContactInputs,
+  type FlowRunRefusal,
+  type FlowRunRow,
+  flowRunRefusalOf,
+  type NodeEffectClaim,
+  type NodeEffectKey,
+  readContactStepLog,
+  readFlowContactInputs,
+  readFlowRun,
+  readRunForEnrolment,
+  readRunStepLog,
+  recordStepLog,
+  type StartFlowRunInput,
+  type StepLogRow,
+  startFlowRun,
+} from './repositories/flow-run.ts'
+export {
   type CountedSendRow,
   FREQUENCY_SOURCE_KINDS,
   type FrequencyBoundCap,
@@ -1860,7 +1890,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // hazard about truncating `appointment`). No validation is in SQL beyond what a CHECK can state: the DSL's
 // rules live in `@berelax/core` and are INJECTED into `publishFlowDefinition`, because this package may not
 // import core — and with no validator injected the publish is refused by name rather than performed.
-// `flow_run`, the step log and the execution cap are C-AUTO-07's and are deliberately absent here.
+// `flow_run`, the step log and the execution cap were C-AUTO-07's and are no longer absent: 0091 adds
+// all three, and the sentence that used to stand here said they never would be.
 //
 // 72 is 0072_credit_note.sql: the credit note, and the reference 0068 could not make (M-TILL-08). 0026
 // created `invoice` append-only and named the correction path in its own comment; 0013 had already
@@ -2409,6 +2440,77 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // and 0081, which is exactly the collision the private-class convention exists to prevent, since a probe
 // asserting `ZW001` cannot tell which statement it bounced off.
 //
+// 91 is 0091_flow_run.sql: the run, the idempotency key, and the step log that answers one question in one
+// query (C-AUTO-07). 0070 built the flow, its immutable versions and the enrolment pin and stated in its own
+// header what it was not building -- "No interpreter state. `flow_run`, the step log, the idempotency key and
+// the execution cap are C-AUTO-07's" -- so nothing here re-argues the pin, and the paragraph above that used
+// to say those three were deliberately absent has been corrected rather than left to read as still true.
+// Three tables. `flow_run` is where an enrolment has got to, and is also where a DRY RUN lives with no
+// enrolment at all: making a projection the same table is what stops the dry run being a second interpreter,
+// and `flow_run_live_run_is_an_enrolments` states the biconditional so neither reading can drift into the
+// other. `flow_node_effect` is the acceptance line's UNIQUE constraint on (flow_run, node, channel, contact)
+// and carries nothing else -- no outcome, no message id -- because it is a TOKEN: the handler inserts it with
+// `on conflict on constraint flow_node_effect_once_per_contact do nothing returning id` BEFORE it calls a
+// transport, and reads the absence of a returned row as the typed `duplicate` outcome, which is a value
+// derived from the constraint rather than a caught exception whose message happened to mention uniqueness.
+// `flow_step_log` is the evidence, and `definition_version` is DENORMALISED onto it deliberately: "why did
+// this contact get this message" has to be one SELECT with no join, so the version, the node id, the resolved
+// `consent_record_id` and the `gate_decision` are four columns on the row, and
+// `flow_step_log_pins_a_definition_version` -- the same composite foreign key `flow_enrolment` carries -- is
+// what keeps the denormalised number a version that was really published.
+//
+// The execution cap is a COLUMN and not a constant in SQL. `max_node_executions` is NOT NULL with no
+// DEFAULT, so the writer supplies `MAX_FLOW_NODE_EXECUTIONS` (200, provisional, and written once in
+// `@berelax/shared`); what the database states is the RELATION, `flow_run_executions_within_bound`, so a run
+// that executed one node past its own ceiling cannot be stored whatever the worker believed. A DEFAULT here
+// would have been a second statement of a provisional figure, and a run halted under one ceiling and
+// reported against another is unanswerable. The same reasoning is why `flow_enrolment.ended_reason` stays
+// `text`: FLOW_END_REASONS is DERIVED from the DSL's own exit reasons plus the interpreter's halts, so an
+// enum would be a third statement of an already-computed list and would be the thing refusing to store the
+// ninth exit reason somebody draws. The three vocabularies that ARE enums -- `flow_run_mode`,
+// `flow_run_status`, `flow_node_outcome` -- are compared against their `@berelax/shared` lists through
+// `pg_enum` in both directions by `flow-interpreter.itest.ts`, which is what makes two statements of one
+// vocabulary safe rather than latent.
+//
+// A DRY RUN leaves nothing behind, and that is the database's claim rather than the worker's care:
+// `refuse_dry_run_side_effect` raises ZY003 for any `flow_node_effect` insert under a dry run and for a
+// `flow_step_log` row naming a message, for every role including the owner. So the suite's "exactly zero
+// message rows" assertions measure a rule a `psql` session meets too.
+//
+// `flow_enrolment` gains a partial UNIQUE index here, `flow_enrolment_one_active_per_contact` on
+// (flow_id, customer_id) where `ended_at is null`, and it is where two acceptance lines meet. "Enrolling the
+// same contact twice in one flow yields one active enrolment" is a dedupe the enrolment writer performs;
+// "a contact merged mid-run continues on the survivor exactly once" is a MERGE, which goes nowhere near that
+// writer -- `mergeCustomers` issues `update flow_enrolment set customer_id = survivor`, and with nothing to
+// refuse it the survivor would hold one flow twice and be sent every node twice. The predicate is
+// `ended_at is null` rather than `status = 'active'` because the two are the same set (0070's
+// `flow_enrolment_ended_matches_status` is that biconditional) and because `MergeParticipant.activePredicate`
+// admits `<column> is [not] null` and nothing wider -- a predicate grammar wide enough to be useful is wide
+// enough to carry a subquery into `sql.unsafe`.
+//
+// It also changes two of 0035's constraints, and only because the caller finally exists. `message
+// .last_failure_reason` gains `stale_outside_window`: C-AUTO-04 decided against adding it and said why --
+// "the value would be unwritable by anything, and a vocabulary with no writer is a CHECK five other units'
+// probes depend on, edited for a caller that does not exist" -- and the release job this unit adds is the
+// first thing in this build that moves a held message, so the value arrives with its one writer.
+// `message_sent_counts_an_attempt` is relaxed in the same breath and only for that value: an expiry is a
+// message that never left, so it has no attempt at all, and the original constraint would have made the
+// honest row unstorable. A `sent` row with zero attempts is still refused, which is what gate case 39c
+// measures and which is the rule that constraint was written for.
+//
+// Four private SQLSTATEs, in class `ZY`, and the class is forced rather than chosen:
+// `sqlstate-uniqueness.test.ts` records that ZA through ZX are taken and that thirteen codes already stand
+// for two unrelated rules each, so only ZY and ZZ were free. ZY001 a flow_step_log row was UPDATEd or
+// DELETEd; ZY002 a flow_node_effect row was DELETEd or UPDATEd in any way but a merge re-pointing its
+// contact; ZY003 a dry run tried to leave a side effect behind; ZY004 a run's mode or enrolment changed.
+// Four and not one because each has a different runbook answer, which is the whole argument for a private
+// class (0061's, restated).
+//
+// 88, 89 and 90 are allocations held by units in flight in other worktrees, so 0091 following 0087 on disk is
+// not a gap in the record: gate case 90a walks the migrations that EXIST rather than consecutive integers.
+// They are not renumbered to close the gap either -- a gap is permanent by convention, like 22, 41, 44, 47,
+// 71 and 74, because renumbering is how two branches come to apply one number to different SQL.
+//
 // 83, 84, 85 and 86 are allocations held by units in flight in other worktrees, which is why 0087 follows
 // 0082 on disk. Gate case 90a walks the migrations that EXIST rather than consecutive integers, so the run
 // is 49..82 plus 87 and the four held numbers cost nothing. If any of them turns out to need no migration
@@ -2418,4 +2520,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 87 as const
+export const SCHEMA_VERSION = 91 as const

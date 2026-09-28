@@ -64,6 +64,8 @@ export {
   advanceMessageStatus,
   type Channel,
   DELIVERY_REPORTED_FAILED,
+  HELD_MESSAGE_TERMINAL_REASONS,
+  type HeldMessageTerminalReason,
   isSendableApproval,
   isTemplateApprovalTransition,
   isTerminalMessageStatus,

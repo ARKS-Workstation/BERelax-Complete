@@ -31,9 +31,10 @@
  * that was deliberately never sent would also appear in the cost report and count against the frequency
  * cap, and both of those describe messages that left.
  */
-import { decideRetry, instantToIso } from '@berelax/core'
+import { decideRetry, instantFromIso, instantToIso } from '@berelax/core'
 import type {
   Channel,
+  HeldMessageTerminalReason,
   MessageClass,
   MessageFailureReason,
   MessageRowFailureReason,
@@ -122,6 +123,19 @@ export type AttemptOutcome =
     }
   /** Held for the promotional window. Not an attempt: nothing was sent, and nothing failed. */
   | { readonly kind: 'held'; readonly releaseAtIso: string; readonly atIso: string }
+  /**
+   * A hold that ended without ever being attempted: it went stale, or the gate refused it at release.
+   *
+   * Terminal, and with NO attempt counted, because no vendor was ever asked — which is the whole
+   * difference between this and a `failed`. 0091 relaxed `message_sent_counts_an_attempt` for exactly
+   * these two reasons and for nothing else; a `sent` row with zero attempts is still refused.
+   */
+  | {
+      readonly kind: 'hold_ended'
+      readonly reason: HeldMessageTerminalReason
+      readonly detail: string
+      readonly atIso: string
+    }
 
 /** One message row, as much of it as a caller of this module needs. */
 export interface MessageRecord {
@@ -309,8 +323,9 @@ export async function deliverMessage(
       // a row with its release instant. An expiry is a message that never will be, so a row saying
       // `queued` would be a reminder that waits for ever and a row saying `sent` would be a lie — the
       // outcome is returned, typed, and the caller reports it (`Y9-queued-staleness` asks the owner for a
-      // report rather than a late send). Moving an EXISTING held row to expired is the release job's, which
-      // is C-AUTO-07's; nothing in this build releases a hold yet, so nothing here can reach that case.
+      // report rather than a late send). Moving an EXISTING held row to expired is {@link
+      // releaseHeldMessage}'s, which C-AUTO-07 added: a FIRST attempt that is already stale still writes
+      // no row here, because there is nothing to move.
       if (row === undefined) return { kind: 'not_sent', result }
       throw new AppError(
         'invariant_violated',
@@ -376,6 +391,112 @@ export async function deliverMessage(
     `Message to ${recorded.recipient} exceeded ${MAX_ATTEMPTS_ANY_POLICY} attempts without reaching a ` +
       'terminal state. MESSAGE_RETRY_POLICY declares a larger cap than this loop allows.',
   )
+}
+
+/**
+ * What releasing one held message did.
+ *
+ * Every arm is a durable state of the SAME row: nothing here creates a second message, which is the whole
+ * point of a release. `still_held` is the case the window moved under — a hold released at 07:00 whose
+ * release instant has been narrowed to 09:00 by an admin — and it is a state rather than a failure.
+ */
+export type ReleaseOutcome =
+  | { readonly kind: 'sent'; readonly message: MessageRecord }
+  | { readonly kind: 'still_held'; readonly message: MessageRecord; readonly releaseAtIso: string }
+  | {
+      readonly kind: 'hold_ended'
+      readonly message: MessageRecord
+      readonly reason: HeldMessageTerminalReason
+      readonly detail: string
+    }
+  | { readonly kind: 'failed'; readonly message: MessageRecord }
+
+/**
+ * Releases one message the promotional window held, on the EXISTING row.
+ *
+ * C-AUTO-07's acceptance line is *"a delay node whose target instant lands outside the promotional window
+ * is released by the gate at the next window open"*, and this is the half of it that lives in the messaging
+ * estate. Three things about it are load-bearing:
+ *
+ *   - **It computes nothing about the window.** The release instant it was scheduled for came from the
+ *     gate's own `queued_for_window` answer (`nextPromotionalWindowOpen`), and whether the message may
+ *     leave NOW is `sendMessage`'s to answer for the same reason. There is exactly one implementation of
+ *     quiet hours in this repository and this function does not contain a second one.
+ *   - **It records against `held.id` and never inserts.** `deliverMessage` creates a row; this moves one.
+ *     A release that inserted would double every held message in the cost report and hand the frequency
+ *     cap two sends for one offer.
+ *   - **`queuedSince` is passed, so the gate can EXPIRE it.** That is what makes the staleness ceiling
+ *     reachable at all: `sendMessage` needs to know when the hold began, and the hold began when the row
+ *     was queued. Supplying it cannot make the gate send something it would otherwise hold — the field can
+ *     only ever move a message towards expiry.
+ */
+export async function releaseHeldMessage(
+  deps: DeliveryDeps,
+  request: RecordedSendRequest,
+  held: { readonly id: string; readonly queuedAtIso: string },
+): Promise<ReleaseOutcome> {
+  const result = await sendMessage(deps.send, {
+    ...request,
+    attempt: { queuedSince: instantFromIso(held.queuedAtIso) },
+  })
+  const atIso = instantToIso(deps.send.clock.now())
+
+  if (result.kind === 'sent') {
+    const message = await deps.store.recordAttempt(held.id, {
+      kind: 'accepted',
+      providerMessageId: result.providerMessageId,
+      segments: result.segments,
+      costFils: result.costFils,
+      atIso,
+    })
+    return { kind: 'sent', message }
+  }
+  if (result.kind === 'queued') {
+    // Still outside the window. The row keeps its `queued` status and gets the NEW release instant, so the
+    // caller re-schedules rather than dropping it: a narrowed window must delay a message, never lose one.
+    const message = await deps.store.recordAttempt(held.id, {
+      kind: 'held',
+      releaseAtIso: result.releaseAtIso,
+      atIso,
+    })
+    return { kind: 'still_held', message, releaseAtIso: result.releaseAtIso }
+  }
+  if (result.kind === 'expired') {
+    const message = await deps.store.recordAttempt(held.id, {
+      kind: 'hold_ended',
+      reason: 'stale_outside_window',
+      detail: result.detail,
+      atIso,
+    })
+    return { kind: 'hold_ended', message, reason: 'stale_outside_window', detail: result.detail }
+  }
+  if (result.kind === 'blocked' || result.kind === 'diverted') {
+    // The contact's own answer changed while the message waited: a withdrawal, a suppression, a cap
+    // crossed. Terminal on the existing row, with the gate's reason carried into the detail — the one
+    // thing it must not be is left `queued`, which is a message that waits for ever with nothing saying
+    // why. A diversion reaches here only on a staging worker and is the same shape of fact.
+    const detail =
+      result.kind === 'blocked'
+        ? `${result.reason}: ${result.detail}`
+        : `diverted: ${result.reason}`
+    const message = await deps.store.recordAttempt(held.id, {
+      kind: 'hold_ended',
+      reason: 'refused_after_hold',
+      detail,
+      atIso,
+    })
+    return { kind: 'hold_ended', message, reason: 'refused_after_hold', detail }
+  }
+  const message = await deps.store.recordAttempt(held.id, {
+    kind: 'failed',
+    reason: result.reason,
+    detail: result.detail,
+    atIso,
+    // No further attempt is scheduled from here: the release IS the attempt, and a retry ladder on a
+    // released promotional message would be a second schedule beside the window's.
+    nextAttemptAtIso: null,
+  })
+  return { kind: 'failed', message }
 }
 
 /**

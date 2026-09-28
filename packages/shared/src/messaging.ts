@@ -221,10 +221,33 @@ export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number]
  */
 export const DELIVERY_REPORTED_FAILED = 'delivery_reported_failed'
 
-/** Every value `message.last_failure_reason` may hold. The four transport failures plus the fifth. */
+/**
+ * The two reasons a HELD promotional message can end without ever having been attempted.
+ *
+ * Both belong to the promotional window's release path, which C-AUTO-07 is the first thing in this build to
+ * have. C-AUTO-04 deliberately added neither and said why: *"the value would be unwritable by anything, and
+ * a vocabulary with no writer is a CHECK five other units' probes depend on, edited for a caller that does
+ * not exist."* They arrive here with that one writer, `releaseHeldMessage` in `@berelax/messaging`.
+ *
+ * Neither is a transport failure, so neither is in {@link MESSAGE_FAILURE_REASONS} and neither keys a retry
+ * policy: nothing was handed to a vendor, so there is nothing to try again. They are kept apart from each
+ * other because they are different pieces of work for whoever reads the report — one says the offer
+ * outlived its window (`Y9-queued-staleness`: a 23:00 offer released at 07:00 is advertising yesterday),
+ * the other says the contact's own answer changed while the message waited, which is the compliance path
+ * working and not a fault at all.
+ */
+export const HELD_MESSAGE_TERMINAL_REASONS = ['stale_outside_window', 'refused_after_hold'] as const
+
+export type HeldMessageTerminalReason = (typeof HELD_MESSAGE_TERMINAL_REASONS)[number]
+
+/**
+ * Every value `message.last_failure_reason` may hold: the four transport failures, the delivery failure,
+ * and the two ways a hold ends unsent.
+ */
 export const MESSAGE_ROW_FAILURE_REASONS = [
   ...MESSAGE_FAILURE_REASONS,
   DELIVERY_REPORTED_FAILED,
+  ...HELD_MESSAGE_TERMINAL_REASONS,
 ] as const
 
 export type MessageRowFailureReason = (typeof MESSAGE_ROW_FAILURE_REASONS)[number]

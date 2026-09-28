@@ -72,6 +72,17 @@ export function createInMemoryMessageStore(): InMemoryMessageStore {
     if (outcome.kind === 'held') {
       return { ...row, status: 'queued', nextAttemptAtIso: outcome.releaseAtIso }
     }
+    if (outcome.kind === 'hold_ended') {
+      // Terminal with NO attempt counted, exactly as the Postgres store records it: nothing was handed to
+      // a vendor. The two stores agreeing on this is what makes the in-memory one usable as a stand-in.
+      return {
+        ...row,
+        status: 'failed',
+        nextAttemptAtIso: null,
+        lastFailureReason: outcome.reason,
+        failedAtIso: outcome.atIso,
+      }
+    }
     const terminal = outcome.nextAttemptAtIso === null
     return {
       ...row,
