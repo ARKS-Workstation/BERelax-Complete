@@ -570,6 +570,36 @@ export const ROUTES = [
       'and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
   },
   {
+    id: 'hr-leave-request',
+    path: '/hr/leave/[id]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-09s leave request screen: the period as INSTANTS in the business zone, every appointment the ' +
+      'leave overlaps with its customer, service, room, therapist and start, what has been decided about ' +
+      'each, and which 30-minute segments approving it would leave short. A handler answering text/html ' +
+      'rather than a document, for the reason the four HR screens beside it give: a document must be served ' +
+      'in both locales, which would need an Arabic admin document and the W-SYS-11 session, and would join ' +
+      'a screenshot matrix whose RTL half has to be a real Arabic route - and ?dir=rtl re-renders this ' +
+      'English document mirrored so the direction half of the accessibility matrix is audited without ' +
+      'inventing an Arabic admin surface. NO sampleParams, although the path has a segment: a sample id ' +
+      'would be one persons leave the screenshot harness opened on every run, and the page lists the ' +
+      'clients who have bookings with them. READ-ONLY on purpose - approving, overriding and withdrawing ' +
+      'are writes with an actor, nothing in apps/web imports @berelax/auth, and migration 0092 refuses a ' +
+      'placeholder approver, a placeholder override label and a placeholder canceller rather than taking ' +
+      'one. ?role= can only NARROW: the decision is taken for the claimed role and intersected with a ' +
+      'manager ceiling, so no query string unlocks the conflict report for a role that may not read a ' +
+      'booking. It names no therapist and no customer: staff_reference is the handle and a client is ' +
+      'Customer 0042 (ADR 0020). Dynamic and never cached, because the conflict report and the coverage ' +
+      'answer are both claims about rows a reassignment changes minute by minute, so a prerendered copy ' +
+      'would show a conflict somebody had already resolved. The /hr prefix in ADMIN_GROUP_PREFIXES is what ' +
+      'makes it noindex.',
+  },
+  {
     id: 'hr-reassignment',
     path: '/hr/reassignment',
     kind: 'handler',

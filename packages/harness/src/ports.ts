@@ -79,6 +79,14 @@ export const TEST_PORT_BANDS = {
   // flight in another worktree", which was true when it was written: that unit is this one, and the
   // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
   'quick-book': { start: 11_800, width: 300 },
+  // P-HR-09's leave request screen, which needs a real server for the claims a pure render cannot make: the
+  // `?role=` narrowing has to be refused by the running route rather than by a view object a test built, the
+  // noindex header is the proxy's and not the document's, and axe needs a rendered DOM. 13_300 rather than
+  // the next round number after `quick-book`: 12_400 through 13_000 are allocations held by units in flight
+  // in other worktrees, and a band chosen from what one worktree can see is exactly how `template-editor` and
+  // `book-flow` came to share one. [13_300, 13_600) contains none of RESTRICTED_PORTS, and none of the low
+  // entries of Chromium's own table either — the nearest above every band is 10080.
+  'leave-approval': { start: 13_300, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
