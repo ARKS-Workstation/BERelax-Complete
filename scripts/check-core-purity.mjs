@@ -15,6 +15,30 @@ import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const ROOT = 'packages/core/src'
 
+/**
+ * The one tree OUTSIDE `packages/core` this gate reads, and why it has to.
+ *
+ * A-FIRST-02's event taxonomy and funnel vocabulary live in `packages/shared/src/analytics`, and they are
+ * there for a boundary reason rather than a convenience: `packages/db` holds the `analytics` schema whose
+ * `funnel_step.stage` and `funnel_step.excluded_reason` are those exact words, and `db` must never import
+ * `core` (ADR 0001). `shared` is the only package all of the readers may depend on.
+ *
+ * The acceptance line for that unit is "these modules import nothing beyond @berelax/shared and never
+ * read the clock", and this script is the half that sees a clock read at all — `pnpm boundaries` sees
+ * imports and cannot see `Date.now()`, because a global is not a dependency. Scanning only
+ * `packages/core` would have left the taxonomy's purity asserted in a comment and measured nowhere,
+ * which is ADR 0002's defect: the claim would have been wider than the measurement.
+ *
+ * It is one directory and not all of `packages/shared` deliberately. Widening the gate to the whole
+ * package is a bigger decision than one unit should take on its own — several modules there are settings
+ * readers and windows whose purity nobody has argued for — and a rule applied to code nobody examined is
+ * how a gate acquires exceptions.
+ */
+const ANALYTICS_TAXONOMY = 'packages/shared/src/analytics'
+
+/** Every tree scanned, in the order the summary names them. */
+const ROOTS = [ROOT, ANALYTICS_TAXONOMY]
+
 const FORBIDDEN = [
   { re: /\bprocess\s*\./g, why: 'process is ambient I/O; pass configuration in as an argument' },
   { re: /\bDate\.now\s*\(/g, why: 'reading the clock; inject a Clock and pass the instant in' },
@@ -83,6 +107,27 @@ const SCOPED = [
     ],
   },
   {
+    // The event taxonomy and the funnel vocabulary take no date at all, and the reason is narrower than
+    // the general clock rule. The funnel is bucketed on `business_day` — trading runs 11:00 to 02:00, so
+    // a payment at 01:30 belongs to the previous trading date — and that resolution happens ONCE, in
+    // `packages/core/src/analytics/funnel.ts`, from an instant its caller passes in. A `Date` here could
+    // only be a second opinion about which day an event landed on, and the two disagree for the nine
+    // hours either side of midnight: the takings would be counted on one day and the funnel on another.
+    // `Intl` goes with it for the ledger's reason — there is no zone or locale lookup to make in a list
+    // of words, and a stage name is not rendered here.
+    root: ANALYTICS_TAXONOMY,
+    forbidden: [
+      {
+        re: /\bDate\b/g,
+        why: 'the taxonomy takes no date; the trading day is resolved once, in core/analytics/funnel.ts, from an injected instant',
+      },
+      {
+        re: /\bIntl\b/g,
+        why: 'no timezone or locale lookup in a vocabulary; a stage name is stored, not rendered',
+      },
+    ],
+  },
+  {
     root: join(ROOT, 'ledger'),
     forbidden: [
       {
@@ -108,8 +153,11 @@ const rulesFor = (file) => [
   ...SCOPED.filter((scope) => file.startsWith(`${scope.root}/`)).flatMap((s) => s.forbidden),
 ]
 
+/** Every file this run examined, kept so the summary can report a COUNT rather than a claim. */
+const scanned = ROOTS.flatMap(walk)
+
 let violations = 0
-for (const file of walk(ROOT)) {
+for (const file of scanned) {
   const code = stripNonCode(readFileSync(file, 'utf8'), { blankStrings: true })
   const rules = rulesFor(file)
   code.split('\n').forEach((line, i) => {
@@ -125,12 +173,31 @@ for (const file of walk(ROOT)) {
 }
 
 if (violations > 0) {
-  console.error(`\n${violations} purity violation(s) in packages/core. See docs/adr/0001.`)
+  console.error(
+    `\n${violations} purity violation(s) in ${ROOTS.join(' / ')}. See docs/adr/0001 and docs/adr/0046.`,
+  )
   process.exit(1)
 }
-const scopedFiles = walk(ROOT).filter((f) => SCOPED.some((scope) => f.startsWith(`${scope.root}/`)))
+
+// A gate that examined nothing must not print a green tick (ADR 0002), and the way this one could reach
+// zero is a root that has been renamed or emptied — `walk` of a missing directory throws, but a directory
+// holding no `.ts` file returns silently. The floor is deliberately per-root rather than a total, because
+// a total is satisfied by `packages/core` alone and the analytics tree is the root this check was widened
+// for.
+for (const root of ROOTS) {
+  const inRoot = scanned.filter((file) => file.startsWith(`${root}/`))
+  if (inRoot.length === 0) {
+    console.error(
+      `${root} contributed no files to the purity scan, so this gate would have passed over it. ` +
+        'Either the directory moved and ROOTS is stale, or it holds no TypeScript.',
+    )
+    process.exit(1)
+  }
+}
+
+const scopedFiles = scanned.filter((f) => SCOPED.some((scope) => f.startsWith(`${scope.root}/`)))
 console.log(
-  `packages/core is pure (${walk(ROOT).length} files checked, ` +
+  `${ROOTS.join(' and ')} are pure (${scanned.length} files checked, ` +
     // "a scoped rule" rather than "the no-Date/no-Intl rule": messaging bans Date and keeps Intl, and a
     // summary that named the other two scopes' rule for all three would be a line stating something
     // untrue about a gate.

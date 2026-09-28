@@ -35691,6 +35691,604 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
+//            event name that must not compile, the funnel that must not be dated on a calendar day, and
+//            the two gates that were widened so the taxonomy's purity is measured rather than asserted.
+//
+//            Seven units restate this vocabulary, so the cases are weighted towards the ONE failure that
+//            would not show up anywhere else: a stage or an event name spelled a second time. 124a, 124c
+//            and 124t are that, from three directions — the type refuses a near-miss, the registry refuses
+//            an undeclared name, and a repo-wide scan refuses a second enumeration. 124t is the only one
+//            of the three that can catch a unit which declares its own tuple and never imports ours.
+//
+//            The purity half is 124o-124r. `pnpm purity` read only `packages/core` until this unit, and
+//            the vocabulary had to leave `core` precisely because `packages/db` needs it and `db` may not
+//            import `core` — so the move that made it reachable also moved it out from under its own
+//            gate. `scripts/check-core-purity.mjs` now reads one directory outside `packages/core`, and
+//            124p's control is what proves the widening is that directory and not all of
+//            `packages/shared`, which nobody argued for.
+{
+  const TAXONOMY = 'packages/shared/src/analytics/taxonomy.ts'
+  const TAXONOMY_SUITE = 'packages/shared/src/analytics/taxonomy.test.ts'
+  const FUNNEL = 'packages/core/src/analytics/funnel.ts'
+  const FUNNEL_SUITE = 'packages/core/src/analytics/funnel.test.ts'
+  const LIFECYCLE = 'packages/core/src/lifecycle/transitions.ts'
+  const PURITY = 'scripts/check-core-purity.mjs'
+  const CORE_FIXTURE = 'packages/core/src/analytics/__gate_fixture__.ts'
+  const SHARED_FIXTURE = 'packages/shared/src/analytics/__gate_fixture__.ts'
+  const SHARED_OUTSIDE_FIXTURE = 'packages/shared/src/__gate_fixture__.ts'
+
+  // Named for this block. A helper called `unit` or `tsc` already exists in several others, and two
+  // helpers with one name in one generated slice is a redeclaration that fails before any case runs.
+  const afUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const afUnitFailing = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const afTsc = () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const afTscClean = () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const afPurity = () => run('node', [PURITY])
+  const afCruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // --- the vocabulary is closed at the type level -----------------------------------------------
+  //
+  // 124a. A stage spelled `cta_clicked` must not compile. This is the whole of "a later unit cannot spell
+  //       a stage differently and still typecheck": `FunnelStage` is derived from the `FUNNEL_STAGES`
+  //       tuple, so a near-miss is a build error rather than a ninth bucket that is empty for ever.
+  //
+  //       It is not a case about TypeScript working. If the type were widened to `string` — the edit
+  //       somebody makes to get a dashboard compiling — the fixture would compile and this case would go
+  //       red, which is exactly the signal wanted.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { FunnelStage } from '@berelax/shared'",
+        "export const stage: FunnelStage = 'cta_clicked'",
+      ].join('\n'),
+      () => afTsc(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: a funnel stage spelled cta_clicked fails to compile',
+      result,
+      'cta_clicked',
+    )
+  }
+
+  // 124b. The control on 124a, and it is load-bearing: without it, a `FunnelStage` of `never` would pass
+  //       124a and reject the whole vocabulary too.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { FunnelStage } from '@berelax/shared'",
+        "export const stage: FunnelStage = 'cta_click'",
+      ].join('\n'),
+      () => afTscClean(),
+    )
+    check(
+      'afirst02 gate: and the correct spelling compiles, so 124a is about the spelling',
+      !result.failed,
+      `tsc rejected a correctly spelled stage, so 124a proves nothing:\n${result.output}`,
+    )
+  }
+
+  // 124c. An event name the taxonomy does not declare must not compile on the typed surface. The edge
+  //       (`parseAnalyticsEvent`) deliberately takes a `string`, because what a browser posts is a string;
+  //       every call site that knows its event at build time goes through `AnalyticsEventName` and the
+  //       schema registry, and this is that half of the acceptance line.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import { ANALYTICS_EVENT_SCHEMAS, type AnalyticsEventName } from '@berelax/shared'",
+        "export const name: AnalyticsEventName = 'conversion'",
+        "export const schema = ANALYTICS_EVENT_SCHEMAS['conversion']",
+      ].join('\n'),
+      () => afTsc(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: an event name outside the taxonomy fails to compile',
+      result,
+      'conversion',
+    )
+  }
+
+  // 124d. Its control, for 124b's reason.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import { ANALYTICS_EVENT_SCHEMAS, type AnalyticsEventName } from '@berelax/shared'",
+        "export const name: AnalyticsEventName = 'page_view'",
+        "export const schema = ANALYTICS_EVENT_SCHEMAS['page_view']",
+      ].join('\n'),
+      () => afTscClean(),
+    )
+    check(
+      'afirst02 gate: and a declared event name compiles, so 124c is about the name',
+      !result.failed,
+      `tsc rejected a declared event name, so 124c proves nothing:\n${result.output}`,
+    )
+  }
+
+  // --- adding a name is TWO obligations, and satisfying one must not satisfy the other ----------
+  //
+  // 124e. A sixth event name with no schema and no funnel decision must fail `tsc` in BOTH files. The
+  //       registry's `satisfies Record<AnalyticsEventName, ZodType>` is one obligation and
+  //       `COLLECTED_EVENT_FUNNEL`'s `Record` over the same union is the other: an event that is collected
+  //       and validated but mapped to nothing is a partition of rows no funnel query reads.
+  {
+    const sixthName = (text) =>
+      replaceOnce(
+        text,
+        "  'whatsapp_ref_shown',\n] as const",
+        "  'whatsapp_ref_shown',\n  '__gate_event__',\n] as const",
+      )
+    const result = withEditedFile(TAXONOMY, sixthName, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a sixth event name with no schema fails to compile',
+      result,
+      '__gate_event__',
+    )
+    check(
+      'afirst02 gate: and the failure names both the schema registry and the funnel mapping',
+      result.output.includes('taxonomy.ts') && result.output.includes('analytics/funnel.ts'),
+      `expected errors in both ${TAXONOMY} and ${FUNNEL}:\n${result.output}`,
+    )
+  }
+
+  // 124f. The second obligation on its own. Give the new name a schema and stop there: the funnel mapping
+  //       is still incomplete, so it must STILL fail — and the error must be the MAPPING's, not the
+  //       registry's. Without this case one entry in the registry would be enough to add an event nothing
+  //       has decided anything about.
+  {
+    const sixthNameWithSchema = (text) =>
+      replaceOnce(
+        replaceOnce(
+          text,
+          "  'whatsapp_ref_shown',\n] as const",
+          "  'whatsapp_ref_shown',\n  '__gate_event__',\n] as const",
+        ),
+        '  whatsapp_ref_shown: whatsappRefShownPayloadSchema,',
+        '  whatsapp_ref_shown: whatsappRefShownPayloadSchema,\n  __gate_event__: z.strictObject({}),',
+      )
+    const result = withEditedFile(TAXONOMY, sixthNameWithSchema, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a sixth event name WITH a schema still fails, on the funnel mapping',
+      result,
+      '__gate_event__',
+    )
+    check(
+      'afirst02 gate: and that failure is the mapping rather than the schema registry',
+      result.output.includes('analytics/funnel.ts') && !result.output.includes('taxonomy.ts'),
+      `expected the error to be in ${FUNNEL} alone:\n${result.output}`,
+    )
+  }
+
+  // 124g. A tenth appointment status must fail `tsc` naming the funnel mapping. This is what makes the
+  //       domain half of the contract a build failure rather than a review: `APPOINTMENT_STATUS_FUNNEL` is
+  //       a `Record` over the lifecycle's own union with no `default` branch, so a state added to the
+  //       machine cannot reach the funnel undecided.
+  {
+    const tenthStatus = (text) =>
+      replaceOnce(
+        text,
+        "  'rescheduled',\n] as const",
+        "  'rescheduled',\n  '__gate_status__',\n] as const",
+      )
+    const result = withEditedFile(LIFECYCLE, tenthStatus, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a tenth appointment status fails to compile',
+      result,
+      '__gate_status__',
+    )
+    check(
+      'afirst02 gate: and the funnel mapping is one of the files that refuses it',
+      result.output.includes('analytics/funnel.ts'),
+      `tsc rejected the status without naming ${FUNNEL}:\n${result.output}`,
+    )
+  }
+
+  // --- the derivations, each mutated away and watched to fail BY NAME ---------------------------
+  //
+  // 124h. A ninth funnel stage that nothing maps to must fail the reachability assertion. A stage in the
+  //       vocabulary with no producer is a bucket that is empty for ever, and a dashboard reading it
+  //       reports a 100% drop-off at a step no customer can perform.
+  {
+    const ninthStage = (text) =>
+      replaceOnce(text, "  'paid',\n] as const", "  'paid',\n  '__gate_stage__',\n] as const")
+    const result = withEditedFile(TAXONOMY, ninthStage, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a funnel stage nothing maps to is caught',
+      result,
+      'produces all eight, in funnel order',
+    )
+  }
+
+  // 124i. An exclusion reason removed from the vocabulary must fail the both-directions equality against
+  //       the lifecycle. The tempting version of this list is `['no_show']` — the one reason the
+  //       acceptance line names — and it works until the first cancelled booking, which then sits at
+  //       `confirmed` for ever and reads as a journey still in flight.
+  {
+    const withoutRescheduled = (text) =>
+      replaceOnce(text, "  'rescheduled',\n] as const", '] as const')
+    const result = withEditedFile(TAXONOMY, withoutRescheduled, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an exclusion reason dropped from the vocabulary is caught',
+      result,
+      'exactly the terminal statuses with completed removed',
+    )
+  }
+
+  // 124j. NO_SHOW mapped to no step at all. This is the acceptance line's row and the mutation somebody
+  //       makes while tidying: a no-show is not a funnel step, so why record one. Because a journey that
+  //       stops producing rows is indistinguishable from one still in flight — ADR 0018's argument about
+  //       ref-capture rate, one stage earlier.
+  {
+    const noShowIgnored = (text) =>
+      replaceOnce(
+        text,
+        "    no_show: Object.freeze({ kind: 'excluded', reason: 'no_show' }),",
+        "    no_show: Object.freeze({ kind: 'no_step', why: 'a no-show is not a funnel event at all' }),",
+      )
+    const result = withEditedFile(FUNNEL, noShowIgnored, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a NO_SHOW that produces no excluded reason is caught',
+      result,
+      'maps NO_SHOW to no stage and sets the excluded reason to no_show',
+    )
+  }
+
+  // 124k. A partial payment advancing the funnel to `paid`. The most consequential mutation in the unit:
+  //       `payment.recorded` fires for a deposit, `paid` is the signal pushed to GA4 and Meta, and a
+  //       funnel that converts on a deposit trains the ad platforms on money that has not arrived.
+  {
+    const anyPaymentPays = (text) =>
+      replaceOnce(
+        text,
+        '      return signal.settlesDocumentInFull',
+        "      return signal.settlesDocumentInFull || signal.source === 'payment'",
+      )
+    const result = withEditedFile(FUNNEL, anyPaymentPays, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a partial payment that reaches the paid stage is caught',
+      result,
+      'maps a payment that leaves the document outstanding to NO step',
+    )
+  }
+
+  // 124l. Every page view contributing a landing. The first bucket would become a count of PAGES rather
+  //       than of sessions, and every conversion rate below it would be divided by the wrong number —
+  //       which is a funnel that looks right and is wrong by a factor nobody can see.
+  {
+    const everyViewLands = (text) =>
+      replaceOnce(
+        text,
+        [
+          '    if (!event.payload.entry) {',
+          '      return {',
+          "        kind: 'no_step',",
+          "        why: 'a page view that is not the session entry contributes no landing; one session, one landing',",
+          '      }',
+          '    }',
+          '',
+        ].join('\n'),
+        '',
+      )
+    const result = withEditedFile(FUNNEL, everyViewLands, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a landing contributed by a non-entry page view is caught',
+      result,
+      'is NOT contributed by a later page view in the same session',
+    )
+  }
+
+  // 124m. The daytime gap bucketed on the calendar date. Trading runs 11:00-02:00, so between 02:00 and
+  //       11:00 an instant belongs to no trading date while web traffic carries on — and "just use the
+  //       calendar date" is the one-line fix that makes the funnel disagree with cash-up, the rota and
+  //       the journal for the nine hours either side of midnight. Which date it should be is
+  //       `Y5-funnel-gap-bucket`; this case is what stops the question being answered by accident.
+  {
+    const gapOnCalendarDate = (text) =>
+      replaceOnce(
+        text,
+        [
+          '    : {',
+          "        kind: 'outside_trading',",
+          '        reason: resolution.reason,',
+          '        calendarDate: resolution.calendarDate,',
+          '      }',
+        ].join('\n'),
+        "    : { kind: 'trading', tradingDate: resolution.calendarDate }",
+      )
+    const result = withEditedFile(FUNNEL, gapOnCalendarDate, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an instant in the daytime gap given a trading date is caught',
+      result,
+      'refuses to invent a trading date for an instant in the daytime gap',
+    )
+  }
+
+  // 124n. The runtime half of the unknown-name acceptance line, mutated away: the refusal replaced by a
+  //       permissive schema, which is what somebody does to stop a 422 appearing in the logs. `/api/collect`
+  //       is a write path exposed to the internet, so this is the difference between a counted refusal and
+  //       a raw partition filling with vocabulary no reporting query knows.
+  {
+    const acceptsAnything = (text) =>
+      replaceOnce(
+        text,
+        '  if (!isAnalyticsEventName(name)) throw new UnknownEventError(name)',
+        '  if (!isAnalyticsEventName(name)) return z.unknown()',
+      )
+    const result = withEditedFile(TAXONOMY, acceptsAnything, () => afUnitFailing(TAXONOMY_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an unknown event name that is not rejected at runtime is caught',
+      result,
+      'throws UnknownEventError, carrying the name and the known set',
+    )
+  }
+
+  // --- purity: the gate had to be widened, so the widening itself needs a fixture ---------------
+  //
+  // 124o. A clock read in the taxonomy must fail `pnpm purity`. Before this unit that gate read
+  //       `packages/core` alone, so this fixture would have passed it — and the acceptance line "these
+  //       modules ... never read the clock" would have been measured nowhere (ADR 0002).
+  {
+    const result = withFixture(SHARED_FIXTURE, 'export const now = () => Date.now()', () =>
+      afPurity(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: purity rejects a clock read in the analytics taxonomy',
+      result,
+      'reading the clock',
+    )
+    check(
+      'afirst02 gate: and the violation names the file it was found in',
+      result.output.includes(SHARED_FIXTURE),
+      `purity failed without naming ${SHARED_FIXTURE}:\n${result.output}`,
+    )
+  }
+
+  // 124p. The scope control on 124o, and it is the case that keeps the CLAIM the size of the measurement.
+  //       The same fixture one directory up, in `packages/shared` proper, must NOT fail: this gate was
+  //       widened to the analytics tree and not to the whole package, because several modules there are
+  //       settings readers whose purity nobody has argued for, and a rule applied to code nobody examined
+  //       is how a gate acquires exceptions. If `packages/shared` is ever brought in deliberately, this
+  //       case goes red and says so.
+  {
+    const result = withFixture(SHARED_OUTSIDE_FIXTURE, 'export const now = () => Date.now()', () =>
+      afPurity(),
+    )
+    check(
+      'afirst02 gate: purity leaves the rest of packages/shared alone, as it says it does',
+      !result.failed,
+      `purity now reads more of packages/shared than it claims to:\n${result.output}`,
+    )
+  }
+
+  // 124q. The scoped half: a bare `Date` in the taxonomy is forbidden even with an argument, for the
+  //       reason the ledger and the till have the same rule. The trading day is resolved ONCE, from an
+  //       injected instant, so a `Date` here could only be a second opinion about which day an event
+  //       landed on. The control is the same code in `packages/core/src/analytics`, where the general
+  //       rules permit an argument-ful `Date` — without it this case would be satisfied by a gate that
+  //       banned `Date` everywhere, which would make `packages/core/src/time.ts` unwritable.
+  {
+    const dateFromAnArgument = 'export const at = (ms: number) => new Date(ms).getTime()'
+    const scoped = withFixture(SHARED_FIXTURE, dateFromAnArgument, () => afPurity())
+    checkRejectedBy(
+      'afirst02 gate: purity rejects a bare Date in the analytics taxonomy',
+      scoped,
+      'the taxonomy takes no date',
+    )
+    const general = withFixture(CORE_FIXTURE, dateFromAnArgument, () => afPurity())
+    check(
+      'afirst02 gate: and allows the same argument-ful Date in packages/core/src/analytics',
+      !general.failed,
+      `the scoped rule is leaking into packages/core, where an injected instant is legitimate:\n${general.output}`,
+    )
+  }
+
+  // 124r. The purity gate must refuse a ROOT that contributed no files, rather than printing a green tick
+  //       over it. This is the failure the widening introduced: a directory that is renamed or emptied
+  //       makes `walk` return nothing, the scan examines `packages/core` alone, and the summary still says
+  //       both trees are pure. ADR 0002 is the whole of why that is worse than a red run.
+  {
+    const rootThatHoldsNoTypeScript = (text) =>
+      replaceOnce(
+        text,
+        "const ANALYTICS_TAXONOMY = 'packages/shared/src/analytics'",
+        "const ANALYTICS_TAXONOMY = 'docs/runbooks'",
+      )
+    const result = withEditedFile(PURITY, rootThatHoldsNoTypeScript, () =>
+      runExpectingFailure('node', [PURITY]),
+    )
+    checkRejectedBy(
+      'afirst02 gate: purity refuses a root it examined no files under',
+      result,
+      'contributed no files to the purity scan',
+    )
+  }
+
+  // --- boundaries: the import half, which a global-scanning gate cannot see ---------------------
+  //
+  // 124s. An I/O import in the taxonomy must fail `pnpm boundaries` BY RULE NAME.
+  //       `shared-must-not-import-siblings` forbids the other first-party packages and says nothing about
+  //       a Node builtin, so until `analytics-taxonomy-must-be-pure` existed the tree with the strictest
+  //       purity requirement in the build was the only one with no import rule about it.
+  {
+    const result = withFixture(
+      SHARED_FIXTURE,
+      ["import { readFileSync } from 'node:fs'", 'export const illegal = readFileSync'].join('\n'),
+      () => afCruise(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: an I/O import in the analytics taxonomy fails the boundary gate',
+      result,
+      'analytics-taxonomy-must-be-pure',
+    )
+    // And the control: zod is what the schemas are built from, so a rule that condemned it would ban the
+    // unit. Asserted on the rule NAME rather than the exit code, because an unreferenced fixture is also
+    // a `no-orphans` warning and a warning is not this rule firing.
+    const allowed = withFixture(
+      SHARED_FIXTURE,
+      ["import { z } from 'zod'", 'export const schema = z.string()'].join('\n'),
+      () => afCruise(),
+    )
+    check(
+      'afirst02 gate: and zod is not what the rule forbids',
+      !allowed.output.includes('analytics-taxonomy-must-be-pure'),
+      `the rule fired on a module importing zod alone, which would ban the taxonomy:\n${allowed.output}`,
+    )
+  }
+
+  // --- the one that matters most: the vocabulary is enumerated in exactly one place -------------
+  //
+  // 124t. No first-party TypeScript file outside the four that OWN the mapping enumerates the funnel stage
+  //       names. This is the defect the brief names as the one this build keeps paying for, and it is the
+  //       only one of the three anti-drift mechanisms that can catch a unit which declares its own tuple
+  //       and never imports `FUNNEL_STAGES` at all — the type system cannot see a list nobody assigns to a
+  //       `FunnelStage`.
+  //
+  //       WHAT THIS MEASURES, EXACTLY, because the claim must not be wider than the measurement: it counts
+  //       how many of the eight stage names appear in one file as QUOTED string literals, and flags a file
+  //       at four or more. It does not parse, so it cannot tell a tuple from a switch — and it deliberately
+  //       does not flag a `Record<FunnelStage, …>`, whose keys are unquoted, because a label map keyed on
+  //       the derived union is the CORRECT way for a later unit to name every stage.
+  //
+  //       The four owners are declared rather than inferred, for the reason scripts/check-gate-registry.mjs
+  //       declares its CI-only steps: "it is not in the list" is exactly the condition a drifting second
+  //       copy also satisfies. On the tree this was written against no other file reaches even four; the
+  //       highest is one.
+  {
+    const STAGE_NAMES = [
+      'landing',
+      'service_viewed',
+      'price_viewed',
+      'cta_click',
+      'booking_created',
+      'confirmed',
+      'attended',
+      'paid',
+    ]
+    const OWNERS = new Set([TAXONOMY, TAXONOMY_SUITE, FUNNEL, FUNNEL_SUITE])
+    const FLOOR = 4
+    const enumerations = () => {
+      const files = globSync('{packages,apps}/**/*.{ts,tsx}', {
+        exclude: (path) =>
+          path.includes('node_modules') || path.includes('/.next/') || path.includes('/dist/'),
+      })
+      // A scan that examined no files would report "no second list" about nothing (ADR 0002), so the
+      // count is returned and asserted rather than assumed.
+      const found = []
+      for (const file of files) {
+        if (OWNERS.has(file)) continue
+        const text = readFileSync(file, 'utf8')
+        const hits = STAGE_NAMES.filter(
+          (stage) => text.includes(`'${stage}'`) || text.includes(`"${stage}"`),
+        )
+        if (hits.length >= FLOOR) found.push(`${file} names ${hits.join(', ')}`)
+      }
+      return { scanned: files.length, found }
+    }
+
+    const live = enumerations()
+    check(
+      'afirst02 gate: the funnel stage vocabulary is enumerated only where it is owned',
+      live.found.length === 0,
+      `these files enumerate ${FLOOR} or more of the eight stage names and are not one of the four that ` +
+        `own the mapping — derive from FUNNEL_STAGES instead of restating it:\n  ${live.found.join('\n  ')}`,
+    )
+    check(
+      'afirst02 gate: and that scan read the tree rather than an empty list',
+      live.scanned > 1000,
+      `the stage-vocabulary scan matched only ${live.scanned} files, so its verdict is about nothing`,
+    )
+    // The known-bad fixture (ADR 0003). A module with its own copy of the tuple must be found, and it is
+    // found by the SAME code the live check runs — a second implementation here would be the very defect
+    // the case is about.
+    const planted = withFixture(
+      'packages/core/src/__gate_fixture__.ts',
+      [
+        'export const STAGES = [',
+        ...STAGE_NAMES.map((stage) => `  '${stage}',`),
+        '] as const',
+      ].join('\n'),
+      () => enumerations(),
+    )
+    check(
+      'afirst02 gate: the scan finds a second copy of the stage tuple',
+      planted.found.some((row) => row.includes('__gate_fixture__')),
+      `a module holding all eight stage names was not flagged, so the scan proves nothing:\n  ${planted.found.join('\n  ')}`,
+    )
+  }
+
+  // 124u. Every open question the taxonomy says it stands on is a row in docs/OPEN-QUESTIONS.md. A
+  //       provisional value carrying an id that names nothing is worse than no id: it reads as a question
+  //       somebody is tracking (brief rule 15).
+  {
+    const taxonomyText = readFileSync(TAXONOMY, 'utf8')
+    const declaration = taxonomyText.slice(taxonomyText.indexOf('ANALYTICS_OPEN_QUESTIONS = {'))
+    const declared = [...declaration.matchAll(/'(Y\d+-[a-z-]+)'/g)].map((match) => match[1])
+    const questions = readFileSync('docs/OPEN-QUESTIONS.md', 'utf8')
+    const missing = declared.filter((id) => !questions.includes(`| ${id} |`))
+    check(
+      'afirst02 gate: every open question the taxonomy declares is in OPEN-QUESTIONS.md',
+      declared.length >= 3 && missing.length === 0,
+      declared.length < 3
+        ? `only ${declared.length} id(s) were read out of ${TAXONOMY}, so this case examined almost nothing`
+        : `${missing.join(', ')} is declared by the taxonomy and absent from docs/OPEN-QUESTIONS.md`,
+    )
+    check(
+      'afirst02 gate: and the OPEN-QUESTIONS scan would not find an id nobody wrote',
+      !questions.includes('| Y5-funnel-gap-bucket-that-nobody-wrote |'),
+      'the scan matches an id nobody wrote, so it would pass for any claim at all',
+    )
+  }
+
+  // 124v. The zone assumed rather than taken as an argument (brief rule 7, ADR 0007). Asia/Dubai has no
+  //       DST, so "the zone never changes anything" is true of every instant until it is not — and the
+  //       default is the correct value, which is what makes this the mutation nobody notices.
+  //
+  //       It is also the case that caught the FIRST version of the suite's own zone test, which asserted
+  //       two instants whose bucket is identical in both zones and would therefore have passed against a
+  //       `funnelBucketFor` that ignored `input.zone` entirely. The suite now asserts one instant that
+  //       trades in Dubai and not in UTC and one that does the reverse, and this fixture is what holds it
+  //       to that.
+  {
+    const zoneIgnored = (text) =>
+      replaceOnce(
+        text,
+        'resolveTradingDate(input.occurredAt, input.hoursFor, input.zone ?? ASIA_DUBAI)',
+        'resolveTradingDate(input.occurredAt, input.hoursFor, ASIA_DUBAI)',
+      )
+    const result = withEditedFile(FUNNEL, zoneIgnored, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a bucket that ignores the zone argument is caught',
+      result,
+      'reads the zone argument, on two instants where the zone changes the answer',
+    )
+  }
+
+  // 124w. The control every mutation above depends on: the two suites pass on this tree. A mutation test
+  //       whose base is red proves nothing about the mutation (ADR 0003), and nine of the cases in this
+  //       block are mutations.
+  {
+    const result = afUnit(TAXONOMY_SUITE, FUNNEL_SUITE)
+    check(
+      'afirst02 gate: the taxonomy and funnel suites pass on this tree',
+      !result.failed,
+      `the base is red, so the mutations above prove nothing:\n${result.output}`,
+    )
+    const purity = afPurity()
+    check(
+      'afirst02 gate: and pnpm purity passes over both trees it now reads',
+      !purity.failed && purity.output.includes('packages/shared/src/analytics'),
+      `purity did not report reading the analytics taxonomy:\n${purity.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

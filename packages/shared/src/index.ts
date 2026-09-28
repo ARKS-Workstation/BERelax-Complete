@@ -4,6 +4,34 @@
  */
 
 export {
+  ANALYTICS_EVENT_NAMES,
+  ANALYTICS_EVENT_SCHEMAS,
+  ANALYTICS_OPEN_QUESTIONS,
+  ANALYTICS_TAXONOMY_VERSION,
+  type AnalyticsEvent,
+  type AnalyticsEventName,
+  type AnalyticsEventPayload,
+  analyticsEventNameSchema,
+  analyticsEventSchemaFor,
+  CTA_TARGETS,
+  type CtaTarget,
+  FUNNEL_EXCLUSION_REASONS,
+  FUNNEL_STAGES,
+  FUNNEL_TERMINAL_STAGE,
+  type FunnelExclusionReason,
+  type FunnelStage,
+  funnelExclusionReasonSchema,
+  funnelStageRank,
+  funnelStageSchema,
+  funnelStagesAfter,
+  isAnalyticsEventName,
+  isFunnelExclusionReason,
+  isFunnelStage,
+  isTerminalFunnelStage,
+  parseAnalyticsEvent,
+  UnknownEventError,
+} from './analytics/taxonomy.ts'
+export {
   CLINICAL_LINT_QUESTION_COPY_SETTING_KEY,
   CLINICAL_OPEN_QUESTIONS,
   CLINICAL_REAL_INTAKE_SETTING_KEY,
@@ -258,37 +286,16 @@ export {
 /** Nominal typing helper, so an AppointmentId cannot be passed where a RoomId is wanted. */
 export type Brand<T, B extends string> = T & { readonly __brand: B }
 
-/** Every error crossing a module boundary is one of these. */
-export type ErrorKind =
-  | 'not_found'
-  | 'conflict'
-  | 'validation'
-  | 'forbidden'
-  | 'unauthenticated'
-  | 'rate_limited'
-  | 'provider_unavailable'
-  | 'invariant_violated'
-
-export class AppError extends Error {
-  readonly kind: ErrorKind
-  /** Safe to show a customer. Anything else is internal-only. */
-  readonly userFacing: boolean
-  readonly details: Readonly<Record<string, unknown>>
-
-  constructor(
-    kind: ErrorKind,
-    message: string,
-    options?: { userFacing?: boolean; details?: Record<string, unknown>; cause?: unknown },
-  ) {
-    super(message, options?.cause === undefined ? undefined : { cause: options.cause })
-    this.name = 'AppError'
-    this.kind = kind
-    this.userFacing = options?.userFacing ?? false
-    this.details = Object.freeze({ ...options?.details })
-  }
-}
-
-export const isAppError = (e: unknown): e is AppError => e instanceof AppError
+/**
+ * The error taxonomy, re-exported from `./app-error.ts` where it now lives.
+ *
+ * Moved out of this file rather than declared in it, because a submodule of `shared` that needs to
+ * SUBCLASS `AppError` — `analytics/taxonomy.ts` does, for `UnknownEventError` — would otherwise import
+ * the barrel that re-exports it and close a cycle `no-circular` refuses. The names and the class
+ * identity are unchanged, so every `import { AppError } from '@berelax/shared'` in the build still
+ * resolves here and `isAppError` still answers true for every error raised anywhere.
+ */
+export { AppError, type ErrorKind, isAppError } from './app-error.ts'
 export {
   addressLines,
   addressOneLine,

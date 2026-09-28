@@ -228,11 +228,26 @@ export interface TenderSettlement {
   readonly fullySettled: boolean
 }
 
-/** The spec for `kind`, or {@link UnknownTenderType} for a value cast past `TenderKind`. */
+/**
+ * The spec for `kind`, or {@link UnknownTenderType} for a value cast past `TenderKind`.
+ *
+ * `Object.hasOwn` and not an index, because indexing a frozen object still resolves the PROTOTYPE. This
+ * function existed to be handed a string from outside — that is its whole parameter type — and `constructor`,
+ * `toString`, `valueOf` and `__proto__` each returned an inherited FUNCTION instead of throwing. The caller
+ * then read `spec.requiresReference`, which is `undefined` on a function, so **a card tender with no approval
+ * code was accepted**, and `spec.account`, which is what `payment.posting_account_code` is snapshotted from.
+ * A payment posted to `undefined` with no reference, from a kind nobody ever declared.
+ *
+ * `hasOwn` rather than checking membership against the `TENDER_KINDS` tuple: the tuple would work today and
+ * would be a second statement of which kinds exist, disagreeing with this registry the first time one is
+ * added to only one of them. The registry is the vocabulary; this asks the registry.
+ *
+ * Found by A-FIRST-02, which had just fixed the identical hole in its own event registry and went looking for
+ * the shape elsewhere. `packages/core/src/money/package-terms.ts` reads the same spec.
+ */
 export function tenderTypeOf(kind: string): TenderTypeSpec {
-  const spec = (TENDER_TYPES as Readonly<Record<string, TenderTypeSpec | undefined>>)[kind]
-  if (spec === undefined) throw new UnknownTenderType(kind)
-  return spec
+  if (!Object.hasOwn(TENDER_TYPES, kind)) throw new UnknownTenderType(kind)
+  return (TENDER_TYPES as Readonly<Record<string, TenderTypeSpec>>)[kind] as TenderTypeSpec
 }
 
 /**
