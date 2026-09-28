@@ -821,6 +821,27 @@ export const ROUTES = [
       'it arrive excluded rather than being indexed until somebody reads Search Console.',
   },
   {
+    id: 'packages',
+    path: '/packages',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-TILL-13s package screen: the templates the desk may sell at their current version, the ' +
+      'entitlements outstanding with how far through each one the customer is, a sale (which takes money ' +
+      'and issues NO document, so it is the one thing the till can complete before Y1-trn is answered) ' +
+      'and a redemption (which is the supply under Y11-vat-packages provisional answer, so it is where ' +
+      'output VAT reaches box 1). Every template name on it carries its own unconfirmed marker and the ' +
+      'open question that owns it, because what this business sells as a package is a fact nobody has ' +
+      'stated (Y9-package-catalogue) and a plausible menu in a screenshot is indistinguishable from a ' +
+      'configured one. A handler for the reason the till gives, and `?dir=rtl` is the same layout axis. It ' +
+      'WRITES and it is NOT authenticated until W-SYS-01, so the actor is the SURFACE (`Packages`). ' +
+      'Dynamic because every balance on it moves as treatments are delivered.',
+  },
+  {
     id: 'preference-centre',
     path: '/preferences',
     kind: 'handler',
@@ -1103,6 +1124,52 @@ export const ROUTES = [
       'it reads the row, and a corrected opening time reaches it by revalidation.',
   },
   {
+    id: 'till',
+    path: '/till',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-TILL-13s till: the delivered treatments waiting to be billed, a gratuity, a discount that has to ' +
+      'say why, a split tender, and the balanced entry the basket would post. `?view=preview` re-renders ' +
+      'it as the invoice preview, with every mandatory field of the chosen document form and the ones the ' +
+      'system cannot state marked absent and named - the supplier TRN among them, which is why this screen ' +
+      'REFUSES to issue today (Y1-trn). A handler answering text/html rather than a document, for the ' +
+      'reason the diary, the pipeline board, the Messages inbox, the template editor, the compliance ' +
+      'calendar, the duplicate queue and quick-book all give: a registry document must be served in BOTH ' +
+      'locales, which needs an Arabic admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders ' +
+      'this English document mirrored so the direction half of the accessibility and screenshot matrices ' +
+      'is audited without inventing an Arabic admin surface. It WRITES - its POST prices the basket and, ' +
+      'when the TRN is configured, issues the document and records the tenders in one transaction - and it ' +
+      'is NOT authenticated until W-SYS-01, so the actor every audit row records is the SURFACE (`Till`) ' +
+      'rather than a name nobody signed in with. Dynamic because it is a claim about what is unbilled ' +
+      'right now: a prerendered copy would offer a treatment somebody has already paid for. The /till ' +
+      'prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, so the cash-up screen below it arrives ' +
+      'excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
+    id: 'till-cash-up',
+    path: '/till/cash-up',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-TILL-13s cash-up: the drawer session for one business day, opened with a declared float and ' +
+      'closed against a counted one, with the variance always posted to 6140 in the close transaction ' +
+      '(M-TILL-11s ZU004). Keyed on the BUSINESS DAY and never the calendar date, because trading runs ' +
+      'across midnight, so one shift spanning it is one session. A handler for the ' +
+      'reason the till above it gives, and `?dir=rtl` is the same layout axis. It WRITES - open, drop and ' +
+      'close are three POSTs, each one transaction - and it is NOT authenticated until W-SYS-01. Dynamic ' +
+      'because the expected float is a sum over the payments taken so far: a prerendered copy would ' +
+      'reconcile against a drawer from an earlier hour. Covered by the /till noindex prefix.',
+  },
+  {
     id: 'treatments',
     path: '/treatments',
     kind: 'document',
@@ -1198,7 +1265,11 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/crm',
   '/hr',
   '/messaging',
+  // M-TILL-13. `/packages` and `/till` both cover a whole group: the cash-up screen sits under `/till` and
+  // arrives noindex before it is written, which is what this list is for.
+  '/packages',
   '/settings',
+  '/till',
 ]
 
 /**

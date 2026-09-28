@@ -246,6 +246,19 @@ export {
   reverseChargeExceptions,
 } from './queries/reverse-charge-exceptions.ts'
 export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-exclusions.ts'
+// M-TILL-13's four till readers. `readTillIssuer` returns the placeholder TRN unvalidated on purpose —
+// `requireIssuerTrn` in `@berelax/core` is the only thing that may put a TRN on a document, and a reader
+// that threw would leave the till unable to draw the screen explaining why it cannot issue one.
+export {
+  readBillableAppointments,
+  readPackageBalances,
+  readPackageTemplates,
+  readTillIssuer,
+  type TillBillableAppointmentRow,
+  type TillIssuerRow,
+  type TillPackageTemplateRow,
+  type TillRedeemableBalanceRow,
+} from './queries/till.ts'
 export {
   isBalanced,
   type TrialBalance,
