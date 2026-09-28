@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**125 / 210 units complete.**
+**128 / 211 units complete.**
 
 ## Next up
 
 1. **W-SYS-12 — Private SQLSTATE allocation: one code, one rule, with an allocator**
 1. **W-SYS-13 — Test isolation: a suite may delete only what it created**
-1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
+1. **W-SYS-14 — Private document storage: the signed URL, and the audited download**
 
 ## All units
 
@@ -59,6 +59,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 41.5 | `W-SYS-11` | The admin session — mounting F07's auth in the web app | `F07`, `W-SYS-01` | — | — |
 | [ ] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
 | [ ] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
+| [ ] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
@@ -72,7 +73,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 52 | `M-TILL-10` | Package redemption drawdown, expiry and breakage | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-09` | — | Y9-package-policy, Y11-vat-package |
 | [x] | 53 | `M-TILL-11` | Cash drawer reconciliation per shift, keyed on business_day | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `M-TILL-07` | — | — |
 | [x] | 54 | `M-TILL-12` | Bilingual tax invoice, simplified invoice and receipt PDFs | `F10`, `M-TILL-04` | — | Y11-vat-invoice, Y1-trn |
-| [ ] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
+| [x] | 55 | `M-TILL-13` | Till, cash-up and package screens, and the M2 Bankable vertical slice | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H04`, `M-TILL-07`, `M-TILL-08`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12` | M2 | — |
 | [x] | 56 | `M-VAT-01` | Suppliers, supplier tax profile, bills and payables | `M-TILL-02`, `M-TILL-03` | — | — |
 | [x] | 57 | `M-VAT-02` | Input VAT recoverability classification, including blocked categories | `M-VAT-01` | — | — |
 | [x] | 58 | `M-VAT-03` | Reverse charge on offshore suppliers and the nightly exception report | `F06`, `M-VAT-01`, `M-VAT-02` | — | — |
@@ -115,14 +116,14 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 95 | `P-HR-06` | Rota publishing, coverage and fatigue validator, labour-cost forecast | `P-HR-02`, `P-HR-05` | — | Y9-coverage |
 | [x] | 96 | `P-HR-07` | Attendance, timesheets and the period lock | `P-HR-06` | — | Y9-attendance |
 | [x] | 97 | `P-HR-08` | Leave types, entitlement and the accrual engine with worked examples | `P-HR-01` | — | Y8-leave, Y9-leave-detail |
-| [ ] | 98 | `P-HR-09` | Leave approval: delegation, coverage, booking conflicts, availability block | `P-HR-04`, `P-HR-06`, `P-HR-08` | M6 | Y9-coverage |
+| [x] | 98 | `P-HR-09` | Leave approval: delegation, coverage, booking conflicts, availability block | `P-HR-04`, `P-HR-06`, `P-HR-08` | M6 | Y9-coverage |
 | [ ] | 99 | `P-HR-10` | Holiday calendar, lunar confirmation impact report, Ramadan dated override | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-06` | — | — |
 | [ ] | 100 | `P-HR-11` | Commission: versioned rules and a reproducible engine | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-07` | — | Y9-commission |
 | [ ] | 101 | `P-HR-12` | Payroll run, bilingual payslips and the WPS export | `F10`, `P-HR-08`, `P-HR-11` | — | Y8-wps, Y9-tips |
 | [ ] | 102 | `P-HR-13` | Monthly gratuity accrual posted to the append-only ledger | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-12` | M6 | Y8-coa, Y9-gratuity |
 | [ ] | 103 | `P-HR-14` | Therapist self-service portal and staff notifications | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-09`, `P-HR-12` | — | — |
 | [x] | 104 | `A-FIRST-01` | Analytics schema, monthly partitions, 90-day raw retention | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
-| [ ] | 105 | `A-FIRST-02` | Event taxonomy and the funnel contract, pure | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F05`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
+| [x] | 105 | `A-FIRST-02` | Event taxonomy and the funnel contract, pure | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F05`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [ ] | 106 | `A-FIRST-03` | Origination resolver and click-id persistence, pure | `A-FIRST-02` | — | — |
 | [ ] | 107 | `A-FIRST-04` | Bot and AI-crawler classification with one shared source of truth | `A-FIRST-02` | — | — |
 | [ ] | 108 | `A-FIRST-05` | /api/collect ingest, session stitching and pre-consent staging | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04` | — | Y5-analytics-basis |

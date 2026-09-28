@@ -103,6 +103,33 @@ describe('the tender-type registry', () => {
     // The control: the accessor is not simply throwing for everything.
     expect(tenderTypeOf('cash').code).toBe('cash')
   })
+
+  /**
+   * The names every object answers to, which `gift_card` above does not cover.
+   *
+   * This function takes a `string` precisely because the value comes from outside, and indexing a frozen
+   * object resolves the PROTOTYPE: each of these returned an inherited function rather than throwing. The
+   * caller reads `requiresReference` off the result — `undefined` on a function, so a card tender with no
+   * approval code was accepted — and `account`, which is what `payment.posting_account_code` is snapshotted
+   * from. A payment posted to `undefined`, unreferenced, under a kind nobody declared.
+   *
+   * `__proto__` is in the list deliberately: it is not an own property of the registry either, and it is the
+   * one a caller might send on purpose.
+   */
+  it('refuses the names every object inherits, not just an undeclared kind', () => {
+    for (const inherited of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(() => tenderTypeOf(inherited), inherited).toThrow(UnknownTenderType)
+    }
+    // The control, and it is the one that would have caught this: every DECLARED kind still resolves, so the
+    // fix refuses inherited names rather than refusing everything that is not spelled out here.
+    for (const kind of TENDER_TYPES_IN_ORDER) {
+      expect(tenderTypeOf(kind.code).code, kind.code).toBe(kind.code)
+    }
+    expect(
+      TENDER_TYPES_IN_ORDER.length,
+      'no kinds were checked, so the control proves nothing',
+    ).toBeGreaterThan(1)
+  })
 })
 
 describe('settleTenders', () => {

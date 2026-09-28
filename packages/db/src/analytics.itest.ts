@@ -1,3 +1,4 @@
+import { FUNNEL_STAGES, FUNNEL_TERMINAL_STAGE } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from './connection.ts'
 import { SCHEMA_VERSION } from './index.ts'
@@ -386,7 +387,7 @@ describe('the analytics schema', () => {
     expect(columns.length).toBeGreaterThan(50)
   })
 
-  it('stores the eight funnel steps IN ORDER, so A-FIRST-02 has a catalogue to pin against', async () => {
+  it('stores the funnel steps in A-FIRST-02s order, pinned against FUNNEL_STAGES', async () => {
     const rows = await sql<{ label: string }[]>`
       select e.enumlabel as label
         from pg_enum e
@@ -395,19 +396,26 @@ describe('the analytics schema', () => {
        where n.nspname = 'analytics' and t.typname = 'funnel_step_name'
        order by e.enumsortorder
     `
-    expect(rows.map((r) => r.label)).toEqual([
-      'landing',
-      'service_viewed',
-      'price_viewed',
-      'cta_click',
-      'booking_created',
-      'confirmed',
-      'attended',
-      'paid',
-    ])
+    /*
+     * Against `FUNNEL_STAGES` and not against a list written here, which is the whole point of putting the
+     * funnel in the database as an ENUM rather than as a CHECK.
+     *
+     * A-FIRST-02 landed its taxonomy while this unit was in flight, so for one commit the eight members
+     * existed twice — once in `packages/shared/src/analytics/taxonomy.ts` as the tuple everything else is
+     * derived from, and once in migration 0096. This assertion is what makes the second one a MIRROR rather
+     * than a second opinion: a member added, renamed or reordered on either side alone is a red test. It is
+     * the shape `whatsappRefCaptureOutcome` is pinned to `REF_CAPTURE_OUTCOMES` in, and it is available to
+     * `packages/db` because the tuple is in `@berelax/shared`, which is the one package this one may import.
+     */
+    expect(rows.map((r) => r.label)).toEqual([...FUNNEL_STAGES])
     // The order is the measurement — "conversion is paid / landing, never booking_created / landing" is a
-    // statement about which step is LAST — so the assertion is on the ordered list and not on the set.
-    expect(rows.at(-1)?.label).toBe('paid')
+    // statement about which step is LAST — so the terminal member is asserted separately and is also
+    // derived, because `FUNNEL_TERMINAL_STAGE` is the tuple's last element rather than a second opinion
+    // about which stage ends the funnel.
+    expect(rows.at(-1)?.label).toBe(FUNNEL_TERMINAL_STAGE)
+    // The control: the tuple this compared against is not empty, so an upstream module that stopped
+    // exporting its members fails here rather than making the equality above pass over two empty lists.
+    expect(rows).toHaveLength(8)
   })
 })
 

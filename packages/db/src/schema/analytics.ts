@@ -1,3 +1,4 @@
+import { FUNNEL_STAGES } from '@berelax/shared'
 import { sql } from 'drizzle-orm'
 import {
   bigint,
@@ -59,24 +60,20 @@ import {
 export const analyticsSchema = pgSchema('analytics')
 
 /**
- * The eight ordered funnel steps, ending at PAID.
+ * The eight ordered funnel steps, ending at PAID — and NOT a list written here.
  *
- * An enum rather than a CHECK list because the ORDER is the measurement — "conversion is paid / landing,
- * never booking_created / landing" is a statement about which step is last — and `pg_enum.enumsortorder`
- * is the only place a database stores it. A-FIRST-02 pins its own ordered enum against this catalogue
- * rather than restating the list, which is how `whatsappRefCaptureOutcome` is pinned to
- * `REF_CAPTURE_OUTCOMES`.
+ * An enum rather than a CHECK list because the ORDER is the measurement: "conversion is paid / landing,
+ * never booking_created / landing" is a statement about which step is last, and `pg_enum.enumsortorder` is
+ * the only place a database stores an order.
+ *
+ * The members come from `FUNNEL_STAGES` in `@berelax/shared`, which is the tuple A-FIRST-02 derives its
+ * whole vocabulary from. Writing them out again would be a third statement of one fact with no checker over
+ * it — `pnpm db:drift` compares tables and columns and has nothing to say about an enum's members. Migration
+ * 0096 is the second, unavoidably, because SQL cannot import; `analytics.itest.ts` asserts `pg_enum`'s
+ * ordered labels equal this tuple, which is what makes the migration a mirror rather than a second opinion.
+ * It is the shape `whatsappRefCaptureOutcome` is pinned to `REF_CAPTURE_OUTCOMES` in.
  */
-export const funnelStepName = analyticsSchema.enum('funnel_step_name', [
-  'landing',
-  'service_viewed',
-  'price_viewed',
-  'cta_click',
-  'booking_created',
-  'confirmed',
-  'attended',
-  'paid',
-])
+export const funnelStepName = analyticsSchema.enum('funnel_step_name', FUNNEL_STAGES)
 
 /** One row per first-party visitor cookie, created at consent and never before it (A-FIRST-05). */
 export const visitor = analyticsSchema.table(

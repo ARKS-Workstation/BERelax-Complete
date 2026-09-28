@@ -71,6 +71,41 @@ module.exports = {
       },
     },
     {
+      name: 'analytics-taxonomy-must-be-pure',
+      comment:
+        'The event taxonomy and the funnel vocabulary in packages/shared/src/analytics may reach zod and ' +
+        'their own siblings inside packages/shared, and nothing else. A-FIRST-02 asks for modules that ' +
+        '"import nothing beyond @berelax/shared and never read the clock". ' +
+        'WHY THIS RULE EXISTS ALONGSIDE shared-must-not-import-siblings, because the overlap is nil: that ' +
+        'rule forbids the OTHER FIRST-PARTY PACKAGES and says nothing about a Node builtin, a framework or ' +
+        'a database driver. packages/shared is the leaf every package imports, so until this rule existed ' +
+        'a `node:fs` in the taxonomy was a boundary violation no gate could see — the tree with the ' +
+        'strictest purity requirement in the build was the only one with no import rule about it. ' +
+        'packages/core is covered by core-must-be-pure; the vocabulary had to leave core precisely ' +
+        'BECAUSE packages/db needs it (funnel_step.stage is these words) and db must never import core, ' +
+        'so the move that made it reachable also moved it out from under its own gate. ' +
+        'WHAT THIS RULE CAN AND CANNOT DO, and the difference is why the acceptance names two gates. ' +
+        'Dependency-cruiser sees module-to-module edges, so it closes the IMPORT path to I/O. It cannot ' +
+        'see `Date.now()` or `process.env`, which are globals and not dependencies — that half is ' +
+        'scripts/check-core-purity.mjs, which was widened to read this one directory outside ' +
+        'packages/core for exactly this reason and bans Date and Intl here outright. Neither gate can ' +
+        'see that a function takes its instant as an ARGUMENT; that is the type signature, and ' +
+        'packages/core/src/analytics/funnel.test.ts is what exercises it. ' +
+        'Three alternations, for core-must-be-pure’s reason — the trap that left ' +
+        'no-lucide-outside-the-icon-wrapper configured, green and dead: a Node builtin and an ' +
+        'UNINSTALLED package both resolve to their bare name, while an installed one resolves into ' +
+        'node_modules. The known-bad fixture is in scripts/test-gates.mjs block 124 and asserts this rule ' +
+        'fires BY NAME, with a control that imports zod alone and must pass.',
+      severity: 'error',
+      from: { path: '^packages/shared/src/analytics/' },
+      to: {
+        path:
+          '^(node:)?(fs|path|os|http|https|net|tls|dns|crypto|child_process|worker_threads)$|' +
+          '^(next|react|drizzle-orm|pg|postgres|undici|axios|node-fetch)(/|$)|' +
+          '(^|/)node_modules/(next|react|drizzle-orm|pg|postgres|undici|axios|node-fetch)/',
+      },
+    },
+    {
       name: 'nothing-imports-an-app',
       comment: 'Apps are entry points. A package must never import from an app.',
       severity: 'error',

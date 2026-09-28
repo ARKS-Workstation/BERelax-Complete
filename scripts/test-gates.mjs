@@ -11639,10 +11639,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         // template's own `version` and refuses a mismatch, and NULL is distinct from 20043. Without it this
         // control failed with ZJ004 — and it had been failing since 0082 landed with C-CRM-08, unnoticed
         // because the batch verifies that followed ran `verify:except-gates` and never reached this suite.
+        // EVERY not-null column without a default, and the three that are constrained rather than free:
+        // `aad_context` must equal 'template_version=' || template_version (0082's
+        // intake_submission_aad_context_matches_version), `data_origin` is 'synthetic' or 'real', and
+        // `retain_until` must be strictly after `submitted_at`. The first version of this fix supplied
+        // `template_version` alone and moved the failure from one not-null column to the next, which is
+        // what a control accumulating columns from later migrations looks like when nobody runs it.
         'insert into clinical.intake_submission (id, customer_id, template_id, template_version, ' +
-        'payload_ciphertext, payload_nonce, wrapped_data_key, kek_version, aad_fingerprint, ' +
-        'submitted_via) values (' +
-        `${GATE_ID}, ${CUSTOMER}, ${GATE_ID}, 20043, ${BYTES}, ${BYTES}, ${BYTES}, ${ACTIVE}, ` +
+        'aad_context, data_origin, retain_until, payload_ciphertext, payload_nonce, wrapped_data_key, ' +
+        'kek_version, aad_fingerprint, submitted_via) values (' +
+        `${GATE_ID}, ${CUSTOMER}, ${GATE_ID}, 20043, 'template_version=20043', 'synthetic', ` +
+        `now() + interval '25 years', ${BYTES}, ${BYTES}, ${BYTES}, ${ACTIVE}, ` +
         "'gate-fingerprint', 'online'); " +
         "update clinical.kek_version set status = 'retired', retired_at = now() " +
         "where status = 'active'; " +
@@ -32673,6 +32680,360 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 115a-115z. (M-TILL-13) The till, cash-up and package screens: the palette rule, the mirrored layout, the
+//            core-to-db transcription held equal to the fixtures' own, and the refusal that is the
+//            deliverable.
+//
+// **What this block can and cannot mutate, and the reason is the build.** A browser suite drives the BUILT
+// application, so an edit to `render.ts` is invisible to `till.itest.ts` until `next build` has run again —
+// and a case that mutated a screen, ran the browser suite and watched it stay green would report PASS about a
+// rebuild that never happened. Worse, a case that mutated, rebuilt and then restored the SOURCE would leave
+// the mutant in `.next` for every later case, so the block's own control would fail for a reason the control
+// cannot name. So this block mutates only what **vitest reads from source**:
+//
+//   - `apps/web/app/(admin)/till/{render,view}.ts` and `.../packages/handler.ts`, which
+//     `apps/web/src/till-render.test.ts` imports and renders in process;
+//   - `apps/web/src/till/mapping.ts`, which `till-mapping.test.ts` compares against `@berelax/fixtures`' three
+//     mappings and which `till.itest.ts` also calls DIRECTLY in the M2 slice's second part — that part drives
+//     `handleTillWrite` rather than the server, which is exactly why it can see a source mutant at all;
+//   - `packages/db/src/queries/till.ts`, `packages/fixtures/src/till-receipt.ts` and
+//     `packages/fixtures/src/package-seed.ts`, which no browser reads.
+//
+// The claims only a browser can make — axe over forty-eight renders, the screenshot matrix, the keypad and the
+// total column changing side, the twelve-interaction walk with an empty pointer-event log — carry their own
+// controls INSIDE `till.itest.ts` instead: an injected unlabelled button and a paragraph on the decorative gold
+// that axe and the palette scan must both report, four cross-cell screenshot comparisons that must differ, and
+// an LTR-versus-RTL geometry comparison that must flip. That is the same discipline in the place where it costs
+// one render rather than one `next build`.
+//
+// Every case edits a shipped file and restores it in a `finally`, and every anchor goes through `replaceOnce`
+// (brief rule 20). The local mutant helper is named `tillMutant` and deliberately not `…Mutant` after a shape
+// another block uses: blocks 106 and 107 each defined a same-shaped `…Mutant`, git found the two bodies as
+// shared context and INTERLEAVED the blocks on merge.
+{
+  const TILL_RENDER = 'apps/web/app/(admin)/till/render.ts'
+  const TILL_VIEW = 'apps/web/app/(admin)/till/view.ts'
+  const TILL_MAPPING = 'apps/web/src/till/mapping.ts'
+  const PACKAGES_HANDLER = 'apps/web/app/(admin)/packages/handler.ts'
+  const TILL_QUERIES = 'packages/db/src/queries/till.ts'
+  const RECEIPT = 'packages/fixtures/src/till-receipt.ts'
+  const PACKAGE_SEED = 'packages/fixtures/src/package-seed.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+
+  const RENDER_SUITE = 'apps/web/src/till-render.test.ts'
+  const MAPPING_SUITE = 'apps/web/src/till-mapping.test.ts'
+  const SEED_SUITE = 'packages/fixtures/src/package-seed.test.ts'
+  const REGISTRY_SUITE = 'apps/web/src/routes/registry.test.ts'
+  const PORTS_SUITE = 'packages/harness/src/ports.test.ts'
+  const RECEIPT_SUITE = 'packages/fixtures/src/till-receipt.itest.ts'
+  const TILL_ITEST = 'apps/web/src/till.itest.ts'
+
+  const unitArgs = (file) => ['vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestArgs = (file, only) => [
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+    ...(only === undefined ? [] : ['-t', only]),
+  ]
+
+  /**
+   * Breaks one construct in one file and requires a named suite to reject it.
+   *
+   * `checkRejectedBy` and not a bare non-zero exit: a mutant can be rejected by an unrelated assertion while
+   * the one the case is about has quietly stopped matching, and the case then reports PASS for ever (ADR
+   * 0003). `rule` is a phrase from the assertion that is supposed to fire.
+   */
+  const tillMutant = (label, file, find, into, suiteArgs, rule) => {
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => {
+        checkRejectedBy(`till gate: ${label}`, runExpectingFailure('pnpm', suiteArgs), rule)
+      },
+    )
+  }
+
+  // 115a. Body text moved onto the decorative gold. The acceptance line names three surfaces no copy may sit
+  //       on, and one stylesheet serves all three till screens, so this is the one place it can be broken.
+  tillMutant(
+    'copy on the decorative gold is refused by the palette rule',
+    TILL_RENDER,
+    '  .absent { font-style: italic; }',
+    '  .absent { font-style: italic; background: var(--color-decor-gold); }',
+    unitArgs(RENDER_SUITE),
+    'is a decorative surface and carries no copy',
+  )
+
+  // 115b. A PHYSICAL side in the stylesheet. The mutant that matters most for the RTL acceptance line: a
+  //       physical side passes every text and substring assertion in the repository and fails only a geometry
+  //       measurement, so the cheap check has to exist as well.
+  tillMutant(
+    'a physical padding in the till stylesheet is refused',
+    TILL_RENDER,
+    '  .field { display: block; margin: 0 0 var(--space-5); }',
+    '  .field { display: block; margin: 0 0 var(--space-5); padding-left: var(--space-2); }',
+    unitArgs(RENDER_SUITE),
+    'mirrors for dir=rtl',
+  )
+
+  // 115c. A colour LITERAL in the page's own stylesheet, which is `pnpm colours`' rule restated where a reader
+  //       of the screen will look.
+  tillMutant(
+    'a hex literal in the till stylesheet is refused',
+    TILL_RENDER,
+    '  code { font-family: ui-monospace, monospace; }',
+    '  code { font-family: ui-monospace, monospace; color: #112233; }',
+    unitArgs(RENDER_SUITE),
+    'names no colour literal',
+  )
+
+  // 115d. The TRN printed as the stand-in instead of the absence. Brief rule 15's whole subject: a placeholder
+  //       on a screen is indistinguishable from a configured value.
+  tillMutant(
+    'printing the placeholder TRN instead of the absence is refused',
+    TILL_RENDER,
+    '        ? \'<span class="absent">not entered</span> <code>Y1-trn</code>\'',
+    "        ? '<span>TRN-PENDING-Y1-TRN</span>'",
+    unitArgs(RENDER_SUITE),
+    'data-field="trn" data-absent="1"',
+  )
+
+  // 115e. A label dropped from the document field list. The preview would print `taxPointDate` at a reviewer,
+  //       and answering Y11-vat-invoice has to fail HERE rather than adding a field nothing labels.
+  tillMutant(
+    'a document field with no label is refused, in both directions',
+    TILL_VIEW,
+    "  taxPointDate: 'Date of supply',\n",
+    '',
+    unitArgs(RENDER_SUITE),
+    'labels exactly the document fields core declares',
+  )
+
+  // 115f. The billable statuses widened to a state that is not money. `packages/db` may never import
+  //       `packages/core`, so the reader spells `'completed'` in SQL and this test is the only thing holding
+  //       the two lists equal — B-LIFE-01's table is the authority and docs/03 §2 the reason.
+  tillMutant(
+    'billing a status that does not emit revenue is refused',
+    TILL_VIEW,
+    "export const TILL_BILLABLE_STATUSES = ['completed'] as const",
+    "export const TILL_BILLABLE_STATUSES = ['completed', 'confirmed'] as const",
+    unitArgs(RENDER_SUITE),
+    'bills exactly the statuses core says emit revenue',
+  )
+
+  // 115g. The route's copy of the package open question changed. The route may not import `@berelax/fixtures`
+  //       (a devDependency of the app), so the id is spelled twice and a test is the only thing that can stop
+  //       the two drifting — which would leave a package on screen naming a question nobody has asked.
+  tillMutant(
+    'a package question id that drifts from the fixture is refused',
+    PACKAGES_HANDLER,
+    "export const FIXTURE_PACKAGE_OPEN_QUESTION = 'Y9-package-catalogue'",
+    "export const FIXTURE_PACKAGE_OPEN_QUESTION = 'Y9-package-policy'",
+    unitArgs(RENDER_SUITE),
+    'names the same package open question the fixture seeds',
+  )
+
+  // 115h. A drawdown state mislabelled. `fully used` reported as `part used` would put a balance with nothing
+  //       left on a list of money still owed, which is the one thing that report is opened for.
+  tillMutant(
+    'a mislabelled drawdown state is refused',
+    PACKAGES_HANDLER,
+    "  if (args.sessionsRedeemed >= args.sessionsTotal) return 'fully used'",
+    "  if (args.sessionsRedeemed > args.sessionsTotal) return 'fully used'",
+    unitArgs(RENDER_SUITE),
+    'names the four states the fixture salon seeds',
+  )
+
+  // 115i. The card's approval code dropped from the checkout mapping. That field is what a disputed card
+  //       payment is settled with, and it is the one a transcription loses most easily — which is the whole
+  //       reason the till's mapping is held EQUAL to the fixtures' rather than reviewed.
+  tillMutant(
+    'a checkout mapping that drops the tender reference is refused',
+    TILL_MAPPING,
+    '    amountFils: tender.amount.fils,\n    ...(tender.reference === undefined ? {} : { reference: tender.reference }),\n  }))\n\n  return {\n    posting,\n    tradingDate,',
+    '    amountFils: tender.amount.fils,\n  }))\n\n  return {\n    posting,\n    tradingDate,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same finaliseCheckout input',
+  )
+
+  // 115j. NET sent where the document wants the charged GROSS. Both figures exist on the same object, both are
+  //       money, and the document's own totals would still equal the sum of its lines — so nothing in
+  //       `packages/db` could refuse it.
+  tillMutant(
+    'a checkout mapping that states the net as the unit price is refused',
+    TILL_MAPPING,
+    '    unitGrossFils: charge.gross.fils,',
+    '    unitGrossFils: tax.net.fils,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same finaliseCheckout input',
+  )
+
+  // 115k. The package sale's balances paired by a reversed order. This is the defect ZG006 cannot see: both
+  //       shares still sum to the price and every count still matches, and one line's money is on another
+  //       line's entitlement.
+  tillMutant(
+    'a package-sale mapping that reorders the balances is refused',
+    TILL_MAPPING,
+    '  const balances: readonly PackageBalanceInput[] = options.lines.map((line, index) => {',
+    '  const balances: readonly PackageBalanceInput[] = [...options.lines].reverse().map((line, index) => {',
+    unitArgs(MAPPING_SUITE),
+    'produces the same sellPackage input',
+  )
+
+  // 115l. The redemption's released GROSS replaced by its net. 2050 would be drawn down by less than the
+  //       revenue recognised, and the entry would still balance because the VAT line absorbs the difference.
+  tillMutant(
+    'a redemption mapping that releases the net is refused',
+    TILL_MAPPING,
+    '      releasedFils: posting.releasedGross.fils,',
+    '      releasedFils: posting.net.fils,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same redeemPackage input',
+  )
+
+  // 115m. The gratuity dropped from the seeded receipt. The acceptance line names four line kinds and the
+  //       census is what makes "contains all four" a measurement rather than a `toContain`.
+  tillMutant(
+    'a seeded receipt with no gratuity is refused by name',
+    RECEIPT,
+    "        tipLine({ lineId: 'receipt-tip', gross: money(filsFrom(TILL_RECEIPT_TIP_FILS)) }),\n",
+    '',
+    itestArgs(RECEIPT_SUITE),
+    'missing tip',
+  )
+
+  // 115n. And the check itself made incapable of failing, which is the control 115m needs: a function that
+  //       never throws would satisfy every assertion about the four kinds.
+  tillMutant(
+    'a four-kinds check that cannot fail is refused',
+    RECEIPT,
+    '  if (missing.length > 0) {',
+    '  if (missing.length > 0 && census.service < 0) {',
+    itestArgs(RECEIPT_SUITE),
+    'the control: a basket missing any of the four kinds is refused by name',
+  )
+
+  // 115o. The provisional marker removed from the seeded package names. THE case for this unit: a name with no
+  //       marker is a plausible product, `is_placeholder_text` would no longer refuse it on a document, and a
+  //       reviewer looking at a screenshot could not tell it from a configured one (brief rule 15).
+  tillMutant(
+    'a seeded package name with no provisional marker is refused',
+    PACKAGE_SEED,
+    '    `${FIXTURE_PACKAGE_MARKER} ${shape.templateKey}: ${shape.sessions} sessions of ` +',
+    '    `${shape.templateKey}: ${shape.sessions} sessions of ` +',
+    unitArgs(SEED_SUITE),
+    'marks every name so the schema would refuse it on a document',
+  )
+
+  // 115p. And the marker check made incapable of failing, which is 115o's control.
+  tillMutant(
+    'a marker check that cannot fail is refused',
+    PACKAGE_SEED,
+    '  if (unmarked.length > 0) {',
+    '  if (unmarked.length > 0 && names.length < 0) {',
+    unitArgs(SEED_SUITE),
+    'the control: a plausible product name is refused by name',
+  )
+
+  // 115q. The expired shape's validity override removed. The seeded business-day range opens 2026-05-21 and
+  //       the frozen clock's today is 2026-09-18, so at the provisional six months nothing expires — and
+  //       `expired with a balance` is the one state that shows Y9-package-policy's retained answer doing
+  //       anything at all.
+  tillMutant(
+    'a seeded expired shape with no shortened validity is refused',
+    PACKAGE_SEED,
+    '    validityMonths: 3,',
+    '',
+    unitArgs(SEED_SUITE),
+    'names the four drawdown states',
+  )
+
+  // 115r. `requireIssuerSnapshot` removed from the till's mapping, so the placeholder TRN is no longer refused
+  //       before anything is composed. The screen would still refuse — the database's CHECK would see to that
+  //       — but as `refused_by_the_ledger` with a constraint name instead of naming Y1-trn, and a
+  //       half-composed document would have reached `finaliseCheckout` first. This case runs the M2 slice's
+  //       CONTROL, which drives the handler directly and therefore sees a source mutant with no rebuild.
+  tillMutant(
+    'a till mapping that does not refuse the placeholder TRN first is refused',
+    TILL_MAPPING,
+    '  const issuer = requireIssuerSnapshot(options.issuer)',
+    '  const issuer = options.issuer',
+    itestArgs(TILL_ITEST, 'the control: the same handler with the real issuer reader refuses'),
+    'the control: the same handler with the real issuer reader refuses',
+  )
+
+  // 115s. The issuer reader made to hide the placeholder. The screen would print `TRN-PENDING-Y1-TRN` as a
+  //       configured TRN, which is the failure brief rule 15 exists for — and the assertion it breaks reads
+  //       the ROW rather than a constant in the test, which is what makes that assertion worth anything.
+  tillMutant(
+    'an issuer reader that hides the placeholder is refused',
+    TILL_QUERIES,
+    '           is_placeholder_text(e.trn) as trn_is_placeholder',
+    '           false as trn_is_placeholder',
+    itestArgs(TILL_ITEST, 'prices a tip and a discount'),
+    'prices a tip and a discount',
+  )
+
+  // 115t. The band declared and then overlapped. An overlap is worse than a flake: the second `next start`
+  //       cannot bind, the suite's wait loop answers from the FIRST server, and the assertions run against
+  //       another worktree's build — green means nothing and red means nothing (brief rule 18).
+  tillMutant(
+    'a till band that overlaps another suite is refused',
+    PORTS,
+    '  till: { start: 12_400, width: 300 },',
+    '  till: { start: 12_200, width: 300 },',
+    unitArgs(PORTS_SUITE),
+    'overlaps',
+  )
+
+  // 115u. The registry entry's path changed, so the filesystem serves a route the registry does not declare.
+  //       `apps/web/src/routes/registry.ts` is in exact bijection with the tree, and a route with no entry is
+  //       a route nobody decided the indexing policy for.
+  tillMutant(
+    'a till route with no registry entry is refused',
+    REGISTRY,
+    "    id: 'till',\n    path: '/till',",
+    "    id: 'till',\n    path: '/till-unregistered',",
+    unitArgs(REGISTRY_SUITE),
+    'till',
+  )
+
+  // 115v. The `/packages` registry entry removed altogether, so the filesystem serves a route the registry
+  //       does not declare. The bijection is what makes "adding a route without an entry" a failing test
+  //       rather than an omission nobody sees.
+  //
+  //       **The ADMIN_GROUP_PREFIXES entries are deliberately NOT gated here, and that is a measurement
+  //       rather than an omission.** A case that removed `/till` from the prefix list was written first and
+  //       reported PASS: `/till` and `/till/cash-up` each declare `indexable: false`, and `NOINDEX_PATTERNS`
+  //       covers a non-indexable handler on its own path — which is what W-SITE-05 made the `indexable` field
+  //       mean, and why `/quick-book` sits under no prefix at all. So the two prefixes are consistency with
+  //       the other admin groups and nothing a test can make load-bearing; claiming otherwise with a case
+  //       that cannot fail would be worse than saying so.
+  tillMutant(
+    'a route on disk with no registry entry is refused',
+    REGISTRY,
+    "    id: 'packages',\n    path: '/packages',",
+    "    id: 'packages',\n    path: '/packages-unregistered',",
+    unitArgs(REGISTRY_SUITE),
+    'packages',
+  )
+
+  // 115w-115z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing the module, or a run that could not
+  //            reach PostgreSQL would all present as a block of passing cases.
+  for (const suite of [RENDER_SUITE, MAPPING_SUITE, SEED_SUITE, REGISTRY_SUITE, PORTS_SUITE]) {
+    const green = run('pnpm', unitArgs(suite))
+    check(`till gate: ${suite} passes unedited`, !green.failed, green.output)
+  }
+  {
+    const green = run('pnpm', itestArgs(RECEIPT_SUITE))
+    check(`till gate: ${RECEIPT_SUITE} passes unedited`, !green.failed, green.output)
+  }
+}
+
 // 116a-116z. (M-VAT-07) The VAT201 return: the mapping that must be ROWS, the box that must equal its own
 //            drill-down to the fils, and the arithmetic that must not exist.
 //
@@ -34353,6 +34714,487 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 119a-119z. (P-HR-09) Leave approval: every refusal shown to be about the thing it says it is about, and
+//            the boundary shown to be a property of the code rather than a promise.
+//
+//            The defects this unit is exposed to are all the same shape — an approval that goes through when
+//            it should not, leaving a plausible-looking record. A coverage check whose delta is computed the
+//            wrong way round, a conflict report that a reassignment silently empties, a leave period aligned
+//            to the calendar so the 01:30 in the session tail falls outside it: every one of them produces a
+//            screen that looks right and a therapist who is either bookable on their holiday or not bookable
+//            at all. So each case here mutates ONE decision and names the ONE test that has to notice.
+//
+//            Three of the mutations are ones this unit actually shipped and are marked. 119f is the one worth
+//            reading: the conflict report's `reassigned` arm originally said "the therapist is no longer the
+//            one on leave", which is true and useless — a reassignment makes the row stop matching the report
+//            altogether, so the label could never be produced and `leave_approval.conflicts_reassigned` was a
+//            figure that was always zero with nothing failing. The integration run found it; nothing else
+//            could have.
+//
+//            **119c, 119e, 119f, 119h, 119j and 119k run the integration suite and need a database.** They are
+//            the claims the pure suites cannot make — that the period the DATABASE holds covers the tail, that
+//            the availability read drops the therapist, that the report survives a reassignment, that the
+//            second of two concurrent approvals is refused by the coverage check — and all of them are about
+//            the write path. None mutates anything the built web application serves, so 104's warning about
+//            browser suites does not apply: `hr-leave-approval.itest.ts` imports the sources directly.
+{
+  const CORE = 'packages/core/src/hr/leave-approval.ts'
+  const REPO = 'packages/db/src/repositories/leave-request.ts'
+  const ELIGIBILITY = 'packages/db/src/repositories/eligibility.ts'
+  const MIGRATION = 'packages/db/migrations/0092_leave_approval.sql'
+  const RENDER = 'apps/web/app/(admin)/hr/leave/[id]/render.ts'
+
+  const PURE_SUITE = 'packages/core/src/hr/leave-approval.test.ts'
+  const SCAN_SUITE = 'packages/fixtures/src/hr-leave-approval.test.ts'
+  const ROWS_SUITE = 'packages/fixtures/src/hr-leave-approval.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/hr-leave-approval-render.test.ts'
+
+  const leaveUnitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const leaveRowsRun = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block rather than `…Mutant` or `…Fixture`, deliberately: blocks 106 and 107 both defined a
+   * helper called `…Mutant` with this exact shape, git found the two bodies as shared context and interleaved
+   * the blocks, and the merge had to rebuild both from whole sides. 113 records the same fix. A distinct name
+   * is all it takes.
+   */
+  const leaveApprovalRegression = (path, anchor, replacement, suite, runner = leaveUnitRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 119a. The coverage delta computed as an ABSOLUTE. Every segment short WITH the leave is reported as
+  //       caused by it, so an approval is refused for a shortfall that was there before anybody asked —
+  //       naming a segment the requester cannot do anything about, and making leave unapprovable on any
+  //       database whose `shift` table is empty, which is every seeded one.
+  checkRejectedBy(
+    'leave gate: a coverage refusal computed as an absolute rather than as a delta is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const known = new Set(preexisting.map(breachKey))',
+      '  const known = new Set([])',
+      PURE_SUITE,
+    ),
+    'reports a pre-existing breach rather than attributing it to the approval',
+  )
+
+  // 119b. The delta computed the other way round: the floor judged WITHOUT the leave subtracted from both
+  //       halves, so `caused` is always empty and the coverage check can never fire. The version that looks
+  //       like a tidy-up — one `validateRota` call instead of two — and it approves everything.
+  checkRejectedBy(
+    'leave gate: a coverage answer that never subtracts the leave is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const withLeave = validateRota({ ...rota, assignments: asRosteredShifts(after.presence) })',
+      '  const withLeave = validateRota({ ...rota, assignments: asRosteredShifts(presence) })',
+      PURE_SUITE,
+    ),
+    'refuses when the leave is what drops the floor below the minimum',
+  )
+
+  // 119c. The leave period stored over CALENDAR midnights instead of the trading session's bounds — the
+  //       plausible wrong implementation, and the one 0030 left the decision about. The 01:30 appointment in
+  //       the tail then falls outside the leave, so the therapist stays bookable for it on a day they are
+  //       away, and nothing on any screen says so.
+  //
+  //       Mutated in `leave-accrual.ts`, which is P-HR-08's file and this unit's dependency: the edit is
+  //       restored in a `finally` like every other, and it is the only place the decision is taken.
+  checkRejectedBy(
+    'leave gate: a leave period aligned to the calendar day rather than to the trading session is caught',
+    leaveApprovalRegression(
+      'packages/core/src/hr/leave-accrual.ts',
+      '    openingHours === undefined ? midnight(from) : tradingBounds(from, openingHours, zone).opensAt',
+      '    openingHours === undefined ? midnight(from) : midnight(from)',
+      PURE_SUITE,
+    ),
+    'contains 01:30 on the following calendar date',
+  )
+
+  // 119d. The conflict report's `holds_resources` predicate dropped, so a cancelled booking is listed as
+  //       something to resolve. The looser direction and the one that looks harmless: an operator is sent
+  //       looking for an appointment that no longer exists, and the approval will not commit until they
+  //       resolve it, which they cannot.
+  checkRejectedBy(
+    'leave gate: a conflict report that lists appointments holding no resources is caught',
+    leaveApprovalRegression(
+      REPO,
+      '      join appointment a on a.period && request.period and a.holds_resources',
+      '      join appointment a on a.period && request.period',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'excludes a cancelled appointment',
+  )
+
+  // 119e. The report widened to every therapist's appointments in the period, not just the one going on
+  //       leave. It then lists the whole diary, the approval never commits, and the first thing anybody does
+  //       is look for a way to switch the check off.
+  checkRejectedBy(
+    'leave gate: a conflict report that is not narrowed to the therapist on leave is caught',
+    leaveApprovalRegression(
+      REPO,
+      '             a.therapist_id = request.employee_id\n',
+      '             a.therapist_id is not null\n',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'excludes a cancelled appointment',
+  )
+
+  // 119f. The defect this unit shipped and the integration run found. `reassigned` decided by "the therapist
+  //       is no longer the one on leave" is true and unreachable: a reassignment makes the row stop matching
+  //       the report's own WHERE, so the arm never fires and `conflicts_reassigned` is a stored figure that is
+  //       always zero. The mutation puts the original reading back.
+  checkRejectedBy(
+    'leave gate: a reassigned conflict inferred from an absence rather than from the audit row is caught',
+    leaveApprovalRegression(
+      REPO,
+      "                  and h.reason = 'leave_approved'\n             ) then 'reassigned'",
+      "                  and h.reason = 'never_raised_by_anything'\n             ) then 'reassigned'",
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'resolves one by a P-HR-04 reassignment and one by an audited override',
+  )
+
+  // 119g. The approval committing while a conflict is unresolved. The refusal order is the whole of this
+  //       unit's first acceptance line, and the mutation is the one somebody writes to make a stuck screen
+  //       move: treat an unresolved conflict as a warning.
+  checkRejectedBy(
+    'leave gate: an approval that commits over an unresolved conflict is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (unresolved.length > 0) {',
+      '  if (unresolved.length > 99) {',
+      PURE_SUITE,
+    ),
+    'refuses while any conflict is unresolved',
+  )
+
+  // 119h. **ADR 0003's known-bad fixture for the availability block.** The leave subtraction removed from
+  //       `tp_net` in `eligibility.ts`, which is B-AVAIL-04's file and the one place the predicate lives. A
+  //       therapist on approved leave is then still offered, and the suite must fail naming the RULE —
+  //       `on_approved_leave` — rather than merely reporting that somebody was offered: a therapist excluded
+  //       for a credential or for gender would satisfy "not offered" while the leave predicate had stopped
+  //       working entirely.
+  checkRejectedBy(
+    'leave gate: the availability leave predicate removed is caught, by rule name',
+    leaveApprovalRegression(
+      ELIGIBILITY,
+      '             case when t.leave is null then r.rostered else r.rostered - t.leave end as net',
+      '             r.rostered as net',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'on_approved_leave',
+  )
+
+  // 119i. The delegation window ignored, so a named deputy may decide for ever. "Time-bounded" is the
+  //       acceptance line's own word, and a deputy whose cover ended last month approving today is the case
+  //       the bound exists for.
+  checkRejectedBy(
+    'leave gate: a delegation that is not time-bounded is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  const covering = live.find(\n    (delegation) => delegation.period.startsAt <= at && at < delegation.period.endsAt,\n  )',
+      '  const covering = live[0]',
+      PURE_SUITE,
+    ),
+    'an approval outside the window is refused',
+  )
+
+  // 119j. The coverage lock dropped. Two approvals for two DIFFERENT therapists on one day conflict on no
+  //       row, so without it both transactions read a floor that still holds the other therapist, both
+  //       coverage checks pass, and the floor ends up short with every check having said yes. The mutation
+  //       removes the `for update`, which leaves the statement syntactically fine and the race open — the
+  //       shape of the defect rather than a broken query.
+  checkRejectedBy(
+    'leave gate: two concurrent approvals left to a race rather than serialised is caught',
+    leaveApprovalRegression(
+      REPO,
+      '     order by trading_date\n       for update\n  `',
+      '     order by trading_date\n  `',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    // The case that measures the LOCK, and it names it: with the `for update` gone, nothing queues and both
+    // approvals commit. The rule string used to name a test that no longer exists — the case was rewritten
+    // when the previous version turned out to be measuring a connection handshake — and a stale rule string
+    // reports "exited non-zero but did not report", which is a gate case failing about a mutation it caught.
+    'waits for the coverage lock',
+  )
+  // 119j's own note: the suite it names starts both approvals with no stagger, deliberately. An earlier
+  // version slept 150 ms before the second, which let the first COMMIT first — so the second's read saw the
+  // committed leave whether or not a lock existed, and this case reported "exited zero" about a repository
+  // with the serialisation removed.
+
+  // 119k. The withdrawal leaving the approval live. `leave_approval_live` is where the predicate lives, for
+  //       `employee_approved_leave`'s reason (0030), and an approval that stayed live after the leave was
+  //       withdrawn shows a therapist as blocked after their holiday was cancelled — with availability
+  //       correctly restored beside it, so the two halves of the screen disagree.
+  //
+  //       Mutated as the READ rather than as the write, and that is the sharper version of the same defect:
+  //       `readLiveLeaveApproval` asking `leave_approval` instead of `leave_approval_live` is the `not
+  //       exists` forgotten, which is exactly what `employee_approved_leave` exists as a view to prevent
+  //       (0030). The first version of this case added a SQL COMMENT to the cancellation insert, which
+  //       changed nothing and reported FAIL about a repository that was fine — `withEditedFile`'s no-op
+  //       guard cannot catch that, because the edit does change bytes.
+  checkRejectedBy(
+    'leave gate: a withdrawal that does not clear what the approval created is caught',
+    leaveApprovalRegression(
+      REPO,
+      '      from leave_approval_live\n     where leave_request_id = ${leaveRequestId}::uuid',
+      '      from leave_approval\n     where leave_request_id = ${leaveRequestId}::uuid',
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'proves both halves',
+  )
+
+  // 119l. The approval taken on somebody's own request. A manager approving their own holiday is the one case
+  //       where holding `leave:approve` is not the question anybody is asking, and it is refused in code
+  //       rather than by a constraint — so the mutation is a one-line removal and nothing in the database
+  //       would catch it.
+  checkRejectedBy(
+    'leave gate: a self-approval permitted is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (approver.employeeId === requestEmployeeId) {',
+      '  if (approver.employeeId === undefined) {',
+      PURE_SUITE,
+    ),
+    'may still not approve their own leave',
+  )
+
+  // 119m. The two refusals collapsed into one, so a deputy whose window closed is told they may not approve
+  //       leave at all. The refusals are a CONTRACT — a caller branches on them — and a deputy sent to ask
+  //       for a permission instead of for an extension is the cost.
+  checkRejectedBy(
+    'leave gate: delegation_not_in_window collapsed into approver_not_authorised is caught',
+    leaveApprovalRegression(
+      CORE,
+      "    refusal: 'delegation_not_in_window',",
+      "    refusal: 'approver_not_authorised',",
+      PURE_SUITE,
+    ),
+    'refused DIFFERENTLY',
+  )
+
+  // 119n. The override role list widened. Y9-coverage's provisional answer names owner and manager; a
+  //       receptionist leaving an appointment standing inside approved leave is a decision about somebody
+  //       else's booking taken by somebody who may not take it. The scan suite holds the list against the
+  //       migration's own predicate in BOTH directions, so widening one side fails.
+  checkRejectedBy(
+    'leave gate: an override role list wider than the migration enforces is caught',
+    leaveApprovalRegression(
+      CORE,
+      "export const LEAVE_OVERRIDE_ROLES: readonly Role[] = Object.freeze(['owner', 'manager'])",
+      "export const LEAVE_OVERRIDE_ROLES: readonly Role[] = Object.freeze([\n  'owner',\n  'manager',\n  'receptionist',\n])",
+      SCAN_SUITE,
+    ),
+    'names an override role set the database also enforces',
+  )
+
+  // 119o. The same rule from the other side: the MIGRATION's predicate widened while the vocabulary stays.
+  //       This is the direction that catches a trigger relaxed in SQL and left alone in TypeScript, which is
+  //       the half a code review reads past.
+  checkRejectedBy(
+    'leave gate: a migration override predicate wider than the vocabulary is caught',
+    leaveApprovalRegression(
+      MIGRATION,
+      "  if new.actor_role not in ('owner', 'manager') then",
+      "  if new.actor_role not in ('owner', 'manager', 'receptionist') then",
+      SCAN_SUITE,
+    ),
+    'names an override role set the database also enforces',
+  )
+
+  // 119p. The override reason floor removed. A blank reason is indistinguishable from a conflict nobody
+  //       looked at, and the row is the only record that anybody did.
+  checkRejectedBy(
+    'leave gate: an override accepted with no written reason is caught',
+    leaveApprovalRegression(
+      CORE,
+      '  if (args.reason.trim().length < LEAVE_OVERRIDE_REASON_MINIMUM_LENGTH) {',
+      '  if (args.reason.trim().length < 0) {',
+      PURE_SUITE,
+    ),
+    'refuses a blank, whitespace or too-short reason',
+  )
+
+  // 119q. The source enumeration's per-symbol resolution replaced by a whole-package one. That is the
+  //       mutation that makes the transition claim meaningless without making it fail: following
+  //       `@berelax/core`'s `export *` barrel reaches `lifecycle/transitions.ts` from any file importing
+  //       anything at all, so the closure becomes the whole state machine — and the case in the scan suite
+  //       that asserts the walk did NOT reach it is what says so.
+  checkRejectedBy(
+    'leave gate: a transition enumeration that follows a whole barrel is caught',
+    leaveApprovalRegression(
+      SCAN_SUITE,
+      '  const reached: string[] = []\n  for (const name of site.names) {',
+      '  const reached: string[] = [...new Set([...index.values()].flat())]\n  for (const name of site.names) {',
+      SCAN_SUITE,
+    ),
+    'did NOT reach the lifecycle state machine',
+  )
+
+  // 119r. The enumeration's comment strip removed, so the prose explaining why this unit must not cancel an
+  //       appointment reads as the appointment being cancelled. The mirror of the mistake
+  //       `check-schema-conventions.mjs` records — reporting the word "timestamp" in a sentence about
+  //       timestamps — and it would report the approval path as a cancellation path.
+  checkRejectedBy(
+    'leave gate: a transition scan that reads comments as code is caught',
+    leaveApprovalRegression(
+      SCAN_SUITE,
+      "  return source.replace(/\\/\\*[\\s\\S]*?\\*\\//g, ' ').replace(/(^|[^:])\\/\\/[^\\n]*/g, '$1')",
+      '  return source',
+      SCAN_SUITE,
+    ),
+    'the strip is load-bearing',
+  )
+
+  // 119s. The `?role=` narrowing turned into a widening: `&&` becomes `||`, which is the one-character
+  //       version of the escalation — a marketer would be served the conflict report, which names a client
+  //       and a service.
+  //
+  //       Mutated in `@berelax/core` and run against the PURE suite, and the first version of this case is
+  //       why. It edited the ROUTE and ran the web suite, and reported "exited zero; nothing was rejected"
+  //       — because `next start` serves whatever `.next` was last built, so editing a route source changes
+  //       nothing an HTTP request can see. That is rule 17's warning arriving as a gate case that could
+  //       never fire. `/clients/[id]/flags` had already recorded the remedy: the ceiling and the narrowing
+  //       live in core, "so the property that matters — this can only NARROW — is proved by a pure test
+  //       rather than by serving the page. A ceiling whose only test needs a server is a ceiling somebody
+  //       removes without ever seeing it fail."
+  checkRejectedBy(
+    'leave gate: a ?role= narrowing that widens instead is caught',
+    leaveApprovalRegression(
+      CORE,
+      '    maySeeConflicts: claimed.maySeeConflicts && ceiling.maySeeConflicts,',
+      '    maySeeConflicts: claimed.maySeeConflicts || ceiling.maySeeConflicts,',
+      PURE_SUITE,
+    ),
+    // The CLAIMED direction, not the ceiling one, and the difference is worth stating: the ceiling holds all
+    // three capabilities, so `claimed || ceiling` never exceeds IT — the property that catches a disjunction
+    // is the one saying the answer is never wider than what the claimed role itself holds. Naming the
+    // ceiling case reported "exited non-zero but did not report" while two other cases were red.
+    'never wider than the CLAIMED role',
+  )
+
+  // 119t. The conflict table kept for a reader who may not see it, with only the wording changed. A render
+  //       that emptied the section would satisfy a check for the sentence while printing the customer, which
+  //       is why the render suite asserts the absence of the ROWS and of the id rather than the presence of
+  //       the wording.
+  checkRejectedBy(
+    'leave gate: a withheld report that still prints the rows is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '    view.access.maySeeConflicts\n      ? [',
+      '    true\n      ? [',
+      RENDER_SUITE,
+    ),
+    'withholds the whole report from a reader who may not see a booking',
+  )
+
+  // 119u. The period printed as a date instead of as two instants. The alignment is the whole subject of this
+  //       unit and it is invisible to anybody looking at "17 March" beside a conflict at 01:30 on the 18th —
+  //       which reads as a bug in the report rather than as the trading day crossing midnight.
+  checkRejectedBy(
+    'leave gate: a screen that prints a leave day as a date rather than as two instants is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '`<dt>Covers</dt><dd data-field="period">${safeText(view.startsAt)} to ${safeText(view.endsAt)}</dd>`,',
+      '`<dt>Covers</dt><dd data-field="period">${safeText(view.fromTradingDate)}</dd>`,',
+      RENDER_SUITE,
+    ),
+    'prints both ends of the period',
+  )
+
+  // 119v. The customer label manufactured when nobody has recorded one. `Customer 0042` is what the fixtures
+  //       package MINTS for a synthetic record, and generating the same shape for a real row makes an invented
+  //       label indistinguishable from a recorded one — brief rule 15 applied to a person.
+  checkRejectedBy(
+    'leave gate: an invented customer label is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '        ? `no name recorded · ${safeText(conflict.customerId)}`',
+      '        ? `Customer ${safeText(conflict.customerId).slice(0, 4)}`',
+      RENDER_SUITE,
+    ),
+    'names a customer nobody has named as unnamed',
+  )
+
+  // 119w. The sentence that approval never cancels a booking removed from the screen. The operator who cannot
+  //       find the cancel button is the person who asks for it, and the sentence is the answer to that
+  //       question rather than decoration — ADR 0041 is not on the screen.
+  checkRejectedBy(
+    'leave gate: a screen that does not say approval never cancels a booking is caught',
+    leaveApprovalRegression(
+      RENDER,
+      "'Approving leave never cancels a booking and never marks one a no-show: a customer learning '",
+      "'Resolve each conflict before approving. '",
+      RENDER_SUITE,
+    ),
+    'says on its face that approval never cancels a booking',
+  )
+
+  // 119x. The pre-existing shortfall folded into the caused breaches on the screen. A manager told that six
+  //       segments are short when this leave caused two of them goes looking for four shifts that are nothing
+  //       to do with it — and the refusal and the screen then disagree about what the approval did.
+  //
+  //       The first version of this case removed the sentence AFTER the one the assertion reads, so the
+  //       suite passed and the case reported FAIL about a render that was fine. The anchor now carries the
+  //       wording the test actually looks for.
+  checkRejectedBy(
+    'leave gate: a screen that attributes a pre-existing shortfall to the approval is caught',
+    leaveApprovalRegression(
+      RENDER,
+      '        `${view.preexistingBreachCount} segment(s) are already short without this leave. They are ` +',
+      '        `${view.preexistingBreachCount} more segment(s) are short. They are ` +',
+      RENDER_SUITE,
+    ),
+    'reports a pre-existing shortfall separately',
+  )
+
+  // 119y. The outbox key taken from something other than the row id. `outbox_event.idempotency_key` is UNIQUE
+  //       and `publishEvent` resolves a collision with `on conflict do nothing`, so a key that can repeat
+  //       silently drops the second event — and here the drop is turned into a refusal by
+  //       `event_not_enqueued`, which is what this case watches fire.
+  checkRejectedBy(
+    'leave gate: an outbox key that is not the row id is caught',
+    leaveApprovalRegression(
+      REPO,
+      'idempotencyKey: `leave.approved:${input.leaveRequestId}`,',
+      "idempotencyKey: 'leave.approved',",
+      ROWS_SUITE,
+      leaveRowsRun,
+    ),
+    'resolves one by a P-HR-04 reassignment and one by an audited override',
+  )
+
+  // 119z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scan that had stopped matching
+  //       would all report as twenty-five passing cases.
+  {
+    for (const suite of [PURE_SUITE, SCAN_SUITE, RENDER_SUITE]) {
+      const green = run('pnpm', leaveUnitRun(suite))
+      check(`leave approval: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const rows = run('pnpm', leaveRowsRun(ROWS_SUITE))
+    check(`leave approval: ${ROWS_SUITE} passes unedited`, !rows.failed, rows.output)
+  }
+}
+
 // 120a-120z. (W-SITE-10) The publication control plane: the lint that must be the profile's, the machine
 //            the DATABASE enforces, the hash that must be of the approved content, and the weight check
 //            that must measure something.
@@ -35141,6 +35983,604 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       `analytics gate control: ${name} passes unedited`,
       !clean.failed,
       `${name} failed with nothing broken, so every mutation case above proves nothing:\n${clean.output}`,
+    )
+  }
+}
+
+// 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
+//            event name that must not compile, the funnel that must not be dated on a calendar day, and
+//            the two gates that were widened so the taxonomy's purity is measured rather than asserted.
+//
+//            Seven units restate this vocabulary, so the cases are weighted towards the ONE failure that
+//            would not show up anywhere else: a stage or an event name spelled a second time. 124a, 124c
+//            and 124t are that, from three directions — the type refuses a near-miss, the registry refuses
+//            an undeclared name, and a repo-wide scan refuses a second enumeration. 124t is the only one
+//            of the three that can catch a unit which declares its own tuple and never imports ours.
+//
+//            The purity half is 124o-124r. `pnpm purity` read only `packages/core` until this unit, and
+//            the vocabulary had to leave `core` precisely because `packages/db` needs it and `db` may not
+//            import `core` — so the move that made it reachable also moved it out from under its own
+//            gate. `scripts/check-core-purity.mjs` now reads one directory outside `packages/core`, and
+//            124p's control is what proves the widening is that directory and not all of
+//            `packages/shared`, which nobody argued for.
+{
+  const TAXONOMY = 'packages/shared/src/analytics/taxonomy.ts'
+  const TAXONOMY_SUITE = 'packages/shared/src/analytics/taxonomy.test.ts'
+  const FUNNEL = 'packages/core/src/analytics/funnel.ts'
+  const FUNNEL_SUITE = 'packages/core/src/analytics/funnel.test.ts'
+  const LIFECYCLE = 'packages/core/src/lifecycle/transitions.ts'
+  const PURITY = 'scripts/check-core-purity.mjs'
+  const CORE_FIXTURE = 'packages/core/src/analytics/__gate_fixture__.ts'
+  const SHARED_FIXTURE = 'packages/shared/src/analytics/__gate_fixture__.ts'
+  const SHARED_OUTSIDE_FIXTURE = 'packages/shared/src/__gate_fixture__.ts'
+
+  // Named for this block. A helper called `unit` or `tsc` already exists in several others, and two
+  // helpers with one name in one generated slice is a redeclaration that fails before any case runs.
+  const afUnit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const afUnitFailing = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const afTsc = () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const afTscClean = () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const afPurity = () => run('node', [PURITY])
+  const afCruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  // --- the vocabulary is closed at the type level -----------------------------------------------
+  //
+  // 124a. A stage spelled `cta_clicked` must not compile. This is the whole of "a later unit cannot spell
+  //       a stage differently and still typecheck": `FunnelStage` is derived from the `FUNNEL_STAGES`
+  //       tuple, so a near-miss is a build error rather than a ninth bucket that is empty for ever.
+  //
+  //       It is not a case about TypeScript working. If the type were widened to `string` — the edit
+  //       somebody makes to get a dashboard compiling — the fixture would compile and this case would go
+  //       red, which is exactly the signal wanted.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { FunnelStage } from '@berelax/shared'",
+        "export const stage: FunnelStage = 'cta_clicked'",
+      ].join('\n'),
+      () => afTsc(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: a funnel stage spelled cta_clicked fails to compile',
+      result,
+      'cta_clicked',
+    )
+  }
+
+  // 124b. The control on 124a, and it is load-bearing: without it, a `FunnelStage` of `never` would pass
+  //       124a and reject the whole vocabulary too.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { FunnelStage } from '@berelax/shared'",
+        "export const stage: FunnelStage = 'cta_click'",
+      ].join('\n'),
+      () => afTscClean(),
+    )
+    check(
+      'afirst02 gate: and the correct spelling compiles, so 124a is about the spelling',
+      !result.failed,
+      `tsc rejected a correctly spelled stage, so 124a proves nothing:\n${result.output}`,
+    )
+  }
+
+  // 124c. An event name the taxonomy does not declare must not compile on the typed surface. The edge
+  //       (`parseAnalyticsEvent`) deliberately takes a `string`, because what a browser posts is a string;
+  //       every call site that knows its event at build time goes through `AnalyticsEventName` and the
+  //       schema registry, and this is that half of the acceptance line.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import { ANALYTICS_EVENT_SCHEMAS, type AnalyticsEventName } from '@berelax/shared'",
+        "export const name: AnalyticsEventName = 'conversion'",
+        "export const schema = ANALYTICS_EVENT_SCHEMAS['conversion']",
+      ].join('\n'),
+      () => afTsc(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: an event name outside the taxonomy fails to compile',
+      result,
+      'conversion',
+    )
+  }
+
+  // 124d. Its control, for 124b's reason.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import { ANALYTICS_EVENT_SCHEMAS, type AnalyticsEventName } from '@berelax/shared'",
+        "export const name: AnalyticsEventName = 'page_view'",
+        "export const schema = ANALYTICS_EVENT_SCHEMAS['page_view']",
+      ].join('\n'),
+      () => afTscClean(),
+    )
+    check(
+      'afirst02 gate: and a declared event name compiles, so 124c is about the name',
+      !result.failed,
+      `tsc rejected a declared event name, so 124c proves nothing:\n${result.output}`,
+    )
+  }
+
+  // --- adding a name is TWO obligations, and satisfying one must not satisfy the other ----------
+  //
+  // 124e. A sixth event name with no schema and no funnel decision must fail `tsc` in BOTH files. The
+  //       registry's `satisfies Record<AnalyticsEventName, ZodType>` is one obligation and
+  //       `COLLECTED_EVENT_FUNNEL`'s `Record` over the same union is the other: an event that is collected
+  //       and validated but mapped to nothing is a partition of rows no funnel query reads.
+  {
+    const sixthName = (text) =>
+      replaceOnce(
+        text,
+        "  'whatsapp_ref_shown',\n] as const",
+        "  'whatsapp_ref_shown',\n  '__gate_event__',\n] as const",
+      )
+    const result = withEditedFile(TAXONOMY, sixthName, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a sixth event name with no schema fails to compile',
+      result,
+      '__gate_event__',
+    )
+    check(
+      'afirst02 gate: and the failure names both the schema registry and the funnel mapping',
+      result.output.includes('taxonomy.ts') && result.output.includes('analytics/funnel.ts'),
+      `expected errors in both ${TAXONOMY} and ${FUNNEL}:\n${result.output}`,
+    )
+  }
+
+  // 124f. The second obligation on its own. Give the new name a schema and stop there: the funnel mapping
+  //       is still incomplete, so it must STILL fail — and the error must be the MAPPING's, not the
+  //       registry's. Without this case one entry in the registry would be enough to add an event nothing
+  //       has decided anything about.
+  {
+    const sixthNameWithSchema = (text) =>
+      replaceOnce(
+        replaceOnce(
+          text,
+          "  'whatsapp_ref_shown',\n] as const",
+          "  'whatsapp_ref_shown',\n  '__gate_event__',\n] as const",
+        ),
+        '  whatsapp_ref_shown: whatsappRefShownPayloadSchema,',
+        '  whatsapp_ref_shown: whatsappRefShownPayloadSchema,\n  __gate_event__: z.strictObject({}),',
+      )
+    const result = withEditedFile(TAXONOMY, sixthNameWithSchema, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a sixth event name WITH a schema still fails, on the funnel mapping',
+      result,
+      '__gate_event__',
+    )
+    check(
+      'afirst02 gate: and that failure is the mapping rather than the schema registry',
+      result.output.includes('analytics/funnel.ts') && !result.output.includes('taxonomy.ts'),
+      `expected the error to be in ${FUNNEL} alone:\n${result.output}`,
+    )
+  }
+
+  // 124g. A tenth appointment status must fail `tsc` naming the funnel mapping. This is what makes the
+  //       domain half of the contract a build failure rather than a review: `APPOINTMENT_STATUS_FUNNEL` is
+  //       a `Record` over the lifecycle's own union with no `default` branch, so a state added to the
+  //       machine cannot reach the funnel undecided.
+  {
+    const tenthStatus = (text) =>
+      replaceOnce(
+        text,
+        "  'rescheduled',\n] as const",
+        "  'rescheduled',\n  '__gate_status__',\n] as const",
+      )
+    const result = withEditedFile(LIFECYCLE, tenthStatus, () => afTsc())
+    checkRejectedBy(
+      'afirst02 gate: a tenth appointment status fails to compile',
+      result,
+      '__gate_status__',
+    )
+    check(
+      'afirst02 gate: and the funnel mapping is one of the files that refuses it',
+      result.output.includes('analytics/funnel.ts'),
+      `tsc rejected the status without naming ${FUNNEL}:\n${result.output}`,
+    )
+  }
+
+  // --- the derivations, each mutated away and watched to fail BY NAME ---------------------------
+  //
+  // 124h. A ninth funnel stage that nothing maps to must fail the reachability assertion. A stage in the
+  //       vocabulary with no producer is a bucket that is empty for ever, and a dashboard reading it
+  //       reports a 100% drop-off at a step no customer can perform.
+  {
+    const ninthStage = (text) =>
+      replaceOnce(text, "  'paid',\n] as const", "  'paid',\n  '__gate_stage__',\n] as const")
+    const result = withEditedFile(TAXONOMY, ninthStage, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a funnel stage nothing maps to is caught',
+      result,
+      'produces all eight, in funnel order',
+    )
+  }
+
+  // 124i. An exclusion reason removed from the vocabulary must fail the both-directions equality against
+  //       the lifecycle. The tempting version of this list is `['no_show']` — the one reason the
+  //       acceptance line names — and it works until the first cancelled booking, which then sits at
+  //       `confirmed` for ever and reads as a journey still in flight.
+  {
+    const withoutRescheduled = (text) =>
+      replaceOnce(text, "  'rescheduled',\n] as const", '] as const')
+    const result = withEditedFile(TAXONOMY, withoutRescheduled, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an exclusion reason dropped from the vocabulary is caught',
+      result,
+      'exactly the terminal statuses with completed removed',
+    )
+  }
+
+  // 124j. NO_SHOW mapped to no step at all. This is the acceptance line's row and the mutation somebody
+  //       makes while tidying: a no-show is not a funnel step, so why record one. Because a journey that
+  //       stops producing rows is indistinguishable from one still in flight — ADR 0018's argument about
+  //       ref-capture rate, one stage earlier.
+  {
+    const noShowIgnored = (text) =>
+      replaceOnce(
+        text,
+        "    no_show: Object.freeze({ kind: 'excluded', reason: 'no_show' }),",
+        "    no_show: Object.freeze({ kind: 'no_step', why: 'a no-show is not a funnel event at all' }),",
+      )
+    const result = withEditedFile(FUNNEL, noShowIgnored, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a NO_SHOW that produces no excluded reason is caught',
+      result,
+      'maps NO_SHOW to no stage and sets the excluded reason to no_show',
+    )
+  }
+
+  // 124k. A partial payment advancing the funnel to `paid`. The most consequential mutation in the unit:
+  //       `payment.recorded` fires for a deposit, `paid` is the signal pushed to GA4 and Meta, and a
+  //       funnel that converts on a deposit trains the ad platforms on money that has not arrived.
+  {
+    const anyPaymentPays = (text) =>
+      replaceOnce(
+        text,
+        '      return signal.settlesDocumentInFull',
+        "      return signal.settlesDocumentInFull || signal.source === 'payment'",
+      )
+    const result = withEditedFile(FUNNEL, anyPaymentPays, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a partial payment that reaches the paid stage is caught',
+      result,
+      'maps a payment that leaves the document outstanding to NO step',
+    )
+  }
+
+  // 124l. Every page view contributing a landing. The first bucket would become a count of PAGES rather
+  //       than of sessions, and every conversion rate below it would be divided by the wrong number —
+  //       which is a funnel that looks right and is wrong by a factor nobody can see.
+  {
+    const everyViewLands = (text) =>
+      replaceOnce(
+        text,
+        [
+          '    if (!event.payload.entry) {',
+          '      return {',
+          "        kind: 'no_step',",
+          "        why: 'a page view that is not the session entry contributes no landing; one session, one landing',",
+          '      }',
+          '    }',
+          '',
+        ].join('\n'),
+        '',
+      )
+    const result = withEditedFile(FUNNEL, everyViewLands, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a landing contributed by a non-entry page view is caught',
+      result,
+      'is NOT contributed by a later page view in the same session',
+    )
+  }
+
+  // 124m. The daytime gap bucketed on the calendar date. Trading runs 11:00-02:00, so between 02:00 and
+  //       11:00 an instant belongs to no trading date while web traffic carries on — and "just use the
+  //       calendar date" is the one-line fix that makes the funnel disagree with cash-up, the rota and
+  //       the journal for the nine hours either side of midnight. Which date it should be is
+  //       `Y5-funnel-gap-bucket`; this case is what stops the question being answered by accident.
+  {
+    const gapOnCalendarDate = (text) =>
+      replaceOnce(
+        text,
+        [
+          '    : {',
+          "        kind: 'outside_trading',",
+          '        reason: resolution.reason,',
+          '        calendarDate: resolution.calendarDate,',
+          '      }',
+        ].join('\n'),
+        "    : { kind: 'trading', tradingDate: resolution.calendarDate }",
+      )
+    const result = withEditedFile(FUNNEL, gapOnCalendarDate, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an instant in the daytime gap given a trading date is caught',
+      result,
+      'refuses to invent a trading date for an instant in the daytime gap',
+    )
+  }
+
+  // 124n. The runtime half of the unknown-name acceptance line, mutated away: the refusal replaced by a
+  //       permissive schema, which is what somebody does to stop a 422 appearing in the logs. `/api/collect`
+  //       is a write path exposed to the internet, so this is the difference between a counted refusal and
+  //       a raw partition filling with vocabulary no reporting query knows.
+  {
+    const acceptsAnything = (text) =>
+      replaceOnce(
+        text,
+        '  if (!isAnalyticsEventName(name)) throw new UnknownEventError(name)',
+        '  if (!isAnalyticsEventName(name)) return z.unknown()',
+      )
+    const result = withEditedFile(TAXONOMY, acceptsAnything, () => afUnitFailing(TAXONOMY_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: an unknown event name that is not rejected at runtime is caught',
+      result,
+      'throws UnknownEventError, carrying the name and the known set',
+    )
+  }
+
+  // --- purity: the gate had to be widened, so the widening itself needs a fixture ---------------
+  //
+  // 124o. A clock read in the taxonomy must fail `pnpm purity`. Before this unit that gate read
+  //       `packages/core` alone, so this fixture would have passed it — and the acceptance line "these
+  //       modules ... never read the clock" would have been measured nowhere (ADR 0002).
+  {
+    const result = withFixture(SHARED_FIXTURE, 'export const now = () => Date.now()', () =>
+      afPurity(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: purity rejects a clock read in the analytics taxonomy',
+      result,
+      'reading the clock',
+    )
+    check(
+      'afirst02 gate: and the violation names the file it was found in',
+      result.output.includes(SHARED_FIXTURE),
+      `purity failed without naming ${SHARED_FIXTURE}:\n${result.output}`,
+    )
+  }
+
+  // 124p. The scope control on 124o, and it is the case that keeps the CLAIM the size of the measurement.
+  //       The same fixture one directory up, in `packages/shared` proper, must NOT fail: this gate was
+  //       widened to the analytics tree and not to the whole package, because several modules there are
+  //       settings readers whose purity nobody has argued for, and a rule applied to code nobody examined
+  //       is how a gate acquires exceptions. If `packages/shared` is ever brought in deliberately, this
+  //       case goes red and says so.
+  {
+    const result = withFixture(SHARED_OUTSIDE_FIXTURE, 'export const now = () => Date.now()', () =>
+      afPurity(),
+    )
+    check(
+      'afirst02 gate: purity leaves the rest of packages/shared alone, as it says it does',
+      !result.failed,
+      `purity now reads more of packages/shared than it claims to:\n${result.output}`,
+    )
+  }
+
+  // 124q. The scoped half: a bare `Date` in the taxonomy is forbidden even with an argument, for the
+  //       reason the ledger and the till have the same rule. The trading day is resolved ONCE, from an
+  //       injected instant, so a `Date` here could only be a second opinion about which day an event
+  //       landed on. The control is the same code in `packages/core/src/analytics`, where the general
+  //       rules permit an argument-ful `Date` — without it this case would be satisfied by a gate that
+  //       banned `Date` everywhere, which would make `packages/core/src/time.ts` unwritable.
+  {
+    const dateFromAnArgument = 'export const at = (ms: number) => new Date(ms).getTime()'
+    const scoped = withFixture(SHARED_FIXTURE, dateFromAnArgument, () => afPurity())
+    checkRejectedBy(
+      'afirst02 gate: purity rejects a bare Date in the analytics taxonomy',
+      scoped,
+      'the taxonomy takes no date',
+    )
+    const general = withFixture(CORE_FIXTURE, dateFromAnArgument, () => afPurity())
+    check(
+      'afirst02 gate: and allows the same argument-ful Date in packages/core/src/analytics',
+      !general.failed,
+      `the scoped rule is leaking into packages/core, where an injected instant is legitimate:\n${general.output}`,
+    )
+  }
+
+  // 124r. The purity gate must refuse a ROOT that contributed no files, rather than printing a green tick
+  //       over it. This is the failure the widening introduced: a directory that is renamed or emptied
+  //       makes `walk` return nothing, the scan examines `packages/core` alone, and the summary still says
+  //       both trees are pure. ADR 0002 is the whole of why that is worse than a red run.
+  {
+    const rootThatHoldsNoTypeScript = (text) =>
+      replaceOnce(
+        text,
+        "const ANALYTICS_TAXONOMY = 'packages/shared/src/analytics'",
+        "const ANALYTICS_TAXONOMY = 'docs/runbooks'",
+      )
+    const result = withEditedFile(PURITY, rootThatHoldsNoTypeScript, () =>
+      runExpectingFailure('node', [PURITY]),
+    )
+    checkRejectedBy(
+      'afirst02 gate: purity refuses a root it examined no files under',
+      result,
+      'contributed no files to the purity scan',
+    )
+  }
+
+  // --- boundaries: the import half, which a global-scanning gate cannot see ---------------------
+  //
+  // 124s. An I/O import in the taxonomy must fail `pnpm boundaries` BY RULE NAME.
+  //       `shared-must-not-import-siblings` forbids the other first-party packages and says nothing about
+  //       a Node builtin, so until `analytics-taxonomy-must-be-pure` existed the tree with the strictest
+  //       purity requirement in the build was the only one with no import rule about it.
+  {
+    const result = withFixture(
+      SHARED_FIXTURE,
+      ["import { readFileSync } from 'node:fs'", 'export const illegal = readFileSync'].join('\n'),
+      () => afCruise(),
+    )
+    checkRejectedBy(
+      'afirst02 gate: an I/O import in the analytics taxonomy fails the boundary gate',
+      result,
+      'analytics-taxonomy-must-be-pure',
+    )
+    // And the control: zod is what the schemas are built from, so a rule that condemned it would ban the
+    // unit. Asserted on the rule NAME rather than the exit code, because an unreferenced fixture is also
+    // a `no-orphans` warning and a warning is not this rule firing.
+    const allowed = withFixture(
+      SHARED_FIXTURE,
+      ["import { z } from 'zod'", 'export const schema = z.string()'].join('\n'),
+      () => afCruise(),
+    )
+    check(
+      'afirst02 gate: and zod is not what the rule forbids',
+      !allowed.output.includes('analytics-taxonomy-must-be-pure'),
+      `the rule fired on a module importing zod alone, which would ban the taxonomy:\n${allowed.output}`,
+    )
+  }
+
+  // --- the one that matters most: the vocabulary is enumerated in exactly one place -------------
+  //
+  // 124t. No first-party TypeScript file outside the four that OWN the mapping enumerates the funnel stage
+  //       names. This is the defect the brief names as the one this build keeps paying for, and it is the
+  //       only one of the three anti-drift mechanisms that can catch a unit which declares its own tuple
+  //       and never imports `FUNNEL_STAGES` at all — the type system cannot see a list nobody assigns to a
+  //       `FunnelStage`.
+  //
+  //       WHAT THIS MEASURES, EXACTLY, because the claim must not be wider than the measurement: it counts
+  //       how many of the eight stage names appear in one file as QUOTED string literals, and flags a file
+  //       at four or more. It does not parse, so it cannot tell a tuple from a switch — and it deliberately
+  //       does not flag a `Record<FunnelStage, …>`, whose keys are unquoted, because a label map keyed on
+  //       the derived union is the CORRECT way for a later unit to name every stage.
+  //
+  //       The four owners are declared rather than inferred, for the reason scripts/check-gate-registry.mjs
+  //       declares its CI-only steps: "it is not in the list" is exactly the condition a drifting second
+  //       copy also satisfies. On the tree this was written against no other file reaches even four; the
+  //       highest is one.
+  {
+    const STAGE_NAMES = [
+      'landing',
+      'service_viewed',
+      'price_viewed',
+      'cta_click',
+      'booking_created',
+      'confirmed',
+      'attended',
+      'paid',
+    ]
+    const OWNERS = new Set([TAXONOMY, TAXONOMY_SUITE, FUNNEL, FUNNEL_SUITE])
+    const FLOOR = 4
+    const enumerations = () => {
+      const files = globSync('{packages,apps}/**/*.{ts,tsx}', {
+        exclude: (path) =>
+          path.includes('node_modules') || path.includes('/.next/') || path.includes('/dist/'),
+      })
+      // A scan that examined no files would report "no second list" about nothing (ADR 0002), so the
+      // count is returned and asserted rather than assumed.
+      const found = []
+      for (const file of files) {
+        if (OWNERS.has(file)) continue
+        const text = readFileSync(file, 'utf8')
+        const hits = STAGE_NAMES.filter(
+          (stage) => text.includes(`'${stage}'`) || text.includes(`"${stage}"`),
+        )
+        if (hits.length >= FLOOR) found.push(`${file} names ${hits.join(', ')}`)
+      }
+      return { scanned: files.length, found }
+    }
+
+    const live = enumerations()
+    check(
+      'afirst02 gate: the funnel stage vocabulary is enumerated only where it is owned',
+      live.found.length === 0,
+      `these files enumerate ${FLOOR} or more of the eight stage names and are not one of the four that ` +
+        `own the mapping — derive from FUNNEL_STAGES instead of restating it:\n  ${live.found.join('\n  ')}`,
+    )
+    check(
+      'afirst02 gate: and that scan read the tree rather than an empty list',
+      live.scanned > 1000,
+      `the stage-vocabulary scan matched only ${live.scanned} files, so its verdict is about nothing`,
+    )
+    // The known-bad fixture (ADR 0003). A module with its own copy of the tuple must be found, and it is
+    // found by the SAME code the live check runs — a second implementation here would be the very defect
+    // the case is about.
+    const planted = withFixture(
+      'packages/core/src/__gate_fixture__.ts',
+      [
+        'export const STAGES = [',
+        ...STAGE_NAMES.map((stage) => `  '${stage}',`),
+        '] as const',
+      ].join('\n'),
+      () => enumerations(),
+    )
+    check(
+      'afirst02 gate: the scan finds a second copy of the stage tuple',
+      planted.found.some((row) => row.includes('__gate_fixture__')),
+      `a module holding all eight stage names was not flagged, so the scan proves nothing:\n  ${planted.found.join('\n  ')}`,
+    )
+  }
+
+  // 124u. Every open question the taxonomy says it stands on is a row in docs/OPEN-QUESTIONS.md. A
+  //       provisional value carrying an id that names nothing is worse than no id: it reads as a question
+  //       somebody is tracking (brief rule 15).
+  {
+    const taxonomyText = readFileSync(TAXONOMY, 'utf8')
+    const declaration = taxonomyText.slice(taxonomyText.indexOf('ANALYTICS_OPEN_QUESTIONS = {'))
+    const declared = [...declaration.matchAll(/'(Y\d+-[a-z-]+)'/g)].map((match) => match[1])
+    const questions = readFileSync('docs/OPEN-QUESTIONS.md', 'utf8')
+    const missing = declared.filter((id) => !questions.includes(`| ${id} |`))
+    check(
+      'afirst02 gate: every open question the taxonomy declares is in OPEN-QUESTIONS.md',
+      declared.length >= 3 && missing.length === 0,
+      declared.length < 3
+        ? `only ${declared.length} id(s) were read out of ${TAXONOMY}, so this case examined almost nothing`
+        : `${missing.join(', ')} is declared by the taxonomy and absent from docs/OPEN-QUESTIONS.md`,
+    )
+    check(
+      'afirst02 gate: and the OPEN-QUESTIONS scan would not find an id nobody wrote',
+      !questions.includes('| Y5-funnel-gap-bucket-that-nobody-wrote |'),
+      'the scan matches an id nobody wrote, so it would pass for any claim at all',
+    )
+  }
+
+  // 124v. The zone assumed rather than taken as an argument (brief rule 7, ADR 0007). Asia/Dubai has no
+  //       DST, so "the zone never changes anything" is true of every instant until it is not — and the
+  //       default is the correct value, which is what makes this the mutation nobody notices.
+  //
+  //       It is also the case that caught the FIRST version of the suite's own zone test, which asserted
+  //       two instants whose bucket is identical in both zones and would therefore have passed against a
+  //       `funnelBucketFor` that ignored `input.zone` entirely. The suite now asserts one instant that
+  //       trades in Dubai and not in UTC and one that does the reverse, and this fixture is what holds it
+  //       to that.
+  {
+    const zoneIgnored = (text) =>
+      replaceOnce(
+        text,
+        'resolveTradingDate(input.occurredAt, input.hoursFor, input.zone ?? ASIA_DUBAI)',
+        'resolveTradingDate(input.occurredAt, input.hoursFor, ASIA_DUBAI)',
+      )
+    const result = withEditedFile(FUNNEL, zoneIgnored, () => afUnitFailing(FUNNEL_SUITE))
+    checkRejectedBy(
+      'afirst02 gate: a bucket that ignores the zone argument is caught',
+      result,
+      'reads the zone argument, on two instants where the zone changes the answer',
+    )
+  }
+
+  // 124w. The control every mutation above depends on: the two suites pass on this tree. A mutation test
+  //       whose base is red proves nothing about the mutation (ADR 0003), and nine of the cases in this
+  //       block are mutations.
+  {
+    const result = afUnit(TAXONOMY_SUITE, FUNNEL_SUITE)
+    check(
+      'afirst02 gate: the taxonomy and funnel suites pass on this tree',
+      !result.failed,
+      `the base is red, so the mutations above prove nothing:\n${result.output}`,
+    )
+    const purity = afPurity()
+    check(
+      'afirst02 gate: and pnpm purity passes over both trees it now reads',
+      !purity.failed && purity.output.includes('packages/shared/src/analytics'),
+      `purity did not report reading the analytics taxonomy:\n${purity.output}`,
     )
   }
 }
