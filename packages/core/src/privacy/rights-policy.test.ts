@@ -215,7 +215,18 @@ describe('the erasure rule registry', () => {
         // a row that is deleted would be a reason for keeping data that is not there.
         expect(rule.subjectReason, rule.key).toBeUndefined()
       }
-      expect(rule.registeredBy, rule.key).toBe('C-CRM-10')
+      // A real unit id, not a fixed one. C-CRM-10 wrote every rule in the registry and this pinned the
+      // field to its own name, which made the field decoration: `registeredBy` exists so that a later unit
+      // adding a table can say who classified it, and an assertion that only C-CRM-10 may appear means the
+      // next unit either lies about the attribution or deletes this line. W-SYS-11 was the first to hit it,
+      // adding `staff_credential` and `staff_session` — two tables the credential probe finds and no
+      // customer appears in.
+      //
+      // Still asserted, and on the shape rather than on a list of permitted units: a list would need
+      // editing by every unit that registers a rule, which is the same defect one level up.
+      expect(rule.registeredBy, rule.key).toMatch(
+        /^(?:[A-Z]-[A-Z]{2,5}-\d{2}|[A-Z]\d{2}|[A-Z]-[A-Z]\d)$/,
+      )
       if (rule.action === 'retain_statutory') {
         // A statutory retention names the PROFILE COLUMN the figure comes from, never a literal number, so
         // the years cannot go stale against the profile.
