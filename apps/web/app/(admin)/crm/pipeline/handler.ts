@@ -40,7 +40,7 @@ import {
  * `application/x-www-form-urlencoded` and is answered with a 303 back to the board carrying the outcome in
  * the query string, so the screen works with JavaScript off. One handler, one transaction, two envelopes.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the credentials
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the credentials
  * screen, the reassignment queue, the compliance calendar, the Messages inbox and the duplicate queue all
  * record. The actor is therefore the SURFACE and not a person: `Pipeline board`, stated rather than
  * invented, because `pipeline_stage_transition_actor_is_stated` refuses a placeholder and a plausible name

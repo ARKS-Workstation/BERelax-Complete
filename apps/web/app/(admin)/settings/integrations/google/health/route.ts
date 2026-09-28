@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import type { Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 import { googleHealthFragment } from './handler.ts'
 
 /**
@@ -17,7 +18,13 @@ import { googleHealthFragment } from './handler.ts'
  */
 export const dynamic = 'force-dynamic'
 
-export async function GET(): Promise<Response> {
+// `request` is taken solely for the guard: this fragment is parameterless and read nothing off it before
+// W-SYS-11. Next passes it to every handler, so adding the parameter changes no call site.
+export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const config = loadConfig()
   const sql = createConnection({ url: config.DATABASE_URL, max: 2 })
   try {

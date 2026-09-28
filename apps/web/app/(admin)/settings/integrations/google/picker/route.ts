@@ -25,6 +25,7 @@ import {
   type SearchConsoleProvider,
 } from '@berelax/providers/google'
 import { AppError, isAppError } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
  * The account and location picker: what this Google account can serve, and which resource it will.
@@ -42,7 +43,7 @@ import { AppError, isAppError } from '@berelax/shared'
  * consent route next door already takes, is covered by the `/settings` noindex prefix, and makes the picker
  * walkable today rather than after two other units land.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the consent
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the consent
  * route records, so it must not be deployed to a reachable environment before then: `POST` here chooses
  * which Google listing this business replies as. The actor recorded on the audit row says so rather than
  * inventing a person.
@@ -181,6 +182,10 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const connectionId = new URL(request.url).searchParams.get('connectionId')
     return await withSql(async (sql) => {
@@ -209,6 +214,10 @@ interface SelectionRequest {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const body = (await request.json().catch(() => ({}))) as SelectionRequest
     const connectionId = typeof body.connectionId === 'string' ? body.connectionId : null

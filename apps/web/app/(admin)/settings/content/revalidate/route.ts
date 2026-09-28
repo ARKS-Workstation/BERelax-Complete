@@ -5,6 +5,7 @@ import {
   type ContentChangeKind,
   runContentRevalidation,
 } from '../../../../../src/revalidate/content.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 
 /**
  * `POST /settings/content/revalidate` — the CMS publish loop's trigger.
@@ -33,6 +34,10 @@ interface RevalidateBody {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   let body: RevalidateBody
   try {
     body = (await request.json()) as RevalidateBody

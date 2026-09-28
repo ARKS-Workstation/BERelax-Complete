@@ -13,6 +13,7 @@ import { createCallLog } from '@berelax/providers/call-log'
 import { FailureScript } from '@berelax/providers/failure'
 import { createFakeGoogleOAuth, type GoogleOAuthProvider } from '@berelax/providers/google'
 import { AppError, isAppError, RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
  * The owner's Google consent, start and callback, on one URL.
@@ -25,7 +26,7 @@ import { AppError, isAppError, RECONNECT_SCREEN_PATH } from '@berelax/shared'
  * re-auth banner — is G-CONN-07 and G-CONN-08, and the `(admin)` route group this lives in has a
  * deliberately minimal root layout until W-SYS-01 builds the real admin shell.
  *
- * **This route is not authenticated yet.** There is no admin session until W-SYS-01, so it must not be
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, so it must not be
  * deployed to a reachable environment before then: anyone who could reach it could start a consent.
  * Starting one is harmless (it redirects to Google and sets a cookie); completing one requires an
  * authorization code Google only hands to the account that consented.
@@ -149,6 +150,10 @@ function problem(error: unknown): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const url = new URL(request.url)
   const isCallback = url.searchParams.has('code') || url.searchParams.has('error')
 

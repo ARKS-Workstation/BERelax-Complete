@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@berelax/auth": "workspace:*",
     "@berelax/clinical": "workspace:*",
     "@berelax/cms": "workspace:*",
     "@berelax/config": "workspace:*",

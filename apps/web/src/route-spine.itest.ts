@@ -2,6 +2,9 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CMS_ROBOTS_TAG, isCmsRoute } from '@berelax/cms'
+import { createConnection, type Sql } from '@berelax/db'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
+import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
 import {
   type CaptureTarget,
   captureFilename,
@@ -36,6 +39,7 @@ import {
   sampleParamsOf,
   samplePathFor,
 } from './routes/registry.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * W-SITE-01 — the route spine, proved against the running application.
@@ -72,6 +76,32 @@ import {
  * origin at module scope is what made a collision present as a bare `next start exited with 1`.
  */
 let BASE = ''
+/*
+  W-SYS-11 — this suite drives the ADMIN estate, which is now behind a session.
+
+  Every route under `app/(admin)` refuses a request with no live staff session, so the bare `fetch` calls
+  and browser contexts below would all answer 303 to `/login`. The principal is created by this suite and
+  removed in `afterAll`: no deployment seeds a staff credential (Y8-staff), deliberately, so a suite that
+  needs one makes its own. See `packages/fixtures/src/admin-principal.ts`.
+
+  `owner`, because these suites assert what the screens SHOW and a narrower role would refuse fields and
+  turn this file into a test of the matrix. What the matrix decides per role is asserted where it belongs:
+  `apps/web/src/session.itest.ts` and `packages/core`'s own suites.
+
+  No TOTP is enrolled and none is needed: the second factor is a LOGIN gate, and the fixture inserts the
+  session row directly rather than signing in. `session.itest.ts` is where the login path — and the refusal
+  of an owner with no factor — is proven.
+*/
+let adminPrincipal: FixturePrincipal | undefined
+let restoreAdminFetch: () => void = () => {}
+let restoreAdminBrowser: () => void = () => {}
+/**
+ * A connection of this suite's own, for the fixture principal and nothing else.
+ *
+ * Every other admin suite already had one; this file had no reason to touch the database until the estate
+ * needed a session. `max: 1` because it issues three statements in `beforeAll` and two in `afterAll`.
+ */
+let adminSql: Sql
 const APP_DIR = new URL('..', import.meta.url).pathname
 const SCREENS = join(APP_DIR, '..', '..', 'artifacts', 'screens', 'routes')
 
@@ -133,10 +163,31 @@ beforeAll(async () => {
     readyWithinMs: 60_000,
   })
   BASE = server.origin
+  // The session, before anything is fetched and before the browser is launched: `installAdminBrowserCookie`
+  // patches `chromium.launch`, so it has to run first to reach the browser this suite is about to make.
+  adminSql = createConnection({
+    url: process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? '',
+    max: 1,
+  })
+  adminPrincipal = await createFixturePrincipal(adminSql, { role: 'owner' })
+  const adminToken = adminPrincipal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
+  restoreAdminBrowser = installAdminBrowserCookie(chromium, {
+    origin: BASE,
+    name: ADMIN_SESSION_COOKIE,
+    token: adminToken,
+  })
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
 }, 180_000)
 
 afterAll(async () => {
+  restoreAdminFetch()
+  restoreAdminBrowser()
+  await adminPrincipal?.cleanup()
+  await adminSql?.end({ timeout: 5 })
   await browser?.close()
   await server?.stop()
 })

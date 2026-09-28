@@ -1,8 +1,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, createPostgresMessageStore, type Sql } from '@berelax/db'
-import { ARABIC_150, type SeededMessagingFixture, seedMessagingFixture } from '@berelax/fixtures'
+import {
+  ARABIC_150,
+  createFixturePrincipal,
+  type FixturePrincipal,
+  type SeededMessagingFixture,
+  seedMessagingFixture,
+} from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
 import {
   captureUntilStable,
   DETERMINISM_CSS,
@@ -11,6 +18,7 @@ import {
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * B-MSG-04 — the admin Messages inbox, driven against the built application.
@@ -46,6 +54,25 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * child's own explanation away and reported only that it had exited.
  */
 let BASE = ''
+/*
+  W-SYS-11 — this suite drives the ADMIN estate, which is now behind a session.
+
+  Every route under `app/(admin)` refuses a request with no live staff session, so the bare `fetch` calls
+  and browser contexts below would all answer 303 to `/login`. The principal is created by this suite and
+  removed in `afterAll`: no deployment seeds a staff credential (Y8-staff), deliberately, so a suite that
+  needs one makes its own. See `packages/fixtures/src/admin-principal.ts`.
+
+  `owner`, because these suites assert what the screens SHOW and a narrower role would refuse fields and
+  turn this file into a test of the matrix. What the matrix decides per role is asserted where it belongs:
+  `apps/web/src/session.itest.ts` and `packages/core`'s own suites.
+
+  No TOTP is enrolled and none is needed: the second factor is a LOGIN gate, and the fixture inserts the
+  session row directly rather than signing in. `session.itest.ts` is where the login path — and the refusal
+  of an owner with no factor — is proven.
+*/
+let adminPrincipal: FixturePrincipal | undefined
+let restoreAdminFetch: () => void = () => {}
+let restoreAdminBrowser: () => void = () => {}
 const SCREENS = new URL('../../../artifacts/screens', import.meta.url).pathname
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
@@ -113,6 +140,19 @@ beforeAll(async () => {
     },
   })
   BASE = server.origin
+  // The session, before anything is fetched and before the browser is launched: `installAdminBrowserCookie`
+  // patches `chromium.launch`, so it has to run first to reach the browser this suite is about to make.
+  adminPrincipal = await createFixturePrincipal(sql, { role: 'owner' })
+  const adminToken = adminPrincipal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
+  restoreAdminBrowser = installAdminBrowserCookie(chromium, {
+    origin: BASE,
+    name: ADMIN_SESSION_COOKIE,
+    token: adminToken,
+  })
   // The shared list, not a hand-written one: `--disable-skia-runtime-opts` and `--disable-lcd-text` are
   // what make the repeat capture below byte-identical, and this file used to launch without them. See
   // `packages/harness/src/determinism.ts`.
@@ -120,6 +160,9 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  restoreAdminFetch()
+  restoreAdminBrowser()
+  await adminPrincipal?.cleanup()
   await browser?.close()
   await server?.stop()
   await sql?.end({ timeout: 5 })

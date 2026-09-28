@@ -25,6 +25,8 @@ import {
   unconfirmedAssumptionRows,
   withUnitOfWork,
 } from '@berelax/db'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
+import { installAdminCookie } from '@berelax/harness/admin-session'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import type { Facts } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -32,6 +34,7 @@ import { buildFacts } from './facts/build.ts'
 import { localisedPath } from './i18n/locales.ts'
 import { CATALOGUE_ARTEFACTS, revalidationPathsFor } from './revalidate/catalogue.ts'
 import { siteOrigin } from './routes/alternates.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 import { priceCellFor, priceRowId, TREATMENT_QUESTIONS } from './treatments/content.ts'
 import { treatmentSitemapEntries } from './treatments/sitemap.ts'
 
@@ -71,6 +74,15 @@ import { treatmentSitemapEntries } from './treatments/sitemap.ts'
  * application answering for this one — is made there now, for all eleven suites rather than for six.
  */
 let BASE = ''
+/*
+  W-SYS-11 — this suite POSTs to `/settings/catalogue/revalidate`, which is an admin route.
+
+  That endpoint is under the `(admin)` group and now refuses a request with no live staff session. This file
+  is otherwise entirely about PUBLIC treatment pages; the only reason it needs a principal is that
+  publishing a catalogue change and then asserting the page reflects it goes through an admin endpoint.
+*/
+let adminPrincipal: FixturePrincipal | undefined
+let restoreAdminFetch: () => void = () => {}
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 if (!DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
@@ -228,6 +240,13 @@ beforeAll(async () => {
     readyWithinMs: 90_000,
   })
   BASE = server.origin
+  // The session, before anything is fetched: the revalidate POSTs below are admin requests.
+  adminPrincipal = await createFixturePrincipal(sql, { role: 'owner' })
+  const adminToken = adminPrincipal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
 
   /*
     The menu pages are revalidated before anything is asserted, and the reason is a trap worth recording.
@@ -245,6 +264,8 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  restoreAdminFetch()
+  await adminPrincipal?.cleanup()
   await server?.stop()
   await sql?.end({ timeout: 5 })
 })

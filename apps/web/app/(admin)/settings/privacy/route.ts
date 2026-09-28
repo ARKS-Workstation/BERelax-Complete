@@ -22,6 +22,7 @@ import {
   RIGHTS_SUPERVISORY_AUTHORITY_SETTING_KEY,
 } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import {
   type DataClassView,
   type PrivacyPageView,
@@ -44,7 +45,7 @@ import {
  * `classifyErasureCoverage` over the live catalogue, which is the same call `eraseSubject` makes before it
  * touches a row — and if the two disagreed, the page would say so by showing an unclassified count.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the routes under
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the routes under
  * `/settings` record. It is READ-ONLY — GET, no mutation — so there is no actor to record and none is
  * invented: `rights_request_actor_is_stated` refuses a placeholder, which is the constraint doing what a
  * comment could not.
@@ -83,6 +84,10 @@ interface RequestRow {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const readAtIso = new Date().toISOString()
     const view = await withSql(async (sql) => {

@@ -3,6 +3,7 @@ import type { Instant } from '@berelax/core'
 import { createConnection, type InboxFilter, listMessageInbox, type Sql } from '@berelax/db'
 import { isAppError, MESSAGE_STATUSES, type MessageStatus } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import { renderInboxHtml } from './render.ts'
 
 /**
@@ -24,7 +25,7 @@ import { renderInboxHtml } from './render.ts'
  * `text/html` is walkable today, is covered by the `/settings` noindex prefix, and is declared in
  * `apps/web/src/routes/registry.ts` as a handler.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the consent
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the consent
  * and picker routes next door record. It is read-only — GET, no mutation of any kind — so there is no
  * actor to record and none is invented: the only writer in this unit is the worker's DLR pass, whose
  * receipts carry the vendor that sent them. It must not be deployed to a reachable environment before
@@ -66,6 +67,10 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const config = loadConfig()
     const filter = parseFilter(new URL(request.url))

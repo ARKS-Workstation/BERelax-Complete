@@ -72,6 +72,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@berelax/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@berelax/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
@@ -268,6 +271,9 @@ importers:
 
   packages/fixtures:
     dependencies:
+      '@berelax/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@berelax/config':
         specifier: workspace:*
         version: link:../config

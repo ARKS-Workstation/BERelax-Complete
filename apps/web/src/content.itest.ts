@@ -19,6 +19,8 @@ import {
   seedCatalogue,
   seedPremises,
 } from '@berelax/db'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
+import { installAdminCookie } from '@berelax/harness/admin-session'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import type { Facts } from '@berelax/shared'
 import { getPayload, type Payload } from 'payload'
@@ -33,6 +35,7 @@ import { buildFacts } from './facts/build.ts'
 import { localisedPath, neutralPath } from './i18n/locales.ts'
 import { siteOrigin } from './routes/alternates.ts'
 import { documentRoutes, isParameterised, samplePathFor } from './routes/registry.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * W-SITE-07 — the CMS-driven routes and the link graph, against the built application and a real PostgreSQL.
@@ -74,6 +77,19 @@ import { documentRoutes, isParameterised, samplePathFor } from './routes/registr
  * application answering for this one — is made there now, for all eleven suites rather than for six.
  */
 let BASE = ''
+/*
+  W-SYS-11 — this suite POSTs to a REVALIDATE endpoint, which is an admin route.
+
+  `/settings/content/revalidate` and `/settings/catalogue/revalidate` are under the `(admin)` group, so both
+  now refuse a request with no live staff session. This file is otherwise entirely about PUBLIC pages; the
+  only reason it needs a principal at all is that publishing a change and then asserting the page reflects
+  it goes through an admin endpoint.
+
+  The principal is created here and removed in `afterAll`: no deployment seeds a staff credential
+  (Y8-staff), deliberately, so a suite that needs one makes its own.
+*/
+let adminPrincipal: FixturePrincipal | undefined
+let restoreAdminFetch: () => void = () => {}
 const DATABASE_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? ''
 if (!DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL is required — integration tests do not skip.')
@@ -285,6 +301,13 @@ beforeAll(async () => {
     readyWithinMs: 90_000,
   })
   BASE = server.origin
+  // The session, before anything is fetched: the revalidate POSTs below are admin requests.
+  adminPrincipal = await createFixturePrincipal(sql, { role: 'owner' })
+  const adminToken = adminPrincipal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
 
   // The CMS pages are regenerated from the rows as they are NOW, before anything is asserted, for the reason
   // the header gives: the ISR cache is on disk and an earlier run's copy is what this server would serve.
@@ -293,6 +316,8 @@ beforeAll(async () => {
 }, 240_000)
 
 afterAll(async () => {
+  restoreAdminFetch()
+  await adminPrincipal?.cleanup()
   // Every row this file created, removed — and then the pages it touched regenerated, so the ISR cache on
   // disk does not carry them into the next run. Both halves matter; see `republish`.
   for (const doc of created) {

@@ -82,7 +82,7 @@ import {
  * read from the appointment row rather than taken from the request, and the proposed start must be one of
  * the day's own quarter-hour targets: a caller cannot post a time the grid does not offer.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the credentials
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the credentials
  * screen, the reassignment queue, the compliance calendar and the Messages inbox all record — and this is
  * the first admin surface that writes, so the actor is the declared principal
  * `system:front_desk_diary` rather than a job title nobody signed in as.

@@ -2,6 +2,7 @@ import { loadConfig } from '@berelax/config'
 import { type Instant, parseReturnPath } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
 import { isAppError, RECONNECT_SCREEN_PATH } from '@berelax/shared'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { runTestConnection } from './handler.ts'
 
 /**
@@ -116,6 +117,10 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const origin = new URL(request.url).origin
   let fields: TestRequestFields = { connectionId: null, returnTo: null, wantsJson: true }
   try {

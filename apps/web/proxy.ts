@@ -46,6 +46,7 @@
  * is explicit.
  */
 import { type NextRequest, NextResponse } from 'next/server'
+import { requiresAdminSession } from './src/routes/admin-routes.ts'
 import {
   CANONICAL_REDIRECT_STATUS,
   canonicalPath,
@@ -54,6 +55,7 @@ import {
   withoutTrailingSlash,
 } from './src/routes/canonical.ts'
 import { ROBOTS_HEADER, robotsTagFor } from './src/routes/registry.ts'
+import { ADMIN_LOGIN_PATH, adminSessionTokenFrom, RETURN_TO_PARAM } from './src/session.ts'
 
 /**
  * Everything except Next's build output.
@@ -109,6 +111,49 @@ export function proxy(request: NextRequest): NextResponse {
     // One hop, because `canonicalPath` applies every rule at once and is idempotent: the destination
     // cannot itself need normalising, so there is no chain and no loop.
     return redirectTo(requested, canonical, CANONICAL_REDIRECT_STATUS)
+  }
+
+  /*
+    The admin estate's default deny (W-SYS-11).
+
+    This runs after canonicalisation, so the path compared is the one a route would actually be reached at
+    — comparing the requested spelling would let `/Settings/messages` past a check for `/settings`, and the
+    301 that follows would then deliver it.
+
+    ## What this is, and what it deliberately is not
+
+    It is NOT the authentication. The proxy cannot reach the database: `requiresAdminSession` and
+    `adminSessionTokenFrom` are pure, and this file must stay that way — see `src/session-cookie.ts` for
+    why a database driver cannot be imported here. So all this can see is whether a cookie is PRESENT, and
+    a syntactically valid cookie naming no row sails straight past it.
+
+    What it is, is the reason a route added later is refused BY DEFAULT. `requiresAdminSession` is a
+    predicate over the registry's own admin prefixes, so a new screen under `/hr` or `/settings` is refused
+    from the commit that creates it rather than from the commit that remembers to add a guard — and
+    `admin-guard.test.ts` proves the predicate matches the `(admin)` directory exactly, in both directions.
+
+    The authoritative check is `requireAdminPrincipal` in each handler, which resolves the cookie against a
+    row. Both layers exist because middleware-only authorisation is how CVE-2025-29927 worked; with the real
+    decision in the handler, a bypass of this edge reaches a route that refuses it anyway.
+    `session.itest.ts` asserts exactly that by driving every admin route with a forged-but-present cookie,
+    which this cannot refuse and the handler must.
+  */
+  if (
+    requiresAdminSession(canonical) &&
+    adminSessionTokenFrom(request.headers.get('cookie')) === null
+  ) {
+    const destination = new URL(ADMIN_LOGIN_PATH, requested.origin)
+    const returnTo = `${canonical}${requested.search}`
+    destination.searchParams.set(RETURN_TO_PARAM, returnTo)
+    // 303 rather than 307, so an unauthenticated POST to an admin route is not replayed as a POST to the
+    // login screen carrying the original body. `NextResponse.redirect` defaults to 307, which preserves the
+    // method — right for a canonicalisation and wrong here.
+    const redirect = NextResponse.redirect(destination, 303)
+    // A cached redirect to the login page would be served to the next reader, who may be signed in; and
+    // the same URL answers differently depending on the cookie, which is what `Vary` says.
+    redirect.headers.set('cache-control', 'no-store')
+    redirect.headers.set('vary', 'Cookie')
+    return redirect
   }
 
   const response = NextResponse.next()

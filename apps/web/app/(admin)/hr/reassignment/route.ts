@@ -3,6 +3,7 @@ import { instantFromIso, orderReassignmentQueue } from '@berelax/core'
 import { createConnection, readReassignmentQueue, type Sql } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import { type ReassignmentQueueEntryView, renderReassignmentQueueHtml } from './render.ts'
 
 /**
@@ -18,7 +19,7 @@ import { type ReassignmentQueueEntryView, renderReassignmentQueueHtml } from './
  * the one line that makes the SQL and the rule checkable against each other, and
  * `packages/fixtures/src/reassignment.itest.ts` asserts they agree over the same rows.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the
  * credentials screen next door and the two Google routes record. It is read-only — GET, no mutation of
  * any kind — so there is no actor to record and none is invented. Acting on the queue is a write with an
  * actor, a reason and a client gender no table holds, so it is deliberately not reachable from here.
@@ -45,6 +46,10 @@ function parseLimit(url: URL): number {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     const url = new URL(request.url)
     const limit = parseLimit(url)

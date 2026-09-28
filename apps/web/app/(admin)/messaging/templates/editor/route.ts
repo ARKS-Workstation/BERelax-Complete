@@ -4,6 +4,7 @@ import { createConnection } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import type { AdminChrome } from '../../../../../src/components/admin/google-reauth-banner.ts'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { previewFigures, renderEditorHtml, WORKED_EXAMPLE_BODY } from './render.ts'
 
 /**
@@ -85,6 +86,10 @@ function unavailable(error: unknown): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   try {
     return new Response(renderEditorHtml(WORKED_EXAMPLE_BODY, await chromeFor(request)), {
       headers: HTML_HEADERS,
@@ -95,6 +100,10 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const wantsJson = (request.headers.get('content-type') ?? '').includes('application/json')
   try {
     if (wantsJson) {

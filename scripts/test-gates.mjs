@@ -33565,6 +33565,291 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 117a-117z. (W-SYS-11) The admin session: the scan that must fire, the guard that must not be
+//            removable, and the manifest check that makes a fourth dangling deferral impossible.
+//
+//            This unit removed a workaround that 119 done units had been built around. Every admin route
+//            took its reader from `?employee=` and `?role=`, and every one of them said so in a comment
+//            deferring the session to W-SYS-01 — a unit that is `status: done` and built the Next.js app
+//            shell. So the cases below are not about a feature working; they are about the OLD shape being
+//            unable to come back, which is a different thing to test and needs fixtures that restore it.
+//
+//            117a and 117b are the repository-wide scan being seen to fire. The scan is the unit's first
+//            acceptance line and it is the check most likely to rot, because the way it regresses is not a
+//            deliberate restoration: it is a new admin screen copied from an old one with the query
+//            parameter carried over, because that was the shape every neighbour had for 119 units. 117b
+//            exists separately because the two routes this unit changed read their employee id through a
+//            local `required(url, 'employee')` helper — a scan for `searchParams.get` alone would have
+//            passed the repository while both of the routes it was written about still took a principal
+//            from the URL.
+//
+//            117c is the wiring assertion. Before this unit NOTHING under apps/web imported
+//            `@berelax/auth`, and that state was invisible for eleven units because it is the ABSENCE of a
+//            line and no test fails for an absence. Deleting the import must now fail.
+//
+//            117d and 117e are the guard. 117d removes it from one route, which is the ordinary
+//            regression; 117e removes it from the SECOND handler of a route that exports two, which the
+//            integration suite cannot see because it drives one method per route.
+//
+//            117f and 117g are the cookie's attributes — the `Secure` flag and the `SameSite=Lax` choice —
+//            and 117h is `safeReturnTo`, where the fixture is the naive `startsWith('/')` that accepts
+//            `//evil.example`. An open redirect on a login page is followed by somebody who has just typed
+//            a password.
+//
+//            117i and 117j are the durable half: the manifest check refusing a deferral to a `done` unit
+//            and to an id that does not exist. The second has no live violation to point at, which is
+//            exactly why it needs a fixture — a check that has never been seen to fail may not be a check.
+//            117k proves the id-shape pattern recognises every id the manifest actually declares, so a new
+//            id shape cannot slip past the scan by being unrecognised rather than by being valid.
+//
+//            117z is the control, and it is not a formality: every file edited above, UNEDITED, passes.
+{
+  const SESSION_MODULE = 'apps/web/src/session.ts'
+  const SESSION_COOKIE_MODULE = 'apps/web/src/session-cookie.ts'
+  const GUARD_SUITE = 'apps/web/src/admin-guard.test.ts'
+  const FLAGS_ROUTE = 'apps/web/app/(admin)/clients/[id]/flags/route.ts'
+  const CALENDAR_ROUTE = 'apps/web/app/(admin)/calendar/route.ts'
+  // A single-handler route, so an anchor on its one guard call is unique.
+  const COMPLIANCE_ROUTE = 'apps/web/app/(admin)/compliance/route.ts'
+  const MANIFEST = 'build/manifest.yaml'
+
+  // Distinct names, prefixed `session`, because two blocks once both defined a `…Mutant` of the same shape
+  // and git found the bodies as shared context and interleaved them — the rebuild that followed dropped a
+  // registration line. A local helper here is named for this block and nothing else.
+  const sessionUnit = (file) => ['vitest', 'run', '-c', 'vitest.config.ts', file]
+  const sessionManifestCheck = () => ['progress:check']
+
+  /** Break one shipped file, run the suite that should notice, and require it to notice BY NAME. */
+  const sessionEdit = (file, find, into, suite) =>
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => runExpectingFailure('pnpm', sessionUnit(suite)),
+    )
+
+  // 117a. The query parameter restored on a real admin route. This is the shape 119 units had, so the
+  //       fixture is not artificial — it is the repository as it was before this unit.
+  checkRejectedBy(
+    'admin session: a principal read from ?role= is caught',
+    sessionEdit(
+      FLAGS_ROUTE,
+      "    const direction: FlagsRenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'",
+      "    const direction: FlagsRenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'\n" +
+        "    const claimed = url.searchParams.get('role')",
+      GUARD_SUITE,
+    ),
+    'from the query string',
+  )
+
+  // 117b. The same defect through a local helper, which is how the two routes this unit changed actually
+  //       did it. A scan for `searchParams.get` alone passes this fixture, which is why there are two.
+  checkRejectedBy(
+    'admin session: a principal read through a required(url, ...) helper is caught',
+    sessionEdit(
+      FLAGS_ROUTE,
+      '    const { id: customerId } = await context.params',
+      '    const { id: customerId } = await context.params\n' +
+        "    const reader = required(url, 'employee')",
+      GUARD_SUITE,
+    ),
+    'reader from the URL',
+  )
+
+  // 117c. The wiring deleted. `@berelax/auth` unimported is the exact state this unit was created to end,
+  //       and it persisted for eleven units because nothing failed for it.
+  checkRejectedBy(
+    'admin session: apps/web no longer importing @berelax/auth is caught',
+    sessionEdit(
+      SESSION_MODULE,
+      "} from '@berelax/auth'",
+      "} from '@berelax/auth-unmounted'",
+      GUARD_SUITE,
+    ),
+    'imports @berelax/auth',
+  )
+
+  // 117d. The guard removed from one route. The ordinary regression, and the one a reviewer skims past
+  //       because the file still imports the guard.
+  //
+  //       `/compliance` and not `/calendar`: the calendar exports GET and POST, so the anchor appears twice
+  //       and `replaceOnce` refuses it — correctly, and it refused this case on its first run. That is the
+  //       guard brief rule 20 exists for, doing its job at authoring time instead of letting the case edit
+  //       whichever occurrence came first and then report PASS about a file still containing the other.
+  //       The two-handler case is 117e, which is about that on purpose.
+  checkRejectedBy(
+    'admin session: an admin route that stops calling the guard is caught',
+    sessionEdit(
+      COMPLIANCE_ROUTE,
+      '  const authorised = await guardAdminRoute(request)',
+      '  const authorised = { principal: null }',
+      GUARD_SUITE,
+    ),
+    'never calls the session guard',
+  )
+
+  // 117e. The guard removed from the SECOND handler of a route that exports two. `/calendar` exports GET
+  //       and POST, and its POST is the reschedule — the first admin surface that WRITES. The integration
+  //       suite drives one method per route, so only the per-handler count sees this.
+  {
+    const source = readFileSync(CALENDAR_ROUTE, 'utf8')
+    const guard = '  const authorised = await guardAdminRoute(request)'
+    const first = source.indexOf(guard)
+    const second = source.indexOf(guard, first + guard.length)
+    check(
+      'admin session: /calendar really does guard two handlers (the fixture below needs both)',
+      first !== -1 && second !== -1,
+      `first=${first} second=${second}`,
+    )
+    checkRejectedBy(
+      'admin session: a second handler left unguarded is caught',
+      withEditedFile(
+        CALENDAR_ROUTE,
+        // Not `replaceOnce`: this case is ABOUT there being two occurrences, so it removes the second
+        // deliberately. The presence check above is what stops it silently editing one.
+        (text) => text.slice(0, second) + text.slice(second + guard.length),
+        () => runExpectingFailure('pnpm', sessionUnit(GUARD_SUITE)),
+      ),
+      'every exported method needs its own call',
+    )
+  }
+
+  // 117f. `Secure` dropped from the session cookie. An admin session cookie sent in clear text is the whole
+  //       estate on the wire, and the drop is invisible in a browser on https.
+  checkRejectedBy(
+    'admin session: a session cookie without Secure is caught',
+    sessionEdit(SESSION_COOKIE_MODULE, "    'Secure',\n", '', GUARD_SUITE),
+    'Secure',
+  )
+
+  // 117g. `SameSite=Lax` turned into `Strict`, which looks stricter and breaks the Google consent round
+  //       trip: the operator returns from Google's screen on a cross-site navigation and arrives logged
+  //       out, mid-flow, having just granted access.
+  checkRejectedBy(
+    'admin session: SameSite=Strict on the session cookie is caught',
+    sessionEdit(SESSION_COOKIE_MODULE, "'SameSite=Lax'", "'SameSite=Strict'", GUARD_SUITE),
+    'SameSite',
+  )
+
+  // 117h. `safeReturnTo` reduced to the naive check. `//evil.example` is a protocol-relative URL a browser
+  //       resolves to another origin and it passes `startsWith('/')` — an open redirect on the one page
+  //       somebody has just typed a password into.
+  checkRejectedBy(
+    'admin session: a returnTo validator that accepts //host is caught',
+    sessionEdit(
+      SESSION_COOKIE_MODULE,
+      "  if (raw.startsWith('//') || raw.startsWith('/\\\\')) return '/'\n",
+      '',
+      GUARD_SUITE,
+    ),
+    'open redirect',
+  )
+
+  // 117i. The durable half, direction one: a deferral pointed at a unit that is already `done`. This has
+  //       happened four times in this build and cost this unit's existence.
+  checkRejectedBy(
+    'manifest: a deferral naming a `done` unit is caught',
+    withEditedFile(
+      MANIFEST,
+      (text) =>
+        replaceOnce(
+          text,
+          '  - id: B-M1\n',
+          "    - 'NOTE: gate fixture — deferred to W-SYS-01 for the admin session.'\n  - id: B-M1\n",
+        ),
+      () => runExpectingFailure('pnpm', sessionManifestCheck()),
+    ),
+    'whose status is `done`',
+  )
+
+  // 117j. Direction two: a deferral pointed at an id that is not a unit at all. There is no live violation
+  //       of this in the repository, which is precisely why it needs a fixture — a check that has never
+  //       been seen to fail may not be a check (ADR 0003). A prose reference to a unit id was written
+  //       before the unit existed once already in this build.
+  checkRejectedBy(
+    'manifest: a deferral naming a unit id that does not exist is caught',
+    withEditedFile(
+      MANIFEST,
+      (text) =>
+        replaceOnce(
+          text,
+          '  - id: B-M1\n',
+          "    - 'NOTE: gate fixture — deferred to W-SYS-99, which is not a unit.'\n  - id: B-M1\n",
+        ),
+      () => runExpectingFailure('pnpm', sessionManifestCheck()),
+    ),
+    'NOT a unit in this manifest',
+  )
+
+  // 117k. The id-shape pattern must recognise every id the manifest declares. Without this the scan could
+  //       report success over a whole FAMILY of ids it simply did not match — `F07` and `B-M1` are both
+  //       shapes a pattern written for `A-FIRST-01` misses, and a dangling deferral to one would be
+  //       invisible rather than refused. This is the ADR 0002 failure mode applied to the scanner itself.
+  //
+  //       The pattern is passed as an ARGUMENT rather than edited into the probe's source. The first
+  //       version built the control by `String.replace` on the probe text and produced an unterminated
+  //       Python string literal, so the control failed for a reason that had nothing to do with what it
+  //       measures — the same class of defect as a fixture whose anchor has gone stale.
+  {
+    const probe = [
+      'import re, sys, yaml',
+      "m = yaml.safe_load(open('build/manifest.yaml'))",
+      'shape = re.compile(sys.argv[1])',
+      "missed = [u['id'] for u in m['units'] if not shape.match(u['id'])]",
+      "print('MISSED=' + ','.join(missed))",
+      'sys.exit(1 if missed else 0)',
+    ].join('\n')
+
+    // The same pattern `ID_SHAPE` in scripts/progress.py declares, anchored. Kept in step by 117l below,
+    // which asserts this literal appears in that file — so the two cannot drift into the scan passing here
+    // and matching nothing there.
+    const shape = '^(?:[A-Z]-[A-Z]{2,5}-\\d{2}|[A-Z]\\d{2}|[A-Z]-[A-Z]\\d)$'
+
+    const result = run('python3', ['-c', probe, shape])
+    check(
+      'manifest: the deferral scan recognises every declared unit id shape',
+      !result.failed,
+      `the ID_SHAPE pattern in scripts/progress.py matches no id of these shapes: ${result.output}`,
+    )
+
+    // The control on the probe itself: a pattern matching nothing must be REPORTED, not pass. Without it
+    // the probe above could be broken in a way that reports success over an empty set.
+    const broken = run('python3', ['-c', probe, '^NOTHING$'])
+    check(
+      'manifest: the id-shape probe reports a pattern that matches nothing',
+      broken.failed && broken.output.includes('MISSED='),
+      broken.output,
+    )
+
+    // 117l. And the pattern this block asserts must be the one the check actually uses. Two copies of a
+    //       regexp is a future disagreement, and the direction it would disagree in is the silent one:
+    //       117k green against a pattern `progress.py` no longer has.
+    const progress = readFileSync('scripts/progress.py', 'utf8')
+    check(
+      'manifest: the id shape 117k proves is the one scripts/progress.py uses',
+      progress.includes(shape.slice(1, -1)),
+      `scripts/progress.py does not contain ${shape.slice(1, -1)}`,
+    )
+  }
+
+  // 117z. The control. Every file edited above, UNEDITED, passes — without it a stale anchor, a suite that
+  //       had stopped importing something, or a scanner that refused the clean tree would all read as a
+  //       row of passing cases.
+  {
+    const clean = run('pnpm', sessionUnit(GUARD_SUITE))
+    check(
+      'admin session: the unedited repository passes the guard suite',
+      !clean.failed,
+      clean.output,
+    )
+    const manifest = run('pnpm', sessionManifestCheck())
+    check(
+      'manifest: the unedited manifest has no dangling deferral',
+      !manifest.failed,
+      manifest.output,
+    )
+  }
+}
+
 // 118a-118z. (C-AUTO-07) The interpreter: the bound that must halt inside itself, the window it must not
 //             re-implement, and the four refusals the DATABASE makes about a run.
 //

@@ -18,6 +18,7 @@ import {
 } from '../../../../../../src/media/publish-gate.ts'
 import { appMediaStorage } from '../../../../../../src/media/storage.ts'
 import { appPayload, principalForRequest } from '../../../../../../src/payload/request-principal.ts'
+import { guardAdminRoute } from '../../../../../../src/session.ts'
 
 /**
  * `GET /settings/media/preview/{mediaId}` — the breakpoint preview.
@@ -67,6 +68,10 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ mediaId: string }> },
 ): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const { mediaId } = await context.params
   const principal = await principalForRequest(request)
   if (principal === null) {

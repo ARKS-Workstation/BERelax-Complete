@@ -36,7 +36,7 @@ import { AppError } from '@berelax/shared'
  * check is the cron's job and *Test connection* is G-CONN-07's; both run `checkConnection`, not a second
  * implementation of it.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, as the two routes beside
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, as the two routes beside
  * it record. It is read-only and names the connected Google account, which is a fact the owner already
  * knows — but it must not be deployed to a reachable environment before the shell exists.
  */

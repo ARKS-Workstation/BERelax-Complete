@@ -1405,6 +1405,35 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
 
   // --- not customer data at all -----------------------------------------------------------------
   rule({
+    key: 'public.staff_credential.*',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'A member of staff’s sign-in, not a data subject of the CRM — the same decision ' +
+      '`public.employee.display_name` records one entry below, for the table W-SYS-11 added to hold what ' +
+      'that person signs in with. A customer’s erasure request has nothing to erase here: the row holds ' +
+      'an employee id, a role, a scrypt hash and a TOTP seed, and no customer ever appears in it. ' +
+      'Reached by the CREDENTIAL probe on `totp_secret`, which is exactly why the entry has to exist: ' +
+      'the probe is right to find a credential column and the answer is that it is not the subject’s. ' +
+      'Staff records have their own retention under the labour obligations in docs/04 §7, and revoking ' +
+      'access is `delete from staff_credential` (docs/runbooks/admin-access.md), which is an offboarding ' +
+      'rather than an erasure.',
+    registeredBy: 'W-SYS-11',
+  }),
+  rule({
+    key: 'public.staff_session.*',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The admin session a member of STAFF holds, not a data subject’s. Reached by the credential probe on ' +
+      '`token_hash`. It cannot inherit a parent the way `booking_session.token_hash` does, and that ' +
+      'contrast is the point: a booking session belongs to a customer and is deleted with them, while ' +
+      'this one belongs to an employee and no customer erasure should touch it. Sessions end through ' +
+      'their own lifecycle — expiry, sign-out, or the CASCADE from `staff_credential` when access is ' +
+      'revoked.',
+    registeredBy: 'W-SYS-11',
+  }),
+  rule({
     key: 'public.employee.display_name',
     dataClass: 'not_customer_data',
     action: 'not_customer_data',

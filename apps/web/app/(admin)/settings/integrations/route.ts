@@ -3,6 +3,7 @@ import type { Instant } from '@berelax/core'
 import { createConnection } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../src/session.ts'
 import { renderIntegrationsPage } from './connection-card.ts'
 import { integrationsView } from './handler.ts'
 
@@ -26,6 +27,10 @@ import { integrationsView } from './handler.ts'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request): Promise<Response> {
+  // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
+  // fails closed, so it is safe as the first statement and outside this handler's own `try`.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
   const config = loadConfig()
   const sql = createConnection({ url: config.DATABASE_URL, max: 2 })
   try {

@@ -1,12 +1,5 @@
 import { loadConfig } from '@berelax/config'
-import {
-  CONTRAINDICATION_SESSIONLESS_CEILING_ROLE,
-  instantFromIso,
-  narrowContraindicationAccess,
-  ROLES,
-  type Role,
-  resolveContraindicationAccess,
-} from '@berelax/core'
+import { instantFromIso, resolveContraindicationAccess } from '@berelax/core'
 import {
   createConnection,
   readAssignedTherapistIds,
@@ -15,6 +8,7 @@ import {
 } from '@berelax/db'
 import { AppError, isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../../src/components/admin/google-reauth-source.ts'
+import { guardAdminRoute } from '../../../../../src/session.ts'
 import { type FlagsOutcome, type FlagsRenderDirection, renderFlagsPageHtml } from './render.ts'
 
 /**
@@ -33,38 +27,40 @@ import { type FlagsOutcome, type FlagsRenderDirection, renderFlagsPageHtml } fro
  * only query against a clinical table is the view's own, which runs as the view's owner because it is
  * declared `security_invoker = false`.
  *
- * ## `?role=` can only NARROW, and that is what makes it safe to take from a query
+ * ## The reader comes from the SESSION, and the receptionist ceiling has come off (W-SYS-11)
  *
- * There is no admin session until W-SYS-01, exactly as every route under `/compliance`, `/hr`, `/settings`
- * and `/clients` records. `?employee=` is the same shape the intake route takes and is safe there for a
- * reason that does not transfer: that read is refused by the DATABASE without a step-up grant, so naming
- * somebody else buys nothing. A role is different — a role IS the permission — so taking one from a query
- * would be an escalation with a query string.
+ * This route used to take `?employee=` and `?role=` from the query string, because there was no admin
+ * session — and it was safe only because the claimed role was intersected with a receptionist ceiling in
+ * `@berelax/core`, which holds `clinical_flags:read` and not `clinical_note:read`. No query string could
+ * unlock the detail behind a marker, and the comment here promised that "when the session lands, the
+ * ceiling comes off and `role` and `employee` come from it".
  *
- * So the role is used to narrow and never to widen. The decision is taken for the claimed role and then
- * intersected with {@link CEILING_ROLE}'s, which holds `clinical_flags:read` and not `clinical_note:read`.
- * Every consequence follows from that one line:
+ * That is this change, and the one thing that must not happen while making it is for a narrowing to become
+ * a widening. It does not, and the reason is worth stating precisely, because "the ceiling was removed"
+ * sounds exactly like the defect:
  *
- *   - `?role=therapist` does not unlock the detail, because the ceiling refuses it.
- *   - `?role=therapist` still has to be ASSIGNED to see the flags, because that half comes from the
- *     database rather than from the query, and a narrowing this route cannot undo.
- *   - `?role=marketer` is refused everything, which is the claimed role narrowing the ceiling.
+ *   - The ceiling existed because the role was **claimed**. A role is the permission, so taking one at face
+ *     value from a query string would have been an escalation with a query string, and intersecting it with
+ *     a fixed ceiling was what made that impossible.
+ *   - The role is now **authenticated**: it comes from `staff_credential` by way of a live `staff_session`,
+ *     reached from an opaque 32-byte cookie that carries no payload for an attacker to edit. So the
+ *     narrowing is replaced by authentication, not by nothing.
+ *   - Keeping the ceiling would now be the defect in the other direction: an assigned therapist holds
+ *     `clinical_note:read` legitimately, and a receptionist ceiling would refuse them their own permission
+ *     for ever — a screen that lies about the matrix.
  *
- * When the session lands, the ceiling comes off and `role` and `employee` come from it. Nothing else
- * changes, which is the point of taking them as arguments now.
+ * The property that replaces it is **the query string cannot change the answer**, and it holds structurally
+ * rather than by intersection: nothing here reads `role` or `employee` from the URL at all.
+ * `apps/web/src/session.itest.ts` asserts it the only way that means anything — by appending
+ * `?role=owner&employee=<somebody else>` to an authenticated receptionist's request and requiring the
+ * response to be byte-for-byte identical.
+ *
+ * `@berelax/core` keeps `narrowContraindicationAccess` and `CONTRAINDICATION_SESSIONLESS_CEILING_ROLE`,
+ * which this route no longer calls. They are C-CRM-09's, they are pure, they have their own tests and gate
+ * case 111o proves the narrowing fires; deleting another unit's tested primitive to tidy up after this one
+ * is not this unit's business.
  */
 export const dynamic = 'force-dynamic'
-
-/**
- * The widest reader this page will serve until there is a session.
- *
- * Both the ceiling and the narrowing live in `@berelax/core`, not here, so the property that matters — this
- * can only NARROW — is proved by a pure test rather than by serving the page. A ceiling whose only test
- * needs a server is a ceiling somebody removes without ever seeing it fail.
- */
-const CEILING_ROLE: Role = CONTRAINDICATION_SESSIONLESS_CEILING_ROLE
-
-const isRole = (value: string): value is Role => (ROLES as readonly string[]).includes(value)
 
 /**
  * The mirror of the intake route's guard, and it exists because this page's central claim is falsifiable.
@@ -112,37 +108,24 @@ async function withSql<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
   }
 }
 
-const required = (url: URL, name: string): string => {
-  const value = url.searchParams.get(name)?.trim() ?? ''
-  if (value.length === 0) {
-    // A TypeError, because the error branch below maps it to 400: this is the caller's request being
-    // incomplete rather than a failure to read.
-    throw new TypeError(
-      `?${name}= is required. A clinical marker is shown to somebody, and there is no default reader.`,
-    )
-  }
-  return value
-}
-
 export async function GET(
   request: Request,
   context: { readonly params: Promise<{ readonly id: string }> },
 ): Promise<Response> {
+  // The session BEFORE anything else, for the reason the intake route one directory along records: with the
+  // guard inside `withSql` an unauthenticated request could be answered by a parameter check first, and a
+  // 400 is not a refusal. Authentication precedes request validation.
+  const authorised = await guardAdminRoute(request)
+  if ('response' in authorised) return authorised.response
+  const { principal } = authorised
+
   try {
     const url = new URL(request.url)
     const { id: customerId } = await context.params
-    const employeeId = required(url, 'employee')
-    const claimedRole = url.searchParams.get('role')?.trim() ?? CEILING_ROLE
-    if (!isRole(claimedRole)) {
-      // Deny by default, including for an unknown role STRING — `canReadFieldGroup`'s lesson from P-HR-01,
-      // one layer up. A 400 rather than a silent fall back to the ceiling: falling back would serve a page
-      // to a caller whose role nobody recognised, and the caller would never learn their role was a typo.
-      throw new TypeError(
-        `?role=${claimedRole} is not a role this system knows (${ROLES.join(', ')}). An unrecognised ` +
-          'role is refused rather than treated as the narrowest one, so a typo cannot be mistaken for a ' +
-          'permission decision.',
-      )
-    }
+    // `?dir=rtl` is the ONLY query parameter this route reads, and it is a presentation axis rather than a
+    // permission: it mirrors the layout so the direction half of the accessibility matrix can be audited
+    // without inventing an Arabic admin surface. `role` and `employee` are deliberately not read here or
+    // anywhere below — see the header.
     const direction: FlagsRenderDirection = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'
 
     const html = await withSql(async (sql) => {
@@ -152,10 +135,14 @@ export async function GET(
         request,
       })
       const assignedTherapistIds = await readAssignedTherapistIds(sql, customerId)
-      const access = narrowContraindicationAccess(
-        resolveContraindicationAccess({ role: claimedRole, employeeId, assignedTherapistIds }),
-        resolveContraindicationAccess({ role: CEILING_ROLE, employeeId, assignedTherapistIds }),
-      )
+      // One decision, for the authenticated role and the authenticated employee. No intersection with a
+      // ceiling, because there is no claimed role left to narrow — see the header for why that is not the
+      // widening it resembles.
+      const access = resolveContraindicationAccess({
+        role: principal.role,
+        employeeId: principal.employeeId,
+        assignedTherapistIds,
+      })
 
       // Not read at all when the flags are refused. A refused reader must not cause a query whose timing or
       // whose error could tell them whether there is a row, and there is nothing this page could do with
@@ -168,8 +155,8 @@ export async function GET(
         chrome,
         customerId,
         direction,
-        role: claimedRole,
-        employeeId,
+        role: principal.role,
+        employeeId: principal.employeeId,
         access,
         outcome,
       })

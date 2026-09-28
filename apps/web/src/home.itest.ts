@@ -9,6 +9,8 @@ import {
   readPublicTherapists,
   type Sql,
 } from '@berelax/db'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
+import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { encodeRendition } from '@berelax/media'
 import type { CropName, DerivativeFormat } from '@berelax/media/ladders'
@@ -37,6 +39,7 @@ import { HOME_COPY_EN } from './home/copy-en.ts'
 import { HERO_DEMO_ASSET, heroDemoMedia } from './media/hero-demo-asset.ts'
 import { GALLERY_ASSETS } from './media/home-gallery.ts'
 import { appMediaStorage, repositoryRoot } from './media/storage.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * W-SITE-04 — the home page, in a browser, because most of what this unit claims is not readable off source.
@@ -82,6 +85,22 @@ import { appMediaStorage, repositoryRoot } from './media/storage.ts'
  * application answering for this one — is made there now, for all eleven suites rather than for six.
  */
 let BASE = ''
+/*
+  W-SYS-11 — this suite POSTs to a REVALIDATE endpoint, which is an admin route.
+
+  `/settings/content/revalidate` and `/settings/catalogue/revalidate` are under the `(admin)` group, so both
+  now refuse a request with no live staff session. This file is otherwise entirely about PUBLIC pages; the
+  only reason it needs a principal at all is that publishing a change and then asserting the page reflects
+  it goes through an admin endpoint.
+
+  The principal is created here and removed in `afterAll`: no deployment seeds a staff credential
+  (Y8-staff), deliberately, so a suite that needs one makes its own.
+*/
+let adminPrincipal: FixturePrincipal | undefined
+let restoreAdminFetch: () => void = () => {}
+let restoreAdminBrowser: () => void = () => {}
+/** A connection of its own, so the principal exists before this hook's first admin POST. */
+let adminSql: Sql
 const ROUTE = '/'
 const ROUTE_AR = '/ar'
 
@@ -326,6 +345,29 @@ beforeAll(async () => {
   })
   BASE = server.origin
 
+  /*
+    The session, and it has to be established HERE — before the revalidate POST a dozen lines down.
+
+    `/settings/content/revalidate` is an admin route, so that POST needs a cookie, and it happens at the very
+    top of this hook. This suite's own `sql` is opened later in the hook, so the principal gets a connection
+    of its own rather than moving another unit's statement: the first placement of this block followed that
+    `sql` and the POST answered with the LOGIN PAGE, which surfaced as
+    `SyntaxError: Unexpected token '<' ... is not valid JSON` from `revalidated.json()` — a message that
+    names neither the session nor the order.
+  */
+  adminSql = createConnection({ url: DATABASE_URL, max: 1 })
+  adminPrincipal = await createFixturePrincipal(adminSql, { role: 'owner' })
+  const adminToken = adminPrincipal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
+  restoreAdminBrowser = installAdminBrowserCookie(chromium, {
+    origin: BASE,
+    name: ADMIN_SESSION_COOKIE,
+    token: adminToken,
+  })
+
   // Revalidate, then read. See this file's header: the prerendered HTML was built from the database as it was
   // during `next build`, and two suites that run before this one write rows this page reads.
   const revalidated = await fetch(`${BASE}/settings/content/revalidate`, {
@@ -344,6 +386,7 @@ beforeAll(async () => {
   homeHtml = await fetchHtml(ROUTE)
 
   sql = createConnection({ url: DATABASE_URL, max: 4 })
+
   therapists = await readPublicTherapists(sql)
   reviews = await readPublicReviews(sql)
 
@@ -351,6 +394,10 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  restoreAdminFetch()
+  restoreAdminBrowser()
+  await adminPrincipal?.cleanup()
+  await adminSql?.end({ timeout: 5 })
   await browser?.close()
   await sql?.end({ timeout: 5 })
   await server?.stop()
