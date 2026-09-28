@@ -42,6 +42,7 @@ a decision the table does not list.
 | [0039](0039-the-admin-session-is-an-opaque-token.md) | The admin session cookie carries 32 random bytes and no role; the role is reached by join on every request, and no deployment seeds an account | — |
 | [0040](0040-flow-interpreter-idempotency-and-one-window.md) | The interpreter owns no window; its idempotency key is a unique constraint; its bounds live on the run | — |
 | [0042](0042-publication-is-refused-at-the-permission-layer-and-in-the-database.md) | Publication is refused at the permission layer and in the database, never by a prompt | — |
+| [0044](0044-a-filed-vat-return-is-a-snapshot-not-a-query.md) | A filed VAT return is a snapshot of bytes with a hash over exactly those bytes, signed by two different people; a correction is a new version | — |
 
 ## Writing one
 

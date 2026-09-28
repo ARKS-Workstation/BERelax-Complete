@@ -6380,7 +6380,7 @@ units:
       Sign-off requires two different users in the accountant or owner role, and an amendment is a new version
       with a reason, never an edit.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F07
@@ -6401,11 +6401,157 @@ units:
       content hash exactly
     - reviewer sign-off is denied to the receptionist and therapist roles by deny-by-default and permitted
       to accountant and owner, asserted for all four
+    - 'NOTE: migration 0095_vat_return.sql and SCHEMA_VERSION = 95. 88, 92 and 94 are held by units in flight
+      in other worktrees, so 0095 follows 0093 on disk; gate case 90a walks the migrations that EXIST rather
+      than consecutive integers, so the held numbers cost nothing and none of them is renumbered into a gap.
+      SCHEMA_VERSION tracks the NEWEST migration on disk rather than this unit''s number, so if a higher one
+      lands first the integrator sets it to that. Private SQLSTATEs ZY051-ZY057 were taken from the allocated
+      band ZY051-ZY060; ZY058-ZY060 are left FREE rather than taken and unused. The CLASS no longer identifies
+      a file — 0085 holds ZY001-ZY008, 0089 ZY009-ZY010 and 0091 ZY011-ZY014 — so a refusal is identified by
+      all five characters, and gate case 122z asserts every code this migration raises is inside the band.'
+    - 'NOTE: the figures are stored as the canonical BYTES and read back through VIEWS, and that is the one
+      decision here worth arguing with. vat_return.snapshot_json holds exactly what
+      canonicaliseVat201WorkingPapers() produced, content_hash = encode(sha256(convert_to(snapshot_json,
+      ''UTF8'')), ''hex'') is a CHECK (the same value vat201ContentHash() computes in TypeScript over the same
+      bytes), and vat_return_box_figure / vat_return_not_fileable_reason are views over that column which
+      touch NO ledger relation. A box TABLE was written first and rejected: a second statement of a figure
+      drifts, nothing in SQL can prove two copies agree, and the copy that disagrees is the one a screen reads
+      while the hash still verifies the other. It also needed three rules the view needs none of — a refusal
+      for a row appended to a sealed return in a later transaction, one for a figure that is not the figure in
+      the hashed bytes, and one for a snapshot committed with no rows at all. The cost is that a view carries
+      no index, which is nothing at quarterly volume where every read names one id, and would not be
+      acceptable for anything with a real row count. Seven scalar columns ARE duplicated between the row and
+      the bytes, deliberately, and two CHECKs compare each against its own value inside the snapshot so the
+      duplication cannot drift.'
+    - 'NOTE: how "the snapshot stores the figures, not a recipe" is PROVEN rather than asserted, and why the
+      suite reopens a closed period to do it. packages/db/src/services/vat-return-signoff.itest.ts snapshots a
+      closed month, then deletes its OWN period_lock, posts a second cash sale into the month, closes it again,
+      and requires the stored hash and every stored figure not to move — with the control that the REGENERATED
+      paper''s hash does move, and by exactly the second sale''s tax named as a figure, because "the figures
+      did not move" is also what a ledger that did not move looks like. The reopen is by hand because nothing
+      the application offers can move the ledger under a closed period (ZL002 refuses a posting, and
+      postDatedCorrection reverses into the first OPEN period) and ADR 0026 makes a reopen a migration — which
+      is exactly the point: the one route by which this could happen is a sanctioned migration the build
+      expects, and if the snapshot re-derived, every return already filed against that period would silently
+      restate itself with the hash recomputed and the signatures still attached. Verified from the other side
+      as well: the view was temporarily replaced with one joining vat201_box_total() and the case went red on
+      the figures (26000/1300 against 20000/1000), so it is a check that has been seen to fail.'
+    - 'NOTE: the GENERATING CODE VERSION is two columns and neither is a number anybody typed. format_version
+      is the canonical form''s own tag from the paper (vat201-wp1), and engine_signature is
+      vat201_engine_signature() — the sha256 of pg_get_functiondef() over the seven SQL functions that compute
+      a VAT201 figure, read out of the catalogue inside the same statement that stores it. It raises ZY056 when
+      the catalogue holds a different number of functions than the list names, because renaming one would leave
+      the signature a hash of six definitions out of seven: ADR 0002 in one line, in the one column whose job
+      is to differ when the code differs. Gate probe 122r exercises it by renaming vat201_box_line inside a
+      rolled-back transaction, which works because DDL is transactional. The seven are the functions that
+      compute a FIGURE; vat201_mapping_is_complete() and vat201_measure_matches_the_account() are deliberately
+      excluded because they are refusals and compute nothing, so rewording one would change a signature without
+      changing an answer.'
+    - 'NOTE: preparer and reviewer are two different people refused in the DATABASE, in two layers that are not
+      copies of each other. unique (return_id, signatory_user_id) is the storage layer — it holds during a
+      restore with triggers off and cannot be satisfied by editing a row, because the table is append-only —
+      and ZY052 (SamePersonSignOff, the name the acceptance line asks for) fires FIRST from a BEFORE INSERT
+      trigger and names the person and the capacity they already signed in, which 23505 naming an index cannot.
+      The same pairing guards the ROLE: a CHECK against vat_return_signing_roles() plus ZY053 carrying the role
+      and the permitted set. The signatory''s display name and role are SNAPSHOTTED beside their id (0026''s
+      argument, publication_approval''s shape) and there is no foreign key to a staff table, because the record
+      of a signature outlives the record of the person — so a later rename cannot rewrite who signed.'
+    - 'NOTE: vat_return_signing_roles() is a FUNCTION and not a literal inside the CHECK, so the permitted set
+      can be READ from outside the constraint. packages/fixtures/src/vat-return-signoff.itest.ts reads it out
+      of the database and requires it to equal the roles core grants vat_return:prepare, for all eight roles
+      individually plus both vacuity floors (exactly 2 permitted, exactly 6 denied) — and asserts that the
+      CHECK''s own pg_get_constraintdef names the function, because a readable list that nothing enforced would
+      agree with core and refuse nobody. That pair test is in fixtures because packages/db may never import
+      packages/core, so nothing else in the repository can compare the two. The db suite drives all eight roles
+      through signOffVatReturn against a real return: ZY053 for the six denied, acceptance for accountant and
+      owner. That is the acceptance line "asserted for all four", widened to all eight, because deny-by-default
+      means the denied list is the complement of the permitted one and naming four of eight leaves the other
+      four unexamined.'
+    - 'NOTE: "an unsigned return cannot be marked final or exported" is enforced on a READ as well as a write,
+      which a privilege cannot express and a TypeScript guard would only promise for the callers that came
+      through it. ZY055 comes from a BEFORE INSERT trigger on vat_return_finalisation and from
+      vat_return_for_filing(), and both read vat_return_sign_off_state() — the ONE reader of "is this signed",
+      which is periodStatusOn''s arrangement for "is this date closed" and for the same reason. The base tables
+      stay readable deliberately: a preparer has to see the figures they are about to sign, and a sign-off that
+      cannot see what it signs is worse than none. What is guarded is the door labelled FILING. The enumeration
+      the acceptance line asks for is VAT_RETURN_CONSUMERS, compared against the module''s REAL export list in
+      the itest, so an export added and not classified fails — and the two that require sign-off are asserted to
+      be exactly finaliseVatReturn and vatReturnForFiling, so a third arriving without its own behavioural case
+      fails there rather than passing silently. The one-way Zoho export itself is deferred to M-VAT-09, which
+      owns it and reads vat_return_for_filing(); a VAT return SCREEN is deferred to M-VAT-12, whose
+      closed-month report is the nearest surface and which depends on this unit.'
+    - 'NOTE: a snapshot may not make an unfileable return look fileable, and that is a CHECK rather than a
+      service guard: vat_return_fileable_only_when_nothing_in_it_refuses_filing reads the HASHED BYTES, so
+      fileable = true is impossible while the snapshot carries a notFileableReasons entry or a box marked
+      isProvisional. Every box is provisional today ([UNVERIFIED] Y11-vat201-boxes) and Y11-tax-agent records an
+      FTA-registered agent''s review as not optional, so the honest answer is always false and the row says why
+      — the reasons are snapshotted with their open-question ids, not recomputed. The itest asserts the refusal
+      over the REAL bytes of its own snapshot with fileable flipped in both the column and the JSON, so the
+      columns-agree CHECK is not what answers.'
+    - 'NOTE: closed_period_id is a plain column and NOT a foreign key to period_lock, which is P-HR-07''s
+      releasable-pin test rather than a shortcut: ask whether the CHILD can be deleted to release the pin. A
+      period_lock row CAN be deleted — journal.itest.ts, period-close.itest.ts, gate block 98 and this unit''s
+      own suite all remove their own to be re-runnable — and a vat_return row can be deleted by nobody, so a
+      RESTRICT reference from one would pin every lock it names for ever and make all four suites unable to
+      clean up after themselves. The lock is provenance here; the EVIDENCE is trial_balance_hash, which is
+      period_trial_balance_hash()''s and needs no row to stay true. Note also that there is deliberately no
+      foreign key from the snapshotted box numbers to vat201_box: answering Y11-vat201-boxes renumbers those
+      rows, and a cascade would rewrite a signed return while a RESTRICT would block the answer. After the
+      numbering is confirmed, old and new returns describe different forms, which is the truth.'
+    - 'NOTE: every sign-off and every finalisation needs an audit_event in the SAME transaction, checked at
+      COMMIT by a deferrable initially deferred constraint trigger (ZY057) — 0081''s ZW003 and 0093''s ZZ004
+      shape, for their reason: an audit row written afterwards in a second transaction is not the same
+      guarantee, because the signature can commit and the audit can fail and the only evidence a named person
+      signed would be the row they signed. The outbox events key on the ROW ID and never on period_id
+      (packages/db/src/outbox-keys.test.ts): two versions of one period, or two capacities on one return, would
+      share a key and the second event would be dropped by on conflict do nothing.'
+    - 'NOTE: the external tax agent''s review is NOT stored by this unit and no placeholder for it was added.
+      The provisional value above splits Y11-tax-agent into an internal sign-off — which this unit builds — and
+      the agent''s own review, which is an OWNER-SIDE step against an open question. The shape it would take
+      here is a third capacity value plus a role outside F07''s set, and adding one now would be a vocabulary
+      with no writer: C-AUTO-04''s recorded argument for declining exactly that, and brief rule 15. So
+      docs/OPEN-QUESTIONS.md carries the provisional value on the Y11-tax-agent row (it read "—" before this
+      unit, which contradicted docs/12 §1.5), and the migration that adds the capacity is the one that arrives
+      with the answer.'
+    - 'NOTE: files beyond the four listed. ADDED: packages/db/migrations/0095_vat_return.sql,
+      packages/fixtures/src/vat-return-signoff.itest.ts (the PAIR suite, which the listed files cannot be: the
+      permitted-role list has to be compared with core''s matrix and packages/db may not import packages/core)
+      and docs/adr/0044-a-filed-vat-return-is-a-snapshot-not-a-query.md. EDITED: packages/db/src/index.ts (the
+      export block, the ledger paragraph for 95, SCHEMA_VERSION = 95 and the single allocation note),
+      packages/db/src/schema/index.ts, scripts/test-gates.mjs (block 122a-122z, forty-two cases, placed after
+      120a-120z and before 79a-79k), docs/adr/README.md, docs/OPEN-QUESTIONS.md (the Y11-tax-agent provisional
+      value) and packages/core/src/tax/vat201.ts (ONE clause: M-VAT-07 said the agent''s review "is recorded by
+      M-VAT-08''s sign-off", which this unit has made untrue — the sign-off records the INTERNAL review). NO
+      port band was claimed and packages/harness/src/ports.ts is untouched: this unit starts no server, and
+      apps/web/src/test-ports.test.ts fails a band that is declared and not used, so taking the allocated
+      13_700 would have been a failing check rather than a reservation.'
+    - 'NOTE: defects found in this unit''s own work, and what found each. (1) A probe asserting the application
+      role holds no DELETE named the return through a TEMPORARY VIEW created by the owner, and berelax_app was
+      refused THAT — so it reported 42501 while measuring nothing about the grant. Found by reading the probe
+      output, and it is the dominant defect class arriving inside the case written to catch it; the probes now
+      name tables directly. (2) Three probes reported the wrong constraint: one aimed at the hash CHECK used a
+      different period_id and hit the period-columns CHECK, one aimed at the empty-boxes CHECK left
+      closed_period_id disagreeing, and six reported ZY057 because the probe setup wrote a signature with no
+      audit row and `set constraints all immediate` fired the deferred trigger at the end of every case. All
+      three were visible only because the probe harness prints the SQLSTATE AND the constraint name. (3) The
+      audit-row mutant was anchored on ZY057 and reported "did not report ZY057" about a suite that had failed
+      for exactly the right reason: the mutation makes six cases fail, and detailExcerpt elides the middle of
+      the output where the message was. It anchors on a failing TEST NAME now, which vitest always prints in
+      the head summary — M-TILL-10''s recorded defect 8, arriving by a different route. (4) The immutability
+      case asserted ZY051 on an UPDATE of a signature without first asserting a signature EXISTS; a BEFORE
+      trigger fires per row, so a statement matching nothing succeeds, and under mutant 122z(iv) the case
+      reported "expected ZY051, got RESOLVED" and sent the reader after a missing trigger when what was missing
+      was the row. It states the precondition now.'
     files:
     - packages/db/src/schema/vat-return.ts
-    - packages/db/migrations/00xx_vat_return.sql
+    - packages/db/migrations/0095_vat_return.sql
     - packages/db/src/services/vat-return-signoff.ts
     - packages/db/src/services/vat-return-signoff.itest.ts
+    - packages/fixtures/src/vat-return-signoff.itest.ts
+    - packages/db/src/index.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0044-a-filed-vat-return-is-a-snapshot-not-a-query.md
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-09
     order: 64
     title: Absence of auto-file, proven, and the Zoho Books export
