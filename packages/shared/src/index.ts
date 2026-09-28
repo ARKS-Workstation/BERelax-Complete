@@ -272,6 +272,7 @@ export class AppError extends Error {
 }
 
 export const isAppError = (e: unknown): e is AppError => e instanceof AppError
+export { CMS_SCHEMA } from './cms-schema.ts'
 export {
   addressLines,
   addressOneLine,

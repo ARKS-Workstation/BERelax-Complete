@@ -81,7 +81,6 @@ export {
 } from './jobs/generate-business-days.ts'
 export {
   assertParticipantIsWellFormed,
-  CMS_SCHEMA,
   MERGE_ALLOWLIST,
   MERGE_CATALOGUE_EXCLUDED_SCHEMAS,
   MERGE_ID_COLUMN_PATTERN,

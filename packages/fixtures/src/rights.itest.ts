@@ -24,7 +24,6 @@ import {
   AuditWriter,
   assertRecipesMatchRules,
   beginRightsRequest,
-  CMS_SCHEMA,
   coveredTables,
   createConnection,
   type ErasureDeps,
@@ -47,6 +46,7 @@ import {
   type UnitOfWork,
   withUnitOfWork,
 } from '@berelax/db'
+import { CMS_SCHEMA } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FIXTURE_TRN, invoiceFixture } from './invoice.ts'
 import { fixtureSuppressionPeppers } from './suppression.ts'

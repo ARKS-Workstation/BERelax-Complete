@@ -1,4 +1,4 @@
-import { AppError } from '@berelax/shared'
+import { AppError, CMS_SCHEMA } from '@berelax/shared'
 import type { Sql } from './connection.ts'
 import { PGBOSS_SCHEMA } from './jobs/boss.ts'
 
@@ -667,16 +667,6 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
  * merge must not rewrite them (see the `invoice` allowlist entry).
  */
 export const MERGE_ID_COLUMN_PATTERN = '^(.*_)?(customer|contact)_id$'
-
-/**
- * Payload CMS's own schema.
- *
- * Declared here rather than only in `apps/web/payload.config.ts` because `packages/db`'s catalogue probes
- * have to name it and may not import `@berelax/cms` or reach into an app. Migration `0023_payload_schema.sql`
- * creates the schema and deliberately nothing in it; the config's `schemaName` imports this constant, so the
- * three places that have to agree about the spelling agree by construction.
- */
-export const CMS_SCHEMA = 'payload' as const
 
 /**
  * Schemas the catalogue enumerates: every schema in the database except the system ones, pg-boss's and the
