@@ -73,6 +73,7 @@ export {
   MESSAGE_ROW_FAILURE_REASONS,
   MESSAGE_STATUS_RANK,
   MESSAGE_STATUSES,
+  type MessageChannel,
   type MessageClass,
   type MessageFailureReason,
   type MessageRowFailureReason,
@@ -202,6 +203,25 @@ export {
   MAX_FLOW_ACCUMULATED_DELAY_MINUTES,
   MAX_FLOW_NODES,
 } from './schemas/flow.ts'
+export {
+  FLOW_END_REASONS,
+  FLOW_ENROLMENT_OUTCOMES,
+  FLOW_INTERPRETER_END_REASONS,
+  FLOW_NODE_OUTCOMES,
+  FLOW_RUN_MODES,
+  FLOW_RUN_STATUSES,
+  type FlowEndReason,
+  type FlowEnrolmentOutcome,
+  type FlowInterpreterEndReason,
+  type FlowNodeOutcome,
+  type FlowRunMode,
+  type FlowRunStatus,
+  isFlowEndReason,
+  isTerminalFlowRunStatus,
+  MAX_ACTIVE_ENROLMENTS_PER_FLOW,
+  MAX_DRY_RUN_PROJECTED_ROWS,
+  MAX_FLOW_NODE_EXECUTIONS,
+} from './schemas/flow-run.ts'
 export {
   isUnsuppressionSource,
   SUPPRESSION_ACTOR_KINDS,
