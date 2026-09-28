@@ -613,6 +613,52 @@ export {
   type LeaveOpeningBalanceRow,
   readLeaveOpeningBalances,
 } from './repositories/leave-opening-balance.ts'
+/*
+  P-HR-09's approval path, at the package boundary.
+
+  `approveLeaveRequest` is the whole subject and the two rules it cannot take without arrive as
+  `LeaveApprovalDeps`, because `packages/db` may not import `packages/core`. Both halves of that pair are
+  exported here — the dependency TYPES as well as the transaction — so a caller wiring `@berelax/core`'s
+  `coverageBreachesCausedBy` and `decideLeaveApproval` in can write `satisfies` against them, which is what
+  makes a field added on one side a `pnpm typecheck` failure rather than an approval nothing judged.
+*/
+export {
+  type ApprovedLeave,
+  type ApproveLeaveInput,
+  approveLeaveRequest,
+  type CancelApprovedLeaveInput,
+  type CancelledLeave,
+  cancelApprovedLeave,
+  type FloorPresenceRow,
+  LEAVE_REQUEST_REFUSALS,
+  type LeaveApprovalDeps,
+  type LeaveConflictRow,
+  type LeaveCoverageAnswer,
+  type LeaveCoverageInput,
+  type LeaveCoverageRule,
+  type LeaveDecisionAnswer,
+  type LeaveDecisionInput,
+  type LeaveDecisionRule,
+  type LeaveDelegationRow,
+  type LeaveOverrideRow,
+  type LeaveRequestRefusal,
+  type LeaveRequestRow,
+  leaveRequestRefusalOf,
+  readFloorPresence,
+  readLeaveApprovalConflicts,
+  readLeaveApprovalDelegations,
+  readLeaveApprovalNotices,
+  readLeaveRequest,
+  readLiveLeaveApproval,
+  readLiveLeaveConflictOverrides,
+  readTradingDatesCovering,
+  recordLeaveConflictOverride,
+  revokeLeaveApprovalDelegation,
+  type WriteLeaveDelegationInput,
+  type WriteLeaveRequestInput,
+  writeLeaveApprovalDelegation,
+  writeLeaveRequest,
+} from './repositories/leave-request.ts'
 export {
   applyMergeParticipant,
   assertParticipantKeyIsAUniqueIndex,
@@ -2418,4 +2464,54 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
 // record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
 // what makes a non-contiguous allocation cost nothing.
-export const SCHEMA_VERSION = 87 as const
+// 92 is 0092_leave_approval.sql: approving leave — who may decide it, what it costs the floor, and what it
+// may never do to a booking. It is the first writer of `leave_request` in the build. 0030 created the table
+// and left ONE decision to P-HR, and 0066 took it in `leaveCoveragePeriod()` while saying in its own header
+// that "writing and approving that period is P-HR-09's"; until this file nothing had written one, which is
+// why the trading-day alignment finally has a caller. The consequence a reader meets first: a day of leave
+// on the 17th is stored as 11:00 on the 17th to 02:00 on the 18th, so the 01:30 appointment in the tail is a
+// REPORTED CONFLICT rather than a booking somebody discovers on the day. No arithmetic for that is in this
+// file or in the SQL — ZY005 compares the approval's period against the request's, which is a comparison and
+// not a second derivation, for the reason 0066 gives: `resolveTradingDate` is the one reading of where a
+// trading day ends. What the file deliberately does NOT do is three things. It stores no CONFLICT REPORT:
+// the report is a read recomputed on every attempt, because a stored one is a snapshot of a world a
+// reassignment has since changed and the approval would then commit against rows nobody looked at; what is
+// stored is the one thing a read cannot recover, the DECISION a human took about a conflict they chose not
+// to resolve (`leave_conflict_override`, whose role and reason are refused by ZY002 rather than by a
+// TypeScript guard alone, so the refusal holds for a `psql` session — 0080's division of labour). It moves
+// NO LEAVE BALANCE, because 0066 is explicit that a request reserves when it is MADE and approval only makes
+// the reservation final; the reservation belongs to the submission path, which is P-HR-14's, so this unit
+// writes neither a `reserved` nor a `released` movement — symmetrically, since a release with no reservation
+// creates leave out of nothing, which `decideRequest` in @berelax/core refuses. And it TOUCHES NO
+// APPOINTMENT: that is ADR 0041, and the proof is not a promise but an enumeration out of the source —
+// `packages/fixtures/src/hr-leave-approval.test.ts` walks the modules reachable from the approval entry
+// points, collects every appointment status any of them can write, and asserts `cancelled_by_salon` and
+// `no_show` are not among them, with the same scan shown firing over `cancel.ts` so an empty answer means
+// something. `leave_coverage_lock` is the table that looks unnecessary and is not: two approvals for two
+// DIFFERENT therapists on one day conflict on no row, so each transaction reads a floor that still holds the
+// other therapist, both coverage checks pass, and the floor ends up short with every check having said yes.
+// `approveLeaveRequest` takes `select ... for update` over one row per trading date in ascending order, so
+// the second transaction BLOCKS, re-reads `employee_approved_leave` and is refused BY THE COVERAGE CHECK
+// inside the transaction — which is the acceptance line's own wording, and why a row nobody can see would
+// have been the wrong mechanism (ADR 0023's row-locked counter is the precedent). The coverage answer itself
+// is P-HR-06's `validateRota` called TWICE over identical arguments bar the leave, and the refusal is the
+// set DIFFERENCE: the segments covered without this leave and not with it. An absolute reading would refuse
+// every approval on any database whose `shift` table is empty, which is every seeded one, and it would name
+// a segment the requester cannot do anything about. `leave_approval` snapshots the `rota_coverage_rule`
+// version that judged the floor, which is 0081's argument taken a fifth time and exactly as true here: "was
+// the floor covered when this leave was approved?" is a question about a decision taken months ago, and
+// raising the minimum in April must not make March's approval retroactively wrong. Withdrawing an approval
+// is a `leave_approval_cancellation` row rather than a column, because the approval table is append-only for
+// the same reason as the rest, and `leave_approval_live` is the view that joins the two — `employee_approved_leave`'s
+// precedent (0030): a predicate held in a view cannot be forgotten, and forgetting this one shows a
+// therapist as blocked after their holiday was withdrawn. `ZY` is its private SQLSTATE class, chosen because
+// it is UNOWNED: `sqlstate-uniqueness.test.ts` records thirteen codes already standing for two unrelated
+// rules each and `ZA` through `ZX` are all taken, so only `ZY` and `ZZ` were free — and a code that stands
+// for two rules makes a probe asserting it pass when the statement bounced off something else.
+//
+// 88 through 91 are allocations held by units in flight in other worktrees, which is why 0092 follows 0087
+// on disk. Gate case 90a walks the migrations that EXIST rather than consecutive integers, so the run is
+// 49..82 plus 87 and 92, and the four held numbers cost nothing. They are NOT renumbered to close the gap:
+// renumbering is how two branches come to apply the same number to different SQL, and the merge resolver
+// takes the higher `SCHEMA_VERSION`.
+export const SCHEMA_VERSION = 92 as const
