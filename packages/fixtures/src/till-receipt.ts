@@ -9,8 +9,8 @@ import {
   isTipLine,
   money,
   packageRedemptionLine,
-  serviceLineFromAppointment,
   STANDARD_SPA_CHART,
+  serviceLineFromAppointment,
   tipLine,
 } from '@berelax/core'
 

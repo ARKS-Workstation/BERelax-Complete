@@ -241,8 +241,8 @@ export { doNotPairExclusion, therapistsExcludedBy } from './queries/therapist-ex
 // that threw would leave the till unable to draw the screen explaining why it cannot issue one.
 export {
   readBillableAppointments,
-  readPackageTemplates,
   readPackageBalances,
+  readPackageTemplates,
   readTillIssuer,
   type TillBillableAppointmentRow,
   type TillIssuerRow,

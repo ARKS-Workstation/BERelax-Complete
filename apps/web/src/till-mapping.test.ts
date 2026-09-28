@@ -7,8 +7,8 @@ import {
   filsFrom,
   type Instant,
   money,
-  serviceLineFromAppointment,
   STANDARD_SPA_CHART,
+  serviceLineFromAppointment,
   type TenderLine,
   tipLine,
   type VatRateBp,
@@ -168,8 +168,18 @@ describe('acceptance — the till package-sale mapping is the fixture package-sa
     templateVersionId: '00000000-0000-4000-8000-00000000ef02',
     priceGross: gross(100_000),
     lines: [
-      { lineNo: 1, serviceVariantId: '00000000-0000-4000-8000-00000000cd01', sessionCount: 3, listGrossFils: 60_000 },
-      { lineNo: 2, serviceVariantId: '00000000-0000-4000-8000-00000000cd02', sessionCount: 2, listGrossFils: 50_000 },
+      {
+        lineNo: 1,
+        serviceVariantId: '00000000-0000-4000-8000-00000000cd01',
+        sessionCount: 3,
+        listGrossFils: 60_000,
+      },
+      {
+        lineNo: 2,
+        serviceVariantId: '00000000-0000-4000-8000-00000000cd02',
+        sessionCount: 2,
+        listGrossFils: 50_000,
+      },
     ],
     // A package's tenders have to equal the price EXACTLY (ZG012): an invoice may be part paid and a package
     // may not, because a part payment would credit 2050 with a liability the salon was never paid for.

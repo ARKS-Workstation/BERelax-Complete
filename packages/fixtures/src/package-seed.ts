@@ -2,13 +2,13 @@ import { entryId, filsFrom, isPlaceholderText, localDate, money } from '@berelax
 import {
   currentPackageTemplateVersion,
   redeemPackage,
+  type Sql,
   savePackageTemplateVersion,
   sellPackage,
-  type Sql,
   withUnitOfWork,
 } from '@berelax/db'
-import { packageRedemptionMapping } from './package-redemption.ts'
 import { packageSaleMapping } from './package.ts'
+import { packageRedemptionMapping } from './package-redemption.ts'
 
 /**
  * The fixture salon's packages, at four drawdown states (M-TILL-13).
@@ -108,9 +108,27 @@ export interface FixturePackageShape {
  * four sales would report a single blended figure.
  */
 export const FIXTURE_PACKAGE_SHAPES: readonly FixturePackageShape[] = Object.freeze([
-  { templateKey: 'fixture_package_untouched', sessions: 5, redeemed: 0, soldOn: '2026-08-14', state: 'untouched' },
-  { templateKey: 'fixture_package_part_used', sessions: 5, redeemed: 2, soldOn: '2026-08-21', state: 'part used' },
-  { templateKey: 'fixture_package_fully_used', sessions: 3, redeemed: 3, soldOn: '2026-07-10', state: 'fully used' },
+  {
+    templateKey: 'fixture_package_untouched',
+    sessions: 5,
+    redeemed: 0,
+    soldOn: '2026-08-14',
+    state: 'untouched',
+  },
+  {
+    templateKey: 'fixture_package_part_used',
+    sessions: 5,
+    redeemed: 2,
+    soldOn: '2026-08-21',
+    state: 'part used',
+  },
+  {
+    templateKey: 'fixture_package_fully_used',
+    sessions: 3,
+    redeemed: 3,
+    soldOn: '2026-07-10',
+    state: 'fully used',
+  },
   {
     templateKey: 'fixture_package_expired',
     sessions: 10,
@@ -316,10 +334,8 @@ export async function seedPackages(sql: Sql): Promise<SeededPackages> {
         units: 1,
         packageLabel: name,
       })
-      await withUnitOfWork(
-        sql,
-        { kind: 'system', label: 'fixture-packages' },
-        async (uow) => redeemPackage(uow, redemptionMapping.input),
+      await withUnitOfWork(sql, { kind: 'system', label: 'fixture-packages' }, async (uow) =>
+        redeemPackage(uow, redemptionMapping.input),
       )
       redemptions += 1
     }

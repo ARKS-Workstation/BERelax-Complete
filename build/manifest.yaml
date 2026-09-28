@@ -5415,6 +5415,12 @@ units:
       consistency with the other admin groups and nothing a test can make load-bearing. The local mutant helper
       is named `tillMutant` and not after a shape another block uses (blocks 106 and 107 each defined a
       same-shaped `…Mutant` and git interleaved them on merge). Every anchor goes through replaceOnce.'
+    - 'NOTE: the forty-eight screenshots land in artifacts/screens/M-TILL-13/ and that path is deliberately
+      NOT declared in the files list below. `artifacts/screens/` is gitignored and the directory exists only
+      where a screenshot run has happened, and gate case 101 fails the build for a `done` unit declaring a path
+      that does not exist — which is exactly the miss M-TILL-11 found on M-VAT-11 and predicted for this unit
+      by name. Nothing in the manifest declares an artifacts/screens path today; asserted rather than assumed,
+      by walking every unit''s files list.'
     - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
       used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
       12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires

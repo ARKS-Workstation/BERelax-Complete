@@ -1,8 +1,10 @@
 import { BILLABLE_APPOINTMENT_STATUSES, DOCUMENT_FIELDS, DOCUMENT_FORM_FIELDS } from '@berelax/core'
 import { FIXTURE_PACKAGE_OPEN_QUESTION, FIXTURE_PACKAGE_SHAPES } from '@berelax/fixtures'
 import { describe, expect, it } from 'vitest'
-import { FIXTURE_PACKAGE_OPEN_QUESTION as ROUTE_PACKAGE_QUESTION } from '../app/(admin)/packages/handler.ts'
-import { drawdownState } from '../app/(admin)/packages/handler.ts'
+import {
+  drawdownState,
+  FIXTURE_PACKAGE_OPEN_QUESTION as ROUTE_PACKAGE_QUESTION,
+} from '../app/(admin)/packages/handler.ts'
 import { renderTillHtml, TILL_CSS } from '../app/(admin)/till/render.ts'
 import {
   TILL_BILLABLE_STATUSES,
@@ -49,8 +51,18 @@ function view(overrides: Partial<TillView> = {}): TillView {
     ],
     basket: {
       lines: [
-        { kind: 'service', description: 'asian normal_massage, 60 min', grossLabel: 'AED 200.00', reason: null },
-        { kind: 'discount', description: 'Discount', grossLabel: 'AED -20.00', reason: 'service_recovery' },
+        {
+          kind: 'service',
+          description: 'asian normal_massage, 60 min',
+          grossLabel: 'AED 200.00',
+          reason: null,
+        },
+        {
+          kind: 'discount',
+          description: 'Discount',
+          grossLabel: 'AED -20.00',
+          reason: 'service_recovery',
+        },
         { kind: 'tip', description: 'Gratuity', grossLabel: 'AED 15.00', reason: null },
       ],
       netLabel: 'AED 171.43',
@@ -252,8 +264,11 @@ describe('acceptance — a drawdown state is read off the rows, never stored', (
     }
     // And the four the fixture asks for are exactly the four this function can answer, so a fifth shape added
     // to the seed without a label here fails rather than rendering as one of the others.
-    expect([...new Set(FIXTURE_PACKAGE_SHAPES.map((shape) => shape.state))].sort()).toEqual(
-      ['expired with a balance', 'fully used', 'part used', 'untouched'],
-    )
+    expect([...new Set(FIXTURE_PACKAGE_SHAPES.map((shape) => shape.state))].sort()).toEqual([
+      'expired with a balance',
+      'fully used',
+      'part used',
+      'untouched',
+    ])
   })
 })
