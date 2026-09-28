@@ -841,6 +841,29 @@ export {
   type TradingDayHours,
 } from './repositories/reschedule.ts'
 export {
+  type AggregateWriteOutcome,
+  type AwaitingPasteItem,
+  countReviewsReportedBetween,
+  getAwaitingPasteItem,
+  type IntakeResolutionOutcome,
+  listAwaitingPaste,
+  listReviewIntakeTargets,
+  type NeedsPasteInput,
+  type ParsedForwardInput,
+  type PlaceAggregateReadingInput,
+  type PlaceAggregateRow,
+  type RecordedForward,
+  type ReviewIntakeTarget,
+  rawBodyByteLength,
+  rawBodyDigest,
+  readPreviousPlaceAggregate,
+  recordAggregateNotification,
+  recordNeedsPasteForward,
+  recordParsedForward,
+  recordPlaceAggregateReading,
+  resolveIntakeWithReview,
+} from './repositories/review-intake.ts'
+export {
   type ApiIngestOutcome,
   type ApiReviewPayload,
   type DraftWriteOutcome,
@@ -2479,14 +2502,16 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // convention that a class identifies a FILE has one allocation left in it — W-SYS-12 owns replacing it
 // with an allocator, and until then a unit taking a class is taking the last one.
 //
-// Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
-// and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
-// becoming a gap. 88 through 92 are allocations held by five units in flight in other worktrees, so 93 is
-// the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather than
-// consecutive integers, which is what makes a non-contiguous allocation cost nothing.
+// Every number allocated through 87 had landed when this note was last rewritten, and 0094 is now on disk:
+// the run is 1..87 less the permanent gaps above, then 94. 85 — held while C-CRM-10's worktree carried the
+// work uncommitted — arrived with that unit rather than becoming a gap. 88 through 93 are allocations held
+// by seven units in flight in other worktrees, which is why this file's own number is 94 and why 88-93 must
+// NOT be renumbered to close the run: renumbering is how two branches come to apply the same number to
+// different SQL. So 95 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on
+// disk rather than consecutive integers, which is what makes a non-contiguous allocation cost nothing.
 //
 // This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 87 as const
+export const SCHEMA_VERSION = 94 as const
