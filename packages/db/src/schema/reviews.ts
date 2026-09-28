@@ -1,6 +1,18 @@
 import { sql } from 'drizzle-orm'
-import { index, pgTable, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import {
+  date,
+  index,
+  integer,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core'
 import { googleConnection } from './google.ts'
+import { message } from './message.ts'
 
 /**
  * Drizzle mirror of the review table (migration 0020).
@@ -147,3 +159,103 @@ export type ReviewDeliveryMode = (typeof REVIEW_DELIVERY_MODES)[number]
  */
 export const REVIEW_ROUTING_VERDICTS = ['auto_send', 'escalate'] as const
 export type ReviewRoutingVerdictName = (typeof REVIEW_ROUTING_VERDICTS)[number]
+
+/**
+ * Drizzle mirror of the fallback intake's two tables (migration 0094).
+ *
+ * `reviewIntakeEmail` holds one row per forwarded Google notification, and the column that matters is
+ * `rawBody`: NOT NULL in effect on the `needs_paste` path and NULL on the `parsed` path, because on that
+ * path the `google_reviews` row is the record and a second copy of the reviewer's words would drift. The
+ * shape is a CHECK over `status` in the migration and is invisible here — `pnpm db:drift` compares columns
+ * only, and `reviews.itest.ts` asserts the constraint by name against the applied schema.
+ *
+ * `googlePlaceAggregate` holds one Places reading per listing per TRADING DATE. There is deliberately no
+ * text column on it at all: docs/10 §8 records the Places caching terms as unverified, so nothing in this
+ * build stores review content from that source (ADR 0049), and the absence of a column is what makes the
+ * acceptance line's table scan a property of the schema rather than of a caller remembering.
+ */
+export const reviewIntakeEmail = pgTable(
+  'review_intake_email',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => googleConnection.id, { onDelete: 'restrict' }),
+    placeId: text('place_id').notNull(),
+    /** parsed | needs_paste. The two shapes `parseReviewNotificationEmail` can return. */
+    status: text('status').notNull(),
+    /** Which template shape read it, on the parsed path. The closed set lives in `packages/core`. */
+    templateId: text('template_id'),
+    /** Why nothing could be read, on the refusal path. Also a `packages/core` set. */
+    refusal: text('refusal'),
+    /** The forwarded body byte for byte, on the needs_paste path. Never normalised. */
+    rawBody: text('raw_body'),
+    /** sha256 of the body on both paths, lower-case hex, computed by the caller. */
+    rawBodySha256: text('raw_body_sha256').notNull(),
+    /** Bytes, not code points: a template change often arrives as an encoding change. */
+    rawBodyBytes: integer('raw_body_bytes').notNull(),
+    reviewId: uuid('review_id').references(() => googleReview.id, { onDelete: 'restrict' }),
+    /** Injected by the caller, never defaulted: the pass is tested on a frozen clock. */
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    /** When a person closed a needs_paste item by pasting the review. */
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // The queue read: what is still somebody's job, oldest forward first. Partial, so the cost does not
+    // grow with the items already dealt with.
+    index('review_intake_email_awaiting_paste_idx')
+      .on(t.connectionId, t.receivedAt)
+      .where(sql`status = 'needs_paste' and resolved_at is null`),
+  ],
+)
+
+export const googlePlaceAggregate = pgTable(
+  'google_place_aggregate',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => googleConnection.id, { onDelete: 'restrict' }),
+    placeId: text('place_id').notNull(),
+    /**
+     * The trading date the reading counts against, resolved by the caller on `business_day`.
+     *
+     * Trading runs 11:00-02:00 Asia/Dubai, so a reading taken at 01:30 belongs to the PREVIOUS trading
+     * date — and the calendar date of the instant is a different number for nine hours either side of
+     * midnight.
+     */
+    observedOn: date('observed_on').notNull(),
+    /** When the call was made. Distinct from `observedOn`, which is the day it counts against. */
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    /** Integer tenths, 10-50, or NULL for an unrated listing. Never a float to compare. */
+    ratingTenths: smallint('rating_tenths'),
+    /** NULL for a listing with no ratings; 0 for one whose only review was deleted. Different facts. */
+    reviewCount: integer('review_count'),
+    /** How many curated bodies the call returned and the adapter dropped. A count, never a body. */
+    curatedReviewsDiscarded: integer('curated_reviews_discarded').notNull().default(0),
+    /** The number the email SAID. Stored rather than derived — it is evidence of what the owner was told. */
+    reportedNewReviews: integer('reported_new_reviews'),
+    /** NULLABLE even for a notification: F03 diverts every send off production and writes no row. */
+    notifiedMessageId: uuid('notified_message_id').references(() => message.id, {
+      onDelete: 'restrict',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // The tripwire's idempotency AND the shape of the table: one reading per listing per trading date, so
+    // a reclaimed job cannot email the owner about the same reviews twice.
+    unique('google_place_aggregate_one_reading_per_trading_date').on(
+      t.connectionId,
+      t.placeId,
+      t.observedOn,
+    ),
+    // "The newest reading strictly before today" is one index step rather than a sort of the history.
+    index('google_place_aggregate_latest_idx').on(t.connectionId, t.placeId, t.observedOn),
+  ],
+)
+
+/** The two outcomes of reading a forwarded notification, mirroring 0094's CHECK. */
+export const REVIEW_INTAKE_STATUSES = ['parsed', 'needs_paste'] as const
+export type ReviewIntakeStatus = (typeof REVIEW_INTAKE_STATUSES)[number]

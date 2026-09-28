@@ -38163,6 +38163,441 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 127a-127z. (G-REV-02) The fallback intake: the bytes that must survive, the fence the injected sentence
+//            cannot leave, the aggregate that must not be cached, and both branches of two crons.
+//
+// docs/10 §6 is the whole specification of this unit and its first sentence is the reason these cases exist:
+// *"the fallback is the launch mode. Not an error state."* Every check below is about a claim that would still
+// read correctly with the feature quietly broken, which is this build's dominant defect class:
+//
+//   - **A parser that guesses.** The mangled fixture has a rating a human can read (*"four stars out of
+//     five"*) and no label a machine can. A parser relaxed to find a digit would file it as a four-star
+//     review, docs/07 §4 row 1 would then permit an auto-send, and nothing would look wrong. So the case
+//     that matters is not "the parse succeeds" but "the parse refuses, and the bytes survive".
+//   - **A byte claim asserted with `toContain`.** `expect(stored).toContain(fixture)` passes for a parser
+//     that appended, prefixed or re-encoded. The suite compares `Buffer`s read back out of the database, and
+//     127d proves it by making the writer trim.
+//   - **An injection boundary asserted against a comment.** `not.toContain(payload)` on the instruction
+//     section passes for a builder that leaked a paraphrase and passes vacuously for one that emits no
+//     instructions at all. The suite compares the bytes BEFORE the fence with those of a benign review's
+//     prompt, and 127f proves it by interpolating the review text into the instruction constant.
+//   - **A table scan that scans one table.** *"None of those body strings is present in any table"* is only
+//     worth asserting as a walk of the whole catalogue, and 127h proves the walk by narrowing it.
+//   - **A cron with one branch.** An email that goes out on an increase is half the claim; the other half is
+//     that nothing goes out otherwise, and 127i and 127k break each direction separately.
+//
+// The helper names here carry a `paste` prefix on purpose. Two gate blocks whose local helpers are named
+// identically make git treat them as shared context and interleave them on merge, which has happened twice.
+{
+  const PASTE_PARSER = 'packages/core/src/reviews/email-parse.ts'
+  const PASTE_PARSER_SUITE = 'packages/core/src/reviews/email-parse.test.ts'
+  const PASTE_INTAKE_WRITER = 'packages/db/src/repositories/review-intake.ts'
+  const PASTE_INBOUND_SUITE = 'packages/google/src/reviews/inbound-email.itest.ts'
+  const PASTE_PROMPT = 'packages/core/src/reviews/prompt-builder.ts'
+  const PASTE_ADAPTER = 'packages/google/src/adapters/places-aggregate.ts'
+  const PASTE_ADAPTER_SUITE = 'packages/google/src/adapters/places-aggregate.test.ts'
+  const PASTE_TRIPWIRE = 'apps/worker/src/jobs/review-count-tripwire.ts'
+  const PASTE_NUDGE = 'apps/worker/src/jobs/review-monday-nudge.ts'
+  const PASTE_WORKER_SUITE = 'apps/worker/src/jobs/review-fallback-intake.itest.ts'
+  const PASTE_HANDLER = 'apps/web/app/(admin)/reviews/paste/handler.ts'
+  const PASTE_E2E = 'apps/web/src/reviews-paste.itest.ts'
+  // The handler suite, and it exists because of what 127m-127p found. The e2e drives the BUILT application:
+  // `next start` serves whatever `.next` was last built, so a gate case that edits an `apps/web` source file
+  // and runs the e2e reports "exited zero; nothing was rejected" against a stale build. Four cases in the
+  // first version of this block did exactly that. So the row, the audit actor, the two refusals, the refusal
+  // page's contents and the redirect are asserted by a suite that calls the handler directly and therefore
+  // sees an edit immediately; the e2e keeps the one claim that needs a browser.
+  const PASTE_HANDLER_SUITE = 'apps/web/src/reviews-paste-handler.itest.ts'
+  const PASTE_PHRASE = 'packages/core/src/reviews/count-phrase.ts'
+  const PASTE_PHRASE_SUITE = 'packages/core/src/reviews/count-phrase.test.ts'
+
+  const pasteUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const pasteIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const pasteCruise = () => ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages']
+
+  // 127a. An imported CLOCK, from a module neither existing check knows about. `node:perf_hooks` is not in
+  //       `core-must-be-pure`'s alternation and `check-core-purity.mjs` greps for `Date.now`, `new Date()`
+  //       and `process.` — an imported `performance` is none of those. So both existing checks pass for a
+  //       parser whose answer depends on when it ran, and this is the rule that does not.
+  checkRejectedBy(
+    'review intake: a clock imported into the parser is rejected by name',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) => `import { performance } from 'node:perf_hooks'\n${text}`,
+      () => runExpectingFailure('pnpm', pasteCruise()),
+    ),
+    'review-email-parse-takes-its-input-as-an-argument',
+  )
+
+  // 127b. The control, and it is not a formality: the rule is an allowlist, so a rule written as "no
+  //       dependencies at all" would reject the parser's own import of `../time.ts` and would have to be
+  //       relaxed to nothing within the week. `@berelax/shared` must pass.
+  {
+    const permitted = withEditedFile(
+      PASTE_PARSER,
+      (text) => `import { AppError } from '@berelax/shared'\nvoid AppError\n${text}`,
+      () => run('pnpm', pasteCruise()),
+    )
+    check(
+      'review intake: the parser may still import @berelax/shared',
+      !permitted.failed,
+      permitted.output,
+    )
+  }
+
+  // 127c. `new Date(instant)` in the parser. The GENERAL purity rule permits it — `time.ts` legitimately
+  //       renders an injected instant that way — so this is the scoped no-`Date` rule G-REV-02 added for
+  //       `packages/core/src/reviews`, and without the scope the mutation below is invisible.
+  checkRejectedBy(
+    'review intake: a Date in the review estate is rejected by the scoped purity rule',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (rawBody.trim().length === 0) return needsPaste(',
+          '  const parsedAt = new Date(options.receivedAt).getUTCFullYear()\n' +
+            '  void parsedAt\n' +
+            '  if (rawBody.trim().length === 0) return needsPaste(',
+        ),
+      () => runExpectingFailure('node', ['scripts/check-core-purity.mjs']),
+    ),
+    'email-parse.ts',
+  )
+
+  // 127d. The writer trims the body. This is the mutation the acceptance line is written against — *asserted
+  //       by comparing stored bytes to the fixture* — and it is the one a `toContain` would miss: a trimmed
+  //       body still contains every word of the fixture.
+  checkRejectedBy(
+    'review intake: a writer that trims the forwarded body fails the byte comparison',
+    withEditedFile(
+      PASTE_INTAKE_WRITER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      ${input.rawBody}, ${digest}, ${bytes}, ${input.receivedAtIso}',
+          '      ${input.rawBody.trim()}, ${digest}, ${bytes}, ${input.receivedAtIso}',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_INBOUND_SUITE)),
+    ),
+    'keeps leading and trailing whitespace',
+  )
+
+  // 127e. The parser falls back to a template rather than refusing. This is the mutation that makes the
+  //       mangled fixture stop being a paste request: `labelled_plain.extract` then reads it, finds no
+  //       reviewer, and the refusal becomes `reviewer_unreadable` — a body nobody could read, filed under a
+  //       reason that says one FIELD moved. The suite asserts the refusal by name for exactly this reason.
+  checkRejectedBy(
+    'review intake: a parser that falls back to a template instead of refusing is caught',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const matcher = MATCHERS.find((candidate) => candidate.recognises(rawBody, lines))\n' +
+            "  if (matcher === undefined) return needsPaste('no_template_recognised')",
+          '  const matcher =\n' +
+            '    MATCHERS.find((candidate) => candidate.recognises(rawBody, lines)) ?? MATCHERS[0]\n' +
+            "  if (matcher === undefined) return needsPaste('no_template_recognised')",
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'refuses by name',
+  )
+
+  // 127e2. And a rating counted out of a row that is not a row. `ratingFromGlyphs` requires every character
+  //        to be one of the two star glyphs; relax it to a count and `★★★★ (4 of 5)` reads as four, which is
+  //        a rating docs/07 §4 row 1 would permit an auto-send against.
+  checkRejectedBy(
+    'review intake: a rating counted from stars anywhere in a field is caught',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (glyphs.length === 0 || glyphs.length > 5) return null\n' +
+            '  if (glyphs.some((glyph) => glyph !== FILLED_STAR && glyph !== UNFILLED_STAR)) return null',
+          '  void UNFILLED_STAR',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'refuses a glyph row with anything else in it',
+  )
+
+  // 127f. The review text reaches the INSTRUCTIONS. The mutation is the realistic one — somebody adds the
+  //       review to the prompt's preamble to give the model context — and it is what the byte-for-byte
+  //       comparison against a benign review's prompt exists to catch. A `not.toContain(payload)` on the
+  //       instruction section would also catch this exact string and would NOT catch a paraphrase, which is
+  //       why the suite compares the bytes instead.
+  checkRejectedBy(
+    'review intake: review text interpolated into the instruction section is caught',
+    withEditedFile(
+      PASTE_PROMPT,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const text = [INSTRUCTIONS, facts, region, CLOSING_INSTRUCTION].join('\\n\\n')",
+          '  const text = [`${INSTRUCTIONS}\\nCONTEXT: ${body}`, facts, region, CLOSING_INSTRUCTION].join(\n' +
+            "    '\\n\\n',\n" +
+            '  )',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'leaves the bytes before the fence identical',
+  )
+
+  // 127g. The adapter keeps the review bodies. ADR 0049's decision is that the RETURN TYPE cannot hold one,
+  //       and the suite asserts it by walking the returned value rather than by naming its fields — which is
+  //       what makes this mutation visible. A test that named the fields would keep passing.
+  checkRejectedBy(
+    'review intake: an adapter that carries the curated bodies through is caught',
+    withEditedFile(
+      PASTE_ADAPTER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    curatedReviewsDiscarded: details.reviews.length,',
+          '    curatedReviewsDiscarded: details.reviews.length,\n' +
+            '    // @ts-expect-error gate fixture: the reading must not be able to hold a body\n' +
+            '    reviews: details.reviews.map((review) => review.text),',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_ADAPTER_SUITE)),
+    ),
+    'drops every curated body',
+  )
+
+  // 127h. The table scan narrowed to one table. The claim is *none of those body strings is present in ANY
+  //       table*, and the control that makes the scan credible is the smuggled body — so narrowing the walk
+  //       must make that control fail. Without this case the scan could be examining nothing and reporting a
+  //       pass, which is ADR 0002 exactly.
+  checkRejectedBy(
+    'review intake: a body scan narrowed to one table stops finding a smuggled body',
+    withEditedFile(
+      PASTE_WORKER_SUITE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      and table_name in (select table_name from information_schema.tables\n',
+          "      and table_name = 'google_place_aggregate'\n" +
+            '      and table_name in (select table_name from information_schema.tables\n',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'leaves none of the three fixture bodies in ANY table',
+  )
+
+  // 127i. The tripwire notifies on any CHANGE rather than on an increase. A count that went down means a
+  //       review was deleted, so the email's one action — read the new reviews — does not exist. Both
+  //       downward cases must fail.
+  checkRejectedBy(
+    'review intake: a tripwire that emails on a decrease is caught',
+    withEditedFile(
+      PASTE_TRIPWIRE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (currentCount < previousCount) {\n' +
+            "    return { kind: 'decreased', from: previousCount, to: currentCount }\n" +
+            '  }',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'sends ZERO when the count went DOWN',
+  )
+
+  // 127j. The idempotency removed. `already_read_today` is what a reclaimed pg-boss job reaches, and without
+  //       it a second pass on one trading date emails the owner about the same reviews twice.
+  checkRejectedBy(
+    'review intake: a tripwire that re-reads the same trading date emails twice',
+    withEditedFile(
+      PASTE_TRIPWIRE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (written.kind === 'already_read_today') {",
+          '    if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'reads once per trading date',
+  )
+
+  // 127k. The nudge fires whatever the window says. This is the other half of *"only when no review was
+  //       reported in the preceding 7 days"*, and a suite with only the fired branch would be satisfied by a
+  //       pass that always nudged.
+  checkRejectedBy(
+    'review intake: a nudge that ignores what was reported is caught',
+    withEditedFile(
+      PASTE_NUDGE,
+      (text) => replaceOnce(text, '    if (reported > 0) {', '    if (reported > 1000) {'),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'does NOT fire when something was reported inside the window',
+  )
+
+  // 127l. The heartbeat. `withAgentRun` is INSIDE the pass rather than around it in the handler, precisely so
+  //       that "writes a heartbeat either way" is a claim a test driving the pass can make. Take the wrapper
+  //       out and the pass still works and the heartbeat stops moving — which is a weekly cron nobody is
+  //       watching.
+  checkRejectedBy(
+    'review intake: a nudge that records no agent run is caught',
+    withEditedFile(
+      PASTE_NUDGE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      results.push(...(await nudgeEveryListing(deps)))',
+          '      void results',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'both branches',
+  )
+
+  // 127m. The paste form's authorisation. The matrix check removed, and the SERVER must still refuse: a
+  //       disabled control is not a guard, and the e2e posts with `curl`-shaped requests for that reason.
+  checkRejectedBy(
+    'review intake: a paste form that does not consult the permission matrix is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!can(principal.role satisfies Role, REVIEWS_PASTE_PERMISSION)) return 'forbidden'",
+          '  void REVIEWS_PASTE_PERMISSION',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    'refuses a role the matrix does not trust',
+  )
+
+  // 127n. The refusal page shows what it refuses. This is a defect this unit's own e2e found in its first
+  //       version: the 401 document carried the forwarded review's full text, the connection id and the
+  //       Google account email. The `reveal` flag is the fix, and this is what stops it being removed.
+  checkRejectedBy(
+    'review intake: a 401 page that renders the forwarded text is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const listings = extra.reveal ? await listingsFor(deps.sql) : []',
+          '  const listings = await listingsFor(deps.sql)',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    'shows NOTHING from the database on a refusal page',
+  )
+
+  // 127o. One POST. The acceptance line names it, and the mutation is the one that would arrive by accident:
+  //       a handler that renders the confirmation instead of redirecting. The browser then reloads on the
+  //       POST, and a refresh files the same review twice under two ids — `google_review_id` is NULL on a
+  //       pasted row, so nothing in the database refuses the duplicate.
+  checkRejectedBy(
+    'review intake: a paste form that answers 200 instead of redirecting is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) => replaceOnce(text, '    status: 303,', '    status: 200,'),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    "records source='paste'",
+  )
+
+  // 127p. `source='paste'` becomes `'manual'`. Both are in migration 0020's vocabulary and they are different
+  //       facts — which one it was is the question an audit of the intake path asks — so the suite asserts the
+  //       value rather than merely that a row exists.
+  checkRejectedBy(
+    'review intake: a paste recorded under the wrong source is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) => replaceOnce(text, "        source: 'paste',", "        source: 'manual',"),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    "records source='paste'",
+  )
+
+  // 127p2. The POST counter, which is the e2e's whole instrument. Nothing here can mutate the APPLICATION and
+  //        see the e2e notice — `next start` serves the last build — so what this case breaks is the counter
+  //        itself: point it at a path nothing requests and the count is zero, which must fail the
+  //        single-submission assertion. Without it, a listener that never fired would satisfy
+  //        `toHaveLength(1)` for a page that posted three times, and the claim the browser is there to make
+  //        would be resting on nothing.
+  checkRejectedBy(
+    'review intake: an e2e POST counter that records nothing fails the single-submission claim',
+    withEditedFile(
+      PASTE_E2E,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (request.method() === 'POST') posts.push(request.url())",
+          "    if (request.method() === 'POST' && request.url().includes('/nope')) posts.push(request.url())",
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_E2E)),
+    ),
+    'posts exactly once',
+  )
+
+  // 127q. The English plural. `{{count}} new reviews` reads "1 new reviews" and an increase of one is the
+  //       commonest case there is; the Arabic dual is the same defect one language along, and neither is
+  //       visible to a test that only ever passes 2.
+  checkRejectedBy(
+    'review intake: an English-shaped plural is caught for a count of one',
+    withEditedFile(
+      PASTE_PHRASE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  return count === 1 ? '1 new review' : `${count} new reviews`",
+          '  return `${count} new reviews`',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PHRASE_SUITE)),
+    ),
+    'reads "1 new review" and not "1 new reviews"',
+  )
+
+  // 127r. And the Arabic dual, which is the case an English-shaped renderer gets wrong for the very number
+  //       the acceptance line uses.
+  checkRejectedBy(
+    'review intake: the Arabic dual collapsed into the plural is caught',
+    withEditedFile(
+      PASTE_PHRASE,
+      (text) => replaceOnce(text, "  if (count === 2) return 'تقييمان جديدان'\n", ''),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PHRASE_SUITE)),
+    ),
+    'uses the DUAL for two',
+  )
+
+  // 127z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing a module, or a scanner that refused the clean tree
+  //       would all report as sixteen passing cases.
+  {
+    const clean = run('pnpm', pasteCruise())
+    check(
+      'review intake: the unedited repository passes the boundary cruise',
+      !clean.failed,
+      clean.output,
+    )
+    const pure = run('node', ['scripts/check-core-purity.mjs'])
+    check('review intake: the unedited repository is pure', !pure.failed, pure.output)
+    for (const suite of [PASTE_PARSER_SUITE, PASTE_ADAPTER_SUITE, PASTE_PHRASE_SUITE]) {
+      const green = run('pnpm', pasteUnit(suite))
+      check(`review intake: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    for (const suite of [PASTE_INBOUND_SUITE, PASTE_WORKER_SUITE, PASTE_HANDLER_SUITE, PASTE_E2E]) {
+      const green = run('pnpm', pasteIntegration(suite))
+      check(`review intake: ${suite} passes unedited`, !green.failed, green.output)
+    }
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

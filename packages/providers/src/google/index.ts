@@ -30,6 +30,15 @@ export {
   TESTING_REFRESH_TOKEN_DAYS,
   URL_INSPECTION_CAP_PER_DAY,
 } from './fake-google.ts'
+export {
+  createFakePlaces,
+  type FakePlacesOptions,
+  GOOGLE_PLACES,
+  PLACES_AGGREGATE_FIELD_MASK,
+  PLACES_AGGREGATE_FIXTURE,
+  PLACES_FIXTURE_PLACE_ID,
+  PLACES_REVIEW_FIXTURES,
+} from './fake-places.ts'
 export type {
   AuthorizationUrlArgs,
   BusinessProfileProvider,
@@ -44,6 +53,9 @@ export type {
   GoogleTokens,
   LocationsGetRequest,
   LocationsListRequest,
+  PlacesDetails,
+  PlacesProvider,
+  PlacesReview,
   Review,
   SearchAnalyticsDevice,
   SearchAnalyticsDimension,

@@ -35,9 +35,11 @@ import {
   createFakeGoogleOAuth,
   createFakeSearchConsole,
 } from './google/fake-google.ts'
+import { createFakePlaces } from './google/fake-places.ts'
 import type {
   BusinessProfileProvider,
   GoogleOAuthProvider,
+  PlacesProvider,
   SearchConsoleProvider,
 } from './google/port.ts'
 import { createFakeLlm } from './llm/fake-llm.ts'
@@ -56,6 +58,16 @@ export interface Providers {
   readonly googleOAuth: GoogleOAuthProvider
   readonly businessProfile: BusinessProfileProvider
   readonly searchConsole: SearchConsoleProvider
+  /**
+   * Places API (New), for the aggregate rating and review count and nothing else (G-REV-02).
+   *
+   * Behind `GOOGLE_PROVIDER` with the other three even though it is a separately billed API on a separate
+   * key: a deployment that has flipped Google to real has real Google credentials, and a registry where
+   * one Google service was fake and another real would be a state nothing in the health panel could
+   * describe. The real adapter it resolves to needs only the key, which is why its PENDING entry names a
+   * different prerequisite from the Business Profile one.
+   */
+  readonly places: PlacesProvider
   /** Cash and terminal. Always the real till adapter; there is no external service to fake. */
   readonly till: PaymentProvider
   /** Online cards. Absent until a gateway is chosen — see docs/01 decision on card payments. */
@@ -113,6 +125,10 @@ export function createProviders(options: ProviderRegistryOptions): Providers {
       config.GOOGLE_PROVIDER === 'real'
         ? notImplemented('google-search-console')
         : createFakeSearchConsole(shared),
+    places:
+      config.GOOGLE_PROVIDER === 'real'
+        ? notImplemented('google-places')
+        : createFakePlaces(shared),
     // The till adapter is real in every environment: cash taken at the desk is recorded, not sent
     // anywhere, so there is nothing a fake would add and a fake would make the ledger fictional.
     till: createManualPaymentProvider({ log, now }),

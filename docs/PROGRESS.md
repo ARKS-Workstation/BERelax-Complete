@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**132 / 211 units complete.**
+**133 / 211 units complete.**
 
 ## Next up
 
@@ -180,7 +180,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |
 | [x] | 160 | `G-CONN-09` | Disconnect with revocation at Google, zeroisation, and the offboarding runbook | `F06`, `G-CONN-04` | — | — |
 | [x] | 161 | `G-REV-01` | Review data model: nullable google_review_id, delivery_mode as a column | `G-CONN-01` | — | — |
-| [ ] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
+| [x] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
 | [x] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
 | [x] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
 | [ ] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |

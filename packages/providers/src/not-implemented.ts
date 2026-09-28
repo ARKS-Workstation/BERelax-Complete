@@ -36,6 +36,13 @@ export const PENDING: Readonly<Record<string, PendingIntegration>> = {
     unit: 'G-REV',
     needs: 'Business Profile API access, which is granted by application review (docs/10 §2)',
   },
+  'google-places': {
+    unit: 'G-REV',
+    // Deliberately NOT the Business Profile prerequisite. Places is a separate API on a separate key and is
+    // available on day one (docs/10 §6), so an operator reading this must not be told to wait for an
+    // application review that has nothing to do with it.
+    needs: 'a Places API (New) key and the billing account it is enabled on (docs/10 §6)',
+  },
   'google-search-console': {
     unit: 'G-SEO',
     needs: 'a verified Search Console property for the production domain (docs/10)',

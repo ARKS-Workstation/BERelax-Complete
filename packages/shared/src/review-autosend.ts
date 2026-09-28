@@ -181,3 +181,43 @@ export function configuredReviewLanguages(value: unknown): readonly DetectableRe
   )
   return Object.freeze(DETECTABLE_REVIEW_LANGUAGES.filter((language) => stored.has(language)))
 }
+
+/**
+ * The fallback intake's two template keys and its two agent keys (G-REV-02, docs/10 §6).
+ *
+ * Here rather than in the job, because four places name each of them: the template corpus in
+ * `packages/messaging`, the job that renders it, migration 0094's `agent_definition` rows, and the
+ * registry-completeness check that pairs a cron with an agent row. A string literal in four files is four
+ * chances for one of them to be a typo that reads as "no template found" and sends nothing.
+ *
+ * They are separate keys for the reason `GOOGLE_REAUTH_TEMPLATE_KEYS` gives: the two notices report
+ * different facts — *the count went up* and *nothing has been reported for a week* — and a single template
+ * would have to hedge between them.
+ */
+export const REVIEW_FALLBACK_TEMPLATE_KEYS = {
+  countIncrease: 'review.count_increase',
+  mondayNudge: 'review.nudge',
+} as const satisfies Readonly<Record<'countIncrease' | 'mondayNudge', string>>
+
+/** Every fallback-intake template key, for a corpus test that must not miss one. */
+export const REVIEW_FALLBACK_TEMPLATE_KEY_LIST: readonly string[] = Object.freeze(
+  Object.values(REVIEW_FALLBACK_TEMPLATE_KEYS),
+)
+
+/**
+ * The `agent_definition` keys migration 0094 inserts, and the jobs report to.
+ *
+ * `assertRegistry` refuses a cron that names no agent row, and `agents.itest.ts` asserts every registered
+ * cron's agent has one — so these two strings are load-bearing in both directions.
+ */
+export const REVIEW_COUNT_TRIPWIRE_AGENT = 'review_count_tripwire'
+export const REVIEW_MONDAY_NUDGE_AGENT = 'review_monday_nudge'
+
+/**
+ * How far back the Monday nudge looks: seven days, as docs/10 §6 states it.
+ *
+ * A constant rather than a setting, and deliberately: the nudge is *"a Monday 09:00 nudge with a direct
+ * link, if nothing has been reported"*, and the week is the cadence rather than a policy anybody has an
+ * opinion about. A setting here would be a knob whose only settings are "weekly" and "wrong".
+ */
+export const REVIEW_NUDGE_LOOKBACK_DAYS = 7

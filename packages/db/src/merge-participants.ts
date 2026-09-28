@@ -1,4 +1,4 @@
-import { AppError } from '@berelax/shared'
+import { AppError, CMS_SCHEMA } from '@berelax/shared'
 import type { Sql } from './connection.ts'
 import { PGBOSS_SCHEMA } from './jobs/boss.ts'
 
@@ -770,8 +770,13 @@ export const MERGE_ID_COLUMN_PATTERN = '^(.*_)?(customer|contact)_id$'
 export const MERGE_CATALOGUE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze([
   'information_schema',
   PGBOSS_SCHEMA,
-  /** Payload's own tables. See the header: not migration-created, and not writable by a statement. */
-  'payload',
+  /**
+   * The CMS's own tables. See the header: not migration-created, and not writable by a statement. By the
+   * constant rather than the literal, because the same name configures Payload's `schemaName` — two
+   * statements of it are two things to drift, and this exclusion going stale means the probe walks tables
+   * an erasure could not act on.
+   */
+  CMS_SCHEMA,
 ])
 
 export interface MergeCoverageRow {

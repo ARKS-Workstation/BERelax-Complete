@@ -181,6 +181,35 @@ module.exports = {
       },
     },
     {
+      name: 'review-email-parse-takes-its-input-as-an-argument',
+      comment:
+        'packages/core/src/reviews/email-parse.ts may depend on NOTHING outside packages/core and ' +
+        'packages/shared. G-REV-02s acceptance line asks for a dependency-cruiser assertion plus the ' +
+        'core-must-be-pure gate to prove the parser takes the raw body as an argument and performs no I/O ' +
+        'and no clock read, and this is the half the purity script cannot make. ' +
+        'WHY IT IS NOT REDUNDANT WITH core-must-be-pure, which is the obvious objection. That rule names a ' +
+        'list: fs, http, https, net, dns, child_process, worker_threads, and the four frameworks. It does ' +
+        'not name node:perf_hooks, whose `performance.now()` is a clock read, and it does not name ' +
+        'node:crypto, node:os or node:timers. check-core-purity.mjs does not see them either, because it ' +
+        'greps for `Date.now`, `new Date()`, `process.`, `fetch(`, `Math.random(`, `globalThis` and ' +
+        '`console.` — an imported clock is none of those. So both existing checks pass for a parser that ' +
+        'reads `performance.now()`, and a parse whose answer depends on when it ran is a parse that cannot ' +
+        'be replayed against the bytes it was given. An allowlist closes the whole class at once instead ' +
+        'of extending two lists every time Node grows a module. ' +
+        'WHY IT IS SCOPED TO ONE FILE rather than to the directory. The rest of packages/core/src/reviews ' +
+        'legitimately imports the compliance lexicon and the escalation tables, and would keep doing so; ' +
+        'this module is the one whose contract is *a string and an instant in, a value out*, and it is the ' +
+        'one an inbound email reaches first. Widening it to the directory would either ban imports that are ' +
+        'correct or be relaxed to nothing within the week. ' +
+        'The known-bad fixture in scripts/test-gates.mjs adds `import { performance } from ' +
+        '"node:perf_hooks"` and asserts THIS rule fires by name — deliberately a module that core-must-be-pure ' +
+        'does not list, so the fixture proves this rule rather than an older one shadowing it, and a ' +
+        'control fixture importing @berelax/shared must pass.',
+      severity: 'error',
+      from: { path: '^packages/core/src/reviews/email-parse\\.ts$' },
+      to: { pathNot: '^packages/(core|shared)/' },
+    },
+    {
       name: 'reviews-generator-must-not-reach-clinical-data',
       comment:
         'The review reply prompt builder and the reply generator must not import packages/clinical or ' +

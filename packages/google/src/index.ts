@@ -31,6 +31,14 @@ export {
   readLocationSnapshot,
 } from './adapters/business-information.ts'
 export {
+  aggregateOf,
+  PLACES_AGGREGATE_FIELD_MASK,
+  PLACES_ANSWERED_ABOUT_ANOTHER_PLACE,
+  type PlaceAggregateReading,
+  placeReviewsDeepLink,
+  readPlaceAggregate,
+} from './adapters/places-aggregate.ts'
+export {
   assertRowCarriesDimensions,
   assertRowCountsArePlausible,
   fetchSearchAnalyticsRows,
@@ -283,6 +291,15 @@ export {
   type NoDraftReason,
   type ReviewDraftOutcome,
 } from './reviews/generate-draft.ts'
+export {
+  deliverInboundReviewEmail,
+  INBOUND_REVIEW_ACTOR,
+  type InboundListingResolution,
+  type InboundReviewEmail,
+  type RecordedInboundForward,
+  recordInboundReviewEmail,
+  resolveInboundListing,
+} from './reviews/inbound-email.ts'
 export {
   type LlmProviderChoice,
   readLlmProviderChoice,

@@ -141,6 +141,16 @@ export const TEST_PORT_BANDS = {
   // [14_000, 14_300) is unallocated, so nothing else reaches into this one. [14_300, 14_600) contains none of RESTRICTED_PORTS — the highest entry in that table below the
   // ephemeral floor is 6697 — so `usableWidth` is the full 300.
   commission: { start: 14_300, width: 300 },
+  // G-REV-02's paste form, which needs a real server for the one claim a pure render cannot make: that the
+  // form completes in a SINGLE POST. Counting requests is a property of a browser submitting a real form to a
+  // real handler, and the 303 that follows it is what makes "one POST" different from "one request". 13_500
+  // was the band this unit was allocated, and it did NOT survive the merge: [13_500, 13_800) reaches into
+  // `leave-approval` at [13_300, 13_600), which is the third overlap this registry has caught and the second
+  // the integrator issued rather than a unit picking for itself. MOVED to 14_900, the next start above
+  // `marketing-kill-switch` [14_600, 14_900). Two suites sharing a band is worse than a collision that fails
+  // to start, because the second `next start` cannot bind and the suite answers from the FIRST one's server.
+  // [14_900, 15_200) contains none of RESTRICTED_PORTS.
+  'reviews-paste': { start: 14_900, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

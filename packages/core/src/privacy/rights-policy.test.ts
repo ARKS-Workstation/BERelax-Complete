@@ -272,6 +272,17 @@ describe('the erasure rule registry', () => {
     for (const owner of owners) expect(UNIT_ID.test(owner), owner).toBe(true)
   })
 
+  it('is still mostly C-CRM-10, and every other registering unit is one that had to classify a table', () => {
+    // The control the widened assertion above needs. `registeredBy` is a string, so a typo would satisfy the
+    // shape; this says the set of units is small, deliberate and led by the unit that built the engine.
+    const units = new Set([...ERASURE_RULES.values()].map((rule) => rule.registeredBy))
+    expect(units.has('C-CRM-10')).toBe(true)
+    const byCcrm10 = [...ERASURE_RULES.values()].filter((rule) => rule.registeredBy === 'C-CRM-10')
+    expect(byCcrm10.length).toBeGreaterThan(ERASURE_RULES.size / 2)
+    // And the others are named rather than counted, so a unit added here is a diff somebody reads.
+    expect([...units].sort()).toEqual(['C-CRM-10', 'G-REV-02'])
+  })
+
   it('keeps the four retaining actions distinct, because their justifications are different', () => {
     expect(isRetainingAction('retain_statutory')).toBe(true)
     expect(isRetainingAction('retain_append_only')).toBe(true)

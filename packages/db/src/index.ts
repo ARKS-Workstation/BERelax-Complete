@@ -1030,6 +1030,29 @@ export {
   type TradingDayHours,
 } from './repositories/reschedule.ts'
 export {
+  type AggregateWriteOutcome,
+  type AwaitingPasteItem,
+  countReviewsReportedBetween,
+  getAwaitingPasteItem,
+  type IntakeResolutionOutcome,
+  listAwaitingPaste,
+  listReviewIntakeTargets,
+  type NeedsPasteInput,
+  type ParsedForwardInput,
+  type PlaceAggregateReadingInput,
+  type PlaceAggregateRow,
+  type RecordedForward,
+  type ReviewIntakeTarget,
+  rawBodyByteLength,
+  rawBodyDigest,
+  readPreviousPlaceAggregate,
+  recordAggregateNotification,
+  recordNeedsPasteForward,
+  recordParsedForward,
+  recordPlaceAggregateReading,
+  resolveIntakeWithReview,
+} from './repositories/review-intake.ts'
+export {
   type ApiIngestOutcome,
   type ApiReviewPayload,
   type DraftWriteOutcome,
@@ -3029,6 +3052,100 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 
 //
+// 94 is 0094_review_fallback_intake.sql: the forwarded notification that could not be read, and the Places
+// aggregate the count tripwire compares against (G-REV-02). Two tables, and the argument for each is that
+// neither thing it has to remember is a REVIEW. A forward nothing could parse has no rating, so it could not
+// satisfy `google_reviews.rating` (NOT NULL, 1-5), and inventing one to make it fit is the guess docs/12 §1
+// forbids in its worst form — a one-star review filed at four stars is auto-send eligible under docs/07 §4.
+// So `review_intake_email` holds the BYTES and nothing interpreted, with a closed two-value status
+// (`parsed` | `needs_paste`) because a third outcome would be a state nothing decides: the parser returns one
+// of two shapes. And an aggregate reading is not a review either — it is two numbers about the listing whose
+// only value is that yesterday's are still there to compare against, which a column on `google_capabilities`
+// would hold and lose. `google_place_aggregate` therefore has no text column AT ALL, which is what turns the
+// acceptance line's scan — none of those review bodies appears in any table — into a property of the SCHEMA
+// rather than a promise about the adapter, and it is the strictest safe reading of the caching terms docs/10
+// §6 marks unverified (the ADR this file cites for that is the one renumbered to 0049 at merge).
+//
+// It takes NO private SQLSTATE, and said so in a header written before W-SYS-12 landed: the refusals here are
+// ordinary `check_violation`s, and the ones that need a name are raised in application code and asserted by
+// name (`PLACES_ANSWERED_ABOUT_ANOTHER_PLACE` in `packages/google`, the parse refusals in
+// `packages/core/src/reviews/email-parse.ts`). It is the last file written under the convention that a
+// private CLASS identifies one migration, and the only one of the seven in that wave that declined to spend
+// the last class — which is the reasoning 0099 replaced with a registry.
+//
+// Its two `agent_definition` rows are the first crons in this build whose subject is something that happened
+// OUTSIDE the system: the tripwire reads the Places aggregate daily and reports an increase, the nudge
+// reports a week of silence on a Monday. Separate agents rather than one, for 0033's reason — a shared
+// heartbeat would be minutes old for ever and would make a dead weekly pass invisible behind a healthy daily
+// one — and their declared intervals (24 hours, 7 days) are what give the watchdog's "no success within
+// twice the interval" something to mean for each.
+//
+// 95 is 0095_vat_return.sql: the VAT return as a SEALED SNAPSHOT — the figures as bytes, a hash over exactly
+// those bytes, two named signatures from two different people, and no way to edit any of it (M-VAT-08).
+// M-VAT-07's working papers are a FUNCTION OF THE LEDGER, recomputed on every read, which is right for a
+// working paper and wrong for a filed return: a return is a statement made on a date about a period, and the
+// one thing it must not do is change when the ledger behind it does. So `vat_return` stores `snapshot_json` —
+// exactly the bytes `canonicaliseVat201WorkingPapers()` produced — and
+// `content_hash = encode(sha256(convert_to(snapshot_json, 'UTF8')), 'hex')` as a CHECK, which is the same
+// value `vat201ContentHash()` computes in TypeScript over the same bytes. That CHECK does not claim the bytes
+// are what the ledger said, and the header says so: what claims that is
+// `services/vat-return-signoff.itest.ts`, which regenerates the papers with the clock five years on and
+// requires the hash back identical.
+//
+// **The figures are VIEWS over those bytes and not a second table**, which is the one decision in this file
+// worth arguing with. `vat_return_box_figure` and `vat_return_not_fileable_reason` read
+// `vat_return.snapshot_json` and touch nothing else — no `journal_line`, no `vat201_box_total()` — so a figure
+// cannot move when the ledger does, and gate case 122t asserts that over the view definitions with a fixture
+// that plants a join to `vat201_box_line`. A box TABLE was written first and is worse in the way this build
+// keeps paying for: a second statement of a fact drifts, nothing in SQL can prove two copies of a figure
+// agree, and the copy that disagrees is the one a screen reads while the hash still verifies the other. It
+// also needs three rules the view needs none of — a refusal for a row appended to a sealed return in a later
+// transaction, one for a figure that is not the figure in the hashed bytes, and one for a snapshot committed
+// with no rows at all. The cost is that a view carries no index, which is nothing here: a VAT return is
+// quarterly and every read names one id. Seven scalar columns are duplicated between the row and the bytes on
+// purpose — a return is looked up by period and a `psql` session should not have to parse JSON — and two
+// CHECKs compare each one against its own value inside the snapshot, so the duplication is refused the chance
+// to drift rather than merely discouraged.
+//
+// `fileable` is the trap this unit could most easily have walked into and it is shut by a CHECK, not by a
+// service: `vat_return_fileable_only_when_nothing_in_it_refuses_filing` reads the HASHED BYTES, so `true` is
+// impossible while the snapshot carries a `notFileableReasons` entry or a box marked `isProvisional`. Every
+// box is provisional today ([UNVERIFIED] Y11-vat201-boxes, and Y11-tax-agent records an FTA-registered
+// agent's review as not optional), so the answer is always false and the row says why. The GENERATING CODE
+// VERSION is two columns and neither is a number anybody typed: `format_version` is the canonical form's own
+// tag from the paper, and `engine_signature` is `vat201_engine_signature()` — the sha256 of
+// `pg_get_functiondef()` over the seven SQL functions that compute a VAT201 figure, which raises `ZY056` when
+// the catalogue holds a different number of them than the list names, because a hash of six definitions out
+// of seven would be quietly wrong in the one column whose job is to differ when the code differs.
+//
+// Sign-off is `vat_return_sign_off`, one row per capacity, and PREPARER AND REVIEWER ARE TWO DIFFERENT PEOPLE
+// refused in the database: `unique (return_id, signatory_user_id)` is the storage layer that survives a
+// restore with triggers off, and `ZY052` (`SamePersonSignOff`) fires first and names the person and the
+// capacity they already signed in — 0093's two-layer pattern, for 0093's reason. The signatory's display name
+// and role are SNAPSHOTTED beside their id so a later rename cannot rewrite who signed (0026's argument,
+// `publication_approval`'s shape). Who MAY sign is `vat_return_signing_roles()`, a function rather than a
+// literal inside the CHECK so the list can be READ from outside it:
+// `packages/fixtures/src/vat-return-signoff.itest.ts` requires it to equal the roles holding
+// `vat_return:prepare` in `core/src/access/permissions.ts`, for all eight roles individually, which is the
+// only thing stopping the two drifting — `packages/db` may not import `packages/core`, so nothing compiles
+// them against each other. Deny by default: manager, receptionist, therapist, marketer, auditor and system
+// are refused by absence, with `ZY053` naming the role and the permitted set.
+//
+// `vat_return_finalisation` is the row a filing cites and `ZY055` refuses it unless both capacities have
+// signed; `vat_return_for_filing()` raises the same code, so the refusal reaches a READ as well as a write
+// and M-VAT-09's one-way export cannot be built without coming through it. Both read
+// `vat_return_sign_off_state()`, the ONE reader of "is this signed" — `periodStatusOn`'s arrangement for "is
+// this date closed", for the same reason. The base tables stay readable deliberately: a preparer has to be
+// able to see the figures they are about to sign, and what is guarded is the door labelled FILING.
+// `closed_period_id` is a plain column and NOT a foreign key to `period_lock`, which is 0086's releasable-pin
+// test rather than a shortcut — a lock CAN be deleted and four suites delete their own, while a `vat_return`
+// row can be deleted by nobody, so a reference from here would pin every lock it names for ever. `ZY051`
+// (append-only, every role including the owner), `ZY052`, `ZY053`, `ZY054` (an amendment that is not the next
+// version of the period in force, describes another period, or forks a superseded one), `ZY055`, `ZY056` and
+// `ZY057` (a signature or a finalisation with no `audit_event` at COMMIT, 0081's ZW003 and 0093's ZZ004
+// shape) are its private SQLSTATEs — band `ZY051`-`ZY057` of a class that no longer identifies a file, with
+// `ZY058`-`ZY060` left free rather than taken and unused.
+//
 // 96 is 0096_analytics_schema.sql: the `analytics` schema, its monthly partitions, and the 90-day raw
 // retention as a thing that RUNS (A-FIRST-01). Nine tables — `visitor`, `session`, `event`, `funnel_step`,
 // `attribution`, the three daily rollups and `retention_policy` — with `event` and `funnel_step` RANGE
@@ -3130,8 +3247,9 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
-// existed, and less 94, which G-REV-02 holds in another worktree. 85, 89, 91, 92, 93, 95, 96, 97, 98 and 99
-// arrived out of order, each with the unit that held it. So 100 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
+// them. 100 through 105 are allocations held by six units in flight in other worktrees — W-SYS-13, W-SYS-14,
+// M-VAT-09, M-VAT-12, P-HR-12 and Y-PAY-01, in that order — so 106 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
