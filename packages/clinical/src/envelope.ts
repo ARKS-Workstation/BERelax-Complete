@@ -63,6 +63,19 @@ export interface RecordBinding {
   readonly context?: string
 }
 
+/**
+ * A wrapped data key of zero bytes: the marker for a key DESTROYED under a data-subject erasure (C-CRM-10).
+ *
+ * `seal()` always produces exactly 60 bytes (12-byte nonce + 32-byte data key + 16-byte GCM tag), so zero
+ * is a length this module cannot emit and therefore cannot be confused with a real key. It is checkable
+ * identically in SQL (`length(wrapped_data_key) = 0`) and here, which matters because three places have to
+ * agree about it: the erasure that writes it, `open()` below, and the KEK rotation that must SKIP it.
+ *
+ * The authority on whether a record was crypto-erased is `clinical.dek_destruction`, which is append-only
+ * and names the request that authorised it. This is the mechanism.
+ */
+export const isDataKeyDestroyed = (wrappedDataKey: Buffer): boolean => wrappedDataKey.length === 0
+
 export function parseKek(base64Key: string, version: string): Kek {
   const key = Buffer.from(base64Key, 'base64')
   if (key.length !== KEY_BYTES) {
@@ -151,6 +164,20 @@ export function open(kek: Kek, binding: RecordBinding, sealed: SealedPayload): s
         'Retain retired KEKs until every payload has been re-wrapped.',
     )
   }
+  if (isDataKeyDestroyed(sealed.wrappedDataKey)) {
+    // Named, and not left to fall through to the generic authentication failure below. A destroyed key and
+    // a tampered ciphertext both make decryption impossible, and they mean completely different things: one
+    // is this business having honoured an erasure request, the other is an attack or a corrupt row. A
+    // caller that could not tell them apart would page somebody at 03:00 for the former, and would report
+    // the latter as "erased" — which is worse, because it closes an incident.
+    throw new AppError(
+      'forbidden',
+      'ClinicalDataKeyDestroyed: this payload\u2019s data key was destroyed under a data-subject erasure ' +
+        'request, so the ciphertext cannot be decrypted by anybody, including the key holder. See ' +
+        'clinical.dek_destruction for which request authorised it and when.',
+      { details: { refusal: 'clinical_data_key_destroyed' } },
+    )
+  }
   const aad = aadFor(binding)
   if (sealed.aadFingerprint !== fingerprint(binding)) {
     throw new AppError('forbidden', 'Record binding does not match the sealed payload')
@@ -179,6 +206,20 @@ export function rewrap(
   binding: RecordBinding,
   sealed: SealedPayload,
 ): SealedPayload {
+  if (isDataKeyDestroyed(sealed.wrappedDataKey)) {
+    // A rotation must never reach this. `listSealedNotOn` excludes destroyed rows, because a row with no
+    // key is not "sealed and pending a re-wrap" — it is not sealed at all. This is the backstop, and it
+    // exists because the failure it prevents is unbounded: `rotateKek` throws `unwrapFailed` on a row it
+    // cannot unwrap, the row never moves off the old KEK, and every subsequent rotation fails on the same
+    // row for ever. One erasure would otherwise make KEK rotation impossible in perpetuity.
+    throw new AppError(
+      'forbidden',
+      'ClinicalDataKeyDestroyed: a payload whose data key was destroyed under an erasure request cannot ' +
+        'be re-wrapped, and a rotation must not have selected it. Exclude destroyed rows from the work ' +
+        'queue rather than skipping them here.',
+      { details: { refusal: 'clinical_data_key_destroyed' } },
+    )
+  }
   const aad = aadFor(binding)
   const wrappedNonce = sealed.wrappedDataKey.subarray(0, NONCE_BYTES)
   const wrappedBody = sealed.wrappedDataKey.subarray(NONCE_BYTES)
