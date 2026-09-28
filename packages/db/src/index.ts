@@ -406,6 +406,46 @@ export {
   setPublicDisplayName,
   TREATMENTS_INDEX_PATH,
 } from './repositories/catalogue.ts'
+/*
+  P-HR-11's commission side (0097). Reads and writes only: the arithmetic is
+  `packages/core/src/hr/commission.ts`'s, this package may not import it, and `packages/hr` is where the two
+  halves meet.
+
+  `readCommissionEarnings` takes a `sourceAsOf` INSTANT and every clause of it filters on `created_at <=` that
+  instant, which is what makes a recompute reproduce. For a period a `period_lock` covers,
+  `commissionPeriodSource` answers with the lock's own `locked_at` — the books as filed — so a payment applied
+  after the close, or a sale backdated into the month, cannot move a figure that has already been paid.
+  `assert_commission_run_reads_the_lock` (ZY076) refuses a run that disagrees.
+
+  No function here answers "is this period closed?". That is `periodStatusOn` (M-VAT-06), which
+  `commissionPeriodSource` calls; the `locked_at` it then reads is a column of the row that call has already
+  identified, fetched by primary key.
+
+  There is no update and no delete: a published version is immutable (ZY071) and a run is evidence (ZY072).
+  A rate that is wrong is a NEW version; a run that is wrong is a NEW run, whose purpose is to be compared
+  with the first.
+*/
+export {
+  COMMISSION_SQLSTATE,
+  type CommissionDerivationRow,
+  type CommissionEarningRow,
+  type CommissionLineToRecord,
+  type CommissionPeriodSource,
+  type CommissionRuleBandRow,
+  type CommissionRuleVersionRow,
+  type CommissionRunRow,
+  commissionError,
+  commissionPeriodSource,
+  type PublishCommissionRuleVersionInput,
+  publishCommissionRuleVersion,
+  type RecordCommissionRunInput,
+  type RecordedCommissionRun,
+  readCommissionDerivation,
+  readCommissionEarnings,
+  readCommissionRuleVersions,
+  readCommissionRuns,
+  recordCommissionRun,
+} from './repositories/commission.ts'
 export {
   CONSENT_AUDIT_ACTIONS,
   CONSENT_REFUSALS,
@@ -2593,7 +2633,10 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // what makes a non-contiguous allocation cost nothing. 83, 84, 86 and 87 landed together as the second
 // batch of five; 85 was allocated to C-CRM-10, whose worktree survived a container restart with the work
 // uncommitted, so 85 is HELD rather than free and rather than a permanent gap — it will land with that
-// unit. Which number is next free is stated ONCE, in the note before `SCHEMA_VERSION`, and nowhere else.
+// unit. **Which number is next free is stated ONCE, in the allocation note immediately before
+// `SCHEMA_VERSION`, and nowhere else.** This paragraph carried its own answer — 88 — for nine migrations
+// after 88 had landed, which is exactly the drift that note exists to prevent, one paragraph away from the
+// sentence saying so.
 //
 // 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
 // learn about a clinical record, made into a shape that can carry nothing else. 0008 created
@@ -3019,6 +3062,34 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 
 //
+// 97 is 0097_hr_commission.sql: a commission figure that cannot be recomputed into a different answer
+// (P-HR-11). The subject is narrower than it sounds — anybody can compute a commission; what a therapist
+// disputing a payslip needs is that the same period computed again comes back byte-identical — and four
+// tables make it so. `commission_rule` is one published, IMMUTABLE version (which figure a percentage
+// applies to, and how it rounds) with `commission_rule_band` holding its rates as ordered rows, so one band
+// from zero is a flat percentage and several ascending bands are a tiered one. `commission_run` names the
+// version that judged it (NOT NULL) and carries `source_as_of`, the instant the source figures were READ
+// at; `commission_line` pins the SAME version through a composite foreign key rather than through a second
+// column somebody keeps in step. Four refusals make the claims properties of the database rather than of
+// the program that wrote the rows: ZY071 and ZY072 refuse every UPDATE and DELETE for every role including
+// the owner, so a rate that is wrong is a new VERSION and a run that is wrong is a new RUN; ZY073 holds a
+// version's bands to covering the value range from zero upwards, so "some band applies" is true by
+// construction and the engine has no unanswered case to invent behaviour for; ZY076 refuses a run over a
+// closed accounting period whose `source_as_of` is not the lock's own `locked_at`, which is the whole trap —
+// a payment applied after the close, or a sale backdated into a filed month, is correct arithmetic over
+// facts that postdate the payslip; and ZY077 holds every line's band, rate and figure to
+// `commission_fils_for()`, the arithmetic in SQL, mirrored by `commissionFilsFor` in `@berelax/core` and
+// held equal to it over a census for the reason 0083 gives about `package_release_through_fils`. ZY074 is
+// the deferred trigger holding the run header to its lines, which is what makes the `commission_derivation`
+// view's "rows summing exactly to the header total" a claim about two independent figures rather than about
+// a sum agreeing with itself. **NOTHING IS SEEDED**, unlike 0059, 0066, 0081 and 0086: there is no law
+// about commission and no figure in the handover, Y9-commission's provisional answer is "none configured;
+// the module ships disabled", and an empty table is therefore the strictest safe option — with no version
+// published the engine produces zero lines and nothing can be paid at a rate nobody chose. The module being
+// off is `hr.commission_enabled` in the settings registry, `false` and flagged provisional, so it appears on
+// the Unconfirmed Assumptions panel rather than being a fact only the code knows. Private SQLSTATEs
+// ZY071-ZY077, a subclass range of the shared `ZY` class per 0091's rule; ZY078-ZY080 are unused.
+//
 // 98 is 0098_messaging_controls.sql: the marketing kill switch has ONE home, and no control row can ever name
 // transactional traffic (C-AUTO-05). `messaging_control` holds one row per promotional operator control —
 // `marketing_kill_switch` and `promotional_sender_suspended` — with `engaged`, the actor, the actor's role, the
@@ -3059,9 +3130,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
-// existed, and less 94 and 97, which are held by units in flight in other worktrees — 94 is G-REV-02's and
-// 97 is P-HR-11's. 85, 89, 91, 92, 93, 95, 96, 98 and 99 arrived out of order, each with the unit that held
-// it. So 100 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// existed, and less 94, which G-REV-02 holds in another worktree. 85, 89, 91, 92, 93, 95, 96, 97, 98 and 99
+// arrived out of order, each with the unit that held it. So 100 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to

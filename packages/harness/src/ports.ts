@@ -132,6 +132,15 @@ export const TEST_PORT_BANDS = {
   // contains none of RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697 —
   // so `usableWidth` is the full 300.
   'marketing-kill-switch': { start: 14_600, width: 300 },
+  // P-HR-11's commission screen, which needs a real server for the one claim no pure render can make: the
+  // bytes an OWNER receives and the bytes a THERAPIST receives differ in the derivation's scope, and that
+  // difference is produced by the session — there is no `?employee=` to drive it with, because
+  // `admin-guard.test.ts` refuses one across the whole of `apps/web`. A render test can be handed either
+  // view; only a served response proves which view a cookie actually gets. 14_300 is the band this unit was
+  // allocated, and it survived the merge: 13_700 is `publication`'s (moved there from an overlap) and
+  // [14_000, 14_300) is unallocated, so nothing else reaches into this one. [14_300, 14_600) contains none of RESTRICTED_PORTS — the highest entry in that table below the
+  // ephemeral floor is 6697 — so `usableWidth` is the full 300.
+  commission: { start: 14_300, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

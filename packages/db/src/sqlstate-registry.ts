@@ -1503,6 +1503,60 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['analytics.ensure_partitions'],
     translators: [],
   },
+  // ZY071-ZY077 are P-HR-11's, adopted as inventory on the same terms as the three bands above: 0097 was
+  // written in a worktree that predates this registry, and it took a subclass RANGE under 0091's rule rather
+  // than a class. ZY078-ZY080 of its allocated band are unused and are NOT registered — an entry for a code
+  // nothing raises is what the stale-entry direction refuses, and it would be permission to invent a second
+  // rule on the same code later.
+  {
+    code: 'ZY071',
+    rule: 'A published commission rule version and its bands are immutable for every role, the owner included.',
+    migration: '0097',
+    raisedBy: ['refuse_commission_rule_change'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY072',
+    rule: 'A commission run and its lines are append-only: a run that is wrong is a new run.',
+    migration: '0097',
+    raisedBy: ['refuse_commission_run_change'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY073',
+    rule: "A rule version's bands must cover the value range from zero upwards, ascending and without a gap.",
+    migration: '0097',
+    raisedBy: ['assert_commission_bands_cover_from_zero'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY074',
+    rule: 'A commission run header must equal the sum of its lines at COMMIT.',
+    migration: '0097',
+    raisedBy: ['assert_commission_run_matches_its_lines'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY075',
+    rule: 'A commission run may only name a rule version that had commenced over the period it covers.',
+    migration: '0097',
+    raisedBy: ['assert_commission_run_version_had_commenced'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY076',
+    rule: "A run over a closed period must read its figures as of that period's lock, never as of now.",
+    migration: '0097',
+    raisedBy: ['assert_commission_run_reads_the_lock'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
+  {
+    code: 'ZY077',
+    rule: "Every line's band, rate and figure must follow from the version the run pins.",
+    migration: '0097',
+    raisedBy: ['assert_commission_line_follows_its_rule', 'commission_fils_for'],
+    translators: ['packages/db/src/repositories/commission.ts'],
+  },
   // ZY081-ZY084 are C-AUTO-05's, on the same adoption terms. Four codes and not one because each has its own
   // runbook answer, which is 0061's argument for a private code at all.
   {

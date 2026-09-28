@@ -14,6 +14,7 @@ export { loadConfig } from './load.ts'
 export {
   assertRoleMayEdit,
   type CacheTag,
+  COMMISSION_ENABLED_SETTING_KEY,
   defaultsForSeeding,
   getDefinition,
   invalidationsFor,

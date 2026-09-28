@@ -293,6 +293,9 @@ importers:
       '@berelax/clinical':
         specifier: workspace:*
         version: link:../clinical
+      '@berelax/hr':
+        specifier: workspace:*
+        version: link:../hr
       '@berelax/media':
         specifier: workspace:*
         version: link:../media

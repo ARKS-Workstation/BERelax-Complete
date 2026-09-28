@@ -22,6 +22,23 @@
  * `pnpm db:drift` and `pnpm db:conventions` read those directories and a schema hidden elsewhere is a
  * schema neither gate checks.
  */
+/*
+  P-HR-11's commission run. Here and not in `packages/db` because a run needs both halves at once — the
+  arithmetic is `@berelax/core`'s and the rows are `@berelax/db`'s, and that package may not import the
+  first — so this package, which already depends on both, is the only place they meet.
+
+  `recomputeCommissionRun` is deliberately a SEPARATE function from `executeCommissionRun` rather than the
+  same one with an optional version: everything that decided a run's answer comes off the run row, and one
+  function doing both is the shape in which somebody later forgets to pass it.
+*/
+export {
+  type CommissionRunResult,
+  type ExecuteCommissionRunArgs,
+  executeCommissionRun,
+  type RecomputeCommissionRunArgs,
+  readCommissionDerivationFor,
+  recomputeCommissionRun,
+} from './commission-run.ts'
 export {
   createEmployeeRepository,
   type EmployeeRepository,

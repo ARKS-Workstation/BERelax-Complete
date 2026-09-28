@@ -37446,6 +37446,386 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 125a-125v. (P-HR-11) Commission: every figure shown to come from the version that judged it, and the
+//            recompute shown to be a reproduction rather than a restatement.
+//
+//            This unit's defects are all the same shape and it is the sharpest instance of it in this build:
+//            a figure that is WRONG but ordinary. A rate read as a literal, a recompute that resolves the
+//            current version, an as-of filter that reads the rows as they are now — every one of them
+//            produces a plausible number on a payslip, and none of them makes anything look broken. So each
+//            case here mutates ONE decision and names the ONE suite that has to notice.
+//
+//            **A recompute that restates is invisible until a second version exists.** In a fresh database
+//            there is exactly one rule version, so a recompute that resolved by date would agree with the
+//            pinned one for ever. `hr-commission.itest.ts` publishes a superseding version that is
+//            effective-dated BEFORE the closed month precisely so that a fresh resolve really would pick it,
+//            and 125j is the case that holds the recompute away from the resolver.
+//
+//            **Most of the migration cases are caught by a SCAN suite rather than behaviourally, and that is
+//            where the claims live.** A migration mutation cannot be caught behaviourally at all: the gate
+//            runs against an already-migrated database, so editing `0097_hr_commission.sql` changes no
+//            refusal anybody could observe. `packages/fixtures/src/hr-commission.test.ts` reads the file,
+//            which is the only layer that can see a constraint being weakened before it has cost somebody a
+//            payslip.
+//
+//            **125k, 125l and 125m run the integration suite and need a database.** They are the three claims
+//            no pure suite can make — that the earnings read is bounded by an instant, that a filed period's
+//            instant is the lock's own, and that an instant parameter keeps its microseconds — and all three
+//            are about the write path. They mutate nothing the built web application serves, so 104's warning
+//            about browser suites does not apply.
+{
+  const CORE = 'packages/core/src/hr/commission.ts'
+  const REPO = 'packages/db/src/repositories/commission.ts'
+  const ORCHESTRATOR = 'packages/hr/src/commission-run.ts'
+  const MIGRATION = 'packages/db/migrations/0097_hr_commission.sql'
+  const RENDER = 'apps/web/app/(admin)/hr/commission/render.ts'
+
+  const PURE_SUITE = 'packages/core/src/hr/commission.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/hr/commission.property.test.ts'
+  const SCAN_SUITE = 'packages/fixtures/src/hr-commission.test.ts'
+  const ROWS_SUITE = 'packages/fixtures/src/hr-commission.itest.ts'
+  const RENDER_SUITE = 'apps/web/src/hr-commission-render.test.ts'
+
+  const unitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const rowsRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block and not `commissionMutant`, deliberately: blocks 106, 107 and 113 all record what a
+   * shared helper NAME cost them — git found two identically shaped bodies as shared context and interleaved
+   * the blocks, and the merge had to rebuild both from whole sides. A distinct name is the whole fix.
+   */
+  const brokenCommissionSource = (path, anchor, replacement, suite, runner = unitRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 125a. The rate read as a LITERAL rather than off the band the basis falls in. Version 1 of the fixture
+  //       rule set pays 10%, so every flat case still passes and the claim that dies is the one the band
+  //       table exists for: a tiered version prices every appointment at the first band's rate, which is a
+  //       therapist underpaid on exactly the treatments the tier was written for.
+  checkRejectedBy(
+    'commission gate: a rate hard-coded rather than read off the band is caught',
+    brokenCommissionSource(
+      CORE,
+      'const commissionFils = commissionFilsFor(basisFils, band.rateBp, ruleVersion.roundingMode)',
+      'const commissionFils = commissionFilsFor(basisFils, 1_000, ruleVersion.roundingMode)',
+      PURE_SUITE,
+    ),
+    'puts a basis in the band it falls in',
+  )
+
+  // 125b. `half_up` implemented as "strictly above a half goes up". Differs from the published direction on
+  //       exactly the ties — one fil, on the lines where the rounding was the whole question — and every
+  //       hand-written test figure has zero microseconds of remainder, so only the census sees it.
+  checkRejectedBy(
+    'commission gate: half-up implemented as strictly-above-half is caught',
+    brokenCommissionSource(
+      CORE,
+      "if (mode === 'half_up') return Math.floor((scaled + 5_000) / 10_000)",
+      "if (mode === 'half_up') return Math.floor((scaled + 4_999) / 10_000)",
+      PROPERTY_SUITE,
+    ),
+    'the census corpus can tell the rounding directions apart',
+  )
+
+  // 125c. Dividing before multiplying. 1% of 9,900 fils becomes 0 — a therapist paid nothing for a treatment
+  //       that was sold — and the figure is plausible for every basis above a dirham.
+  checkRejectedBy(
+    'commission gate: dividing the basis before applying the rate is caught',
+    brokenCommissionSource(
+      CORE,
+      "if (mode === 'floor') return Math.floor(scaled / 10_000)",
+      "if (mode === 'floor') return Math.floor(basisFils / 10_000) * rateBp",
+      PURE_SUITE,
+    ),
+    'floors, and the worked example is one a reader can check',
+  )
+
+  // 125d. An unknown rounding mode falling through to `floor` instead of raising. That is an unpublished
+  //       rounding rule paying somebody a fil less on every line, and nothing would ever report it: the
+  //       schema's CHECK makes the value unreachable through the table, which is exactly why the fall-through
+  //       would never be exercised until a third mode was added.
+  checkRejectedBy(
+    'commission gate: an unknown rounding mode silently becoming floor is caught',
+    brokenCommissionSource(
+      CORE,
+      '  throw new AppError(\n    \'invariant_violated\',\n    `"${String(mode)}" is not a commission rounding mode.',
+      '  return Math.floor(scaled / 10_000)\n  throw new AppError(\n    \'invariant_violated\',\n    `"${String(mode)}" is not a commission rounding mode.',
+      PURE_SUITE,
+    ),
+    'not a commission rounding mode',
+  )
+
+  // 125e. The band's lower bound made EXCLUSIVE. An appointment worth exactly the threshold then falls in the
+  //       band below, which is a different rule from the one published — and it is wrong on precisely the
+  //       round figures a price list is made of.
+  checkRejectedBy(
+    'commission gate: a band boundary read as exclusive rather than inclusive is caught',
+    brokenCommissionSource(
+      CORE,
+      'if (band.fromFils > basisFils) continue',
+      'if (band.fromFils >= basisFils) continue',
+      PURE_SUITE,
+    ),
+    'picks band 1 below the second threshold and band 2 at it',
+  )
+
+  // 125f. The basis taken as the gross for a net version. Five per cent too much on every line, for ever, and
+  //       the figure looks exactly like a commission figure. VAT is not the salon's money.
+  checkRejectedBy(
+    'commission gate: commissioning the gross where the version says net is caught',
+    brokenCommissionSource(
+      CORE,
+      "return basis === 'gross_inclusive' ? earning.grossFils : earning.grossFils - earning.vatFils",
+      'return earning.grossFils',
+      PURE_SUITE,
+    ),
+    'gross - vat for a net one',
+  )
+
+  // 125g. The band-covers-zero assertion removed from the pure layer. The database still holds it (ZY073), so
+  //       nothing observable changes for a version that came from a migration — and a rule set a TEST or a
+  //       caller built in memory would price the cheapest treatments at whatever the reader decided.
+  checkRejectedBy(
+    'commission gate: a rule set whose lowest band is above zero being accepted is caught',
+    brokenCommissionSource(
+      CORE,
+      'if (first === undefined || first.bandNo !== 1 || first.fromFils !== 0) {',
+      'if (first === undefined) {',
+      PURE_SUITE,
+    ),
+    'must start at 0',
+  )
+
+  // 125h. The version resolver ignoring the effective date and taking the newest. This is the defect in its
+  //       purest form, and in a database with one version it is a no-op — which is why the pure suite holds
+  //       two and asserts that a March date answers version 1 after version 2 exists.
+  checkRejectedBy(
+    'commission gate: resolving the newest version rather than the one in force is caught',
+    brokenCommissionSource(
+      CORE,
+      'if (version.effectiveFrom > tradingDate) continue',
+      'if (false) continue',
+      PURE_SUITE,
+    ),
+    'whatever is in force now',
+  )
+
+  // 125i. The output order dropped. "Recomputing reproduces every line byte-identically" is a claim about a
+  //       SEQUENCE, and an unordered answer satisfies every per-line assertion while failing the one that
+  //       compares the two runs as sequences — which is the assertion a therapist's dispute rests on.
+  checkRejectedBy(
+    'commission gate: an unordered line set is caught',
+    brokenCommissionSource(
+      CORE,
+      '  const ordered = [...earnings].sort((a, b) =>\n    a.tradingDate === b.tradingDate\n      ? a.appointmentId.localeCompare(b.appointmentId)\n      : a.tradingDate.localeCompare(b.tradingDate),\n  )',
+      '  const ordered = [...earnings].reverse()',
+      PURE_SUITE,
+    ),
+    'orders by trading date then appointment id',
+  )
+
+  // 125j. The recompute RESOLVING the version instead of taking the one the run names. The whole unit, in the
+  //       one place it is invisible without a second version: a rate published in June answers for March, the
+  //       arithmetic is correct the whole way, and the only symptom is a figure that differs from the payslip.
+  //       Caught by the SCAN, because that is the layer whose wording is load-bearing — the rows suite catches
+  //       it too, and only after publishing a superseding version to make it observable.
+  checkRejectedBy(
+    'commission gate: a recompute that resolves the current version is caught',
+    brokenCommissionSource(
+      ORCHESTRATOR,
+      'const pinned = versions.find((row) => row.ruleVersionId === args.run.ruleVersionId)',
+      'const pinned = versions.find(() => true) ?? commissionRuleFor(versions.map(asRuleVersion), localDate(args.run.periodStartsOn)).ruleVersionId',
+      SCAN_SUITE,
+    ),
+    'never resolves a version by date in the recompute path',
+  )
+
+  // 125k. The run reading the earnings AS THEY ARE NOW rather than at its own `source_as_of`. A sale backdated
+  //       into a filed month then earns commission nobody paid, and the run RECORDS the lock's instant while
+  //       having read something else — so the row says it reproduces and it does not. Needs the database: the
+  //       claim is about which rows a query returns.
+  //
+  //       The mutation is at the CALL and not inside the query, and that is a measurement rather than a
+  //       preference: dropping one of the read's seven as-of bounds is a no-op, because the other six still
+  //       exclude the backdated document. The first version of this case did exactly that and reported PASS
+  //       over a suite that stayed green.
+  checkRejectedBy(
+    'commission gate: a run that reads the earnings at the current instant is caught',
+    brokenCommissionSource(
+      ORCHESTRATOR,
+      '    periodEndsOn: args.periodEndsOn,\n    sourceAsOf: args.sourceAsOf,\n  })',
+      '    periodEndsOn: args.periodEndsOn,\n    sourceAsOf: new Date().toISOString(),\n  })',
+      ROWS_SUITE,
+      rowsRun,
+    ),
+    'names the lock and reads at the instant the lock was taken',
+  )
+
+  // 125l. A filed period's figures read at NOW rather than at the lock. `assert_commission_run_reads_the_lock`
+  //       (ZY076) refuses it, which is the database being the authority — and the reason this case exists is
+  //       that the refusal is what the repository would have to walk into rather than something it decides.
+  checkRejectedBy(
+    'commission gate: reading a filed period at the current instant rather than at the lock is caught',
+    brokenCommissionSource(
+      REPO,
+      '  if (!status.closed || status.periodId === null) {',
+      '  if (true) {',
+      ROWS_SUITE,
+      rowsRun,
+    ),
+    'reads at the instant the lock was taken',
+  )
+
+  // 125m. The `::text` removed from an instant parameter. THE subtlest defect this unit shipped: postgres.js
+  //       infers the parameter type from the cast that follows it, so `${iso}::timestamptz` is serialised as
+  //       a Date at MILLISECOND precision and a microsecond-precise `locked_at` arrives a fraction early. It
+  //       cannot be found in `psql`, where the same literal is exact either way.
+  checkRejectedBy(
+    'commission gate: an instant parameter cast straight to timestamptz is caught',
+    brokenCommissionSource(
+      REPO,
+      '${input.sourceAsOf}::text::timestamptz, ${input.lockedPeriodId},',
+      '${input.sourceAsOf}::timestamptz, ${input.lockedPeriodId},',
+      SCAN_SUITE,
+    ),
+    'casts every instant through ::text first',
+  )
+
+  // 125n. The lock guard testing the period START rather than its END. A run over a month whose last day is
+  //       filed then passes with figures read at whatever instant the caller chose, which is the one case the
+  //       guard exists for — and the two agree for every period that is wholly open or wholly closed.
+  checkRejectedBy(
+    'commission gate: a lock guard that asks about the period start is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      'v_period_id := period_lock_for(new.period_ends_on);',
+      'v_period_id := period_lock_for(new.period_starts_on);',
+      SCAN_SUITE,
+    ),
+    'the DATABASE guard calls period_lock_for rather than reading the table',
+  )
+
+  // 125o. A version SEEDED into the migration. Y9-commission's provisional answer is that no commission
+  //       structure is configured, and a seeded rate is indistinguishable from an agreed one on the payslip
+  //       that results — brief rule 15, sharpest here because what the figure decides is somebody's pay. No
+  //       behavioural test can see it: it would find a version and price against it.
+  checkRejectedBy(
+    'commission gate: a seeded commission rate is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      "comment on table commission_rule is\n  'One published commission rule version:",
+      "insert into commission_rule (version, effective_from, basis, rounding_mode,\n  published_by_actor_kind, is_provisional, open_question_id, source_note)\nvalues (1, date '1900-01-01', 'net_of_vat', 'floor', 'system', true, 'Y9-commission', 'seeded');\n\ncomment on table commission_rule is\n  'One published commission rule version:",
+      SCAN_SUITE,
+    ),
+    'seeds no rule version and no band',
+  )
+
+  // 125p. The composite foreign key replaced by a plain column. The line's version then becomes a SECOND
+  //       statement of the run's, and a second statement of a fact drifts — a line naming a version its run
+  //       does not name would be storable, and the derivation would report a rate the run never used.
+  checkRejectedBy(
+    'commission gate: a line version that is a copy rather than the run’s own fact is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      '  constraint commission_line_pins_its_runs_rule_version\n    foreign key (run_id, rule_version_id) references commission_run (id, rule_version_id),',
+      '  constraint commission_line_names_a_version\n    foreign key (rule_version_id) references commission_rule (id),',
+      SCAN_SUITE,
+    ),
+    'makes the line’s version the run’s own fact, by composite foreign key',
+  )
+
+  // 125q. The figure check removed from ZY077. A run could then store any `commission_fils` at all and
+  //       satisfy every other constraint in the file, so "recomputing reproduces the stored line" would be a
+  //       claim about whichever program wrote the row rather than about the rule.
+  checkRejectedBy(
+    'commission gate: a line whose figure nothing checks against its rule is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      '  v_expected := commission_fils_for(new.basis_fils, new.rate_bp, v_rounding);',
+      '  v_expected := new.commission_fils;',
+      SCAN_SUITE,
+    ),
+    'holds every line to the formula in the database',
+  )
+
+  // 125r. The SQL formula dividing before multiplying, which is 125c one layer down. The two implementations
+  //       are held equal over a census by the rows suite, and the scan holds the EXPRESSION — because a census
+  //       over a box whose remainders are all zero would agree with a wrong formula.
+  checkRejectedBy(
+    'commission gate: the SQL formula dividing before multiplying is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      "  if p_rounding_mode = 'floor' then\n    return (p_basis_fils * p_rate_bp) / 10000;",
+      "  if p_rounding_mode = 'floor' then\n    return (p_basis_fils / 10000) * p_rate_bp;",
+      SCAN_SUITE,
+    ),
+    'states the formula in SQL, multiplying before dividing',
+  )
+
+  // 125s. A foreign key into `business_day` added to an append-only table. Nothing here can ever be deleted,
+  //       so the reference pins every trading date it names FOR EVER — and the failure lands in
+  //       `business-days.itest.ts`, a suite this unit does not own, as eleven cases about a generator that can
+  //       no longer do its job. P-HR-06 found it that way and 0086 wrote the principle down.
+  checkRejectedBy(
+    'commission gate: an append-only table pinning the generated business_day calendar is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      '  trading_date          date        not null,\n\n  -- The figure the rate was applied to',
+      '  trading_date          date        not null\n                          references business_day (trading_date) on delete restrict,\n\n  -- The figure the rate was applied to',
+      SCAN_SUITE,
+    ),
+    'references business_day from nowhere',
+  )
+
+  // 125t. The revokes dropped. 0009 granted the application role UPDATE and DELETE on every table in public
+  //       and extended it to tables created later, so an append-only table that forgets to revoke them is
+  //       append-only only for as long as nobody writes the statement — and the triggers are not the backup,
+  //       they are the half that answers a `psql` session.
+  checkRejectedBy(
+    'commission gate: the application role keeping UPDATE and DELETE is caught',
+    brokenCommissionSource(
+      MIGRATION,
+      'revoke update, delete\n  on commission_rule, commission_rule_band, commission_run, commission_line\n  from berelax_app;',
+      '-- revoked elsewhere',
+      SCAN_SUITE,
+    ),
+    'revokes UPDATE and DELETE from the application role',
+  )
+
+  // 125u. The disabled banner removed from the screen. An empty commission page is then indistinguishable
+  //       from a month in which nobody earned anything, which is the acceptance line's "no silent success" —
+  //       and of those two readings one is a switch to flip and the other is a business problem.
+  checkRejectedBy(
+    'commission gate: a commission screen that does not say the module is off is caught',
+    brokenCommissionSource(
+      RENDER,
+      '`<p><strong>The commission module is DISABLED, which is why there are no figures.</strong> ` +',
+      '`<p><strong>No commission is due for this period.</strong> ` +',
+      RENDER_SUITE,
+    ),
+    'The commission module is DISABLED',
+  )
+
+  // 125v. The money formatter losing its zero-padded remainder. 100,005 fils renders as `AED 1,000.5` — a
+  //       figure wrong by a factor of ten in the fils, on the one surface a person reads rather than an
+  //       assertion, and it is the exact shape a float-formatted figure takes.
+  checkRejectedBy(
+    'commission gate: a dirham figure rendered without its padded fils is caught',
+    brokenCommissionSource(
+      RENDER,
+      "return `${sign}AED ${dirhams.toLocaleString('en-GB')}.${String(remainder).padStart(2, '0')}`",
+      "return `${sign}AED ${dirhams.toLocaleString('en-GB')}.${remainder}`",
+      RENDER_SUITE,
+    ),
+    'renders fils as dirhams without a float',
+  )
+}
+
 // 126a-126z. (C-AUTO-05) The marketing kill switch: the one it must not be able to stop, and the state it
 //            must not hold twice.
 //

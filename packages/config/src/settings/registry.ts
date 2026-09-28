@@ -173,6 +173,15 @@ export const PACKAGE_POLICY_SETTING_KEYS = [
   PACKAGE_UNREDEEMED_BALANCE_SETTING_KEY,
 ] as const
 
+/**
+ * Whether the commission module computes anything (P-HR-11, Y9-commission).
+ *
+ * Spelled once here for the reason the package keys are: the HR commission screen reads it, the run
+ * orchestrator takes the answer as an argument, and the gate asserts it is flagged provisional — three
+ * readers, and a second spelling is a reader that silently falls back to the declared default.
+ */
+export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
+
 // --- the registry ------------------------------------------------------------------------------
 // Provisional values are the STRICTEST safe option, so an uncorrected assumption leaves the system
 // conservative rather than non-compliant. Each carries its OPEN-QUESTIONS id.
@@ -865,6 +874,44 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y1-licence',
       note: 'docs/04 §7 lists the therapist screening requirements and their renewal intervals as [UNVERIFIED], so the interval is unknown and the warning window that should precede it is unknown with it. 60 days is the longest of the three obvious candidates (30/60/90) and therefore the conservative one: a warning too early is noise, a warning too late is a therapist off the rota with a day of bookings to reassign by hand.',
+    },
+  }),
+  define({
+    /**
+     * Whether the commission module computes anything at all (P-HR-11).
+     *
+     * **This is the provisional answer to Y9-commission, and the answer is not a rate.** The handover names
+     * no commission structure — flat, tiered and service-dependent are all still open — so the build ships
+     * the full engine with NOTHING configured: `commission_rule` (0097) seeds no version, and this flag is
+     * `false`. With it off a run produces zero lines and records why (`commission_run.module_enabled`), so
+     * "no commission is due" and "the module is switched off" are never the same empty answer.
+     *
+     * A FLAG and not a missing table, because docs/12 §1.3 is explicit that the switch is flipped by
+     * configuration rather than by a code change: turning commission on is one audited settings change plus
+     * one published rule version, and neither is a deploy.
+     *
+     * `OWNER_ONLY` and not `OWNER_MANAGER`, for the reason `ROLE_DEFINITIONS` gives about the manager and
+     * `employee.salary`: a commission is pay, and what the business pays its staff is the proprietor's
+     * decision. The manager runs the floor.
+     *
+     * `invalidates: []` is a conclusion rather than an oversight. Nothing is prerendered from this value —
+     * the HR commission screen is `dynamic` and reads it per request — and `rerunJobs` is empty for a
+     * sharper reason: turning the flag on must NOT retro-compute a period. A commission run is a dated,
+     * immutable record of what was computed and when, and a job that swept old months the moment somebody
+     * flipped a switch would produce runs nobody asked for over periods that had already been paid.
+     */
+    key: COMMISSION_ENABLED_SETTING_KEY,
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: false,
+    label: 'Commission module enabled',
+    help: 'Off until a commission structure is agreed. While it is off, a commission run produces no lines and says on its face that the module is disabled rather than reporting nothing is due. Turning it on also needs a published commission rule version — the rates live in a versioned row, never in code.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-commission',
+      note: 'No commission structure is configured and none is guessed. docs/OPEN-QUESTIONS.md Y9-commission asks whether the structure is flat, tiered or service-dependent and nothing in the handover answers it, so the strictest safe option is OFF: a rate this build invented would be indistinguishable from a configured one on the payslip that resulted. The engine is complete and is tested against a fixture rule set; answering this is one audited change here plus one published commission_rule version.',
     },
   }),
   define({

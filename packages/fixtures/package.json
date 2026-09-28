@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@berelax/clinical": "workspace:*",
+    "@berelax/hr": "workspace:*",
     "@berelax/media": "workspace:*",
     "@berelax/pdf": "workspace:*"
   }

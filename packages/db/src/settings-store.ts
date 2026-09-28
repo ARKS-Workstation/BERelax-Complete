@@ -364,6 +364,20 @@ export async function unconfirmedAssumptionRows(
       -- charge. The label itself is constrained to carry a placeholder marker for exactly as long as the
       -- flag is set (vat201_box_provisional_label_is_marked, using is_placeholder_text from 0026), so the
       -- row leaves this panel by a migration clearing the flag AND cleaning the label in one statement.
+      -- The commission rule versions (0097). Here for working_hours_rule's reason, and it is the only one
+      -- of these tables that is normally EMPTY: nothing is seeded, because Y9-commission's provisional
+      -- answer is that no commission structure is configured at all, so the row that carries that answer on
+      -- this panel is the hr.commission_enabled app_setting above rather than a rule version. This clause is
+      -- what makes the FIRST published version appear here too — a version drafted by this build and not
+      -- confirmed by the business is exactly the thing that must not be indistinguishable from an agreed
+      -- rate, because what it decides is somebody's pay. Per VERSION and not per band, because the basis,
+      -- the rounding direction and every band are one decision somebody makes in one sitting. No backtick
+      -- appears in this comment, for the reason the pipeline paragraph above states: it lives inside a JS
+      -- template literal and one would end it early.
+      union all
+      select 'commission_rule', 'commission effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from commission_rule where is_provisional
       union all
       select 'vat201_box', box_no::text, open_question_id, provisional_note
         from vat201_box where is_provisional
