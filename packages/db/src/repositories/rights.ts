@@ -118,6 +118,17 @@ interface ExecutionRecipe {
   readonly matchColumn: string
   readonly action: 'pseudonymise' | 'redact' | 'delete_row' | 'crypto_erase'
   /**
+   * How the statement reaches the table. `statement` — the default — is a direct DML statement.
+   *
+   * `definer` means the application role may not issue it and it goes through
+   * `public.erase_customer_workflow_rows`, which is SECURITY DEFINER and gated on an in-progress erasure
+   * request. Declared on the recipe rather than decided in the executor because the recipe is where the
+   * question "what carries this rule out" is already answered, and because the two tables that need it
+   * (`flow_enrolment`, `customer_pipeline_card`) are indistinguishable from their neighbours in every way
+   * except the privilege — so an executor deciding by name would be a rule nobody could see.
+   */
+  readonly via?: 'statement' | 'definer'
+  /**
    * For `redact`: what replaces the value. `null` where the column admits it, and a stated marker where it
    * does not — a `not null` column blanked to the empty string reads as a message that was sent empty.
    */
@@ -131,6 +142,16 @@ interface ExecutionRecipe {
  * a redaction from data that was never there — which is brief rule 15's argument applied to an absence.
  */
 export const REDACTION_MARKER = '[redacted under a data-subject erasure request]'
+
+/**
+ * The only tables `public.erase_customer_workflow_rows` will delete from, and it takes a BRANCH SELECTOR
+ * rather than an identifier — so this list and the function's `if` have to agree. A third table means
+ * editing 0085, which is the point: a SECURITY DEFINER delete should not be reachable by passing a string.
+ */
+const DEFINER_TARGETS: readonly string[] = Object.freeze([
+  'flow_enrolment',
+  'customer_pipeline_card',
+])
 
 const recipe = (r: ExecutionRecipe): ExecutionRecipe => Object.freeze(r)
 
@@ -154,6 +175,13 @@ function recipeRegistry(recipes: readonly ExecutionRecipe[]): readonly Execution
     }
     if (r.action === 'redact' && r.redactTo === undefined) {
       problems.push(`${r.ruleKey}: a redaction must say what replaces the value`)
+    }
+    // `erase_customer_workflow_rows` holds two static DELETEs and admits no other target, so a recipe
+    // routed through it that is not one of them would raise ZA008 mid-erasure. Refused here instead.
+    if (r.via === 'definer' && !(r.action === 'delete_row' && DEFINER_TARGETS.includes(r.table))) {
+      problems.push(
+        `${r.ruleKey}: only a delete of ${DEFINER_TARGETS.join(' or ')} goes through the definer function`,
+      )
     }
     if (seen.has(r.ruleKey)) problems.push(`${r.ruleKey}: declared more than once`)
     seen.add(r.ruleKey)
@@ -333,6 +361,11 @@ export const EXECUTION_RECIPES: readonly ExecutionRecipe[] = recipeRegistry([
     matchColumn: 'customer_id',
     action: 'delete_row',
   }),
+  // `via: 'definer'` on both of these, and it is a privilege fact rather than a preference. 0070 and 0077
+  // each revoke DELETE on their table from `berelax_app` with the same stated reason — that removal happens
+  // by cascade from `customer` — and an erasure cannot delete `customer`, because a retained tax invoice
+  // references it. So the cascade they relied on never runs and the direct DELETE raises `permission
+  // denied` for the role the engine actually runs as. The app-role integration case found both.
   recipe({
     ruleKey: 'public.flow_enrolment.customer_id',
     schema: 'public',
@@ -341,6 +374,7 @@ export const EXECUTION_RECIPES: readonly ExecutionRecipe[] = recipeRegistry([
     subjectKey: 'customer_id',
     matchColumn: 'customer_id',
     action: 'delete_row',
+    via: 'definer',
   }),
   recipe({
     ruleKey: 'public.customer_preference.customer_id',
@@ -368,6 +402,7 @@ export const EXECUTION_RECIPES: readonly ExecutionRecipe[] = recipeRegistry([
     subjectKey: 'customer_id',
     matchColumn: 'customer_id',
     action: 'delete_row',
+    via: 'definer',
   }),
 
   // Clinical. These three go through the SECURITY DEFINER functions, not through a statement here — the
@@ -937,6 +972,7 @@ async function actOnPublicSchema(
     readonly customerIds: readonly string[]
     readonly livePhones: readonly string[]
     readonly erasedAtIso: string
+    readonly rightsRequestId: string
   },
 ): Promise<readonly ClassLine[]> {
   const classes: ClassLine[] = []
@@ -984,6 +1020,7 @@ async function actOnPublicSchema(
       phones: ctx.livePhones,
       pseudonymFor: deps.pseudonymFor,
       erasedAtIso: ctx.erasedAtIso,
+      rightsRequestId: ctx.rightsRequestId,
     })
     classes.push({
       participant,
@@ -1352,6 +1389,7 @@ export async function eraseSubject(
     customerIds,
     livePhones,
     erasedAtIso: input.erasedAtIso,
+    rightsRequestId: input.rightsRequestId,
   })
 
   // The suppression that keeps the person un-messageable, WRITTEN rather than merely preserved: somebody
@@ -1482,6 +1520,8 @@ async function applyRecipe(
     readonly phones: readonly string[]
     readonly pseudonymFor: (id: string) => string
     readonly erasedAtIso: string
+    /** Needed by the `definer` route: the function refuses without a request that authorises it. */
+    readonly rightsRequestId: string
   },
 ): Promise<number> {
   const target = `${r.schema}.${r.table}`
@@ -1510,11 +1550,37 @@ async function applyRecipe(
         : sql`${sql.unsafe(r.matchColumn)} = any (${[...ctx.customerIds]}::uuid[])`
 
   if (r.action === 'delete_row') {
+    // The privileged route, for the two tables whose DELETE the application role does not hold. One call
+    // per id in the merge lineage, because the function authorises one customer at a time — the same shape
+    // `destroy_customer_deks` is called in, and for the same reason.
+    if (r.via === 'definer') {
+      let acted = 0
+      for (const id of ctx.customerIds) {
+        const [row] = await sql<{ n: number }[]>`
+          select public.erase_customer_workflow_rows(${id}::uuid, ${ctx.rightsRequestId}::uuid,
+                                                     ${r.table}) as n
+        `
+        acted += Number(row?.n ?? 0)
+      }
+      return acted
+    }
     const rows = await sql`delete from ${sql.unsafe(target)} where ${where} returning 1 as one`
     return rows.length
   }
 
-  // redact
+  if (r.action !== 'redact') {
+    // Defensive, and it closes a real trap rather than a hypothetical one. The branches above are
+    // `pseudonymise` and `delete_row`; everything else used to FALL THROUGH into the redact statement, so a
+    // `crypto_erase` recipe arriving here would have issued `set <column> = null` on a clinical table. It
+    // cannot arrive today because `actOnPublicSchema` skips the clinical schema before the loop reaches it,
+    // and "cannot today" is exactly how a fallthrough becomes reachable in a later refactor that has no
+    // reason to read this function.
+    refuse(
+      'erasure_recipe_mismatch',
+      `${r.ruleKey} has action "${r.action}", which no statement in this executor carries out.`,
+      { ruleKey: r.ruleKey, action: r.action },
+    )
+  }
   const replacement = r.redactTo === 'marker' ? REDACTION_MARKER : null
   const rows = await sql`
     update ${sql.unsafe(target)} set ${sql.unsafe(r.column)} = ${replacement}

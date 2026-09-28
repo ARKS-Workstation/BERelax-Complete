@@ -30246,6 +30246,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   const KEY_STORE = 'packages/clinical/src/crypto/postgres-key-store.ts'
   const PURGE = 'apps/worker/src/jobs/retention-purge.ts'
   const PRIVACY_RENDER = 'apps/web/app/(admin)/settings/privacy/render.ts'
+  const CONVENTIONS = 'scripts/check-schema-conventions.mjs'
 
   const POLICY_SUITE = 'packages/core/src/privacy/rights-policy.test.ts'
   const RIGHTS_SUITE = 'packages/fixtures/src/rights.itest.ts'
@@ -30628,6 +30629,46 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       RIGHTS_SUITE,
     ),
     'booking-manage token',
+  )
+
+  // 112y. The privileged route removed, so the two workflow deletes are issued directly. This is the ONLY
+  //       case in the block that cannot fail as the database owner: the owner holds DELETE on both tables,
+  //       so every other assertion in the suite is green either way. 0070 and 0077 revoke DELETE on
+  //       `flow_enrolment` and `customer_pipeline_card` from `berelax_app` on the stated grounds that
+  //       removal happens by cascade from `customer` — which an erasure cannot do, because a retained tax
+  //       invoice references that row. The app-role case is what fails, and it is the reason that case
+  //       exists.
+  checkRejectedBy(
+    'rights gate: an erasure issuing a delete the application role may not is caught',
+    rightsMutant(
+      ENGINE,
+      "    if (r.via === 'definer') {",
+      '    if (false as boolean) {',
+      RIGHTS_SUITE,
+    ),
+    'permission denied',
+  )
+
+  // 112z. The schema qualifier removed from case 87's append-only rule, which is where this unit found a
+  //       gate that was silent about a whole schema rather than wrong about anything. The rule takes the
+  //       table name from the table's own comment and STRIPS the schema, then looks for a trigger `on
+  //       <table>` — but a trigger on a table outside `public` must be written `on clinical.<table>`,
+  //       because SQL offers no other spelling. So for any append-only table in the `clinical` schema the
+  //       rule could never pass, and `clinical.dek_destruction` is the first one to carry the declaration
+  //       marker, which is why the hole had never been reachable.
+  //
+  //       This is not a mutation of this unit's own code: it is the known-bad fixture for a one-line fix
+  //       made to somebody else's gate, and it fails by naming the table, which is what says the fix is
+  //       load-bearing rather than cosmetic.
+  checkRejectedBy(
+    'rights gate: an append-only table outside `public` with no refusal trigger is caught',
+    withEditedFile(
+      CONVENTIONS,
+      (text) =>
+        replaceOnce(text, "const QUALIFIER = '(?:[a-z0-9_]+\\\\.)?'", "const QUALIFIER = ''"),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'dek_destruction',
   )
 
   // 112r. The pseudonym/erasure agreement dropped, for real (the criterion's known-bad fixture).

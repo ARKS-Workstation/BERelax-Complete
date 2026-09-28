@@ -912,6 +912,100 @@ comment on function public.clinical_erasure_census(uuid, uuid) is
 
 grant execute on function public.clinical_erasure_census(uuid, uuid) to berelax_app;
 
+/**
+ * Removes one customer from the two CRM workflows a DELETE was revoked on, under the erasure gate.
+ *
+ * ## Why this function has to exist at all
+ *
+ * `flow_enrolment` (0070) and `customer_pipeline_card` (0077) both revoke DELETE from `berelax_app`, and
+ * both give the same reason in almost the same words: *"DELETE has no legitimate caller; the cascade from
+ * `customer` still works, because a referential action runs with the privileges of the referencing table's
+ * owner rather than the caller's."*
+ *
+ * That reasoning is sound and its premise does not hold for an erasure. **An erasure cannot delete the
+ * `customer` row** — `invoice.customer_id` names it and an issued tax document must be kept for the
+ * statutory period — so it pseudonymises instead, and the cascade those two migrations were relying on
+ * never runs. Without this function a completed erasure leaves the person on a sales board a human drags
+ * cards around, and inside a marketing automation that goes on stepping. Neither is a statutory record and
+ * neither has any purpose once there is nobody to serve.
+ *
+ * ## Why it is a gated function and NOT a grant
+ *
+ * Granting `berelax_app` blanket DELETE on these tables would undo exactly what 0070 and 0077 were
+ * protecting: any request handler, not just an erasure, could then remove a card or an enrolment and leave
+ * "not on the board" and "never was" indistinguishable. What those migrations said was that DELETE has no
+ * legitimate caller. This is one — a named, single-row, authorised caller — so it is added as a caller
+ * rather than as a privilege. That is `destroy_customer_deks`'s argument above, applied to a `public`
+ * table for a different reason: there the schema is unreachable, here the verb is.
+ *
+ * ## `p_target` is a BRANCH SELECTOR, not dynamic SQL
+ *
+ * Both statements below are static and fully qualified; the parameter only chooses which one runs, and an
+ * unrecognised value raises. There is no `execute`, no `format`, no identifier interpolation — so widening
+ * this function to a third table is a visible edit to this file rather than a new string a caller may pass.
+ * One function rather than two because the gate is the part worth having once: two copies of an
+ * authorisation check are two things that can come to disagree, which is the defect the erasure rule
+ * registry exists to refuse elsewhere in this unit.
+ */
+create function public.erase_customer_workflow_rows(
+  p_customer_id       uuid,
+  p_rights_request_id uuid,
+  p_target            text
+) returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_ok      boolean;
+  v_deleted integer;
+begin
+  -- The same gate, and the same `merge_survivor_of` reason, as `destroy_customer_deks`: a record merged
+  -- into the subject is the same person, the tombstone keeps its own id (0069), and matching the subject
+  -- exactly would refuse every merged-away id — leaving that record on the board under an honoured erasure.
+  select exists (
+    select 1 from public.rights_request r
+     where r.id = p_rights_request_id
+       and r.subject_customer_id = public.merge_survivor_of(p_customer_id)
+       and r.request_type = 'erasure'
+       and r.state = 'in_progress'
+  ) into v_ok;
+
+  if not v_ok then
+    raise exception
+      'ErasureWorkflowRemovalNotAuthorised: no in-progress erasure request % names customer % as its '
+      'subject, or the survivor of the merge chain it belongs to. 0070 and 0077 revoke DELETE on these '
+      'tables from the application role; this function is the one authorised caller, not a way around '
+      'that.',
+      p_rights_request_id, p_customer_id
+      using errcode = 'ZA007';
+  end if;
+
+  if p_target = 'flow_enrolment' then
+    delete from public.flow_enrolment where customer_id = p_customer_id;
+  elsif p_target = 'customer_pipeline_card' then
+    delete from public.customer_pipeline_card where customer_id = p_customer_id;
+  else
+    raise exception
+      'ErasureWorkflowTargetUnknown: % is not one of the two tables this function removes rows from. '
+      'The target chooses a static statement; it is not an identifier this function will interpolate.',
+      p_target
+      using errcode = 'ZA008';
+  end if;
+
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end $$;
+
+comment on function public.erase_customer_workflow_rows(uuid, uuid, text) is
+  'Deletes one customer''s flow_enrolment or customer_pipeline_card rows under a verified in-progress '
+  'erasure request. SECURITY DEFINER because 0070 and 0077 revoke DELETE on those tables from '
+  'berelax_app on the stated grounds that removal happens by cascade from `customer` - which an erasure '
+  'cannot do, because a retained tax invoice references that row. Raises ZA007 without an authorising '
+  'request and ZA008 for an unknown target.';
+
+grant execute on function public.erase_customer_workflow_rows(uuid, uuid, text) to berelax_app;
+
 -- ---------------------------------------------------------------------------------------------
 -- 9. The retention purge's agent, so the pass is watched and capped.
 -- ---------------------------------------------------------------------------------------------

@@ -33,6 +33,7 @@ import {
   erasureCoverage,
   exportSubjectData,
   issueInvoice,
+  moveCard,
   overdueRightsRequests,
   publishEvent,
   RETAINING_ERASURE_ACTIONS,
@@ -147,6 +148,8 @@ const SUBJECTS = {
   overdue: syntheticPerson(9_606),
   /** The credential case's own subject: an erasure cannot be undone, so nothing else may use it. */
   credential: syntheticPerson(9_607),
+  /** The privileged-delete case's own subject, for the same reason. */
+  workflow: syntheticPerson(9_608),
   /**
    * Merged INTO `invoiced`, to prove an erasure covers a tombstone's own phone number.
    *
@@ -743,6 +746,117 @@ describe('the reachability invariant', () => {
       select count(*)::int as n from customer where erased_at is not null
     `
     expect(Number(erased?.n)).toBeGreaterThan(0)
+  })
+})
+
+describe('the rows the application role may not delete directly', () => {
+  /**
+   * A pipeline card goes, although `berelax_app` holds no DELETE on that table.
+   *
+   * 0070 (`flow_enrolment`) and 0077 (`customer_pipeline_card`) each revoke DELETE from the application
+   * role, and each gives the same reason: *"DELETE has no legitimate caller; the cascade from `customer`
+   * still works."* The premise does not hold for an erasure — it cannot delete the `customer` row, because
+   * a retained tax invoice references it — so the cascade never runs and the direct statement raises
+   * `permission denied` for the role the engine actually runs as. Both go through
+   * `public.erase_customer_workflow_rows`, which is SECURITY DEFINER and gated on an in-progress erasure
+   * request.
+   *
+   * Asserted on the CARD and not on the enrolment because `flow_enrolment` needs a `flow_definition` and
+   * the seed creates none, while the two share one function, one gate and one call site — the branch is
+   * chosen by a parameter this test would only be re-proving. What is specific to each table is the
+   * `delete` statement, and `recipeRegistry` refuses a `definer` recipe naming any other table at module
+   * load.
+   *
+   * This case runs as the OWNER, so it proves the route's EFFECT. That the route is necessary at all is
+   * proved by the app-role case at the end of this file, and gate case 112y removes the route and watches
+   * that case fail.
+   */
+  it('deletes the card through the definer function and leaves another customer\u2019s card alone', async () => {
+    const customerId = ids.workflow
+    const [stage] = await sql<{ stageKey: string }[]>`
+      select stage_key as "stageKey" from pipeline_stage order by stage_key limit 1
+    `
+    if (stage === undefined)
+      throw new Error('the seed created no pipeline stage for this case to use')
+    // Through `moveCard` and not a raw insert, because 0077 carries a deferred constraint trigger that
+    // refuses a card whose stage changed with no `pipeline_stage_transition` recording the move — "a stage
+    // is a claim somebody made about a person, so the claim and its record are one transaction". A raw
+    // insert here failed at COMMIT with exactly that message, which is the guard working. Using the real
+    // path also means the card arrives the way a card arrives, with its transition, and the transition is
+    // itself a classified participant this erasure has to account for.
+    // Only where the card is not ALREADY on that stage, and that is re-runnability rather than caution.
+    // `ids.overdue` is a fixed subject this file never erases, so its card survives the run — and `moveCard`
+    // refuses a move whose `from` and `to` are the same column, correctly, because a transition recording a
+    // move to where the card already is records nothing. The first draft moved both unconditionally and was
+    // green once and red for ever after, which is the failure mode this file's own header warns about.
+    for (const id of [customerId, ids.overdue]) {
+      const [card] = await sql<{ stageKey: string }[]>`
+        select stage_key as "stageKey" from customer_pipeline_card where customer_id = ${id}::uuid
+      `
+      if (card?.stageKey === stage.stageKey) continue
+      await withUnitOfWork(sql, ACTOR, (uow) =>
+        moveCard(uow, {
+          customerId: id,
+          toStageKey: stage.stageKey,
+          actor: ACTOR,
+          at: new Date(RECEIVED_ISO),
+        }),
+      )
+    }
+    const carded = async (id: string): Promise<number> => {
+      const [row] = await sql<{ n: number }[]>`
+        select count(*)::int as n from customer_pipeline_card where customer_id = ${id}::uuid
+      `
+      return Number(row?.n ?? 0)
+    }
+    // The precondition, asserted: without it the case passes against an engine that deletes nothing.
+    expect(await carded(customerId)).toBe(1)
+    expect(await carded(ids.overdue)).toBe(1)
+
+    const report = await withUnitOfWork(sql, ACTOR, async (uow) => {
+      const requestId = await openErasure(uow, customerId)
+      return eraseSubject(uow, deps, { ...ERASURE_ARGS, rightsRequestId: requestId })
+    })
+
+    expect(await carded(customerId)).toBe(0)
+    // The control, and it is what says the function is scoped to one customer rather than clearing a board:
+    // it takes a customer id, not a predicate, and there is no variant that takes one.
+    expect(await carded(ids.overdue)).toBe(1)
+
+    // And it is accounted for, as an acting line with a count — not as a table the report forgot.
+    const [line] = await sql<{ action: string; rowsActed: number; rowsRetained: number }[]>`
+      select action, rows_acted as "rowsActed", rows_retained as "rowsRetained"
+        from rights_resolution_class
+       where rights_resolution_id = ${report.resolutionId}::uuid
+         and participant = 'public.customer_pipeline_card'
+    `
+    expect(line?.action).toBe('delete_row')
+    expect(line?.rowsActed).toBe(1)
+    expect(line?.rowsRetained).toBe(0)
+  }, 30_000)
+
+  it('refuses to delete a workflow row without an in-progress erasure request naming that customer', async () => {
+    // The gate, on its own. The privilege is only half of what makes a SECURITY DEFINER delete safe: the
+    // other half is that it will not act without a request that says who asked and how they were verified.
+    await expect(
+      sql`
+        select public.erase_customer_workflow_rows(${ids.overdue}::uuid,
+          '00000000-0000-7000-8000-000000000000'::uuid, 'customer_pipeline_card')
+      `,
+    ).rejects.toThrow(/ErasureWorkflowRemovalNotAuthorised/)
+    // And the target is a branch selector, not an identifier it will interpolate.
+    await expect(
+      sql`
+        select public.erase_customer_workflow_rows(${ids.overdue}::uuid,
+          '00000000-0000-7000-8000-000000000000'::uuid, 'customer')
+      `,
+    ).rejects.toThrow(/ErasureWorkflowRemovalNotAuthorised|ErasureWorkflowTargetUnknown/)
+    // The control: the card this did NOT delete is still there, so the refusals refused rather than
+    // silently doing nothing.
+    const [row] = await sql<{ n: number }[]>`
+      select count(*)::int as n from customer_pipeline_card where customer_id = ${ids.overdue}::uuid
+    `
+    expect(Number(row?.n)).toBe(1)
   })
 })
 
