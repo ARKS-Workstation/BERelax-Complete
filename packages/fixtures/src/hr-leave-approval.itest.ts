@@ -567,7 +567,12 @@ async function sweep(): Promise<void> {
   await sql`delete from service_room_type_compat where service_treatment_key like 'phr09_probe_%'`
   await sql`delete from service where treatment_key like 'phr09_probe_%'`
   await sql`delete from rooms where notes = ${FILE_MARKER}`
-  await sql`delete from customer where phone_e164 like '+97159740%'`
+  // By this file's own MARKER and never by a phone prefix, which is what the first version did. A prefix is
+  // a guess about which numbers are this suite's: `packages/db/src/seeded-row-deletes.test.ts` refuses a suite
+  // that empties the customer table, and the reason it exists is that `pnpm seed` does not put the fixture
+  // salon's four synthetic people back once a suite has removed them — so a pattern that drifted onto one of
+  // them would break every later file with nothing naming the cause. A marker cannot drift.
+  await sql`delete from customer where notes = ${FILE_MARKER}`
   await sql`delete from business_day where trading_date = any(${DATES}::date[])`
 }
 
@@ -577,9 +582,9 @@ beforeAll(async () => {
   await sweep()
 
   const [customer] = await sql<{ id: string }[]>`
-    insert into customer (phone_e164, created_via, locale)
-    values (${PROBE_PHONE}, 'guest_booking', 'en')
-    on conflict (phone_e164) do update set created_via = excluded.created_via
+    insert into customer (phone_e164, created_via, locale, notes)
+    values (${PROBE_PHONE}, 'guest_booking', 'en', ${FILE_MARKER})
+    on conflict (phone_e164) do update set created_via = excluded.created_via, notes = excluded.notes
     returning id::text as id
   `
   customerId = (customer as { id: string }).id
@@ -787,7 +792,7 @@ describe('acceptance — a leave period is stored over business_day instants, ta
   it('the DATABASE refuses a leave period aligned to the calendar rather than to the session', async () => {
     // The known-bad fixture for the alignment (ADR 0003), and it is a statement rather than a helper: a
     // caller that wrote two calendar midnights would produce a row that looks completely ordinary and
-    // silently leaves two tails rostered. ZY006 refuses it by name.
+    // silently leaves two tails rostered. ZY020 refuses it by name.
     const state = await sqlStateOf(
       (tx) => tx`
         insert into leave_request (employee_id, period, kind)
@@ -797,9 +802,9 @@ describe('acceptance — a leave period is stored over business_day instants, ta
                 'annual'::leave_kind)
       `,
     )
-    expect(state).toBe('ZY006')
+    expect(state).toBe('ZY020')
 
-    // And the control: the SAME insert with the session's own bounds is accepted, so ZY006 is about the
+    // And the control: the SAME insert with the session's own bounds is accepted, so ZY020 is about the
     // alignment and not about the table refusing every insert.
     const aligned = await sqlStateOf(
       (tx) => tx`
@@ -1186,7 +1191,7 @@ describe('acceptance — delegation is time-bounded: three cases at the transact
     )
     expect(approved.approvedVia).toBe('delegation')
     expect(approved.delegationId).toBe(delegation.id)
-    // The record names the delegation, and 0092's ZY004 refused it unless the delegation authorises it.
+    // The record names the delegation, and 0092's ZY018 refused it unless the delegation authorises it.
     const live = await readLiveLeaveApproval(sql, leaveRequestId)
     expect(live?.delegationId).toBe(delegation.id)
     expect(live?.approverRole).toBe('receptionist')
@@ -1495,9 +1500,9 @@ describe('the rules the DATABASE refuses, for every role including the owner', (
       insert into leave_conflict_override (leave_request_id, appointment_id, actor_role, actor_label, reason)
       values (${leaveRequestId}::uuid, ${appointmentId}::uuid, ${role}, 'P-HR-09 pair itest', ${reason})
     `
-    expect(await sqlStateOf(insert('receptionist', 'a properly written reason'))).toBe('ZY002')
-    expect(await sqlStateOf(insert('manager', 'short'))).toBe('ZY002')
-    // The control: the same insert with a permitted role and a written reason is accepted, so ZY002 is about
+    expect(await sqlStateOf(insert('receptionist', 'a properly written reason'))).toBe('ZY016')
+    expect(await sqlStateOf(insert('manager', 'short'))).toBe('ZY016')
+    // The control: the same insert with a permitted role and a written reason is accepted, so ZY016 is about
     // the two halves of the rule and not about the table refusing everything.
     expect(await sqlStateOf(insert('manager', 'the client asked for her by name'))).toBe('')
   }, 60_000)
@@ -1515,16 +1520,16 @@ describe('the rules the DATABASE refuses, for every role including the owner', (
         (tx) =>
           tx`update leave_approval set approver_role = 'owner' where leave_request_id = ${id}::uuid`,
       ),
-    ).toBe('ZY001')
+    ).toBe('ZY015')
     expect(
       await sqlStateOf((tx) => tx`delete from leave_approval where leave_request_id = ${id}::uuid`),
-    ).toBe('ZY001')
+    ).toBe('ZY015')
     expect(
       await sqlStateOf(
         (tx) =>
           tx`update leave_approval_notice set outcome = 'sent' where leave_request_id = ${id}::uuid`,
       ),
-    ).toBe('ZY001')
+    ).toBe('ZY015')
   }, 60_000)
 
   it('refuses an approval record whose request is not approved, and one whose period differs', async () => {
@@ -1545,7 +1550,7 @@ describe('the rules the DATABASE refuses, for every role including the owner', (
           )
         `,
       ),
-    ).toBe('ZY005')
+    ).toBe('ZY019')
   }, 30_000)
 
   it('refuses a delegation to the delegator, and two live overlapping ones between one pair', async () => {

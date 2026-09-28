@@ -21,7 +21,7 @@ Three things, and each one is a refusal to do something that would look like a f
 
 3. **A leave period is stored over trading-session instants, and the database holds it so.** A day of leave on
    the 17th runs 11:00 on the 17th to 02:00 on the 18th. `leaveCoveragePeriod()` in `@berelax/core` computes
-   it, and migration 0092 refuses (`ZY006`) a `leave_request.period` bounded by a LOCAL MIDNIGHT that falls
+   it, and migration 0092 refuses (`ZY020`) a `leave_request.period` bounded by a LOCAL MIDNIGHT that falls
    inside an open trading session — so the rule does not depend on the caller having used that function.
 
    The rule is that narrow on purpose. "No bound may fall strictly inside a session" is the same claim in a

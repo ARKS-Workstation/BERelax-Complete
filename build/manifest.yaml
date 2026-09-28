@@ -10351,7 +10351,7 @@ units:
       firing over cancel.ts and over the approval path with a cancellation spliced in, because every
       assertion it makes is an empty result (ADR 0002). The runtime half is beside it: the round-trip case
       reads the overridden appointment back and asserts its status and therapist are unchanged.'
-    - 'NOTE: ZY006 is a trigger on leave_request, which is 0030''s table, and that is flagged rather than
+    - 'NOTE: ZY020 is a trigger on leave_request, which is 0030''s table, and that is flagged rather than
       done quietly. The acceptance line says "leave periods are stored over business_day open/close
       instants", and until this trigger the only thing making that true was the caller having used
       leaveCoveragePeriod(). leave_request takes a bare tstzrange, the submission path is P-HR-14''s, and a
@@ -10375,9 +10375,25 @@ units:
       matters - this can only NARROW - is proved by a pure test rather than by serving the page. A ceiling
       whose only test needs a server is a ceiling somebody removes without ever seeing it fail." The property
       is asserted over EVERY role in both directions, with a case proving the ceiling is not vacuous.'
+    - 'NOTE: the private SQLSTATEs are ZY015-ZY020, and the CONVENTION changed under this unit rather than
+      the unit changing its mind. 0092 first took ZY001-ZY006 on the reasoning every migration before it
+      used: read the migrations you can see, and take a class nobody raises. ZA through ZX were taken and ZY
+      was free. That was correct when it was written and false by the time it merged - 0085 had moved its
+      eight codes INTO ZY after it and 0084 both landed on ZA, and two other units in flight reasoned their
+      way to ZY001 in the same week, so four migrations claimed ZY001 at once. There is no free class left:
+      ZA through ZY are in use and ZZ is W-SITE-10''s. So the rule is now W-SYS-12''s provisional answer - a
+      refusal is identified by all FIVE characters, and two unrelated rules may share a class as long as they
+      never share a code - and packages/db/src/sqlstate-uniqueness.test.ts was already keyed on the exact
+      five, which is what makes the new convention checkable rather than a hope: a shared class is not a
+      finding, a shared code is. The prose in 0092''s header and in the ledger paragraph was rewritten with
+      the codes, because a header arguing for a class it does not have is the second-statement defect in its
+      purest form. What did NOT change is why the five characters matter, which is 0080''s sentence: a code
+      standing for two rules makes one file''s translator report the other file''s refusal with a plausible
+      message and the wrong cause, and makes a probe asserting the code pass when the statement bounced off
+      something else.'
     - 'NOTE: leave_conflict_override.appointment_id is a PLAIN column with no foreign key, which is the one
       referential decision in 0092 that looks like an omission. 0081 records both halves of why neither
-      action works for an append-only row: ON DELETE SET NULL arrives as an UPDATE, which ZY001 refuses, and
+      action works for an append-only row: ON DELETE SET NULL arrives as an UPDATE, which ZY015 refuses, and
       ON DELETE RESTRICT pins the parent for ever because nothing in the table can be deleted to release it.
       In production an appointment is cancelled and never deleted, so RESTRICT would cost nothing there - and
       it made every fixture appointment this unit overrode permanently undeletable, which presented as an

@@ -611,7 +611,7 @@ export interface LeaveOverrideRow {
  * recorded against any appointment at all, and `leave_approval.conflicts_overridden` would count decisions
  * about bookings nobody was asked about — while the approval still refused for the conflict that was real.
  *
- * The role and the reason are NOT validated here. Migration 0092's ZY002 refuses both, for every role and for
+ * The role and the reason are NOT validated here. Migration 0092's ZY016 refuses both, for every role and for
  * a `psql` session; `judgeLeaveConflictOverride` in `@berelax/core` is the layer that says which half is
  * wrong before a transaction is opened. A third copy in this function would be the one that drifts.
  */
@@ -856,7 +856,7 @@ export async function approveLeaveRequest(
 
       // `now()` and not a clock in this module: the decision instant is the transaction's, and the same
       // value is what `decided_at` DEFAULTs to, so the delegation window the rule judged and the window
-      // 0092's ZY004 judges are the same instant rather than two readings a few milliseconds apart.
+      // 0092's ZY018 judges are the same instant rather than two readings a few milliseconds apart.
       const [clock] = await uow.sql<{ atText: string }[]>`
         select (extract(epoch from now()) * 1000)::bigint::text as "atText"
       `
@@ -889,7 +889,7 @@ export async function approveLeaveRequest(
         )
       }
 
-      // The status and the record are two statements of one decision, which is why 0092's ZY005 refuses an
+      // The status and the record are two statements of one decision, which is why 0092's ZY019 refuses an
       // approval row whose request is not approved: the UPDATE has to land first, and a row that did not
       // match means somebody else decided it between the lock and here.
       const updated = await uow.sql<{ id: string }[]>`

@@ -27,7 +27,7 @@ import { employee, leaveRequest } from './staff.ts'
  * PostgreSQL by `packages/fixtures/src/hr-leave-approval.itest.ts`:
  *
  *   * the exclusion constraint `leave_delegation_no_overlapping_live`;
- *   * the four append-only trigger pairs (ZY001) and the two assertion triggers (ZY002, ZY003, ZY004, ZY005);
+ *   * the four append-only trigger pairs (ZY015) and the two assertion triggers (ZY016, ZY017, ZY018, ZY019);
  *   * the `leave_approval_live` view, which Drizzle has no mirror for — and which is where the "is this
  *     approval still live" predicate lives, for `employee_approved_leave`'s reason (0030).
  */
@@ -165,12 +165,12 @@ export const leaveConflictOverride = pgTable(
       .references(() => leaveRequest.id, { onDelete: 'restrict' }),
     /**
      * A plain column, not a reference. 0081's lesson in full: `ON DELETE SET NULL` arrives as an UPDATE,
-     * which ZY001 refuses, and `ON DELETE RESTRICT` pins the parent for ever because nothing here can be
+     * which ZY015 refuses, and `ON DELETE RESTRICT` pins the parent for ever because nothing here can be
      * deleted to release it. `recordLeaveConflictOverride` refuses an appointment the leave does not
      * overlap, which is a stronger check than the existence a key would give.
      */
     appointmentId: uuid('appointment_id').notNull(),
-    /** Refused unless 'owner' or 'manager', by ZY002 in the migration — a trigger, not a CHECK. */
+    /** Refused unless 'owner' or 'manager', by ZY016 in the migration — a trigger, not a CHECK. */
     actorRole: text('actor_role').notNull(),
     actorLabel: text('actor_label').notNull(),
     reason: text('reason').notNull(),

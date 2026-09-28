@@ -13,7 +13,7 @@
 -- leave on the 17th runs 11:00 on the 17th to 02:00 on the 18th and therefore covers the 01:30 appointment in
 -- the tail. 0066's header states the same thing and states why it is not in SQL — a second reading of where a
 -- trading day ends, when `resolveTradingDate` is the one. This file stores the instants that function
--- produced and adds no arithmetic of its own; `leave_approval_matches_request` (ZY005) is a comparison, not
+-- produced and adds no arithmetic of its own; `leave_approval_matches_request` (ZY019) is a comparison, not
 -- a derivation.
 --
 -- **It does not store the conflict report.** The report is a READ — `readLeaveApprovalConflicts` — over
@@ -49,7 +49,7 @@
 -- approval retroactively wrong. A plain `approved_at` on `leave_request` cannot say what was judged.
 --
 -- `leave_conflict_override` — one row per appointment a human decided to leave standing inside approved
--- leave. `actor_role` is refused unless it is one that may (ZY002) rather than validated in TypeScript alone,
+-- leave. `actor_role` is refused unless it is one that may (ZY016) rather than validated in TypeScript alone,
 -- because the refusal has to hold for a `psql` session too, and the reason is refused blank, placeholder and
 -- under eight characters for `attendance_correction.reason`'s reason (0086): a reason nobody wrote is not an
 -- audited decision.
@@ -78,18 +78,30 @@
 --
 -- ## Private SQLSTATEs
 --
---   ZY001  an approval record is append-only; UPDATE or DELETE refused (four tables, one rule)
---   ZY002  a conflict override needs the owner or a manager and a written reason
---   ZY003  a delegation's window is not usable
---   ZY004  an approval does not name a delegation that authorises it
---   ZY005  an approval's period or status does not match the request it approves
---   ZY006  a leave period is bounded by a midnight inside an open session, so a tail would stay rostered
+--   ZY015  an approval record is append-only; UPDATE or DELETE refused (four tables, one rule)
+--   ZY016  a conflict override needs the owner or a manager and a written reason
+--   ZY017  a delegation's window is not usable
+--   ZY018  an approval does not name a delegation that authorises it
+--   ZY019  an approval's period or status does not match the request it approves
+--   ZY020  a leave period is bounded by a midnight inside an open session, so a tail would stay rostered
 --
--- Class `ZY` because it is UNOWNED. `packages/db/src/sqlstate-uniqueness.test.ts` records thirteen codes that
--- already stand for two unrelated rules each, and `ZA` through `ZX` are all taken — only `ZY` and `ZZ` were
--- free. A code that stands for two rules makes one file's translator report the other file's refusal and
--- makes a probe asserting the code pass when the statement bounced off something else, so taking a fresh
--- class matters more than taking a memorable one. 0077's reasoning, verbatim.
+-- **A class no longer identifies a migration, and these six codes do.** The convention this file was written
+-- against was "one private class per migration", and it has run out: `ZA` through `ZY` are all in use and `ZZ`
+-- is another unit's. `0085` holds `ZY001` through `ZY008` — it moved into `ZY` because it and `0084` had both
+-- reasoned their way to `ZA`, which is the same shortage arriving one class earlier — and two units in flight
+-- reasoned their way to `ZY001` as well. Four migrations claimed it at once.
+--
+-- So the rule is now the one W-SYS-12 records as its provisional answer: **a refusal is identified by all five
+-- characters, and two unrelated rules may share a class as long as they never share a code.** This file's
+-- allocation is `ZY015` through `ZY020`. That is the whole of the claim: no prose here argues that `ZY` is
+-- this file's, because it is not, and a header arguing for a class it does not have is the second-statement
+-- defect in its purest form.
+--
+-- What has NOT changed is why the five characters matter. A code standing for two rules makes one file's
+-- translator report the other file's refusal with a plausible message and the wrong cause, and makes a probe
+-- asserting the code pass when the statement bounced off something else entirely — 0080's words, and the
+-- reason `packages/db/src/sqlstate-uniqueness.test.ts` exists. It keys on the exact five characters, which is
+-- precisely what makes the new convention checkable: a shared CLASS is not a finding, a shared CODE is.
 --
 -- See docs/adr/0041-leave-approval-never-cancels-an-appointment.md, docs/OPEN-QUESTIONS.md Y9-coverage, and
 -- packages/core/src/hr/leave-approval.ts.
@@ -162,13 +174,13 @@ begin
       'leaveCoveragePeriod() in @berelax/core is the one function that computes those bounds. A PARTIAL day '
       'is not this: it is any other pair of instants, and it is permitted.',
       new.period, breached.trading_date, breached.opens_at, breached.closes_at
-      using errcode = 'ZY006';
+      using errcode = 'ZY020';
   end if;
   return new;
 end $$;
 
 comment on function assert_leave_period_is_not_calendar_bounded() is
-  'Raises ZY006 (LeavePeriodCalendarBounded) for a leave period bounded by a local midnight inside an open '
+  'Raises ZY020 (LeavePeriodCalendarBounded) for a leave period bounded by a local midnight inside an open '
   'trading session — the calendar-alignment mistake, and nothing else. A partial day is permitted, and so is '
   'a midnight on a date the premises does not trade on, where there is no session to align to.';
 
@@ -261,13 +273,13 @@ begin
       'deputy may approve in. Every approval they attempted would be refused naming the window rather '
       'than the mistake.',
       new.delegator_employee_id, new.deputy_employee_id
-      using errcode = 'ZY003';
+      using errcode = 'ZY017';
   end if;
   return new;
 end $$;
 
 comment on function refuse_unusable_leave_delegation() is
-  'Raises ZY003 (LeaveDelegationUnusable) for a window no instant can be inside.';
+  'Raises ZY017 (LeaveDelegationUnusable) for a window no instant can be inside.';
 
 create trigger leave_approval_delegation_is_usable
   before insert or update on leave_approval_delegation
@@ -294,7 +306,7 @@ create table leave_approval (
   -- but a RESTRICT reference from a row that can never be deleted pins the parent for ever.
   coverage_rule_effective_from  date        not null,
   -- The period approved, snapshotted. Equal to the request's period at approval time and held so by
-  -- ZY005 — a comparison rather than a second derivation of it.
+  -- ZY019 — a comparison rather than a second derivation of it.
   period                        tstzrange   not null,
   -- What the approval had to step over. Counts and not ids: the ids are `leave_conflict_override` rows and
   -- `appointment_status_history` rows, and a second list of them here would be the copy that drifts.
@@ -320,7 +332,7 @@ create table leave_approval (
 
 comment on table leave_approval is
   'One approved leave request: who decided it, under what authority, and which coverage rule version '
-  'judged the floor. Append-only: UPDATE and DELETE raise ZY001 for every role including the owner, '
+  'judged the floor. Append-only: UPDATE and DELETE raise ZY015 for every role including the owner, '
   'because an approval that can be edited is not a record of what was decided. Cancellation is a '
   'leave_approval_cancellation row, and leave_approval_live is the view that joins the two.';
 comment on column leave_approval.coverage_rule_effective_from is
@@ -328,7 +340,7 @@ comment on column leave_approval.coverage_rule_effective_from is
   'when this was approved?" is a question about a past decision, and raising the minimum in April must not '
   'make March''s approval retroactively wrong.';
 comment on column leave_approval.period is
-  'The approved period, snapshotted from leave_request.period and held equal to it by ZY005. Computed by '
+  'The approved period, snapshotted from leave_request.period and held equal to it by ZY019. Computed by '
   'leaveCoveragePeriod() in @berelax/core, which is the one place that decides a leave day covers its '
   'trading session rather than its calendar day.';
 
@@ -342,7 +354,7 @@ create table leave_conflict_override (
   leave_request_id uuid        not null references leave_request (id) on delete restrict,
   -- A PLAIN column and not a foreign key, which is the one referential decision in this file that looks
   -- like an omission and is not. 0081 records both halves of why neither action works for an append-only
-  -- row: `ON DELETE SET NULL` arrives as an UPDATE, which ZY001 refuses, and `ON DELETE RESTRICT` pins the
+  -- row: `ON DELETE SET NULL` arrives as an UPDATE, which ZY015 refuses, and `ON DELETE RESTRICT` pins the
   -- parent for ever because nothing here can be deleted to release it. In production an appointment is
   -- cancelled or rescheduled and never deleted, so RESTRICT would cost nothing there — but it made every
   -- fixture appointment this unit overrode permanently undeletable, which surfaced as an integration suite
@@ -353,7 +365,7 @@ create table leave_conflict_override (
   -- not one the leave overlaps for that therapist, which is a stronger check than existence — a foreign key
   -- would accept any appointment in the diary.
   appointment_id   uuid        not null,
-  -- The role that took the decision, refused unless it is one that may (ZY002). A trigger and not a
+  -- The role that took the decision, refused unless it is one that may (ZY016). A trigger and not a
   -- TypeScript guard alone, because the refusal has to hold for the INSERT somebody runs in psql.
   actor_role       text        not null,
   actor_label      text        not null,
@@ -369,11 +381,11 @@ create table leave_conflict_override (
 
 comment on table leave_conflict_override is
   'One appointment left standing inside approved leave, by a named decision. Append-only: UPDATE and '
-  'DELETE raise ZY001 for every role including the owner. It is the alternative to a P-HR-04 reassignment '
+  'DELETE raise ZY015 for every role including the owner. It is the alternative to a P-HR-04 reassignment '
   'and it is NEVER a cancellation — see ADR 0041.';
 comment on column leave_conflict_override.reason is
   'Why this appointment was left with a therapist who is on leave. Refused blank, placeholder or under '
-  'eight characters by ZY002, for attendance_correction.reason''s reason (0086): a reason nobody wrote is '
+  'eight characters by ZY016, for attendance_correction.reason''s reason (0086): a reason nobody wrote is '
   'not an audited decision.';
 
 create index leave_conflict_override_request_idx
@@ -392,7 +404,7 @@ begin
       'appointment standing inside approved leave is a decision about somebody else''s booking, and the '
       'provisional answer to Y9-coverage names those two roles.',
       new.actor_role
-      using errcode = 'ZY002';
+      using errcode = 'ZY016';
   end if;
   if length(btrim(coalesce(new.reason, ''))) < 8 or is_placeholder_text(new.reason) then
     raise exception
@@ -400,13 +412,13 @@ begin
       'placeholder reason is indistinguishable from a conflict nobody looked at, and this row is the only '
       'record that anybody did.',
       new.appointment_id
-      using errcode = 'ZY002';
+      using errcode = 'ZY016';
   end if;
   return new;
 end $$;
 
 comment on function refuse_unauthorised_leave_override() is
-  'Raises ZY002 (LeaveOverrideNotPermitted) for a role that may not override and for a reason nobody '
+  'Raises ZY016 (LeaveOverrideNotPermitted) for a role that may not override and for a reason nobody '
   'wrote. Both halves of Y9-coverage''s provisional answer, in the database rather than only in a caller.';
 
 create trigger leave_conflict_override_is_authorised
@@ -439,7 +451,7 @@ create table leave_approval_notice (
 );
 
 comment on table leave_approval_notice is
-  'One staff notification per approved leave request. Append-only: UPDATE and DELETE raise ZY001 for '
+  'One staff notification per approved leave request. Append-only: UPDATE and DELETE raise ZY015 for '
   'every role including the owner — a record that somebody was told their leave was approved is not '
   'evidence if it can be edited, which is rota_publication_notice''s argument (0081). NOT cleared when '
   'the leave is cancelled: a notification that was sent cannot be unsent.';
@@ -464,7 +476,7 @@ create table leave_approval_cancellation (
 );
 
 comment on table leave_approval_cancellation is
-  'An approved leave request withdrawn. Append-only: UPDATE and DELETE raise ZY001 for every role '
+  'An approved leave request withdrawn. Append-only: UPDATE and DELETE raise ZY015 for every role '
   'including the owner. Its presence is what makes an approval stop being live, and it is a separate row '
   'rather than a column on leave_approval because that table is append-only for the same reason.';
 
@@ -529,11 +541,11 @@ begin
     'decision was taken. Withdrawing an approval is a leave_approval_cancellation row; correcting an '
     'override is a further row, and leave_approval_live is how a reader asks what is still true.',
     tg_op, tg_table_name
-    using errcode = 'ZY001';
+    using errcode = 'ZY015';
 end $$;
 
 comment on function refuse_leave_approval_record_edit() is
-  'Raises ZY001 (LeaveApprovalRecordImmutable) for leave_approval, leave_conflict_override, '
+  'Raises ZY015 (LeaveApprovalRecordImmutable) for leave_approval, leave_conflict_override, '
   'leave_approval_notice and leave_approval_cancellation, for every role including the owner.';
 
 create trigger leave_approval_no_update before update on leave_approval
@@ -578,7 +590,7 @@ begin
       'statements of one decision, and a reader that found one without the other would report leave as '
       'approved on one screen and pending on the next.',
       new.leave_request_id, request.status
-      using errcode = 'ZY005';
+      using errcode = 'ZY019';
   end if;
   if request.period <> new.period then
     raise exception
@@ -586,7 +598,7 @@ begin
       'request''s period and a screen reads the approval''s, so two spellings are two answers to "which '
       'hours is this therapist away for".',
       new.leave_request_id, new.period, request.period
-      using errcode = 'ZY005';
+      using errcode = 'ZY019';
   end if;
   if new.delegation_id is not null then
     select * into delegation from leave_approval_delegation where id = new.delegation_id;
@@ -595,28 +607,28 @@ begin
         'Approval of leave_request % claims delegation %, which names another deputy. An approval that '
         'cites somebody else''s authority records a decision nobody was entitled to take.',
         new.leave_request_id, new.delegation_id
-        using errcode = 'ZY004';
+        using errcode = 'ZY018';
     end if;
     if not (delegation.period @> new.decided_at) then
       raise exception
         'Approval of leave_request % was decided at %, outside delegation %''s window %. A delegation is '
         'time-bounded, and an approval outside the window is the case the bound exists for.',
         new.leave_request_id, new.decided_at, new.delegation_id, delegation.period
-        using errcode = 'ZY004';
+        using errcode = 'ZY018';
     end if;
     if delegation.revoked_at is not null and delegation.revoked_at <= new.decided_at then
       raise exception
         'Approval of leave_request % cites delegation %, which was withdrawn at %. A withdrawn delegation '
         'confers nothing from the instant it was withdrawn.',
         new.leave_request_id, new.delegation_id, delegation.revoked_at
-        using errcode = 'ZY004';
+        using errcode = 'ZY018';
     end if;
   end if;
   return new;
 end $$;
 
 comment on function assert_leave_approval_matches_request() is
-  'Raises ZY005 when an approval does not describe the request it approves, and ZY004 when it cites a '
+  'Raises ZY019 when an approval does not describe the request it approves, and ZY018 when it cites a '
   'delegation that does not authorise it. Cross-row, so it cannot be a CHECK.';
 
 create trigger leave_approval_matches_request

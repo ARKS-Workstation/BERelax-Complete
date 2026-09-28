@@ -92,7 +92,7 @@ export const LEAVE_APPROVAL_PERMISSION = 'leave:approve' as const
  *
  * It is not a permission, and inventing one would be inventing a grant nobody asked for. Y9-coverage's
  * provisional answer says the override needs "owner or manager role and a non-empty audited reason", and
- * these are those two roles. Migration 0092 refuses any other role with ZY002, so this list and that trigger
+ * these are those two roles. Migration 0092 refuses any other role with ZY016, so this list and that trigger
  * are two layers of one rule rather than two rules — and `leave-approval.test.ts` asserts that every role
  * outside this list is refused, so a third role added here without the migration fails a test.
  */
@@ -118,7 +118,7 @@ export const LEAVE_APPROVAL_REFUSALS = [
 
 export type LeaveApprovalRefusal = (typeof LEAVE_APPROVAL_REFUSALS)[number]
 
-/** The shortest reason a human has to write on an override. 0092's ZY002 refuses anything shorter. */
+/** The shortest reason a human has to write on an override. 0092's ZY016 refuses anything shorter. */
 export const LEAVE_OVERRIDE_REASON_MINIMUM_LENGTH = 8
 
 /** One row of `leave_approval_delegation`, as this module needs it. */
@@ -527,7 +527,7 @@ export function decideLeaveApproval(args: LeaveApprovalDecisionArgs): LeaveAppro
   }
 }
 
-/** Whether a role may take a conflict override. 0092's ZY002 refuses the same set in the database. */
+/** Whether a role may take a conflict override. 0092's ZY016 refuses the same set in the database. */
 export function mayOverrideLeaveConflict(role: Role): boolean {
   return LEAVE_OVERRIDE_ROLES.includes(role)
 }
@@ -605,7 +605,7 @@ export type LeaveOverrideVerdict =
 /**
  * Whether this override may be recorded: the role, and the reason, which are one rule in two halves.
  *
- * Both halves are ALSO refused by migration 0092 (ZY002), and that duplication is deliberate in the one
+ * Both halves are ALSO refused by migration 0092 (ZY016), and that duplication is deliberate in the one
  * direction this build allows it: the trigger is the layer that still holds for the UPDATE somebody runs in
  * `psql`, and this is the layer that can say which of the two is wrong before a transaction is opened. The
  * test asserts the two agree on every role, so they cannot drift into two different answers.
