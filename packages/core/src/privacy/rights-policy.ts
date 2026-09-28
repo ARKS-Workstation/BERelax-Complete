@@ -701,6 +701,52 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'never to a customer.',
     registeredBy: 'C-CRM-10',
   }),
+  /*
+   * W-SITE-10's publication control plane. Three columns, named individually rather than as
+   * `publication_*.*`, and that is the point of naming them: a `*` key would silently classify a column
+   * somebody adds to one of these tables later — an approver's email, a subject's name quoted in a
+   * refusal — as not-customer-data, which is the exact silence ADR 0034 built the enumeration against.
+   *
+   * Probe 4 is what finds them. `CREDENTIAL_COLUMN_PATTERN` matches `(^|_)sha256(_|$)`, so
+   * `content_sha256` reads to the probe like a token hash, and the probe is right to look: a column called
+   * `<something>_sha256` usually IS a credential. These are not. Each is the digest of PUBLISHED PAGE
+   * COPY — the anchor of the chain that ties a lint pass to an approval to a publication — and the pages
+   * it hashes are the salon's own marketing, linted precisely so that they say nothing about any
+   * individual. A customer cannot appear in one, because migration 0093 refuses the publication of copy
+   * the profile's lexicon rejects and `PROVIDER_TITLES` refuses a named person on published copy at all
+   * (B-CAT-05).
+   *
+   * They are also append-only for every role including the owner (ZZ001), so `not_customer_data` is the
+   * only action the database would accept here even if the classification were wrong.
+   */
+  rule({
+    key: 'public.publication_lint_pass.content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The sha256 of the page copy a lint pass examined. Found by probe 4 because the name ends `_sha256`, ' +
+      'which usually means a credential; this one is a digest of the salon’s own published marketing and ' +
+      'holds nothing about any individual. Append-only (ZZ001), so nothing could be done to it anyway.',
+    registeredBy: 'W-SITE-10',
+  }),
+  rule({
+    key: 'public.publication_approval.content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The same digest, on the row recording which named STAFF member approved that copy. The approver is ' +
+      'an employee and is P-HR-01’s subject, not this CRM’s; the column itself is a hash of page copy.',
+    registeredBy: 'W-SITE-10',
+  }),
+  rule({
+    key: 'public.publication_record.content_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The same digest again, on the publication ledger. It is the evidence of what was live on a given ' +
+      'date, which is a fact about the site and not about a person.',
+    registeredBy: 'W-SITE-10',
+  }),
   rule({
     key: 'public.google_connections.*',
     dataClass: 'not_customer_data',

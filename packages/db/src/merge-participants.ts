@@ -669,15 +669,49 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
 export const MERGE_ID_COLUMN_PATTERN = '^(.*_)?(customer|contact)_id$'
 
 /**
- * Schemas the catalogue enumerates: every schema in the database except the system ones and pg-boss's.
+ * Schemas the catalogue enumerates: every schema in the database except the system ones, pg-boss's and
+ * Payload's.
  *
  * Discovered rather than listed, so a schema added later is covered by default. pg-boss's tables are
  * excluded by name because they are the queue library's own — a column in one of them is a job payload
  * rather than a customer record, and a strategy cannot be registered on a table this build does not own.
+ *
+ * ## Why `payload` is excluded, and how it was found
+ *
+ * The same sentence: this build does not own those tables. Payload creates them by pushing its own schema
+ * when `getPayload()` first boots (ADR 0019 puts the CMS inside this application and this database), writes
+ * to them only through its own API, and keeps a `_<collection>_v` version table beside each one. A direct
+ * SQL UPDATE against a collection would desynchronise the versions and the drafts — so an erasure or a
+ * merge could not act on this schema through a statement even if a row in it were a person's, which is a
+ * substantive reason rather than a convenience.
+ *
+ * It was found by running the whole `pnpm verify` chain on ONE database, which is the only place the
+ * omission is visible, and the reason it had been invisible is the ORDER rather than the rule. These tables
+ * do not exist in a freshly migrated and seeded database at all: nothing in `packages/db/migrations`
+ * creates them. `vitest.integration.config.ts` lists `packages/**` before `apps/**`, so
+ * `packages/fixtures/src/rights.itest.ts` runs before the first `apps/web` suite boots Payload and the
+ * probes returned nothing from here. By the time `pnpm gates:test` re-runs that same suite from gate block
+ * 112, the schema exists and five columns appear — `payload.cms_user.email`,
+ * `payload.cms_user.reset_password_token` and the `body` of `pages`, `journal_posts` and
+ * `service_narrative`.
+ *
+ * Classifying those five in `rights-policy.ts` does not fix it and was tried first: `rights.itest.ts`
+ * asserts `staleRuleKeys` is empty as well as `unclassified`, so a rule for a table that does not exist
+ * fails in the other direction — and whether these tables exist depends on whether a process has booted
+ * Payload. A catalogue that is a function of runtime cannot satisfy both halves at once. The exclusion is
+ * what makes the enumeration stable, which is the property both halves rest on.
+ *
+ * What this does NOT claim: that CMS copy can never contain a person's details. It claims that a row-level
+ * erasure cannot reach it through SQL, which is the same limitation ADR 0034 already records for free text
+ * on a table that is not subject-scoped. The guard that keeps a named individual out of published copy is
+ * the publication lint (B-CAT-05, W-SITE-07, W-SITE-10), and if that ever stops holding the fix is the
+ * lint rather than an erasure rule that quietly redacts marketing.
  */
 export const MERGE_CATALOGUE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze([
   'information_schema',
   PGBOSS_SCHEMA,
+  /** Payload's own tables. See the header: not migration-created, and not writable by a statement. */
+  'payload',
 ])
 
 export interface MergeCoverageRow {
