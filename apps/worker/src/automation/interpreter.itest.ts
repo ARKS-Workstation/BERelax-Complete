@@ -1168,6 +1168,64 @@ describe('acceptance — a contact merged mid-run continues on the survivor exac
   }, 60_000)
 })
 
+/**
+ * The run whose enrolment is GONE, which is what a completed erasure leaves behind.
+ *
+ * This case measures one thing and is named for it: a live run whose `flow_enrolment` row has been deleted
+ * ends rather than raising. It does NOT claim that erasure works — `packages/fixtures/src/rights.itest.ts`
+ * owns that, and this file would be asserting C-CRM-10's behaviour under C-AUTO-07's name. What it asserts
+ * is the state that unit's decision creates here, reproduced by the one statement the erasure issues.
+ *
+ * Why the state exists at all, since it looks impossible: `flow_run_live_run_is_an_enrolments` guarantees
+ * `enrolment_id is not null` for a live run, so the COLUMN is always set — but `enrolment_id` is deliberately
+ * not a foreign key (0091: a cascade from `customer` would reach the append-only step log and raise ZY011 for
+ * every caller), so nothing makes the row follow. C-CRM-10 classifies `flow_enrolment.customer_id` as
+ * `delete_row` on purpose, because "a completed erasure should not leave a sequence running against the
+ * person and relying on a downstream gate to stop it every time". Both decisions are right and together they
+ * produce an orphan.
+ *
+ * The delete runs as the OWNER because `berelax_app` has no DELETE on `flow_enrolment` (0070 revokes it), so
+ * the erasure's own privileged path is the only thing that can issue it — which is also why a flow author
+ * could never reach this state by hand.
+ */
+describe('a run whose enrolment was erased', () => {
+  it('ends the run as cancelled with a named reason, rather than failing the job for ever', async () => {
+    const contactId = contact(20)
+    const runId = await enrolAndStart(KEYS.send, contactId, INSIDE_WINDOW_ISO)
+    const before = smsCalls()
+    const [enrolment] = await sql<{ id: string }[]>`
+      select enrolment_id as id from flow_run where id = ${runId}::uuid
+    `
+    expect(enrolment?.id, 'a live run always names an enrolment').toBeDefined()
+
+    // The one statement the erasure issues against this table, at the privilege it issues it with.
+    await sql`delete from flow_enrolment where id = ${enrolment?.id}::uuid`
+
+    const outcome = await runFlowTick(runtime, { runId, atIso: INSIDE_WINDOW_ISO })
+    expect(outcome.kind, 'a state, not a throw — this tick used to raise invariant_violated').toBe(
+      'halted',
+    )
+    if (outcome.kind !== 'halted') return
+    expect(outcome.reason).toBe('enrolment_removed')
+
+    const run = await readFlowRun(sql, runId)
+    expect(run?.status).toBe('cancelled')
+    expect(run?.endedReason).toBe('enrolment_removed')
+    // Nothing ran: no node was executed, so no message left and no token was claimed. That is the whole
+    // reason ending it is safe — the run stops before the walk rather than partway through one.
+    expect(await messagesFor(runId), 'the erased subject was sent nothing').toBe(0)
+    expect(smsCalls() - before, 'and no vendor was asked').toBe(0)
+    expect(await countNodeEffects(sql, runId), 'and no idempotency token was claimed').toBe(0)
+
+    // And a re-delivery of the same job is a no-op rather than a second ending, so a lost ack cannot
+    // overwrite the reason with a later one.
+    expect((await runFlowTick(runtime, { runId, atIso: LONG_AFTER_ISO })).kind).toBe(
+      'already_ended',
+    )
+    expect((await readFlowRun(sql, runId))?.endedReason).toBe('enrolment_removed')
+  }, 60_000)
+})
+
 // ------------------------------------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------------------------------------

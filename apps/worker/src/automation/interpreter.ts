@@ -146,12 +146,24 @@ export async function runFlowTick(
       )
     }
     if (run.customerId === null) {
-      throw new AppError(
-        'invariant_violated',
-        `Live run ${run.runId} has no contact. flow_run_live_run_is_an_enrolments makes that unstorable, ` +
-          'so reaching it means the run was read through something other than its own foreign key.',
-        { details: { runId: run.runId } },
-      )
+      // The ERASURE case, and the reason this is an ending rather than the `invariant_violated` it used to
+      // be. `flow_run_live_run_is_an_enrolments` guarantees `enrolment_id is not null` for a live run, so
+      // the column is set; what is missing is the enrolment ROW, because `enrolment_id` is deliberately not
+      // a foreign key (0091: a cascade from `customer` would reach the append-only step log and raise ZY011
+      // for every caller) and C-CRM-10's erasure DELETES the enrolment on purpose. So a subject who asked to
+      // be forgotten mid-flow leaves exactly this: a running run with nobody to run it against.
+      //
+      // Ending it is the whole of the fix, and it needs nothing else: no node is executed, so no message is
+      // sent and no token is claimed, and a run that has ended enqueues no further tick. Throwing instead
+      // was a job that failed for ever, retried by pg-boss, and put the erased subject's run id in front of
+      // whoever reads the dead letters.
+      await endFlowRun(uow, {
+        runId: run.runId,
+        status: 'cancelled',
+        reason: 'enrolment_removed',
+        atIso: input.atIso,
+      })
+      return { kind: 'halted', reason: 'enrolment_removed', executed: run.nodeExecutions }
     }
     if (run.survivorCustomerId !== null && run.survivorCustomerId !== run.customerId) {
       // The merge case. See this file's header on when it is reachable.

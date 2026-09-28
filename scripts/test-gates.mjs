@@ -32728,6 +32728,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   const PLAN_SUITE = 'packages/core/src/automation/step-plan.test.ts'
   const VOCABULARY_SUITE = 'packages/core/src/automation/flow-run-vocabulary.test.ts'
   const RULES_SUITE = 'packages/core/src/automation/rules.test.ts'
+  const INTERPRETER_SUITE = 'apps/worker/src/automation/interpreter.itest.ts'
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
 
   // 118a. A window call spliced into the interpreter must be named by the scan.
   {
@@ -33125,6 +33134,32 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         expired.output,
       )
     }
+  }
+
+  // 118p. The ORPHANED RUN, which is the one case in this block driven against the integration suite, and
+  //       the reason is that there is no unit suite it could be driven against: the state only exists once a
+  //       row has been deleted out from under a run. C-CRM-10's erasure classifies `flow_enrolment.customer_id`
+  //       as `delete_row` and `flow_run.enrolment_id` is deliberately not a foreign key, so a subject erased
+  //       mid-flow leaves a running run with nobody to run it against. The mutation restores what the
+  //       interpreter did before that engine landed beside it — raise `invariant_violated` — which is a
+  //       pg-boss job that fails for ever and puts the erased subject's run in front of whoever reads the
+  //       dead letters.
+  {
+    const result = withEditedFile(
+      INTERPRETER,
+      (text) =>
+        replaceOnce(
+          text,
+          "        reason: 'enrolment_removed',",
+          "        reason: 'cancelled_by_operator',",
+        ),
+      () => runExpectingFailure('pnpm', integration(INTERPRETER_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: an orphaned run ended under the wrong reason is caught',
+      result,
+      'enrolment_removed',
+    )
   }
 
   // 118z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a

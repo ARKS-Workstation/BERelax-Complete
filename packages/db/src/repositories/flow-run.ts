@@ -51,9 +51,13 @@ export type FlowRunRefusal = (typeof FLOW_RUN_REFUSALS)[number]
 /**
  * The private SQLSTATEs 0091 raises.
  *
- * Class `ZY` because `sqlstate-uniqueness.test.ts` records that ZA through ZX are taken and thirteen codes
- * already stand for two unrelated rules each — a shared code makes a probe pass when the statement bounced
- * off something else entirely.
+ * `ZY011`-`ZY014`, which is a subclass RANGE and not a class. 0091's header sets out why at length; the
+ * short of it is that this file first took `ZY001`-`ZY004` under the convention that a private class
+ * identifies a migration, and by the merge FOUR migrations claimed `ZY001` — each having reasoned correctly
+ * from what it could see. Every translator in this package matches on the code ALONE, so a shared code makes
+ * a probe pass when the statement bounced off something else entirely. The rule now is W-SYS-12's: a refusal
+ * is identified by all five characters, and two unrelated rules may share a class as long as they never
+ * share a code. `ZY001`-`ZY008` are 0085's.
  */
 export const FLOW_RUN_SQLSTATE = {
   stepLogAppendOnly: 'ZY011',

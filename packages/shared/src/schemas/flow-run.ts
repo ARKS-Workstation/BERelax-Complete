@@ -118,6 +118,22 @@ export const FLOW_INTERPRETER_END_REASONS = [
   'condition_unreadable',
   /** A person ended it: the operator surface, or the marketing kill switch. */
   'cancelled_by_operator',
+  /**
+   * The run's enrolment row is gone, so there is no contact to run against.
+   *
+   * The one thing that does this is an ERASURE. C-CRM-10 classifies `flow_enrolment.customer_id` as
+   * `delete_row`, and says why: "an enrolment is a live automation that goes on sending... a completed
+   * erasure should not leave a sequence running against the person and relying on a downstream gate to stop
+   * it every time." The enrolment therefore goes, and `flow_run.enrolment_id` is deliberately NOT a foreign
+   * key (0091's reason: a cascade from `customer` would reach the append-only step log and raise ZY011 for
+   * every caller), so the RUN survives its own enrolment.
+   *
+   * That state is reachable and this is what it is called. The alternative — the interpreter raising
+   * `invariant_violated` on the next tick, which is what it did until the erasure engine landed beside it —
+   * is a job that fails for ever on a subject who asked to be forgotten, and the operator reading the dead
+   * letter is reading a name the erasure was supposed to have removed from their attention.
+   */
+  'enrolment_removed',
 ] as const
 export type FlowInterpreterEndReason = (typeof FLOW_INTERPRETER_END_REASONS)[number]
 

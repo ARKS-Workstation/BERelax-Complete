@@ -8251,8 +8251,9 @@ units:
       paragraph, and the correction of the paragraph that said flow_run would never exist),
       packages/fixtures/src/merge.itest.ts (the deferral case replaced by the worked example),
       packages/fixtures/src/crm-pipeline.itest.ts and packages/fixtures/src/flow-versioning.itest.ts and
-      packages/fixtures/src/frequency-ledger.itest.ts (deferral comments that my unit makes false), and
-      scripts/test-gates.mjs (block 118a-118z, 28 cases).'
+      packages/fixtures/src/frequency-ledger.itest.ts (deferral comments that my unit makes false),
+      packages/core/src/privacy/rights-policy.ts (the two erasure rules 0091''s tables need, see the NOTE on
+      the orphaned run), and scripts/test-gates.mjs (block 118a-118z, 29 cases).'
     - 'NOTE: SQLSTATE codes taken: ZY011, ZY012, ZY013, ZY014. ZY011 flow_step_log is append-only. ZY012 a
       flow_node_effect row may be DELETEd by nothing and UPDATEd only in its contact_customer_id, by a
       customer merge. ZY013 a dry run may leave no side effect behind: no token at all, and no step log row
@@ -8282,6 +8283,29 @@ units:
       attempts became storable. That is the exact rule the constraint was written for (docs/12 SS1: a stub must
       never look like it worked) and gate case 39c had been asserting since B-MSG-04; it is now
       coalesce(last_failure_reason, '''') and both cases drive it.'
+    - 'NOTE: A FIFTH DEFECT, found by the MERGE rather than by a test of mine, and it is the more interesting
+      kind: two units each decided correctly and the combination was wrong. C-CRM-10''s erasure classifies
+      flow_enrolment.customer_id as `delete_row`, and its reason is sound - "an enrolment is a live automation
+      that goes on sending... a completed erasure should not leave a sequence running against the person and
+      relying on a downstream gate to stop it every time". 0091 makes flow_run.enrolment_id NOT a foreign key,
+      and that reason is sound too (defect (1) above: a cascade from customer would reach the append-only step
+      log and raise ZY011 for every caller). Together they leave a RUNNING flow_run whose enrolment row is
+      gone, and the interpreter raised `invariant_violated` on the next tick - a pg-boss job that fails for
+      ever, retried, putting the erased subject''s run id in front of whoever reads the dead letters. It is now
+      a named ending: status `cancelled`, ended_reason `enrolment_removed`, a fifth member of
+      FLOW_INTERPRETER_END_REASONS, with a case in interpreter.itest.ts that deletes the enrolment at the
+      privilege the erasure uses (0070 revokes DELETE on flow_enrolment from berelax_app, so nothing else can
+      reach the state) and asserts zero messages, zero tokens and a second tick that is a no-op. Gate case
+      118p is the one case in the block driven against the integration suite, because the state only exists
+      once a row has been deleted out from under a run. Found by running packages/fixtures/src/rights.itest.ts
+      after the merge, which refused nine cases outright: its erasure enumerates the catalogue from
+      information_schema and REFUSES rather than guessing when a column has no rule, so 0091''s two
+      contact_customer_id columns failed it by existing. Both are now registered as `retain_append_only` with
+      a subjectReason - flow_node_effect because DELETE is refused for every role (ZY012) and because removing
+      the tokens would hand a re-created record a run with no history and send every node again
+      (frequency_ledger''s argument), flow_step_log because it is the evidence a complaint about a past
+      message is answered with and erasing it would leave the consent record and destroy the record of what
+      was sent under it.'
     - 'NOTE: a defect NOT fixed here, and to whom it is deferred. The DSL''s action_tag.tag grammar is lower
       snake_case (VOCABULARY_VALUE in schemas/flow.ts) and customer_tag.tag is kebab-case
       (customer_tag_tag_check, 0053), so NO string satisfies both: a flow an operator draws with
