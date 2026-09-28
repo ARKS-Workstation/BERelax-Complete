@@ -40,7 +40,7 @@ import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
  *     design — it shows every column and every card — so what is asserted about it is this file's cards and
  *     never a count of all of them.
  *   - **The two fixture columns are archived in `afterAll`, not deleted.** A `pipeline_stage_transition`
- *     row names the column it moved a card into, that log is append-only (ZU002), and the reference is ON
+ *     row names the column it moved a card into, that log is append-only (ZU009), and the reference is ON
  *     DELETE RESTRICT — so a column a card has ever entered cannot be removed. Archiving is what the schema
  *     offers, `readPipelineBoard` filters archived columns out, and a second run un-archives these two by
  *     key.

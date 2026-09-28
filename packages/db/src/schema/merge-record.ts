@@ -17,7 +17,7 @@ import {
  * definitions rather than calling `packages/db/src/repositories/merge.ts`:
  *
  *   - **Both tables are append-only.** `update` and `delete` are revoked from `berelax_app` AND refused
- *     by BEFORE triggers for every role including the owner (ZT001). `db.update(mergeRecord)`
+ *     by BEFORE triggers for every role including the owner (ZT005). `db.update(mergeRecord)`
  *     typechecks perfectly and raises at run time, which is the correct outcome: a merge that was wrong
  *     is answered by a new operation with its own record, never by editing the row that says what was
  *     done.

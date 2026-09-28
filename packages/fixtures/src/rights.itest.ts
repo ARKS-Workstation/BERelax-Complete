@@ -154,7 +154,7 @@ const SUBJECTS = {
    * Merged INTO `invoiced`, to prove an erasure covers a tombstone's own phone number.
    *
    * Per-run like `suppression`, and for a sharper reason: `merge_record` is append-only for every role
-   * (ZT001) and its `loser_customer_id` is UNIQUE, so a tombstone written by an earlier run cannot be
+   * (ZT005) and its `loser_customer_id` is UNIQUE, so a tombstone written by an earlier run cannot be
    * removed or re-pointed — and it names a survivor that run has since erased and `ensureCustomer` has
    * since replaced. The lineage from the new survivor then finds nothing, and the case reports a failure
    * about a defect that is not there. Gate case 112m found this.

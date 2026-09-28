@@ -528,7 +528,7 @@ export function renderPipelineHtml(view: PipelineView): string {
     '<div class="lede">',
     '<p><strong>A stage is a claim somebody made about a person.</strong> Every move is recorded with ' +
       'who made it, which column it came from and when — the database refuses a stage change that is not ' +
-      '(ZU001), so there is no way to move a card quietly.</p>',
+      '(ZU008), so there is no way to move a card quietly.</p>',
     '<p>A pipeline stage is not the lifecycle state beside it. The lifecycle is derived from what has ' +
       'happened; a column is where a human has put somebody, and the two disagree on purpose. The six ' +
       'columns are provisional and are tracked as ' +

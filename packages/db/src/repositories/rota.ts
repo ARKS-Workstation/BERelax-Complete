@@ -29,7 +29,7 @@ import type { Sql } from '../connection.ts'
  *      there are never two rival current rotas. That is why {@link publishRota} does NOT lock the current
  *      version first: a lock would serialise a race the constraint already decides correctly, and the
  *      constraint keeps working for a caller that forgets the lock.
- *   3. A **published rota is immutable** — `refuse_published_rota_change` (ZW001) for every role. Nothing
+ *   3. A **published rota is immutable** — `refuse_published_rota_change` (ZW006) for every role. Nothing
  *      here issues an UPDATE against either table, and if it did the database would refuse it.
  */
 

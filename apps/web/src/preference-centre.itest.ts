@@ -70,7 +70,7 @@ import { canonicalPath, needsCanonicalRedirect } from './routes/canonical.ts'
  *     other is about to count.
  *
  * The merge case runs inside a `withUnitOfWork` that is rolled back, for the reason
- * `packages/fixtures/src/merge.itest.ts` gives: `merge_record` refuses DELETE for every role (ZT001), so a
+ * `packages/fixtures/src/merge.itest.ts` gives: `merge_record` refuses DELETE for every role (ZT005), so a
  * committed tombstone would make every later run of this file answer `already_merged` and would leave the
  * estate every other suite reads holding a merge nobody expected.
  */
@@ -839,7 +839,7 @@ describe('acceptance — a link for a merged-away record (C-CRM-05 NOTE 8b)', ()
   /**
    * One rolled-back unit of work, for `merge.itest.ts`'s reason.
    *
-   * `merge_record` refuses DELETE for every role including the owner (ZT001), so a committed tombstone here
+   * `merge_record` refuses DELETE for every role including the owner (ZT005), so a committed tombstone here
    * would make every later run of this file answer `already_merged`, and would leave a merge nobody expected
    * in the estate every other suite reads. Nothing is skipped by rolling back: the trigger, the CHECKs and
    * the unique index all fire inside the transaction.

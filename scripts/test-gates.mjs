@@ -24786,17 +24786,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         // The append-only pair, from the database's side and for the OWNER: psql does not connect as the
         //      application role, so the revoked privileges are not what refuses these.
         name: 'merge gate: UPDATE on merge_record is refused for the owner',
-        rule: 'ZT001',
+        rule: 'ZT005',
         sql: `${recordRow()}; update merge_record set reason = 'edited' where loser_customer_id = ${LOSER}`,
       },
       {
         name: 'merge gate: DELETE on merge_record is refused for the owner',
-        rule: 'ZT001',
+        rule: 'ZT005',
         sql: `${recordRow()}; delete from merge_record where loser_customer_id = ${LOSER}`,
       },
       {
         name: 'merge gate: UPDATE on merge_record_table is refused for the owner',
-        rule: 'ZT001',
+        rule: 'ZT005',
         sql: `${tableRow()}; update merge_record_table set rows_moved = 9 where participant = 'public.customer_tag'`,
       },
     ]
@@ -25302,7 +25302,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 //
 //     The other half is the rollback. 0069's repository inserts `merge_record` BEFORE it moves a row, so a
 //     preview that reused the merge path without rolling back would tombstone a customer nobody approved
-//     merging — and that row cannot be deleted by anybody (ZT001). Which is also why no case here MAKES a
+//     merging — and that row cannot be deleted by anybody (ZT005). Which is also why no case here MAKES a
 //     preview commit: the mutant would leave a real tombstone on the verify database and every later run of
 //     this suite would answer `already_merged`. The property is guarded where it can be broken safely —
 //     the only exit from the transaction is a throw, and the module issues no write of its own — and 95a
@@ -27858,7 +27858,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 //            cap inside it.
 //
 //            The two worth reading twice are 104d and 104h. 104d removes the transition insert from
-//            `moveCard` and the card write is then refused AT COMMIT by ZU001 — which is the one case here
+//            `moveCard` and the card write is then refused AT COMMIT by ZU008 — which is the one case here
 //            that proves the database's own guard fires rather than proving a test asserts it. 104h wraps
 //            the enrolment writer in a lambda: every behavioural assertion in this repository still passes,
 //            and the only thing that fails is the identity the acceptance line asks for.
@@ -27932,7 +27932,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 
   // 104d. The transition insert removed from `moveCard`, leaving the card write on its own. The DATABASE
-  //       refuses it at COMMIT (ZU001), which is what this case is really about: the guard is the
+  //       refuses it at COMMIT (ZU008), which is what this case is really about: the guard is the
   //       migration's, not the repository's, so it holds for a `psql` session too.
   checkRejectedBy(
     'pipeline gate: a card moved with no transition row is caught by the database',
@@ -27981,7 +27981,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 
   // 104g. Positions written from zero. The columns come out in exactly the right ORDER and the numbers are
   //       0..n-1, which nothing on the page shows — and the next stage appended to the board then collides
-  //       or leaves a gap. ZU003 is what catches it, which is this case's real subject.
+  //       or leaves a gap. ZU010 is what catches it, which is this case's real subject.
   checkRejectedBy(
     'pipeline gate: positions written 0-based are caught by the gapless rule',
     pipelineMutant(
@@ -32609,7 +32609,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
      * `VERBOSITY=verbose` is what makes the assertion possible at all, and the first run of this case is
      * why it is here: psql's DEFAULT verbosity prints the message and NOT the SQLSTATE, so all four probes
      * bounced off the right trigger and `checkRejectedBy` reported "exited non-zero but did not report
-     * ZX001" about a database that had refused them perfectly. A private SQLSTATE that no probe can read is
+     * ZX006" about a database that had refused them perfectly. A private SQLSTATE that no probe can read is
      * a private SQLSTATE that proves nothing (0080's argument for having one at all, one step further on).
      *
      * `withTriggersOff` is the second layer. The trigger is BEFORE INSERT so it always wins, which means
@@ -32640,7 +32640,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       ['{"startHour":21,"endHour":21}', 'a window that never opens'],
       ['"off"', 'the string "off"'],
     ]) {
-      checkRejectedBy(`compliance gate: the database refuses ${why}`, windowProbe(value), 'ZX001')
+      checkRejectedBy(`compliance gate: the database refuses ${why}`, windowProbe(value), 'ZX006')
     }
 
     // The CHECK, with the trigger out of the way. A restore runs with triggers off, and a restore that
@@ -35691,6 +35691,201 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 121a-121z. (W-SYS-12) The private SQLSTATE allocator: every direction shown to fire, and the derivation
+//            shown to read the migrations rather than the registry.
+//
+//            The convention this replaced had nothing that failed when it was ignored. A unit picked a
+//            private CLASS by reading the migrations its worktree could see, units in flight cannot see each
+//            other, and the result was four migrations claiming `ZY001` in one afternoon and thirteen codes
+//            each standing for two rules. A code standing for two rules is not untidy: every translator in
+//            `packages/db` matches on the code ALONE, so one file's refusal is reported as the other's and a
+//            probe asserting the code passes on a statement it never touched.
+//
+//            So `pnpm sqlstate` fails in five directions, and each has a fixture here because a direction
+//            nobody has seen fire is not a direction (ADR 0003). Four of the five are edits to the REGISTRY
+//            and one is a fixture MIGRATION, and that asymmetry is the point: the fifth proves the gate reads
+//            the migration files, which is the difference between an allocator and a list of codes somebody
+//            keeps up to date.
+//
+//            121g is the case worth reading twice. It replaces a function that already raises a code, with
+//            the SAME code, and asserts the gate does NOT call that a collision — because it is not one. The
+//            detector this replaced keyed on which FILES contain a code and therefore counted a superseded
+//            definition as a second rule, which is how three of its thirteen entries came to describe
+//            collisions that did not exist. Nothing else in the build would notice that regressing.
+{
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const FIXTURE_MIGRATION = 'packages/db/migrations/9999___gate_fixture__sqlstate.sql'
+  const sqlstate = () => runExpectingFailure('pnpm', ['sqlstate'])
+
+  /** ZZ005's entry, which every registry edit below anchors on. Its rule sentence makes the anchor unique. */
+  const ZZ005_RULE =
+    "    rule: 'A surface may not be published over its measured critical-path weight budget.',\n"
+  const ZZ005_ENTRY =
+    `  {\n    code: 'ZZ005',\n${ZZ005_RULE}    migration: '0093',\n` +
+    "    raisedBy: ['assert_publication_within_weight_budget'],\n" +
+    "    translators: ['packages/db/src/repositories/publication.ts'],\n  },\n"
+
+  /** A migration that raises `code` from a function named `fn`, `create or replace` when asked. */
+  const raising = (fn, code, replace = false) =>
+    [
+      `-- A gate fixture. Removed in a finally; if you are reading this in a diff, ${FIXTURE_MIGRATION}`,
+      '-- escaped a killed run (brief rule 13) and must be deleted.',
+      `create ${replace ? 'or replace ' : ''}function ${fn}() returns trigger`,
+      'language plpgsql',
+      'as $$',
+      'begin',
+      `  raise exception 'a gate fixture' using errcode = '${code}';`,
+      'end $$;',
+    ].join('\n')
+
+  // 121a. Two entries for one code. The registry's own shape, and the one direction that needs no migration
+  //       to break: a code is an identity, so two entries for it IS two rules sharing it, written down.
+  checkRejectedBy(
+    'sqlstate gate: two registry entries for one code are refused',
+    withEditedFile(
+      REGISTRY,
+      (text) => replaceOnce(text, ZZ005_ENTRY, `${ZZ005_ENTRY}${ZZ005_ENTRY}`),
+      sqlstate,
+    ),
+    'sqlstate-registry-holds-one-entry-per-code',
+  )
+
+  // 121b. A code a migration raises with no entry. The direction the allowlist this replaced could not have
+  //       had, and the one that stops the next unit taking a code silently.
+  checkRejectedBy(
+    'sqlstate gate: a raised code with no registry entry is refused',
+    withEditedFile(REGISTRY, (text) => replaceOnce(text, ZZ005_ENTRY, ''), sqlstate),
+    'sqlstate-registry-covers-every-raised-code',
+  )
+
+  // 121c. An entry naming a code no migration raises. The direction that lets the registry SHRINK: an entry
+  //       that no longer describes a refusal is permission to create a different one on the same code, which
+  //       is what the thirteen-entry allowlist had become.
+  checkRejectedBy(
+    'sqlstate gate: an entry naming a code nothing raises is refused',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          ZZ005_ENTRY,
+          `${ZZ005_ENTRY}  {\n    code: 'ZZ099',\n    rule: 'A gate fixture nothing raises, which is the point of it.',\n    migration: '0093',\n    raisedBy: ['nobody'],\n    translators: [],\n  },\n`,
+        ),
+      sqlstate,
+    ),
+    'sqlstate-registry-entry-still-describes-a-refusal',
+  )
+
+  // 121d. An entry whose fields disagree with the tree. Without this the registry could name the wrong
+  //       migration, the wrong function or the wrong translator and read perfectly — which is the defect
+  //       class this build pays for most: a claim that is not what is measured.
+  checkRejectedBy(
+    'sqlstate gate: an entry naming the wrong migration is refused',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          `${ZZ005_RULE}    migration: '0093',`,
+          `${ZZ005_RULE}    migration: '0018',`,
+        ),
+      sqlstate,
+    ),
+    'sqlstate-registry-entry-matches-the-migrations',
+  )
+
+  // 121e. One code raised from two migrations' live definitions — the collision itself, and the case that
+  //       proves the gate reads the MIGRATION FILES. A gate that read only the registry would pass here.
+  checkRejectedBy(
+    'sqlstate gate: a second migration raising an existing code is refused',
+    withFixture(FIXTURE_MIGRATION, raising('__gate_fixture__second_rule', 'ZZ005'), sqlstate),
+    'one-private-sqlstate-stands-for-one-rule',
+  )
+
+  // 121f. The floor (ADR 0002). A pattern that stops matching makes every assertion above pass over an empty
+  //       set, and "no problems" over nothing is the failure this whole suite exists to catch. The fixture
+  //       widens the code pattern so it matches no `errcode` at all, and the gate must stop at the floor
+  //       rather than report 138 stale entries — a report that would send the reader to the registry.
+  {
+    const blinded = withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          text,
+          "const RAISED = /errcode = '([A-Z0-9]{5})'/g",
+          "const RAISED = /errcode = '([A-Z0-9]{9})'/g",
+        ),
+      sqlstate,
+    )
+    checkRejectedBy(
+      'sqlstate gate: a raise pattern that matches nothing fails on the floor',
+      blinded,
+      'under the floor of',
+    )
+    check(
+      'sqlstate gate: the floor failure does not report the registry instead',
+      !blinded.output.includes('problem(s).'),
+      `it reported registry problems rather than the empty scan that caused them:\n${blinded.output}`,
+    )
+  }
+
+  // 121g. The control on the measurement, and the one that saved four migrations. A LATER migration that
+  //       `create or replace`s a function raising an existing code is ONE rule whose definition moved, not a
+  //       second rule — so the collision direction must stay silent while the entry direction fires, because
+  //       the live definition is now somewhere else. ZB001, ZB002, ZL002 and ZV002 are exactly this shape and
+  //       were all listed as collisions by the check this replaced.
+  {
+    const superseded = withFixture(
+      FIXTURE_MIGRATION,
+      raising('assert_publication_within_weight_budget', 'ZZ005', true),
+      sqlstate,
+    )
+    checkRejectedBy(
+      'sqlstate gate: a REPLACED definition moves the code rather than colliding with itself',
+      superseded,
+      'sqlstate-registry-entry-matches-the-migrations',
+    )
+    check(
+      'sqlstate gate: a replaced definition is NOT reported as one code standing for two rules',
+      !superseded.output.includes('one-private-sqlstate-stands-for-one-rule'),
+      'the scan counted a superseded definition as a second rule, which is the false positive that made ' +
+        `three of the thirteen inherited "collisions" describe nothing:\n${superseded.output}`,
+    )
+  }
+
+  // 121h. The same collision against the SUITE, not the script. The acceptance asks the uniqueness test to
+  //       keep its own directions and gain the registry one, and a direction that lives only in a verify step
+  //       is a direction an agent's own loop never runs.
+  checkRejectedBy(
+    'sqlstate gate: the uniqueness suite fails on a collision too, not just the verify step',
+    withFixture(FIXTURE_MIGRATION, raising('__gate_fixture__second_rule', 'ZZ005'), () =>
+      runExpectingFailure('pnpm', [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.config.ts',
+        'packages/db/src/sqlstate-uniqueness.test.ts',
+      ]),
+    ),
+    'a private SQLSTATE collision',
+  )
+
+  // 121i. The control for all of the above: the committed tree passes, and the gate says what it examined.
+  //       Without it the eight failures are satisfied by a script that refuses everything.
+  {
+    const clean = run('pnpm', ['sqlstate'])
+    check(
+      'sqlstate gate: the committed registry passes and reports what it examined',
+      !clean.failed &&
+        /\d+ private SQLSTATE\(s\) registered across \d+ migration\(s\)/.test(clean.output),
+      `the unedited tree did not pass, or said nothing about what it read:\n${clean.output}`,
+    )
+    check(
+      'sqlstate gate: no fixture was left behind',
+      !existsSync(FIXTURE_MIGRATION),
+      `${FIXTURE_MIGRATION} survived a fixture, and every later gate reading the migrations will now fail`,
+
 // 124a-124w. (A-FIRST-02) The measurement plan: the vocabulary that must have exactly one statement, the
 //            event name that must not compile, the funnel that must not be dated on a calendar day, and
 //            the two gates that were widened so the taxonomy's purity is measured rather than asserted.
@@ -37155,6 +37350,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm db:migrate:dry',
     'pnpm db:drift',
     'pnpm db:conventions',
+    // W-SYS-12's allocator. Registered here because the convention it replaced had nothing that failed when
+    // it was ignored: a class was taken by reading the migrations a worktree could see, and four migrations
+    // claimed one code. A check nobody runs is the convention again with more steps.
+    'pnpm sqlstate',
     'pnpm budgets',
     // The registry check registers itself. Not a cute trick: it is the one entry whose absence this array
     // could not otherwise reveal, since the check exists precisely to notice a verify step nobody listed

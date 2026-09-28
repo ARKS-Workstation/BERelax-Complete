@@ -18,7 +18,7 @@ import { type Enrolment, enrolOnLiveVersion } from './flow.ts'
  *   - **A move writes the card and the log together.** `moveCard` does both inside one transaction because
  *     the database refuses either alone: `customer_pipeline_card_records_every_move` is a DEFERRED
  *     constraint trigger that, at COMMIT, requires a `pipeline_stage_transition` row for exactly this move
- *     (ZU001). There is no ordering that satisfies it except writing both.
+ *     (ZU008). There is no ordering that satisfies it except writing both.
  *   - **A reorder is a PERMUTATION.** `reorderPipelineStages` takes the whole order and refuses anything
  *     that is not a permutation of the stages that exist, then writes every position in one transaction.
  *     The UNIQUE constraint and the gapless check are both deferred to COMMIT, so the shuffle needs no
@@ -63,14 +63,22 @@ export const PIPELINE_REFUSALS = [
 ] as const
 export type PipelineRefusal = (typeof PIPELINE_REFUSALS)[number]
 
-/** The private SQLSTATEs 0077 raises. Private, so a probe cannot be satisfied by another trigger. */
+/**
+ * The private SQLSTATEs 0077 raises. Private, so a probe cannot be satisfied by another trigger.
+ *
+ * `ZU008`-`ZU010` and not `ZU001`-`ZU003`, which 0076's cash session holds: both files took class `ZU` in
+ * worktrees that could not see each other, so "private, so a probe cannot be satisfied by another trigger"
+ * was false for all three of them — a probe asserting `ZU002` was satisfied by a closed drawer refusing an
+ * edit. 0094 moved this side; the allocator that refuses the next one is
+ * `packages/db/src/sqlstate-registry.ts`.
+ */
 export const PIPELINE_SQLSTATE = {
   /** A card created or moved with no transition row recording the move. */
-  moveUnrecorded: 'ZU001',
+  moveUnrecorded: 'ZU008',
   /** UPDATE or DELETE on `pipeline_stage_transition`. */
-  transitionImmutable: 'ZU002',
+  transitionImmutable: 'ZU009',
   /** `pipeline_stage.display_order` is not 1..n. */
-  positionsNotGapless: 'ZU003',
+  positionsNotGapless: 'ZU010',
 } as const
 
 /** The audit actions this module writes. Named, so a coverage test can enumerate them. */

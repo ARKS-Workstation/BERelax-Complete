@@ -1,9 +1,17 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import {
+  collisions,
+  liveRaisesByCode,
+  PRIVATE_SQLSTATES,
+  readMigrationCorpus,
+  readTranslatorCorpus,
+  registryProblems,
+  SQLSTATE_REGISTRY_RULES,
+  translatorsByCode,
+} from './sqlstate-registry.ts'
 
 /**
- * No private SQLSTATE is raised by two migrations for two DIFFERENT rules.
+ * No private SQLSTATE stands for two rules, and no code is raised that the registry does not hold.
  *
  * ## The defect, and why nothing else catches it
  *
@@ -17,126 +25,199 @@ import { describe, expect, it } from 'vitest'
  * `0080_frequency_ledger.sql`'s own header says it: a shared code makes "a probe asserting it pass when
  * the statement bounced off something else entirely."
  *
- * Nothing checked this, because the allocation is a convention with no allocator. Each unit picks a class
- * by reading the migrations it can see, and units in flight cannot see each other — the same failure that
- * produced two suites sharing port band 9700 and two branches claiming one migration number, except those
- * have an allocator now and this did not.
+ * ## What this file is now, and what it was
  *
- * ## What is and is not a collision
+ * It used to hold `KNOWN_COLLISIONS`, a dated allowlist of thirteen codes each naming the two rules it
+ * stood for, tolerated because adopting a rule against thirteen violations by disabling the rule would
+ * have been worse than not having it. W-SYS-12 resolved all thirteen and the map is DELETED rather than
+ * emptied, so the allowlist cannot be re-grown: there is no longer anywhere to put an exception.
  *
- * A class appearing in two files is NOT one. `ZG001-ZG006` are 0078's and `ZG007-ZG012` are 0083's, which
- * is one subject continuing its own family correctly, and `ZL002` is raised from 0018's function and
- * 0073's caller, which is ONE rule raised in two places. Sharing is fine; what must never happen is one
- * CODE standing for two different rules.
+ * Two things the allowlist got wrong, and both are the reason the detector is now a measurement:
  *
- * This test therefore keys on the exact five characters and holds a dated allowlist of the collisions that
- * already exist, each naming both rules. **The allowlist may only ever shrink.** A new collision fails
- * immediately; an existing one is tolerated with its reason recorded and an owner named, because adopting a
- * rule against thirteen existing violations by disabling the rule would be worse than not having it.
+ *   * It keyed on **which FILES contain a code**, which cannot tell a superseded definition from a second
+ *     rule. `create or replace` means the file that DEFINED a function is often not the file whose
+ *     definition executes, so ZB001, ZB002 and ZV002 were listed as collisions when each is ONE rule whose
+ *     function was later replaced — three of thirteen entries describing something that did not exist.
+ *   * Its ZL002 entry read "0018 raises it from the shared function, 0073 from its caller". 0073 does not
+ *     raise it from a caller; it `create or replace`s the shared function. The one entry that correctly
+ *     said "ONE rule, two places" was wrong about which two places, in a file whose subject is a claim
+ *     standing for something other than what it measures.
+ *
+ * So the derivation lives in `sqlstate-registry.ts` and is shared with `pnpm sqlstate` rather than written
+ * twice, and it resolves each raising function to its LIVE definition before comparing. `ZL002` then needs
+ * no exception at all: one function, one rule, and the two call sites that reach it are driven end to end
+ * by `packages/fixtures/src/sqlstate-allocation.itest.ts`, which asserts they report the same rule.
+ *
+ * ## The three directions
+ *
+ * A new collision fails. A registry entry that no longer describes a refusal fails — the direction the
+ * allowlist had, which is what lets the registry SHRINK. And a code raised with no entry fails, which is
+ * the direction the allowlist could not have: it is what stops the next unit taking a code silently.
  */
-const MIGRATIONS = 'packages/db/migrations'
-
-/**
- * Codes already shared when this check was written, with the two rules each one stands for.
- *
- * Every entry is a latent defect, not an exemption on the merits. Reallocating them needs a namespace
- * decision, a migration per offender to `create or replace` its functions, and every translator and probe
- * updated with it. That is unit-sized and is **W-SYS-12** in the manifest, which is where the namespace
- * decision is taken: the CLASS stops identifying a migration file, a refusal is identified by all five
- * characters, and the registry allocates them. `ZY` went to 0085 when C-CRM-09 and C-CRM-10 turned out to
- * have taken `ZA` in worktrees that could not see each other, which this check caught on the first run
- * after that merge and is the reason it exists. `ZZ` was the last free class after that and **0093
- * (W-SITE-10) has taken it**, ZZ001-ZZ005 — so there is now NO free class, and a migration needing a
- * private code before W-SYS-12 lands must either extend an existing family, which is what this check
- * refuses, or wait for the allocator. That is the point at which the convention has run out rather than
- * merely become awkward.
- *
- * This sentence used to say the work was "recorded as such in the manifest" when nothing in the manifest
- * owned it. The file was added to catch a code standing for two rules; it carried a claim standing for
- * nothing, six lines under the paragraph explaining why an unallocated convention drifts.
- *
- * REMOVE an entry when its collision is resolved. Never add one.
- */
-const KNOWN_COLLISIONS: ReadonlyMap<string, string> = new Map([
-  ['ZB001', '0024 and 0038'],
-  ['ZB002', '0024 and 0038'],
-  ['ZL002', '0018 raises it from the shared function, 0073 from its caller — ONE rule, two places'],
-  ['ZT001', '0068 tender, 0069 customer merge, 0083 package redemption'],
-  ['ZT002', '0068 tender and 0069 customer merge'],
-  ['ZT003', '0068 tender and 0069 customer merge'],
-  ['ZU001', '0076 cash session and 0077 pipeline — unrelated rules'],
-  ['ZU002', '0076 cash session and 0077 pipeline — unrelated rules'],
-  ['ZU003', '0076 cash session and 0077 pipeline — unrelated rules'],
-  ['ZV002', '0028, 0034 and 0039'],
-  [
-    'ZW001',
-    '0080 "the cap must be a whole number >= 1" and 0081 "rota_version carrying supersedes_id"',
-  ],
-  ['ZW002', '0080 frequency ledger and 0081 rota version'],
-  [
-    'ZX001',
-    '0086 "an attendance row is append-only" and 0087 "the Ramadan window may only narrow"',
-  ],
-])
-
-const RAISED = /errcode = '([A-Z0-9]{5})'/g
-
-function codesByMigration(): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>()
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))) {
-    const text = readFileSync(join(MIGRATIONS, file), 'utf8')
-    for (const match of text.matchAll(RAISED)) {
-      const code = match[1] as string
-      const seen = out.get(code) ?? new Set<string>()
-      seen.add(file.split('_')[0] as string)
-      out.set(code, seen)
-    }
-  }
-  return out
-}
+const corpus = readMigrationCorpus()
+const raises = liveRaisesByCode(corpus)
 
 describe('a private SQLSTATE stands for exactly one rule', () => {
-  const byCode = codesByMigration()
-
   it('scans a corpus big enough for an empty result to mean something', () => {
     // ADR 0002: a check that examined nothing passes. Floors well under the real figures and far above
     // zero, so a glob that stopped matching fails here rather than reporting that all is well.
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).length).toBeGreaterThan(60)
-    expect(byCode.size).toBeGreaterThan(80)
+    expect(corpus.size).toBeGreaterThan(60)
+    expect(raises.size).toBeGreaterThan(80)
+    expect(PRIVATE_SQLSTATES.length).toBeGreaterThan(80)
   })
 
-  it('raises no code from two migrations except the ones already known', () => {
-    const shared = [...byCode.entries()]
-      .filter(([, files]) => files.size > 1)
-      .map(([code, files]) => `${code} (${[...files].sort().join(', ')})`)
-      .sort()
-    const unexpected = shared.filter((line) => !KNOWN_COLLISIONS.has(line.slice(0, 5)))
+  it('raises no code from two migrations', () => {
     expect(
-      unexpected,
-      "a new private SQLSTATE collision. Two rules sharing a code means one file's translator reports " +
-        "the other file's refusal, and a probe asserting the code passes when the statement bounced off " +
-        'something else. Take a code nobody raises — and if the class is exhausted, say so rather than ' +
-        'reusing one.',
+      collisions(raises),
+      "a private SQLSTATE collision. Two rules sharing a code means one file's translator reports the " +
+        "other file's refusal, and a probe asserting the code passes when the statement bounced off " +
+        'something else. Take a code nobody raises — the next free subclass of the class your rule ' +
+        'belongs in, registered in sqlstate-registry.ts. There is no allowlist to add it to.',
     ).toEqual([])
   })
 
-  it('the allowlist only shrinks: every entry in it is still a real collision', () => {
-    // The other direction, and the one that makes the allowlist safe to keep. Once a collision is fixed
-    // its entry must be deleted, or the list silently becomes permission to re-collide on that code.
-    const stale = [...KNOWN_COLLISIONS.keys()].filter((code) => (byCode.get(code)?.size ?? 0) < 2)
+  it('every entry in the registry still describes a refusal some migration raises', () => {
+    // The direction that makes the registry safe to keep, inherited from the allowlist it replaced: once
+    // a code stops being raised its entry must be deleted, or the registry silently becomes permission to
+    // use that code for something else.
+    const stale = registryProblems({ registry: PRIVATE_SQLSTATES, raises, translators: new Map() })
+      .filter((problem) => problem.rule === SQLSTATE_REGISTRY_RULES.staleEntry)
+      .map((problem) => problem.detail)
     expect(
       stale,
-      'these codes are in KNOWN_COLLISIONS and are no longer shared — delete them from the list, ' +
-        'because an entry that no longer describes a collision is permission to create one',
+      'these codes are registered and no migration raises them — delete the entries, because an entry ' +
+        'that no longer describes a refusal is permission to create a different one on the same code',
     ).toEqual([])
   })
 
-  it('the control: the scan DOES see a collision when one exists', () => {
-    // Without this, the first case passes when `RAISED` stops matching and `byCode` is empty of duplicates
-    // for the wrong reason. `ZW001` is known to be raised by two migrations, so the scan must say so.
-    expect(byCode.get('ZW001')?.size ?? 0).toBeGreaterThan(1)
-    // And a code raised by exactly one migration must not be reported as shared.
-    const singles = [...byCode.entries()].filter(([, f]) => f.size === 1)
-    expect(singles.length).toBeGreaterThan(70)
+  it('every code a migration raises has a registry entry', () => {
+    // The direction the allowlist could not have had, and the one the acceptance calls the registry
+    // direction: a unit that raises a code without registering it fails here rather than at the merge
+    // where a second unit has already taken it.
+    const unregistered = registryProblems({
+      registry: PRIVATE_SQLSTATES,
+      raises,
+      translators: new Map(),
+    })
+      .filter((problem) => problem.rule === SQLSTATE_REGISTRY_RULES.unregisteredCode)
+      .map((problem) => problem.detail)
+    expect(unregistered, 'raised and unregistered').toEqual([])
+  })
+
+  it('the whole registry agrees with the migrations and the translators', () => {
+    // Everything `pnpm sqlstate` checks, asserted here too, because the suite runs on every change and
+    // the script runs at a named step: a unit that renames a trigger function should not have to reach
+    // the verify chain to find out that the registry now describes a function nobody has.
+    expect(
+      registryProblems({
+        registry: PRIVATE_SQLSTATES,
+        raises,
+        translators: translatorsByCode(readTranslatorCorpus()),
+      }).map((problem) => `[${problem.rule}] ${problem.detail}`),
+    ).toEqual([])
+  })
+})
+
+/**
+ * The controls. Every assertion above says "nothing is wrong", and that is exactly the shape that passes
+ * when the detector has stopped detecting.
+ *
+ * The corpus is synthetic on purpose. There is no longer a real collision to point at — that was the
+ * unit's job — so a control that asserted "the scan sees ZW001 raised twice" would have to be deleted with
+ * the last collision, which is the moment the detector stops being watched. A fabricated corpus can hold
+ * every case the real tree must never hold again.
+ */
+describe('the detector detects', () => {
+  const fn = (name: string, code: string) =>
+    `create function ${name}() returns trigger\nlanguage plpgsql\nas $$\nbegin\n  raise exception 'x' using errcode = '${code}';\nend $$;\n`
+
+  it('sees a collision when two migrations raise one code from two functions', () => {
+    const synthetic = new Map([
+      ['0001_a.sql', fn('rule_one', 'ZZ900')],
+      ['0002_b.sql', fn('rule_two', 'ZZ900')],
+    ])
+    expect(collisions(liveRaisesByCode(synthetic))).toEqual([
+      'ZZ900 (0001:rule_one, 0002:rule_two)',
+    ])
+  })
+
+  it('does NOT see a collision when the later migration REPLACES the function', () => {
+    // ZL002's shape, and ZB001's, ZB002's and ZV002's: one rule, raised from one function, whose
+    // definition moved. This is the case the allowlist got wrong three times out of four, and the reason
+    // the three above need no migration and no exception.
+    const synthetic = new Map([
+      ['0001_a.sql', fn('one_rule', 'ZZ901')],
+      [
+        '0002_b.sql',
+        fn('one_rule', 'ZZ901').replace('create function', 'create or replace function'),
+      ],
+    ])
+    const byCode = liveRaisesByCode(synthetic)
+    expect(collisions(byCode)).toEqual([])
+    // And the live site is the REPLACEMENT, not the original — otherwise "no collision" would be right
+    // for the wrong reason.
+    expect(byCode.get('ZZ901')).toEqual([{ code: 'ZZ901', migration: '0002', fn: 'one_rule' }])
+  })
+
+  it('sees one code raised from several functions in ONE migration as one rule', () => {
+    // ZU002's shape: three functions in 0076 raise it for one subject. A detector that keyed on the
+    // function rather than the migration would demand two more migrations to satisfy it, about nothing.
+    const synthetic = new Map([['0003_c.sql', fn('a_row', 'ZZ902') + fn('another_row', 'ZZ902')]])
+    expect(collisions(liveRaisesByCode(synthetic))).toEqual([])
+    expect(liveRaisesByCode(synthetic).get('ZZ902')).toHaveLength(2)
+  })
+
+  it('reads code and not prose: a commented-out raise is not a raise', () => {
+    // Not hypothetical, and the reason the scanner blanks comments. 0094's own header explains itself with
+    // `errcode = 'ZT001'` written inside a `--` comment; a scanner reading the file as text would report
+    // the migration that resolved nine collisions as having created one.
+    const commented = new Map([
+      ['0004_d.sql', `-- the old code was errcode = 'ZZ903'\n${fn('live_rule', 'ZZ904')}`],
+      ['0005_e.sql', `/* errcode = 'ZZ903' */\n${fn('other_rule', 'ZZ905')}`],
+    ])
+    const byCode = liveRaisesByCode(commented)
+    expect([...byCode.keys()].sort()).toEqual(['ZZ904', 'ZZ905'])
+    // The control on the control: the real 0094 header carries that line, so the real scan must not hold
+    // a ZT001 raise in 0094. If comment blanking regressed, this is where it shows.
+    expect(corpus.get('0094_sqlstate_reallocation.sql')).toContain("errcode = 'ZT001'")
+    expect((raises.get('ZT001') ?? []).map((site) => site.migration)).toEqual(['0083'])
+  })
+
+  it.each([
+    [
+      SQLSTATE_REGISTRY_RULES.duplicateEntry,
+      [...PRIVATE_SQLSTATES, PRIVATE_SQLSTATES[0] as (typeof PRIVATE_SQLSTATES)[number]],
+    ],
+    [SQLSTATE_REGISTRY_RULES.unregisteredCode, PRIVATE_SQLSTATES.slice(1)],
+  ])('registryProblems reports %s', (rule, registry) => {
+    // Each direction shown to fire on a registry that breaks it and only it. The remaining two directions
+    // are covered below, and all five have a known-bad fixture in scripts/test-gates.mjs block 121.
+    const found = registryProblems({ registry, raises, translators: new Map() }).map((p) => p.rule)
+    expect(found).toContain(rule)
+  })
+
+  it('registryProblems reports a stale entry and an entry that disagrees', () => {
+    const stale = registryProblems({
+      registry: [
+        {
+          code: 'ZZ999',
+          rule: 'nothing raises this',
+          migration: '0093',
+          raisedBy: ['nobody'],
+          translators: [],
+        },
+      ],
+      raises,
+      translators: new Map(),
+    })
+    expect(stale.map((problem) => problem.rule)).toContain(SQLSTATE_REGISTRY_RULES.staleEntry)
+
+    const first = PRIVATE_SQLSTATES[0] as (typeof PRIVATE_SQLSTATES)[number]
+    const wrong = registryProblems({
+      registry: [{ ...first, migration: '0001', raisedBy: ['not_the_function'] }],
+      raises,
+      translators: new Map(),
+    })
+    expect(wrong.map((problem) => problem.rule)).toContain(SQLSTATE_REGISTRY_RULES.entryDisagrees)
   })
 })

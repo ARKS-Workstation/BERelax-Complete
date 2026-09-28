@@ -1179,7 +1179,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     action: 'retain_append_only',
     why:
       'A transition says a NAMED STAFF ACTOR moved this record between columns at an instant. Append-only ' +
-      'for every role including the owner (0077, ZU002) and the application role holds no UPDATE, DELETE ' +
+      'for every role including the owner (0077, ZU009) and the application role holds no UPDATE, DELETE ' +
       'or TRUNCATE, so an erasure — an application operation — cannot reach it. What the row ' +
       'says happened does not stop being true, and it names a member of staff as much as a customer.',
     subjectReason:
@@ -1193,7 +1193,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     dataClass: 'audit',
     action: 'retain_append_only',
     why:
-      'The tombstone. Append-only for every role (ZT001), and `merge_survivor_of()` follows the chain: ' +
+      'The tombstone. Append-only for every role (ZT005), and `merge_survivor_of()` follows the chain: ' +
       'erasing it would make a merged-away record unanswerable and would hide that two records were ever ' +
       'one person — which is the fact an erasure of the survivor most needs to be able to see.',
     subjectReason:
@@ -1206,7 +1206,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     dataClass: 'audit',
     action: 'retain_append_only',
     why:
-      'The tombstone’s own id, UNIQUE and append-only (ZT001). Also the mechanism by which an ' +
+      'The tombstone’s own id, UNIQUE and append-only (ZT005). Also the mechanism by which an ' +
       'erasure must cover BOTH records: a request naming the survivor has to erase the identity of every ' +
       'record merged into it, and this column is how they are found.',
     subjectReason:
@@ -1373,7 +1373,7 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
     dataClass: 'audit',
     action: 'inherits_parent',
     parent: 'public.merge_record',
-    why: 'The per-table report of one merge. Append-only with its parent (ZT001).',
+    why: 'The per-table report of one merge. Append-only with its parent (ZT005).',
     registeredBy: 'C-CRM-10',
   }),
 

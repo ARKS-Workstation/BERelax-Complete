@@ -294,7 +294,7 @@ describe('the preview is computed by the merge itself', () => {
 
     // (3) From outside: nothing survived. `merge_record` is inserted BEFORE any row moves, so a preview
     // that committed would have tombstoned a customer nobody approved merging — and the pair would answer
-    // `already_merged` for ever, with no way back: the table refuses DELETE for every role (ZT001).
+    // `already_merged` for ever, with no way back: the table refuses DELETE for every role (ZT005).
     expect(await writeFootprint(sql, pair.loserId), 'the preview wrote nothing').toEqual(before)
     // And the acceptance line's own words: per-table row counts are unchanged after a preview.
     expect(await pairRowCounts(sql, pair), 'no row moved').toEqual(rowsBefore)

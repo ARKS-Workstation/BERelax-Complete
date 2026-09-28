@@ -621,7 +621,7 @@ export const labourCostRule = pgTable(
  * row carrying `supersedesId`.
  *
  * Four triggers and two of this file's constraints are not expressible in Drizzle and live in the
- * migration: `refuse_published_rota_change` (ZW001) refuses every UPDATE and DELETE for every role
+ * migration: `refuse_published_rota_change` (ZW006) refuses every UPDATE and DELETE for every role
  * including the owner, `assert_rota_version_sequence` (ZW005) keeps the numbering unbroken, and the
  * DEFERRED `rota_version_changes_something` (ZW003) refuses a re-publish whose assignment set is
  * identical to its predecessor's — which is how an unchanged re-publish emits no staff notification: it
@@ -702,7 +702,7 @@ export const rotaVersion = pgTable(
  * which is the one claim this table exists to make. `sourceShiftId` is a plain uuid and NOT a foreign key,
  * which is 0077's decision for `pipeline_stage_transition.customer_id` verbatim and for exactly its reason:
  * an immutable table cannot reference a mutable parent, because the referential action arrives as an UPDATE
- * and ZW001 refuses every UPDATE — so `delete from shift` would become impossible and the draft roster
+ * and ZW006 refuses every UPDATE — so `delete from shift` would become impossible and the draft roster
  * could never be rewritten again.
  */
 export const rotaVersionAssignment = pgTable(

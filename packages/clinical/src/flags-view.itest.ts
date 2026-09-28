@@ -34,7 +34,7 @@ import { type ClinicalIntakeStore, createClinicalIntakeStore } from './repositor
  * The integration suite runs sequentially against ONE database and earlier files leave rows behind (brief
  * rule 12). Every row this file writes carries its own uuid prefix and `sweep()` removes exactly those.
  * `merge_record` is the exception and cannot be swept — it is append-only for every role including the owner
- * (ZT001) — so its fixture row is written with `on conflict do nothing` and is idempotent across runs.
+ * (ZT005) — so its fixture row is written with `on conflict do nothing` and is idempotent across runs.
  *
  * Every audit assertion is a DELTA counted in SQL, because `audit_event` only grows (brief rule 9).
  */
@@ -775,7 +775,7 @@ describe('acceptance — a merged-away record keeps its flags, under the survivo
     // pass vacuously: without the resolution the loser would answer the flags and the survivor would
     // answer nothing, which is the exact opposite of both expectations.
     //
-    // The tombstone. `merge_record` is append-only for every role (ZT001), so this cannot be swept and is
+    // The tombstone. `merge_record` is append-only for every role (ZT005), so this cannot be swept and is
     // written idempotently instead — a second run of this file finds its own row and does nothing.
     await sql`
       insert into merge_record (survivor_customer_id, loser_customer_id, merged_at, actor_kind,

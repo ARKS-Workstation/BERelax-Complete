@@ -50,7 +50,7 @@ import { syntheticPerson } from './synthetic.ts'
  *     read first, which is what makes a second run append rather than collide;
  *   - **the fixture stages** are `cauto08_*` keys, and they are ARCHIVED in `afterAll` rather than deleted.
  *     Deleting is not available: a `pipeline_stage_transition` row names the stage it moved a card into,
- *     that log is append-only (ZU002), and the stage reference is ON DELETE RESTRICT — so a stage a card has
+ *     that log is append-only (ZU009), and the stage reference is ON DELETE RESTRICT — so a stage a card has
  *     ever entered cannot be removed. Archiving is the shape the schema offers, `readPipelineBoard` filters
  *     archived columns out, and a second run of this file un-archives its own three by key. That also keeps
  *     the gapless invariant true, because an archived row keeps its position.
@@ -374,7 +374,7 @@ describe('acceptance — stage positions are unique and gapless across 100 rando
     const victim = keys[0]
     if (victim === undefined) throw new Error('a stage is needed')
 
-    // A gap: one position pushed past the end. ZU003 and not a constraint violation, because the gapless
+    // A gap: one position pushed past the end. ZU010 and not a constraint violation, because the gapless
     // rule is a statement about the TABLE and no CHECK can make it.
     expect(
       await sqlstateOf(() =>
@@ -576,7 +576,7 @@ describe('acceptance — a move writes a transition with actor, from, to and tim
 })
 
 describe('acceptance — a stage change with no transition row is impossible', () => {
-  it('raises ZU001 for a bare UPDATE, for the owner as well', async () => {
+  it('raises ZU008 for a bare UPDATE, for the owner as well', async () => {
     const customerId = contact(0)
     // The known-bad fixture the acceptance line names, run against a real PostgreSQL as the OWNER — the
     // role the revokes do not cover, and the one that moves a card by hand at 02:00.
@@ -721,7 +721,7 @@ describe('acceptance — the whole board is ONE query', () => {
   it('leaves a merged-away contact off the board', async () => {
     // One person, two records, one of them merged away: without the filter the board draws both, and a
     // drag on the wrong one moves a card nothing else reads. Probed inside a transaction that is rolled
-    // back, because `merge_record` is append-only for every role (ZT001) and a row written here would
+    // back, because `merge_record` is append-only for every role (ZT005) and a row written here would
     // outlive the contacts this file removes.
     const survivor = contact(0)
     const loser = contact(2)

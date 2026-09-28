@@ -49,7 +49,7 @@ import { PGBOSS_SCHEMA } from './jobs/boss.ts'
  * Every entry names a reason a merge must NOT touch that table, and most of those reasons are structural
  * rather than preferential: the application role holds no UPDATE privilege on `invoice` or
  * `checkout_finalisation`, holds NO privilege at all on the `clinical` schema (0009 revokes it), and
- * cannot edit `merge_record` at all (ZT001). The read side resolves the tombstone instead —
+ * cannot edit `merge_record` at all (ZT005). The read side resolves the tombstone instead —
  * `merge_survivor_of(uuid)` in 0069 is granted to `berelax_clinical` for exactly that, because the
  * clinical schema cannot call TypeScript.
  *
@@ -587,7 +587,7 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
     table: 'pipeline_stage_transition',
     column: 'customer_id',
     reason:
-      '0077 makes this log append-only for every role including the owner (ZU002) and the application ' +
+      '0077 makes this log append-only for every role including the owner (ZU009) and the application ' +
       'role holds no UPDATE, DELETE or TRUNCATE on it, so a merge — an application operation — cannot ' +
       'move a row here even if it wanted to. It should not want to: a transition says a NAMED actor moved ' +
       'this record from one column to another at an instant, and re-pointing it would make the survivor’s ' +
@@ -606,7 +606,7 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
     column: 'survivor_customer_id',
     reason:
       'The merge record IS the tombstone. Re-pointing it would rewrite the history of the merges — and ' +
-      'it is append-only for every role (ZT001), so nothing can. A later merge of the survivor adds a ' +
+      'it is append-only for every role (ZT005), so nothing can. A later merge of the survivor adds a ' +
       'row and merge_survivor_of() follows the chain.',
     registeredBy: 'C-CRM-05',
   }),
@@ -616,7 +616,7 @@ export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
     column: 'loser_customer_id',
     reason:
       'The tombstone’s own id, UNIQUE. Moving it would either erase the fact that a record was merged ' +
-      'away or claim a second record had been. Append-only for every role (ZT001).',
+      'away or claim a second record had been. Append-only for every role (ZT005).',
     registeredBy: 'C-CRM-05',
   }),
   Object.freeze({

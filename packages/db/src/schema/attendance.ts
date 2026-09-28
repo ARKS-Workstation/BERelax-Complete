@@ -212,7 +212,7 @@ export const timesheetApproval = pgTable(
      * its own words — the immutable version exists to be compared against — and a PRECONDITION rather than
      * provenance: a plain column would let a timesheet be approved against a version nobody published, which
      * is the after-the-fact variance the immutability was built to prevent. The pin costs nothing because
-     * `rotaVersion` can never be deleted either (ZW001), which is the case 0081 describes for its own
+     * `rotaVersion` can never be deleted either (ZW006), which is the case 0081 describes for its own
      * self-references.
      */
     rotaVersionId: uuid('rota_version_id')

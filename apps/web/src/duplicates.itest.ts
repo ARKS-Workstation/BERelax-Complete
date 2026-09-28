@@ -52,7 +52,7 @@ import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
  *
  * The CONFIRM case is different and the difference is stated rather than hidden. It merges for real, over
  * HTTP, in a separate process: there is no transaction this file can roll back, `merge_record` refuses DELETE
- * for every role including the owner (ZT001), and the append-only rows a merge copies cannot be removed. So
+ * for every role including the owner (ZT005), and the append-only rows a merge copies cannot be removed. So
  * that case mints its OWN pair per run — a fresh number in a band nothing else uses — merges it, and deletes
  * the two customer rows afterwards. What necessarily stays is the `merge_record` row and its per-table
  * reports, pointing at two ids that no longer exist. That is an ordinary state for this table (it has
@@ -209,7 +209,7 @@ afterAll(async () => {
   await adminPrincipal?.cleanup()
   await browser?.close()
   await server?.stop()
-  // The confirm pair's customer rows go; its merge_record cannot (ZT001) and does not need to — see the
+  // The confirm pair's customer rows go; its merge_record cannot (ZT005) and does not need to — see the
   // file header. The shared fixture's six records stay: they are ensured, never merged, and
   // `merge-preview.itest.ts` drives the same ones.
   if (confirmLoserId !== '') {
