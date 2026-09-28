@@ -564,7 +564,10 @@ describe('acceptance — the worked example, exact to the fils', () => {
       (row) => row.accountCode === VAT201_WORKED_EXAMPLE_UNALLOCATED.accountCode,
     )
     expect(blocked?.disposition).toBe('unallocated')
-    expect(blocked?.openQuestionId).toBe('Y11-vat201-boxes')
+    // Its OWN question. Y11-vat201-boxes asks for the numbers for standard-rated sales, reverse charge and
+    // recoverable input tax and does not reach blocked expenditure, and filing a genuinely unasked question
+    // under one that IS asked is how it comes to be answered by implication.
+    expect(blocked?.openQuestionId).toBe('Y11-vat201-blocked-box')
     expect(blocked?.netSuppliesFils).toBe(BigInt(VAT201_WORKED_EXAMPLE_UNALLOCATED.netSuppliesFils))
     // The ledger holds the net AND the borne tax in one debit, so the 2,000 comes from M-VAT-02's
     // working paper. The two figures together are the acceptance line's "explicit non-recoverable

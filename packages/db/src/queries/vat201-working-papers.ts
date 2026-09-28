@@ -640,7 +640,10 @@ function notFileableReasons(
   if (unallocated.length > 0) {
     reasons.push({
       reason: 'unallocated_figures_present',
-      openQuestionId: 'Y11-vat201-boxes',
+      // The question the ROWS name, not this file's guess at it. The blocked accounts carry
+      // Y11-vat201-blocked-box, which is a different question from Y11-vat201-boxes — see 0089's header —
+      // and a reason that named the wrong one would send whoever reads it to the wrong answer.
+      openQuestionId: unallocated[0]?.openQuestionId ?? 'Y11-vat201-boxes',
       detail:
         `${unallocated.length} account(s) feed the return with no box number: ` +
         `${unallocated.map((row) => `${row.accountCode} (${row.movementFils} fils moved)`).join(', ')}. ` +

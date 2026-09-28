@@ -362,6 +362,21 @@ export const VAT201_OPEN_QUESTIONS: readonly Vat201OpenQuestion[] = [
       "if it allocates blocked input tax, 6090's and 5060's rows go from unallocated to box.",
   },
   {
+    questionId: 'Y11-vat201-blocked-box',
+    provisionalAnswer:
+      'No box number is guessed. 6090 Entertainment and 5060 Staff accommodation are attributed ' +
+      "'unallocated': in scope for the return, with the column and the direction known and the box " +
+      'number absent, and reported under their own heading.',
+    whatChanges:
+      "Two rows: `set disposition = 'box', box_no = N` on the blocked accounts' attributions, and " +
+      'nothing else — the measure and the contribution are already right. The question is separate from ' +
+      'Y11-vat201-boxes because that one asks for the numbers for standard-rated sales, reverse charge ' +
+      'and recoverable input tax and does not reach blocked expenditure; filing an unasked question ' +
+      'under one that IS asked is how it comes to be answered by implication. If the answer is that ' +
+      'blocked expenditure appears nowhere on the return, the rows become out_of_scope instead — which ' +
+      'is a different edit and a different figure, so it cannot be the default.',
+  },
+  {
     questionId: 'Y11-tax-agent',
     provisionalAnswer:
       'The working papers are produced FOR the agent to review and are never asserted correct. Every ' +

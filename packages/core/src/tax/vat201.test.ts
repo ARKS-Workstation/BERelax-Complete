@@ -217,9 +217,10 @@ describe('the exhaustive partition census', () => {
 })
 
 describe('what is unconfirmed, and what each answer changes', () => {
-  it('names all four questions this return stands on, each with what its answer moves', () => {
+  it('names all five questions this return stands on, each with what its answer moves', () => {
     expect(VAT201_OPEN_QUESTIONS.map((question) => question.questionId)).toEqual([
       'Y11-vat201-boxes',
+      'Y11-vat201-blocked-box',
       'Y11-tax-agent',
       'Y11-vat-package',
       'Y11-rounding',

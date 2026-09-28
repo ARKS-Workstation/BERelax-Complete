@@ -6099,7 +6099,15 @@ units:
     - 'NOTE: blocked input VAT is IN SCOPE and UNALLOCATED, which is the honest state rather than a
       placeholder for one. The expenditure is real and the tax on it was borne rather than claimed, so 6090
       and 5060 cannot be out_of_scope; and whether the blocked VALUE appears in the input box''s value column
-      is a question Y11-vat201-boxes'' wording does not reach, so no box number is guessed. 6090 also carries
+      is a question Y11-vat201-boxes'' wording does not reach — it asks for the numbers for standard-rated
+      sales, reverse charge and recoverable input VAT and stops there — so no box number is guessed and the
+      sub-question is LOGGED AS ITS OWN: Y11-vat201-blocked-box in docs/OPEN-QUESTIONS.md, which is what the
+      two unallocated rows and the not-fileable reason both name. Filing a genuinely unasked question under
+      one that IS asked is how it comes to be answered by implication, which is the third time this build has
+      surfaced a sub-question by having to write a rule down (M-TILL-10 recorded the second: whether
+      forfeited package consideration is a supply at all). Answering it is `set disposition = ''box'', box_no
+      = N` on two rows, or making them out_of_scope if the answer is that blocked expenditure appears
+      nowhere — a different edit and a different figure, so it cannot be the default. 6090 also carries
       the net AND the blocked VAT in ONE debit (post-bill: "blocked VAT is part of what the thing cost"), so
       the ledger cannot separate them at all — the 2,000 disclosure figure comes from
       bill_line.blocked_input_vat_fils, which is M-VAT-02''s working paper, and the itest asserts both figures
@@ -6123,7 +6131,8 @@ units:
       period-close.itest.ts already have). EDITED: packages/db/src/index.ts (the export block, the ledger
       paragraph for 89, SCHEMA_VERSION = 89), packages/core/src/tax/index.ts,
       packages/db/src/schema/index.ts, packages/fixtures/src/index.ts, scripts/test-gates.mjs (block
-      116a-116z, forty cases, placed after 114a-114z and before 79a-79k) and packages/db/src/settings-store.ts.
+      116a-116z, forty cases, placed after 114a-114z and before 79a-79k), packages/db/src/settings-store.ts
+      and docs/OPEN-QUESTIONS.md (one new row, Y11-vat201-blocked-box; see the blocked-input-tax NOTE).
       NO ADR was needed: every decision here is recorded in the migration header and in these notes, and
       0038 was not taken — the highest on disk is still 0033. No server-starting suite was added, so no port
       band was claimed and packages/harness/src/ports.ts is untouched.'
@@ -6180,6 +6189,7 @@ units:
     - packages/db/src/index.ts
     - packages/db/src/settings-store.ts
     - scripts/test-gates.mjs
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-08
     order: 63
     title: Immutable VAT return snapshot with preparer and reviewer sign-off

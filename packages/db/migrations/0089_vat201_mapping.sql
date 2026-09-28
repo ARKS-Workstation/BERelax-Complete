@@ -414,7 +414,10 @@ select a.code,
        'box''s value column is a question Y11-vat201-boxes'' wording does not reach, so no box number is '
        'guessed. Note that this account carries the net AND the blocked VAT in one debit, so the '
        'disclosure figure comes from bill_line and not from here.',
-       'Y11-vat201-boxes'
+       -- Its OWN question and not Y11-vat201-boxes, which asks for the numbers for standard-rated sales,
+       -- reverse charge and recoverable input VAT and does not reach this one. Filing a genuinely
+       -- unasked question under a question that IS asked is how it gets answered by implication.
+       'Y11-vat201-blocked-box'
   from account a
  where a.vat_box = 'blocked_input_tax'
 on conflict (account_code) do nothing;
