@@ -47,20 +47,25 @@ import {
  *
  * Two checks, in this order, and neither of them is in the render:
  *
- *   1. `principalForRequest` — Payload's own session, verified by Payload. It is the ONLY real session this
- *      application has (`apps/web/src/payload/request-principal.ts`), and it is a session rather than a query
- *      parameter: the cookie is signed, the row is loaded, and `principalFrom` narrows the stored role to one
- *      the F07 matrix knows or treats it as absent.
+ *   1. The admin session, through `guardAdminRoute` in the route binding: W-SYS-11's cookie carries 32 random
+ *      bytes and no role, and the role is reached by a join on every request (ADR 0039). The principal this
+ *      handler receives is `{ id: employeeId, role }` off that session.
  *   2. `can(role, REVIEWS_PASTE_PERMISSION)` — the F07 matrix in `@berelax/core`, which is where every
  *      permission decision in this system is made.
  *
  * There is deliberately **no `?role=` parameter** here, and that is the decision this unit had to get right.
- * Several screens in this build narrow a claimed role from the query string because they have no session to
- * read; W-SYS-11 is in flight to remove exactly that, and its first acceptance line is a repository-wide scan
- * for `?role=` used to choose a principal. A form that WRITES must not be the route that fails that scan. The
- * cost is real and is stated rather than worked around: this screen is reachable only by somebody who has
- * signed into the Payload admin, because that is the only sign-in that exists today. When W-SYS-11 lands,
- * `principalForRequest` is the function that changes and nothing here does.
+ * Several screens in this build narrowed a claimed role from the query string because they had no session to
+ * read; W-SYS-11 removed the last of them, and its first acceptance line is a repository-wide scan for `?role=`
+ * used to choose a principal. A form that WRITES must not be the route that fails that scan.
+ *
+ * This unit was written while W-SYS-11 was in flight, so it took Payload's own session — the only sign-in that
+ * existed then — and its header said that when W-SYS-11 landed, `principalForRequest` was the function that
+ * would change and nothing here would. That is exactly what happened, at the merge: the route calls
+ * `guardAdminRoute` like every other admin route, and the `CmsPrincipal` this handler takes is built from the
+ * admin session's `employeeId` and `role`. The type is unchanged because it never named the CMS — it is "a
+ * staff principal as the admin sees it, no name, the role decides and the id is the audit key" — and only the
+ * SOURCE of the two fields moved. Two session authorities on one admin screen is the drift this build keeps
+ * paying for; there is one now.
  *
  * No development bypass, no default user, no env-var escape hatch: an unauthenticated request gets 401 and an
  * unauthorised one gets 403, in both verbs, and the GET is refused as well as the POST — the queue shows a
@@ -159,19 +164,20 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /**
  * The actor the audit row names.
  *
- * The principal's own id and role, from the verified session. Not a label naming the SURFACE — which is what
+ * The principal's own id and role, from the admin session. Not a label naming the SURFACE — which is what
  * the diary, the pipeline board and the quick-book screen all record, correctly, because they have no session
  * to read — and not an invented receptionist's name, which brief rule 15 forbids and which would be
  * indistinguishable from a real one in the trail.
  *
  * The id is carried only when it is a UUID, and that is not defensiveness for its own sake. `audit_event.
- * actor_id` is a `uuid` column; Payload's id shape is a configuration choice and is an integer in a default
- * setup. A non-uuid id would make every paste a 500 from the audit insert — which is how this was found, by
- * a handler test whose fixture principal had a readable id. The LABEL always names the principal, so the row
- * identifies the actor either way, which is what the acceptance line needs.
+ * actor_id` is a `uuid` column, and a non-uuid id would make every paste a 500 from the audit insert — which
+ * is how this was found, by a handler test whose fixture principal had a readable id. The admin session's
+ * `employeeId` IS a uuid, so the guard holds for a reason the type cannot state rather than for one nobody
+ * checked; the check stays because the handler takes a principal from its caller and a caller is not a schema.
+ * The LABEL always names the principal, so the row identifies the actor either way.
  */
 export function pasteActorFor(principal: CmsPrincipal): Actor {
-  const label = `Reviews paste — cms_user ${principal.id} (${principal.role})`
+  const label = `Reviews paste — employee ${principal.id} (${principal.role})`
   return UUID.test(principal.id)
     ? { kind: 'staff', id: principal.id, label }
     : { kind: 'staff', label }

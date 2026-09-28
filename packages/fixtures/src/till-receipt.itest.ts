@@ -22,6 +22,7 @@ import {
 } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { assertMappingReconciles, checkoutMapping } from './checkout.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 import { packageSaleMapping } from './package.ts'
 import { packageRedemptionMapping } from './package-redemption.ts'
 import {
@@ -340,9 +341,7 @@ afterAll(async () => {
   // RESTRICT. Every referencing table is NAMED rather than reached with CASCADE, so the next one to reference
   // `invoice` fails loudly here. `package_redemption` and `payment` are in the package truncate for 0083's
   // reason: PostgreSQL refuses a TRUNCATE while a referencing table is absent from the statement.
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   /*
     And the package family, which an earlier version of this file deliberately left standing. That was wrong,
     and the reason it was wrong is worth keeping.

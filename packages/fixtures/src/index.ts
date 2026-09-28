@@ -15,6 +15,7 @@ export * from './duplicate-queue.ts'
 // `checkoutMapping` defaults to, so a test comparing the till's transcription against it has to be able to
 // pass the same two values in. There is nothing test-only about them that the rest of this barrel is not.
 export * from './invoice.ts'
+export * from './invoice-family.ts'
 export * from './load.ts'
 export * from './media.ts'
 export * from './message-lifecycle.ts'

@@ -7,6 +7,7 @@ import {
   FIXTURE_PACKAGE_SHAPES,
   seedPackageDrawdownStates,
   seedPackageTemplates,
+  truncateInvoiceFamily,
 } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
 import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
@@ -347,9 +348,7 @@ afterAll(async () => {
   // legal removal, and it must happen before the booking goes because `invoice_appointment` is ON DELETE
   // RESTRICT against the appointment. Every referencing table is NAMED rather than reached with CASCADE, so
   // the next one to reference `invoice` fails loudly here.
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   await sql?.unsafe(`update document_series set next_number = 1, period_key = ''`)
   /*
     The cash tables by TRUNCATE and not by DELETE, which is forced: a closed `cash_session` refuses DELETE for

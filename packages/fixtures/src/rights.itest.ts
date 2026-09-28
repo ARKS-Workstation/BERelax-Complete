@@ -49,6 +49,7 @@ import {
 import { CMS_SCHEMA } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FIXTURE_TRN, invoiceFixture } from './invoice.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 import { fixtureSuppressionPeppers } from './suppression.ts'
 import { syntheticPerson } from './synthetic.ts'
 
@@ -232,9 +233,7 @@ afterAll(async () => {
    * reachability invariant reads the whole table, so those rows are evidence; `ensureCustomer` creates a
    * fresh record for each fixture number on the next run because the erased row no longer holds it.
    */
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   const subjectIds = Object.values(ids)
   if (sql !== undefined && subjectIds.length > 0) {
     await sql`delete from booking where customer_id = any (${subjectIds}::uuid[])`

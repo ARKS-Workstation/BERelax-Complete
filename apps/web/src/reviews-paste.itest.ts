@@ -1,11 +1,9 @@
 import { createConnection, type Sql } from '@berelax/db'
-import { createFixturePrincipal } from '@berelax/fixtures'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
-import { getPayload, type Payload } from 'payload'
 import { type Browser, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEWS_PASTE_FIELDS, REVIEWS_PASTE_PATH } from '../app/(admin)/reviews/paste/view.ts'
-import config, { PAYLOAD_PLACEHOLDER_SECRET } from '../payload.config.ts'
 import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
@@ -22,12 +20,18 @@ import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
  *
  * ## The session is real, and it is why this file exists in this shape
  *
- * The route is guarded by `principalForRequest`, which is Payload's own verified session — the only sign-in
- * this application has. So the browser SIGNS IN over HTTP and carries the cookie, exactly as
- * `breakpoint-preview.itest.ts` does, and the three roles it creates are what make the 401, the 403 and the
- * 200 three separate assertions rather than one. The principal is a fixture this file creates and deletes; no
- * staff member is invented (brief rule 15) and there is no `?role=` parameter anywhere near the route, which is
- * what keeps it on the right side of W-SYS-11's scan.
+ * The route is guarded by `guardAdminRoute`, W-SYS-11's admin session, which is the door every route under
+ * `(admin)` goes through. This file was written before that session existed and signed into the Payload admin
+ * instead — the only sign-in there was — and the screen's own header said that when W-SYS-11 landed, the
+ * principal's SOURCE was the one thing that would change. It did, at the merge. So each role here is a fixture
+ * principal with a real session token, which is what makes the redirect, the 403 and the 200 three separate
+ * assertions rather than one. No staff member is invented (brief rule 15) and there is no `?role=` parameter
+ * anywhere near the route, which is what keeps it on the right side of W-SYS-11's scan.
+ *
+ * The UNAUTHENTICATED answer is a 303 to /login and not a 401, and that is the door's answer rather than this
+ * screen's opinion: a person who is not signed in is sent to sign in, on every admin route in the build. The
+ * handler still answers 401 for a null principal and `reviews-paste-handler.itest.ts` drives that path
+ * directly, because the handler takes a principal from its caller and a caller is not a guarantee.
  *
  * ## Isolation
  *
@@ -48,7 +52,6 @@ if (DATABASE_URL === '')
 let BASE = ''
 
 /** Long enough for Payload's own policy, and obviously a test value. */
-const PASSWORD = 'a-long-enough-test-password'
 
 const PLACE = 'ChIJ_berelax_paste_place'
 const CT = Buffer.from('ciphertext-stand-in')
@@ -58,45 +61,35 @@ const REVIEWED_ON = '2026-09-20'
 
 let server: WebServer
 let browser: Browser
-let payload: Payload
 let sql: Sql
 let connectionId = ''
-const cookies = new Map<string, string>()
 /**
- * The W-SYS-11 admin session, per role, beside Payload's own.
+ * The admin session cookie, per role, as a `Cookie` header value.
  *
- * Two session authorities reach this screen and that is not a mistake left in place: `guardAdminRoute` is the
- * DOOR — every route under `(admin)` calls it, and `admin-guard.test.ts` fails the build for one that does
- * not — while `principalForRequest` is Payload's verified user, which this screen's handler needs because the
- * paste is ATTRIBUTED to a CMS account. G-REV-02 wrote the screen before the admin session existed and its
- * header called Payload's "the only sign-in this application has"; that was true when written. Until the two
- * are reconciled, a browser here carries both cookies, because the door is checked first and a page with only
- * Payload's cookie is now redirected to /login.
+ * One jar and not two: the screen has ONE session authority now. Each entry is
+ * `berelax_admin_session=<token>` for a fixture principal in that role, so every `fetch` below that passes
+ * `headers: { cookie }` is a signed-in request of that role and the ones that pass no cookie are the door's own
+ * case.
  */
-const adminSessions = new Map<string, string>()
+const cookies = new Map<string, string>()
+/** Kept so `afterAll` can call each one's own `cleanup`, which is how every other suite removes them. */
+const principals: FixturePrincipal[] = []
 
-async function ensureStaff(role: string): Promise<string> {
-  const email = `grev02-${role}@berelax.test`
-  await payload.delete({ collection: 'cms_user', where: { email: { equals: email } } })
-  await payload.create({
-    collection: 'cms_user',
-    data: { email, password: PASSWORD, role },
-    overrideAccess: true,
-  })
-  return email
-}
-
-/** Signs in over HTTP and returns the session cookie, so the route sees Payload's own session. */
-async function signIn(email: string): Promise<string> {
-  const response = await fetch(`${BASE}/cms-api/cms_user/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password: PASSWORD }),
-  })
-  if (!response.ok) throw new Error(`login for ${email} answered ${response.status}`)
-  const body = (await response.json()) as { readonly token?: string }
-  if (typeof body.token !== 'string') throw new Error(`login for ${email} returned no token`)
-  return `payload-token=${body.token}`
+/**
+ * A fixture principal in one role, and its session cookie.
+ *
+ * `createFixturePrincipal` writes the employee, the credential and the session the way the application's own
+ * login would, and `packages/fixtures/src/admin-principal.ts` deletes them by their reference prefix — so no
+ * staff member is invented and nothing is left behind for the next suite to find.
+ */
+async function sessionCookieFor(role: 'owner' | 'receptionist' | 'marketer'): Promise<string> {
+  const principal = await createFixturePrincipal(sql, { role })
+  principals.push(principal)
+  const token = principal.sessionToken
+  if (token === undefined || token === null || token === '') {
+    throw new Error(`the fixture principal for ${role} carries no session token`)
+  }
+  return `${ADMIN_SESSION_COOKIE}=${token}`
 }
 
 async function seedConnection(): Promise<string> {
@@ -168,19 +161,12 @@ async function pageAs(role: string): Promise<{ page: Page; posts: () => readonly
   const context = await browser.newContext({ baseURL: BASE })
   const cookie = cookies.get(role)
   if (cookie !== undefined) {
-    const [name, value] = cookie.split('=')
-    await context.addCookies([
-      { name: name ?? '', value: value ?? '', url: BASE, httpOnly: true, sameSite: 'Lax' },
-    ])
-  }
-  const session = adminSessions.get(role)
-  if (session !== undefined) {
     // `secure: true` with a loopback URL is accepted: browsers treat 127.0.0.1 as a secure context, which is
     // what lets the application set `Secure` unconditionally. See `packages/harness/src/admin-session.ts`.
     await context.addCookies([
       {
         name: ADMIN_SESSION_COOKIE,
-        value: session,
+        value: cookie.slice(`${ADMIN_SESSION_COOKIE}=`.length),
         url: BASE,
         httpOnly: true,
         secure: true,
@@ -207,20 +193,11 @@ beforeAll(async () => {
     env: {
       APP_ENV: process.env['APP_ENV'] ?? 'test',
       DATABASE_URL,
-      // The same secret the in-process Payload below signs the session with. Without it the spawned server
-      // rejects every cookie this file presents and every assertion reads as a 401 — which
-      // `breakpoint-preview.itest.ts` had to record for the same reason.
-      PAYLOAD_SECRET: process.env['PAYLOAD_SECRET'] ?? PAYLOAD_PLACEHOLDER_SECRET,
     },
   })
   BASE = server.origin
-  payload = await getPayload({ config })
   for (const role of ['owner', 'receptionist', 'marketer'] as const) {
-    cookies.set(role, await signIn(await ensureStaff(role)))
-    // The door's own session, in the same role, so what this suite measures stays the SCREEN's behaviour for
-    // that role rather than the guard's refusal of everybody.
-    const principal = await createFixturePrincipal(sql, { role })
-    adminSessions.set(role, principal.sessionToken ?? '')
+    cookies.set(role, await sessionCookieFor(role))
   }
   // The pre-installed Chromium at /opt/pw-browsers, with the same flags as every other browser here.
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
@@ -230,12 +207,9 @@ afterAll(async () => {
   await browser?.close()
   await server?.stop()
   await clean()
-  for (const role of ['owner', 'receptionist', 'marketer']) {
-    await payload?.delete({
-      collection: 'cms_user',
-      where: { email: { equals: `grev02-${role}@berelax.test` } },
-    })
-  }
+  // Each principal removes its own employee, credential and session — three of each — so nothing of this
+  // suite's is left for the next one to find.
+  for (const principal of principals) await principal.cleanup()
   await sql?.end({ timeout: 5 })
 })
 
@@ -367,7 +341,7 @@ describe('acceptance — one form submission creates the review', () => {
 })
 
 describe('authorisation is server-side and both verbs are guarded', () => {
-  it('refuses an unauthenticated GET with 401 and shows no forwarded text', async () => {
+  it('sends an unauthenticated GET to /login and shows no forwarded text', async () => {
     await sql`
       insert into review_intake_email
         (connection_id, place_id, status, refusal, raw_body, raw_body_sha256, raw_body_bytes, received_at)
@@ -375,24 +349,38 @@ describe('authorisation is server-side and both verbs are guarded', () => {
               'a distinctive forwarded body nobody signed in should see', ${'b'.repeat(64)}, 55,
               ${'2026-09-21T10:00:00.000Z'}::timestamptz)
     `
-    const response = await fetch(`${BASE}${REVIEWS_PASTE_PATH}`)
-    expect(response.status).toBe(401)
+    // `redirect: 'manual'`, because the door answers 303 and following it would assert about /login.
+    const response = await fetch(`${BASE}${REVIEWS_PASTE_PATH}`, { redirect: 'manual' })
+    // 303 and not 401: the estate has one door and its answer to somebody not signed in is "sign in", on
+    // every admin route in the build. This case asserted 401 until the merge that put `guardAdminRoute` in
+    // front of the handler — the handler still answers 401 for a null principal, and
+    // `reviews-paste-handler.itest.ts` drives that path directly, because a handler takes its principal from
+    // a caller and a caller is not a guarantee.
+    expect(response.status).toBe(303)
+    const location = response.headers.get('location') ?? ''
+    // The POSITIVE claim, so the absences below are about a real answer rather than about an empty response:
+    // the redirect names the login screen and carries this path to come back to.
+    expect(new URL(location).pathname).toBe('/login')
+    expect(new URL(location).searchParams.get('returnTo')).toBe(REVIEWS_PASTE_PATH)
+    // And the BYTES, which is the claim that found a real defect: the first version of the handler rendered
+    // the same page for every refusal, so its 401 document carried the forwarded text, the connection id and
+    // the Google account email. A refusal that shows what it refuses is not a refusal — and a redirect can
+    // leak the same way, through the URL it sends the caller to.
     const body = await response.text()
-    // The GET is guarded because this page shows a customer's words about the business, and the assertion is
-    // about the BYTES rather than about the status alone. It found a real defect: the first version of the
-    // handler rendered the same page for every refusal, so the 401 document carried the forwarded text, the
-    // connection id and the Google account email. A 401 that shows what it refuses is not a refusal.
-    expect(body).not.toContain('a distinctive forwarded body nobody signed in should see')
-    expect(body).not.toContain(connectionId)
-    expect(body).not.toContain('owner@berelax.ae')
-    expect(body).not.toContain(PLACE)
-    // And it is not vacuous: the refusal itself is on the page, so the assertion is about what is absent
-    // from a document that was rendered rather than about an empty response.
-    expect(body).toContain('needs a signed-in admin session')
+    for (const secret of [
+      'a distinctive forwarded body nobody signed in should see',
+      connectionId,
+      'owner@berelax.ae',
+      PLACE,
+    ]) {
+      expect(body, 'the redirect body').not.toContain(secret)
+      expect(location, 'the redirect location').not.toContain(secret)
+    }
   })
 
-  it('refuses an unauthenticated POST with 401 and writes nothing', async () => {
+  it('sends an unauthenticated POST to /login and writes nothing', async () => {
     const response = await fetch(`${BASE}${REVIEWS_PASTE_PATH}`, {
+      redirect: 'manual',
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -403,7 +391,10 @@ describe('authorisation is server-side and both verbs are guarded', () => {
         [REVIEWS_PASTE_FIELDS.reviewedOn]: REVIEWED_ON,
       }).toString(),
     })
-    expect(response.status).toBe(401)
+    // 303, and the row count is the claim that matters: a redirect that had already written the review would
+    // be the worst of both answers.
+    expect(response.status).toBe(303)
+    expect(new URL(response.headers.get('location') ?? '').pathname).toBe('/login')
     const [row] = await sql<{ n: string }[]>`
       select count(*)::text as n from google_reviews where place_id = ${PLACE}
     `

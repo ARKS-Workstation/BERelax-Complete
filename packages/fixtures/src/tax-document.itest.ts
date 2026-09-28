@@ -24,6 +24,7 @@ import { createPdfRenderer, type PdfRenderer, renderTaxDocumentPdf } from '@bere
 import { arabicFallbacksFor, extractPdfText, findLine, visualLines } from '@berelax/pdf/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FIXTURE_TRN, invoiceFixture, TWO_LINES_AT_ELEVEN_FILS } from './invoice.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 import { syntheticPerson } from './synthetic.ts'
 
 /**
@@ -80,9 +81,7 @@ afterAll(async () => {
   // sequentially against one database in an order no file controls. Both of those suites now scope their cleanup to the rows they created and `packages/db/src/seeded-row-deletes.test.ts` refuses the bare form, but a child row left behind still outlives this file and still fails somebody's foreign key. That is hazard 12 in the
   // contributing brief, and it is why the truncate is here as well as in beforeEach: beforeEach leaves
   // the last test's rows standing.
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  await truncateInvoiceFamily(sql)
   await sql`delete from customer where phone_e164 = ${PERSON.phone}`
   await renderer?.close()
   await sql.end({ timeout: 5 })
@@ -96,9 +95,7 @@ beforeEach(async () => {
   // `refund` — which is the loud failure that comment predicted. Named rather than
   // reached with CASCADE, so the next table to reference `invoice` fails here loudly instead of having
   // its rows removed by a statement that never mentioned it.
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  await truncateInvoiceFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

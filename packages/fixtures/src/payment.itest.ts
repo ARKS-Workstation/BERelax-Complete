@@ -18,6 +18,7 @@ import {
   withUnitOfWork,
 } from '@berelax/db'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -92,9 +93,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  await truncateInvoiceFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

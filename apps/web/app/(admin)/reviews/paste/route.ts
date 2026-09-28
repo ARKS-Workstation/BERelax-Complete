@@ -1,10 +1,10 @@
+import type { CmsPrincipal } from '@berelax/cms'
 import { loadConfig } from '@berelax/config'
 import type { Instant } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
 import { isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
-import { principalForRequest } from '../../../../src/payload/request-principal.ts'
-import { guardAdminRoute } from '../../../../src/session.ts'
+import { type AdminPrincipal, guardAdminRoute } from '../../../../src/session.ts'
 import { handleReviewsPasteRead, handleReviewsPasteWrite } from './handler.ts'
 
 /**
@@ -52,6 +52,17 @@ function unavailable(error: unknown): Response {
   })
 }
 
+/**
+ * The admin session's principal, as the handler's decision needs it.
+ *
+ * Two fields of five: the handler decides on a ROLE and audits an ID, and `sessionId`, `credentialId` and
+ * `staffReference` are not its business. `employeeId` is a uuid, which is what `audit_event.actor_id` requires
+ * — see `pasteActorFor`, which still checks rather than assuming, because it takes a principal from a caller.
+ */
+function pastePrincipalFrom(principal: AdminPrincipal): CmsPrincipal {
+  return { id: principal.employeeId, role: principal.role }
+}
+
 export async function GET(request: Request): Promise<Response> {
   // W-SYS-11: the session, before anything else this handler does. `guardAdminRoute` never throws and
   // fails closed, so it is safe as the first statement and outside this handler's own `try`.
@@ -59,9 +70,11 @@ export async function GET(request: Request): Promise<Response> {
   if ('response' in authorised) return authorised.response
   try {
     const url = new URL(request.url)
-    // Payload's own session, verified by Payload. The GET is guarded as well as the POST: the queue on this
-    // page shows a forwarded review's full text, which is a customer's words about this business.
-    const principal = await principalForRequest(request)
+    // The admin session's principal, in the shape the handler decides on. The GET is authorised as well as
+    // the POST: the queue on this page shows a forwarded review's full text, which is a customer's words about
+    // this business. `guardAdminRoute` above has already refused an unauthenticated request; `can(role, …)`
+    // inside the handler is what refuses a role the F07 matrix does not trust with it.
+    const principal = pastePrincipalFrom(authorised.principal)
     return await withSql(async (sql) =>
       handleReviewsPasteRead(
         {
@@ -86,7 +99,7 @@ export async function POST(request: Request): Promise<Response> {
   if ('response' in authorised) return authorised.response
   try {
     const url = new URL(request.url)
-    const principal = await principalForRequest(request)
+    const principal = pastePrincipalFrom(authorised.principal)
     // `application/x-www-form-urlencoded` only. This screen has no JSON client and never will: it is one
     // `<form method="post">`, which is what makes it work with JavaScript off. A body that is not form-encoded
     // parses to an empty `URLSearchParams`, which the handler refuses by name as `unreadable_request` — the
