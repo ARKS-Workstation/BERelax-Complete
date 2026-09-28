@@ -43,7 +43,7 @@ import { guardAdminRoute } from '../../../../../../src/session.ts'
  * consent route next door already takes, is covered by the `/settings` noindex prefix, and makes the picker
  * walkable today rather than after two other units land.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the consent
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the consent
  * route records, so it must not be deployed to a reachable environment before then: `POST` here chooses
  * which Google listing this business replies as. The actor recorded on the audit row says so rather than
  * inventing a person.

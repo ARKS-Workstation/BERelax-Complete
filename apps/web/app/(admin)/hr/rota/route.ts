@@ -49,7 +49,7 @@ import { type RotaPageView, type RotaShortfallView, renderRotaHtml } from './ren
  * forecast, render — and `packages/fixtures/src/hr-rota.itest.ts` asserts the same composition against real
  * PostgreSQL. Nothing in this file decides anything a rule could decide.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the credentials
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the credentials
  * and reassignment screens next door record. It is READ-ONLY — GET, no mutation — so there is no actor to
  * record and none is invented: `rota_version_published_by_not_placeholder` would refuse a placeholder, which
  * is the constraint doing what a comment could not.

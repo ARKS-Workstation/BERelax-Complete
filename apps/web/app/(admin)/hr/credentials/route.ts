@@ -34,7 +34,7 @@ import { type CredentialRow, renderCredentialsHtml } from './render.ts'
  * the kind of one-in-a-thousand disagreement nobody reproduces. `?at=` overrides it so an operator can
  * ask "what did this look like on the 31st", and so a screenshot is reproducible.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the Messages
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the Messages
  * inbox and the two Google routes next door record. It is read-only — GET, no mutation of any kind — so
  * there is no actor to record and none is invented. It shows no document number: `number_ct` is a
  * ciphertext under `STAFF_PII_KEK`, the only path to a plaintext is the audited decrypt in

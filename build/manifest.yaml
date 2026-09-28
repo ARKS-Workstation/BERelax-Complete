@@ -240,7 +240,7 @@ units:
     - 'NOTE: the retry/dead-letter assertion needs boss.supervise() to have run. Without it an exhausted
       job sits in the failed state and the dead-letter count reads 0 for a reason that has nothing to do
       with dead-lettering.'
-    - 'NOTE: deferred to G-AGT-01 — the heartbeat contract, the agent_definition table and the
+    - 'NOTE: deferred to G-AGT-01 (DEFERRAL SATISFIED) — the heartbeat contract, the agent_definition table and the
       2x-interval watchdog. This unit exposes cronRegistrations() for that unit''s registry-completeness
       gate to enumerate, and JobDefinition carries an optional agent field naming the agent_definition a
       job reports to, but nothing writes a heartbeat yet.'
@@ -613,7 +613,7 @@ units:
     - 'NOTE: the therapist interval is checked against existing appointments and shift gaps only.
       resource_block (0012_rooms.sql) is room-scoped, so blocks are checked against the room interval;
       therapist unavailability from approved leave and expired mandatory credentials is deferred to
-      B-AVAIL-04, which narrows the therapistIds handed to this solver rather than adding a second source
+      B-AVAIL-04 (DEFERRAL SATISFIED), which narrows the therapistIds handed to this solver rather than adding a second source
       of truth here. Shifts, appointments, rooms, blocks and closures are injected as packages/core types
       because packages/core is pure; B-AVAIL-01 and B-AVAIL-04 add the tables and repositories that fill
       them, and B-AVAIL-03 turns availableRoomIds/availableTherapistIds into a concrete (therapists[],
@@ -2346,7 +2346,7 @@ units:
       x 2 themes with no direction axis, which is the same decision read from the other end. It is declared
       in apps/web/src/routes/registry.ts as a handler covered by the /settings noindex prefix, and
       apps/web/src/messages-inbox.itest.ts asserts the header on the live response. The route is read-only
-      (GET) and, like the two Google routes beside it, is NOT authenticated until W-SYS-01: there is no
+      (GET) and, like the two Google routes beside it, is NOT authenticated until W-SYS-11, which has since landed (DEFERRAL SATISFIED): there is no
       actor to record because it writes nothing, and none is invented. The recipient is masked in the
       rendering because the page is screenshotted and the gallery is published as a link'
     - 'NOTE: the vendor-status mapping, which is the substance of "the lifecycle is ours". SMSala:
@@ -2489,7 +2489,7 @@ units:
       (/book?therapist=<uuid>), which is what the no-availability state''s therapist region is asserted
       against, and is rendered with the unnamed label plus the internal reference as clipped
       assistive-technology text — never as a display name.'
-    - 'NOTE: deferred to B-UI-02 — the waitlist JOIN and the continue-to-details step. joinWaitlist needs a
+    - 'NOTE: deferred to B-UI-02 (DEFERRAL SATISFIED) — the waitlist JOIN and the continue-to-details step. joinWaitlist needs a
       customer id, which needs the phone/OTP step B-UI-02 owns. This unit renders the waitlist CTA and the
       step it leads to as a named designed state carrying the desk telephone number from the premises row,
       and the chosen-slot summary says in so many words that nothing has been reserved. Neither is a dead
@@ -2649,7 +2649,7 @@ units:
       way round, as a property of the produced file. The ICS is served by `GET /api/v1/book?ics=<id>`,
       authorised by the session''s own customer id as a SQL predicate (`readBookingForCustomer`), and a
       booking that is not this session''s gets the same 404 body as one that does not exist.'
-    - 'NOTE: DEFERRED, and re-deferred to B-UI-05 by name: the MAGIC LINK. B-MSG-03 asked this unit to wire
+    - 'NOTE: DEFERRED, and re-deferred to B-UI-05 (DEFERRAL SATISFIED) by name: the MAGIC LINK. B-MSG-03 asked this unit to wire
       `scheduledStepRuntimeFor`''s one line if minting a link belonged here. It does not, and the reason is
       not scope but the 404: a magic link needs a token service (hashed, single-purpose, expiring at
       appointment end + 24h, revoked on cancellation) AND a page that resolves it, and both are B-UI-05''s
@@ -2818,7 +2818,7 @@ units:
       carrying the instant it means, so the inline script does no time arithmetic at all: a browser that
       converted a pixel offset into a time would be a second implementation of the grid, disagreeing with
       this one at exactly the two edges nobody drags onto while testing - the midnight crossing and the close.'
-    - 'NOTE: SCOPED - the therapist axis is READ-ONLY and a drop there is not offered, deferred to W-SYS-01.
+    - 'NOTE: SCOPED - the therapist axis is READ-ONLY and a drop there is not offered, deferred to W-SYS-11 for the session it needed, which has since landed (DEFERRAL SATISFIED).
       Changing the therapist re-applies B-AVAIL-04 eligibility on the new date, and under strict same-gender
       matching that needs the client gender, which no table holds (B-AVAIL-05: `customer` has no gender
       column) - the same reason P-HR-04 reassignment queue gives for reporting the queue and not acting on
@@ -2829,7 +2829,7 @@ units:
       none of which carries a name is a control nobody can use (the reasoning B-UI-01 records for its
       therapist selector).'
     - 'NOTE: this is the first admin surface in the application that WRITES, and it is not authenticated -
-      there is no admin session until W-SYS-01, exactly as the five read-only admin routes record. The actor
+      there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), exactly as the five read-only admin routes record. The actor
       is therefore a THIRD declared agent principal, `system:front_desk_diary`
       (packages/core/src/access/principals/front-desk-diary.ts, registered beside the customer link and the
       SEO agent), holding `booking:read`, `calendar:read` and `booking:reschedule` and nothing else.
@@ -3353,7 +3353,7 @@ units:
     summary: A real staff session in apps/web — login with mandatory TOTP, a session cookie, a guard on
       every admin route, and the principal read from that session instead of from a query parameter. F07
       built the primitives and W-SYS-01 built the shell; nothing mounts one in the other, and 56 manifest
-      references defer to W-SYS-01 for a session it never owned.
+      references defer to W-SYS-01 (DEFERRAL SATISFIED) for a session it never owned.
     owner: claude
     status: todo
     size: L
@@ -3408,6 +3408,44 @@ units:
       must refuse every login rather than fall back to anything. P-HR-14''s therapist portal needs a staff
       session too and is a separate unit; this one owns the ADMIN estate, and the two should share the
       session reader rather than each building one.'
+    - 'NOTE: what was SCOPED OUT, and to which unit. (1) The SALARY half of the field-level acceptance
+      line cannot be demonstrated: no admin screen serves a wage figure to anybody. /hr/rota is the only
+      screen that reaches a wage column and its own header records that every basic_wage_fils is NULL
+      (Y8-staff), so printing it would print an unanswered question; nothing under (admin) references
+      employee.salary, payroll:read or canReadFieldGroup. session.itest.ts therefore asserts the true and
+      weaker claim — no admin response carries a wage marker to a receptionist, over every guarded screen —
+      and names itself a REGRESSION GUARD rather than a refusal. The measured refusal is deferred to P-HR-12
+      (verified `todo`), which is the first unit to serve a salary and so the first able to have one refused.
+      (2) The NOTE-level clinical refusal (data-scope="note") is not asserted through a served response: that
+      panel renders only once markers are DERIVED, deriving one needs a clinical.intake_submission row and
+      CLINICAL_KEK, and the seeded database holds zero rows in public.customer_contraindication_flags — so
+      asserting on it would report PASS about a branch never reached. What IS asserted at the edge is the
+      role-dependent decision: a marketer is refused the crossing BY NAME while a receptionist is served it,
+      same URL, both signed in. The note-scope edge measurement is deferred to whichever unit first serves
+      derived markers. (3) NO admin screen performs any role-based field or permission check — they were all
+      built with no session to check against. That is a finding about the estate, not a defect this unit
+      fixed: adding field-level filtering to twenty-odd screens owned by other units is not this unit''s
+      business, and R-REP-08 (`todo`, role-scoped dashboards) is the unit that first has to.'
+    - 'NOTE: two deferrals were UNBLOCKED rather than satisfied, and are allocated to nobody. B-UI-03''s
+      therapist-axis drag and C-AUTO-02''s template approve/reject controls were both deferred to W-SYS-01
+      (DEFERRAL SATISFIED: named here as the historical target, re-pointed in their own entries) because a
+      write needs an actor and there was no session. The session now exists, so the BLOCKER is
+      gone — but neither control is built, and W-SYS-11 does not build them. Their manifest references are
+      re-pointed at W-SYS-11 "for the session it needed" and marked DEFERRAL SATISFIED, which is accurate
+      about the session and silent about the feature. The features themselves are unallocated and the
+      integrator should place them; re-pointing them at a unit of this unit''s choosing would be inventing
+      somebody else''s scope, and leaving them pointed at a `done` unit is the defect this unit exists
+      because of.'
+    - 'NOTE: the dangling-deferral check reads build/manifest.yaml ONLY, and says so in its own failure
+      message. Several route headers carry the same defect in a source COMMENT — "there is no admin session
+      until W-SYS-01 (DEFERRAL SATISFIED: quoted as the defect, not deferred to)" — and 17 of those were
+      corrected here, being the direct security claim that now sits
+      two lines above a guardAdminRoute call. The rest were NOT rewritten: a first mechanical pass over every
+      phrase mentioning the absent session damaged prose in seven places including two user-facing strings in
+      a render.ts, so the reasoning sentences ("publishing is a write with an actor, and there is no admin
+      session, so it is not reachable from here") are left alone — the blocker is gone but the control is
+      still unbuilt, and what is now true differs per screen. Widening the check to source comments is a
+      worthwhile follow-up and is deliberately not claimed by the current one.'
   - id: W-SYS-12
     order: 41.6
     title: 'Private SQLSTATE allocation: one code, one rule, with an allocator'
@@ -3630,7 +3668,7 @@ units:
       and is itself shown to fail five ways — a renamed account, a re-tagged vat_box, a missing account, an
       extra account and a dropped provisional marker — one of them as a rolled-back UPDATE against the
       database rather than against a copy of the rows.'
-    - 'NOTE: deferred to M-VAT-06 — lockAccountingPeriod checks no preconditions. Refusing a close until the
+    - 'NOTE: deferred to M-VAT-06 (DEFERRAL SATISFIED) — lockAccountingPeriod checks no preconditions. Refusing a close until the
       trial balance balances and every document in the period is posted, naming the earliest OPEN period in
       the refusal, and hashing the period''s trial balance into the audit row are that unit''s acceptance
       lines. What is here is the mechanism they need: period_lock with a gist exclusion constraint that makes
@@ -3737,7 +3775,7 @@ units:
       the application role holds no UPDATE grant on invoice or invoice_line
     - 'tax_point_date is stored separately from issue date: a test asserts a supply on business_day D invoiced
       on D+1 keeps tax_point_date = D'
-    - 'NOTE: deferred to M-TILL-12 and B-CAT-06 — the Arabic-language requirement is carried but cannot be NOT
+    - 'NOTE: deferred to M-TILL-12 (DEFERRAL SATISFIED) and B-CAT-06 — the Arabic-language requirement is carried but cannot be NOT
       NULL. issuer_legal_name_ar, issuer_address_snapshot_ar and invoice_line.description_ar are nullable
       because there is nothing to snapshot FROM: legal_entity has no Arabic legal name, premises no Arabic
       address, and service no Arabic public display name. NOT NULL would make every invoice unissuable.
@@ -3892,7 +3930,7 @@ units:
       may never import packages/core, so the service takes the structural mirrors journal.ts and
       invoice.ts already define and the caller maps field for field; packages/fixtures/src/checkout.ts is
       that mapping, which is where packages/fixtures/src/invoice.ts said it would live ("the right home
-      for that mapping until M-TILL-06 has a service layer to own it" — the service layer is in db, so it
+      for that mapping until M-TILL-06 (DEFERRAL SATISFIED) has a service layer to own it" — the service layer is in db, so it
       cannot be that home). The journal posts Dr tender account(s), Cr 4010 at the price the treatment was
       SOLD at, Cr 2030 for the VAT actually charged, Cr 2040 for gratuities, Dr 4095 for the discount and
       Dr 2030 for the VAT it relieved. Debits equal credits by CONSTRUCTION rather than by a check,
@@ -4146,7 +4184,7 @@ units:
       need (gives_change, requires_reference, settles_immediately, adapter, sort_order) and takes the
       account FROM that map, which keeps one statement of it. The import direction is money/ -> checkout/,
       which is unusual inside packages/core and creates no module cycle.'
-    - 'NOTE: deferred to M-TILL-08 — refund.credit_note_id is NOT NULL and carries NO FOREIGN KEY, because
+    - 'NOTE: deferred to M-TILL-08 (DEFERRAL SATISFIED) — refund.credit_note_id is NOT NULL and carries NO FOREIGN KEY, because
       `credit_note` does not exist yet. So the requirement is enforced today (no path writes a refund
       without a credit note id, and RefundRequiresCreditNote refuses before the database is reached), and
       three things are M-TILL-08''s to add: the foreign key, the check that the note is for THIS invoice,
@@ -6168,7 +6206,7 @@ units:
       reducing the arms to one and watching the itest fail. The reason string is deliberately NOT an
       eighth EligibilityExclusionReason: those seven are the port''s vocabulary, pinned to core in both
       directions, and resolveTherapistPool cannot compute a fact that lives in a compliance calendar.'
-    - 'NOTE: deferred to M-VAT-11 — reminder offsets, escalation intervals and the (instance, step)
+    - 'NOTE: deferred to M-VAT-11 (DEFERRAL SATISFIED) — reminder offsets, escalation intervals and the (instance, step)
       idempotency key; serving obligation_evidence privately by signed URL and auditing every download;
       the compliance calendar UI and the owner banner docs/04 §9 asks for; and the
       open-compliance-questions dashboard. obligation.is_unverified, unverified_note and
@@ -6177,7 +6215,7 @@ units:
       nothing reads it back out over HTTP yet. unconfirmedAssumptionRows() is deliberately NOT widened
       to include obligations: the unverified dashboard is M-VAT-11''s and a count assertion in
       business-seed.itest.ts should not move under it.'
-    - 'NOTE: deferred to M-VAT-11 — the scheduled generation run. The generator is a pure plan
+    - 'NOTE: deferred to M-VAT-11 (DEFERRAL SATISFIED) — the scheduled generation run. The generator is a pure plan
       (obligationInstancePlan in core) plus a write (generateObligationInstances in db), and the pair is
       driven by packages/fixtures/src/obligation-calendar.itest.ts under a frozen clock. No cron job
       calls it, because apps/worker''s obligation job is M-VAT-11''s file; the per-therapist obligations
@@ -6282,7 +6320,7 @@ units:
       report been filed against this occurrence" to anybody who can guess a uuid, which is a fact about the
       premises. The one 404 is [evidence-object-missing], for a row whose bytes are not in the private
       bucket — that is a lost file rather than a refused one, and the two are different incidents. The grant
-      is the ONLY gate today: there is no admin session until W-SYS-01, exactly as /hr/credentials,
+      is the ONLY gate today: there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), exactly as /hr/credentials,
       /settings/messages and the two Google routes record, which is also why minting is a function in
       packages/db rather than an endpoint — an unauthenticated mint endpoint would hand a link to anybody
       who asked, which is the whole of what the 403 exists to prevent.'
@@ -6332,7 +6370,7 @@ units:
     - 'NOTE: deferred — the ACTIONS on both screens. Acknowledging an occurrence, completing one, filing an
       attachment and minting a download link are services in packages/db with audit rows and integration
       coverage, and none has an HTTP route: there is no admin session to attribute a mutation to until
-      W-SYS-01, and an unauthenticated POST that silenced a compliance escalation would be the off switch
+      W-SYS-11, which has since landed (DEFERRAL SATISFIED), and an unauthenticated POST that silenced a compliance escalation would be the off switch
       this module exists to refuse. Both screens are GET-only and read-only today, which is why neither
       records an actor.'
     - 'NOTE: the compliance calendar''s daily pass also performs the SCHEDULED GENERATION run M-VAT-10
@@ -6761,9 +6799,9 @@ units:
     - 'NOTE: SCOPED, not satisfied in full — the editor at apps/web/app/(admin)/messaging/templates/editor/
       prices a body and CREATES NOTHING, so C-AUTO-01''s residual gap (a variant INSERT that names
       `approval_state = ''approved''` starts there without passing through `pending`, because the state
-      machine governs transitions) is NOT closed by this unit and is deferred to W-SYS-01, which owns the
+      machine governs transitions) is NOT closed by this unit and is deferred to W-SYS-11 for the session it needed, which has since landed (DEFERRAL SATISFIED), which owns the
       settings surface and the approve/reject controls. The reason is the one the inbox and the two Google
-      routes next door already record: a creation is a write, there is no admin session until W-SYS-01, and
+      routes next door already record: a creation is a write, there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), and
       a variant created here would have no author to record — an invented one being worse than a blank
       (brief rule 15). What this unit does instead of closing it is state the rule on the screen''s own face
       and in its route header: the create path must insert at `draft` and reach `approved` through
@@ -6961,7 +6999,7 @@ units:
       outbox event an appointment transition already publishes, and packages/core/src/automation/dsl.test.ts
       asserts the set EQUALS eventTypeFor over APPOINTMENT_STATUSES in both directions - so a lifecycle event
       added without deciding whether a flow may start on it fails the build. pipeline.stage_entered is therefore
-      ABSENT and is deferred to C-AUTO-08, which owns the pipeline and whose acceptance line about ''the same
+      ABSENT and is deferred to C-AUTO-08 (DEFERRAL SATISFIED), which owns the pipeline and whose acceptance line about ''the same
       enrolment API as any other trigger'' is what adds it. For the same reason the action_stage node''s stage and
       the condition''s lifecycle_state value are NOT checked against pipeline_stage or customer_lifecycle_state:
       the first table is C-AUTO-08''s and unbuilt, and packages/core may not read a database, so the publish path
@@ -7149,7 +7187,7 @@ units:
       because the disagreement is the useful thing. ZU001, ZU002 and ZU003 are 0077''s private SQLSTATEs; ZU
       rather than a mnemonic letter because the mnemonic ones are taken (ZK is the KEK''s, ZP is consent''s, ZF
       is the flow''s) and what a private code has to be is unique to one file, not memorable.'
-    - 'NOTE: this route is NOT authenticated - there is no admin session until W-SYS-01, exactly as the
+    - 'NOTE: this route is NOT authenticated - there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), exactly as the
       credentials screen, the reassignment queue, the compliance calendar, the Messages inbox and the duplicate
       queue all record - so the actor every transition carries is the SURFACE, Pipeline board, and not a name
       nobody signed in with. Stated rather than invented, because pipeline_stage_transition_actor_is_stated
@@ -7517,7 +7555,7 @@ units:
       a registered participant nor an allowlisted exception, so the day flow_run lands the completeness case
       turns red until C-AUTO-07 registers it - and merge.itest.ts asserts today that no flow_ table exists,
       so the deferral is visible in the suite and not only here. The FREQUENCY LEDGER half of the
-      suppression/ledger line is deferred to C-AUTO-03 for the same reason (it owns frequency_ledger and
+      suppression/ledger line is deferred to C-AUTO-03 (DEFERRAL SATISFIED) for the same reason (it owns frequency_ledger and
       depends on this unit), but the RULE is built and proved: the union_dedupe strategy is implemented,
       driven in merge.itest.ts against a ledger-shaped table created inside a rolled-back transaction, and
       the worked example the line asks for is asserted from both sides - 2 from 1+1 with different messages,
@@ -7587,12 +7625,12 @@ units:
       C-CRM-04''s handler to do it. (c) findDuplicateCandidates still returns a tombstone as a candidate for
       its own survivor, so the review queue would show the merged pair for ever. Not fixed here because
       C-CRM-02''s integration suite asserts that query''s EXPLAIN plan contains a trigram index scan and a
-      tombstone filter changes the plan; deferred to C-CRM-06, which owns the queue. (9) C-CRM-02''S
+      tombstone filter changes the plan; deferred to C-CRM-06 (DEFERRAL SATISFIED), which owns the queue. (9) C-CRM-02''S
       DEFERRED DETERMINISTIC BLOCK IS RE-DEFERRED. Its NOTE (5) hands this unit the two expression btrees on
       left(key,4) and right(key,5) that would find every single-character typo the 0.30 trigram floor
       misses. It belongs in the candidate SCAN, not in the merge: C-CRM-02 pins that query''s plan and its
       per-signal caps from both sides, and the queue the extra candidates feed is C-CRM-06''s. This unit
-      touched no part of the scan, so the block is re-deferred to C-CRM-06 with the boundary C-CRM-02
+      touched no part of the scan, so the block is re-deferred to C-CRM-06 (DEFERRAL SATISFIED) with the boundary C-CRM-02
       measured left exactly as it pinned it. (10) THE THRESHOLDS ARE INJECTED as Y9-dedup-thresholds
       promised: planCustomerMerge takes a DuplicateScore, whose verdict was computed by scoreDuplicatePair
       under whichever thresholds the caller passed, so the owner''s figures reach the merge without either
@@ -8616,13 +8654,13 @@ units:
       migration 0008. No second consent table was added. 0082 adds the index the gate reads
       (treatment_consent_gate_idx on customer_id, consent_hash where withdrawn_at is null) and the
       deferred constraint trigger that refuses a submission without a matching live row (ZJ003).'
-    - 'NOTE: deferred to C-CRM-09 - the contraindication flag derivation. 0082 writes no
+    - 'NOTE: deferred to C-CRM-09 (DEFERRAL SATISFIED) - the contraindication flag derivation. 0082 writes no
       clinical.contraindication_flag row, so the public.customer_contraindication_flags view still answers
       empty for every submission this unit stores. That is C-CRM-09''s acceptance ("a pure derivation from
       a decrypted submission produces a closed set of boolean flags") and building a derivation here would
       be building its FlagKey set before the unit that closes it exists. recordIntake therefore takes no
       flags argument at all rather than taking one it would have to guess at.'
-    - 'NOTE: deferred to W-SYS-01 - the admin session. /clients/[id]/intake takes ?employee= and ?purpose=
+    - 'NOTE: deferred to W-SYS-11, which has since landed (DEFERRAL SATISFIED) - the admin session. /clients/[id]/intake takes ?employee= and ?purpose=
       as query parameters because there is no admin session yet, exactly as every route under /compliance,
       /hr, /settings and /clients/duplicates records. It is not a way to read another person''s records:
       without a step-up grant of their own the read is refused and the refusal is audited against whoever
@@ -8836,7 +8874,7 @@ units:
       of the leak sweep is apps/web/src/manage-booking.itest.ts''s, which already runs a real server and now
       sweeps every FlagKey over a real booking page.'
     - 'NOTE: the screen''s reader identity. /clients/[id]/flags takes ?employee= and ?role= as query
-      parameters because there is no admin session until W-SYS-01, as every route under /compliance, /hr,
+      parameters because there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), as every route under /compliance, /hr,
       /settings and /clients records. ?role= is different in kind from ?employee= - a role IS the permission -
       so it can only NARROW: narrowContraindicationAccess intersects the claimed role''s decision with
       CONTRAINDICATION_SESSIONLESS_CEILING_ROLE''s (receptionist, which holds clinical_flags:read and not
@@ -8845,7 +8883,7 @@ units:
       everything. Both the ceiling and the narrowing are in @berelax/core so the property is proved by a pure
       test; a ceiling whose only test needs a server is one somebody removes without seeing it fail. When the
       session lands the ceiling comes off and only the SOURCE of the two arguments changes.'
-    - 'NOTE: deferred to C-CRM-10 (still todo) - a re-derivation SWEEP. A bumped
+    - 'NOTE: deferred to C-CRM-10 (DEFERRAL SATISFIED) (still todo) - a re-derivation SWEEP. A bumped
       CONTRAINDICATION_DERIVATION_VERSION, or a reworded template, makes every stored flag row stale, and
       clearing it needs somebody who can open each submission. Nothing here schedules that: a job that
       decrypted every client''s intake payload on a timer is a bulk clinical read with an audit shape nobody
@@ -8855,7 +8893,7 @@ units:
       belongs.'
     - 'NOTE: DEFECT FOUND, NOT FIXED, and it is not this unit''s - THE ADMIN SESSION HAS NO `todo` OWNER.
       This unit''s route takes ?employee= and ?role= because there is no admin session, and every route under
-      /compliance, /hr, /settings and /clients says the same thing in the same words: "until W-SYS-01". There
+      /compliance, /hr, /settings and /clients says the same thing in the same words: "until W-SYS-01 (DEFERRAL SATISFIED)". There
       are 58 references to W-SYS-01 in this manifest. W-SYS-01 is `status: done` and is "Next.js app shell,
       Tailwind v4 token mapping and the type stack" - it never owned a session, and none of its acceptance
       lines mentions one. F07 ("Staff auth with mandatory TOTP and the RBAC policy layer") is also done and
@@ -9340,7 +9378,7 @@ units:
       registry entry is id `hr-credentials`, path /hr/credentials, kind handler, and `/hr` was added to
       ADMIN_GROUP_PREFIXES - a prefix rather than one entry per screen, because the manifest puts eight
       more HR routes under it and every one of them shows wages, identity documents or somebody''s
-      leave. Like the routes under /settings it is NOT authenticated (no admin session until W-SYS-01),
+      leave. Like the routes under /settings it is NOT authenticated (no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED)),
       it is GET-only and read-only, and it shows no document number: `hasSealedNumber` is a boolean over
       `number_ct is not null` and the page prints "recorded" or "not recorded". People are identified by
       staff_reference ("Therapist 07") and never by a name (ADR 0020, Y8-staff).'
@@ -9982,10 +10020,10 @@ units:
       property now also counts how many of its generated lines could have exposed drift at all and asserts a
       floor, which is brief rule 22 applied to the one claim it was written for'
     - 'NOTE: scoped out. (1) PUBLISHING FROM THE BROWSER: the rota screen is read-only, because a publish is
-      a write with an actor and there is no admin session until W-SYS-01 -
+      a write with an actor and there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED) -
       rota_version_published_by_not_placeholder refuses a placeholder rather than taking one. (2) THE SWAP
       APPROVAL WORKFLOW: rota_change_request has no pending state, because a pending request needs an
-      APPROVER identity that does not exist until W-SYS-01, and the first thing built on a pending row would
+      APPROVER identity that does not exist until W-SYS-11, which has since landed (DEFERRAL SATISFIED), and the first thing built on a pending row would
       be a way to approve without one; every request is decided in the transaction that made it. (3) THE
       PUBLIC-HOLIDAY CALENDAR, which P-HR-05 already deferred to Y9-overtime: premises_closure is a floor and
       not a calendar, so the holiday flag reaches the validator as an argument and both callers pass false.
@@ -10193,7 +10231,7 @@ units:
       hr-attendance.test.ts asserts the arithmetic rather than the number, and gate 113p raises the bound to
       300 to prove the assertion fires'
     - 'NOTE: scoped out. (1) RECORDING A PUNCH FROM THE BROWSER, and a correction and an approval with it: all
-      three are writes with an actor and there is no admin session until W-SYS-01, so the timesheets screen is
+      three are writes with an actor and there is no admin session until W-SYS-11, which has since landed (DEFERRAL SATISFIED), so the timesheets screen is
       read-only and three separate not_placeholder constraints refuse a placeholder actor rather than taking
       one. (2) ATTENDANCE FOR A DAY IN A CLOSED ACCOUNTING PERIOD WITH NO PUNCH AT ALL cannot be entered:
       attendance_correction.corrects_event_id is NOT NULL because a correction amends a record and cannot
@@ -11759,16 +11797,16 @@ units:
       components" is enforced by filename (overlay|dialog|sheet|toast|popover|tooltip|menu|drawer|modal)
       because no overlay component exists yet — W-SYS-03 ships the first one, and until then the rule reads
       as "nowhere", which is exactly right.'
-    - 'NOTE: deferred to W-SYS-04 — the reveal''s trigger. [data-reveal] carries the one authored keyframe
+    - 'NOTE: deferred to W-SYS-04 (DEFERRAL SATISFIED) — the reveal''s trigger. [data-reveal] carries the one authored keyframe
       set whose inline distance is calc(var(--move-lg) * var(--dir)), and the itest proves it yields
       numerically mirrored matrices in both directions, but it plays on load rather than on intersection.
       W-SYS-04 owns animation-timeline, the IntersectionObserver fallback and packages/ui/src/motion/reveal.tsx;
       wiring a scroll trigger here would have put a second implementation in the path of that unit.'
-    - 'NOTE: deferred to W-SYS-05 — image derivatives. The portrait route serves the original JPEG with
+    - 'NOTE: deferred to W-SYS-05 (DEFERRAL SATISFIED) — image derivatives. The portrait route serves the original JPEG with
       cache-control: no-store; there are no responsive sources, no AVIF/WebP derivatives and no immutable
       URL, because that is W-SYS-05''s pipeline. What this unit asserts about photography is only the crop:
       4:5 around the per-image focal point from assets/media/manifest.json.'
-    - 'NOTE: deferred to W-SYS-03 — axe on this route. The kitchen sink is audited here for touch targets,
+    - 'NOTE: deferred to W-SYS-03 (DEFERRAL SATISFIED) — axe on this route. The kitchen sink is audited here for touch targets,
       measure, focus rings, the grid and the container queries; the twelve-render axe sweep across
       390/768/1440 x light/dark x ltr/rtl is W-SYS-03''s acceptance, and `pnpm a11y` still audits the
       specimen only. ServiceRow also takes formatted strings rather than a catalogue row: the menu on the
@@ -12470,7 +12508,7 @@ units:
       apps/web/app/(admin)/settings/catalogue/revalidate/route.ts — POST only, because `revalidatePath` works
       only inside the Next process and a GET would let any crawler invalidate the site''s caches on every visit.
       It is unauthenticated, exactly as the three `/settings` handlers beside it record (there is no admin
-      session until W-SYS-01) and bounded to invalidating a cache: it reads no customer data and writes no row.
+      session until W-SYS-11, which has since landed (DEFERRAL SATISFIED)) and bounded to invalidating a cache: it reads no customer data and writes no row.
       The decision — which paths, in which locales, and the retired path after a rename — is in
       apps/web/src/revalidate/catalogue.ts and is unit-tested without a server, because the mistake to catch is
       a forgotten `/ar` or a forgotten `/pricing` and an integration test that fetches the paths the report
@@ -14515,14 +14553,14 @@ units:
       An append-only log whose rows a DELETE can rewrite is not a log, and an ON DELETE SET NULL fires an
       UPDATE that the append-only trigger correctly refuses — which made a connection with events
       undeletable. Caught by the integration test, not by review'
-    - 'NOTE deferred to G-CONN-04: the advisory transaction lock and double-checked re-read from docs/10
+    - 'NOTE deferred to G-CONN-04 (DEFERRAL SATISFIED): the advisory transaction lock and double-checked re-read from docs/10
       §4. accessTokenFor refreshes proactively inside the 5-minute margin, but the serialisation belongs
       around the whole read-refresh-write in a transaction, one level up. Taking the lock here would look
       serialised without being it'
-    - 'NOTE deferred to G-CONN-06/07/08: deriveConnectionHealth in packages/core/src/google/connection.ts
+    - 'NOTE deferred to G-CONN-06 (DEFERRAL SATISFIED)/07/08: deriveConnectionHealth in packages/core/src/google/connection.ts
       computes the displayed state, the staleness window and the consent_at + 7 day Testing tripwire, and
       returns the deduped notification decision. Nothing renders it and nothing sends an email yet — there
-      is no admin app shell until W-SYS-01, the daily check is G-CONN-06, the settings card G-CONN-07 and
+      is no admin app shell until W-SYS-01 (DEFERRAL SATISFIED), the daily check is G-CONN-06, the settings card G-CONN-07 and
       the banner and notification ladder G-CONN-08'
     files:
     - packages/db/migrations/0016_google_connection.sql
@@ -14585,13 +14623,13 @@ units:
       granted scopes so the partial-consent path is exercisable, PKCE, and single-use authorization codes
       minted by the consent stand-in and carried in its URL as dev_code. GoogleTokens.idToken,
       AuthorizationUrlArgs and ExchangeCodeOptions are additive; every existing caller still compiles'
-    - 'NOTE deferred to H-HARD-03: the connect route reads GOOGLE_TOKEN_KEK from the environment rather
+    - 'NOTE deferred to H-HARD-03 (DEFERRAL SATISFIED): the connect route reads GOOGLE_TOKEN_KEK from the environment rather
       than from @berelax/config, and refuses the callback loudly when it is absent. Nothing in this
       system loads a KEK at runtime yet — every existing use is generateKek() in a test — so naming the
       app-wide key (one KEK for clinical payloads and Google tokens, or two) belongs with the secret
       inventory in H-HARD-03, and a config key invented here would be the wrong name to migrate away
       from. The start of the consent needs no key and works today'
-    - 'NOTE deferred to W-SYS-01: the route is NOT authenticated and the consent cookie is NOT signed.
+    - 'NOTE deferred to W-SYS-11, which has since landed (DEFERRAL SATISFIED): the route is NOT authenticated and the consent cookie is NOT signed.
       There is no admin session to bind either to. The cookie is HttpOnly, SameSite=Lax, Secure and
       ten-minute; the state is compared double-submit, which is the standard OAuth defence, and what it
       does not close is an attacker who can set a cookie on this origin. apps/web/app/(admin)/layout.tsx
@@ -14891,7 +14929,7 @@ units:
       enumerates both halves, POST records one choice, and it is declared in apps/web/src/routes/registry.ts
       as a handler covered by the /settings noindex prefix, exactly like G-CONN-03''s consent route beside
       it. The rendered card that calls it is G-CONN-07''s, and like the consent route this one is NOT
-      authenticated until W-SYS-01: its recorded actor says so rather than inventing a user'
+      authenticated until W-SYS-11, which has since landed (DEFERRAL SATISFIED): its recorded actor says so rather than inventing a user'
     - 'NOTE: withGoogle gained two OPTIONS, both defaulting to the strict answer, and the picker is the only
       caller of either. `resource: ''enumerating''` is the substance: every other consumer must degrade with
       ResourceNotSelected when no resource is chosen, but accounts.list and locations.list are calls against
@@ -14949,7 +14987,7 @@ units:
       account and returns no data, so selecting it would produce an SEO report of zeroes that reads as a
       collapse in traffic. placeIds are visibly fixtures (ChIJ-fake-…) rather than plausible, per the
       brief''s rule 15. Every addition is additive and every existing caller still compiles'
-    - 'NOTE deferred to G-CONN-06: nothing here compares the returned title and postal address against an
+    - 'NOTE deferred to G-CONN-06 (DEFERRAL SATISFIED): nothing here compares the returned title and postal address against an
       owner-confirmed snapshot. A selection re-reads the chosen location and refuses if the placeId that
       comes back is not the one on the screen — a listing merged or moved between the enumeration and the
       click — but listing-drift detection over title and address is that unit''s acceptance line and its
@@ -15100,7 +15138,7 @@ units:
       not a convenience: the tripwire has to be readable on exactly the day the grant died, and a surface
       that reached Google to render it would show nothing precisely then. G-CONN-07 replaces the fragment
       with the rendered card and reuses the same derivation. Like the two routes beside it, it is NOT
-      authenticated until W-SYS-01.'
+      authenticated until W-SYS-11, which has since landed (DEFERRAL SATISFIED).'
     - 'NOTE: the fake OAuth provider gained consentAtIso and publishingStatus so the day-seven
       invalid_grant genuinely happens. Until they existed the launch blocker was unreachable from any test
       and the detection path, the state transition and the deduplicated notification could only be
@@ -15121,7 +15159,7 @@ units:
       leave no heartbeat, and the watchdog would then alert two days later for the wrong reason). Every
       claim needing a token that DOES open lives in packages/google/src/google-health.itest.ts, inside the
       boundary that may seal one.'
-    - 'NOTE deferred to G-CONN-08: nothing here SENDS anything. The run computes the deduplicated
+    - 'NOTE deferred to G-CONN-08 (DEFERRAL SATISFIED): nothing here SENDS anything. The run computes the deduplicated
       notification decision (notify: reauth_required | predictive_warning) and records it on the summary
       row the panel renders; the Resend templates, the T-48h predictive email and the one-per-incident
       reactive email are that unit''s. Deferred with it: the Places API review-count trigger from docs/10
@@ -15599,7 +15637,7 @@ units:
       a physical replica or any pre-disconnect backup, and it does not rotate the app KEK. The runbook
       states all of that, and names backup retention and KEK rotation as a separate task rather than
       pretending the bytes are gone'
-    - 'NOTE: deferred to G-CONN-07 — the operator-facing Disconnect control on the settings card, and the
+    - 'NOTE: deferred to G-CONN-07 (DEFERRAL SATISFIED) — the operator-facing Disconnect control on the settings card, and the
       transactional enqueue that wires announceRevokeRetry to pg-boss. That card does not exist yet
       (G-CONN-07 is todo), so this unit ships the two seams it will call — disconnectGoogleConnection and
       announceRevokeRetry — and the retry job''s own sweep, which finds its work by the ROW rather than by
@@ -15689,7 +15727,7 @@ units:
       calls reconcileApiReviewId belongs with the unit that gets API access. This unit ships the shape, the
       constraints, ingestApiReview, recordManualReview, reconcileApiReviewId, the three delivery recorders and the
       connection-scoped queue read'
-    - 'NOTE deferred to G-REV-03 and G-REV-04: reply_draft exists as a column here but nothing generates, lints or
+    - 'NOTE deferred to G-REV-03 (DEFERRAL SATISFIED) and G-REV-04: reply_draft exists as a column here but nothing generates, lints or
       approves it (G-REV-04), and the routing verdict columns — matched rule id and lexicon version — belong to
       G-REV-03''s own migration. Adding either here would be a column no code writes'
     files:

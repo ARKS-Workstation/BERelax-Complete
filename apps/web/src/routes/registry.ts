@@ -308,7 +308,7 @@ export const ROUTES = [
       'Messages inbox, the template editor and the compliance calendar give: a document must be served in ' +
       'both locales, which would need an Arabic admin document and the W-SYS-01 shell, and would join a ' +
       'screenshot matrix whose RTL half has to be a real Arabic route. It is the first admin surface that ' +
-      'WRITES — its POST is the reschedule — and it is NOT authenticated until W-SYS-01, so the actor it ' +
+      'WRITES — its POST is the reschedule — and it is authenticated since W-SYS-11, so the actor it ' +
       'records is the declared principal system:front_desk_diary rather than a job title nobody signed in ' +
       'as. Not indexable and covered by NOINDEX_PATTERNS rather than a prefix, because `/calendar` claims ' +
       'no other route and a prefix would be a claim on paths nothing serves. Dynamic because the page is a ' +
@@ -502,7 +502,7 @@ export const ROUTES = [
       'needs an Arabic admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English ' +
       'document mirrored so the direction half of the accessibility and screenshot matrices is audited ' +
       'without inventing an Arabic admin surface. It WRITES - its POST is the move, in one transaction - ' +
-      'and it is NOT authenticated until W-SYS-01, so the actor every transition records is the SURFACE ' +
+      'and it is authenticated since W-SYS-11, so the actor every transition records is the SURFACE ' +
       '(`Pipeline board`) rather than a name nobody signed in with. Dynamic because the page is a claim ' +
       'about where every card is right now: a prerendered copy would draw cards in columns they left. The ' +
       '/crm prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, so the CRM screens the manifest puts ' +
@@ -567,7 +567,7 @@ export const ROUTES = [
       'under STAFF_PII_KEK and the only path to a plaintext is the audited decrypt in packages/hr. ' +
       'Dynamic because the verdict is a claim about which day it is, so a prerendered copy would be ' +
       'wrong from the next midnight. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, ' +
-      'and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+      'and authenticated since W-SYS-11, exactly as the routes under /settings record.',
   },
   {
     id: 'hr-reassignment',
@@ -589,7 +589,7 @@ export const ROUTES = [
       'refuses. It names no customer and no therapist: staff_reference is the handle, and nineteen ' +
       'employees have no name recorded (ADR 0020). Dynamic because a work queue that was prerendered ' +
       'would still show work already done. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it ' +
-      'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+      'noindex, and authenticated since W-SYS-11, exactly as the routes under /settings record.',
   },
   {
     id: 'hr-rota',
@@ -612,7 +612,7 @@ export const ROUTES = [
       'nineteen employees have no name recorded (ADR 0020). Dynamic because the answer is a claim about ' +
       'which day it is and about a draft that is rewritten freely, so a prerendered copy would show a ' +
       'rota somebody had already changed. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it ' +
-      'noindex, and NOT authenticated until W-SYS-01, exactly as the routes under /settings record.',
+      'noindex, and authenticated since W-SYS-11, exactly as the routes under /settings record.',
   },
   {
     id: 'hr-timesheets',
@@ -836,7 +836,7 @@ export const ROUTES = [
       'admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English document mirrored so ' +
       'the direction half of the accessibility matrix is audited without inventing an Arabic admin ' +
       'surface. It WRITES - its POST checks and then books, through the one booking endpoint - and it is ' +
-      'NOT authenticated until W-SYS-01, so the actor every audit row records is the SURFACE ' +
+      'authenticated since W-SYS-11, so the actor every audit row records is the SURFACE ' +
       '(`Quick-book (front desk)`) rather than a name nobody signed in with. Dynamic because every start ' +
       'it offers is computed from the clock: a prerendered copy would offer times that have gone. It is ' +
       'the one admin route that sits under NO prefix in ADMIN_GROUP_PREFIXES, and that is deliberate - ' +

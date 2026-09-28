@@ -46,7 +46,7 @@ import {
  * nobody reproduces. `?at=` overrides it so an operator can ask "what did this look like on the 31st", and
  * so a screenshot is reproducible.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the HR
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the HR
  * credentials screen, the Messages inbox and the two Google routes record. It is read-only — GET, no
  * mutation of any kind — so there is no actor to record and none is invented. It shows no licence number,
  * no permit number and no TRN: none is on file and the obligation table holds none.

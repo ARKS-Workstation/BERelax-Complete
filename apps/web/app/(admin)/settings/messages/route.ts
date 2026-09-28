@@ -25,7 +25,7 @@ import { renderInboxHtml } from './render.ts'
  * `text/html` is walkable today, is covered by the `/settings` noindex prefix, and is declared in
  * `apps/web/src/routes/registry.ts` as a handler.
  *
- * **This route is not authenticated.** There is no admin session until W-SYS-01, exactly as the consent
+ * **This route is authenticated (W-SYS-11).** `guardAdminRoute` refuses a request that carries no live staff session, exactly as the consent
  * and picker routes next door record. It is read-only — GET, no mutation of any kind — so there is no
  * actor to record and none is invented: the only writer in this unit is the worker's DLR pass, whose
  * receipts carry the vendor that sent them. It must not be deployed to a reachable environment before
