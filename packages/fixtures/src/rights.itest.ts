@@ -209,6 +209,61 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  /**
+   * This file leaves NO invoice and no booking behind, and that is a convention rather than tidiness.
+   *
+   * `customer-identity.itest.ts` clears the table with a bare `delete from customer`, and
+   * `invoice.customer_id` and `booking.customer_id` are both `ON DELETE RESTRICT` — so a single row of
+   * either, left behind by any suite that runs earlier, turns all eleven of that file's cases red with a
+   * foreign-key message that names neither this file nor the row. It happened: this suite's invoice fixture
+   * and its two fixture bookings did exactly that on the first full `pnpm test:integration`, in a file this
+   * unit never touched. `checkout-finalise.itest.ts` already carries this cleanup and its comment already
+   * names `customer-identity.itest.ts` as the reason; this is that convention, followed.
+   *
+   * TRUNCATE and not DELETE for the invoice family: `invoice` refuses DELETE for every role including the
+   * owner (ZI003, migration 0026) and `scripts/check-no-invoice-mutation.mjs` refuses the statement anywhere
+   * in the tree, so truncate is the only legal removal. Every referencing table is NAMED rather than reached
+   * with CASCADE, so the next table to reference `invoice` fails loudly here instead of having its rows
+   * removed by a statement that never mentioned it.
+   *
+   * The pseudonymised customers themselves are LEFT, deliberately. An erasure cannot be undone and the
+   * reachability invariant reads the whole table, so those rows are evidence; `ensureCustomer` creates a
+   * fresh record for each fixture number on the next run because the erased row no longer holds it.
+   */
+  await sql?.unsafe(
+    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
+  )
+  const subjectIds = Object.values(ids)
+  if (sql !== undefined && subjectIds.length > 0) {
+    await sql`delete from booking where customer_id = any (${subjectIds}::uuid[])`
+
+    /**
+     * This file's own clinical rows go too, and the reason is sharper than tidiness.
+     *
+     * `packages/clinical/src/crypto/rotation.itest.ts` asserts `countSealedOn(baseVersion) === 0` — a count
+     * over the WHOLE estate, while its own `sweep` removes only rows carrying its id prefix. A
+     * CRYPTO-ERASED row is never rotated, by design and by this unit's own gate case 112p: the KEK rotation
+     * skips a destroyed key rather than re-wrapping zero bytes, and 0085 leaves `kek_version` unchanged so
+     * the sealed-row trigger admits the write. So one committed crypto-erasure leaves one row on the base
+     * version for ever, and that global assertion goes red in a file this unit never touched — which is
+     * what happened. Sweeping by subject is rotation's own convention, applied here.
+     *
+     * Order matters and each step is a constraint rather than a preference: the contraindication flags
+     * reference the submission (`source_submission_id`), and 0082's consent gate is a DEFERRED constraint
+     * trigger, so the consents must go in the same transaction as the submissions they authorise or COMMIT
+     * refuses. `clinical.dek_destruction` is deliberately NOT swept — it refuses DELETE for every role
+     * including the owner (ZA005) — and it does not need to be: it holds no wrapped key, so it is invisible
+     * to the count above, and it carries no foreign key that a swept submission would break.
+     */
+    await sql.begin(async (tx) => {
+      await tx`
+        delete from clinical.contraindication_flag where customer_id = any (${subjectIds}::uuid[])
+      `
+      await tx`delete from clinical.intake_submission where customer_id = any (${subjectIds}::uuid[])`
+      await tx`delete from clinical.treatment_note where customer_id = any (${subjectIds}::uuid[])`
+      await tx`delete from clinical.treatment_consent where customer_id = any (${subjectIds}::uuid[])`
+    })
+  }
   await sql?.end({ timeout: 5 })
 })
 
@@ -969,21 +1024,44 @@ describe('erasing a customer with clinical data', () => {
     // A template, the consent that authorises an answer against it (0082's deferred gate refuses without
     // one), and a real sealed payload — so the decryption assertions are about a payload that genuinely
     // decrypted a moment ago.
-    // `on conflict do nothing` then read it back, so a second run of the suite reuses the template rather
-    // than colliding on `unique (version, locale)`. 0082's version trigger returns early for a version that
-    // already exists precisely so an idempotent upsert is possible, and this is that case.
-    await sql`
-      insert into clinical.intake_form_template (version, locale, title, definition, consent_text,
-                                                 consent_hash, is_current)
-      values (960201, 'en', 'Fixture intake (C-CRM-10)', '{"fields":[]}'::jsonb,
-              '[DRAFT WORDING — not approved copy]', 'ccrm10-fixture-consent-hash', false)
-      on conflict (version, locale) do nothing
-    `
-    const [template] = await sql<{ id: string; version: number; consentHash: string }[]>`
-      select id, version, consent_hash as "consentHash"
-        from clinical.intake_form_template where version = 960201 and locale = 'en'
-    `
-    if (template === undefined) throw new Error('the fixture template was not created')
+    //
+    // **An EXISTING template is reused wherever there is one, and the version space is the reason.**
+    // `intake_form_template.version` is shared across every suite that touches the clinical schema, and
+    // 0082's `intake_template_version_is_newer` refuses any insert numbered below the locale's current
+    // version. The first draft of this fixture inserted a fixed `960201` — chosen to sit above everything,
+    // which is exactly what made it harmful: `intake.itest.ts` walks the locale forward with
+    // `max(version) + 1`, so twenty-five of its own inserts climbed from that seed to a current version of
+    // 960226, and `rotation.itest.ts` — which inserts a fixed, modest version of its own — was then refused
+    // with `IntakeTemplateVersionNotNewer`. A file this unit never touched, failing on a number this unit
+    // chose. That is brief rule 12 with a shared counter instead of a shared row.
+    //
+    // This fixture needs only SOME template to hang a consent and a sealed payload on, so it takes whatever
+    // is there and inserts one only when the table is empty for this locale — at version 1, which cannot be
+    // above anything. Reusing another suite's template is safe in both directions: the consent written below
+    // makes the row undeletable by `intake.itest.ts`'s conditional cleanup, which skips a referenced
+    // template rather than failing on one.
+    const templateFor = async (): Promise<{ id: string; version: number; consentHash: string }> => {
+      const [found] = await sql<{ id: string; version: number; consentHash: string }[]>`
+        select id, version, consent_hash as "consentHash"
+          from clinical.intake_form_template where locale = 'en'
+         order by version desc limit 1
+      `
+      if (found !== undefined) return found
+      await sql`
+        insert into clinical.intake_form_template (version, locale, title, definition, consent_text,
+                                                   consent_hash, is_current)
+        values (1, 'en', 'Fixture intake (C-CRM-10)', '{"fields":[]}'::jsonb,
+                '[DRAFT WORDING — not approved copy]', 'ccrm10-fixture-consent-hash', false)
+        on conflict (version, locale) do nothing
+      `
+      const [created] = await sql<{ id: string; version: number; consentHash: string }[]>`
+        select id, version, consent_hash as "consentHash"
+          from clinical.intake_form_template where locale = 'en' order by version desc limit 1
+      `
+      if (created === undefined) throw new Error('the fixture template was not created')
+      return created
+    }
+    const template = await templateFor()
 
     await sql`
       insert into clinical.treatment_consent (customer_id, template_id, consent_hash, consented_at,

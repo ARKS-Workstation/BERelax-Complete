@@ -176,8 +176,22 @@ export async function runRetentionPurge(sql: Sql, nowIso: string): Promise<Purge
     clinicalRetentionYears: Number(profile?.clinicalRetentionYears ?? 25),
   })
 
+  // **Both sides of the hold comparison are resolved through `merge_survivor_of`, and that is what makes
+  // `legal_hold`'s merge-allowlist entry true rather than hopeful.**
+  //
+  // `legal_hold.subject_customer_id` is allowlisted in `merge-participants.ts`: a merge does not re-point
+  // it, because its live-hold uniqueness is a partial index over two `coalesce` EXPRESSIONS and the
+  // executor's conflict test is a list of plain columns — so a hold on "every subject" (a null
+  // `subject_customer_id`) could collide on a re-point without the skip ever detecting it. The read side
+  // resolves the tombstone instead, which is 0069's standing answer and the one the clinical tables already
+  // rely on.
+  //
+  // Resolving only ONE side would be worse than resolving neither, because it would look done: a hold
+  // placed on a record that was later merged away has to keep protecting the survivor's rows, and a hold
+  // placed on the survivor has to protect rows captured under the loser's id before the merge. The function
+  // returns its input unchanged for an id that is not a tombstone, so the ordinary case is untouched.
   const holds = await sql<{ subjectCustomerId: string | null; dataClass: string | null }[]>`
-    select subject_customer_id as "subjectCustomerId", data_class as "dataClass"
+    select merge_survivor_of(subject_customer_id) as "subjectCustomerId", data_class as "dataClass"
       from legal_hold where lifted_at is null
   `
 
@@ -204,7 +218,9 @@ export async function runRetentionPurge(sql: Sql, nowIso: string): Promise<Purge
            null::uuid as "subjectCustomerId"
       from otp_challenge
     union all
-    select id::text, 'contact_channel', created_at, customer_id
+    -- Resolved, for the reason given above the holds query: a row captured under a tombstone's id must be
+    -- matched against a hold placed on the survivor.
+    select id::text, 'contact_channel', created_at, merge_survivor_of(customer_id)
       from booking_session where expires_at < ${nowIso}::timestamptz
     union all
     select id::text, 'credential', created_at, null::uuid
