@@ -3,6 +3,7 @@ import { aed } from '@berelax/core'
 import { isAppError } from '@berelax/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { FAILURE_MODES, type FailureMode, failureModeOf } from './failure.ts'
+import { PLACES_AGGREGATE_FIELD_MASK, PLACES_FIXTURE_PLACE_ID } from './google/fake-places.ts'
 import { DEEPSEEK, MINIMAX } from './llm/named-fakes.ts'
 import { BUILT_LLM_PROVIDERS, createProviders, type Providers } from './registry.ts'
 
@@ -96,6 +97,15 @@ const EXERCISES: readonly Exercise[] = [
         siteUrl: 'https://berelax.example',
         startDate: '2026-09-01',
         endDate: '2026-09-15',
+      }),
+  },
+  {
+    key: 'places',
+    provider: 'google-places',
+    call: (p) =>
+      p.places.getPlace({
+        placeId: PLACES_FIXTURE_PLACE_ID,
+        fieldMask: [...PLACES_AGGREGATE_FIELD_MASK],
       }),
   },
   {

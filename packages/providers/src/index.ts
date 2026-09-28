@@ -36,12 +36,23 @@ export {
   REVIEW_FIXTURES,
   TESTING_REFRESH_TOKEN_DAYS,
 } from './google/fake-google.ts'
+export {
+  createFakePlaces,
+  GOOGLE_PLACES,
+  PLACES_AGGREGATE_FIELD_MASK,
+  PLACES_AGGREGATE_FIXTURE,
+  PLACES_FIXTURE_PLACE_ID,
+  PLACES_REVIEW_FIXTURES,
+} from './google/fake-places.ts'
 export type {
   BusinessProfileProvider,
   GoogleOAuthProvider,
   GoogleRevocation,
   GoogleSub,
   GoogleTokens,
+  PlacesDetails,
+  PlacesProvider,
+  PlacesReview,
   Review,
   SearchAnalyticsRow,
   SearchConsoleProvider,

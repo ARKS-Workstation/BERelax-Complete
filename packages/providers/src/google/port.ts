@@ -375,3 +375,78 @@ export interface SearchConsoleProvider {
    */
   inspectUrl(args: { siteUrl: string; inspectionUrl: string }): Promise<UrlInspectionResult>
 }
+
+/**
+ * Places API (New) — the aggregate, and the reviews it returns beside it.
+ *
+ * ## Why this port exists at all, when docs/10 §6 says Places is not a review feed
+ *
+ * Because of the one thing it IS good for, stated there in full: *"reading the aggregate rating and review
+ * count, so you can detect that the count went up even without seeing which review is new. That is the
+ * cheapest honest trigger available and worth building."* With the Business Profile application unapproved
+ * (Y3-gbp-api) this is the only programmatic signal that a review exists, and a daily call plus an email
+ * saying *you have 2 new reviews* turns an invisible event into a visible one.
+ *
+ * ## Why the response carries `reviews`, when nothing may store them
+ *
+ * Deliberately, and it is the most important decision on this port. Places API (New) returns a small,
+ * Google-curated, non-exhaustive set of review bodies whether a caller wants them or not, and docs/10 §6
+ * marks it **[UNVERIFIED]** whether its terms permit caching review CONTENT. The strictest safe reading is
+ * that they do not, so nothing in this build stores one — and the way to make that provable is for the port
+ * to hand the bodies over exactly as the API does, so `packages/google/src/adapters/places-aggregate.ts` can
+ * be seen to drop them. A port that pre-filtered them would move the decision into the fake, where a test
+ * would be asserting the fixture's shape rather than the adapter's behaviour: it would pass just as well if
+ * the adapter stored everything it was given. ADR 0043 records the decision; the field scan in
+ * `packages/fixtures/src/review-fallback-intake.itest.ts` is what holds it shut.
+ *
+ * ## Why it is separate from `BusinessProfileProvider`
+ *
+ * They are separately billed, separately enabled and separately gated: Places needs an API key and is
+ * available on day one, while Business Profile needs an application review measured in weeks. Folding them
+ * together would mean one `access_not_granted` standing for both, and the whole point of the fallback is
+ * that the one that works keeps working while the other does not.
+ */
+
+/** One review as Places returns it. Never persisted — see the header and ADR 0043. */
+export interface PlacesReview {
+  /** Places' own resource name for the review. Not a Business Profile review id. */
+  readonly name: string
+  readonly rating: number
+  /** The body, as the API returns it. The field this build is careful never to store. */
+  readonly text: string
+  /** Google's display name for the author. Also never stored from this source. */
+  readonly authorDisplayName: string
+  readonly publishTimeIso: string
+}
+
+/**
+ * A Places `places.get` response, narrowed to the fields this build asks for.
+ *
+ * `rating` is a decimal one place wide as Google reports it (4.6, not 46 or 4.63). It is NOT money, so
+ * ADR 0007's integer-fils rule does not apply; what does apply is that the adapter converts it to the
+ * integer tenths the database column holds, so no float is ever compared for equality.
+ */
+export interface PlacesDetails {
+  readonly placeId: string
+  /** Absent for a listing with no ratings at all, which is a real state and not an error. */
+  readonly rating?: number
+  /** Absent for the same reason. `0` and "not rated yet" are different facts. */
+  readonly userRatingCount?: number
+  /** The curated sample. Possibly empty, never complete, and never stored. */
+  readonly reviews: readonly PlacesReview[]
+}
+
+export interface PlacesProvider {
+  readonly name: string
+  /**
+   * `places.get` for one place, with the field mask this build needs.
+   *
+   * `fieldMask` is mandatory on the real API — a request without one is rejected — and it is on the port
+   * for the same reason `readMask` is on `listLocations`: a client that defaulted it would make the
+   * adapter's own guard untestable and would spend a real billed call to discover the mistake.
+   */
+  getPlace(args: {
+    readonly placeId: string
+    readonly fieldMask: readonly string[]
+  }): Promise<PlacesDetails>
+}
