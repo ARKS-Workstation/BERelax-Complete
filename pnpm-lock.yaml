@@ -190,6 +190,9 @@ importers:
       '@berelax/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@berelax/fixtures':
+        specifier: workspace:*
+        version: link:../../packages/fixtures
       '@berelax/google':
         specifier: workspace:*
         version: link:../../packages/google

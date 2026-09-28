@@ -19,4 +19,4 @@
 export { type NodeContext, type NodeEffect, noEffect } from './effect.ts'
 export { executeMessageNode, type MessageNodeDeps } from './message.ts'
 export { executeStageNode } from './stage.ts'
-export { executeTagNode } from './tag.ts'
+export { executeTagNode, isStorableTag, STORABLE_TAG } from './tag.ts'

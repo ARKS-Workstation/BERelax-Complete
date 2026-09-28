@@ -3,6 +3,7 @@ import {
   type FlowContactFacts,
   type FlowDefinition,
   type FlowStepPlan,
+  type Instant,
   instantFromIso,
   instantToIso,
   parseFlowDefinition,
@@ -206,6 +207,13 @@ async function walk(
         contactCustomerId: run.customerId ?? '',
       })
       const status = plan.reason === 'loop_detected' ? 'loop_detected' : 'cancelled'
+      // The counter is persisted BEFORE the run ends, and it is not a detail: the acceptance line is that
+      // the run halts at exactly the ceiling, and the only place that figure is readable afterwards is
+      // `flow_run.node_executions`. Without this it stays at whatever the last `advanceFlowRun` wrote —
+      // zero, for a loop that ran to the cap inside one tick — and the assertion would be about nothing.
+      // `flow_run_executions_within_bound` also refuses a figure past the row's own ceiling, so writing it
+      // is what makes the database a second opinion on the cap rather than a bystander.
+      await persistCount(uow, run, cursor, executions, elapsedFrom)
       await endFlowRun(uow, { runId: run.runId, status, reason: plan.reason, atIso })
       await endEnrolmentFor(uow, run, plan.reason, atIso)
       if (plan.reason === 'loop_detected') {
@@ -230,6 +238,7 @@ async function walk(
         effect: { ...noEffect(), outcome: 'refused', detail: plan.detail },
         contactCustomerId: run.customerId ?? '',
       })
+      await persistCount(uow, run, cursor, executions, elapsedFrom)
       await endFlowRun(uow, {
         runId: run.runId,
         status: 'cancelled',
@@ -249,6 +258,7 @@ async function walk(
         effect: noEffect(),
         contactCustomerId: run.customerId ?? '',
       })
+      await persistCount(uow, run, plan.node.id, executions, elapsedFrom)
       await endFlowRun(uow, {
         runId: run.runId,
         status: 'completed',
@@ -315,9 +325,14 @@ async function walk(
     }
 
     if (effect.pause) {
+      // The cursor stays ON the held node, and that is the whole of how a release works. The next tick asks
+      // `planFlowStep` about the same node, `executeMessageNode` finds its token already claimed AND a
+      // message row still `queued`, and releases that row instead of reporting a duplicate. Advancing past
+      // it here would leave the held message with nothing that ever comes back to it — a promotional
+      // message queued for 07:00 that no tick ever looks at again.
       await advanceFlowRun(uow.sql, {
         runId: run.runId,
-        cursorNodeId: cursor,
+        cursorNodeId: plan.node.id,
         nodeExecutions: executions,
         resumeAtIso: effect.releaseAtIso,
         elapsedFromIso: instantToIso(elapsedFrom),
@@ -353,6 +368,29 @@ async function walk(
       return { kind: 'halted', reason: 'no_outgoing_edge', executed: executions }
     }
   }
+}
+
+/**
+ * Writes the cursor and the counter before a run reaches a terminal state.
+ *
+ * `advanceFlowRun` refuses a run that is not `running`, so this has to come before `endFlowRun` rather than
+ * after it. Separated into its own function because it is called from three places and forgetting it in one
+ * of them is a run whose reported execution count is whatever the previous tick wrote.
+ */
+async function persistCount(
+  uow: UnitOfWork,
+  run: ClaimedFlowRun,
+  cursorNodeId: string | null,
+  executions: number,
+  elapsedFrom: Instant,
+): Promise<void> {
+  await advanceFlowRun(uow.sql, {
+    runId: run.runId,
+    cursorNodeId,
+    nodeExecutions: executions,
+    resumeAtIso: null,
+    elapsedFromIso: instantToIso(elapsedFrom),
+  })
 }
 
 /** The side effect one executable node asks for. */

@@ -558,9 +558,12 @@ export async function enrolOnLiveVersion(uow: UnitOfWork, input: EnrolInput): Pr
   const [row] = await sql<{ id: string }[]>`
     insert into flow_enrolment (flow_id, definition_version, customer_id, enrolled_at, created_by)
     values (${flow.id}, ${pinnedVersion}, ${input.customerId}, ${input.at}, ${input.createdBy})
-    -- 0091's partial unique index. The absence of a returned row IS the already_enrolled outcome, which
-    -- is what makes the guarantee the INDEX's rather than a read's: two enrolments racing cannot both win.
-    on conflict on constraint flow_enrolment_one_active_per_contact do nothing
+    -- 0091's partial unique index, named by INFERENCE and not by constraint name: a partial unique index
+    -- cannot be a table constraint in Postgres, so ON CONFLICT ON CONSTRAINT finds nothing and raises.
+    -- The predicate has to be repeated here for the same reason -- it is how the planner picks the index.
+    -- The absence of a returned row IS the already_enrolled outcome, which makes the guarantee the INDEX's
+    -- rather than a read's: two enrolments racing cannot both win.
+    on conflict (flow_id, customer_id) where ended_at is null do nothing
     returning id
   `
   if (row === undefined) {

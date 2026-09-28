@@ -136,10 +136,22 @@ comment on type flow_node_outcome is
 -- ---------------------------------------------------------------------------------------------
 create table flow_run (
   id                      uuid            not null default uuid_generate_v7(),
-  -- NULL for a dry run, and the biconditional below makes that the only reading. CASCADE for 0070's
-  -- reason about `flow_enrolment.customer_id`: a run is a process attached to an enrolment, and a
-  -- RESTRICT here would make `delete from customer` fail for every suite that clears the table.
-  enrolment_id            uuid            references flow_enrolment (id) on delete cascade,
+  -- NULL for a dry run, and the biconditional below makes that the only reading.
+  --
+  -- NOT a foreign key, and this is 0056's decision restated for the third time in this schema (`consent`
+  -- and `merge_record` are the other two): an APPEND-ONLY table cannot hang off a parent that can be
+  -- deleted. `flow_enrolment.customer_id` cascades from `customer` — 0070 chose that deliberately, so
+  -- `delete from customer` keeps working for the four suites that clear the table — so a cascading key
+  -- here would carry that delete into `flow_run`, from there into `flow_step_log`, and the append-only
+  -- trigger would raise ZY001. The symptom is not a flow bug: it is `delete from customer` failing for
+  -- every caller, with a SQLSTATE about an automation log. Found by running the suite, which is the only
+  -- thing that could have found it.
+  --
+  -- What is lost is referential integrity on this column, and what replaces it is that nothing deletes an
+  -- enrolment: DELETE is revoked from `berelax_app` on `flow_enrolment` (0070) and on `flow_run` here, so
+  -- the only route is the cascade from `customer` — and a run whose contact has been erased is a run with
+  -- nobody to send to, which the tick discovers on its next read and ends.
+  enrolment_id            uuid,
   flow_id                 uuid            not null,
   -- The version this run interprets. The interpreter reads the PINNED document and nothing else
   -- (`readEnrolmentPinnedDefinition`), so the run carries the number the enrolment pinned rather than
@@ -283,9 +295,13 @@ create table flow_node_effect (
   -- if a later DSL version says so, and a key without it would make the second one a duplicate of the
   -- first. `message_channel` rather than text, so a channel nobody implements cannot be claimed.
   channel             message_channel not null,
-  -- The contact. CASCADE for 0053's reason, and the column a merge RE-POINTS: after a merge the contact
-  -- IS the survivor, so the token has to move or the node would execute again under the survivor's key.
-  contact_customer_id uuid            not null references customer (id) on delete cascade,
+  -- The contact, and the column a merge RE-POINTS: after a merge the contact IS the survivor, so the
+  -- token has to move or the node would execute again under the survivor's key.
+  --
+  -- NOT a foreign key, for the reason `flow_run.enrolment_id` gives above: DELETE on this table raises
+  -- ZY002, so a cascade from `customer` reaching it would make `delete from customer` fail. 0056 took the
+  -- same decision about `consent.contact_customer_id` and said so in its own header.
+  contact_customer_id uuid            not null,
   claimed_at          timestamptz     not null,
 
   constraint flow_node_effect_pkey primary key (id),
@@ -303,7 +319,8 @@ comment on table flow_node_effect is
 comment on column flow_node_effect.contact_customer_id is
   'The contact the node reached. Re-pointed by a customer merge and by nothing else, which is what makes '
   '"a contact merged mid-run continues on the survivor exactly once" hold: the token moves with the '
-  'person, so the survivor''s key finds it.';
+  'person, so the survivor''s key finds it. NOT a foreign key: DELETE here raises ZY002, so a cascade '
+  'from customer reaching it would make `delete from customer` fail for every caller (0056''s decision).';
 
 -- ---------------------------------------------------------------------------------------------
 -- The step log
@@ -325,7 +342,9 @@ create table flow_step_log (
   branch               text              not null
     constraint flow_step_log_branch_is_a_label check (branch ~ '^[a-z][a-z0-9_]{0,31}$'),
   outcome              flow_node_outcome not null,
-  contact_customer_id  uuid              not null references customer (id) on delete cascade,
+  -- NOT a foreign key: this table refuses DELETE for every role (ZY001), so a cascade from `customer`
+  -- reaching it would make `delete from customer` raise. 0056's decision about `consent`, restated.
+  contact_customer_id  uuid              not null,
   channel              message_channel,
   template_key         text,
   -- The message this step produced. NULL for a node that sends nothing, for a refusal (B-MSG-04's rule:

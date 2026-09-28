@@ -348,7 +348,8 @@ describe('acceptance — four hundred enrolments stay pinned when the flow is ed
     await asManager((uow) => setFlowActive(uow, KEYS.pinning, true))
 
     // One transaction for the four hundred, which is also what a bulk enrolment would do. The figure is
-    // the acceptance line's; the enrolment API's caps and idempotency are C-AUTO-07's.
+    // the acceptance line's, and it is comfortably inside the per-flow cap C-AUTO-07 added to this writer
+    // (5,000 active enrolments) — which is why four hundred distinct contacts still enrol one after another.
     const enrolments = await asManager(async (uow) => {
       const out: { enrolmentId: string; pinnedVersion: number }[] = []
       for (const customerId of contactIds) {
@@ -435,8 +436,12 @@ describe('acceptance — four hundred enrolments stay pinned when the flow is ed
     const live = await readLiveFlowVersion(sql, KEYS.pinning)
     const joiner = contactIds[0]
     if (joiner === undefined || live === null) throw new Error('nothing to enrol onto')
-    // A second enrolment for the same contact: the per-flow dedupe is C-AUTO-07's, so at this layer the
-    // row is simply another enrolment — which is what makes the version resolution visible on its own.
+    // A second enrolment for the same contact, and it is a NEW row because the first one has been ENDED by
+    // the case above. C-AUTO-07 added the per-flow dedupe to this writer — one ACTIVE enrolment per contact
+    // per flow (`flow_enrolment_one_active_per_contact`, 0091) — and a completed enrolment is outside that
+    // index, because a contact going round a win-back sequence a second time is the ordinary case. So the
+    // version resolution is still visible on its own here, and it is worth knowing that it is visible
+    // BECAUSE the earlier enrolment finished rather than in spite of the dedupe.
     const second = await asManager((uow) =>
       enrolOnLiveVersion(uow, {
         at: ENROLLED_AT,

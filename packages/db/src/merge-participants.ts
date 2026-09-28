@@ -368,14 +368,12 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
     activePredicate: 'ended_at is null',
     dedupeKey: null,
     backReference: null,
+    // `merge_record_table_retained_reason_is_stated` caps this at 300 characters, so the argument lives in
+    // `why` below and this is the sentence a merge report carries.
     retainedReason:
-      'The survivor is ALREADY running on that flow, so moving the loser’s enrolment would put one ' +
-      'person on one flow twice and send them every node twice — which is exactly what C-AUTO-07’s ' +
-      '"a contact merged mid-run continues on the survivor exactly once" forbids. The survivor’s own ' +
-      'run continues; the loser’s stays readable on the tombstone with its step log intact, and the ' +
-      'interpreter cancels it with contact_merged_away the next time it ticks rather than going on ' +
-      'sending to a record nothing else reads. A merge may not decide WHICH of two in-flight runs is the ' +
-      'real one — the same reasoning customer_pipeline_card gives for not advancing a stage.',
+      'The survivor is already running on that flow. Moving the loser’s enrolment would put one person on ' +
+      'one flow twice and send them every node twice; the survivor’s run continues and the loser’s stays ' +
+      'readable on the tombstone, where the interpreter ends it with contact_merged_away.',
     excludeColumns: [],
     why:
       'An enrolment is a process attached to a contact (0070), so it must follow the person: left on the ' +
@@ -406,10 +404,9 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
     backReference: null,
     excludeColumns: [],
     retainedReason:
-      'The same (run, node, channel) already has a token on the survivor, which can only mean the same ' +
-      'node of the same run was recorded against both records — an at-least-once job replayed across a ' +
-      'merge that had already moved the contact. One token is what the run needs: a second would be a ' +
-      'second claim on an execution that happened once.',
+      'The same (run, node, channel) already has a token on the survivor, so the same node of the same run ' +
+      'was recorded against both records — an at-least-once job replayed across a merge that had already ' +
+      'moved the contact. One token is what the run needs; a second would claim one execution twice.',
     why:
       'The token says THIS node of THIS run has already reached THIS contact, and after a merge the ' +
       'contact IS the survivor — so the token has to move or the next tick computes a key that finds ' +

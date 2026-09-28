@@ -394,32 +394,54 @@ describe('the participant registry', () => {
     ).toBe('allowlisted')
   })
 
-  it('has no flow-run participant yet, which is the deferral to C-AUTO-07 stated as a test', async () => {
+  it('classifies every flow-run table the interpreter added, each the way its own rule needs', async () => {
+    /*
+      This case WAS "has no flow-run participant yet, which is the deferral to C-AUTO-07 stated as a test",
+      and it asserted that `flow_run` was absent from the catalogue. C-AUTO-07 has landed, so that sentence
+      is now false, and a test asserting a false thing is worse than no test: the mechanism it was written
+      to prove — `mergeCoverage` enumerating from `information_schema` so a table nobody registered turns the
+      completeness case above red — did exactly what it exists for and this is the other end of it.
+
+      What replaces it is the DECISION taken about each of the three tables 0091 added, because "registered"
+      is satisfied by any strategy and the strategies mean opposite things:
+
+        * `flow_enrolment` is RE-POINTED. The process follows the person.
+        * `flow_node_effect` is RE-POINTED. The token says this node already reached this contact, and after
+          a merge the contact IS the survivor — so it has to move, or the survivor is sent every message the
+          loser already received. That is C-AUTO-07's "a contact merged mid-run continues on the survivor
+          exactly once", and the row-level worked example for it is in this file, below.
+        * `flow_step_log` is ALLOWLISTED. It is evidence about the record the message actually went to, and
+          re-attributing it would make the survivor's history say a message was sent under a consent record
+          that belonged to somebody else. The `invoice` entry takes the same decision about a filed document.
+
+      `flow_run` itself is deliberately NOT in the catalogue at all, and that is not the old deferral
+      surviving: the table carries no customer or contact column, because the run follows its enrolment and
+      the contact lives on the token and the log. A reader who comes here looking for `flow_run` should find
+      that sentence rather than silence.
+    */
     const coverage = await mergeCoverage(sql)
-    // C-AUTO-07 owns `flow_run` and its (flow_run, node, channel, contact) idempotency key, and it
-    // depends on this unit. The day that table lands, the completeness case above turns red until it is
-    // registered — which is the whole point of enumerating from the catalogue. This assertion exists so
-    // the deferral is visible here and not only in the manifest.
-    //
-    // It used to assert that NO table starting with `flow_` was catalogued, and that was true when it was
-    // written and false a few hours later: C-AUTO-06 landed 0070 with `flow_enrolment.customer_id`, and
-    // this case reported the arrival of a table it had no opinion about as the deferral breaking. The
-    // deferral is about `flow_run` specifically, so it names it — and `flow_enrolment` is asserted to be
-    // a REGISTERED participant here as well, because "the enrolment moves with the contact" is a decision
-    // taken at that merge and this is where a reader of the deferral will look for it.
-    expect(coverage.map((row) => row.table).filter((table) => table === 'flow_run')).toEqual([])
-    const enrolment = coverage.find((row) => row.table === 'flow_enrolment')
-    expect(
-      enrolment?.status,
-      'flow_enrolment is registered, not merely absent from the deferral',
-    ).toBe('participant')
-    // And the STRATEGY, not just the registration: "it moves with the contact" is the decision, and an
-    // entry switched to `union_dedupe` or to an allowlist would satisfy "registered" while changing what
-    // happens to a person's automations. C-CRM-06 asserted this from its own worktree, which is how the
-    // stronger of the two assertions survived the merge.
-    expect(enrolment?.strategy, 'the enrolment is RE-POINTED, not deduped or left behind').toBe(
+    const classified = (table: string) => coverage.find((row) => row.table === table)
+
+    expect(classified('flow_enrolment')?.status).toBe('participant')
+    expect(classified('flow_enrolment')?.strategy, 'the enrolment is RE-POINTED').toBe(
       'repoint_update',
     )
+    expect(classified('flow_node_effect')?.status).toBe('participant')
+    expect(classified('flow_node_effect')?.strategy, 'the token moves with the person').toBe(
+      'repoint_update',
+    )
+    expect(classified('flow_step_log')?.status, 'the step log is evidence, not state').toBe(
+      'allowlisted',
+    )
+    expect(classified('flow_step_log')?.reason, 'and the allowlist entry says why').toContain(
+      'merge_survivor_of',
+    )
+    // `flow_run` carries no contact column, so the catalogue never sees it. Asserted so the absence is a
+    // stated fact rather than a gap somebody reads as the old deferral.
+    expect(
+      coverage.filter((row) => row.table === 'flow_run'),
+      'flow_run has no customer or contact column to classify',
+    ).toEqual([])
   })
 })
 
@@ -1090,6 +1112,170 @@ describe('a repeated merge, and the tombstone', () => {
       `
       expect(Number(counted?.moved), 'one enrolment moved').toBe(1)
       expect(Number(counted?.retained), 'none retained').toBe(0)
+    })
+  })
+
+  /*
+    C-AUTO-07's "a contact merged mid-run continues on the survivor exactly once", at the row level, sharing
+    this file's worked example.
+
+    The behavioural half — the tick that continues on the survivor and sends one message, and the tick that
+    cancels with `contact_merged_away` when the survivor was already enrolled — is
+    `apps/worker/src/automation/interpreter.itest.ts`, because it needs the interpreter and this package may
+    not import an app. What is HERE is the half that is about the merge: the idempotency token moves with the
+    person, so the key the next tick computes finds it.
+
+    Why that is the whole of "exactly once". The token is `(flow_run, node, channel, contact)`. Before the
+    merge it names the loser; the run's next tick reads the contact through `merge_survivor_of` and computes a
+    key naming the SURVIVOR. If the token had stayed on the tombstone, that key would find nothing and the
+    node would send a second time — to the same human, who had already received it.
+  */
+  it('moves the idempotency token onto the survivor, so a node already executed is not executed again', async () => {
+    await probe(async ({ tx, uow }) => {
+      const [flow] = await tx<{ id: string }[]>`
+        insert into flow (flow_key, title, created_by)
+        values ('merge_itest_token', 'A flow whose run the merge suite re-points a token for', 'merge.itest.ts')
+        returning id
+      `
+      const flowId = flow?.id ?? ''
+      await tx`
+        insert into flow_definition (flow_id, version, dsl_version, definition, published_by)
+        values (
+          ${flowId}::uuid, 1, 1,
+          '{"dslVersion":1,"nodes":[{"id":"n1","kind":"exit","reason":"probe"}]}'::jsonb,
+          'merge.itest.ts'
+        )
+      `
+      // A run and a token for the LOSER, written with SQL: what is under test is the participant, not the
+      // interpreter. The enrolment is real because `flow_run_live_run_is_an_enrolments` states the
+      // biconditional — a live run with no enrolment is a send to nobody — even though
+      // `flow_run.enrolment_id` is deliberately not a foreign key (0091 says why).
+      const [enrolled] = await tx<{ id: string }[]>`
+        insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
+        values (${flowId}::uuid, 1, ${loserId}::uuid, 'merge.itest.ts')
+        returning id
+      `
+      const [run] = await tx<{ id: string }[]>`
+        insert into flow_run (
+          enrolment_id, flow_id, definition_version, mode, max_node_executions, elapsed_from, started_at
+        ) values (
+          ${enrolled?.id ?? null}, ${flowId}::uuid, 1, 'live', 200,
+          ${MERGED_AT_ISO}::timestamptz, ${MERGED_AT_ISO}::timestamptz
+        )
+        returning id
+      `
+      const runId = run?.id ?? ''
+      const token = async (customerId: string, nodeId: string): Promise<void> => {
+        await tx`
+          insert into flow_node_effect (flow_run_id, node_id, channel, contact_customer_id, claimed_at)
+          values (${runId}::uuid, ${nodeId}, 'sms', ${customerId}::uuid, ${MERGED_AT_ISO}::timestamptz)
+        `
+      }
+      await token(loserId, 'sent_the_offer')
+      // The control, and it is the one that matters: a THIRD record's token must not move. "The loser's
+      // token moved" is also true of a statement that re-points every row in the table.
+      await token(thirdId, 'sent_the_offer_to_somebody_else')
+
+      const outcome = await mergeCustomers(uow, { ...MERGE_ARGS, plan: await planned(tx) })
+      if (outcome.kind !== 'merged') throw new Error(outcome.kind)
+
+      const owner = async (nodeId: string): Promise<string | undefined> => {
+        const [row] = await tx<{ contactCustomerId: string }[]>`
+          select contact_customer_id as "contactCustomerId" from flow_node_effect
+           where flow_run_id = ${runId}::uuid and node_id = ${nodeId}
+        `
+        return row?.contactCustomerId
+      }
+      expect(await owner('sent_the_offer'), "the loser's token now names the survivor").toBe(
+        survivorId,
+      )
+      expect(
+        await owner('sent_the_offer_to_somebody_else'),
+        "a third record's token is left alone",
+      ).toBe(thirdId)
+
+      // And the merge's own record says one row moved, so the count and the rows agree.
+      const [counted] = await tx<{ moved: number; retained: number }[]>`
+        select rows_moved as "moved", rows_retained_on_loser as "retained"
+        from merge_record_table
+        where merge_record_id = ${outcome.mergeRecordId}::uuid
+          and participant = 'public.flow_node_effect'
+      `
+      expect(Number(counted?.moved), 'one token moved').toBe(1)
+      expect(Number(counted?.retained), 'none retained').toBe(0)
+    })
+  })
+
+  it('retains a token the survivor already holds, rather than claiming one execution twice', async () => {
+    await probe(async ({ tx, uow }) => {
+      const [flow] = await tx<{ id: string }[]>`
+        insert into flow (flow_key, title, created_by)
+        values ('merge_itest_token_clash', 'A flow whose token both records already hold', 'merge.itest.ts')
+        returning id
+      `
+      const flowId = flow?.id ?? ''
+      await tx`
+        insert into flow_definition (flow_id, version, dsl_version, definition, published_by)
+        values (
+          ${flowId}::uuid, 1, 1,
+          '{"dslVersion":1,"nodes":[{"id":"n1","kind":"exit","reason":"probe"}]}'::jsonb,
+          'merge.itest.ts'
+        )
+      `
+      const [enrolled] = await tx<{ id: string }[]>`
+        insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
+        values (${flowId}::uuid, 1, ${loserId}::uuid, 'merge.itest.ts')
+        returning id
+      `
+      const [run] = await tx<{ id: string }[]>`
+        insert into flow_run (
+          enrolment_id, flow_id, definition_version, mode, max_node_executions, elapsed_from, started_at
+        ) values (
+          ${enrolled?.id ?? null}, ${flowId}::uuid, 1, 'live', 200,
+          ${MERGED_AT_ISO}::timestamptz, ${MERGED_AT_ISO}::timestamptz
+        )
+        returning id
+      `
+      const runId = run?.id ?? ''
+      // The same (run, node, channel) against BOTH records, which can only mean one at-least-once job was
+      // replayed across a merge that had already moved the contact. One execution happened; one token is
+      // what the run needs.
+      for (const customerId of [survivorId, loserId]) {
+        await tx`
+          insert into flow_node_effect (flow_run_id, node_id, channel, contact_customer_id, claimed_at)
+          values (${runId}::uuid, 'sent_the_offer', 'sms', ${customerId}::uuid, ${MERGED_AT_ISO}::timestamptz)
+        `
+      }
+
+      const outcome = await mergeCustomers(uow, { ...MERGE_ARGS, plan: await planned(tx) })
+      if (outcome.kind !== 'merged') throw new Error(outcome.kind)
+
+      const [counted] = await tx<
+        {
+          moved: number
+          retained: number
+          retainedReason: string | null
+        }[]
+      >`
+        select rows_moved as "moved", rows_retained_on_loser as "retained",
+               retained_reason as "retainedReason"
+        from merge_record_table
+        where merge_record_id = ${outcome.mergeRecordId}::uuid
+          and participant = 'public.flow_node_effect'
+      `
+      expect(Number(counted?.moved), 'nothing moved: the key was already taken').toBe(0)
+      expect(Number(counted?.retained), "the loser's token stayed on the tombstone").toBe(1)
+      // With a STATED reason, which is what `merge_record_table_retained_reason_is_stated` exists for: a
+      // row left behind with no explanation is the silent half-merge the whole registry is about.
+      expect(counted?.retainedReason).toContain('already has a token on the survivor')
+      // And exactly one token for that (run, node) survives, which is the "exactly once" the acceptance
+      // line is about — asserted as a COUNT, because "the survivor has one" is also true of two.
+      const [tokens] = await tx<{ n: string }[]>`
+        select count(*)::text as n from flow_node_effect
+         where flow_run_id = ${runId}::uuid and node_id = 'sent_the_offer'
+           and contact_customer_id = ${survivorId}::uuid
+      `
+      expect(Number(tokens?.n)).toBe(1)
     })
   })
 })

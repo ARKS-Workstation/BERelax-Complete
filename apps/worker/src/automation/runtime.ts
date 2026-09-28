@@ -2,7 +2,7 @@ import { loadConfig } from '@berelax/config'
 import {
   type FrequencyCap,
   frequencyCapsFrom,
-  type Instant,
+  instantFromIso,
   PROVISIONAL_FREQUENCY_CAPS,
   suppressionKeyNormaliser,
 } from '@berelax/core'
@@ -16,6 +16,7 @@ import {
   type UnitOfWork,
 } from '@berelax/db'
 import {
+  type ClassRoutedTransport,
   costOf,
   InMemoryOutbox,
   PROVISIONAL_SENDER_IDS,
@@ -48,19 +49,35 @@ import type { MessageNodeDeps } from './nodes/message.ts'
  *     a booking reminder. Resolved at the first promotional send instead, so the failure is one send
  *     refused `blocked_unevaluable` naming `isSuppressed` — the gate failing closed, which is its job.
  */
-export function messageNodeDepsFor(sql: Sql): MessageNodeDeps {
+export function messageNodeDepsFor(
+  sql: Sql,
+  options: {
+    /**
+     * The transport to send through, for a caller that has to be able to SEE what the vendor was asked.
+     *
+     * Injected rather than always built here, because the fake's call log is what makes "zero provider
+     * calls" measurable — and a transport built inside this function would have a call log the caller
+     * cannot reach, so a spy on a second instance would be a spy on nothing. `run.ts` passes none and gets
+     * the configured one, which is the shipped path.
+     */
+    readonly transport?: ClassRoutedTransport
+  } = {},
+): MessageNodeDeps {
   const config = loadConfig()
   const now = (): string => new Date().toISOString()
-  const sms = createSmsalaTransport({ config, now })
+  const transport = options.transport ?? createSmsalaTransport({ config, now }).transport
 
   return {
-    sendContextFor: ({ evaluators }): SendContext => ({
+    sendContextFor: ({ evaluators, atIso }): SendContext => ({
       appEnv: config.APP_ENV,
       outboundAllowlist: config.OUTBOUND_ALLOWLIST,
       senderIds: PROVISIONAL_SENDER_IDS,
-      transports: [sms.transport],
+      transports: [transport],
       outbox: new InMemoryOutbox(),
-      clock: { now: () => Date.now() as Instant },
+      // The TICK's instant, from the job context, and never the wall clock. Every other instant in a run
+      // comes from there, and a gate reading `Date.now()` would answer the window question about the moment
+      // the process is running rather than the moment the run reached the node.
+      clock: { now: () => instantFromIso(atIso) },
       gate: {
         // Still a literal `false`: making it a real audited read is C-AUTO-05's, which owns the switch and
         // the record of who engaged it. Stated rather than left to be inferred, because a `false` that

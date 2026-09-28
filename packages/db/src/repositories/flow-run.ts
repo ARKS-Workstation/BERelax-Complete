@@ -304,6 +304,57 @@ export async function claimNodeEffect(
   return row === undefined ? { kind: 'duplicate' } : { kind: 'claimed', effectId: row.id }
 }
 
+/**
+ * The message this node HELD for the promotional window, if it is still waiting.
+ *
+ * The one read that makes a release possible, and it is why the token alone is not enough: a replayed job
+ * and a scheduled RELEASE arrive at the same node with the same token already claimed, and the two must not
+ * do the same thing. A replay has nothing to release and answers `duplicate`; a release finds a message row
+ * that is still `queued` and moves it.
+ *
+ * `m.status = 'queued'` is the whole discriminator, and it cannot go stale: a message that was sent, failed
+ * or expired has left `queued` for ever (`refuse_message_status_regression`, 0035), so a second release of
+ * one message finds nothing and falls back to `duplicate`. Newest first, because a hold that was released
+ * into another hold — the window narrowed under it — has two `held` rows and the later one is the live one.
+ */
+export interface HeldStepRead {
+  readonly stepLogId: string
+  readonly messageId: string
+  /** When the message was first queued. The gate measures the hold's age from it. */
+  readonly queuedAtIso: string
+}
+
+export async function readHeldStepForNode(
+  sql: Sql,
+  key: {
+    readonly runId: string
+    readonly nodeId: string
+    readonly channel: MessageChannel
+    readonly contactCustomerId: string
+  },
+): Promise<HeldStepRead | null> {
+  const [row] = await sql<{ stepLogId: string; messageId: string; queuedAt: Date }[]>`
+    select s.id as "stepLogId", s.message_id as "messageId", m.queued_at as "queuedAt"
+      from flow_step_log s
+      join message m on m.id = s.message_id
+     where s.flow_run_id = ${key.runId}::uuid
+       and s.node_id = ${key.nodeId}
+       and s.channel = ${key.channel}::message_channel
+       and s.contact_customer_id = ${key.contactCustomerId}::uuid
+       and s.outcome = 'held'
+       and m.status = 'queued'
+     order by s.recorded_at desc, s.id desc
+     limit 1
+  `
+  return row === undefined
+    ? null
+    : {
+        stepLogId: row.stepLogId,
+        messageId: row.messageId,
+        queuedAtIso: row.queuedAt.toISOString(),
+      }
+}
+
 /** How many tokens a run holds. The count the 50-delivery case reads to prove one execution. */
 export async function countNodeEffects(sql: Sql, runId: string): Promise<number> {
   const [row] = await sql<{ n: string }[]>`
@@ -469,11 +520,21 @@ export async function readContactStepLog(
   }))
 }
 
-/** Every projected row of one run, oldest first. The dry run's plan as an operator reads it. */
-export async function readRunStepLog(
-  sql: Sql,
-  runId: string,
-): Promise<readonly (ContactStepLogEntry & { readonly contactCustomerId: string })[]> {
+/**
+ * Every row of one run, oldest first. The dry run's plan as an operator reads it.
+ *
+ * A wider row than {@link ContactStepLogEntry}: the contact is on it, because a dry run's rows are ABOUT
+ * many contacts, and so is the costing, because a projection is a quotation and a quotation with no figures
+ * is a list of nodes.
+ */
+export interface RunStepLogEntry extends ContactStepLogEntry {
+  readonly contactCustomerId: string
+  readonly encoding: string | null
+  readonly segments: number | null
+  readonly costFils: number | null
+}
+
+export async function readRunStepLog(sql: Sql, runId: string): Promise<readonly RunStepLogEntry[]> {
   const rows = await sql<
     {
       id: string
@@ -492,8 +553,8 @@ export async function readRunStepLog(
       plannedAt: Date
       detail: string | null
       encoding: string | null
-      segments: number | null
-      costFils: number | null
+      segments: number | string | null
+      costFils: number | string | null
     }[]
   >`
     select s.id, f.flow_key as "flowKey", s.definition_version as "definitionVersion",
@@ -511,6 +572,11 @@ export async function readRunStepLog(
     ...row,
     flowRunId: runId,
     plannedAtIso: row.plannedAt.toISOString(),
+    // `fils` is a domain over bigint, which postgres.js hands over as a STRING rather than a number — the
+    // same reason every money read in this package converts explicitly. A caller comparing it numerically
+    // against a budget would otherwise be comparing a string.
+    costFils: row.costFils === null ? null : Number(row.costFils),
+    segments: row.segments === null ? null : Number(row.segments),
   }))
 }
 

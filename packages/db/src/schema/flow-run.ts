@@ -13,8 +13,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { consent } from './consent.ts'
-import { customer } from './customer.ts'
-import { flowDefinition, flowEnrolment } from './flow.ts'
+import { flowDefinition } from './flow.ts'
 import { message } from './message.ts'
 
 /**
@@ -64,8 +63,14 @@ export const flowRun = pgTable(
   'flow_run',
   {
     id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
-    /** NULL for a dry run, which nobody is enrolled on. UNIQUE, so one live run per enrolment. */
-    enrolmentId: uuid('enrolment_id').references(() => flowEnrolment.id, { onDelete: 'cascade' }),
+    /**
+     * NULL for a dry run, which nobody is enrolled on. UNIQUE, so one live run per enrolment.
+     *
+     * Deliberately NOT a foreign key (0056's decision, restated in 0091's own comment): the append-only
+     * step log hangs off this run, and a cascade from `customer` reaching it would raise ZY001 and make
+     * `delete from customer` fail for every caller.
+     */
+    enrolmentId: uuid('enrolment_id'),
     flowId: uuid('flow_id').notNull(),
     /** The version the run interprets: the one the enrolment pinned, never `max(version)`. */
     definitionVersion: integer('definition_version').notNull(),
@@ -126,10 +131,12 @@ export const flowNodeEffect = pgTable(
     nodeId: text('node_id').notNull(),
     /** `message_channel`. Part of the key, so one node reaching two channels is two executions. */
     channel: text('channel').notNull(),
-    /** Re-pointed by a customer merge and by nothing else. That is what makes "exactly once" survive one. */
-    contactCustomerId: uuid('contact_customer_id')
-      .notNull()
-      .references(() => customer.id, { onDelete: 'cascade' }),
+    /**
+     * Re-pointed by a customer merge and by nothing else. That is what makes "exactly once" survive one.
+     *
+     * Not a foreign key: DELETE here raises ZY002, so a cascade from `customer` would fail.
+     */
+    contactCustomerId: uuid('contact_customer_id').notNull(),
     claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -159,9 +166,8 @@ export const flowStepLog = pgTable(
     /** The branch this run took out of the node: a split's choice is a fact about this run. */
     branch: text('branch').notNull(),
     outcome: flowNodeOutcome('outcome').notNull(),
-    contactCustomerId: uuid('contact_customer_id')
-      .notNull()
-      .references(() => customer.id, { onDelete: 'cascade' }),
+    /** Not a foreign key: this table refuses DELETE (ZY001), so a cascade from `customer` would fail. */
+    contactCustomerId: uuid('contact_customer_id').notNull(),
     /** `message_channel`, or NULL for a node that sends nothing. */
     channel: text('channel'),
     templateKey: text('template_key'),

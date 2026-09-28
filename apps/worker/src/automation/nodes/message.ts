@@ -15,6 +15,7 @@ import {
   readConsentLogs,
   readCountedSendsByContact,
   readCurrentTemplate,
+  readHeldStepForNode,
   readSuppressionLogs,
   recordFrequencyCapRefusal,
   recordSendWithLedger,
@@ -29,6 +30,7 @@ import {
   type MessageId,
   type MessageLifecycleStore,
   promotionalGateEvaluators,
+  releaseHeldMessage,
   type SendContext,
 } from '@berelax/messaging'
 import type { MessageChannel } from '@berelax/shared'
@@ -95,10 +97,20 @@ import type { NodeContext, NodeEffect } from './effect.ts'
 export const FLOW_PROMOTIONAL_CONSENT_PURPOSE = 'marketing'
 
 export interface MessageNodeDeps {
-  /** The send context, built over the tick's connection and this contact's prefetched reads. */
+  /**
+   * The send context, built over the tick's connection, this contact's prefetched reads and the tick's own
+   * instant.
+   *
+   * `atIso` is not a convenience. The gate's window decision is made from `ctx.clock.now()`, so a context
+   * whose clock read wall-clock time would answer about the moment the process happens to be running rather
+   * than the moment the run reached the node — and a tick replayed after a delay, or driven at a frozen
+   * clock, would get a window answer about a different hour. It cost this file a red test: the window case
+   * drove a tick at 02:00 Dubai and the gate allowed the send, because the clock was reading today.
+   */
   readonly sendContextFor: (input: {
     readonly sql: Sql
     readonly evaluators: ReturnType<typeof promotionalGateEvaluators>
+    readonly atIso: string
   }) => SendContext
   /** The caps in force, read from settings by the runtime rather than assumed here. */
   readonly caps: readonly FrequencyCap[]
@@ -148,21 +160,70 @@ export async function executeMessageNode(
     channel: node.channel,
     contactCustomerId: context.customerId,
   }
-  const claim = await claimNodeEffect(context.uow.sql, key, context.atIso)
+  const { sql } = context.uow
+  const claim = await claimNodeEffect(sql, key, context.atIso)
   if (claim.kind === 'duplicate') {
-    // The typed outcome, from the constraint. No vendor is asked, no message row is written, and the step
-    // log records that this delivery of the job found the work already done.
-    return effect({
-      outcome: 'duplicate',
-      channel: node.channel,
-      templateKey: node.templateKey,
-      detail:
-        'An earlier delivery of this job already executed this node for this contact. ' +
-        'flow_node_effect_once_per_contact refused the second claim.',
-    })
+    // The token was already taken, and TWO different things arrive here with that in common: a replayed
+    // delivery of a job whose work is done, and the RELEASE of a message this node held for the promotional
+    // window. `readHeldStepForNode` is the discriminator, and it is a fact about the message row rather
+    // than about the job — a message that was sent, failed or expired has left `queued` for ever.
+    const held = await readHeldStepForNode(sql, key)
+    if (held === null) {
+      // The typed outcome, from the constraint. No vendor is asked, no message row is written, and the step
+      // log records that this delivery of the job found the work already done.
+      return effect({
+        outcome: 'duplicate',
+        channel: node.channel,
+        templateKey: node.templateKey,
+        detail:
+          'An earlier delivery of this job already executed this node for this contact. ' +
+          'flow_node_effect_once_per_contact refused the second claim.',
+      })
+    }
+    return await release(context, node, deps, held)
   }
 
+  return await attempt(context, node, deps, null)
+}
+
+/**
+ * Releases a message this node held, at the instant the GATE named.
+ *
+ * Nothing here decides anything about the window: `releaseHeldMessage` runs the same `sendMessage` choke
+ * point with `queuedSince` set, so the gate answers `allow`, `queued_for_window` again (an admin narrowed it
+ * under the hold) or `stale_outside_window` — and the row that moves is the one the hold created. A second
+ * message row would double the offer in the cost report and hand the frequency cap two sends for one send.
+ */
+async function release(
+  context: NodeContext,
+  node: MessageNodeSpec,
+  deps: MessageNodeDeps,
+  held: { readonly messageId: string; readonly queuedAtIso: string },
+): Promise<NodeEffect> {
+  return await attempt(context, node, deps, held)
+}
+
+/**
+ * One attempt at one message node: the first one, or the release of a hold.
+ *
+ * The two share everything but the last step — the same template, the same prefetch, the same three
+ * evaluators, the same consent resolution — and sharing them is the point: a release evaluated against a
+ * differently-built gate would be a second compliance path, which is the failure `send.ts`'s header is
+ * about. What differs is only whether the outcome is recorded as a new row or against an existing one.
+ */
+async function attempt(
+  context: NodeContext,
+  node: MessageNodeSpec,
+  deps: MessageNodeDeps,
+  held: { readonly messageId: string; readonly queuedAtIso: string } | null,
+): Promise<NodeEffect> {
   const { sql } = context.uow
+  const key = {
+    runId: context.run.runId,
+    nodeId: node.id,
+    channel: node.channel,
+    contactCustomerId: context.customerId,
+  }
   const template = await readCurrentTemplate(sql, {
     key: node.templateKey,
     channel: node.channel,
@@ -282,13 +343,13 @@ export async function executeMessageNode(
   }
   const delivery: DeliveryDeps = {
     store: ledgerBackedStore(sql, attribution, context.atIso),
-    send: deps.sendContextFor({ sql, evaluators }),
+    send: deps.sendContextFor({ sql, evaluators, atIso: context.atIso }),
     // A retry inside the tick would hold the run's row lock for the length of the declared backoff. The
     // queue is the thing that waits, which is `send-scheduled-step.ts`'s decision and for its reason.
     waitUntil: async () => {},
   }
 
-  const outcome = await deliverMessage(delivery, {
+  const request = {
     templateId: template.templateId,
     // Derived from the four-part key, so a replay after a worker was KILLED between the provider call and
     // the commit computes the SAME idempotency key — the fake derives the same provider message id from it
@@ -297,17 +358,17 @@ export async function executeMessageNode(
     template: classified.template,
     values: {},
     recipient,
-  })
-
-  // The authoring-time figures, computed by the same `costOf` the choke point prices the send with rather
-  // than read off the variant row: a second source for "what does this body cost" is how a dry run's
-  // quotation comes to disagree with the invoice it is supposed to predict.
-  const priced = costOf(node.channel, classified.template.body)
-  const costing = {
-    encoding: priced.encoding,
-    segments: priced.segments,
-    costFils: priced.costFils,
   }
+  if (held !== null) {
+    const released = await releaseHeldMessage(delivery, request, {
+      id: held.messageId,
+      queuedAtIso: held.queuedAtIso,
+    })
+    return releasedEffect(node, released, consentRecordId, priceOf(node, classified.template.body))
+  }
+  const outcome = await deliverMessage(delivery, request)
+
+  const costing = priceOf(node, classified.template.body)
 
   if (outcome.kind === 'held') {
     return effect({
@@ -454,4 +515,76 @@ function effect(
     pause: false,
     ...partial,
   }
+}
+
+/**
+ * The authoring-time figures for one body, from the same `costOf` the choke point prices the send with.
+ *
+ * Read from the BODY and not off the variant row, so a dry run's quotation cannot disagree with the invoice
+ * it is supposed to predict: two sources for "what does this message cost" is one source plus a future
+ * disagreement, and the disagreement is the number an operator was shown.
+ */
+function priceOf(
+  node: MessageNodeSpec,
+  body: string,
+): { readonly encoding: string; readonly segments: number; readonly costFils: number } {
+  const priced = costOf(node.channel, body)
+  return { encoding: priced.encoding, segments: priced.segments, costFils: priced.costFils }
+}
+
+/** What a release did, in the shape the step log holds. */
+function releasedEffect(
+  node: MessageNodeSpec,
+  released: Awaited<ReturnType<typeof releaseHeldMessage>>,
+  consentRecordId: string | null,
+  costing: { readonly encoding: string; readonly segments: number; readonly costFils: number },
+): NodeEffect {
+  const base = {
+    channel: node.channel,
+    templateKey: node.templateKey,
+    consentRecordId,
+    ...costing,
+  }
+  if (released.kind === 'sent') {
+    return effect({
+      ...base,
+      outcome: 'executed',
+      messageId: released.message.id,
+      gateDecision: 'allow',
+      detail: 'Released at the instant the gate named, and accepted by the vendor.',
+    })
+  }
+  if (released.kind === 'still_held') {
+    // The window narrowed under the hold. A state and not a failure: the run pauses again on the NEW
+    // instant the gate named, which is the only place that instant can come from.
+    return effect({
+      ...base,
+      outcome: 'held',
+      messageId: released.message.id,
+      gateDecision: 'queued_for_window',
+      releaseAtIso: released.releaseAtIso,
+      detail: `Still outside the window; the gate moved the release to ${released.releaseAtIso}.`,
+      pause: true,
+    })
+  }
+  if (released.kind === 'hold_ended') {
+    return effect({
+      ...base,
+      outcome: 'refused',
+      // No message id, although the row exists and is now terminal:
+      // `flow_step_log_message_belongs_to_a_send` admits one only on `executed` or `held`, and a refused
+      // step pointing at a message would read as a message this step sent. The message's own row carries
+      // the reason and the earlier `held` row on this node points at it, so "which message was this" is
+      // still one query.
+      gateDecision: released.reason,
+      detail: released.detail,
+    })
+  }
+  return effect({
+    ...base,
+    outcome: 'executed',
+    messageId: released.message.id,
+    gateDecision: 'allow',
+    detail: `The vendor did not accept the release: ${String(released.message.lastFailureReason)}.`,
+  })
 }

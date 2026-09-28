@@ -778,7 +778,20 @@ describe('acceptance — stage entry enrols through the same enrolment API as an
        where customer_id = ${customerId}
          and flow_id = (select id from flow where flow_key = ${FLOWS.onStageEntry})
     `
-    expect(rows.length - Number(before?.n)).toBe(1)
+    // One ACTIVE enrolment for the pair, and the outcome that says which of the two happened.
+    //
+    // It used to be `rows.length - before === 1`, which was right while a second enrolment for one contact
+    // was simply another row. C-AUTO-07 made that false: `flow_enrolment_one_active_per_contact` (0091) is a
+    // partial unique index, so a contact already running on this flow gets the EXISTING enrolment back with
+    // `outcome: 'already_enrolled'` — and the old assertion would have failed on the second run of this
+    // suite against one database, for a reason that has nothing to do with the pipeline.
+    expect(outcome.enrolment?.outcome).toBe(
+      Number(before?.n) === 0 ? 'enrolled' : 'already_enrolled',
+    )
+    expect(
+      rows.filter((row) => row.status === 'active'),
+      'one active enrolment for this contact on this flow, whatever the run',
+    ).toHaveLength(1)
     const [live] = await sql<{ version: number }[]>`
       select max(d.version)::int as version from flow_definition d
         join flow f on f.id = d.flow_id where f.flow_key = ${FLOWS.onStageEntry}
@@ -823,14 +836,18 @@ describe('acceptance — stage entry enrols through the same enrolment API as an
 
   it('carries a refusal from the enrolment writer out unchanged, never swallowing it', async () => {
     /*
-      What makes the per-flow enrolment limit apply here the moment C-AUTO-07 adds it.
+      What makes the per-flow enrolment limit apply here, and it now DOES.
 
-      The cap does not exist yet — C-AUTO-06's NOTE says the per-flow cap, the already-enrolled outcome and
-      the idempotency of a trigger are C-AUTO-07's, and its provisional line names the figure (5,000 active
-      enrolments per flow). Inventing it here would be inventing a threshold nobody has agreed and putting
-      it in the wrong unit. What IS assertable is the property the cap needs: a refusal raised by the
-      enrolment writer travels out of `moveCard` with its own name attached, and the move goes back with it.
-      A path that caught the refusal and carried on would pass every other case in this file.
+      This case was written before the cap existed, to prove the property the cap would need: a refusal
+      raised by the enrolment writer travels out of `moveCard` with its own name attached, and the move goes
+      back with it. A path that caught the refusal and carried on would pass every other case in this file.
+
+      C-AUTO-07 has since added the cap to `enrolOnLiveVersion` — 5,000 active enrolments per flow, refused
+      as `flow_enrolment_cap_reached`, which is the string this case's injected enroller already raised — and
+      because `PIPELINE_ENROLMENT_PATH.enrol` IS that function by reference rather than a wrapper around it,
+      a stage entry inherited the cap with nothing here to change. The real refusal is driven at the real
+      bound in `apps/worker/src/automation/interpreter.itest.ts`, which fills a flow to its ceiling; what
+      this case still proves is the half that is about `moveCard` — that the refusal is not absorbed.
     */
     const customerId = contact(2)
     const [stageBefore] = await sql<{ stage_key: string }[]>`

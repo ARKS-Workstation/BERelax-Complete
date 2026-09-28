@@ -2,6 +2,41 @@ import { applyCustomerTag, claimNodeEffect } from '@berelax/db'
 import type { NodeContext, NodeEffect } from './effect.ts'
 
 /**
+ * The grammar `customer_tag.tag` accepts: kebab-case, 2 to 40 characters (`customer_tag_tag_check`, 0053).
+ *
+ * Restated here because `packages/db` does not export it and this is the one caller that can be handed a
+ * tag it did not choose. It is a copy, and the copy is asserted against the live CHECK by
+ * `interpreter.itest.ts` so it cannot drift silently.
+ *
+ * ## The disagreement this exists because of, and who owns it
+ *
+ * The DSL's `action_tag.tag` is lower SNAKE case (`schemas/flow.ts`, `VOCABULARY_VALUE`), and no string
+ * satisfies both grammars: one requires `_` to be legal, the other requires `-`. So a flow an operator
+ * draws with `nurture_touch` validates, publishes, and then cannot write its tag. Two of the committed
+ * corpus documents are in that state, which is how this was found — by running the interpreter, which is
+ * the first thing in this build that writes a tag from a flow.
+ *
+ * This unit does NOT reconcile the two vocabularies, and the reason is that reconciling them changes what a
+ * published document may contain: the DSL field is `.strict()`, its round-trip property is over the
+ * committed corpus, and `flow-corpus.test.ts` asserts twelve valid documents byte for byte. Changing the
+ * grammar is a change to what an operator may draw, and the unit that owns the picker an operator draws it
+ * in is C-AUTO-09. A NOTE in the manifest says so.
+ *
+ * What this unit does is refuse LOUDLY and in a row a reader will find: `refused` with
+ * `tag_not_storable`, the grammar in the detail, and the flow carrying on down the rest of the graph.
+ * Raising instead would burn a pg-boss retry on a condition that cannot change in sixty seconds and would
+ * dead-letter a job whose only problem is a document somebody was allowed to publish.
+ */
+export const STORABLE_TAG = /^[a-z0-9]+(-[a-z0-9]+)*$/
+const STORABLE_TAG_LENGTH = { min: 2, max: 40 } as const
+
+/** True for a tag `customer_tag` will accept. */
+export const isStorableTag = (tag: string): boolean =>
+  STORABLE_TAG.test(tag) &&
+  tag.length >= STORABLE_TAG_LENGTH.min &&
+  tag.length <= STORABLE_TAG_LENGTH.max
+
+/**
  * `action_tag`: put a tag on the contact.
  *
  * ## Why it claims a token at all, when the insert is already idempotent
@@ -47,6 +82,27 @@ export async function executeTagNode(
       segments: null,
       costFils: null,
       detail: `The tag "${node.tag}" was already applied by an earlier delivery of this node.`,
+      releaseAtIso: null,
+      pause: false,
+    }
+  }
+  if (!isStorableTag(node.tag)) {
+    return {
+      outcome: 'refused',
+      channel: null,
+      templateKey: null,
+      messageId: null,
+      consentRecordId: null,
+      gateDecision: 'tag_not_storable',
+      encoding: null,
+      segments: null,
+      costFils: null,
+      detail:
+        `"${node.tag}" is not a tag customer_tag will store: the column accepts ` +
+        `${String(STORABLE_TAG)} between ${STORABLE_TAG_LENGTH.min} and ${STORABLE_TAG_LENGTH.max} ` +
+        'characters (customer_tag_tag_check, 0053), and the flow DSL accepts lower snake_case. No string ' +
+        'satisfies both. Recorded rather than raised: the document cannot fix itself in sixty seconds, and ' +
+        'a dead-lettered job would hide a flow that publishes and then does nothing.',
       releaseAtIso: null,
       pause: false,
     }
