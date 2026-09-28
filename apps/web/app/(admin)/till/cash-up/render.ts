@@ -84,6 +84,14 @@ export interface CashUpView {
   readonly cashUpHref: string
   readonly packagesHref: string
   readonly tradingDate: string
+  /**
+   * The day's own opening and closing time, read off the `business_day` row.
+   *
+   * Carried rather than written into the template: `premises_hours` is where the hours live, and
+   * `premises.test.ts` refuses a literal opening or closing time anywhere in `apps/web` — because a surface
+   * with them typed in goes on showing them after the owner has changed them. It caught this screen's lede.
+   */
+  readonly hoursLabel: string
   readonly announcement: string
   readonly refusal: string | null
   readonly drawers: readonly CashUpDrawerView[]
@@ -277,7 +285,9 @@ export function renderCashUpHtml(view: CashUpView): string {
     nav(view),
     '<div class="lede">',
     `<p><strong>Business day ${safeText(view.tradingDate)}</strong></p>`,
-    '<p data-testid="cash-up-lede">Keyed on the business day and never the calendar date: a shift that opens at 23:00 and ends at 02:00 is one session, so a cash payment taken at 01:30 belongs to the day before.</p>',
+    `<p data-testid="cash-up-lede">Keyed on the business day and never the calendar date: this day trades ` +
+      `${safeText(view.hoursLabel)}, so one shift crosses midnight and is one session — a cash payment taken ` +
+      'in the small hours belongs to the day before.</p>',
     '</div>',
     `<p class="live" role="status" aria-live="polite" data-testid="cash-up-live">${safeText(view.announcement)}</p>`,
     view.refusal === null

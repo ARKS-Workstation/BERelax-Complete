@@ -182,25 +182,32 @@ async function tradingWindowFor(
   sql: Sql,
   now: number,
   requested: string,
-): Promise<{ tradingDate: string } | null> {
+): Promise<{ tradingDate: string; opensAt: Date; closesAt: Date } | null> {
   const wanted = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : null
-  const [row] = await sql<{ trading_date: string }[]>`
-    select to_char(trading_date, 'YYYY-MM-DD') as trading_date
+  const [row] = await sql<{ trading_date: string; opens_at: Date; closes_at: Date }[]>`
+    select to_char(trading_date, 'YYYY-MM-DD') as trading_date, opens_at, closes_at
       from business_day
      where case when ${wanted}::text is null then closes_at > ${new Date(now)}
                 else trading_date = ${wanted}::date end
      order by trading_date
      limit 1
   `
-  return row === undefined ? null : { tradingDate: row.trading_date }
+  return row === undefined
+    ? null
+    : { tradingDate: row.trading_date, opensAt: row.opens_at, closesAt: row.closes_at }
 }
 
 /**
  * The hours around an instant, as `resolveTaxPoint` takes them.
  *
- * Shaped exactly as quick-book's and `/api/v1/bookings`'. A window of five days and not one, because trading
- * runs 11:00–02:00: an instant at 01:30 belongs to the previous trading date, and the tax point is resolved
- * from the SUPPLY instant, which may be a day either side of the issue.
+ * Shaped exactly as quick-book's and `/api/v1/bookings`'. A window of five days and not one, because the
+ * trading day CROSSES MIDNIGHT: an instant in the small hours belongs to the previous trading date, and the
+ * tax point is resolved from the SUPPLY instant, which may be a day either side of the issue.
+ *
+ * The hours themselves are deliberately not written down here. They live in `premises_hours` and reach a
+ * reader through the `business_day` row; `premises.test.ts` scans `apps/web` for a literal opening or closing
+ * time and refuses one, because a surface with the hours typed into it goes on showing them after the owner
+ * has changed them. That check caught this comment.
  */
 async function hoursAround(
   sql: Sql,
@@ -595,9 +602,13 @@ async function buildView(args: {
       packagesHref: `${PACKAGES_PATH}?${query.toString()}`,
       dayLabel: `Business day ${window.tradingDate}`,
       tradingDate: window.tradingDate,
+      // The hours come off the `business_day` ROW, never a literal: `premises_hours` is where they live, and a
+      // lede with them typed in would go on claiming them after the owner had changed them.
       lede:
-        'Trading runs 11:00 to 02:00, so a treatment delivered at 01:30 is billed on the previous ' +
-        'business day. Every date on this screen is the business day, never the calendar date.',
+        `Trading runs ${toLocal(window.opensAt.getTime() as Instant, ASIA_DUBAI).time} to ` +
+        `${toLocal(window.closesAt.getTime() as Instant, ASIA_DUBAI).time}, so a treatment delivered ` +
+        'after midnight is billed on the previous business day. Every date on this screen is the business ' +
+        'day, never the calendar date.',
       announcement: args.announcement,
       billable: billable.map((row) => ({
         appointmentId: row.appointmentId,

@@ -1066,7 +1066,7 @@ export const ROUTES = [
       'M-TILL-13s cash-up: the drawer session for one business day, opened with a declared float and ' +
       'closed against a counted one, with the variance always posted to 6140 in the close transaction ' +
       '(M-TILL-11s ZU004). Keyed on the BUSINESS DAY and never the calendar date, because trading runs ' +
-      '11:00-02:00 and a shift that opens at 23:00 and ends at 02:00 is one session. A handler for the ' +
+      'across midnight, so one shift spanning it is one session. A handler for the ' +
       'reason the till above it gives, and `?dir=rtl` is the same layout axis. It WRITES - open, drop and ' +
       'close are three POSTs, each one transaction - and it is NOT authenticated until W-SYS-01. Dynamic ' +
       'because the expected float is a sum over the payments taken so far: a prerendered copy would ' +

@@ -37,7 +37,7 @@ function view(overrides: Partial<TillView> = {}): TillView {
     packagesHref: '/packages?day=2026-09-18',
     dayLabel: 'Business day 2026-09-18',
     tradingDate: '2026-09-18',
-    lede: 'Trading runs 11:00 to 02:00.',
+    lede: 'Trading runs from open to close, so a treatment after midnight is billed on the previous day.',
     announcement: 'Pull a completed treatment through, then take the payment.',
     billable: [
       {

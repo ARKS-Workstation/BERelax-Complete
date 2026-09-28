@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  ASIA_DUBAI,
   accountCode,
   cashDropPosting,
   cashUpPosting,
@@ -7,10 +8,12 @@ import {
   expectedFloat,
   filsFrom,
   formatMoney,
+  type Instant,
   localDate,
   money,
   reconcileDrawer,
   STANDARD_SPA_CHART,
+  toLocal,
 } from '@berelax/core'
 import {
   closeCashSession,
@@ -73,17 +76,31 @@ function amountFils(raw: string): number | null {
   return Number(trimmed)
 }
 
-async function tradingDateFor(sql: Sql, now: number, requested: string): Promise<string | null> {
+interface CashUpDay {
+  readonly tradingDate: string
+  readonly opensAt: Date
+  readonly closesAt: Date
+}
+
+/**
+ * The trading day, requested or in progress, WITH its own hours.
+ *
+ * The hours are read rather than written down: `premises_hours` is where they live and the `business_day` row
+ * is how a reader reaches them, which is what `premises.test.ts` refuses a literal for.
+ */
+async function tradingDayFor(sql: Sql, now: number, requested: string): Promise<CashUpDay | null> {
   const wanted = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : null
-  const [row] = await sql<{ trading_date: string }[]>`
-    select to_char(trading_date, 'YYYY-MM-DD') as trading_date
+  const [row] = await sql<{ trading_date: string; opens_at: Date; closes_at: Date }[]>`
+    select to_char(trading_date, 'YYYY-MM-DD') as trading_date, opens_at, closes_at
       from business_day
      where case when ${wanted}::text is null then closes_at > ${new Date(now)}
                 else trading_date = ${wanted}::date end
      order by trading_date
      limit 1
   `
-  return row?.trading_date ?? null
+  return row === undefined
+    ? null
+    : { tradingDate: row.trading_date, opensAt: row.opens_at, closesAt: row.closes_at }
 }
 
 const sessionView = (session: {
@@ -136,12 +153,9 @@ async function buildView(args: {
   readonly postedLines: CashUpView['postedLines']
 }): Promise<CashUpView | null> {
   const { deps, params } = args
-  const tradingDate = await tradingDateFor(
-    deps.sql,
-    deps.now(),
-    params.get(CASH_UP_FIELDS.day) ?? '',
-  )
-  if (tradingDate === null) return null
+  const day = await tradingDayFor(deps.sql, deps.now(), params.get(CASH_UP_FIELDS.day) ?? '')
+  if (day === null) return null
+  const tradingDate = day.tradingDate
   const direction = params.get(CASH_UP_FIELDS.direction) === 'rtl' ? 'rtl' : 'ltr'
   const drawerCode = params.get(CASH_UP_FIELDS.drawer) ?? DEFAULT_DRAWER
   const drawers = await readCashDrawers(deps.sql)
@@ -166,6 +180,9 @@ async function buildView(args: {
     cashUpHref: `${TILL_CASH_UP_PATH}?${ownQuery.toString()}`,
     packagesHref: `${PACKAGES_PATH}?${query.toString()}`,
     tradingDate,
+    hoursLabel:
+      `${toLocal(day.opensAt.getTime() as Instant, ASIA_DUBAI).time} to ` +
+      `${toLocal(day.closesAt.getTime() as Instant, ASIA_DUBAI).time}`,
     announcement: args.announcement,
     refusal: args.refusal,
     drawers: drawers.map((drawer) => ({
@@ -254,8 +271,9 @@ export async function handleCashUpWrite(
     )
   }
 
-  const tradingDate = await tradingDateFor(deps.sql, deps.now(), body.get(CASH_UP_FIELDS.day) ?? '')
-  if (tradingDate === null) return NOT_TRADING()
+  const day = await tradingDayFor(deps.sql, deps.now(), body.get(CASH_UP_FIELDS.day) ?? '')
+  if (day === null) return NOT_TRADING()
+  const tradingDate = day.tradingDate
   const drawerCode = body.get(CASH_UP_FIELDS.drawer) ?? DEFAULT_DRAWER
 
   try {

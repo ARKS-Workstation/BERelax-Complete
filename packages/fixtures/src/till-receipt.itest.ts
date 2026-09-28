@@ -13,6 +13,7 @@ import {
 import type { Actor, Sql } from '@berelax/db'
 import {
   createConnection,
+  currentPackageTemplateVersion,
   finaliseCheckout,
   redeemPackage,
   savePackageTemplateVersion,
@@ -231,15 +232,32 @@ beforeAll(async () => {
   if (spare !== undefined) {
     balanceId = spare.id
   } else {
-    const saved = await withUnitOfWork(sql, TILL, async (uow) =>
-      savePackageTemplateVersion(uow, {
-        templateKey: TEMPLATE_KEY,
-        internalName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
-        publicDisplayName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
-        priceFils: packagePriceFils,
-        lines: [{ serviceVariantId: packageVariantId, sessionCount: PACKAGE_SESSIONS }],
-      }),
-    )
+    /*
+      The template version is SAVED ONLY WHEN THERE IS NONE, and read back otherwise.
+
+      `savePackageTemplateVersion` is an EDIT: it inserts version + 1, because a template's terms are immutable
+      once anything has been sold under them (0078). Calling it on every sale therefore left one undeletable
+      version per sale — eight of them after eight runs, read by nothing because every reader takes
+      `max(version)`, which is exactly why nothing noticed. A version that already says what this probe needs
+      is the version to sell, so the save happens once in the life of a database.
+    */
+    let version = await currentPackageTemplateVersion(sql, TEMPLATE_KEY)
+    if (version === null) {
+      await withUnitOfWork(sql, TILL, async (uow) =>
+        savePackageTemplateVersion(uow, {
+          templateKey: TEMPLATE_KEY,
+          internalName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
+          publicDisplayName: `[confirm] ${PACKAGE_SESSIONS} sessions — probe, Y9-package-catalogue`,
+          priceFils: packagePriceFils,
+          lines: [{ serviceVariantId: packageVariantId, sessionCount: PACKAGE_SESSIONS }],
+        }),
+      )
+      version = await currentPackageTemplateVersion(sql, TEMPLATE_KEY)
+    }
+    const saved = version as NonNullable<typeof version>
+    // The stored price, not the one computed above: the version is what the sale is held equal to by ZG002,
+    // and a catalogue price that moved after the version was published must not change what is sold.
+    packagePriceFils = saved.priceFils
     const saleMapping = packageSaleMapping({
       entryId: entryId(`mtill13-receipt-pkg-sale-${nonce}`),
       tradingDate: localDate(TRADING_DATE),
