@@ -283,9 +283,26 @@ beforeAll(async () => {
       template_id, channel, locale, approval_state, body, variables, encoding, segments, cost_fils
     )
     select t.id, 'sms', 'en', 'approved',
-           'A short note from the salon. Reply STOP to opt out.', '{}'::text[], 'GSM-7', 1, 12
+           -- No opt-out promise in the body, and that is a RULE and not a style choice. Every SMS leaves
+           -- from a TDRA-registered ALPHANUMERIC sender ID, which cannot receive an inbound message, so
+           -- "Reply STOP" tells somebody who wants the messages to stop that they have a way to stop them,
+           -- sends them into a void, and leaves the business able to say it offered an opt-out while having
+           -- offered none. The working one is C-CRM-07's preference-centre link.
+           -- unreachableOptOutPhrasesIn in @berelax/core forbids the phrase and
+           -- apps/web/src/preference-centre.itest.ts scans EVERY message_template_variant row in the
+           -- database for it, not just the shipped corpus — which is how this body was caught: the row this
+           -- suite inserts persists, so a fixture written here becomes a row that suite reads. C-AUTO-03's
+           -- fixture said the same thing and was corrected for the same reason; a fixture is where a
+           -- convention gets copied from, which is exactly what happened.
+           'A short note from the salon about this week.', '{}'::text[], 'GSM-7', 1, 12
       from message_template t where t.template_key = ${TEMPLATE_KEY}
-    on conflict do nothing
+    -- UPDATE and not DO NOTHING, so the fixture in this file is authoritative rather than
+    -- first-writer-wins. DO NOTHING is what let the old body survive here after it was corrected: the row
+    -- persists between runs and against a database that already held it the edit would have been silent,
+    -- which is the same defect as a test asserting something it never wrote.
+    on conflict (template_id, channel, locale) do update
+       set body = excluded.body, variables = excluded.variables, encoding = excluded.encoding,
+           segments = excluded.segments, cost_fils = excluded.cost_fils
   `
 
   const rows = await sql<{ template_key: string; message_class: string }[]>`
