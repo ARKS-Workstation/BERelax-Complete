@@ -91,22 +91,14 @@
 -- this database and asserts the two agree. An enum would make each future alignment a migration and
 -- would still not have proved the two agree about the arrows, which is the part that matters.
 --
--- ## The one term this file adds to `regulatory_profile`, and why it is added THERE
+-- ## The one term this file adds to `regulatory_profile`, and why it moves the DEFAULT
 --
 -- The banned vocabulary is the profile's (0004, ADR 0020) and this unit adds no list of its own: the page
 -- lint calls `lintPublicDisplayName` with the profile in force, which is the same function the catalogue's
--- public names go through. One term was missing for a PAGE, and it is missing for a reason rather than by
--- omission: 0004's list was written for service display names, where the word cannot appear, and the
--- lint's stemmer stops at plurals and `-ing` on purpose ("a real stemmer starts matching words nobody
--- banned"), so `clinical` does not match `clinic`. A page that calls the premises a clinic is claiming a
--- Department of Health facility licence in one word, which is the exact exposure the list exists for.
---
--- So it is added where the fact lives — a new `regulatory_profile` version, which is what that table's
--- append-only versioning is FOR — and not as a second list in the lint file. Every other column is copied
--- from the row in force rather than restated, which is `opening-balances.itest.ts`'s lesson (brief rule
--- 12): a singleton ensured with hand-typed values is how a wrong registered name reached every tax
--- invoice. The new row stays `is_provisional` and its `source_note` names Y1-licence, because it is still
--- the stricter reading of an unanswered licence question and belongs on the Unconfirmed Assumptions panel.
+-- public names go through. One term was missing for a PAGE — `clinic` — and §8 below sets out why it was
+-- missing, why it is added to the column's DEFAULT and then reconciled into the row (0058's shape, for
+-- 0058's reason), and the `pnpm verify` run that proved a row-only change cannot survive the integration
+-- suite. It stays `is_provisional` against Y1-licence either way.
 --
 -- ## The private SQLSTATEs
 --
@@ -578,38 +570,69 @@ revoke update, delete, truncate on publication_record    from berelax_app;
 -- 8. The one term the page lint needs and 0004's list does not carry.
 -- ---------------------------------------------------------------------------------------------
 --
--- A new version, because `regulatory_profile` is append-only and versioned for exactly this (ADR 0008,
--- ADR 0020). Every column except the term list is COPIED from the row in force rather than restated: a
--- singleton re-ensured with hand-typed values is how `opening-balances.itest.ts` wrote a wrong registered
--- name onto every tax invoice (brief rule 12). `array_append` rather than a literal array, so the fourteen
--- terms 0004 seeded stay in their order — `seo-agent-cage.itest.ts` reads `banned_claim_terms[0]` as its
--- fixture term — and so this file states one term rather than fifteen.
+-- The banned vocabulary is the profile's (0004, ADR 0020) and this unit adds no list of its own: the page
+-- lint calls `lintPublicDisplayName` with the profile in force, which is the same function the catalogue's
+-- public names go through. One term was missing for a PAGE, and it is missing for a reason rather than by
+-- omission: 0004's list was written for service display names, where the word cannot appear, and the lint's
+-- stemmer stops at plurals and `-ing` on purpose ("a real stemmer starts matching words nobody banned"), so
+-- `clinical` does not match `clinic`. A page that calls the premises a clinic is claiming a Department of
+-- Health facility licence in one word, which is the exact exposure the list exists for.
+--
+-- ## Why the DEFAULT moves and not just the row — 0058's shape, and the run that proved it necessary
+--
+-- The first version of this section inserted a new version carrying `array_append(retired.banned_claim_terms,
+-- 'clinic')` and left the column DEFAULT alone. It was correct for exactly as long as no integration suite
+-- ran. `restoreSeededProfile()` in `packages/fixtures/src/hr-credentials.itest.ts`, and the equivalents in
+-- `catalogue-compliance.itest.ts` and `therapist-eligibility.itest.ts`, restore the seeded profile by
+-- inserting a row that names `source_note` and NOTHING ELSE — so every other column takes its DEFAULT. That
+-- is deliberate and it is the right design: it means "the seeded profile" and "every column at its DEFAULT"
+-- are the same sentence, a fixture cannot restore NEARLY the original row, and a database left polluted by a
+-- suite that died between its probe and its `finally` is HEALED rather than merely tolerated. Gate case 75
+-- asserts that healing with a known-bad control.
+--
+-- So a term added to the ROW and not to the DEFAULT is erased by the first integration run, silently, and
+-- `pnpm verify` reported it as two failures in this unit's own suite — "the profile in force really carries
+-- the terms the corpus depends on" — four versions after mine, each restored to fourteen terms.
+--
+-- 0058 had already answered this from the other side, for `mandatory_therapist_document_types`: 0054 revised
+-- the DEFAULT, the row in force lagged it, and "the credential gate ACTUALLY IN FORCE is weaker than the
+-- answer the build states everywhere else". The fix there was to move the default and then insert a version
+-- naming `source_note` and nothing else. This does the same, in the same order, for the same reason.
+--
+-- The fifteen terms are therefore written out ONCE, as the column's default, which is where 0004 put them
+-- and where every reader and every restore already looks. `set default array_append(<the old default>, …)`
+-- is not expressible in DDL, and a DO block reading `pg_get_expr` to synthesise one would make the single
+-- most-read list in this schema unreadable. The order is 0004's, with `clinic` appended last, because
+-- `seo-agent-cage.itest.ts` takes `banned_claim_terms[0]` as its fixture term.
+--
+-- Still PROVISIONAL against Y1-licence. A lawyer's answer supersedes this row; it does not edit it.
 
-with retired as (
-  update regulatory_profile
-     set superseded_at = now()
-   where superseded_at is null
-  returning *
-)
-insert into regulatory_profile (
-  licence_class, emirate, clinical_retention_years, financial_retention_years,
-  erasure_overrides_retention, medical_claims_permitted, permitted_public_titles,
-  banned_claim_terms, mandatory_therapist_document_types, non_expiring_document_types,
-  is_provisional, source_note, effective_from, created_by
-)
-select
-  retired.licence_class, retired.emirate, retired.clinical_retention_years,
-  retired.financial_retention_years, retired.erasure_overrides_retention,
-  retired.medical_claims_permitted, retired.permitted_public_titles,
-  array_append(retired.banned_claim_terms, 'clinic'),
-  retired.mandatory_therapist_document_types, retired.non_expiring_document_types,
-  retired.is_provisional,
-  'Migration 0093 (W-SITE-10). Adds "clinic" to banned_claim_terms for the page lint: 0004''s list was '
-  'written for service display names, where the word cannot appear, and the lexicon''s stemmer stops at '
-  'plurals and -ing on purpose, so "clinical" does not match "clinic". A page calling the premises a '
-  'clinic claims a Department of Health facility licence in one word. Still the stricter reading of an '
-  'unanswered licence question: see OPEN-QUESTIONS Y1-licence.',
-  now(), 'migration_0093'
-from retired;
+alter table regulatory_profile
+  alter column banned_claim_terms set default array[
+    'therapeutic', 'therapy', 'treatment', 'pain relief', 'rehabilitation',
+    'cure', 'heal', 'medical', 'clinical', 'diagnosis', 'prescribe',
+    'physiotherapy', 'lymphatic drainage', 'prenatal',
+    -- W-SITE-10. See the header: a page may say it, a service name cannot, and `clinical` does not match it.
+    'clinic'
+  ];
+
+comment on column regulatory_profile.banned_claim_terms is
+  'Drives the publication lint. Under a non-healthcare licence these words are claims, not marketing. '
+  'Applies to service display names too: "Therapeutic Deep Tissue" is a claim. 0093 appended "clinic" for '
+  'the PAGE lint: 0004''s list was written for display names, where the word cannot appear, and the '
+  'lexicon''s stemmer stops at plurals and -ing, so "clinical" does not match it.';
+
+update regulatory_profile set superseded_at = now() where superseded_at is null;
+
+insert into regulatory_profile (source_note)
+values (
+  'Reconciled by migration 0093 (W-SITE-10). The row in force now carries every column''s DEFAULT, which is '
+  'what 0004''s own seed and 0058''s reconciliation both wrote, and which this migration revised to add '
+  '"clinic" to banned_claim_terms for the page lint. Written this way so that "the seeded profile" and '
+  '"every column at its DEFAULT" stay the same sentence: three integration suites restore the seeded '
+  'profile by naming source_note and nothing else, and a term added only to the row would be erased by the '
+  'first one to run. Still PROVISIONAL against Y1-licence: a lawyer''s answer supersedes this row, it does '
+  'not edit it.'
+);
 
 commit;

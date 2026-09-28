@@ -13845,6 +13845,14 @@ units:
       it at all: a migration needing a refusal code before that unit lands must extend an existing family,
       which `packages/db/src/sqlstate-uniqueness.test.ts` refuses, or wait. The ledger note before
       SCHEMA_VERSION and that test''s header both say so.'
+    - 'NOTE: `clinic` reached `banned_claim_terms` by revising the column''s DEFAULT and then reconciling the
+      row in force to every column''s default — migration 0058''s shape. A first version appended the term to
+      the ROW alone and `pnpm verify` failed in this unit''s own suite four profile versions later:
+      `restoreSeededProfile()` in `packages/fixtures/src/hr-credentials.itest.ts` and the equivalents in
+      `catalogue-compliance.itest.ts` and `therapist-eligibility.itest.ts` restore the seeded profile by
+      inserting a row that names `source_note` and nothing else, so every other column takes its DEFAULT.
+      That is the right design and gate case 75 protects it — it HEALS a database a killed suite left
+      polluted — so a term added only to the row cannot survive an integration run and must not be made to.'
     - 'NOTE: the slot-budget half of the publish-time check reaches W-SYS-09''s rules through W-SYS-10''s
       `assessMediaForPublication`, which measures the objects in the bucket. The refusal is composed and
       mapped here and is asserted at that level; the per-rung AVIF weights those rules judge are asserted

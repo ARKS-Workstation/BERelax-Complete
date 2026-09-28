@@ -86,10 +86,18 @@ that can be switched off eventually will be"*. A prompt is a request. `assertPri
   identifies a migration file has no allocation left in it. W-SYS-12 owns replacing it with an allocator and
   is no longer optional: a migration needing a refusal code before that lands must extend an existing family,
   which `packages/db/src/sqlstate-uniqueness.test.ts` refuses, or wait.
-- **One term was added to `regulatory_profile`, not to a lint file.** `clinic`, because 0004's list was
-  written for service display names where the word cannot appear and the lexicon's stemmer deliberately stops
-  at plurals and `-ing`, so `clinical` does not match it. It went in as a new profile version with every other
-  column copied from the row in force, and it stays `is_provisional` against `Y1-licence`. The consequence is
-  that the term list in force is no longer the one migration 0004 seeds, so a fixture copy of those fourteen
-  words is now a stale copy — and the integration suite reads the row rather than a fixture for exactly that
-  reason.
+- **One term was added to `regulatory_profile`, not to a lint file** — and it had to move the column's
+  DEFAULT, not just the row. `clinic`, because 0004's list was written for service display names where the
+  word cannot appear and the lexicon's stemmer deliberately stops at plurals and `-ing`, so `clinical` does
+  not match it. The first attempt inserted a new version carrying `array_append(retired.banned_claim_terms,
+  'clinic')` and left the default alone; `pnpm verify` then failed in this unit's own suite, four profile
+  versions later, because three integration suites restore the seeded profile by inserting a row that names
+  `source_note` and nothing else — so every other column takes its DEFAULT. That is the right design and gate
+  case 75 protects it: it makes "the seeded profile" and "every column at its DEFAULT" one sentence, and it
+  HEALS a database a killed suite left polluted. Migration 0058 had already answered the same question for
+  `mandatory_therapist_document_types`, in the same order, for the same reason. So 0093 revises the default and
+  then reconciles the row, and the consequence to live with is that the fifteen terms are written out once as
+  a DDL default — a `set default array_append(<the old default>, …)` is not expressible, and a `DO` block
+  synthesising one from `pg_get_expr` would make the most-read list in the schema unreadable. It stays
+  `is_provisional` against `Y1-licence`, and every fixture copy of the old fourteen words is now stale, which
+  is why the integration suite reads the row.
