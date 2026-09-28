@@ -5421,25 +5421,64 @@ units:
       that does not exist — which is exactly the miss M-TILL-11 found on M-VAT-11 and predicted for this unit
       by name. Nothing in the manifest declares an artifacts/screens path today; asserted rather than assumed,
       by walking every unit''s files list.'
-    - 'NOTE: the seeded packages are DESTROYED before the screen that shows them is asked to, and the browser
-      suite re-seeds them. Five integration suites run
-      `truncate package_redemption, payment, package_balance, package_sale, package_template_line,
-      package_template_version, package_template` to get an empty table for their own probes
+    - 'NOTE: the seed writes package TEMPLATES and deliberately no sales, and the four drawdown states are
+      built by the suite that displays them. This is the second and worse of the two defects the full
+      integration chain found in this unit''s own work, and the schema is the whole argument.
+      `package_sale.customer_id` is `not null references customer (id) on delete restrict` (0078) and
+      `package_sale` refuses DELETE for every role, so a seeded sale pins its customer PERMANENTLY — the sale
+      cannot be removed, therefore neither can the customer. `apps/web/src/otp-route.itest.ts` clears the table
+      with a bare `delete from customer` in beforeEach and again in afterAll, and NINE of its cases failed on
+      `package_sale_customer_id_fkey` once this unit''s loader seeded sales against the four customers the
+      consent loader inserts. That is why all five existing package suites end with
+      `truncate ... package_template_version, package_template`: truncate is the only statement that removes an
+      append-only row, and a sale written by a LOADER has no suite to truncate it. So the split is by what is
+      safe to make permanent — `seedPackageTemplates` is what `pnpm seed` runs (a template pins a
+      `service_variant`, which nothing deletes, and writes no journal entry at all), and
+      `seedPackageDrawdownStates` is called by apps/web/src/till.itest.ts, which truncates the family in
+      afterAll. The four states are therefore real on the screens, in the axe audit and in all forty-eight
+      screenshots, and gone by the time anything else runs. What a human running `pnpm seed` loses is the
+      outstanding balances, not the packages: /packages still lists the four marked templates, and selling and
+      redeeming one is what that screen is for. packages/fixtures/src/till-receipt.itest.ts pinned a seeded
+      customer the same way with its own probe sale and now truncates the family too; its header carried the
+      sentence "No suite deletes them" about the seeded customers, which was FALSE and is the sentence that
+      caused this — corrected in place rather than deleted.'
+    - 'NOTE: the fixture packages were destroyed before the screen that shows them, which is the first of the
+      two defects the chain found. Five suites run `truncate package_redemption, payment, package_balance,
+      package_sale, package_template_line, package_template_version, package_template` for their own probes
       (packages/fixtures/src/package.itest.ts and package-redemption.itest.ts,
       packages/db/src/services/sell-package.itest.ts twice over, apps/worker/src/jobs/package-expiry.itest.ts),
-      and two of them do it in afterAll as well, so the four fixture drawdown states `pnpm seed` wrote are gone
-      by the time apps/web/src/till.itest.ts runs. The three package cases passed in isolation, twice back to
-      back, and failed in the full `pnpm test:integration` — brief rule 12 exactly, found by running the chain
-      rather than the file. apps/web/src/till.itest.ts therefore calls seedPackages(sql, nonce) in beforeAll:
-      the loader is guarded on `count(*) from package_template`, so on a run where nothing truncated it that is
-      one count and no writes, and the outcome is checked against the TABLE rather than the return value
-      because seedPackages returns a silent no-op when a prerequisite is missing and a silent no-op would
-      resurface as three unexplained assertion failures 200 seconds later. The nonce is load-bearing:
-      `journal_entry` is append-only and is NOT in that truncate list and could not be — it refuses DELETE for
-      every role — so the entries the first seeding posted outlive the package rows they were posted for, and a
-      re-seed deriving `fixture-pkg-sale-<key>` again would collide on the primary key. seedPackages therefore
-      takes a `run` suffix defaulting to the empty string, which leaves `pnpm seed` as deterministic as every
-      other loader.'
+      two of them in afterAll as well. The three package cases in apps/web/src/till.itest.ts passed in
+      isolation, twice back to back, and failed in the full `pnpm test:integration` — brief rule 12 exactly,
+      found by running the chain and not the file. The suite now seeds templates and drawdown states in its own
+      beforeAll and checks the TABLE rather than the helpers'' return values, because both no-op silently when a
+      prerequisite is missing and a silent no-op would resurface as three unexplained assertion failures two
+      hundred seconds later. The same truncation is why `seedPackageDrawdownStates` discriminates its entry
+      ids: `journal_entry` is append-only and is NOT in that list and could not be, so the entries a first
+      seeding posted outlive the rows they were posted for, and re-deriving `fixture-pkg-sale-<key>` collides on
+      the primary key from inside `sellPackage` with nothing about seeding in the message. The discriminator is
+      the number of fixture sale entries the journal already holds — deterministic, legible in a query, and
+      strictly increasing because those rows cannot be removed, so it cannot repeat; a fresh database counts
+      zero and takes no suffix, which keeps `pnpm seed` as deterministic as every other loader. This is also
+      what failed `packages/fixtures/src/load.itest.ts`''s "produces identical rows when run twice from clean"
+      with `duplicate key value violates unique constraint "journal_entry_pkey"`: that file re-runs every
+      loader on a warm database, and the packages loader now writes no journal entry at all, so the collision
+      cannot arise from `pnpm seed` any more.'
+    - 'NOTE: DEFECT FOUND IN ANOTHER UNIT''S WORK, reported and NOT fixed —
+      `apps/web/src/otp-route.itest.ts` destroys the fixture salon''s customers. It clears the table with a
+      bare `delete from customer` in beforeEach and again in afterAll, with no predicate, so it removes the
+      four rows `pnpm seed` creates along with its own and restores none of them. `pnpm seed` is not re-run
+      between suites, so after ONE integration run `customer` is empty for the life of that database:
+      measured, 0 rows, after the chain that found this. Every suite that reads a seeded customer by phone is
+      therefore order-dependent and passes only until that file runs before it. Eighteen other suites scope
+      their cleanup (`delete from customer where phone_e164 = ...`), which is the convention; this one and
+      `packages/fixtures/src/customer-identity.itest.ts` do not. It is not fixed here because it is another
+      unit''s file, but this unit stopped depending on it: apps/web/src/till.itest.ts and
+      packages/fixtures/src/till-receipt.itest.ts now INSERT their own probe customer on a phone number
+      nothing else in the repository uses (+971559990131, +971559990132 — deliberately not a seeded number,
+      because they delete it) and `seedPackageDrawdownStates` takes the customer ids from its caller instead of
+      reading the seeded four. The wider hazard for whoever fixes it: the first unit to seed a BOOKING hits the
+      same wall from the other side, because `booking.customer_id` is `on delete restrict` too (0024) and
+      docs/12 promises the fixture salon has appointments.'
     - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
       used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
       12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires

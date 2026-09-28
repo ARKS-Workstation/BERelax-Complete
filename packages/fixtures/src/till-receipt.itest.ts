@@ -84,8 +84,19 @@ const MARKER = 'mtill13 till receipt itest'
  */
 const TRADING_DATE = '2026-06-03'
 const PROBE = 'mtill13_receipt_probe'
-/** One of the four customers the consent loader seeds. No suite deletes them. */
-const PROBE_PHONE = '+971590009101'
+/**
+ * This file's own probe customer, in a range nothing else in the repository uses.
+ *
+ * It was one of the four the consent loader seeds, and the comment here used to read "No suite deletes them".
+ * That was false twice over. `apps/web/src/otp-route.itest.ts` clears the whole table with a bare
+ * `delete from customer`, seeded rows included — so the row was not there to be read — and this file's own
+ * package sale pinned it through 0078's `on delete restrict`, which is what made nine of that file's cases
+ * fail on the foreign key. A probe row this file inserts and deletes has neither problem, and deleting it is
+ * reachable because `afterAll` truncates the package family first. Deliberately NOT a seeded number: this
+ * file deletes it, and deleting a row `pnpm seed` created would damage the fixture salon for every suite
+ * after it.
+ */
+const PROBE_PHONE = '+971559990131'
 const PROBE_ROOM = 'mtill13-receipt'
 const TEMPLATE_KEY = 'mtill13_receipt_probe_package'
 const THERAPIST_ONE = '33333333-4444-4555-8666-999999999911'
@@ -116,10 +127,21 @@ beforeAll(async () => {
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from rooms where notes = ${MARKER}`
 
-  // The seeded customer, READ and never inserted: a package sale pins whoever it names, so an invented one
-  // would be undeletable and would break the next suite that clears `customer`.
+  /*
+    This file's OWN customer, inserted rather than read.
+
+    It used to read one of the four the consent loader seeds, on the reasoning that a package sale pins
+    whoever it names so an invented customer would be undeletable. The reasoning was right and the conclusion
+    was wrong: `apps/web/src/otp-route.itest.ts` clears the table with a bare `delete from customer`, so the
+    seeded customers do not survive one integration run and `pnpm seed` is not run again between suites — the
+    read returned undefined and the booking insert failed on `UNDEFINED_VALUE`. The pin is the real problem
+    and `afterAll` now removes it, by truncating the package family before deleting this row.
+  */
   const [customer] = await sql<{ id: string }[]>`
-    select id from customer where phone_e164 = ${PROBE_PHONE}
+    insert into customer (phone_e164, display_name, created_via, locale)
+    values (${PROBE_PHONE}, ${`${MARKER} receipt probe`}, 'front_desk', 'en')
+    on conflict (phone_e164) do update set display_name = excluded.display_name
+    returning id
   `
   customerId = customer?.id as string
 
@@ -321,18 +343,34 @@ afterAll(async () => {
   await sql?.unsafe(
     'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )
-  // The package family is deliberately NOT truncated and NOT deleted, and that is a real limitation rather
-  // than an oversight. 0078 refuses DELETE on `package_sale` for every role and 0083 does the same for
-  // `package_redemption` (a release is evidence that a treatment was delivered against a contract), so the
-  // only removal available is a TRUNCATE — and truncating it would wipe the fixture salon's own four seeded
-  // packages, which the `/packages` screen and its screenshots read. So this file's probe package stays, with
-  // a name carrying the `[confirm]` marker so nothing can mistake it for a product (brief rule 15), and every
-  // assertion anywhere else narrows to its own ids rather than counting templates (brief rule 12).
+  /*
+    And the package family, which an earlier version of this file deliberately left standing. That was wrong,
+    and the reason it was wrong is worth keeping.
+
+    The argument then was that truncating it would wipe the fixture salon's four seeded packages, which the
+    `/packages` screen photographs. That is no longer true and should not have been relied on anyway: the
+    seeded SALES are gone from `pnpm seed` altogether, because a `package_sale` pins its `customer_id` through
+    an `on delete restrict` foreign key and 0078 refuses DELETE on the sale, so the customer can never be
+    deleted again — and `apps/web/src/otp-route.itest.ts` clears the table with a bare `delete from customer`.
+    Nine of its cases failed on that foreign key. This file's own probe sale pinned a seeded customer exactly
+    the same way, so leaving it standing was the same defect in a second place.
+
+    `truncate` is the only statement that removes an append-only row, so it is the only cleanup available, and
+    it is what all five of the other package suites do. `apps/web/src/till.itest.ts` builds the four drawdown
+    states in its own `beforeAll` and truncates them again afterwards, so nothing here is photographing rows
+    this statement takes away.
+  */
+  await sql?.unsafe(
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
+  )
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`
-  // No `business_day` and no `customer` delete: both are SEEDED rows this file only reads, for the reason
-  // stated above TRADING_DATE.
+  // No `business_day` delete: that is a SEEDED row this file only reads, for the reason stated above
+  // TRADING_DATE. The customer IS this file's own and goes last, which is reachable only because the package
+  // truncate above released 0078's `on delete restrict` pin on it.
+  await sql`delete from customer where phone_e164 = ${PROBE_PHONE}`
   await sql?.end({ timeout: 5 })
 })
 

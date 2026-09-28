@@ -175,49 +175,65 @@ export function assertFixturePackageNamesAreMarked(names: readonly string[]): vo
   }
 }
 
-/** The customers the fixture packages are sold to: the four the consent loader inserts, by phone. */
-const FIXTURE_PACKAGE_CUSTOMER_PHONES = [
-  '+971590009101',
-  '+971590009102',
-  '+971590009103',
-  '+971590009104',
-] as const
+/**
+ * ## Why the templates are seeded and the drawdown states are not
+ *
+ * This file used to seed both, and that broke nine cases in `apps/web/src/otp-route.itest.ts` — a file this
+ * unit never touched and had no business touching.
+ *
+ * The schema is the whole argument. `package_sale.customer_id` is `not null references customer (id) on delete
+ * restrict` (0078), and `package_sale` refuses DELETE for every role because a sale is a contract. So a
+ * package sale PERMANENTLY pins its customer: the sale cannot be deleted, therefore the customer cannot be
+ * either, for the life of the database. `otp-route.itest.ts` clears the table with a bare `delete from
+ * customer` in `beforeEach` and again in `afterAll`, and that statement can never succeed again once any
+ * package has been sold to any customer that is still there.
+ *
+ * That is why the five existing package suites all end with
+ * `truncate ... package_template_version, package_template`: `truncate` is the one statement that removes an
+ * append-only row, so a package sale that must not outlive its suite is truncated away rather than deleted.
+ * A sale written by a LOADER has no suite to be truncated by, and between `pnpm seed` and whichever package
+ * suite happens to run first there is a window in which `otp-route.itest.ts` fails.
+ *
+ * So the split is by what is safe to make permanent:
+ *
+ *   - {@link seedPackageTemplates} is what `pnpm seed` runs. A template and its version pin a
+ *     `service_variant` and nothing else, no suite deletes a variant, and no journal entry is written at all
+ *     — so it is permanent, idempotent, and cannot pin a customer or collide with the ledger.
+ *   - {@link seedPackageDrawdownStates} writes the sales, balances and redemptions, and is called by the
+ *     suite that DISPLAYS them (`apps/web/src/till.itest.ts`), which truncates the package family in its
+ *     `afterAll` exactly as the other five do. The four states are therefore real on the screens, in the
+ *     axe audit and in the forty-eight screenshots, and gone by the time anything else runs.
+ *
+ * What a human running `pnpm seed` loses is the outstanding balances, not the packages: `/packages` still
+ * lists the four marked fixture templates, and selling and redeeming one is what that screen is for, so
+ * every drawdown state is two keystrokes away rather than pre-made. That is a smaller loss than a seed that
+ * makes a bare `delete from customer` impossible for every suite that comes after it.
+ */
 
-export interface SeededPackages {
+export interface SeededPackageTemplates {
   readonly templates: number
-  readonly sales: number
-  readonly balances: number
-  readonly redemptions: number
   readonly names: readonly string[]
 }
 
-const NOTHING: SeededPackages = Object.freeze({
-  templates: 0,
-  sales: 0,
-  balances: 0,
-  redemptions: 0,
-  names: [],
-})
+export interface SeededDrawdownStates {
+  readonly sales: number
+  readonly balances: number
+  readonly redemptions: number
+}
+
+const NO_TEMPLATES: SeededPackageTemplates = Object.freeze({ templates: 0, names: [] })
+const NO_STATES: SeededDrawdownStates = Object.freeze({ sales: 0, balances: 0, redemptions: 0 })
 
 /**
- * Seeds the four templates, their sales and their redemptions.
+ * Seeds the four fixture templates and their first version. Nothing else.
  *
  * Idempotent per table, like every other loader: a database that already holds a `package_template` row is
- * left alone. That matters more here than elsewhere because a second run would issue a second set of journal
- * entries, and `journal_entry` is append-only.
- *
- * `run` distinguishes one CALL of this loader from another, and it exists because the guard above is not the
- * whole story. Five integration suites end with
- * `truncate ... package_template_version, package_template` to get an empty table for their own probes, and
- * `journal_entry` is not in that list and could not be — it refuses DELETE. So the guard opens again while
- * the entries the first seeding posted are still there, and a second seeding deriving the same entry id from
- * the same template key collides on `journal_entry`'s primary key. The default keeps `pnpm seed` exactly as
- * deterministic as every other loader; a caller re-seeding a truncated database passes something that
- * distinguishes its call, and the entries it posts sit beside the first set instead of failing against them.
+ * left alone. `savePackageTemplateVersion` is an EDIT — it inserts version+1 — so calling it on a template
+ * that already exists would leave a trail of undeletable versions rather than the one this fixture means.
  */
-export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> {
+export async function seedPackageTemplates(sql: Sql): Promise<SeededPackageTemplates> {
   const [existing] = await sql<{ n: string }[]>`select count(*)::text as n from package_template`
-  if (existing !== undefined && Number(existing.n) > 0) return NOTHING
+  if (existing !== undefined && Number(existing.n) > 0) return NO_TEMPLATES
 
   const [variant] = await sql<{ id: string; gross_price_fils: string }[]>`
     select v.id, v.gross_price_fils
@@ -228,62 +244,103 @@ export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> 
        and v.duration_minutes = ${FIXTURE_PACKAGE_VARIANT.durationMinutes}
        and s.archived_at is null
   `
-  if (variant === undefined) return NOTHING
-
-  const customers = await sql<{ id: string }[]>`
-    select id from customer
-     where phone_e164 = any(${FIXTURE_PACKAGE_CUSTOMER_PHONES as unknown as string[]})
-     order by phone_e164
-  `
-  if (customers.length === 0) return NOTHING
+  if (variant === undefined) return NO_TEMPLATES
 
   const unitGrossFils = Number(variant.gross_price_fils)
   const names: string[] = []
   let templates = 0
-  let sales = 0
-  let balances = 0
-  let redemptions = 0
 
-  for (const [index, shape] of FIXTURE_PACKAGE_SHAPES.entries()) {
+  for (const shape of FIXTURE_PACKAGE_SHAPES) {
     const name = fixturePackageName(shape)
     names.push(name)
     // The undiscounted sum of the catalogue prices of the sessions. No figure is invented; see the note.
     const priceFils = unitGrossFils * shape.sessions
 
-    const saved = await withUnitOfWork(
-      sql,
-      { kind: 'system', label: 'fixture-packages' },
-      async (uow) =>
-        savePackageTemplateVersion(uow, {
-          templateKey: shape.templateKey,
-          internalName: name,
-          publicDisplayName: name,
-          priceFils,
-          lines: [{ serviceVariantId: variant.id, sessionCount: shape.sessions }],
-          ...(shape.validityMonths === undefined
-            ? {}
-            : {
-                terms: {
-                  validityMonths: shape.validityMonths,
-                  transferable: false,
-                  unredeemedBalancePolicy: 'retained',
-                },
-              }),
-        }),
+    await withUnitOfWork(sql, { kind: 'system', label: 'fixture-packages' }, async (uow) =>
+      savePackageTemplateVersion(uow, {
+        templateKey: shape.templateKey,
+        internalName: name,
+        publicDisplayName: name,
+        priceFils,
+        lines: [{ serviceVariantId: variant.id, sessionCount: shape.sessions }],
+        ...(shape.validityMonths === undefined
+          ? {}
+          : {
+              terms: {
+                validityMonths: shape.validityMonths,
+                transferable: false,
+                unredeemedBalancePolicy: 'retained',
+              },
+            }),
+      }),
     )
     templates += 1
+  }
 
+  assertFixturePackageNamesAreMarked(names)
+  return { templates, names }
+}
+
+/**
+ * Sells each fixture template and draws its sessions down to the state the shape declares.
+ *
+ * NOT part of `pnpm seed`. Every row this writes pins a customer that cannot then be deleted, so it belongs
+ * to a suite that truncates the package family afterwards — see the note above. It is idempotent against its
+ * own output: a database that already holds a sale for a fixture template is left alone.
+ *
+ * **The CALLER supplies the customers, and that is deliberate.** This used to read the four the consent loader
+ * seeds, which cannot be relied on: `apps/web/src/otp-route.itest.ts` clears the table with a bare
+ * `delete from customer`, so after one integration run the fixture salon has no customers at all and never
+ * gets them back — `pnpm seed` is not re-run between suites. A caller that owns its customer row, creates it
+ * and deletes it again is the only arrangement that holds whatever order the files run in (brief rule 12).
+ * Sales are spread round the list, so one id gives one holder four packages and four ids give one each.
+ *
+ * The entry ids carry a discriminator, and that is not decoration. They are derived from the template key, and
+ * `journal_entry` refuses DELETE and is absent from the truncate statement that clears everything else — it
+ * could not be in it. So after a truncate the sales are gone while the entries they posted are still there,
+ * and a second seeding deriving `fixture-pkg-sale-<key>` again collides on the primary key, from inside
+ * `sellPackage`, with nothing about seeding in the message. The discriminator is the number of fixture sale
+ * entries the journal ALREADY holds, which is deterministic, legible in a query, and strictly increasing
+ * because those rows cannot be removed — so it cannot repeat. The first seeding of a fresh database counts
+ * zero and takes no suffix at all.
+ */
+export async function seedPackageDrawdownStates(
+  sql: Sql,
+  customerIds: readonly string[],
+): Promise<SeededDrawdownStates> {
+  if (customerIds.length === 0) return NO_STATES
+
+  const [already] = await sql<{ n: string }[]>`
+    select count(*)::text as n
+      from package_sale s
+      join package_template_version v on v.id = s.template_version_id
+      join package_template t on t.id = v.template_id
+     where t.template_key = any(${FIXTURE_PACKAGE_SHAPES.map((shape) => shape.templateKey)})
+  `
+  if (already !== undefined && Number(already.n) > 0) return NO_STATES
+
+  const [posted] = await sql<{ n: string }[]>`
+    select count(*)::text as n from journal_entry where entry_id like 'fixture-pkg-sale-%'
+  `
+  const generation = Number(posted?.n ?? '0')
+  const run = generation === 0 ? '' : `-r${generation}`
+
+  let sales = 0
+  let balances = 0
+  let redemptions = 0
+
+  for (const [index, shape] of FIXTURE_PACKAGE_SHAPES.entries()) {
     const version = await currentPackageTemplateVersion(sql, shape.templateKey)
     if (version === null) continue
-    const customer = customers[index % customers.length]
-    if (customer === undefined) continue
+    const customerId = customerIds[index % customerIds.length]
+    if (customerId === undefined) continue
 
     const saleMapping = packageSaleMapping({
       entryId: entryId(`fixture-pkg-sale-${shape.templateKey}${run}`),
       tradingDate: localDate(shape.soldOn),
-      customerId: customer.id,
+      customerId,
       templateVersionId: version.versionId,
-      priceGross: money(filsFrom(priceFils)),
+      priceGross: money(filsFrom(Number(version.priceFils))),
       lines: version.lines.map((line) => ({
         lineNo: line.lineNo,
         serviceVariantId: line.serviceVariantId,
@@ -292,11 +349,11 @@ export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> 
       })),
       // Cash, because a fixture drawer that never took a note would leave the cash-up screen with nothing to
       // reconcile — and a package payment being visible to `readDrawerTakings` is the defect M-TILL-10 fixed.
-      tenders: [{ kind: 'cash', amount: money(filsFrom(priceFils)) }],
-      validityMonths: saved.validityMonths,
-      transferable: saved.transferable,
-      unredeemedBalancePolicy: saved.unredeemedBalancePolicy,
-      packageLabel: name,
+      tenders: [{ kind: 'cash', amount: money(filsFrom(Number(version.priceFils))) }],
+      validityMonths: version.validityMonths,
+      transferable: version.transferable,
+      unredeemedBalancePolicy: version.unredeemedBalancePolicy,
+      packageLabel: version.publicDisplayName,
     })
     const sold = await withUnitOfWork(
       sql,
@@ -341,7 +398,7 @@ export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> 
         },
         appointmentId: derived.id,
         units: 1,
-        packageLabel: name,
+        packageLabel: version.publicDisplayName,
       })
       await withUnitOfWork(sql, { kind: 'system', label: 'fixture-packages' }, async (uow) =>
         redeemPackage(uow, redemptionMapping.input),
@@ -350,6 +407,5 @@ export async function seedPackages(sql: Sql, run = ''): Promise<SeededPackages> 
     }
   }
 
-  assertFixturePackageNamesAreMarked(names)
-  return { templates, sales, balances, redemptions, names }
+  return { sales, balances, redemptions }
 }

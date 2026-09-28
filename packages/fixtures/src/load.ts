@@ -53,7 +53,7 @@ import {
   FIXTURE_OPEN,
   FIXTURE_TODAY,
 } from './clock.ts'
-import { seedPackages } from './package-seed.ts'
+import { seedPackageTemplates } from './package-seed.ts'
 import type { FixtureSalon } from './salon.ts'
 import { fixtureSuppressionPeppers } from './suppression.ts'
 import { assertSynthetic, syntheticPerson } from './synthetic.ts'
@@ -464,23 +464,29 @@ function shift(date: string, offsetDays: number) {
 }
 
 /**
- * The fixture salon's packages, at four drawdown states (M-TILL-13).
+ * The fixture salon's package TEMPLATES (M-TILL-13).
  *
- * After `catalogue` because every template line names a live `service_variant`, and after `consent` because the
- * four customers a package is sold to are the ones that loader inserts — a package is an entitlement somebody
- * walks in and uses, so it is always attached to a record.
+ * After `catalogue` because every template line names a live `service_variant`. No longer after `consent`,
+ * and the reason is the one thing this loader deliberately does not do.
  *
- * docs/12 §5 promised this and nothing wrote it. See `package-seed.ts` for how a package is made demonstrable
- * without inventing a product the business does not sell, which is the whole difficulty: M-TILL-09 and
- * M-TILL-10 each declined to seed one for exactly that reason and both named this unit.
+ * **It seeds no sales.** It did, and that broke nine cases in `apps/web/src/otp-route.itest.ts`:
+ * `package_sale.customer_id` is `on delete restrict` and `package_sale` refuses DELETE, so a seeded sale pins
+ * its customer for the life of the database and that file's bare `delete from customer` can never succeed
+ * again. `package-seed.ts` carries the argument in full, and `seedPackageDrawdownStates` is the other half —
+ * called by the suite that displays the four states, which truncates them away afterwards as the other five
+ * package suites do.
+ *
+ * docs/12 §5 promised packages and nothing wrote them. See `package-seed.ts` for how a package is made
+ * demonstrable without inventing a product the business does not sell, which is the whole difficulty:
+ * M-TILL-09 and M-TILL-10 each declined to seed one for exactly that reason and both named this unit.
  */
 const packageLoader: Loader = {
   name: 'packages',
-  after: ['catalogue', 'consent', 'business-days'],
+  after: ['catalogue', 'business-days'],
   async load(sql, salon) {
     void salon
-    const result = await seedPackages(sql)
-    return result.templates + result.sales + result.balances + result.redemptions
+    const result = await seedPackageTemplates(sql)
+    return result.templates
   },
 }
 

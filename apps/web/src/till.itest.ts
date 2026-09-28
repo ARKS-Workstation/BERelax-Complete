@@ -1,8 +1,12 @@
-import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, readTillIssuer, type Sql } from '@berelax/db'
-import { FIXTURE_ISSUER, FIXTURE_PACKAGE_SHAPES, seedPackages } from '@berelax/fixtures'
+import {
+  FIXTURE_ISSUER,
+  FIXTURE_PACKAGE_SHAPES,
+  seedPackageDrawdownStates,
+  seedPackageTemplates,
+} from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
 import {
   captureUntilStable,
@@ -99,7 +103,14 @@ const CASH_UP_DAY = '2081-03-14'
 const PROBE = 'mtill13_till_probe'
 const PROBE_ROOM = 'mtill13-till'
 /** The customer this file's booking hangs off. A SEEDED one: an invented one would outlive the suite. */
-const PROBE_PHONE = '+971590009102'
+/**
+ * This file's own probe customer, in a range nothing else in the repository uses.
+ *
+ * Deliberately NOT one of the four the consent loader seeds. This file inserts it and deletes it again,
+ * and deleting a row `pnpm seed` created would damage the fixture salon for every suite after it. See the
+ * insert in `beforeAll` for why it is no longer read from the seed.
+ */
+const PROBE_PHONE = '+971559990132'
 const THERAPIST_ONE = '33333333-4444-4555-8666-999999999921'
 const PRICE_AT_BOOKING = 20_000
 
@@ -160,42 +171,6 @@ beforeAll(async () => {
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from rooms where notes = ${MARKER}`
 
-  /*
-   * The seeded packages are re-seeded here, and this is not belt-and-braces.
-   *
-   * `pnpm seed` loads the four drawdown states through `packageLoader`, and five suites that run before this
-   * one in the integration order then `truncate ... package_template_version, package_template` to get a
-   * clean table for their own probes (packages/fixtures/src/package-{redemption,}.itest.ts,
-   * packages/db/src/services/sell-package.itest.ts, apps/worker/src/jobs/package-expiry.itest.ts). The
-   * fixtures are therefore GONE by the time the packages screen is asked to show them: the three package
-   * cases passed in isolation and failed in the full run, which is brief rule 12 exactly.
-   *
-   * `seedPackages` is the loader's own body and is guarded on `count(*) from package_template`, so on a run
-   * where nothing truncated it this is one cheap count and no writes — which matters, because a second pass
-   * would issue a second set of journal entries and `journal_entry` is append-only.
-   *
-   * It returns a no-op silently when its prerequisites are missing (no fixture variant, no fixture
-   * customers), and a silent no-op here would resurface as three unexplained assertion failures 200 seconds
-   * later. So the outcome is checked against the table rather than against the return value.
-   *
-   * The nonce is not decoration. `journal_entry` is append-only and is NOT in those suites' truncate list —
-   * it could not be, it refuses DELETE — so the entries the first seeding posted outlive the rows they were
-   * posted for, and a re-seed deriving the same entry id from the same template key would collide on the
-   * primary key. One per run, so this file can be run against the same database as often as it likes.
-   */
-  const reseeded = await seedPackages(sql, `-${randomUUID()}`)
-  const [templates] = await sql<{ n: string }[]>`
-    select count(*)::text as n from package_template where name like ${'%[confirm]%'}
-  `
-  if (Number(templates?.n ?? '0') < FIXTURE_PACKAGE_SHAPES.length) {
-    throw new Error(
-      `The four fixture packages are absent: ${templates?.n ?? '0'} marked template rows, and this run's ` +
-        `re-seed wrote ${reseeded.templates}. Either \`pnpm seed\` has not run against this database, or a ` +
-        'prerequisite of `seedPackages` (the fixture service variant, the four fixture customers) was ' +
-        'truncated with the package family and has not come back.',
-    )
-  }
-
   const [day] = await sql<{ trading_date: string }[]>`
     select to_char(trading_date, 'YYYY-MM-DD') as trading_date
       from business_day where closes_at > now() order by trading_date limit 1
@@ -208,10 +183,63 @@ beforeAll(async () => {
   }
   tradingDate = day.trading_date
 
+  /*
+    This file's OWN customer, inserted rather than read.
+    It used to read one of the four the consent loader seeds. That cannot be relied on:
+    `apps/web/src/otp-route.itest.ts` clears the table with a bare `delete from customer`, so after one
+    integration run there are no seeded customers left and `pnpm seed` is not run again between suites — the
+    read returned undefined and the probe booking failed on a null customer_id, in a file that had passed in
+    isolation. Inserted here and deleted in `afterAll`, which is what eighteen other suites do; it is safe to
+    delete only because the package family is truncated first, releasing 0078's `on delete restrict` pin.
+  */
   const [customer] = await sql<{ id: string }[]>`
-    select id from customer where phone_e164 = ${PROBE_PHONE}
+    insert into customer (phone_e164, display_name, created_via, locale)
+    values (${PROBE_PHONE}, ${`${MARKER} till probe`}, 'front_desk', 'en')
+    on conflict (phone_e164) do update set display_name = excluded.display_name
+    returning id
   `
   customerId = customer?.id as string
+
+  /*
+   * The four drawdown states are built HERE, and this file owns them.
+   *
+   * They are not in `pnpm seed`, and the reason is in `package-seed.ts`: a `package_sale` pins its customer
+   * through an `on delete restrict` foreign key and can never be deleted, so a seeded sale makes
+   * `otp-route.itest.ts`'s bare `delete from customer` fail for the rest of the database's life. This suite
+   * is the one that DISPLAYS the four states, so it is the one that creates them and truncates them away in
+   * `afterAll` — the same discipline the other five package suites keep.
+   *
+   * Templates first, because five of those suites truncate `package_template` too and two of them do it in
+   * `afterAll`, so on any run but the first the table this needs is already empty (brief rule 12 — these
+   * cases passed in isolation twice and failed in the full chain). Both calls are guarded and both no-op on a
+   * database that already holds their rows.
+   *
+   * Checked against the TABLE rather than the return value: both helpers return a silent no-op when a
+   * prerequisite is missing, and a silent no-op here would resurface as three unexplained assertion failures
+   * two hundred seconds later.
+   */
+  await seedPackageTemplates(sql)
+  const states = await seedPackageDrawdownStates(sql, [customerId])
+  const [seeded] = await sql<{ templates: string; balances: string }[]>`
+    select (select count(*)::text from package_template
+             where template_key = any(${FIXTURE_PACKAGE_SHAPES.map((shape) => shape.templateKey)}))
+           as templates,
+           (select count(*)::text from package_balance) as balances
+  `
+  if (Number(seeded?.templates ?? '0') < FIXTURE_PACKAGE_SHAPES.length) {
+    throw new Error(
+      `The four fixture package templates are absent: ${seeded?.templates ?? '0'} of ` +
+        `${FIXTURE_PACKAGE_SHAPES.length}. The fixture service variant they are built over is missing, so ` +
+        '`seedPackageTemplates` returned a no-op — run `pnpm seed`.',
+    )
+  }
+  if (Number(seeded?.balances ?? '0') === 0) {
+    throw new Error(
+      'No package balances exist, so the four drawdown states have nothing to show and the /packages ' +
+        `screen would be photographed empty. seedPackageDrawdownStates reported ${states.sales} sales and ` +
+        `${states.balances} balances.`,
+    )
+  }
 
   // The cash-up case's own day. The trading calendar is a TABLE (0011), so it has to exist before a drawer can
   // be opened against it. 11:00-02:00 in Asia/Dubai, like every other day the premises trades.
@@ -301,10 +329,26 @@ afterAll(async () => {
     the failure arrives as a package sale refusing for a reason that names neither the drawer nor this file.
   */
   await sql?.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  /*
+    And the package family, for a harder reason than tidiness. Every `package_sale` this file writes — the
+    four seeded drawdown states and the one part 3 buys through the browser — pins its `customer_id` through
+    an `on delete restrict` foreign key, and 0078 refuses DELETE on the sale, so the customer becomes
+    undeletable for the life of the database. `apps/web/src/otp-route.itest.ts` clears the table with a bare
+    `delete from customer`, and nine of its cases fail on the foreign key if anything here survives.
+    `truncate` is the only statement that removes an append-only row, which is why all five of the other
+    package suites end with this same list. `payment` is named because it references `package_sale` and
+    PostgreSQL refuses a truncate while a referencing table is left out.
+  */
+  await sql?.unsafe(
+    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+      'package_template_version, package_template',
+  )
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`
   await sql`delete from business_day where trading_date = ${CASH_UP_DAY}::date`
+  // Last, and only reachable because the package truncate above released 0078's `on delete restrict`.
+  await sql`delete from customer where phone_e164 = ${PROBE_PHONE}`
   await sql?.end({ timeout: 5 })
 }, 120_000)
 
