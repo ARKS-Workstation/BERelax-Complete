@@ -87,11 +87,13 @@ let tradingDate = ''
  * the file unable to take cash at all. Both happened before this constant existed, and the symptom was
  * "Unexpected." on a package sale.
  *
- * 2088 is unused: `cash-up.itest.ts` uses 2089 and 2087, `period-close.itest.ts` 2091,
- * `package-redemption.itest.ts` 2085/2084/2083, `credit-note.itest.ts` 2097-2098,
- * `checkout-finalise.itest.ts` 2099, gate block 98 uses 2094.
+ * 2081 is unused, MEASURED rather than assumed: a grep for every year from 2080 to 2100 in `.ts`, `.mjs` and
+ * `.sql` puts 0 occurrences in 2080, 2081 and 2082 and 30 in 2088, which was this constant's first value —
+ * gate block 110's own note records 2088 as the journal's. `cash-up.itest.ts` uses 2089 and 2087,
+ * `period-close.itest.ts` 2091, `package-redemption.itest.ts` 2085/2084/2083, gate 105 2086, gate 103 2093,
+ * gate 98 2094, and five fixtures suites 2095-2099.
  */
-const CASH_UP_DAY = '2088-03-14'
+const CASH_UP_DAY = '2081-03-14'
 
 const PROBE = 'mtill13_till_probe'
 const PROBE_ROOM = 'mtill13-till'
@@ -179,7 +181,7 @@ beforeAll(async () => {
   await sql`
     insert into business_day (trading_date, opens_at, closes_at, source)
     values (${CASH_UP_DAY}, ${`${CASH_UP_DAY} 11:00:00+04`}::timestamptz,
-            ${'2088-03-15 02:00:00+04'}::timestamptz, 'weekly')
+            ${'2081-03-15 02:00:00+04'}::timestamptz, 'weekly')
     on conflict (trading_date) do nothing
   `
 

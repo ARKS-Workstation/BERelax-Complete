@@ -156,9 +156,17 @@ describe('acceptance — the till document says what it can and cannot do', () =
     expect(html).toContain('data-testid="till-tender-form"')
     expect(html).toContain('data-testid="till-keypad"')
     expect(html).toContain('data-testid="till-total-column"')
-    // The absence, stated. Not a stand-in, and the question named beside it (brief rule 15).
+    /*
+      The absence, stated. Not a stand-in, and the question named beside it (brief rule 15).
+
+      The WHOLE cell and not just `data-absent="1"`: that attribute comes from `view.issuer.trn === null`, so a
+      render that printed `TRN-PENDING-Y1-TRN` inside the absent cell would still emit it — measured, by a gate
+      mutant that did exactly that and was not caught. And not just `<code>Y1-trn</code>` either, because the
+      assumptions panel prints that id too.
+    */
     expect(html).toContain('data-field="trn" data-absent="1"')
-    expect(html).toContain('<code>Y1-trn</code>')
+    expect(html).toContain('<span class="absent">not entered</span> <code>Y1-trn</code>')
+    expect(html).not.toContain('TRN-PENDING')
     // Each form has exactly ONE submit button, which is what makes Enter do the one thing that form is for.
     expect(html.match(/type="submit"/g)).toHaveLength(2)
   })

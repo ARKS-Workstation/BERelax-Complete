@@ -124,11 +124,20 @@ export const FIXTURE_PACKAGE_SHAPES: readonly FixturePackageShape[] = Object.fre
   },
 ])
 
-/** The display name a shape gets. It says what it is, it names the question, and it is not a product. */
+/**
+ * The display name a shape gets. It says what it is, it names the question, and it is not a product.
+ *
+ * The TEMPLATE KEY is in it, and that is not decoration: two of the four shapes sell five sessions, so a name
+ * built from the session count alone gave the untouched and the part-used templates the SAME name — four
+ * templates on the screen and two names. The key is already unique, already on the page as `data-template`,
+ * and already says which fixture this is, so it is the right distinguisher; a serial number would be a second
+ * identity to keep in step.
+ */
 export function fixturePackageName(shape: FixturePackageShape): string {
   return (
-    `${FIXTURE_PACKAGE_MARKER} ${shape.sessions} sessions of Normal Massage (Asian), 60 min — ` +
-    `not a package this business sells; ${FIXTURE_PACKAGE_OPEN_QUESTION}`
+    `${FIXTURE_PACKAGE_MARKER} ${shape.templateKey}: ${shape.sessions} sessions of ` +
+    'Normal Massage (Asian), 60 min — not a package this business sells; ' +
+    FIXTURE_PACKAGE_OPEN_QUESTION
   )
 }
 

@@ -32128,6 +32128,360 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 115a-115z. (M-TILL-13) The till, cash-up and package screens: the palette rule, the mirrored layout, the
+//            core-to-db transcription held equal to the fixtures' own, and the refusal that is the
+//            deliverable.
+//
+// **What this block can and cannot mutate, and the reason is the build.** A browser suite drives the BUILT
+// application, so an edit to `render.ts` is invisible to `till.itest.ts` until `next build` has run again —
+// and a case that mutated a screen, ran the browser suite and watched it stay green would report PASS about a
+// rebuild that never happened. Worse, a case that mutated, rebuilt and then restored the SOURCE would leave
+// the mutant in `.next` for every later case, so the block's own control would fail for a reason the control
+// cannot name. So this block mutates only what **vitest reads from source**:
+//
+//   - `apps/web/app/(admin)/till/{render,view}.ts` and `.../packages/handler.ts`, which
+//     `apps/web/src/till-render.test.ts` imports and renders in process;
+//   - `apps/web/src/till/mapping.ts`, which `till-mapping.test.ts` compares against `@berelax/fixtures`' three
+//     mappings and which `till.itest.ts` also calls DIRECTLY in the M2 slice's second part — that part drives
+//     `handleTillWrite` rather than the server, which is exactly why it can see a source mutant at all;
+//   - `packages/db/src/queries/till.ts`, `packages/fixtures/src/till-receipt.ts` and
+//     `packages/fixtures/src/package-seed.ts`, which no browser reads.
+//
+// The claims only a browser can make — axe over forty-eight renders, the screenshot matrix, the keypad and the
+// total column changing side, the twelve-interaction walk with an empty pointer-event log — carry their own
+// controls INSIDE `till.itest.ts` instead: an injected unlabelled button and a paragraph on the decorative gold
+// that axe and the palette scan must both report, four cross-cell screenshot comparisons that must differ, and
+// an LTR-versus-RTL geometry comparison that must flip. That is the same discipline in the place where it costs
+// one render rather than one `next build`.
+//
+// Every case edits a shipped file and restores it in a `finally`, and every anchor goes through `replaceOnce`
+// (brief rule 20). The local mutant helper is named `tillMutant` and deliberately not `…Mutant` after a shape
+// another block uses: blocks 106 and 107 each defined a same-shaped `…Mutant`, git found the two bodies as
+// shared context and INTERLEAVED the blocks on merge.
+{
+  const TILL_RENDER = 'apps/web/app/(admin)/till/render.ts'
+  const TILL_VIEW = 'apps/web/app/(admin)/till/view.ts'
+  const TILL_MAPPING = 'apps/web/src/till/mapping.ts'
+  const PACKAGES_HANDLER = 'apps/web/app/(admin)/packages/handler.ts'
+  const TILL_QUERIES = 'packages/db/src/queries/till.ts'
+  const RECEIPT = 'packages/fixtures/src/till-receipt.ts'
+  const PACKAGE_SEED = 'packages/fixtures/src/package-seed.ts'
+  const PORTS = 'packages/harness/src/ports.ts'
+  const REGISTRY = 'apps/web/src/routes/registry.ts'
+
+  const RENDER_SUITE = 'apps/web/src/till-render.test.ts'
+  const MAPPING_SUITE = 'apps/web/src/till-mapping.test.ts'
+  const SEED_SUITE = 'packages/fixtures/src/package-seed.test.ts'
+  const REGISTRY_SUITE = 'apps/web/src/routes/registry.test.ts'
+  const PORTS_SUITE = 'packages/harness/src/ports.test.ts'
+  const RECEIPT_SUITE = 'packages/fixtures/src/till-receipt.itest.ts'
+  const TILL_ITEST = 'apps/web/src/till.itest.ts'
+
+  const unitArgs = (file) => ['vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itestArgs = (file, only) => [
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+    ...(only === undefined ? [] : ['-t', only]),
+  ]
+
+  /**
+   * Breaks one construct in one file and requires a named suite to reject it.
+   *
+   * `checkRejectedBy` and not a bare non-zero exit: a mutant can be rejected by an unrelated assertion while
+   * the one the case is about has quietly stopped matching, and the case then reports PASS for ever (ADR
+   * 0003). `rule` is a phrase from the assertion that is supposed to fire.
+   */
+  const tillMutant = (label, file, find, into, suiteArgs, rule) => {
+    withEditedFile(
+      file,
+      (source) => replaceOnce(source, find, into),
+      () => {
+        checkRejectedBy(`till gate: ${label}`, runExpectingFailure('pnpm', suiteArgs), rule)
+      },
+    )
+  }
+
+  // 115a. Body text moved onto the decorative gold. The acceptance line names three surfaces no copy may sit
+  //       on, and one stylesheet serves all three till screens, so this is the one place it can be broken.
+  tillMutant(
+    'copy on the decorative gold is refused by the palette rule',
+    TILL_RENDER,
+    '  .absent { font-style: italic; }',
+    '  .absent { font-style: italic; background: var(--color-decor-gold); }',
+    unitArgs(RENDER_SUITE),
+    'is a decorative surface and carries no copy',
+  )
+
+  // 115b. A PHYSICAL side in the stylesheet. The mutant that matters most for the RTL acceptance line: a
+  //       physical side passes every text and substring assertion in the repository and fails only a geometry
+  //       measurement, so the cheap check has to exist as well.
+  tillMutant(
+    'a physical padding in the till stylesheet is refused',
+    TILL_RENDER,
+    '  .field { display: block; margin: 0 0 var(--space-5); }',
+    '  .field { display: block; margin: 0 0 var(--space-5); padding-left: var(--space-2); }',
+    unitArgs(RENDER_SUITE),
+    'mirrors for dir=rtl',
+  )
+
+  // 115c. A colour LITERAL in the page's own stylesheet, which is `pnpm colours`' rule restated where a reader
+  //       of the screen will look.
+  tillMutant(
+    'a hex literal in the till stylesheet is refused',
+    TILL_RENDER,
+    '  code { font-family: ui-monospace, monospace; }',
+    '  code { font-family: ui-monospace, monospace; color: #112233; }',
+    unitArgs(RENDER_SUITE),
+    'names no colour literal',
+  )
+
+  // 115d. The TRN printed as the stand-in instead of the absence. Brief rule 15's whole subject: a placeholder
+  //       on a screen is indistinguishable from a configured value.
+  tillMutant(
+    'printing the placeholder TRN instead of the absence is refused',
+    TILL_RENDER,
+    '        ? \'<span class="absent">not entered</span> <code>Y1-trn</code>\'',
+    "        ? '<span>TRN-PENDING-Y1-TRN</span>'",
+    unitArgs(RENDER_SUITE),
+    'data-field="trn" data-absent="1"',
+  )
+
+  // 115e. A label dropped from the document field list. The preview would print `taxPointDate` at a reviewer,
+  //       and answering Y11-vat-invoice has to fail HERE rather than adding a field nothing labels.
+  tillMutant(
+    'a document field with no label is refused, in both directions',
+    TILL_VIEW,
+    "  taxPointDate: 'Date of supply',\n",
+    '',
+    unitArgs(RENDER_SUITE),
+    'labels exactly the document fields core declares',
+  )
+
+  // 115f. The billable statuses widened to a state that is not money. `packages/db` may never import
+  //       `packages/core`, so the reader spells `'completed'` in SQL and this test is the only thing holding
+  //       the two lists equal — B-LIFE-01's table is the authority and docs/03 §2 the reason.
+  tillMutant(
+    'billing a status that does not emit revenue is refused',
+    TILL_VIEW,
+    "export const TILL_BILLABLE_STATUSES = ['completed'] as const",
+    "export const TILL_BILLABLE_STATUSES = ['completed', 'confirmed'] as const",
+    unitArgs(RENDER_SUITE),
+    'bills exactly the statuses core says emit revenue',
+  )
+
+  // 115g. The route's copy of the package open question changed. The route may not import `@berelax/fixtures`
+  //       (a devDependency of the app), so the id is spelled twice and a test is the only thing that can stop
+  //       the two drifting — which would leave a package on screen naming a question nobody has asked.
+  tillMutant(
+    'a package question id that drifts from the fixture is refused',
+    PACKAGES_HANDLER,
+    "export const FIXTURE_PACKAGE_OPEN_QUESTION = 'Y9-package-catalogue'",
+    "export const FIXTURE_PACKAGE_OPEN_QUESTION = 'Y9-package-policy'",
+    unitArgs(RENDER_SUITE),
+    'names the same package open question the fixture seeds',
+  )
+
+  // 115h. A drawdown state mislabelled. `fully used` reported as `part used` would put a balance with nothing
+  //       left on a list of money still owed, which is the one thing that report is opened for.
+  tillMutant(
+    'a mislabelled drawdown state is refused',
+    PACKAGES_HANDLER,
+    "  if (args.sessionsRedeemed >= args.sessionsTotal) return 'fully used'",
+    "  if (args.sessionsRedeemed > args.sessionsTotal) return 'fully used'",
+    unitArgs(RENDER_SUITE),
+    'names the four states the fixture salon seeds',
+  )
+
+  // 115i. The card's approval code dropped from the checkout mapping. That field is what a disputed card
+  //       payment is settled with, and it is the one a transcription loses most easily — which is the whole
+  //       reason the till's mapping is held EQUAL to the fixtures' rather than reviewed.
+  tillMutant(
+    'a checkout mapping that drops the tender reference is refused',
+    TILL_MAPPING,
+    '    amountFils: tender.amount.fils,\n    ...(tender.reference === undefined ? {} : { reference: tender.reference }),\n  }))\n\n  return {\n    posting,\n    tradingDate,',
+    '    amountFils: tender.amount.fils,\n  }))\n\n  return {\n    posting,\n    tradingDate,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same finaliseCheckout input',
+  )
+
+  // 115j. NET sent where the document wants the charged GROSS. Both figures exist on the same object, both are
+  //       money, and the document's own totals would still equal the sum of its lines — so nothing in
+  //       `packages/db` could refuse it.
+  tillMutant(
+    'a checkout mapping that states the net as the unit price is refused',
+    TILL_MAPPING,
+    '    unitGrossFils: charge.gross.fils,',
+    '    unitGrossFils: tax.net.fils,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same finaliseCheckout input',
+  )
+
+  // 115k. The package sale's balances paired by a reversed order. This is the defect ZG006 cannot see: both
+  //       shares still sum to the price and every count still matches, and one line's money is on another
+  //       line's entitlement.
+  tillMutant(
+    'a package-sale mapping that reorders the balances is refused',
+    TILL_MAPPING,
+    '  const balances: readonly PackageBalanceInput[] = options.lines.map((line, index) => {',
+    '  const balances: readonly PackageBalanceInput[] = [...options.lines].reverse().map((line, index) => {',
+    unitArgs(MAPPING_SUITE),
+    'produces the same sellPackage input',
+  )
+
+  // 115l. The redemption's released GROSS replaced by its net. 2050 would be drawn down by less than the
+  //       revenue recognised, and the entry would still balance because the VAT line absorbs the difference.
+  tillMutant(
+    'a redemption mapping that releases the net is refused',
+    TILL_MAPPING,
+    '      releasedFils: posting.releasedGross.fils,',
+    '      releasedFils: posting.net.fils,',
+    unitArgs(MAPPING_SUITE),
+    'produces the same redeemPackage input',
+  )
+
+  // 115m. The gratuity dropped from the seeded receipt. The acceptance line names four line kinds and the
+  //       census is what makes "contains all four" a measurement rather than a `toContain`.
+  tillMutant(
+    'a seeded receipt with no gratuity is refused by name',
+    RECEIPT,
+    "        tipLine({ lineId: 'receipt-tip', gross: money(filsFrom(TILL_RECEIPT_TIP_FILS)) }),\n",
+    '',
+    itestArgs(RECEIPT_SUITE),
+    'missing tip',
+  )
+
+  // 115n. And the check itself made incapable of failing, which is the control 115m needs: a function that
+  //       never throws would satisfy every assertion about the four kinds.
+  tillMutant(
+    'a four-kinds check that cannot fail is refused',
+    RECEIPT,
+    '  if (missing.length > 0) {',
+    '  if (missing.length > 0 && census.service < 0) {',
+    itestArgs(RECEIPT_SUITE),
+    'the control: a basket missing any of the four kinds is refused by name',
+  )
+
+  // 115o. The provisional marker removed from the seeded package names. THE case for this unit: a name with no
+  //       marker is a plausible product, `is_placeholder_text` would no longer refuse it on a document, and a
+  //       reviewer looking at a screenshot could not tell it from a configured one (brief rule 15).
+  tillMutant(
+    'a seeded package name with no provisional marker is refused',
+    PACKAGE_SEED,
+    '    `${FIXTURE_PACKAGE_MARKER} ${shape.templateKey}: ${shape.sessions} sessions of ` +',
+    '    `${shape.templateKey}: ${shape.sessions} sessions of ` +',
+    unitArgs(SEED_SUITE),
+    'marks every name so the schema would refuse it on a document',
+  )
+
+  // 115p. And the marker check made incapable of failing, which is 115o's control.
+  tillMutant(
+    'a marker check that cannot fail is refused',
+    PACKAGE_SEED,
+    '  if (unmarked.length > 0) {',
+    '  if (unmarked.length > 0 && names.length < 0) {',
+    unitArgs(SEED_SUITE),
+    'the control: a plausible product name is refused by name',
+  )
+
+  // 115q. The expired shape's validity override removed. The seeded business-day range opens 2026-05-21 and
+  //       the frozen clock's today is 2026-09-18, so at the provisional six months nothing expires — and
+  //       `expired with a balance` is the one state that shows Y9-package-policy's retained answer doing
+  //       anything at all.
+  tillMutant(
+    'a seeded expired shape with no shortened validity is refused',
+    PACKAGE_SEED,
+    '    validityMonths: 3,',
+    '',
+    unitArgs(SEED_SUITE),
+    'names the four drawdown states',
+  )
+
+  // 115r. `requireIssuerSnapshot` removed from the till's mapping, so the placeholder TRN is no longer refused
+  //       before anything is composed. The screen would still refuse — the database's CHECK would see to that
+  //       — but as `refused_by_the_ledger` with a constraint name instead of naming Y1-trn, and a
+  //       half-composed document would have reached `finaliseCheckout` first. This case runs the M2 slice's
+  //       CONTROL, which drives the handler directly and therefore sees a source mutant with no rebuild.
+  tillMutant(
+    'a till mapping that does not refuse the placeholder TRN first is refused',
+    TILL_MAPPING,
+    '  const issuer = requireIssuerSnapshot(options.issuer)',
+    '  const issuer = options.issuer',
+    itestArgs(TILL_ITEST, 'the control: the same handler with the real issuer reader refuses'),
+    'the control: the same handler with the real issuer reader refuses',
+  )
+
+  // 115s. The issuer reader made to hide the placeholder. The screen would print `TRN-PENDING-Y1-TRN` as a
+  //       configured TRN, which is the failure brief rule 15 exists for — and the assertion it breaks reads
+  //       the ROW rather than a constant in the test, which is what makes that assertion worth anything.
+  tillMutant(
+    'an issuer reader that hides the placeholder is refused',
+    TILL_QUERIES,
+    '           is_placeholder_text(e.trn) as trn_is_placeholder',
+    '           false as trn_is_placeholder',
+    itestArgs(TILL_ITEST, 'prices a tip and a discount'),
+    'prices a tip and a discount',
+  )
+
+  // 115t. The band declared and then overlapped. An overlap is worse than a flake: the second `next start`
+  //       cannot bind, the suite's wait loop answers from the FIRST server, and the assertions run against
+  //       another worktree's build — green means nothing and red means nothing (brief rule 18).
+  tillMutant(
+    'a till band that overlaps another suite is refused',
+    PORTS,
+    '  till: { start: 12_400, width: 300 },',
+    '  till: { start: 12_200, width: 300 },',
+    unitArgs(PORTS_SUITE),
+    'overlaps',
+  )
+
+  // 115u. The registry entry's path changed, so the filesystem serves a route the registry does not declare.
+  //       `apps/web/src/routes/registry.ts` is in exact bijection with the tree, and a route with no entry is
+  //       a route nobody decided the indexing policy for.
+  tillMutant(
+    'a till route with no registry entry is refused',
+    REGISTRY,
+    "    id: 'till',\n    path: '/till',",
+    "    id: 'till',\n    path: '/till-unregistered',",
+    unitArgs(REGISTRY_SUITE),
+    'till',
+  )
+
+  // 115v. The `/packages` registry entry removed altogether, so the filesystem serves a route the registry
+  //       does not declare. The bijection is what makes "adding a route without an entry" a failing test
+  //       rather than an omission nobody sees.
+  //
+  //       **The ADMIN_GROUP_PREFIXES entries are deliberately NOT gated here, and that is a measurement
+  //       rather than an omission.** A case that removed `/till` from the prefix list was written first and
+  //       reported PASS: `/till` and `/till/cash-up` each declare `indexable: false`, and `NOINDEX_PATTERNS`
+  //       covers a non-indexable handler on its own path — which is what W-SITE-05 made the `indexable` field
+  //       mean, and why `/quick-book` sits under no prefix at all. So the two prefixes are consistency with
+  //       the other admin groups and nothing a test can make load-bearing; claiming otherwise with a case
+  //       that cannot fail would be worse than saying so.
+  tillMutant(
+    'a route on disk with no registry entry is refused',
+    REGISTRY,
+    "    id: 'packages',\n    path: '/packages',",
+    "    id: 'packages',\n    path: '/packages-unregistered',",
+    unitArgs(REGISTRY_SUITE),
+    'packages',
+  )
+
+  // 115w-115z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing the module, or a run that could not
+  //            reach PostgreSQL would all present as a block of passing cases.
+  for (const suite of [RENDER_SUITE, MAPPING_SUITE, SEED_SUITE, REGISTRY_SUITE, PORTS_SUITE]) {
+    const green = run('pnpm', unitArgs(suite))
+    check(`till gate: ${suite} passes unedited`, !green.failed, green.output)
+  }
+  {
+    const green = run('pnpm', itestArgs(RECEIPT_SUITE))
+    check(`till gate: ${RECEIPT_SUITE} passes unedited`, !green.failed, green.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
