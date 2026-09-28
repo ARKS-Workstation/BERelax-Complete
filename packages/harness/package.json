@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./accessibility": "./src/accessibility.ts",
+    "./admin-session": "./src/admin-session.ts",
     "./determinism": "./src/determinism.ts",
     "./matrix": "./src/matrix.ts",
     "./ports": "./src/ports.ts",
