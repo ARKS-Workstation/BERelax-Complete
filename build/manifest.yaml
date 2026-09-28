@@ -12,7 +12,7 @@ meta:
   contract: docs/12-autonomous-delivery.md
   # 208 rather than 207 since W-SYS-11 was added: the admin session, which 56 references deferred to a
   # unit that is `done` and never owned it. See W-SYS-11's own NOTEs for the evidence.
-  units_total: 209
+  units_total: 210
 
 units:
   - id: F01
@@ -3477,6 +3477,62 @@ units:
     - 'NOTE: the migration number is a placeholder. `00xx_sqlstate_reallocation.sql` must be allocated a
       real number when this unit starts and not before, because five units in flight hold 0088 through 0092
       and a number allocated at plan time is a number two branches can claim.'
+  - id: W-SYS-13
+    order: 41.7
+    title: 'Test isolation: a suite may delete only what it created'
+    summary: The integration suites run sequentially against one database in an order no file controls, and
+      67 unqualified delete and truncate statements across them remove rows they did not create - including
+      rows `pnpm seed` writes. One emptied the `customer` table for every suite that ran afterwards and for
+      every later run, which skipped all 21 cases of a file it had never heard of. Sort the legitimate
+      owners from the harmful ones, scope the rest, and extend the guard from one table to the seeded set.
+    owner: claude
+    status: todo
+    size: M
+    depends_on: []
+    blocked_on_owner: []
+    provisional: 'The rule, as the strictest safe reading: a suite may remove rows it created, or every row
+      of a table it owns outright and DECLARES that it owns; anything else carries a predicate. Truncating
+      the invoice family as its owner stays legitimate - `invoice` refuses DELETE for every role - and
+      becomes a declaration rather than a convention.'
+    acceptance:
+    - 'Every unqualified delete or truncate in a test file is either scoped to rows the suite created or
+      listed in a declared-owners table naming the file, the table and why that suite owns it; the check
+      derives the offending set by scanning the suites, never from a written list of known sites'
+    - 'The seeded table set is DERIVED from the seed - its loaders, or the row counts it reports - and not
+      restated in the check, because a hand-written list of seeded tables is the second statement of a fact
+      that will drift the first time a loader is added'
+    - A known-bad fixture per ADR 0003 in both directions - a bare delete of a seeded table fails by rule
+      name, and a delete scoped to the suite's own rows passes - with the scan proven to read code rather
+      than prose, since six files describe this hazard in comments
+    - 'An invariant over a full integration run: the seeded row counts are identical before and after, per
+      table, so a suite that removes a seeded row fails the run that did it rather than the next one'
+    - The six files that carried workaround comments keep their own local reason and stop restating what
+      another file does; a file that documents another file's cleanup is a statement that drifts when that
+      file is fixed, which is exactly what happened to all six
+    - '`packages/db/src/seeded-row-deletes.test.ts` is extended rather than duplicated: it already holds the
+      `customer` line with an EMPTY allowlist, and that allowlist may only stay empty'
+    files:
+    - packages/db/src/seeded-row-deletes.test.ts
+    - scripts/test-gates.mjs
+    - docs/adr/00xx-a-suite-may-delete-only-what-it-created.md
+    - 'NOTE: this unit was ADDED by the integrator and the manifest went from 209 units to 210. It is not
+      new scope. It was found by fixing the failure it describes: `customer-identity.itest.ts` and
+      `otp-route.itest.ts` both held `delete from customer` with no predicate, which removed the four
+      customers the seed creates, and `sell-package.itest.ts` skipped all 21 of its cases with "the seed
+      creates customers". Both are fixed and guarded for that one table. The measured remainder is 67
+      unqualified statements against `premises`, `business_day`, `app_setting`, `message_template`,
+      `premises_hours`, `working_hours_rule` and others, and sorting them needs per-site judgement across
+      dozens of files in units that are all `done` - which is what makes it a unit rather than a fix.'
+    - 'NOTE: and `pnpm seed` does not repair it. Measured: on a database whose customers had been removed by
+      a suite, re-running the seed left the four missing rows missing — the customer loader does not insert
+      into a table that already holds rows, so once a suite has deleted them nothing short of rebuilding the
+      database brings them back. That is why one bare `delete` broke every subsequent RUN and not merely
+      every subsequent suite, and a loader that cannot repair what it created is part of this unit.'
+    - 'NOTE: the defect hid behind another one. The bare delete raised on an `ON DELETE RESTRICT` foreign
+      key for as long as an earlier suite leaked a child row, so it never completed and the seeded customers
+      survived by accident. Six files ordered their own cleanup around that hazard and described it in
+      comments. Fixing the leak let the delete succeed. Expect the same shape here: a site that looks
+      harmless may be harmless only because something else is broken.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'

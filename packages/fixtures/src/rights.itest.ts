@@ -212,7 +212,7 @@ afterAll(async () => {
   /**
    * This file leaves NO invoice and no booking behind, and that is a convention rather than tidiness.
    *
-   * `customer-identity.itest.ts` clears the table with a bare `delete from customer`, and
+   * `customer-identity.itest.ts` USED TO clear the table with a bare `delete from customer`, and
    * `invoice.customer_id` and `booking.customer_id` are both `ON DELETE RESTRICT` — so a single row of
    * either, left behind by any suite that runs earlier, turns all eleven of that file's cases red with a
    * foreign-key message that names neither this file nor the row. It happened: this suite's invoice fixture
