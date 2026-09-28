@@ -14,11 +14,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import config from '../payload.config.ts'
 import { homeBudgetLimit } from './home/budget.ts'
 import {
+  assessPublication,
   criticalResourcesIn,
   documentBytes,
   measureCriticalPath,
   PUBLICATION_ENDPOINT,
-  slotRefusalOf,
 } from './publication/publish-gate.ts'
 
 /**
@@ -408,36 +408,63 @@ describe('acceptance — the weight check measures the rendered page, before pub
     )
   }, 60_000)
 
-  it('composes W-SYS-09’s slot refusals unchanged', async () => {
-    // The slot half of the gate. The RULES are W-SYS-09's and its own suite proves them against real
-    // derivative ladders; what is unproven there is that this plane reports them, with the measured weight,
-    // in the same list as a claim and a weight breach. So the refusal is taken from that function and mapped
-    // — which is the only thing this unit added.
-    const { publicationRefusals } = await import('@berelax/media/slots')
-    const over = publicationRefusals([
+  it('composes W-SYS-09’s slot refusals into the same list as a claim and a weight breach', async () => {
+    // The slot half of the gate, through the gate. The RULES are W-SYS-09's and its own suites prove them
+    // against real derivative ladders; what is unproven there is that this plane REPORTS them, with the
+    // measured weight, beside a claim. So an oversized hero goes through `assessPublication` itself rather
+    // than through `publicationRefusals` directly — a test of the mapping alone would pass with the gate's
+    // call to it deleted.
+    const policy = await readCompliancePolicy(sql)
+    const fetchResource = async (path: string) => {
+      const response = await fetch(`${BASE}${path}`, { headers: { 'accept-language': 'en' } })
+      if (!response.ok) throw new Error(`${path} answered ${response.status}`)
+      return {
+        contentType: response.headers.get('content-type') ?? '',
+        body: Buffer.from(await response.arrayBuffer()),
+      }
+    }
+    const heavy = await assessPublication(
+      { sql, policy, fetchResource },
       {
-        slot: 'hero',
-        alt: 'Treatment room with a linen-draped bed, a stone basin and a single orchid stem',
-        servedBytes: { mobile: 240_000, desktop: 460_000 },
+        surface: surfaceFor('slot'),
+        path: PAGE,
+        regions: KNOWN_BAD,
+        slotImages: [
+          {
+            slot: 'hero',
+            alt: 'Treatment room with a linen-draped bed, a stone basin and a single orchid stem',
+            servedBytes: { mobile: 240_000, desktop: 460_000 },
+          },
+        ],
       },
-    ])
-    expect(over.length).toBeGreaterThan(0)
-    const mapped = over.map(slotRefusalOf)
-    expect(mapped.map((refusal) => refusal.rule)).toContain('media-slot-over-byte-budget')
-    expect(mapped.every((refusal) => refusal.where === 'slot:hero')).toBe(true)
-    expect(mapped.some((refusal) => refusal.measuredBytes === 240_000)).toBe(true)
-    // The control: an in-budget image with good alt text produces nothing, so the mapping is not turning
-    // everything into a refusal.
-    expect(
-      publicationRefusals([
-        {
-          slot: 'hero',
-          alt: 'Treatment room with a linen-draped bed, a stone basin and a single orchid stem',
-          servedBytes: { mobile: 60_000, desktop: 120_000 },
-        },
-      ]),
-    ).toEqual([])
-  }, 60_000)
+    )
+    const rules = heavy.refusals.map((refusal) => refusal.rule)
+    // One list, three sources: the lint's rule names and the slot's, together, so an editor is told about
+    // both in one pass rather than after two renders.
+    expect(rules).toContain('banned_claim_term')
+    expect(rules).toContain('media-slot-over-byte-budget')
+    const slot = heavy.refusals.find((refusal) => refusal.rule === 'media-slot-over-byte-budget')
+    expect(slot?.where).toBe('slot:hero')
+    expect(slot?.measuredBytes).toBe(240_000)
+    // The control: an in-budget image with good alt text on compliant copy produces nothing at all, so the
+    // composition is not turning everything into a refusal.
+    const clean = await assessPublication(
+      { sql, policy, fetchResource },
+      {
+        surface: surfaceFor('slot-clean'),
+        path: PAGE,
+        regions: CLEAN,
+        slotImages: [
+          {
+            slot: 'hero',
+            alt: 'Treatment room with a linen-draped bed, a stone basin and a single orchid stem',
+            servedBytes: { mobile: 60_000, desktop: 120_000 },
+          },
+        ],
+      },
+    )
+    expect(clean.refusals).toEqual([])
+  }, 90_000)
 })
 
 describe('the state machine holds over HTTP too', () => {

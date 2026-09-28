@@ -1,6 +1,7 @@
 import { loadConfig } from '@berelax/config'
 import {
   agentPrincipal,
+  assertPublicationTransition,
   deniedPermissionOf,
   type Principal,
   type PublishedCopyRegion,
@@ -10,6 +11,7 @@ import {
 } from '@berelax/core'
 import {
   createConnection,
+  publicationPosition,
   publishSurface,
   readCompliancePolicy,
   recordApproval,
@@ -17,15 +19,17 @@ import {
   recordLintPass,
   type Sql,
 } from '@berelax/db'
+import type { SlotImageForPublication } from '@berelax/media/slots'
 import { isAppError } from '@berelax/shared'
-import { assessMediaForPublication } from '../../../../../src/media/publish-gate.ts'
+import {
+  assessMediaForPublication,
+  publicationSubject,
+} from '../../../../../src/media/publish-gate.ts'
 import { appPayload, principalForRequest } from '../../../../../src/payload/request-principal.ts'
 import {
   assessPublication,
   type PublicationAssessment,
-  type PublicationGateRefusal,
   type ResourceFetcher,
-  slotRefusalOf,
 } from '../../../../../src/publication/publish-gate.ts'
 
 /**
@@ -235,27 +239,30 @@ function resourceFetcher(request: Request, documentPath: string): ResourceFetche
 }
 
 /**
- * The slot refusals for the media rows this page names, through `assessMediaForPublication`.
+ * The slot images for the media rows this page names, through `assessMediaForPublication`.
  *
- * The SAME function the media publish endpoint calls: the alt-text rules and the per-slot byte budgets are
- * W-SYS-09's, they are measured off the objects in the bucket, and a second reading of them here would be
- * the second implementation `publish-gate.ts`'s header is about. A row that does not exist contributes
- * nothing rather than throwing — a page naming a deleted image is a page with one fewer image, and the
- * weight check still weighs whatever the document actually references.
+ * The SAME function the media publish endpoint calls: it reads the row through Payload's access layer as
+ * this caller and measures the objects in the bucket. Its REFUSALS are deliberately not used — the gate
+ * runs `publicationRefusals` over the images itself, so there is one place in this request where a slot is
+ * judged rather than two lists merged. A row that does not exist contributes nothing rather than throwing:
+ * a page naming a deleted image is a page with one fewer image, and the weight check still weighs whatever
+ * the document actually references.
  */
-async function slotRefusalsFor(
+async function slotImagesFor(
   mediaIds: readonly string[],
   user: unknown,
-): Promise<readonly PublicationGateRefusal[]> {
+): Promise<readonly SlotImageForPublication[]> {
   if (mediaIds.length === 0) return []
   const payload = await appPayload()
-  const out: PublicationGateRefusal[] = []
+  const images: SlotImageForPublication[] = []
   for (const mediaId of mediaIds) {
     const assessment = await assessMediaForPublication(payload, mediaId, user)
     if (assessment === null) continue
-    for (const refusal of assessment.refusals) out.push(slotRefusalOf(refusal))
+    // The row and the measured objects, in the shape W-SYS-09's rules take. `publicationSubject` is the
+    // media endpoint's own mapping, so the weights this gate judges are the weights that endpoint judges.
+    images.push(publicationSubject(assessment.subject, assessment.set))
   }
-  return out
+  return images
 }
 
 export async function handlePublish(request: Request): Promise<Response> {
@@ -364,14 +371,11 @@ async function publish(
       surface: body.surface,
       path: body.path,
       regions: body.regions,
-      // Resolved from the rows rather than read from the body; see `slotRefusalsFor`. The gate re-runs
-      // `publicationRefusals` over this list and would find nothing, so the refusals are merged below
-      // instead of round-tripped through it.
-      slotImages: [],
+      // Resolved from the rows and the bucket, never read from the body; see `slotImagesFor`.
+      slotImages: await slotImagesFor(body.slotMediaIds, caller.cmsUser),
     },
   )
-  const slotRefusals = await slotRefusalsFor(body.slotMediaIds, caller.cmsUser)
-  const refusalsFound = [...assessment.refusals, ...slotRefusals]
+  const refusalsFound = assessment.refusals
   if (refusalsFound.length > 0) {
     return json(
       {
@@ -436,6 +440,27 @@ async function publish(
     approverRole: approver.role,
     approvedAt: now,
   })
+  /*
+   * The pure machine, asked before the write rather than after it.
+   *
+   * This is what makes `@berelax/core`'s transition table load-bearing in production rather than a second
+   * statement only tests read: the surface is re-read AFTER the approval, and a concurrent editor who moved
+   * it in between gets a 409 naming the refusal instead of a SQLSTATE. The database refuses the same write
+   * on its own terms a moment later, which is the point — this layer exists to say WHY in words, and
+   * `publication-control-plane.itest.ts` drives both with the same pairs so they cannot disagree.
+   */
+  const position = await publicationPosition(sql, body.surface)
+  assertPublicationTransition(
+    body.surface,
+    { state: position.state, currentRecordId: position.currentRecordId },
+    'published',
+    {
+      lintPassId,
+      approvalId,
+      measuredCriticalPathBytes: assessment.measuredCriticalPathBytes,
+      supersedesId: null,
+    },
+  )
   const published = await publishSurface(sql, {
     surface: body.surface,
     lintPassId,

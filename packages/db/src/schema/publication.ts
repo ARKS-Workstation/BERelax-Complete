@@ -62,12 +62,12 @@ export const publicationLintPass = pgTable(
     regulatoryProfileVersion: integer('regulatory_profile_version').notNull(),
     /** How many banned terms the pass compared against. `> 0` by CHECK; see 0093's header. */
     termsChecked: smallint('terms_checked').notNull(),
-    linted_at: timestamp('linted_at', { withTimezone: true }).notNull(),
+    lintedAt: timestamp('linted_at', { withTimezone: true }).notNull(),
     actorKind: text('actor_kind').notNull(),
     actorLabel: text('actor_label').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('publication_lint_pass_surface_idx').on(table.surface, table.linted_at)],
+  (table) => [index('publication_lint_pass_surface_idx').on(table.surface, table.lintedAt)],
 )
 
 export const publicationApproval = pgTable(

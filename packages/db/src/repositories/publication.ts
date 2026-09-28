@@ -33,13 +33,17 @@ import type { Sql } from '../connection.ts'
 // Refusals and the codes 0093 raises
 // ------------------------------------------------------------------------------------------------
 
+/**
+ * Every refusal this module raises, by name. Three, and each one is raised below.
+ *
+ * Deliberately NOT a longer list of plausible refusals: a name nothing can raise is a rule a reader
+ * believes exists, which is the same defect as a check that examines nothing. The refusals that belong to
+ * the DATABASE are not here either — they arrive as the SQLSTATEs in {@link PUBLICATION_SQLSTATE}, and
+ * restating them as names here would be two vocabularies for one set of rules.
+ */
 export const PUBLICATION_REFUSALS = [
   /** No regulatory profile is in force, so nothing can say what the lint compared against. */
   'publication_profile_absent',
-  /** The lint pass named does not exist, or is for a different surface. */
-  'publication_lint_pass_not_found',
-  /** The approval named does not exist, or is for a different lint pass. */
-  'publication_approval_not_found',
   /** A revert was asked for against a record that is not a published record of this surface. */
   'publication_revert_target_not_published',
   /** A revert was asked for against the record that is already live, which changes nothing. */
