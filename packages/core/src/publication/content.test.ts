@@ -63,8 +63,9 @@ describe('does change the content', () => {
   })
 
   it('a paragraph moved between regions', () => {
-    // The same words in a different place. A page whose standfirst became its title is a different page, and
-    // a digest that joined the regions without naming them would call it the same one.
+    // The same words in a different place. This one is caught by the ORDER rather than by the region names
+    // — the sibling case below is what the names are for — and it is here because swapping the title and the
+    // body is the edit an editor actually makes.
     expect(
       publicationCanonicalContent([
         { region: 'title', text: 'The desk takes your booking and shows you to the room.' },
@@ -74,6 +75,10 @@ describe('does change the content', () => {
   })
 
   it('a region renamed, with the copy untouched', () => {
+    // THE case the region names exist for, and the only one that can see them: the text sequence is
+    // identical, so a digest that joined the regions without naming them would call this the same page. A
+    // paragraph that became the title, or a body promoted to the standfirst, is a different page — and it is
+    // the one an approval must not carry over.
     expect(
       publicationCanonicalContent([
         POST[0] as { region: string; text: string },
