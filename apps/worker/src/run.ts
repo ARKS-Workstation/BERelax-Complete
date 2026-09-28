@@ -1,8 +1,14 @@
 import { loadConfig } from '@berelax/config'
 import { createConnection, createPostgresMessageStore } from '@berelax/db'
 import { createSmsalaTransport } from '@berelax/messaging/transports/smsala'
+import { FLOW_TICK_JOB, setInterpreterRuntime } from './automation/interpreter.ts'
+import {
+  interpreterCaps,
+  messageNodeDepsFor,
+  raiseLoopDetectedAlert,
+} from './automation/runtime.ts'
 import { createBoss, shutdown } from './boss.ts'
-import { enqueue } from './enqueue.ts'
+import { enqueue, transactionalEnqueue } from './enqueue.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
 import {
@@ -105,6 +111,29 @@ async function main(): Promise<void> {
   setObligationNoticeEnqueue((data) =>
     enqueue(boss).send(SEND_OBLIGATION_NOTICE_JOB, data, { singletonKey: data.noticeId }),
   )
+  // C-AUTO-07: the interpreter, before `startWorkers` for the reason every other runtime is — a handler
+  // that attached first would take a tick off the queue and fail on a missing dependency, burning a retry
+  // on nothing. The caps are read from `app_setting` HERE and not captured: `Y9-frequency-cap` is answered
+  // by an audited settings change, so the figure is re-read per boot and the send path re-reads it per
+  // tick through `messageDeps.caps`.
+  setInterpreterRuntime({
+    sql,
+    messageDeps: { ...messageNodeDepsFor(sql), caps: await interpreterCaps(sql) },
+    // TRANSACTIONAL, and it is the acceptance line: the next tick's job row commits with the side effects
+    // the current tick performed, so a tick that rolled back leaves no tick behind and a tick that
+    // committed cannot lose the one it queued.
+    enqueueTick: (uow, data, options) =>
+      transactionalEnqueue(boss, uow).send(FLOW_TICK_JOB, data, {
+        ...(options?.startAfterSeconds === undefined
+          ? {}
+          : { startAfterSeconds: options.startAfterSeconds }),
+        // The run id, so a tick queued while one is already pending for the same run is discarded. Not the
+        // guarantee — the run's row lock and the idempotency tokens are — but it keeps the queue from
+        // filling with work the first tick already has.
+        singletonKey: data.runId,
+      }),
+    alertLoopDetected: raiseLoopDetectedAlert,
+  })
   await boss.start()
   const registered = await registerJobs(boss, JOB_REGISTRY)
   await startWorkers(boss, () => new Date().toISOString(), JOB_REGISTRY)

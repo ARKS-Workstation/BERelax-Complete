@@ -54,6 +54,8 @@ export {
   type ReceiptSource,
   type RecordedMessage,
   type RecordedSendRequest,
+  type ReleaseOutcome,
+  releaseHeldMessage,
   vendorFor,
 } from './lifecycle.ts'
 export {

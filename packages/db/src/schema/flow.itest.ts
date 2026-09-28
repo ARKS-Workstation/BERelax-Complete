@@ -27,6 +27,20 @@ let sql: Sql
 const FLOW_KEY = 'cauto06_schema_itest'
 /** On the unallocated +971 59 prefix, and in a band no other suite uses (`synthetic.ts`). */
 const PROBE_PHONE = '+971590061001'
+/**
+ * The band this file owns for the contacts a case needs OF ITS OWN, and why cases need one.
+ *
+ * `flow_enrolment_one_active_per_contact` (0091, C-AUTO-07) is a partial UNIQUE index on
+ * (flow_id, customer_id) where ended_at is null, because "enrolling the same contact twice in one flow
+ * yields ONE active enrolment" is that unit's acceptance line and a dedupe in a writer is not a rule. This
+ * file publishes one flow and reused ONE contact across every case, and three of its cases leave an active
+ * enrolment behind — so the second and third collided on the index rather than reaching the assertion they
+ * were written for. The rule is right and the fixture was wrong: three enrolments on one flow are three
+ * contacts. Each case that needs a live enrolment takes its own from this band, 61101 upward, kept clear of
+ * PROBE_PHONE and of the bands the other flow suites own.
+ */
+const OWN_CONTACT_BAND_FIRST = 61_101
+let ownContacts = 0
 
 /** The smallest publishable document. Written by hand: this package may not import the DSL. */
 const document = (nodes: number) => ({
@@ -61,11 +75,27 @@ beforeAll(async () => {
   customerId = (contact as { id: string }).id
 })
 
+/** A contact this case alone enrols, so it cannot collide with another case's live enrolment. */
+async function ownContact(): Promise<string> {
+  ownContacts += 1
+  const phone = `+97159${String(OWN_CONTACT_BAND_FIRST + ownContacts - 1).padStart(7, '0')}`
+  const [contact] = await sql<{ id: string }[]>`
+    insert into customer (phone_e164, created_via) values (${phone}, 'front_desk')
+    on conflict (phone_e164) do update set created_via = excluded.created_via
+    returning id
+  `
+  return (contact as { id: string }).id
+}
+
 afterAll(async () => {
   // Enrolments only. `flow_definition` refuses DELETE by trigger and `flow` is referenced by the versions
   // this run published, so neither can be cleaned up — which is what makes every assertion below relative.
+  // The contacts go too, and only the ones this file created: PROBE_PHONE plus its own band, never the
+  // whole table (`packages/db/src/seeded-row-deletes.test.ts`). Deleting them cascades their enrolments,
+  // which is what makes a second run of this file start from no active enrolment on the probe flow.
   await sql`delete from flow_enrolment where flow_id = ${flowId}`
   await sql`delete from customer where id = ${customerId}`
+  await sql`delete from customer where phone_e164 between '+971590061101' and '+971590061199'`
   await sql?.end({ timeout: 5 })
 })
 
@@ -159,7 +189,7 @@ describe('acceptance — the enrolment names an exact version row', () => {
     const version = await publish()
     await sql`
       insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
-      values (${flowId}, ${version}, ${customerId}, 'cauto06 itest')
+      values (${flowId}, ${version}, ${await ownContact()}, 'cauto06 itest')
     `
     const state = await sqlstateOf(
       sql`delete from flow_definition where flow_id = ${flowId} and version = ${version}`,
@@ -256,7 +286,7 @@ describe('acceptance — the pin cannot drift', () => {
     const first = await publish()
     const [enrolment] = await sql<{ id: string }[]>`
       insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
-      values (${flowId}, ${first}, ${customerId}, 'cauto06 itest')
+      values (${flowId}, ${first}, ${await ownContact()}, 'cauto06 itest')
       returning id
     `
     const enrolmentId = (enrolment as { id: string }).id
@@ -294,7 +324,7 @@ describe('acceptance — the pin cannot drift', () => {
     const version = await publish()
     const [enrolment] = await sql<{ id: string }[]>`
       insert into flow_enrolment (flow_id, definition_version, customer_id, created_by)
-      values (${flowId}, ${version}, ${customerId}, 'cauto06 itest')
+      values (${flowId}, ${version}, ${await ownContact()}, 'cauto06 itest')
       returning id
     `
     const enrolmentId = (enrolment as { id: string }).id

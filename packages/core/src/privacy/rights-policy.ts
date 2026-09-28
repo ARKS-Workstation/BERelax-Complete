@@ -917,6 +917,45 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'records and the tax authority requires those to be kept.',
     registeredBy: 'C-CRM-10',
   }),
+  // --- the flow interpreter's two append-only tables (C-AUTO-07, 0091) -----------------------------
+  rule({
+    key: 'public.flow_node_effect.contact_customer_id',
+    dataClass: 'operational',
+    action: 'retain_append_only',
+    why:
+      'The idempotency token: THIS node of THIS run has already reached THIS contact. DELETE is refused ' +
+      'for every role including the owner (0091, ZY012) and the application role holds `update ' +
+      '(contact_customer_id)` and nothing more, so the retention is structural before it is a policy. It ' +
+      'is also the right answer in the same direction as `frequency_ledger`: removing the tokens would ' +
+      'hand a re-created record a run with no history, and the next tick would send every node the person ' +
+      'had already received. `flow_enrolment.customer_id` is a `delete_row` beside this one and that is ' +
+      'what stops the sequence — the token is the record that it already ran, not a reason to run it ' +
+      'again. The row holds a run id, a node id, a channel and an instant; never a contact detail.',
+    subjectReason:
+      'We keep a record that each step of an automated message sequence had already reached you. It holds ' +
+      'no contact details, and it is what stops a re-created record being sent the same messages again.',
+    registeredBy: 'C-AUTO-07',
+  }),
+  rule({
+    key: 'public.flow_step_log.contact_customer_id',
+    dataClass: 'audit',
+    action: 'retain_append_only',
+    why:
+      'The answer to "why did this contact receive this message", in one row: the flow, the pinned ' +
+      'document version, the node, the consent record the send was gated on, the gate decision and the ' +
+      'outcome. Append-only for every role including the owner (0091, ZY011) and the application role ' +
+      'holds no UPDATE privilege on it, so there is no statement an erasure could issue — but the ' +
+      'structural half is not the argument. The argument is `consent`\u2019s, one step further on: the ' +
+      'consent log says what we were permitted to do and this says what we then did with that permission, ' +
+      'and a complaint about a past message is answered from the two together. Erasing it would leave the ' +
+      'consent record and destroy the evidence of what was sent under it. It carries ids, a decision and ' +
+      'an instant; the recipient address lives on `message.recipient`, which is redacted.',
+    subjectReason:
+      'We keep the record of which automated messages were sent to you, when, and what permission each ' +
+      'one was sent under. It holds no contact details, and it is how we answer any question or complaint ' +
+      'about a message you received.',
+    registeredBy: 'C-AUTO-07',
+  }),
   rule({
     key: 'public.frequency_ledger.contact_customer_id',
     dataClass: 'operational',

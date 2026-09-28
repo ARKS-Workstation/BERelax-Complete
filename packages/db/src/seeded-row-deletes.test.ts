@@ -145,7 +145,16 @@ describe('the seeded customers survive every suite', () => {
         'the rows this suite created — by its own `phone_match_key`s or its own number band — the way ' +
         'customer-identity.itest.ts and otp-route.itest.ts do',
     ).toEqual([])
-  })
+    // 60 seconds, explicitly, because `vitest.config.ts` sets no testTimeout and the default 5s is not
+    // enough for this case under `pnpm coverage`. Measured: the walk and the reads are 150ms for 451 files
+    // and 8MB, and the rest is `withoutComments` building 8 million characters one `out += char` at a time
+    // — 1.8s standalone, 5.5s under the full unit run with coverage instrumentation and 20 workers
+    // competing, which failed the whole of `pnpm verify` with `Test timed out in 5000ms` and said nothing
+    // about any suite's cleanup. A timeout rather than a faster stripper: pre-filtering on the raw text
+    // before stripping would be the obvious speed-up and it is not equivalent, because a comment sitting
+    // between `customer` and the end of a line (`delete from customer/*x*/`) is an offence the raw text
+    // does not match. The check must stay exact; it is the clock that was wrong.
+  }, 60_000)
 
   it('reads code and not prose, so the files that describe the hazard are not accused of it', () => {
     // The control for the scan above, both directions, on strings this case owns.

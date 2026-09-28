@@ -29,6 +29,7 @@ import {
   AppError,
   advanceMessageStatus,
   DELIVERY_REPORTED_FAILED,
+  type HeldMessageTerminalReason,
   type MessageRowFailureReason,
   type MessageStatus,
   type ReceiptIgnoredReason,
@@ -81,6 +82,18 @@ export type MessageAttemptOutcome =
       readonly nextAttemptAtIso: string | null
     }
   | { readonly kind: 'held'; readonly releaseAtIso: string; readonly atIso: string }
+  /**
+   * A hold that ended without ever being attempted: it went stale, or the gate refused it at release.
+   *
+   * Terminal with NO attempt counted, which is what 0091 relaxed `message_sent_counts_an_attempt` for and
+   * for nothing else. `HELD_MESSAGE_TERMINAL_REASONS` in `@berelax/shared` is the pair of reasons.
+   */
+  | {
+      readonly kind: 'hold_ended'
+      readonly reason: HeldMessageTerminalReason
+      readonly detail: string
+      readonly atIso: string
+    }
 
 /** A receipt, already mapped by the vendor's transport. Matches `DeliveryReceiptRecord`. */
 export interface ReceiptToApply {
@@ -167,6 +180,20 @@ function columnsFor(outcome: MessageAttemptOutcome): {
       providerMessageId: outcome.providerMessageId,
       sentAt: outcome.atIso,
       countsAsAttempt: true,
+    }
+  }
+  if (outcome.kind === 'hold_ended') {
+    // Terminal, with no attempt: nothing was ever handed to a vendor, which is the whole difference
+    // between this and a failure. `next_attempt_at` is cleared because `message_retry_only_while_queued`
+    // refuses a pending retry on a row that is not queued — and a retry on an expired offer would send it
+    // late, which is the one outcome `Y9-queued-staleness` rules out.
+    return {
+      ...base,
+      status: 'failed',
+      failedAt: outcome.atIso,
+      failureReason: outcome.reason,
+      failureDetail: outcome.detail,
+      countsAsAttempt: false,
     }
   }
   if (outcome.kind === 'held') {

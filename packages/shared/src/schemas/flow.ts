@@ -188,6 +188,19 @@ export const FLOW_DSL_RULES = [
   'flow-dsl-edge-into-the-trigger',
   /** An action node whose declared class is not the class of the template it names. */
   'flow-dsl-message-class-mismatch',
+  /**
+   * A condition testing `lifecycle_state` against a value the customer lifecycle vocabulary does not hold.
+   *
+   * C-AUTO-06's NOTE (5) deferred this check to C-AUTO-07, which owns the interpreter that would have to
+   * answer such a condition. The vocabulary is `CUSTOMER_LIFECYCLE_STATES` in `@berelax/core`, which
+   * `automation/dsl.ts` is in the same package as and therefore READS rather than restates — so no
+   * registry has to be injected for it and there is nothing to drift. The other half of that NOTE, an
+   * `action_stage` node's stage, is deliberately NOT checked here: a stage can be archived after a flow is
+   * published, so the choke point has to be the write, and the interpreter's `action_stage` step calls
+   * `moveCard`, which refuses `stage_not_found` and `stage_archived` by name at the only moment either can
+   * be true.
+   */
+  'flow-dsl-unknown-lifecycle-state',
   /** The named template is not in the registry at all, so its class could not be checked. */
   'flow-dsl-unknown-template',
   /** No template registry was supplied, so no class was checked. Fail closed, never skip. */

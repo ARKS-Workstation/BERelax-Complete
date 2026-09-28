@@ -75,6 +75,10 @@ const EXPECTED = [
   'nextPromotionalWindowOpen',
   'outboundMessageFor',
   'placeholdersIn',
+  // C-AUTO-07's release path. It sends through `sendMessage` like everything else and records against
+  // an EXISTING row rather than inserting one, which is the only thing it adds: a held message may be
+  // released once, not sent a second time. It is no more a bypass than `deliverMessage` is.
+  'releaseHeldMessage',
   'promotionalDefaults',
   'promotionalGateEvaluators',
   'renderEmailHtml',

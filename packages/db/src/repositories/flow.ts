@@ -1,4 +1,8 @@
-import { AppError } from '@berelax/shared'
+import {
+  AppError,
+  type FlowEnrolmentOutcome,
+  MAX_ACTIVE_ENROLMENTS_PER_FLOW,
+} from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 import type { UnitOfWork } from '../tx.ts'
 
@@ -50,6 +54,15 @@ export const FLOW_REFUSALS = [
   'enrolment_not_found',
   /** Ending an enrolment that has already ended. A second ending is an error, not a no-op. */
   'enrolment_not_active',
+  /**
+   * The flow already holds `MAX_ACTIVE_ENROLMENTS_PER_FLOW` active enrolments (C-AUTO-07).
+   *
+   * A NAMED refusal, which is the acceptance line's wording, and it is named this because
+   * `crm-pipeline.itest.ts` already injects an enroller raising exactly this string to prove a refusal
+   * travels out of `moveCard` unchanged — so the real cap arrives under the name that case was written
+   * against rather than beside it.
+   */
+  'flow_enrolment_cap_reached',
 ] as const
 export type FlowWriteRefusal = (typeof FLOW_REFUSALS)[number]
 
@@ -455,20 +468,46 @@ export interface Enrolment {
   readonly flowId: string
   /** The version resolved at enrolment time and pinned. Nothing re-resolves it afterwards. */
   readonly pinnedVersion: number
+  /**
+   * Whether this call created the enrolment or found the one that was already running (C-AUTO-07).
+   *
+   * An OUTCOME and not a refusal, which is the acceptance line's wording and the only reading that makes a
+   * trigger safe to deliver twice: an at-least-once queue re-delivers an `appointment.completed` event, and
+   * an enrolment attempt that threw would burn a retry and dead-letter a job whose work was already done.
+   * On `already_enrolled` the ids are the EXISTING enrolment's, so a caller that goes on to start a run
+   * finds the run that is already going rather than starting a second one.
+   */
+  readonly outcome: FlowEnrolmentOutcome
 }
 
 /**
  * Enrols one contact on the version that is live NOW, and pins it.
  *
- * This is the narrow write, not the enrolment API: the per-flow enrolment cap, the already-enrolled
- * outcome, the idempotency key and the trigger plumbing are C-AUTO-07's, which builds on this row. What
- * is here is the part that must be right before any of that exists — the version is read once, written
- * into the row, and never resolved again.
+ * THE enrolment API: every trigger reaches it, and `PIPELINE_ENROLMENT_PATH.enrol` IS this function by
+ * reference rather than a wrapper around it (`pipeline-board.itest.ts` compares them with `toBe`), so a
+ * stage entry gets the cap and the dedupe for free.
+ *
+ * Three things beyond the pin, all C-AUTO-07's and each one a statement the database also makes:
+ *
+ *   - **The flow row is locked FIRST.** `for update`, and it is what makes the cap a cap: without it two
+ *     enrolments racing both read 4,999 and both insert, and the flow ends up one over its ceiling with
+ *     nothing having been refused. The same lock `publishFlowDefinition` takes, in the same order, so the
+ *     two cannot deadlock against each other.
+ *   - **A contact already running on this flow is an OUTCOME, not a second row.** The mechanism is
+ *     `flow_enrolment_one_active_per_contact` (0091), a partial unique index on `(flow_id, customer_id)
+ *     where ended_at is null`: the insert carries `on conflict ... do nothing` and the absence of a
+ *     returned row IS the answer, so a caller cannot get two active enrolments even by racing. A
+ *     COMPLETED enrolment does not block a new one — that is a contact going round a win-back sequence a
+ *     second time, which is the ordinary case.
+ *   - **The per-flow cap is refused by name.** `MAX_ACTIVE_ENROLMENTS_PER_FLOW` (5,000, provisional) is
+ *     counted in SQL over the partial `flow_enrolment_active_idx` and never through a capped reader
+ *     (brief rule 12: a limit is right for a panel and wrong for a count).
  */
 export async function enrolOnLiveVersion(uow: UnitOfWork, input: EnrolInput): Promise<Enrolment> {
   const { sql } = uow
+  // THE lock, and it comes before everything: see the note above on why the cap is not a cap without it.
   const [flow] = await sql<{ id: string; is_active: boolean }[]>`
-    select id, is_active from flow where flow_key = ${input.flowKey}
+    select id, is_active from flow where flow_key = ${input.flowKey} for update
   `
   if (flow === undefined) {
     refuse('flow_not_found', `No flow is called "${input.flowKey}".`, { flowKey: input.flowKey })
@@ -493,12 +532,65 @@ export async function enrolOnLiveVersion(uow: UnitOfWork, input: EnrolInput): Pr
     )
   }
 
+  // The cap, counted in SQL. Checked BEFORE the insert rather than caught afterwards, because a count is
+  // not a constraint: the partial unique index below refuses a duplicate contact and nothing in the
+  // database counts a flow's enrolments, so this read under the flow's row lock is the enforcement.
+  const [active] = await sql<{ n: string }[]>`
+    select count(*)::text as n from flow_enrolment
+     where flow_id = ${flow.id} and status = 'active'
+  `
+  const activeNow = Number(active?.n ?? '0')
+  if (activeNow >= MAX_ACTIVE_ENROLMENTS_PER_FLOW) {
+    refuse(
+      'flow_enrolment_cap_reached',
+      `Flow "${input.flowKey}" already has ${activeNow} active enrolments and the maximum is ` +
+        `${MAX_ACTIVE_ENROLMENTS_PER_FLOW}. The figure is provisional (build/manifest.yaml, C-AUTO-07) ` +
+        'and it is a ceiling rather than a preference: a flow with no bound is one trigger away from ' +
+        'enrolling the whole contact list, and the first anybody hears of it is the send report.',
+      {
+        flowKey: input.flowKey,
+        activeEnrolments: activeNow,
+        maximum: MAX_ACTIVE_ENROLMENTS_PER_FLOW,
+      },
+    )
+  }
+
   const [row] = await sql<{ id: string }[]>`
     insert into flow_enrolment (flow_id, definition_version, customer_id, enrolled_at, created_by)
     values (${flow.id}, ${pinnedVersion}, ${input.customerId}, ${input.at}, ${input.createdBy})
+    -- 0091's partial unique index, named by INFERENCE and not by constraint name: a partial unique index
+    -- cannot be a table constraint in Postgres, so ON CONFLICT ON CONSTRAINT finds nothing and raises.
+    -- The predicate has to be repeated here for the same reason -- it is how the planner picks the index.
+    -- The absence of a returned row IS the already_enrolled outcome, which makes the guarantee the INDEX's
+    -- rather than a read's: two enrolments racing cannot both win.
+    on conflict (flow_id, customer_id) where ended_at is null do nothing
     returning id
   `
-  const enrolmentId = (row as { id: string }).id
+  if (row === undefined) {
+    // Already running. The EXISTING enrolment's ids and its own pin are returned, not the live version: a
+    // caller handed `pinnedVersion` of the newest version would think the contact had been moved onto it,
+    // which is the drift ZF002 exists to refuse one table along.
+    const [existing] = await sql<{ id: string; definitionVersion: number }[]>`
+      select id, definition_version as "definitionVersion" from flow_enrolment
+       where flow_id = ${flow.id} and customer_id = ${input.customerId} and ended_at is null
+    `
+    if (existing === undefined) {
+      throw new AppError(
+        'invariant_violated',
+        `The enrolment insert for ${input.customerId} on "${input.flowKey}" conflicted on ` +
+          'flow_enrolment_one_active_per_contact and no active enrolment could then be found. The index ' +
+          'and this read disagree, which means one of them is not about the same rows.',
+        { details: { flowKey: input.flowKey, customerId: input.customerId } },
+      )
+    }
+    return {
+      enrolmentId: existing.id,
+      flowId: flow.id,
+      pinnedVersion: existing.definitionVersion,
+      outcome: 'already_enrolled',
+    }
+  }
+  const enrolmentId = row.id
 
   await uow.audit.record({
     action: FLOW_AUDIT_ACTIONS.enrolled,
@@ -508,7 +600,7 @@ export async function enrolOnLiveVersion(uow: UnitOfWork, input: EnrolInput): Pr
     after: { flowKey: input.flowKey, pinnedVersion, customerId: input.customerId },
   })
 
-  return { enrolmentId, flowId: flow.id, pinnedVersion }
+  return { enrolmentId, flowId: flow.id, pinnedVersion, outcome: 'enrolled' }
 }
 
 export interface EndEnrolmentInput {

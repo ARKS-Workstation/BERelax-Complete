@@ -67,9 +67,13 @@ import { assertSynthetic, syntheticPerson } from './synthetic.ts'
  *
  * ## Why the interpreter is absent and what stands in for it
  *
- * C-AUTO-07 owns the flow interpreter and C-AUTO-10 owns campaigns; neither exists. So
- * {@link attemptPromotionalSend} is the composition those two will make — read caps, read ledger, decide,
- * send, record — written here because `packages/fixtures` is the only package that may import both halves.
+ * C-AUTO-10 owns campaigns and does not exist. C-AUTO-07's interpreter now does, and it makes exactly this
+ * composition — read caps, read ledger, decide, send, record — in
+ * `apps/worker/src/automation/nodes/message.ts`, over a message store that writes the ledger row with the
+ * message row in one transaction (`recordSendWithLedger`, which takes the caller's transaction for this
+ * reason). {@link attemptPromotionalSend} stays: it is the CAMPAIGN half's stand-in, and it is also the
+ * version of the composition this file can drive over a cross product without a queue, written here because
+ * `packages/fixtures` is the only package that may import both halves.
  * The two FLOWS are real rows in `flow`, `flow_definition` and `flow_enrolment`, so "one contact enrolled
  * in two flows" is a fact in the database rather than a label in a test; the CAMPAIGN is a `source_kind`
  * and a `source_ref` with no table behind it, which is exactly what 0080 says about `source_ref` having no
@@ -272,7 +276,7 @@ afterAll(async () => {
 })
 
 // ------------------------------------------------------------------------------------------------
-// The composition C-AUTO-07 and C-AUTO-10 will make
+// The composition C-AUTO-07 has made and C-AUTO-10 will
 // ------------------------------------------------------------------------------------------------
 
 interface Attempt {

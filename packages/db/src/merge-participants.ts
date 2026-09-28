@@ -355,14 +355,26 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
     table: 'flow_enrolment',
     column: 'customer_id',
     strategy: 'repoint_update',
-    // No unique key involves the customer: the primary key is `id` and the two indexes on this table are
-    // not unique, so no row can be refused and nothing can be retained.
-    conflictKey: null,
-    activePredicate: null,
+    // `flow_enrolment_one_active_per_contact` (0091), minus the customer: a contact may be on one flow
+    // once at a time, so the only thing an active enrolment can collide with is the survivor's own active
+    // enrolment on the SAME flow. It was `null` here, and it was right until 0091 added the index — which
+    // is the direction this field has to be kept in step, because a null conflict key against a real
+    // unique index is a 23505 in the middle of a merge instead of a retained row with a stated reason.
+    conflictKey: ['flow_id'],
+    // The index is PARTIAL on `ended_at is null`, which is exactly `status = 'active'` (0070's
+    // `flow_enrolment_ended_matches_status` is that biconditional). A COMPLETED enrolment is outside the
+    // index, cannot collide with anything and must move — `customer_therapist_do_not_pair`'s lifted-row
+    // case, and for the same structural reason.
+    activePredicate: 'ended_at is null',
     dedupeKey: null,
     backReference: null,
+    // `merge_record_table_retained_reason_is_stated` caps this at 300 characters, so the argument lives in
+    // `why` below and this is the sentence a merge report carries.
+    retainedReason:
+      'The survivor is already running on that flow. Moving the loser’s enrolment would put one person on ' +
+      'one flow twice and send them every node twice; the survivor’s run continues and the loser’s stays ' +
+      'readable on the tombstone, where the interpreter ends it with contact_merged_away.',
     excludeColumns: [],
-    retainedReason: null,
     why:
       'An enrolment is a process attached to a contact (0070), so it must follow the person: left on the ' +
       'tombstone, a win-back sequence would go on sending to a record nothing else reads, resolving ' +
@@ -370,12 +382,42 @@ export const MERGE_PARTICIPANTS: readonly MergeParticipant[] = registry([
       'than by C-CRM-05 because 0070 landed FIRST and nothing registered it: `mergeCoverage` enumerates ' +
       'from information_schema, so the completeness case in merge.itest.ts went red the moment the two ' +
       'branches met — which is exactly what that mechanism is for, and this is the first time it fired ' +
-      'on a real table. What is still C-AUTO-07’s is the half its own acceptance names: `flow_run`, the ' +
-      'step log and the (flow_run, node, channel, contact) idempotency keys do not exist yet, so a node ' +
-      'already executed for the loser cannot be prevented from executing again for the survivor here. ' +
+      'on a real table. The half C-AUTO-07 owed it has landed: `flow_run` hangs off this row and follows ' +
+      'it, and `flow_node_effect` below carries the (flow_run, node, channel, contact) token, so a node ' +
+      'already executed for the loser is not executed again for the survivor. ' +
       'The pin (flow_id, definition_version) is immutable (ZF002) and is NOT touched: re-pointing the ' +
       'customer leaves the version this enrolment is governed by exactly where it was.',
     registeredBy: 'C-CRM-06',
+  }),
+  participant({
+    schema: 'public',
+    table: 'flow_node_effect',
+    column: 'contact_customer_id',
+    strategy: 'repoint_update',
+    // `flow_node_effect_once_per_contact` (0091), minus the contact. The run, the node and the channel are
+    // the rest of the acceptance line's key, and `assertParticipantKeyIsAUniqueIndex` refuses this
+    // registration the day that constraint's columns stop matching.
+    conflictKey: ['flow_run_id', 'node_id', 'channel'],
+    // The index is total, so every row is in it and every row can collide. Nothing to narrow.
+    activePredicate: null,
+    dedupeKey: null,
+    backReference: null,
+    excludeColumns: [],
+    retainedReason:
+      'The same (run, node, channel) already has a token on the survivor, so the same node of the same run ' +
+      'was recorded against both records — an at-least-once job replayed across a merge that had already ' +
+      'moved the contact. One token is what the run needs; a second would claim one execution twice.',
+    why:
+      'The token says THIS node of THIS run has already reached THIS contact, and after a merge the ' +
+      'contact IS the survivor — so the token has to move or the next tick computes a key that finds ' +
+      'nothing and sends the message again. That is the whole of C-AUTO-07’s "a contact merged mid-run ' +
+      'continues on the survivor exactly once", and it is the one thing on this table a merge may touch: ' +
+      'the table refuses DELETE and refuses an UPDATE of the run, the node, the channel or the instant ' +
+      '(ZY012), and the application role holds `update (contact_customer_id)` and nothing more, which is ' +
+      'exactly the statement this strategy issues (package_sale’s arrangement in 0078, ZG001). ' +
+      'The alternative — leaving the tokens on the tombstone — is not a missing tidy-up: it is the ' +
+      'survivor being sent every message the loser had already received.',
+    registeredBy: 'C-AUTO-07',
   }),
   participant({
     schema: 'public',
@@ -477,6 +519,24 @@ export interface MergeAllowlistEntry {
  * already in somebody's hand resolves to. Those readers follow the tombstone instead.
  */
 export const MERGE_ALLOWLIST: readonly MergeAllowlistEntry[] = Object.freeze([
+  Object.freeze({
+    schema: 'public',
+    table: 'flow_step_log',
+    column: 'contact_customer_id',
+    reason:
+      'The step log is EVIDENCE, not state a decision is taken from. It is append-only for every role ' +
+      'including the owner (0091, ZY011) and the application role holds no UPDATE privilege on it, so ' +
+      'there is no statement a merge could issue — but the structural half is not the argument. The ' +
+      'argument is that "why did this contact get this message" about the tombstone is a TRUE statement ' +
+      'about the past: those rows name the version, the node, the consent record and the gate decision ' +
+      'that were in force for the record the message actually went to, and re-attributing them would ' +
+      'make the survivor’s history say a message was sent under a consent record that belonged to ' +
+      'somebody else. The `invoice` entry below takes the same decision about a filed document. A read ' +
+      'that wants one person’s whole automation history resolves the tombstone with ' +
+      'merge_survivor_of(uuid), which is what that function is for. What a merge DOES move is the ' +
+      'idempotency token (`flow_node_effect`), because that one is read to decide whether to send.',
+    registeredBy: 'C-AUTO-07',
+  }),
   Object.freeze({
     schema: 'public',
     table: 'invoice',

@@ -7,3 +7,4 @@
  */
 export * from './dsl.ts'
 export * from './static-analysis.ts'
+export * from './step-plan.ts'

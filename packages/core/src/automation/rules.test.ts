@@ -171,6 +171,21 @@ const inlineCases: readonly RuleCase[] = [
     })(),
   },
   {
+    rule: 'flow-dsl-unknown-lifecycle-state',
+    why:
+      'A lifecycle_state nobody can be in: the interpreter would have to guess, and the guess is the ' +
+      'false branch for every contact. C-AUTO-07 added the check and reads CUSTOMER_LIFECYCLE_STATES.',
+    document: (() => {
+      const document = base()
+      document.nodes[2] = {
+        id: 'ask',
+        kind: 'condition',
+        test: { fact: 'lifecycle_state', operator: 'equals', value: 'dormant' },
+      }
+      return document
+    })(),
+  },
+  {
     rule: 'flow-dsl-templates-not-checked',
     why: 'Fail closed. A class check that silently did not run is ADR 0002 in the messaging estate.',
     document: base(),

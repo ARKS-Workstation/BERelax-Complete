@@ -20,6 +20,7 @@ import { instantFromIso } from '@berelax/core'
 import { DEFAULT_QUEUE_OPTIONS, MAINTENANCE_JOBS, type Sql } from '@berelax/db'
 import { AppError } from '@berelax/shared'
 import type { Job, PgBoss } from 'pg-boss'
+import { FLOW_TICK_JOB } from './automation/interpreter.ts'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
@@ -440,6 +441,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // path writes to. Its declared interval in 0085 is 24 hours, which is what makes the watchdog's "no
   // success within twice the interval" alert mean something for it.
   RETENTION_PURGE_JOB_DEFINITION,
+  // C-AUTO-07's one queue, and the same shape again: a tick is ANNOUNCED — by the enrolment that started
+  // the run, by the previous tick's own delay, or by the instant the GATE named when it held a message —
+  // so a cron here would be a poller looking for work an enqueue already named. No cron therefore no
+  // agent: what is watched is the caller. The run row is the durable record of where a flow got to, so a
+  // worker outage is self-healing in the same way B-MSG-03's `scheduled_step` rows are — nothing moved,
+  // and `flow_run.resume_at` says what was owed.
+  FLOW_TICK_JOB,
 ]
 
 /**

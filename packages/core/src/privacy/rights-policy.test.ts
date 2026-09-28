@@ -215,7 +215,12 @@ describe('the erasure rule registry', () => {
         // a row that is deleted would be a reason for keeping data that is not there.
         expect(rule.subjectReason, rule.key).toBeUndefined()
       }
-      expect(rule.registeredBy, rule.key).toBe('C-CRM-10')
+      // A MANIFEST unit id, not one particular unit's. This read `toBe('C-CRM-10')` until C-AUTO-07
+      // registered the two tables 0091 adds, and the sentence it was making was "nobody else has classified
+      // a column yet" — a fact about the calendar, asserted inside a case named for the registry. The rule
+      // worth holding is that the field names SOMEWHERE A QUESTION CAN GO, so the shape is what is checked
+      // and the control below proves the check is not vacuous.
+      expect(rule.registeredBy, rule.key).toMatch(/^[A-Z]-[A-Z]{2,5}-\d{2}$/)
       if (rule.action === 'retain_statutory') {
         // A statutory retention names the PROFILE COLUMN the figure comes from, never a literal number, so
         // the years cannot go stale against the profile.
@@ -225,6 +230,31 @@ describe('the erasure rule registry', () => {
         expect(rule.parent, rule.key).toBeDefined()
       }
     }
+  })
+
+  it('the control: a registry entry owned by nobody is refused by the shape the case checks', () => {
+    // Without this, a pattern that matched everything would pass the loop above for every entry and the
+    // field could become decoration — which is what a hard-coded unit id did from the other direction
+    // (ADR 0002). Each of these is a real way the field goes wrong: blank, a person, a team, prose, and a
+    // lower-case id that no manifest row carries.
+    const UNIT_ID = /^[A-Z]-[A-Z]{2,5}-\d{2}$/
+    for (const notAUnit of [
+      '',
+      '  ',
+      'claude',
+      'the platform team',
+      'see the migration',
+      'c-auto-07',
+    ]) {
+      expect(UNIT_ID.test(notAUnit), notAUnit).toBe(false)
+    }
+    // And every id the registry actually holds satisfies it, so the two halves are about one pattern.
+    const owners = new Set([...ERASURE_RULES.values()].map((rule) => rule.registeredBy))
+    expect(
+      owners.size,
+      'more than one unit classifies columns now, which is the point',
+    ).toBeGreaterThan(1)
+    for (const owner of owners) expect(UNIT_ID.test(owner), owner).toBe(true)
   })
 
   it('keeps the four retaining actions distinct, because their justifications are different', () => {

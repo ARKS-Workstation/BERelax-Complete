@@ -40,6 +40,7 @@ import {
   isFlowRule,
   type MessageClass,
 } from '@berelax/shared'
+import { CUSTOMER_LIFECYCLE_STATES } from '../crm/lifecycle.ts'
 import { analyseFlowGraph } from './static-analysis.ts'
 
 export type {
@@ -203,6 +204,43 @@ export function checkFlowIntegrity(
   }
 
   out.push(...checkTemplateClasses(definition, deps))
+  out.push(...checkLifecycleStateValues(definition))
+  return out
+}
+
+/**
+ * A `lifecycle_state` condition must name a state the customer lifecycle vocabulary holds.
+ *
+ * C-AUTO-06's NOTE (5) deferred this to C-AUTO-07 and C-AUTO-08's NOTE restated it. It is cheap HERE and
+ * only here: `CUSTOMER_LIFECYCLE_STATES` lives in this package (`crm/lifecycle.ts`), so the check READS the
+ * one vocabulary rather than taking an injected registry that could be omitted — no fail-closed arm is
+ * needed, because there is no way for the list not to have arrived.
+ *
+ * Why it is worth making at publish time although the interpreter also halts on it: a value that is not a
+ * state can never become one, so unlike an archived pipeline stage there is nothing about the world that
+ * could change the answer later. Refusing the publish is therefore the earliest moment the answer is
+ * final, and the operator is holding the builder. The interpreter's `condition_unreadable` halt remains
+ * for a document published by a build that did not have this check.
+ */
+function checkLifecycleStateValues(definition: FlowDefinition): readonly FlowRefusal[] {
+  const out: FlowRefusal[] = []
+  for (const node of definition.nodes) {
+    if (node.kind !== 'condition') continue
+    if (node.test.fact !== 'lifecycle_state') continue
+    const { value } = node.test
+    if (value === undefined) continue
+    if ((CUSTOMER_LIFECYCLE_STATES as readonly string[]).includes(value)) continue
+    out.push(
+      refusal(
+        'flow-dsl-unknown-lifecycle-state',
+        node.id,
+        `"${value}" is not one of the customer lifecycle states ` +
+          `(${CUSTOMER_LIFECYCLE_STATES.join(', ')}). The interpreter cannot answer the condition, and ` +
+          'the branch it would have to guess is the false one — which silences the condition for every ' +
+          'contact while the flow goes on looking as though it works.',
+      ),
+    )
+  }
   return out
 }
 

@@ -32668,6 +32668,509 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 118a-118z. (C-AUTO-07) The interpreter: the bound that must halt inside itself, the window it must not
+//             re-implement, and the four refusals the DATABASE makes about a run.
+//
+//             This unit's hard half is that almost every claim in it is satisfiable by something that does
+//             nothing. A loop bound is satisfied by an interpreter that halts immediately; a dry run's "zero
+//             message rows" is satisfied by a projection that projects nothing; "the interpreter contains no
+//             window logic" is satisfied by a scan whose needle list has gone stale. So every case below
+//             breaks the CODE and watches the CHECK fail, and every psql probe asserts its refusal BY CODE —
+//             a bare non-zero exit is also what a typo in a column name produces, and the rule under test
+//             would then be dead while this file reported PASS for ever (ADR 0003).
+//
+//             118a and 118b are the source-level half of *"a source-level assertion plus a behavioural test
+//             prove the interpreter contains no window logic of its own"*. 118a splices one window call into
+//             the interpreter and requires the scan to name it. 118b is the case worth reading twice: it
+//             breaks the NEEDLE LIST rather than the interpreter, because a list of identifiers that no
+//             longer exist scans a file for nothing and reports a clean tree — which is precisely ADR 0002's
+//             failure, and the reason that test carries a control asserting every needle still matches where
+//             the window does live.
+//
+//             118c is the bound. `executionsSoFar >= maxNodeExecutions` becomes `>`, which is an
+//             off-by-one that leaves a working interpreter: every flow still runs, every test about sending
+//             still passes, and a runaway halts at 201 instead of 200. The suite catches it because it
+//             asserts the figure with `toBe` rather than `toBeLessThanOrEqual` — which is the assertion a
+//             reviewer is tempted to relax.
+//
+//             118d is the dry run's overflow. The mutation makes `projectedRowsOmitted` always zero, which
+//             is the silent truncation the acceptance line was written against: the plan still renders, the
+//             row counts still say zero messages, and an operator reads the first thousand rows of forty
+//             thousand as the whole plan.
+//
+//             118e is the split. `chooseSplitBranch` returns the first label, which is a working splitter
+//             with one branch — and the reason it matters here rather than in a builder is idempotency: a
+//             replayed job that re-drew the branch would walk one contact down two paths through one flow.
+//
+//             118f and 118g are the two vocabularies that must not be restated. 118f turns FLOW_END_REASONS
+//             from a derivation into a literal list, which is the defect class this build has paid for
+//             twice: the list agrees today and drifts the first time an exit reason is added. 118g moves a
+//             provisional bound, because a figure nobody is holding to the manifest is a figure that changes
+//             in a diff nobody reads.
+//
+//             118h is the publish-time check C-AUTO-06's NOTE (5) deferred here. Removing the call leaves a
+//             validator that accepts a `lifecycle_state` nobody can be in — and the interpreter then halts
+//             on it at run time, days later, for the enrolments already pinned to the document.
+//
+//             118i to 118o are the database's own refusals, driven as statements inside
+//             `begin; … ; rollback;`. No case edits `packages/db/migrations/0091_flow_run.sql`: the database
+//             the suites run against has already had it applied, so an edit to the file changes nothing a
+//             statement can see and a PASS would be a report about a file nothing read. Each probe has a
+//             CONTROL beside it, because a trigger that refused everything would satisfy every refusal here
+//             and make the interpreter unable to advance a run at all.
+{
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const INTERPRETER = 'apps/worker/src/automation/interpreter.ts'
+  const STEP_PLAN = 'packages/core/src/automation/step-plan.ts'
+  const VOCABULARY = 'packages/shared/src/schemas/flow-run.ts'
+  const DSL = 'packages/core/src/automation/dsl.ts'
+  const WINDOW_SCAN = 'apps/worker/src/automation/no-window-logic.test.ts'
+  const PLAN_SUITE = 'packages/core/src/automation/step-plan.test.ts'
+  const VOCABULARY_SUITE = 'packages/core/src/automation/flow-run-vocabulary.test.ts'
+  const RULES_SUITE = 'packages/core/src/automation/rules.test.ts'
+  const INTERPRETER_SUITE = 'apps/worker/src/automation/interpreter.itest.ts'
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 118a. A window call spliced into the interpreter must be named by the scan.
+  {
+    const result = withEditedFile(
+      INTERPRETER,
+      (text) =>
+        replaceOnce(
+          text,
+          'const ACTOR: Actor = ',
+          'const openNow = withinPromotionalWindow(local, window)\nconst ACTOR: Actor = ',
+        ),
+      () => runExpectingFailure('pnpm', unit(WINDOW_SCAN)),
+    )
+    checkRejectedBy(
+      'interpreter: a promotional-window call spliced into the interpreter is caught by name',
+      result,
+      'withinPromotionalWindow',
+    )
+  }
+
+  // 118b. And the needle list itself. A list naming identifiers that no longer exist scans for nothing.
+  {
+    const result = withEditedFile(
+      WINDOW_SCAN,
+      (text) =>
+        replaceOnce(
+          text,
+          "{ needle: 'decideSendWindow', why: \"the gate's adaptor onto it\" },",
+          "{ needle: 'decideSendWindowRenamedAway', why: 'a needle that matches nothing' },",
+        ),
+      () => runExpectingFailure('pnpm', unit(WINDOW_SCAN)),
+    )
+    checkRejectedBy(
+      'interpreter: a stale needle in the window scan is caught by its own control',
+      result,
+      'no longer appear in the modules that own the promotional window',
+    )
+  }
+
+  // 118c. The execution cap must halt INSIDE the bound. `>=` to `>` is one node too many.
+  {
+    const result = withEditedFile(
+      STEP_PLAN,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (question.executionsSoFar >= question.maxNodeExecutions) {',
+          'if (question.executionsSoFar > question.maxNodeExecutions) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(PLAN_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: a loop bound that halts one execution past the ceiling is caught',
+      result,
+      'the execution cap halts inside the bound',
+    )
+  }
+
+  // 118d. The dry run must REPORT its overflow. Always-zero is the silent truncation.
+  {
+    const result = withEditedFile(
+      STEP_PLAN,
+      (text) => replaceOnce(text, 'projectedRowsOmitted: omitted,', 'projectedRowsOmitted: 0,'),
+      () => runExpectingFailure('pnpm', unit(PLAN_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: a dry run that truncates its plan in silence is caught',
+      result,
+      'reports the overflow rather than truncating',
+    )
+  }
+
+  // 118e. A split that always takes the first branch is a working splitter with one branch.
+  {
+    const result = withEditedFile(
+      STEP_PLAN,
+      (text) =>
+        replaceOnce(
+          text,
+          'const bucket = fnv1a32(seed) % 1000',
+          'const bucket = 0 * fnv1a32(seed)',
+        ),
+      () => runExpectingFailure('pnpm', unit(PLAN_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: a split that starves every branch but the first is caught',
+      result,
+      'divides 4,000 runs in roughly the declared proportions',
+    )
+  }
+
+  // 118f. The end-reason vocabulary must be DERIVED. A literal list agrees today and drifts tomorrow.
+  {
+    const result = withEditedFile(
+      VOCABULARY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const FLOW_END_REASONS = [...FLOW_EXIT_REASONS, ...FLOW_INTERPRETER_END_REASONS] as const',
+          "export const FLOW_END_REASONS = ['completed', 'goal_met', ...FLOW_INTERPRETER_END_REASONS] as const",
+        ),
+      () => runExpectingFailure('pnpm', unit(VOCABULARY_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: an end-reason list restated instead of derived is caught',
+      result,
+      'the DSL exit reasons plus the interpreter halts',
+    )
+  }
+
+  // 118g. The provisional bounds are held to the manifest's figures.
+  {
+    const result = withEditedFile(
+      VOCABULARY,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const MAX_ACTIVE_ENROLMENTS_PER_FLOW = 5_000',
+          'export const MAX_ACTIVE_ENROLMENTS_PER_FLOW = 50_000',
+        ),
+      () => runExpectingFailure('pnpm', unit(VOCABULARY_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: a provisional bound moved without a decision is caught',
+      result,
+      'the three provisional bounds are ceilings',
+    )
+  }
+
+  // 118h. The publish-time lifecycle_state check C-AUTO-06 deferred here.
+  {
+    const result = withEditedFile(
+      DSL,
+      (text) => replaceOnce(text, '  out.push(...checkLifecycleStateValues(definition))\n', ''),
+      () => runExpectingFailure('pnpm', unit(RULES_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: a lifecycle_state nobody can be in is refused at publish time',
+      result,
+      'flow-dsl-unknown-lifecycle-state',
+    )
+  }
+
+  // --- the database's own refusals ---------------------------------------------------------------
+  const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+  const FLOW_KEY = 'gate_cauto07_run'
+  const PHONE = '+971590099001'
+
+  /**
+   * A flow, a published version, a contact, an enrolment, a LIVE run and a DRY RUN.
+   *
+   * `max_node_executions` is 5 rather than 200 so the cap probe is one statement rather than two hundred:
+   * the constraint is a relation between two columns of the row, so the ceiling it is driven at is the
+   * row's own and the figure does not matter.
+   */
+  const seed = [
+    `insert into customer (phone_e164, created_via) values ('${PHONE}', 'front_desk')`,
+    `insert into flow (flow_key, title, created_by) values ('${FLOW_KEY}', 'C-AUTO-07 gate fixture', 'test-gates')`,
+    'insert into flow_definition (flow_id, version, dsl_version, definition, published_by) ' +
+      `select id, 1, 1, '{"dslVersion":1,"nodes":[{"id":"n1","kind":"exit","reason":"probe"}]}'::jsonb, ` +
+      `'test-gates' from flow where flow_key = '${FLOW_KEY}'`,
+    'insert into flow_enrolment (flow_id, definition_version, customer_id, created_by) ' +
+      `select f.id, 1, c.id, 'test-gates' from flow f, customer c ` +
+      `where f.flow_key = '${FLOW_KEY}' and c.phone_e164 = '${PHONE}'`,
+    'insert into flow_run (enrolment_id, flow_id, definition_version, mode, max_node_executions, ' +
+      "elapsed_from, started_at) select e.id, e.flow_id, 1, 'live', 5, now(), now() " +
+      `from flow_enrolment e join flow f on f.id = e.flow_id where f.flow_key = '${FLOW_KEY}'`,
+    'insert into flow_run (enrolment_id, flow_id, definition_version, mode, max_node_executions, ' +
+      'elapsed_from, started_at, projected_audience_size, projected_rows_omitted) ' +
+      "select null, f.id, 1, 'dry_run', 5, now(), now(), 3, 0 " +
+      `from flow f where f.flow_key = '${FLOW_KEY}'`,
+    'insert into flow_node_effect (flow_run_id, node_id, channel, contact_customer_id, claimed_at) ' +
+      "select r.id, 'n1', 'sms', e.customer_id, now() from flow_run r " +
+      `join flow_enrolment e on e.id = r.enrolment_id join flow f on f.id = r.flow_id ` +
+      `where f.flow_key = '${FLOW_KEY}' and r.mode = 'live'`,
+    'insert into flow_step_log (flow_run_id, flow_id, definition_version, node_id, node_kind, branch, ' +
+      'outcome, contact_customer_id, planned_at) ' +
+      "select r.id, r.flow_id, 1, 'n1', 'exit', 'default', 'no_effect', e.customer_id, now() " +
+      'from flow_run r join flow_enrolment e on e.id = r.enrolment_id join flow f on f.id = r.flow_id ' +
+      `where f.flow_key = '${FLOW_KEY}' and r.mode = 'live'`,
+  ].join('; ')
+
+  /** The live run, and the dry run, as subqueries every probe below reaches them through. */
+  const LIVE_RUN =
+    `(select r.id from flow_run r join flow f on f.id = r.flow_id ` +
+    `where f.flow_key = '${FLOW_KEY}' and r.mode = 'live')`
+  const DRY_RUN =
+    `(select r.id from flow_run r join flow f on f.id = r.flow_id ` +
+    `where f.flow_key = '${FLOW_KEY}' and r.mode = 'dry_run')`
+  const CONTACT = `(select id from customer where phone_e164 = '${PHONE}')`
+
+  const psqlProbe = (...statements) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${seed}; ${statements.join('; ')}; rollback;`,
+    ])
+
+  if (!dbUrl) {
+    check(
+      'interpreter: the run constraints reject their known-bad fixtures',
+      false,
+      'TEST_DATABASE_URL or DATABASE_URL is required — this gate fails rather than skips',
+    )
+  } else {
+    // 118i. A run that executed one node past its own ceiling cannot be stored.
+    checkRejectedBy(
+      'interpreter: a run past its own execution ceiling is refused',
+      psqlProbe(`update flow_run set node_executions = 6 where id = ${LIVE_RUN}`),
+      'flow_run_executions_within_bound',
+    )
+    // The control, and it is the one that matters: a figure AT the ceiling is accepted, or the cap would be
+    // refusing the run that halted correctly.
+    {
+      const atCeiling = psqlProbe(`update flow_run set node_executions = 5 where id = ${LIVE_RUN}`)
+      check(
+        'interpreter: a run exactly at its ceiling is accepted',
+        !atCeiling.failed,
+        atCeiling.output,
+      )
+    }
+
+    // 118j. The step log is append-only, both events.
+    checkRejectedBy(
+      'interpreter: an UPDATE of a step log row raises ZY011',
+      psqlProbe(`update flow_step_log set branch = 'true' where flow_run_id = ${LIVE_RUN}`),
+      'ZY011',
+    )
+    checkRejectedBy(
+      'interpreter: a DELETE of a step log row raises ZY011',
+      psqlProbe(`delete from flow_step_log where flow_run_id = ${LIVE_RUN}`),
+      'ZY011',
+    )
+
+    // 118k. The token may only ever have its contact re-pointed, and only by a merge.
+    checkRejectedBy(
+      'interpreter: a DELETE of an idempotency token raises ZY012',
+      psqlProbe(`delete from flow_node_effect where flow_run_id = ${LIVE_RUN}`),
+      'ZY012',
+    )
+    checkRejectedBy(
+      'interpreter: moving a token to another node raises ZY012',
+      psqlProbe(`update flow_node_effect set node_id = 'n2' where flow_run_id = ${LIVE_RUN}`),
+      'ZY012',
+    )
+    {
+      // The control: the merge's own statement is accepted. Without it the two refusals above would be
+      // satisfied by a trigger that refused every UPDATE, and a customer merge could not re-point a token
+      // at all — which is the acceptance line about a contact merged mid-run, broken from the other side.
+      const repointed = psqlProbe(
+        `insert into customer (phone_e164, created_via) values ('${PHONE}9', 'front_desk')`,
+        'update flow_node_effect set contact_customer_id = ' +
+          `(select id from customer where phone_e164 = '${PHONE}9') where flow_run_id = ${LIVE_RUN}`,
+      )
+      check(
+        'interpreter: a merge re-pointing a token to the survivor is accepted',
+        !repointed.failed,
+        repointed.output,
+      )
+    }
+
+    // 118l. A dry run may leave nothing behind, and both halves of the trigger are driven.
+    checkRejectedBy(
+      'interpreter: an idempotency token under a dry run raises ZY013',
+      psqlProbe(
+        'insert into flow_node_effect (flow_run_id, node_id, channel, contact_customer_id, claimed_at) ' +
+          `values (${DRY_RUN}, 'n1', 'sms', ${CONTACT}, now())`,
+      ),
+      'ZY013',
+    )
+    checkRejectedBy(
+      'interpreter: a dry-run step log row naming a message raises ZY013',
+      psqlProbe(
+        'insert into flow_step_log (flow_run_id, flow_id, definition_version, node_id, node_kind, ' +
+          'branch, outcome, contact_customer_id, message_id, planned_at) ' +
+          `select ${DRY_RUN}, f.id, 1, 'n1', 'action_message', 'default', 'executed', ${CONTACT}, ` +
+          `(select id from message order by queued_at limit 1), now() from flow f ` +
+          `where f.flow_key = '${FLOW_KEY}'`,
+      ),
+      'ZY013',
+    )
+    {
+      // The control: the same step log row WITHOUT a message is accepted under a dry run, because that is
+      // what a projected row is. A trigger that refused every dry-run row would make the plan unwritable.
+      const projected = psqlProbe(
+        'insert into flow_step_log (flow_run_id, flow_id, definition_version, node_id, node_kind, ' +
+          'branch, outcome, contact_customer_id, planned_at) ' +
+          `select ${DRY_RUN}, f.id, 1, 'n1', 'action_message', 'default', 'no_effect', ${CONTACT}, now() ` +
+          `from flow f where f.flow_key = '${FLOW_KEY}'`,
+      )
+      check(
+        'interpreter: a projected step log row with no message is accepted',
+        !projected.failed,
+        projected.output,
+      )
+    }
+
+    // 118m. A run's mode and its enrolment are immutable: a dry run turned live would send what it projected.
+    checkRejectedBy(
+      'interpreter: turning a dry run into a live run raises ZY014',
+      psqlProbe(`update flow_run set mode = 'live' where id = ${DRY_RUN}`),
+      'ZY014',
+    )
+    {
+      // The control: the interpreter's own advance is accepted, or a run could never progress.
+      const advanced = psqlProbe(
+        `update flow_run set cursor_node_id = 'n1', node_executions = 1 where id = ${LIVE_RUN}`,
+      )
+      check(
+        'interpreter: advancing a run is accepted, so ZY014 is about identity and not about progress',
+        !advanced.failed,
+        advanced.output,
+      )
+    }
+
+    // 118n. One ACTIVE enrolment per contact per flow, and it lifts when the first one ends.
+    const secondEnrolment =
+      'insert into flow_enrolment (flow_id, definition_version, customer_id, created_by) ' +
+      `select f.id, 1, c.id, 'test-gates' from flow f, customer c ` +
+      `where f.flow_key = '${FLOW_KEY}' and c.phone_e164 = '${PHONE}'`
+    checkRejectedBy(
+      'interpreter: a second ACTIVE enrolment for one contact on one flow is refused',
+      psqlProbe(secondEnrolment),
+      'flow_enrolment_one_active_per_contact',
+    )
+    {
+      // The control: once the first has ENDED the second is accepted, which is a contact going round a
+      // win-back sequence a second time. A total unique index would refuse that for ever.
+      const afterEnding = psqlProbe(
+        "update flow_enrolment set status = 'completed', ended_at = now(), ended_reason = 'goal_met' " +
+          `where flow_id = (select id from flow where flow_key = '${FLOW_KEY}')`,
+        secondEnrolment,
+      )
+      check(
+        'interpreter: a new enrolment after the first one ended is accepted',
+        !afterEnding.failed,
+        afterEnding.output,
+      )
+    }
+
+    // 118o. 0091 widened `message_sent_counts_an_attempt` for two reasons and must still refuse the third.
+    //       The one this constraint was written for is a `sent` row with no counted attempt — docs/12 §1's
+    //       "a stub must never look like it worked" — and widening it for an expiry must not have let that
+    //       through. Gate case 39c drives the same rule from B-MSG-04's side; this drives the widening.
+    {
+      const KEY = 'gate-cauto07-expiry'
+      const messageSeed =
+        'insert into message_template (template_key, version, message_class, purpose, is_current) ' +
+        `values ('${KEY}', 1, 'promotional', 'C-AUTO-07 gate fixture', true)`
+      /**
+       * A row that is legitimate in every respect but the one under test.
+       *
+       * `provider_message_id` and `sent_at` are supplied for a `sent` row because
+       * `message_sent_requires_acceptance` refuses one without them FIRST — and a probe rejected by that
+       * constraint would leave `message_sent_counts_an_attempt` free to have stopped matching anything,
+       * which is the exact trap `checkRejectedBy` exists for and which cost this case one red run.
+       */
+      const messageRow = (status, attempts, reason) => {
+        const accepted = status === 'sent'
+        return (
+          'insert into message (template_id, channel, message_class, locale, vendor, recipient, ' +
+          'sender_id, body, encoding, segments, cost_fils, status, attempts, last_failure_reason, ' +
+          'provider_message_id, sent_at, failed_at, queued_at) ' +
+          `select id, 'sms'::message_channel, 'promotional'::message_class, 'en', 'smsala', ` +
+          `'${PHONE}', 'AD-BERELAX', 'An offer.', 'GSM-7', 1, 9, '${status}'::message_status, ` +
+          `${attempts}, ${reason}, ` +
+          `${accepted ? "'smsala-gate-cauto07-0001'" : 'null'}, ${accepted ? 'now()' : 'null'}, ` +
+          `${status === 'failed' ? 'now()' : 'null'}, now() ` +
+          `from message_template where template_key = '${KEY}'`
+        )
+      }
+      const expiryProbe = (...statements) =>
+        run('psql', [
+          '--no-psqlrc',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-q',
+          dbUrl,
+          '-c',
+          `begin; ${messageSeed}; ${statements.join('; ')}; rollback;`,
+        ])
+      checkRejectedBy(
+        'interpreter: a sent message with no counted attempt is still refused',
+        expiryProbe(messageRow('sent', 0, 'null')),
+        'message_sent_counts_an_attempt',
+      )
+      const expired = expiryProbe(messageRow('failed', 0, "'stale_outside_window'"))
+      check(
+        'interpreter: a hold that expired unsent is storable with no attempt',
+        !expired.failed,
+        expired.output,
+      )
+    }
+  }
+
+  // 118p. The ORPHANED RUN, which is the one case in this block driven against the integration suite, and
+  //       the reason is that there is no unit suite it could be driven against: the state only exists once a
+  //       row has been deleted out from under a run. C-CRM-10's erasure classifies `flow_enrolment.customer_id`
+  //       as `delete_row` and `flow_run.enrolment_id` is deliberately not a foreign key, so a subject erased
+  //       mid-flow leaves a running run with nobody to run it against. The mutation restores what the
+  //       interpreter did before that engine landed beside it — raise `invariant_violated` — which is a
+  //       pg-boss job that fails for ever and puts the erased subject's run in front of whoever reads the
+  //       dead letters.
+  {
+    const result = withEditedFile(
+      INTERPRETER,
+      (text) =>
+        replaceOnce(
+          text,
+          "        reason: 'enrolment_removed',",
+          "        reason: 'cancelled_by_operator',",
+        ),
+      () => runExpectingFailure('pnpm', integration(INTERPRETER_SUITE)),
+    )
+    checkRejectedBy(
+      'interpreter: an orphaned run ended under the wrong reason is caught',
+      result,
+      'enrolment_removed',
+    )
+  }
+
+  // 118z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scan that refused the clean tree
+  //       would all report as eight passing cases.
+  for (const suite of [WINDOW_SCAN, PLAN_SUITE, VOCABULARY_SUITE, RULES_SUITE]) {
+    const green = run('pnpm', unit(suite))
+    check(`interpreter: ${suite} passes unedited`, !green.failed, green.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -2027,9 +2027,9 @@ units:
       frequency cap are injected evaluators; their stores are C-CRM-03/04 and C-AUTO-03'
     files:
     - packages/messaging/src/send.ts
-    - packages/messaging/src/gate.ts
+    - packages/messaging/src/gate/
     - packages/messaging/src/send.test.ts
-    - packages/messaging/src/gate.fail-closed.test.ts
+    - packages/messaging/src/gate/fail-closed.test.ts
     - packages/messaging/src/transports/smsala.ts
     - .dependency-cruiser.cjs
     - scripts/test-boundaries.mjs
@@ -8210,7 +8210,7 @@ units:
       answer why a given contact received a given message. The window check lives only in the gate - the
       interpreter never reimplements it.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-AUTO-04
@@ -8239,11 +8239,138 @@ units:
     - A contact merged mid-run continues on the survivor exactly once, sharing the worked example with C-CRM-05
     - Every step log row names the definition version, node id, resolved consent record id and gate decision,
       so 'why did this contact get this message' is one query
+    - 'NOTE: what was built beyond the files list. It also edits packages/core/src/automation/dsl.ts and
+      packages/shared/src/schemas/flow.ts (the publish-time lifecycle_state check C-AUTO-06''s NOTE (5)
+      deferred here, plus its rule name and its known-bad case in packages/core/src/automation/rules.test.ts),
+      packages/db/src/repositories/flow.ts (the per-flow cap and the already_enrolled outcome),
+      packages/db/src/merge-participants.ts (the flow_node_effect participant and the flow_step_log allowlist
+      entry), packages/messaging/src/lifecycle.ts and packages/messaging/src/lifecycle-memory.ts
+      (releaseHeldMessage and the hold_ended attempt outcome), packages/shared/src/messaging.ts
+      (HELD_MESSAGE_TERMINAL_REASONS and the MessageChannel union), packages/db/src/repositories/message.ts
+      (the same outcome on the Postgres store), packages/db/src/index.ts (SCHEMA_VERSION 91, the 0091 ledger
+      paragraph, and the correction of the paragraph that said flow_run would never exist),
+      packages/fixtures/src/merge.itest.ts (the deferral case replaced by the worked example),
+      packages/fixtures/src/crm-pipeline.itest.ts and packages/fixtures/src/flow-versioning.itest.ts and
+      packages/fixtures/src/frequency-ledger.itest.ts (deferral comments that my unit makes false),
+      packages/core/src/privacy/rights-policy.ts (the two erasure rules 0091''s tables need, see the NOTE on
+      the orphaned run), and scripts/test-gates.mjs (block 118a-118z, 29 cases).'
+    - 'NOTE: SQLSTATE codes taken: ZY011, ZY012, ZY013, ZY014. ZY011 flow_step_log is append-only. ZY012 a
+      flow_node_effect row may be DELETEd by nothing and UPDATEd only in its contact_customer_id, by a
+      customer merge. ZY013 a dry run may leave no side effect behind: no token at all, and no step log row
+      naming a message. ZY014 a run''s mode and its enrolment are immutable. Four and not one because each
+      has a different runbook answer, and a code is the only part of a refusal every translator in packages/db
+      matches on. They were first written as ZY001-ZY004, under the convention that a private CLASS
+      identifies a migration file, and that is where this unit met the failure W-SYS-12 exists to fix: by the
+      merge, FOUR migrations claimed ZY001 - 0085 (which had itself moved out of ZA after colliding with
+      0084), two units in flight in other worktrees, and this one - each having reasoned correctly from the
+      migrations it could see. The rule that changed, taken as the strictest safe reading of W-SYS-12''s
+      provisional answer: a refusal is identified by all FIVE characters, two unrelated rules may share a
+      class as long as they never share a code, and a unit takes a subclass RANGE. ZY001-ZY008 stay 0085''s
+      and ZY015 onward belongs to units that asked before this one.'
+    - 'NOTE: FOUR DEFECTS FOUND BY RUNNING THE TESTS, each fixed here and each worth recording because none
+      of them is visible in a diff. (1) The append-only step log hung off a chain that CASCADES from customer
+      - flow_enrolment.customer_id cascades by 0070''s deliberate choice so `delete from customer` keeps
+      working for the four suites that clear the table - so a delete would have reached flow_step_log and
+      raised ZY011 for every caller. Three columns are therefore not foreign keys (flow_run.enrolment_id,
+      flow_node_effect.contact_customer_id, flow_step_log.contact_customer_id), which is 0056''s decision
+      about consent restated for the third time in this schema. (2) The SendContext''s clock read Date.now()
+      rather than the tick''s instant, so a tick driven at 02:00 Asia/Dubai was judged against whatever hour
+      the process was running in - the window case went green for the wrong reason until it was driven.
+      (3) node_executions was persisted only by advanceFlowRun, so a run that halted at the ceiling inside one
+      tick reported ZERO executions and the "halts at exactly the bound" assertion was about nothing.
+      (4) The widened message_sent_counts_an_attempt used a bare `last_failure_reason in (...)`, which is NULL
+      for a NULL column - and a CHECK whose expression is NULL is SATISFIED, so a `sent` row with zero
+      attempts became storable. That is the exact rule the constraint was written for (docs/12 SS1: a stub must
+      never look like it worked) and gate case 39c had been asserting since B-MSG-04; it is now
+      coalesce(last_failure_reason, '''') and both cases drive it.'
+    - 'NOTE: A FIFTH DEFECT, found by the MERGE rather than by a test of mine, and it is the more interesting
+      kind: two units each decided correctly and the combination was wrong. C-CRM-10''s erasure classifies
+      flow_enrolment.customer_id as `delete_row`, and its reason is sound - "an enrolment is a live automation
+      that goes on sending... a completed erasure should not leave a sequence running against the person and
+      relying on a downstream gate to stop it every time". 0091 makes flow_run.enrolment_id NOT a foreign key,
+      and that reason is sound too (defect (1) above: a cascade from customer would reach the append-only step
+      log and raise ZY011 for every caller). Together they leave a RUNNING flow_run whose enrolment row is
+      gone, and the interpreter raised `invariant_violated` on the next tick - a pg-boss job that fails for
+      ever, retried, putting the erased subject''s run id in front of whoever reads the dead letters. It is now
+      a named ending: status `cancelled`, ended_reason `enrolment_removed`, a fifth member of
+      FLOW_INTERPRETER_END_REASONS, with a case in interpreter.itest.ts that deletes the enrolment at the
+      privilege the erasure uses (0070 revokes DELETE on flow_enrolment from berelax_app, so nothing else can
+      reach the state) and asserts zero messages, zero tokens and a second tick that is a no-op. Gate case
+      118p is the one case in the block driven against the integration suite, because the state only exists
+      once a row has been deleted out from under a run. Found by running packages/fixtures/src/rights.itest.ts
+      after the merge, which refused nine cases outright: its erasure enumerates the catalogue from
+      information_schema and REFUSES rather than guessing when a column has no rule, so 0091''s two
+      contact_customer_id columns failed it by existing. Both are now registered as `retain_append_only` with
+      a subjectReason - flow_node_effect because DELETE is refused for every role (ZY012) and because removing
+      the tokens would hand a re-created record a run with no history and send every node again
+      (frequency_ledger''s argument), flow_step_log because it is the evidence a complaint about a past
+      message is answered with and erasing it would leave the consent record and destroy the record of what
+      was sent under it.'
+    - 'NOTE: a defect NOT fixed here, and to whom it is deferred. The DSL''s action_tag.tag grammar is lower
+      snake_case (VOCABULARY_VALUE in schemas/flow.ts) and customer_tag.tag is kebab-case
+      (customer_tag_tag_check, 0053), so NO string satisfies both: a flow an operator draws with
+      `nurture_touch` validates, publishes, and then cannot write its tag. Two of the committed corpus
+      documents are in that state. Found by running the interpreter, which is the first thing in this build
+      that writes a tag from a flow. NOT reconciled here because reconciling it changes what a published
+      document may contain - the field is .strict(), its round-trip property is over the committed corpus and
+      flow-corpus.test.ts asserts twelve valid documents byte for byte - and the unit that owns the picker an
+      operator types a tag into is C-AUTO-09, which is todo. What IS built is a LOUD refusal: outcome
+      `refused`, gate_decision `tag_not_storable`, the grammar in the detail, the flow carrying on down the
+      rest of the graph, and a case in interpreter.itest.ts that also holds the copy of the grammar to the
+      live CHECK read from pg_constraint.'
+    - 'NOTE: SCOPED OUT, and to which unit, checked still todo. (1) The EVENT-TO-ENROLMENT consumer. The
+      acceptance lines are all about a run, and startRunAndQueueFirstTick is the entry point every trigger
+      calls; what does not exist is the outbox consumer that turns an appointment.* event into an enrolment.
+      C-AUTO-11 owns the stock journeys that need it (review solicitation, win-back, birthday) and is todo.
+      The pipeline stage entry already enrols through this writer (PIPELINE_ENROLMENT_PATH.enrol IS
+      enrolOnLiveVersion by reference), so it inherited the cap and the dedupe with nothing to change.
+      (2) The DRY RUN''s audience RESOLVER. projectFlowDryRun takes the audience as an argument and reports
+      its size whole; resolving a segment from the contact estate is the campaign surface''s, C-AUTO-10, which
+      is todo. (3) A per-node VALUE resolver. A flow node carries no values, so a template declaring a
+      variable is recorded `refused` with `template_variables_unresolved` rather than sent with a blank -
+      B-MSG-01''s renderer refuses a blank for a declared variable precisely because the half-finished
+      sentence sends successfully. Supplying a review link or an offer code would be inventing a business fact
+      nobody has stated (brief rule 15); C-AUTO-11 owns the journeys that need them. (4) The MARKETING KILL
+      SWITCH is still a literal false in the gate context, said out loud in runtime.ts rather than left to be
+      inferred: making it a real audited read is C-AUTO-05''s, which is todo. (5) A periodic SWEEP for a held
+      message whose queued release was lost. The hold is durable (flow_run.resume_at and the message row''s
+      next_attempt_at) and the release travels on pg-boss startAfter inside the tick''s own transaction, so a
+      lost job needs a re-enqueue rather than a re-decision; a cron for it would need an agent_definition row
+      and a watchdog interval, which is C-AUTO-10''s territory when it adds the campaign scheduler.'
+    - 'NOTE: the promotional consent purpose a flow send is gated on is `marketing` and the node cannot
+      choose. ADR 0040 records why: a per-node purpose would let a builder pick the gate its own message
+      passes (C-AUTO-01''s failure from the other direction), FLOW_CONDITION_FACTS already names
+      has_marketing_consent and no review-request equivalent, and `marketing` is the stricter of the two
+      readings (docs/12 SS2). The consequence is real and is the safe one: a review-request journey cannot
+      reach a contact who opted into review requests alone.'
+    - 'NOTE: the KILL test is a real SIGKILL of a real child process, not a thrown error, and what it proves
+      and does not prove is stated in the test. apps/worker/src/testing/flow-kill-probe.ts wraps the transport
+      so that it calls the fake vendor, writes the acceptance to a FILE outside any transaction, and then
+      SIGKILLs itself. The parent then proves the provider WAS asked (only the file can say so), that nothing
+      committed - zero message rows, zero tokens, zero step log rows, the run still running with its cursor
+      unmoved - and that the replay produces exactly one message row whose provider_message_id is
+      byte-identical to the killed process''s, because both derived it from the same (flow_run, node, channel,
+      contact) key. What it CANNOT prove is the suppression itself across the two processes: the fake''s memory
+      of an idempotency key lives in the memory of a process that no longer exists, and that half is proved
+      directly in packages/providers/src/behaviour.test.ts. Said out loud rather than glossed, because
+      asserting "no second message" from one process would be a weaker thing under a stronger name.'
     files:
     - apps/worker/src/automation/interpreter.ts
     - apps/worker/src/automation/nodes/
+    - apps/worker/src/automation/runtime.ts
+    - apps/worker/src/automation/reads.ts
+    - apps/worker/src/automation/no-window-logic.test.ts
+    - apps/worker/src/automation/interpreter.itest.ts
+    - apps/worker/src/testing/flow-runtime.ts
+    - apps/worker/src/testing/flow-kill-probe.ts
+    - packages/db/migrations/0091_flow_run.sql
     - packages/db/src/schema/flow-run.ts
+    - packages/db/src/repositories/flow-run.ts
     - packages/core/src/automation/step-plan.ts
+    - packages/core/src/automation/step-plan.test.ts
+    - packages/core/src/automation/flow-run-vocabulary.test.ts
+    - packages/shared/src/schemas/flow-run.ts
+    - docs/adr/0040-flow-interpreter-idempotency-and-one-window.md
   - id: C-AUTO-09
     order: 82
     title: Node-graph journey builder, with misrouting made impossible
