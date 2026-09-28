@@ -38,10 +38,22 @@ import { ACCOUNTS } from '@berelax/core'
 /**
  * The span this fixture may use, and it is deliberately enormous.
  *
- * `journal_entry` and `journal_line` refuse DELETE for every role including the owner (ZL001), so every run
- * of the suite consumes its months FOR GOOD. A narrow span is therefore not a tidiness question: gate block
- * 116 runs this suite once per mutant, so a span of a few years would be exhausted inside a single
- * `pnpm gates:only` and the failure would arrive as "the fixture threw" in a case about something else.
+ * `journal_entry` and `journal_line` refuse DELETE for every role including the owner (ZL001), so a run of
+ * this suite ON ITS OWN consumes its three months FOR GOOD. A narrow span is therefore not a tidiness
+ * question: gate block 116 runs this suite once per mutant, so a span of a few years would be exhausted
+ * inside a single `pnpm gates:only` and the failure would arrive as "the fixture threw" in a case about
+ * something else.
+ *
+ * The append-only claim is about DELETE and not about TRUNCATE, which is worth stating precisely because
+ * several files in this repository say "nothing truncates the journal" and one thing does:
+ * `packages/db/src/repositories/journal.itest.ts` runs `truncate journal_line, journal_entry cascade` in
+ * its `beforeAll`, and a BEFORE DELETE row trigger cannot see a TRUNCATE. `packages/db` runs before
+ * `packages/fixtures` in the integration suite, so a full `pnpm test:integration` empties the span before
+ * this file reaches it and the window search starts from the beginning every time — which means the
+ * six-hundred-month budget is spent only by running this file repeatedly on its own. The truncate cannot
+ * land in the middle of this file either, because the suite is sequential and file-scoped, so the absolute
+ * figures below are safe in both orders. If it ever did, every figure would read ZERO and the suite would
+ * fail loudly rather than quietly agreeing with itself.
  *
  * 2150-01 to 2199-12 is six hundred months — two hundred runs against one database. Measured free rather
  * than assumed: no date in `packages`, `apps` or `scripts` falls in the 2100s except three unrelated

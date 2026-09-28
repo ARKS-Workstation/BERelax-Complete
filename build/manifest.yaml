@@ -6079,6 +6079,20 @@ units:
       months, two hundred runs per database. It was three years at first and gate block 116 is why it is not
       — that block runs the suite once per mutant, so three years would be exhausted inside one
       `pnpm gates:only` and the failure would arrive as "the fixture threw" in a case about something else.
+      The append-only claim is about DELETE and NOT about TRUNCATE, which several files in this repository
+      get wrong: packages/db/src/repositories/journal.itest.ts runs `truncate journal_line, journal_entry
+      cascade` in its beforeAll and a BEFORE DELETE row trigger cannot see a TRUNCATE, while
+      packages/fixtures/src/credit-note.itest.ts, payment.itest.ts, manual-payment.itest.ts,
+      sell-package.itest.ts, cash-session.itest.ts, issue-credit-note.itest.ts and
+      packages/db/src/schema/cash-session.ts all state in comments that nothing truncates the journal. It is
+      benign for every one of them — they all assert DELTAS, which holds either way — and it is reported
+      rather than fixed because those units are `done`. For THIS unit it is good news: packages/db runs
+      before packages/fixtures, so a full `pnpm test:integration` empties the span before this file reaches
+      it and the window search starts from the beginning every time, which means the six-hundred-month
+      budget is spent only by running this file repeatedly on its own. The truncate cannot land in the
+      middle of this file, because the suite is sequential and file-scoped, so the absolute figures are safe
+      in both orders — and if it ever did land there every figure would read ZERO and the suite would fail
+      loudly rather than quietly agreeing with itself.
       Measured free rather than assumed: no date in packages, apps or scripts falls in the 2100s except three
       unrelated expiry dates in 2100, and nothing bounds a date that far out (journal_entry.entry_date has no
       FK to business_day, and business_day carries no range CHECK). Three months is the MINIMUM the acceptance

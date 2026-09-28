@@ -91,7 +91,9 @@ if (!url)
  * ## The window is picked, not fixed
  *
  * `journal_entry` and `journal_line` refuse DELETE for every role including the owner (ZL001), so nothing
- * here can be undone. A fixed month would DOUBLE every figure on a second run against the same database —
+ * here can be undone by this file. (DELETE, not TRUNCATE — `packages/db/src/repositories/journal.itest.ts`
+ * truncates the journal in its `beforeAll` and a BEFORE DELETE row trigger cannot see that; see
+ * `vat201.ts` for why it is safe in both orders.) A fixed month would DOUBLE every figure on a second run against the same database —
  * M-TILL-10's recorded defect (7), which reported 430,003 fils where 33,334 was expected, from its own
  * first run. So the suite finds a virgin three-month window inside {@link VAT201_RESERVED_SPAN}
  * (2150-01..2199-12, six hundred months that nothing else in this build posts into) and the committed
