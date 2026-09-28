@@ -710,16 +710,27 @@ returns table (
 language sql
 stable
 as $$
+  -- ONE pass over the enumeration, with `filter` rather than seven subqueries over it.
+  --
+  -- Measured, because the first version was seven separate `select … from vat201_box_line(…)` subqueries
+  -- and it cost 912 ms over 874 lines against 32 ms for a single call: PostgreSQL evaluates the
+  -- set-returning function once per subquery and there is nothing to share. A census is the cheapest
+  -- thing on the working paper and it was the most expensive by a factor of thirty.
+  --
+  -- An aggregate with no GROUP BY always returns exactly one row, so an empty period reports zeros rather
+  -- than no row at all — which matters, because the reader treats a missing row as an invariant violation
+  -- and a quarter with no trade in it is not one.
   select (select count(*)
             from journal_line l
             join journal_entry e on e.entry_id = l.entry_id
            where e.entry_date between p_from and p_to)::bigint,
-         (select count(*) from vat201_box_line(p_from, p_to))::bigint,
-         (select count(*) from (select distinct entry_id, line_no from vat201_box_line(p_from, p_to)) d)::bigint,
-         (select count(*) from vat201_box_line(p_from, p_to) where disposition = 'unattributed')::bigint,
-         (select count(*) from vat201_box_line(p_from, p_to) where disposition = 'box')::bigint,
-         (select count(*) from vat201_box_line(p_from, p_to) where disposition = 'unallocated')::bigint,
-         (select count(*) from vat201_box_line(p_from, p_to) where disposition = 'out_of_scope')::bigint;
+         count(*)::bigint,
+         count(distinct (l.entry_id, l.line_no))::bigint,
+         (count(*) filter (where l.disposition = 'unattributed'))::bigint,
+         (count(*) filter (where l.disposition = 'box'))::bigint,
+         (count(*) filter (where l.disposition = 'unallocated'))::bigint,
+         (count(*) filter (where l.disposition = 'out_of_scope'))::bigint
+    from vat201_box_line(p_from, p_to) l;
 $$;
 
 comment on function vat201_partition_census(date, date) is
