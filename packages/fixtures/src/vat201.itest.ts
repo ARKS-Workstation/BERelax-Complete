@@ -612,6 +612,33 @@ describe('acceptance — the worked example, exact to the fils', () => {
     }
   })
 
+  it('still reconciles in a month whose only movement is a dated REVERSAL', async () => {
+    // FOUND BY READING, not by a failing test, which is why it is recorded: the reconciliation summed only
+    // the bills DATED in the period, and a dated reversal moves the ledger while `bill` — append-only —
+    // keeps the reversed bill's columns and its own date. So the correction month reported a difference of
+    // −5,000 fils for a perfectly correct correction, and a report that cries wolf is one nobody opens.
+    //
+    // The document side now subtracts the columns of any bill whose posting a reversal in this period
+    // undid, so the identity holds. Both figures are NEGATIVE here and that is the assertion: the ledger
+    // took 5,000 back out of the claim and the document side agrees that it did.
+    const paper = await vat201WorkingPapers(sql, correctionMonth)
+    const claim = paper.reconciliations.find((line) =>
+      line.identity.startsWith('input tax claimed'),
+    )
+    expect(claim?.differenceFils).toBe(0n)
+    expect(claim?.ledgerFils).toBe(BigInt(VAT201_CORRECTION_MONTH.inputTaxTaxFils))
+    expect(claim?.documentFils).toBe(BigInt(VAT201_CORRECTION_MONTH.inputTaxTaxFils))
+    expect(claim?.ledgerFils).toBeLessThan(0n)
+    // And the other identity is a pair of honest zeros: the reversed bill declared no reverse charge, so
+    // there is nothing on either side. Asserted rather than skipped, because "zero" and "not computed"
+    // look the same in a report.
+    const declared = paper.reconciliations.find((line) =>
+      line.identity.startsWith('reverse-charge output tax'),
+    )
+    expect(declared?.ledgerFils).toBe(0n)
+    expect(declared?.documentFils).toBe(0n)
+  })
+
   it('finds the chart and the mapping in agreement, and SEES a disagreement when one exists', async () => {
     expect(await vat201MappingDisagreements(sql)).toEqual([])
     await sql

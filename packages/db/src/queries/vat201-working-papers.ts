@@ -480,19 +480,58 @@ async function reconciliations(
   period: Vat201Period,
   boxes: readonly Vat201BoxRow[],
 ): Promise<readonly Vat201Reconciliation[]> {
+  // Two terms, and the second one is what makes the identity hold at all in a period containing a
+  // correction. A dated reversal (M-VAT-06's `postDatedCorrection`) MOVES the ledger and writes no
+  // document: `bill` is append-only, so the bill it undoes keeps its columns and keeps its own date. A
+  // reconciliation summing only the bills DATED here therefore reports a difference for every legitimate
+  // correction — measured at −5,000 fils in this unit's own correction month before the second term
+  // existed — and a report that cries wolf is one nobody opens (M-VAT-03's phrase, about the same thing).
+  //
+  // So the document side is "the bills dated in this period, LESS the bills whose posting was reversed by
+  // an entry dated in this period". `bill.entry_id` is unique, so the join through `reverses` names
+  // exactly one bill per reversal.
   const [billSide] = await sql<
-    { reverse_charge_output: string; recoverable: string; reverse_charge_input: string }[]
+    {
+      reverse_charge_output: string
+      recoverable: string
+      reverse_charge_input: string
+      reversed_output: string
+      reversed_recoverable: string
+      reversed_reverse_charge_input: string
+    }[]
   >`
     select coalesce(sum(b.reverse_charge_output_vat_fils), 0)::text as reverse_charge_output,
            coalesce(sum(b.recoverable_input_vat_fils), 0)::text     as recoverable,
-           coalesce(sum(b.reverse_charge_input_vat_fils), 0)::text  as reverse_charge_input
+           coalesce(sum(b.reverse_charge_input_vat_fils), 0)::text  as reverse_charge_input,
+           coalesce((select sum(rb.reverse_charge_output_vat_fils)
+                       from bill rb
+                       join journal_entry r on r.reverses = rb.entry_id
+                      where r.entry_date between ${period.startsOn}::date
+                                             and ${period.endsOn}::date), 0)::text
+             as reversed_output,
+           coalesce((select sum(rb.recoverable_input_vat_fils)
+                       from bill rb
+                       join journal_entry r on r.reverses = rb.entry_id
+                      where r.entry_date between ${period.startsOn}::date
+                                             and ${period.endsOn}::date), 0)::text
+             as reversed_recoverable,
+           coalesce((select sum(rb.reverse_charge_input_vat_fils)
+                       from bill rb
+                       join journal_entry r on r.reverses = rb.entry_id
+                      where r.entry_date between ${period.startsOn}::date
+                                             and ${period.endsOn}::date), 0)::text
+             as reversed_reverse_charge_input
     from bill b
     join journal_entry e on e.entry_id = b.entry_id
     where e.entry_date between ${period.startsOn}::date and ${period.endsOn}::date
   `
-  const declared = BigInt(billSide?.reverse_charge_output ?? '0')
+  const declared =
+    BigInt(billSide?.reverse_charge_output ?? '0') - BigInt(billSide?.reversed_output ?? '0')
   const claimed =
-    BigInt(billSide?.recoverable ?? '0') + BigInt(billSide?.reverse_charge_input ?? '0')
+    BigInt(billSide?.recoverable ?? '0') +
+    BigInt(billSide?.reverse_charge_input ?? '0') -
+    BigInt(billSide?.reversed_recoverable ?? '0') -
+    BigInt(billSide?.reversed_reverse_charge_input ?? '0')
 
   /** The tax figure in the box a grouping maps to, read from the ROWS rather than from a box number. */
   const taxIn = async (grouping: string): Promise<bigint> => {
@@ -518,9 +557,10 @@ async function reconciliations(
       documentFils: declared,
       differenceFils: reverseChargeTax - declared,
       note:
-        'The box is summed from journal_line and the bill figure from bill.reverse_charge_output_vat_fils. ' +
-        'M-VAT-03 recorded that a bill can satisfy one source and not the other, so a non-zero difference ' +
-        'means a posting and a document disagree about what was declared.',
+        'The box is summed from journal_line and the bill figure from bill.reverse_charge_output_vat_fils, ' +
+        'less the same column on any bill whose posting a dated reversal in this period undid. M-VAT-03 ' +
+        'recorded that a bill can satisfy one source and not the other, so a non-zero difference means a ' +
+        'posting and a document disagree about what was declared.',
     },
     {
       identity: 'input tax claimed: ledger against bill',
@@ -531,7 +571,7 @@ async function reconciliations(
         'Both halves of 1080: the claim supported by a supplier tax invoice and the claim supported by ' +
         'our own reverse-charge self-assessment. Summed separately on the bill (two columns) and ' +
         'together in the ledger (two lines on the same account), which is why the document side adds ' +
-        'them rather than taking one.',
+        'them rather than taking one — less whatever a dated reversal in this period took back out.',
     },
   ]
 }

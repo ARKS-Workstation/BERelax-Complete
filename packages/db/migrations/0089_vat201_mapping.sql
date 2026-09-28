@@ -239,6 +239,11 @@ create constraint trigger account_carries_a_vat201_attribution
 
 -- Both directions, because they are different defects arriving by different routes: an account inserted
 -- with no attribution, and an attribution deleted from under an account that already had one.
+--
+-- One consequence, stated because it was found by trying: an account can no longer be DELETEd on its own.
+-- The foreign key refuses removing the account first and ZY001 refuses removing the attribution first, so
+-- both statements have to be in one transaction. That is correct — an account with entries against it is
+-- not removable at all — and it is the kind of thing a later migration discovers at the worst moment.
 create constraint trigger vat201_mapping_covers_every_account
   after delete on vat201_box_mapping
   deferrable initially deferred

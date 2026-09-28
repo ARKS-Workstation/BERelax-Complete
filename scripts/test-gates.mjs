@@ -32969,11 +32969,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       withEditedFile(
         VAT201_QUERY,
         (text) =>
-          replaceOnce(
-            text,
-            "    BigInt(billSide?.recoverable ?? '0') + BigInt(billSide?.reverse_charge_input ?? '0')",
-            "    BigInt(billSide?.recoverable ?? '0')",
-          ),
+          replaceOnce(text, "    BigInt(billSide?.reverse_charge_input ?? '0') -", '    0n -'),
         () => runExpectingFailure('pnpm', vat201Itest(VAT201_PAIR_SUITE)),
       ),
       'vat201',
