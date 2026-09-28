@@ -5213,11 +5213,268 @@ units:
       tender, and the journal entry for it balances to zero
     - no body text sits on --surface-clay, --decor-gold or --decor-tan on any till screen, asserted by the
       palette gate against the captured DOM
+    - 'NOTE: THE FINDING THIS UNIT EXISTS TO REPORT — the till cannot take money for a TREATMENT today, and it
+      is not a gap in this unit''s code. legal_entity.trn holds ''TRN-PENDING-Y1-TRN''; a tax invoice AND a
+      simplified invoice both state the supplier TRN, so both fail invoice_issuer_trn_is_fifteen_digits,
+      invoice_issuer_trn_not_placeholder and requireIssuerTrn(); and `payment` may name only an invoice_id or a
+      package_sale_id (payment_settles_exactly_one_document, 0083). So there is no path from a delivered
+      treatment to a `payment` row until the TRN is entered, and the M2 Bankable milestone''s service half is
+      blocked on Y1-trn at the level of the BUSINESS. Nothing provisional is rendered onto a document to work
+      around it: the refusal is the deliverable, which is the answer M-TILL-04 and M-TILL-12 already
+      established. The screens state the obligation, enumerate every mandatory field with the ones the system
+      cannot state marked ABSENT, and name the question. Money the till CAN complete today is a PACKAGE sale,
+      which issues no document at all — which is why /packages is where the walkthrough takes cash.'
+    - 'NOTE: the M2 slice is walked in THREE parts, because the middle of it is the wall above. (1) In the
+      browser against the real business profile: a seeded completed appointment pulled through, priced with a
+      gratuity and a discount that says why, split across two tenders, the entry it WOULD post shown balanced
+      at AED 0.00 difference, the preview enumerating every mandatory field with the TRN absent, and then
+      REFUSED by name — with a delta of zero over invoice, journal_entry and payment, and the reason read off
+      the ROW rather than a constant in the test. (2) Through the served Response BYTES with a configured
+      issuer injected (FIXTURE_ISSUER''s fifteen-digit TRN, the one packages/pdf''s goldens use and which
+      reaches nothing but a fixture): the document issued, the cash recorded with the card''s approval code,
+      the entry balanced as a DELTA, and the box-1 drill-down walked as tag -> account -> journal line ->
+      checkout_finalisation -> document. `TillDeps.readIssuer` is dependency injection and not a door:
+      whatever it returns still goes through requireIssuerSnapshot inside tillCheckoutMapping, so a caller may
+      supply a VALID fifteen-digit TRN — exactly as the owner will when they enter the real one — and can never
+      supply a placeholder or a blank. The route passes nothing, and the CONTROL drives the same handler with
+      the route''s own reader and requires the refusal. (3) In the browser all the way through: a package sale
+      taking cash with a `payment` row naming package_sale_id, then a redemption crediting 4020 at the net and
+      2030 at the VAT. The only part of the acceptance line not walked by Playwright is the issued document,
+      and the reason is Y1-trn rather than the harness.'
+    - 'NOTE: reading account.vat_box MEASURED that box 1 is TWO tags and not one, and the drill-down names
+      both. The SUPPLIES sit on the revenue accounts (standard_rated_supplies: 4010 and the contra 4095) and
+      the TAX sits on 2030 (output_tax). The first version of the drill-down asserted 2030 was tagged
+      standard_rated_supplies and failed, which is how the split was found; a walk over one tag would report a
+      supply with no tax or a tax with no supply. The control is 2040 Tips payable — credited by the very same
+      entry, tagged with neither, and excluded, which is how a gratuity comes to be on a VAT return. The
+      NUMBERED boxes, the working papers and the regenerable return are M-VAT-07''s, which is `todo` and does
+      not depend on this unit; what exists today is the grouping tag, and that is what is asserted against.
+      DEFERRED TO M-VAT-07 (verified `todo`): the box NUMBER, the exhaustive partition proof and the
+      byte-identical working papers.'
+    - 'NOTE: how a package is demonstrable without inventing a product, which is the trap M-TILL-10 named.
+      Four things, and the first three are what stop a reviewer mistaking the fixture for a configured
+      product. (1) The NAME carries `[confirm]`, one of the ten markers is_placeholder_text() (0026) matches —
+      the same function that stops TRN-PENDING-Y1-TRN reaching invoice.issuer_trn — plus the template key, the
+      sentence "not a package this business sells", and Y9-package-catalogue. So a fixture package name can
+      never be printed on a document as though it were a product, and a screenshot reads the id.
+      assertFixturePackageNamesAreMarked() holds that for every seeded name and
+      packages/fixtures/src/package-seed.test.ts is its control, with `6 Massage Package` refused by name. (2)
+      The template is FLAGGED in the DATA: is_provisional true with an open_question_id, which is what puts it
+      on the Unconfirmed Assumptions panel, and the /packages screen READS the flag rather than deciding for
+      itself — so a package the owner confirms loses its badge with no code change, the same mechanism a
+      confirmed setting uses. (3) No price is invented: the price is the UNDISCOUNTED SUM of the catalogue
+      prices of the sessions the template contains, which is arithmetic over prices docs/13 §4 publishes. What
+      a package DISCOUNT should be is exactly the unstated fact, so the fixture applies none — a fixture
+      package therefore saves the customer nothing, which is the point: it reads as a fixture. (4) The
+      treatments are real seeded service_variant rows, so the entitlement, the allocation weight and the
+      redemption posting all exercise real catalogue data. A new OPEN-QUESTIONS id, Y9-package-catalogue, was
+      added: docs/12 §1 requirement 4 is that nothing is remembered only by me.'
+    - 'NOTE: the four drawdown states, and the one that needed a term overridden. docs/12 §5 promises "packages
+      at several drawdown states" and no loader wrote one. `untouched`, `part used` and `fully used` are
+      reachable at the provisional six-month validity; `expired with a balance` is NOT, and the arithmetic says
+      why rather than the fixture guessing: the seeded business_day range opens 2026-05-21 and the frozen
+      clock''s today is 2026-09-18, so a six-month package sold on the earliest day the premises traded expires
+      in November. That one shape therefore supplies its terms explicitly at three months, which means
+      savePackageTemplateVersion does NOT flag it provisional — supplying the terms is a deliberate override
+      and here the somebody who typed the numbers in is the fixture. Its name still carries both markers, and
+      the /packages screen falls back to Y9-package-catalogue for a row whose name is placeholder-marked and
+      whose open_question_id is null, so no package is ever shown without a question beside it. That state
+      matters more than the other three: a retained balance posts NOTHING at expiry, so without it the screen
+      has nothing to show for the decision M-TILL-10 spent a section on. Measured on a fresh database: 4
+      templates, 4 sales, 4 balances, 8 redemptions — 1010 debited 460,000, 2050 credited 460,000 and debited
+      160,000, 4020 credited 152,384, 2030 credited 7,616, and four `payment` rows carrying package_sale_id,
+      which is what makes cash taken for a package visible to readDrawerTakings and so to the cash-up.'
+    - 'NOTE: A SECOND FINDING ABOUT THE SEED, wider than the rota this unit was warned about. generateSalon
+      builds 250 appointments and 188 invoices and loadSalon writes NEITHER — measured on a freshly seeded
+      database: 0 appointment rows and 0 invoice rows, as well as the 0 shift and 0 shift_assignment rows
+      already recorded on buildShifts. So docs/12 §5''s "~200 historical and 40 forward bookings, invoices, one
+      closed month" is written by nothing at all, and only 4 customers exist (the consent loader''s). Every
+      suite here therefore creates its own appointments, which is what every other browser suite already does.
+      Loading them is somebody''s unit-sized work and is NOT deferred to a named unit, because no unit in the
+      manifest owns it; it is recorded here and in the commit so the next reader of docs/12 §5 does not take it
+      for a promise the build keeps. The package redemptions lean on 0083''s stated decision that
+      package_redemption.appointment_id has NO foreign key and may be orphaned — "the release of a liability is
+      accounting and the diary row is not" — and the ids are md5-derived from a fixed namespace so an
+      appointment loader can adopt the same derivation and the links resolve.'
+    - 'NOTE: the numbering series each fixture uses, chosen deliberately (M-TILL-10''s recorded defect 9). The
+      SEEDED RECEIPT issues a SIMPLIFIED invoice into SIMPL-INV, and two independent reasons agree: the RULE
+      chooses it — requireInvoiceForm answers simplified_invoice for a counter sale below the AED 10,000
+      provisional threshold naming no customer on the document, which the itest asserts rather than assumes —
+      and nothing anywhere asserts a counter over SIMPL-INV, where checkout-finalise.itest.ts asserts
+      document_series.next_number = max(invoice.number) + 1 for TAX-INV. The itest truncates the invoice family
+      as well, so the series is the decision and the cleanup is a second line of defence rather than the only
+      one. The BROWSER suite''s own checkout issues into TAX-INV because that is what the rule answers there,
+      and it resets document_series and truncates the family in afterAll, which is what four existing fixture
+      suites do. That difference is itself a FINDING: booking.customer_id is NOT NULL (0011), so every
+      appointment has a customer record and requireInvoiceForm can never answer simplified_invoice for a
+      treatment checkout — ADR 0014''s "cash sale at the desk with no customer record" cannot exist as an
+      appointment at all, and the simplified form is only reachable where a basket is built by hand.'
+    - 'NOTE: there is NO walk-in basket LINE, and that is the schema''s answer rather than a simplification.
+      B-LIFE-01 makes `completed` the only status that emits revenue and invoice_appointment is how "was this
+      appointment billed" is answered, so a chargeable line with no appointment row could never be linked and
+      could never be stopped from being billed twice. The walk-in path is therefore quick-book (which creates
+      the booking and the appointment), the treatment, and then this screen — where the line shows as
+      `Walk-in, no record` when the booking names no display name. The twelve-interaction acceptance line is
+      measured on exactly that path and comes to EIGHT: Space to pull the treatment through, Enter to price the
+      basket, five digits for the cash amount, Enter to take the payment. The exact figure is asserted as well
+      as the ceiling, because a redesign costing four more presses would still be under 12 and would still be a
+      regression in the thing the line is about. "No pointer events used" is the DOCUMENT''s own answer: an
+      init script records every pointer, mouse and touch event in the capture phase and the log is asserted
+      empty — a count of Playwright calls would prove nothing.'
+    - 'NOTE: the core-to-db mapping is TRANSCRIBED into apps/web/src/till/mapping.ts and held EQUAL to
+      packages/fixtures'' three, and the reason is a boundary rather than a preference.
+      packages/fixtures/src/checkout.ts''s own header says "the till route will call it"; **it cannot**.
+      @berelax/fixtures is a devDependency of @berelax/web, its public entry is a barrel re-exporting the salon
+      generator, the synthetic builders and every loader, and a route importing it would pull that graph into
+      the Next server bundle, which pnpm budgets measures. Promoting a test-support package to a runtime
+      dependency of the application to reach three field-copying functions is the wrong trade. So the two are
+      held equal by apps/web/src/till-mapping.test.ts — deep equality on the whole input for all three
+      mappings, each with a control that a deliberately wrong transcription IS detected (a dropped card
+      reference, two package lines swapped, one more session released) — which a test in apps/web can do
+      because it may import the devDependency a route may not. This is the shape the repository already uses at
+      this seam: toEntryInput is transcribed four times inside packages/fixtures alone. What must never be
+      transcribed is an ARITHMETIC RULE, and none is: every account, allocation, split and tax figure comes out
+      of @berelax/core. The proper fix is one implementation in a package the application may depend on, and it
+      is NOT done here because moving packages/fixtures/src/checkout.ts would break gate case 101 for the
+      `done` units that declare it. Reported rather than taken.'
+    - 'NOTE: NO MIGRATION. 0088 was allocated to this unit and is left a PERMANENT GAP, like 22, 41, 44, 47, 71
+      and 74 — renumbering into a gap is how two branches come to apply one number to different SQL, and gate
+      90a walks the migrations that EXIST so the gap costs nothing. SCHEMA_VERSION stays 87. A screens unit
+      needed none: finaliseCheckout, sellPackage, redeemPackage, openCashSession and closeCashSession all
+      exist, and the basket''s state travels in the request rather than in a table — a `basket` row written on
+      the first keystroke would be a table of abandoned baskets and a second answer to "what is being billed".
+      M-TILL-11 deferred `payment.drawer_code` to this unit; it is RE-SCOPED rather than built, and the
+      condition is named: ZU005 and ZU006 are keyed on the business day, which M-TILL-11 measured as exactly
+      right while ONE cash_drawer row exists, and the till already attributes every tender to a drawer at the
+      SESSION level, which is where a cash-up reads it. The column becomes necessary when a second drawer is
+      open on one business day; the unit that inserts that row must add it, and both predicates already name
+      the column. No unit in the manifest owns that today, which is why this is stated rather than deferred to
+      a name that would never pick it up.'
+    - 'NOTE: M-TILL-10''s two deferrals, both ANSWERED rather than deferred again. (1) The TAX DOCUMENT AT
+      REDEMPTION: under Y11-vat-package''s provisional answer the redemption is the supply, so a document is
+      owed — and issuing one needs the numbering series, the issuer snapshot and the mandatory field list, all
+      three of which exist. What does not exist is a TRN, and every invoice form states it, so the document
+      owed for a redemption cannot be issued for exactly the same reason a treatment cannot be billed. The
+      answer is therefore not "later": it is the OBLIGATION, stated on the /packages screen with both questions
+      named (DOCUMENT_OBLIGATION), and the VAT is not deferred with the paper — 2030 is credited by the
+      redemption, so box 1 is right whether or not the document exists. (2) SEEDED PACKAGE TEMPLATES: done,
+      four of them, at four drawdown states. M-TILL-12''s deferral of private storage and the signed URL is NOT
+      taken either, and the reason is that it is unreachable: the till has no document to store, because it
+      cannot issue one. The capability M-TILL-12 asked for now exists in M-VAT-11''s form — a single-use grant
+      redeemed by redeemObligationEvidenceGrant rather than a signed URL — so whoever wires the till''s receipt
+      PDF after Y1-trn is answered should reuse that rather than build a second.'
+    - 'NOTE: defects found in THIS unit''s own work — nine, and every one had reported a pass or looked right.
+      (1) A deterministic journal entry id on the package sale (pkg-sale-<day>-<key>-<cash>-<card>) made the
+      SECOND identical sale fail on journal_entry''s unique id with a raw violation the screen could only
+      report as "Unexpected.". A desk legitimately sells the same package twice on one day to one customer. Now
+      a fresh uuid per sale; the cash drop had the same defect and the same fix. The CHECKOUT keeps its
+      deterministic id on purpose — it has an idempotency key, so a double-submit must produce the same entry,
+      which is what makes finaliseCheckout return the winner''s document. (2) "Unexpected." was also the answer
+      to ZU006 CashTakenAfterTheDrawerWasCounted, which arrives from the `payment` insert inside
+      finaliseCheckout and sellPackage and which checkoutError and packageError do not know. Both handlers now
+      try cashSessionError too, because that refusal''s own message says what to do instead. (3) The cash-up
+      case counted the drawer for the DAY IN PROGRESS, and a closed cash_session refuses DELETE for every role
+      — so it made every later case in the file, and every later RUN of the file, unable to take cash on that
+      day. The case now has its own business day (2081, measured unused: a grep of every year 2080-2100 puts 0
+      occurrences in 2080-2082 and 30 in 2088, which was this constant''s first value) and the afterAll
+      truncates the three cash tables, which is what cash-up.itest.ts does and for the same forced reason. (4)
+      TWO `autofocus` attributes in one document are not two focuses: the browser takes the first in DOM order,
+      so the tender field never received focus and the twelve-interaction walk would have spent its budget on
+      Tab. The appointment checkbox now claims autofocus only while the basket is empty. (5)
+      readRedeemableBalances filtered sessions_redeemed < sessions_total, which made the `fully used` drawdown
+      state — seeded, correct in the rows — UNREACHABLE on the one screen built to display it. The reader now
+      returns every balance and the REDEEM select filters, because offering a control known to fail is worse
+      than not offering it. (6) The axe control set colour AND background to decor-gold: at 1:1 there is no
+      visible text to measure and axe reported nothing, so the known-bad proved nothing. Two paragraphs now —
+      gold text on sand for the contrast rule, ink on a gold surface for the palette scan. (7)
+      waitForLoadState(''networkidle'') after a navigating POST is satisfied by the OLD document for a moment,
+      and the next page.evaluate died with "Execution context was destroyed", which reads like a broken page.
+      Every such wait is now on the element the new document must contain. (8) Gate case 115d printed the
+      placeholder TRN inside the ABSENT cell and was not caught: data-absent="1" comes from issuer.trn === null
+      so it was still emitted, and <code>Y1-trn</code> is also printed by the assumptions panel. The render
+      test now asserts the whole cell and that the document contains no TRN-PENDING at all — brief rule 15''s
+      own failure mode, nearly shipped. (9) Two of the four fixture package shapes sell five sessions, so a
+      name built from the session count gave two templates the SAME name; the template key is in the name now.
+      Also worth recording: `expected ''AED 0.00'' to be ''AED 0.00''` — formatMoney separates the currency
+      with U+00A0, so every money label is normalised before comparison.'
+    - 'NOTE: gate labels used 115a-115z in scripts/test-gates.mjs, placed immediately AFTER block 114a-114z and
+      BEFORE 79a-79k, because that file is ordered by CATEGORY. Selector `pnpm gates:only --only ''// 115a''`.
+      TWENTY-EIGHT cases: twenty-two source mutants and six controls, 28 PASS and exit 0. **The block mutates
+      only what vitest reads from SOURCE, and the reason is the build**: a browser suite drives the BUILT
+      application, so an edit to render.ts is invisible to till.itest.ts until `next build` runs again — a case
+      that mutated a screen and watched the browser suite stay green would report PASS about a rebuild that
+      never happened, and one that mutated, rebuilt and restored the source would leave the mutant in .next for
+      every later case, so the block''s own control would fail for a reason it cannot name. The browser-only
+      claims carry their controls INSIDE till.itest.ts instead: the injected unlabelled button and gold
+      paragraph that axe and the palette scan must both report, four cross-cell screenshot comparisons that
+      must differ, and an LTR-versus-RTL geometry comparison that must flip. Two mutants reach till.itest.ts
+      anyway, through the M2 slice''s second part, which drives handleTillWrite rather than the server. A case
+      removing /till from ADMIN_GROUP_PREFIXES was written and reported PASS, and the block SAYS SO rather than
+      deleting it quietly: /till and /till/cash-up each declare indexable:false and NOINDEX_PATTERNS covers a
+      non-indexable handler on its own path, which is what /quick-book relies on, so the two prefixes are
+      consistency with the other admin groups and nothing a test can make load-bearing. The local mutant helper
+      is named `tillMutant` and not after a shape another block uses (blocks 106 and 107 each defined a
+      same-shaped `…Mutant` and git interleaved them on merge). Every anchor goes through replaceOnce.'
+    - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
+      used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
+      12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires
+      packages/harness/src/ports.test.ts to refuse.'
+    - 'NOTE: what the manifest got wrong. (1) The three screens were declared as
+      apps/web/src/app/(admin)/<name>/page.tsx. That path does not exist — the App Router directory is
+      apps/web/app, not apps/web/src/app — and a `page.tsx` is the wrong shape besides: every admin surface in
+      this application is a route HANDLER answering text/html, for the reason the diary, the pipeline board,
+      the Messages inbox, the template editor, the compliance calendar, the duplicate queue and quick-book all
+      record — apps/web/src/routes/registry.ts requires every DOCUMENT to be served in both locales, which
+      would need an Arabic admin document and the W-SYS-01 shell and would join a screenshot matrix whose RTL
+      half has to be a real Arabic route. `?dir=rtl` re-renders the English document mirrored instead, which is
+      a layout axis rather than a locale, and is what the RTL acceptance line is measured against. (2)
+      apps/web/e2e/m2-bankable.spec.ts does not exist and is not the convention: there is no e2e/ directory and
+      no standalone Playwright runner in this repository — every browser suite is a vitest `.itest.ts` driving
+      Chromium through @berelax/harness/server, which is what brief rules 18 and 19 are about. It is
+      apps/web/src/till.itest.ts. (3) The invoice PREVIEW is a fourth SCREEN in the acceptance list and is a
+      STATE of /till (`?view=preview`) rather than a route of its own: the preview is of the basket in the
+      request, and a separate route would have to be POSTed the basket again. axe and the screenshot matrix
+      treat it as a fourth cell source, so all four screens are audited and photographed. (4) Nothing in the
+      acceptance list itself was wrong, and the one line not fully satisfiable — "invoice issued" inside the
+      Playwright walk — is blocked by Y1-trn rather than by this unit.'
+    - 'NOTE: files beyond the four listed, and the list is corrected below. Added: the three screens as route
+      handlers under apps/web/app/(admin) (till/{route,handler,render,view}.ts,
+      till/cash-up/{route,handler,render}.ts, packages/{route,handler,render}.ts),
+      apps/web/src/till/mapping.ts, apps/web/src/till-{render,mapping}.test.ts, apps/web/src/till.itest.ts,
+      packages/db/src/queries/till.ts, packages/fixtures/src/till-receipt.{ts,itest.ts} and
+      packages/fixtures/src/package-seed.{ts,test.ts}. Edited: apps/web/src/routes/registry.ts (three entries
+      and two ADMIN_GROUP_PREFIXES rows), packages/db/src/index.ts (one export block; SCHEMA_VERSION
+      untouched), packages/harness/src/ports.ts (the `till` band), packages/fixtures/src/load.ts (the
+      `packages` loader), packages/fixtures/src/index.ts (three exports, and `invoice.ts` joined the barrel so
+      a test can pass FIXTURE_ISSUER and FIXTURE_HOURS into the till''s mapping), scripts/test-gates.mjs (block
+      115a-115z), docs/OPEN-QUESTIONS.md (Y9-package-catalogue) and build/manifest.yaml. No new pnpm step was
+      added to the verify chain, so case 29''s list and pnpm gate-registry are untouched.'
     files:
-    - apps/web/src/app/(admin)/till/page.tsx
-    - apps/web/src/app/(admin)/till/cash-up/page.tsx
-    - apps/web/src/app/(admin)/packages/page.tsx
-    - apps/web/e2e/m2-bankable.spec.ts
+    - apps/web/app/(admin)/till/route.ts
+    - apps/web/app/(admin)/till/handler.ts
+    - apps/web/app/(admin)/till/render.ts
+    - apps/web/app/(admin)/till/view.ts
+    - apps/web/app/(admin)/till/cash-up/route.ts
+    - apps/web/app/(admin)/till/cash-up/handler.ts
+    - apps/web/app/(admin)/till/cash-up/render.ts
+    - apps/web/app/(admin)/packages/route.ts
+    - apps/web/app/(admin)/packages/handler.ts
+    - apps/web/app/(admin)/packages/render.ts
+    - apps/web/src/till/mapping.ts
+    - apps/web/src/till-render.test.ts
+    - apps/web/src/till-mapping.test.ts
+    - apps/web/src/till.itest.ts
+    - apps/web/src/routes/registry.ts
+    - packages/db/src/queries/till.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/till-receipt.ts
+    - packages/fixtures/src/till-receipt.itest.ts
+    - packages/fixtures/src/package-seed.ts
+    - packages/fixtures/src/package-seed.test.ts
+    - packages/fixtures/src/load.ts
+    - packages/fixtures/src/index.ts
+    - packages/harness/src/ports.ts
+    - scripts/test-gates.mjs
   - id: M-VAT-01
     order: 56
     title: Suppliers, supplier tax profile, bills and payables

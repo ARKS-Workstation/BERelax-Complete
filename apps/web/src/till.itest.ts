@@ -1067,6 +1067,14 @@ describe('acceptance — the M2 slice, part 3: a package sale and redemption com
        where jl.entry_id = ${release?.entry_id as string} and jl.account_code = '4020'
     `
     expect(supply?.vat_box).toBe('standard_rated_supplies')
+
+    // And the appointment has STOPPED being billable, which is the other half of ZG011: one appointment, one
+    // settlement. `readBillableAppointments` consults `package_redemption` as well as `invoice_appointment`,
+    // because a reader that looked only at documents would offer the desk a treatment the customer has already
+    // paid for in advance — and the till's insert would then be refused by a trigger, telling the operator
+    // about a constraint instead of not offering the row.
+    const stillOffered = await fetch(`${BASE}${TILL_PATH}?${TILL_FIELDS.day}=${tradingDate}`)
+    expect(await stillOffered.text()).not.toContain(`data-appointment="${redeemedAppointmentId()}"`)
   }, 180_000)
 
   it('states the tax document that is owed at redemption and cannot be issued', async () => {
