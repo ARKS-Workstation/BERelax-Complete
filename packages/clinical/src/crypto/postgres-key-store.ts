@@ -167,6 +167,13 @@ export function createPostgresClinicalKeyStore(sql: Sql): ClinicalKeyStore {
                  ${columns.aadContext === null ? sql`null` : sql(columns.aadContext)} as aad_context
             from ${sql(columns.relation)}
            where kek_version <> ${version}
+             -- A row whose data key was DESTROYED under a data-subject erasure (C-CRM-10, migration 0085)
+             -- is not sealed and pending a re-wrap; it is not sealed at all. Excluding it here rather than
+             -- skipping it in the loop is what keeps rotateKek's no-progress guard meaningful, and the
+             -- failure it prevents is unbounded: rewrap cannot unwrap a destroyed key, so the row would
+             -- throw unwrapFailed, never move off the old KEK, and fail every rotation from then on. One
+             -- honoured erasure request would otherwise make KEK rotation impossible for ever.
+             and length(wrapped_data_key) > 0
            order by id
            limit ${limit - found.length}
         `
@@ -196,6 +203,12 @@ export function createPostgresClinicalKeyStore(sql: Sql): ClinicalKeyStore {
                  ${columns.aadContext === null ? sql`null` : sql(columns.aadContext)} as aad_context
             from ${sql(columns.relation)}
            where kek_version = ${version}
+             -- Excluded for the same reason as in listSealedNotOn, and with a different consequence. This
+             -- is the VERIFICATION queue and scripts/rotate-kek.mjs --verify decrypts every row it
+             -- returns. A row crypto-erased under migration 0085 is unreadable BY DESIGN, so including it
+             -- would make --verify report a successful erasure as a corrupt record, and the operator's
+             -- correct response to a corrupt clinical record is to raise an incident.
+             and length(wrapped_data_key) > 0
              and (${lowerBound}::uuid is null or id > ${lowerBound}::uuid)
            order by id
            limit ${limit - found.length}

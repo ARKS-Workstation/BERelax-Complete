@@ -12,6 +12,7 @@ import {
   setObligationNoticeRuntime,
 } from './jobs/obligation-reminders.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
+import { setRetentionPurgeSql } from './jobs/retention-purge.ts'
 import {
   SEND_SCHEDULED_STEP_JOB,
   scheduledStepRuntimeFor,
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
   // holds a staff phone number, so every due notice is skipped with `no_recipient_on_file` recorded —
   // which is a row on the calendar rather than a renewal notice sent to a number somebody invented.
   setObligationNoticeRuntime(obligationNoticeRuntimeFor(sql))
+  setRetentionPurgeSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first

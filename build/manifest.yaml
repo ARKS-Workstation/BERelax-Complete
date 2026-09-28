@@ -8861,7 +8861,7 @@ units:
       the financial record under the FTA five-year obligation and records the conflict and its legal basis.
       Retention purge jobs run per data class and respect legal hold.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-CRM-04
@@ -8891,6 +8891,55 @@ units:
       class, and a row under legal hold is skipped and reported rather than silently retained'
     - Every rights request carries a due date derived from the configured SLA and is returned by the overdue
       query once the frozen clock passes it
+    - 'NOTE: what landed, where. Migration packages/db/migrations/0085_data_subject_rights.sql and
+      SCHEMA_VERSION 85, which is the newest migration on the base this unit was built on; 0083, 0084,
+      0086 and 0087 landed on the tip afterwards, so that one line conflicts and resolves to 87. ADR 0034
+      records the enumeration argument and the four things a row-level erasure cannot do. Gate block
+      // 112a-112z, 26 cases, selector `pnpm gates:only --only ''// 112a''`. No port band: nothing in this
+      unit needs a real server, and packages/harness/src/ports.test.ts refuses a band declared and not
+      used. SQLSTATE prefix ZA, codes ZA001-ZA008.'
+    - 'NOTE: the FIRST acceptance line is NOT delivered and is the one thing outstanding on this unit. The
+      export writes its audit row and enqueues the bulk-export alert in one transaction (the fifth line,
+      docs/06 D4, done and asserted both ways), but it reads `customer` plus three counts - it does not
+      read the subject''s bookings, invoices, consents, preferences or package sales, and there is NO
+      committed exclusion allowlist and no completeness test over it. What exists on the erasure axis is
+      the whole mechanism that line asks for, one axis over: packages/db/src/privacy-coverage.ts
+      enumerates every table holding a customer reference from pg_catalog, every column must be classified
+      BY NAME, an unclassified one makes the engine refuse, and a rolled-back
+      `__gate_fixture_unregistered` table proves the failure. Pointing that same enumeration at the export
+      is the remaining work. It was scoped out rather than half-built because an exclusion allowlist is a
+      list of REASONS a data subject is not being given something, twenty-odd of them, and several depend
+      on which regime applies (Y1-entity, open): whether the existence of a legal_hold row is disclosable
+      to its subject, and whether an encrypted clinical payload is released through this export or through
+      the clinical boundary''s own authorised path (ADR 0010, Y5-residency). Reasons written to fill a list
+      would read as configured positions, which is brief rule 15 in the place it costs most. Stays on
+      C-CRM-10; no other unit owns subject export, and A-FIRST-08, A-MEAS-02, R-REP-01, H-HARD-07 and
+      H-MIG-04 - the five units that depend on this one - are each about something else.'
+    - 'NOTE: the "analytics schemas" half of that same line is not satisfiable yet and needs no work when it
+      becomes so. There is no analytics schema in the database: R-REP-01 (Reporting schema: dims, facts,
+      materialised views, status todo) is what creates it. The coverage probe takes its schema exclusions
+      from MERGE_CATALOGUE_EXCLUDED_SCHEMAS and otherwise enumerates every schema present, so an analytics
+      table holding a customer reference is enumerated - and demands a rule - on the commit that creates
+      it, with no edit here.'
+    - 'NOTE: two privilege gaps this unit found in earlier units'' work and did NOT work around. 0067
+      revokes UPDATE on booking_manage_grant from berelax_app ("there is no legitimate edit to a
+      capability") and names DELETE as the revocation path; 0070 (flow_enrolment) and 0077
+      (customer_pipeline_card) each revoke DELETE with the reason that "the cascade from `customer` still
+      works". That premise does not hold for an erasure, which cannot delete the customer row because a
+      retained tax invoice references it, so the cascade never runs. The credential rule became a
+      delete_row, which is what 0067 already called revocation; the other two go through
+      public.erase_customer_workflow_rows, SECURITY DEFINER and gated on an in-progress erasure request,
+      so those two migrations get a named authorised CALLER rather than a widened privilege. Nothing in
+      0067, 0070 or 0077 was edited.'
+    - 'NOTE: one defect fixed in another unit''s gate, because it blocked `pnpm verify` and the rule''s
+      owner is done. scripts/check-schema-conventions.mjs case 87 takes an append-only table''s name from
+      its own SQL comment, STRIPS the schema, then looks for a trigger `on <table>` - but a trigger on a
+      table outside `public` must be written `on clinical.<table>`, because SQL has no other spelling. So
+      the rule could never pass for any append-only table in the clinical schema, and
+      clinical.dek_destruction is the first one to carry the declaration marker, which is why the hole had
+      never been reachable. Fixed by one optional qualifier group used in three places, with gate case
+      112z as its known-bad: remove the group and the check fails naming dek_destruction. The rule was not
+      wrong about anything - it was silent about a whole schema.'
     files:
     - packages/core/src/privacy/rights-policy.ts
     - packages/db/src/repositories/rights.ts

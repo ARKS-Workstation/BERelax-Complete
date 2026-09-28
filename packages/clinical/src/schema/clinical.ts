@@ -205,3 +205,47 @@ export const stepUpGrant = clinicalSchema.table(
     index('step_up_grant_live_idx').on(t.employeeId, t.expiresAt).where(sql`revoked_at is null`),
   ],
 )
+
+/**
+ * Data keys destroyed under a data-subject erasure (migration 0085, C-CRM-10).
+ *
+ * In the `clinical` schema by ADR 0010's own test for what belongs here: it moves with the store, because
+ * it is the record of what happened to rows in this schema, and a relocated store that left it behind would
+ * be unable to say which of its own records had been erased or on whose authority.
+ *
+ * **This table, not the empty `wrappedDataKey`, is the AUTHORITY on whether a record was crypto-erased.**
+ * The zero-byte key is the mechanism — a real wrapped key is always 60 bytes, so zero is a value `seal()`
+ * cannot produce — and a mechanism with no record beside it cannot say who decided or when.
+ *
+ * Append-only: UPDATE and DELETE raise for every role including the owner (ZA005). It has to outlive every
+ * other trace of the data it is about, which is the one retention in that unit that is a CONSEQUENCE of the
+ * erasure rather than something surviving it. Written only by `public.destroy_customer_deks`, which
+ * refuses (ZA006) unless an `in_progress` erasure request names the customer — so there is no path that
+ * destroys a key without a row saying who asked and how they were verified.
+ *
+ * `customerId` and `rightsRequestId` are plain uuids and NOT foreign keys, which is 0008's decision for
+ * this schema verbatim: a foreign key would weld the two schemas together and defeat the relocation the
+ * boundary exists to enable. `rightsRequestId` points ACROSS that boundary, which is exactly why it cannot
+ * be one.
+ */
+export const dekDestruction = clinicalSchema.table(
+  'dek_destruction',
+  {
+    id: uuid('id').primaryKey().default(sql`public.uuid_generate_v7()`),
+    /** `intake_submission` or `treatment_note`, behind a CHECK. The only two sealed tables. */
+    targetTable: text('target_table').notNull(),
+    recordId: uuid('record_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    rightsRequestId: uuid('rights_request_id').notNull(),
+    destroyedAt: timestamp('destroyed_at', { withTimezone: true }).notNull(),
+    /**
+     * The KEK version the key was wrapped under when it was destroyed.
+     *
+     * Recorded because it is the one fact that stops a future rotation being blamed: a row whose key is
+     * gone was never re-wrapped, and this says which version it stopped at. The rotation work queue
+     * excludes destroyed rows (`listSealedNotOn`), so nothing will ever move it.
+     */
+    kekVersionAtDestruction: text('kek_version_at_destruction').notNull(),
+  },
+  (t) => [index('dek_destruction_customer_idx').on(t.customerId, t.destroyedAt)],
+)

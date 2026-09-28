@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**119 / 208 units complete.**
+**120 / 208 units complete.**
 
 ## Next up
 
@@ -104,7 +104,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 86 | `C-CRM-07` | Preference centre, public and login-free | `C-CRM-04`, `F11` | — | — |
 | [x] | 87 | `C-CRM-08` | Clinical intake templates and encrypted submissions behind the boundary | `C-CRM-01`, `F08` | — | Y5-residency, Y1-licence |
 | [x] | 88 | `C-CRM-09` | Contraindication flags: the boolean-only crossing | `C-CRM-08` | — | Y1-licence |
-| [ ] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
+| [x] | 89 | `C-CRM-10` | Data-subject rights engine, retention and erasure with statutory conflict resolution | `C-CRM-04`, `C-CRM-08`, `F06` | — | Y1-entity, Y5-residency |
 | [x] | 90 | `P-HR-01` | Employee record and encrypted staff PII | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F07` | — | Y8-staff |
 | [x] | 91 | `P-HR-02` | Credential registry and the pure eligibility evaluator | `P-HR-01` | — | Y1-licence, Y8-staff |
 | [x] | 92 | `P-HR-03` | Expired credential removes a therapist from availability and flags their appointments | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-02` | — | Y8-staff |
