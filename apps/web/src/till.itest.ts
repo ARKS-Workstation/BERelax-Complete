@@ -2,18 +2,21 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, readTillIssuer, type Sql } from '@berelax/db'
 import {
+  createFixturePrincipal,
   FIXTURE_ISSUER,
   FIXTURE_PACKAGE_SHAPES,
   seedPackageDrawdownStates,
   seedPackageTemplates,
 } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { installAdminBrowserCookie, installAdminCookie } from '@berelax/harness/admin-session'
 import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { databaseIssuer, handleTillWrite } from '../app/(admin)/till/handler.ts'
 import { TILL_FIELDS } from '../app/(admin)/till/view.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -114,6 +117,8 @@ let sql: Sql
 let server: WebServer
 let browser: Browser
 let BASE = ''
+let restoreAdminFetch: (() => void) | undefined
+let restoreAdminBrowser: (() => void) | undefined
 /**
  * Two probe appointments, both delivered on the day in progress.
  *
@@ -304,12 +309,40 @@ beforeAll(async () => {
     },
   })
   BASE = server.origin
+  /*
+    The admin session, before anything is fetched and before the browser is launched.
+
+    `/till`, `/till/cash-up` and `/packages` called no session guard at all until the integrating verify said
+    so — three of the four unguarded routes in the admin estate, so a receipt, a counted drawer and a package
+    sale were reachable by anybody who knew the path. They call `guardAdminRoute` now, which means this suite
+    has to present a session or every assertion below reads as a 303 to /login.
+
+    `owner` because this file finalises invoices, counts a drawer and sells a package: those are the till's
+    own decisions and the narrower roles are asserted by the render and handler suites, which need no server.
+    `installAdminBrowserCookie` patches `chromium.launch`, so it runs FIRST — it has to reach the browser this
+    line is about to make.
+  */
+  const principal = await createFixturePrincipal(sql, { role: 'owner' })
+  const adminToken = principal.sessionToken ?? ''
+  restoreAdminFetch = installAdminCookie({
+    origin: BASE,
+    cookie: `${ADMIN_SESSION_COOKIE}=${adminToken}`,
+  })
+  restoreAdminBrowser = installAdminBrowserCookie(chromium, {
+    origin: BASE,
+    name: ADMIN_SESSION_COOKIE,
+    token: adminToken,
+  })
   browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 180_000)
 
 afterAll(async () => {
   await browser?.close()
   await server?.stop()
+  // Restored before the database work below, so a failure there still leaves `fetch` and `chromium` as they
+  // were found — the patches are process-wide and a suite that leaked them would change another's answers.
+  restoreAdminBrowser?.()
+  restoreAdminFetch?.()
   // The invoice family, as the OWNER: `invoice` refuses DELETE for every role (ZI003) so truncate is the only
   // legal removal, and it must happen before the booking goes because `invoice_appointment` is ON DELETE
   // RESTRICT against the appointment. Every referencing table is NAMED rather than reached with CASCADE, so

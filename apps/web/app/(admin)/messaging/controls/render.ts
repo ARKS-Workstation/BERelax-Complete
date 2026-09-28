@@ -38,6 +38,11 @@ import {
 } from '@berelax/messaging'
 import type { MessagingControlKey } from '@berelax/shared'
 import { tokensCss } from '@berelax/ui'
+import {
+  type AdminChrome,
+  GOOGLE_REAUTH_BANNER_CSS,
+  renderAdminBanner,
+} from '../../../../src/components/admin/google-reauth-banner.ts'
 
 /** The page's own styles. Colours are tokens only; there is no literal in this file (`pnpm colours`). */
 const CONTROLS_CSS = `
@@ -130,6 +135,15 @@ export interface ControlsView {
   readonly mayToggle: boolean
   /** A refusal or a confirmation from a POST, if this response is answering one. */
   readonly notice: { readonly kind: 'refused' | 'done'; readonly detail: string } | null
+  /**
+   * The admin chrome, for the Google re-auth banner every admin document carries.
+   *
+   * Added at merge rather than by this unit, because `google-reauth-banner.test.ts` scans EVERY admin
+   * document and this screen was the one that rendered none — an operator toggling the kill switch would not
+   * have been told the Google connection was dead. It matters more here than on most screens: this console is
+   * where somebody goes when messages are not arriving, and a dead connection is one of the reasons.
+   */
+  readonly chrome: AdminChrome
 }
 
 const CONTROL_HEADINGS: Readonly<
@@ -218,11 +232,12 @@ export function renderControlsHtml(view: ControlsView): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<meta name="robots" content="noindex, nofollow, noarchive">',
-    '<title>Promotional controls — BE RELAX admin</title>',
-    `<style>${tokensCss()}${CONTROLS_CSS}</style>`,
+    '<title>Promotional controls — messaging admin</title>',
+    `<style>${tokensCss()}${GOOGLE_REAUTH_BANNER_CSS}${CONTROLS_CSS}</style>`,
     '</head>',
     '<body>',
     '<main>',
+    renderAdminBanner(view.chrome),
     '<h1>Promotional controls</h1>',
     view.notice === null
       ? ''

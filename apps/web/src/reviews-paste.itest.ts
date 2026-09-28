@@ -1,10 +1,12 @@
 import { createConnection, type Sql } from '@berelax/db'
+import { createFixturePrincipal } from '@berelax/fixtures'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { getPayload, type Payload } from 'payload'
 import { type Browser, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEWS_PASTE_FIELDS, REVIEWS_PASTE_PATH } from '../app/(admin)/reviews/paste/view.ts'
 import config, { PAYLOAD_PLACEHOLDER_SECRET } from '../payload.config.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * G-REV-02 — the paste form, driven by a real browser against the built application.
@@ -60,6 +62,18 @@ let payload: Payload
 let sql: Sql
 let connectionId = ''
 const cookies = new Map<string, string>()
+/**
+ * The W-SYS-11 admin session, per role, beside Payload's own.
+ *
+ * Two session authorities reach this screen and that is not a mistake left in place: `guardAdminRoute` is the
+ * DOOR — every route under `(admin)` calls it, and `admin-guard.test.ts` fails the build for one that does
+ * not — while `principalForRequest` is Payload's verified user, which this screen's handler needs because the
+ * paste is ATTRIBUTED to a CMS account. G-REV-02 wrote the screen before the admin session existed and its
+ * header called Payload's "the only sign-in this application has"; that was true when written. Until the two
+ * are reconciled, a browser here carries both cookies, because the door is checked first and a page with only
+ * Payload's cookie is now redirected to /login.
+ */
+const adminSessions = new Map<string, string>()
 
 async function ensureStaff(role: string): Promise<string> {
   const email = `grev02-${role}@berelax.test`
@@ -159,6 +173,21 @@ async function pageAs(role: string): Promise<{ page: Page; posts: () => readonly
       { name: name ?? '', value: value ?? '', url: BASE, httpOnly: true, sameSite: 'Lax' },
     ])
   }
+  const session = adminSessions.get(role)
+  if (session !== undefined) {
+    // `secure: true` with a loopback URL is accepted: browsers treat 127.0.0.1 as a secure context, which is
+    // what lets the application set `Secure` unconditionally. See `packages/harness/src/admin-session.ts`.
+    await context.addCookies([
+      {
+        name: ADMIN_SESSION_COOKIE,
+        value: session,
+        url: BASE,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ])
+  }
   const posts: string[] = []
   const page = await context.newPage()
   // Every request the browser makes, filtered to POSTs. A redirect after the POST is a GET, so a
@@ -186,8 +215,12 @@ beforeAll(async () => {
   })
   BASE = server.origin
   payload = await getPayload({ config })
-  for (const role of ['owner', 'receptionist', 'marketer']) {
+  for (const role of ['owner', 'receptionist', 'marketer'] as const) {
     cookies.set(role, await signIn(await ensureStaff(role)))
+    // The door's own session, in the same role, so what this suite measures stays the SCREEN's behaviour for
+    // that role rather than the guard's refusal of everybody.
+    const principal = await createFixturePrincipal(sql, { role })
+    adminSessions.set(role, principal.sessionToken ?? '')
   }
   // The pre-installed Chromium at /opt/pw-browsers, with the same flags as every other browser here.
   browser = await chromium.launch({ args: ['--no-sandbox', '--font-render-hinting=none'] })
