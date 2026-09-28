@@ -121,6 +121,48 @@ The consequence: a review-request journey cannot reach a contact who opted into 
 is a real limitation and it is the safe one; the unit that wants it differently is the one that owns the stock
 journeys, and it will have to ask the owner rather than widen the gate.
 
+## Why an erased subject's run ENDS rather than raising
+
+This one was written after the fact, by a merge, and it is the clearest example in the unit of two correct
+decisions composing into a wrong one.
+
+C-CRM-10 classifies `flow_enrolment.customer_id` as `delete_row`, and its reason is the right one: an
+enrolment is a live automation that goes on sending, and a completed erasure should not leave a sequence
+running against the person and relying on a downstream gate to stop it every time. This ADR's own schema
+makes `flow_run.enrolment_id` **not** a foreign key, for the reason above: a cascade from `customer` reaches
+the append-only step log and raises `ZY011` for every caller of `delete from customer`. Neither decision can
+be given up. Together they produce a `running` run whose enrolment row is gone.
+
+The interpreter raised `invariant_violated` on the next tick, and the sentence it raised was true — a live
+run always names an enrolment, because `flow_run_live_run_is_an_enrolments` says so. What was false was the
+inference: the constraint holds the COLUMN, and with no foreign key nothing holds the ROW. So the error was a
+pg-boss job that failed for ever, retried on the ladder, putting the erased subject's run id in front of
+whoever reads dead letters — an erasure whose visible consequence is the subject's identifier arriving in an
+operator's queue every few minutes.
+
+Three alternatives, and why each is worse:
+
+- **Make `enrolment_id` a foreign key with `on delete set null`.** The column is `not null` for a live run,
+  so this is the constraint refusing the erasure instead, which is the same failure wearing a different
+  SQLSTATE.
+- **Have the erasure end the run.** It puts knowledge of the interpreter's state machine in the erasure
+  engine, and the next unit to add a terminal state has to remember to update a second writer. The run is
+  ended by the thing that owns endings.
+- **Leave it as an invariant violation and document it.** This is what the tree did for one merge, and the
+  documentation is exactly the shape this build calls a defect: a true sentence beside a broken behaviour.
+
+The decision is `enrolment_removed`, a fifth member of `FLOW_INTERPRETER_END_REASONS` — so it reaches
+`FLOW_END_REASONS` by derivation and the one writer's `isFlowEndReason` guard admits it with no second list
+to update. The tick ends the run `cancelled` **before the walk begins**, which is what makes ending it safe
+rather than a partial execution: no node runs, no message leaves, no token is claimed, and a run that has
+ended enqueues no further tick.
+
+The consequence to live with: a `cancelled` run with reason `enrolment_removed` is the only trace left that a
+flow was in flight for somebody, and it is a run id with no contact on it. That is the correct residue of an
+erasure and it is deliberately unhelpful to a reader — the two tables that CAN answer a question about it,
+`flow_node_effect` and `flow_step_log`, are `retain_append_only` under that engine's own registry, with the
+subject-facing reasons stated there.
+
 ## What is deliberately NOT decided here
 
 The DSL's `action_tag` grammar is lower snake_case and `customer_tag.tag` is kebab-case, so no string
