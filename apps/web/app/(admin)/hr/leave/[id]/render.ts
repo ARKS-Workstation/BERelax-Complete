@@ -25,9 +25,11 @@ import {
  * ## The five things this screen must say
  *
  *   1. **The period, as instants in the business zone.** A leave day covers its TRADING session, so a day of
- *      leave on the 17th runs to 02:00 on the 18th — and the screen prints both ends, because the whole
- *      point of the alignment is invisible if the page says "17 March" and the conflict below is at 01:30 on
- *      the 18th.
+ *      leave on the 17th runs to the small hours of the 18th — and the screen prints both ends, because the
+ *      whole point of the alignment is invisible if the page says "17 March" and the conflict below is at
+ *      01:30 on the 18th. No opening or closing TIME is written in this file: they live in `premises_hours`
+ *      and every consumer formats them, so a literal here would be a second source of truth that went on
+ *      showing the old time after an owner changed it (`packages/db/src/seed/premises.test.ts` refuses one).
  *   2. **Every conflicting appointment, with the five facts the report carries**: the customer, the service,
  *      the room, the therapist and the start instant. All of them, never a count: a count cannot be acted on,
  *      and the acceptance line is that N overlapping appointments produce N rows.
@@ -176,8 +178,8 @@ export function renderLeaveApprovalHtml(view: LeaveApprovalPageView): string {
     `<dt>Kind</dt><dd data-field="kind">${safeText(view.kind)}</dd>`,
     `<dt>Status</dt><dd data-field="status">${safeText(view.status)}</dd>`,
     // Both ends, as instants. The alignment is the whole subject of this unit and it is invisible if the
-    // screen prints a date: a leave day on the 17th ENDS at 02:00 on the 18th, which is what makes the
-    // 01:30 conflict below belong to it.
+    // screen prints a date: a leave day on the 17th ENDS in the small hours of the 18th, which is what
+    // makes the 01:30 conflict below belong to it. The instants come from the view; no time is written here.
     `<dt>Covers</dt><dd data-field="period">${safeText(view.startsAt)} to ${safeText(view.endsAt)}</dd>`,
     `<dt>Trading dates</dt><dd data-field="tradingDates">${safeText(view.fromTradingDate)} to ` +
       `${safeText(view.toTradingDate)}</dd>`,
