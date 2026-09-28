@@ -20,6 +20,7 @@ import {
   MAX_ATTEMPTS_ANY_POLICY,
   MESSAGE_VENDORS,
   type RecordedSendRequest,
+  releaseHeldMessage,
   vendorFor,
 } from './lifecycle.ts'
 import { createInMemoryMessageStore } from './lifecycle-memory.ts'
@@ -353,6 +354,141 @@ describe('outcomes that are deliberately not a row', () => {
     // The control: the same template inside the window is sent rather than held.
     const inside = harness()
     expect((await deliverMessage(inside.deps, requestFor(OFFER))).kind).toBe('sent')
+  })
+})
+
+/**
+ * Releasing a message the promotional window held (C-AUTO-07).
+ *
+ * Every case here is about the SAME row moving, because that is the whole of what a release is: a second row
+ * would double the offer in the cost report and hand the frequency cap two sends for one send. So each case
+ * holds a message first, at 01:00 Asia/Dubai, and then advances the clock with `waitUntil` — the seam this
+ * file was built around — and releases it. The one thing no case does is compute a window instant: the
+ * release instant comes back from the gate, which is C-AUTO-07's acceptance line and the subject of
+ * `apps/worker/src/automation/no-window-logic.test.ts`.
+ */
+describe('releasing a message the window held', () => {
+  /** Holds one promotional message and hands back what a release needs: the row and when it was queued. */
+  async function held(
+    h: ReturnType<typeof harness>,
+  ): Promise<{ request: RecordedSendRequest & SendRequest; id: string; queuedAtIso: string }> {
+    const request = requestFor(OFFER)
+    const outcome = await deliverMessage(h.deps, request)
+    expect(outcome.kind, 'the fixture must actually be held before it can be released').toBe('held')
+    if (outcome.kind !== 'held') throw new Error('not held')
+    return { request, id: outcome.message.id, queuedAtIso: ONE_AM }
+  }
+
+  it('sends it at the opening, on the existing row, with one attempt counted', async () => {
+    const h = harness({ nowIso: ONE_AM })
+    const { request, id, queuedAtIso } = await held(h)
+    // 07:00 Asia/Dubai, which is the instant the GATE named when it held the message — read off the row
+    // rather than written down here, so this test cannot disagree with the window rule.
+    const releaseAt = h.store.byId(id)?.nextAttemptAtIso
+    expect(releaseAt).toBe('2026-09-19T03:00:00.000Z')
+    await h.deps.waitUntil(releaseAt as string)
+
+    const released = await releaseHeldMessage(h.deps, request, { id, queuedAtIso })
+    expect(released.kind).toBe('sent')
+    if (released.kind !== 'sent') return
+    // The SAME row, not a second one. Both halves matter: the id is unchanged and the store holds one row.
+    expect(released.message.id).toBe(id)
+    expect(h.store.all(), 'one message row across the hold and the release').toHaveLength(1)
+    expect(released.message.status).toBe('sent')
+    expect(released.message.attempts, 'the release is the first attempt this message has had').toBe(
+      1,
+    )
+    expect(released.message.providerMessageId).toMatch(/^smsala-[0-9a-f]{12}$/)
+    expect(released.message.nextAttemptAtIso, 'and it holds no pending retry').toBeNull()
+    expect(
+      h.sms.calls.forProvider('smsala'),
+      'the vendor was asked once, at the opening',
+    ).toHaveLength(1)
+  })
+
+  it("holds it again when the window has not opened yet, with the gate's new instant", async () => {
+    const h = harness({ nowIso: ONE_AM })
+    const { request, id, queuedAtIso } = await held(h)
+    // 03:00 Asia/Dubai: the release was scheduled for 07:00 and this tick is early, which is what a
+    // narrowed window or a re-queued job looks like. A state, not a failure.
+    await h.deps.waitUntil('2026-09-18T23:00:00.000Z')
+
+    const released = await releaseHeldMessage(h.deps, request, { id, queuedAtIso })
+    expect(released.kind).toBe('still_held')
+    if (released.kind !== 'still_held') return
+    expect(released.releaseAtIso, 'the gate named the instant, and it is still the opening').toBe(
+      '2026-09-19T03:00:00.000Z',
+    )
+    expect(released.message.status).toBe('queued')
+    expect(released.message.attempts, 'nothing was attempted, so nothing is counted').toBe(0)
+    expect(h.sms.calls.forProvider('smsala'), 'and no vendor was asked').toHaveLength(0)
+    expect(h.store.all()).toHaveLength(1)
+  })
+
+  it('ends the hold as stale rather than sending an offer that outlived its window', async () => {
+    const h = harness({ nowIso: ONE_AM })
+    const { request, id } = await held(h)
+    await h.deps.waitUntil('2026-09-19T03:00:00.000Z')
+    // Queued thirteen hours before the release, which is past MAX_QUEUED_PROMOTIONAL_STALENESS_SECONDS.
+    // `Y9-queued-staleness`: a 23:00 offer released at 07:00 is advertising yesterday, and the recipient's
+    // frequency allowance would be spent on it.
+    const queuedAtIso = '2026-09-18T14:00:00.000Z'
+
+    const released = await releaseHeldMessage(h.deps, request, { id, queuedAtIso })
+    expect(released.kind).toBe('hold_ended')
+    if (released.kind !== 'hold_ended') return
+    expect(released.reason).toBe('stale_outside_window')
+    expect(released.message.status, 'terminal, so nothing sweeps it again').toBe('failed')
+    expect(released.message.attempts, 'and with NO attempt: no vendor was ever asked').toBe(0)
+    expect(released.message.lastFailureReason).toBe('stale_outside_window')
+    expect(h.sms.calls.forProvider('smsala')).toHaveLength(0)
+  })
+
+  it('ends the hold when the contact withdrew consent while the message waited', async () => {
+    const h = harness({ nowIso: ONE_AM })
+    const { request, id, queuedAtIso } = await held(h)
+    await h.deps.waitUntil('2026-09-19T03:00:00.000Z')
+    // The gate as it stands at RELEASE time, which is the whole reason a release runs the gate again rather
+    // than trusting the decision that held the message: a withdrawal between the two is the compliance path
+    // working, and a release that skipped the gate would send to somebody who had opted out.
+    const withdrawn: DeliveryDeps = {
+      ...h.deps,
+      send: {
+        ...h.deps.send,
+        gate: {
+          ...h.deps.send.gate,
+          evaluators: { ...h.deps.send.gate.evaluators, hasConsent: () => false },
+        },
+      },
+    }
+
+    const released = await releaseHeldMessage(withdrawn, request, { id, queuedAtIso })
+    expect(released.kind).toBe('hold_ended')
+    if (released.kind !== 'hold_ended') return
+    expect(released.reason).toBe('refused_after_hold')
+    expect(released.detail, "the gate's own reason travels onto the row").toContain(
+      'refused_no_consent',
+    )
+    expect(released.message.status).toBe('failed')
+    expect(released.message.attempts).toBe(0)
+    expect(h.sms.calls.forProvider('smsala'), 'and the vendor was never asked').toHaveLength(0)
+  })
+
+  it('records a vendor refusal at release time as a failure with no further attempt', async () => {
+    const h = harness({ nowIso: ONE_AM })
+    const { request, id, queuedAtIso } = await held(h)
+    await h.deps.waitUntil('2026-09-19T03:00:00.000Z')
+    h.sms.failures.promotional.failAlways('rejected')
+
+    const released = await releaseHeldMessage(h.deps, request, { id, queuedAtIso })
+    expect(released.kind).toBe('failed')
+    if (released.kind !== 'failed') return
+    expect(released.message.status).toBe('failed')
+    expect(released.message.lastFailureReason).toBe('provider_rejected')
+    // No retry ladder. The release IS the attempt, and a schedule beside the window's would be a second
+    // schedule for one message.
+    expect(released.message.nextAttemptAtIso).toBeNull()
+    expect(h.store.all(), 'still one row').toHaveLength(1)
   })
 })
 
