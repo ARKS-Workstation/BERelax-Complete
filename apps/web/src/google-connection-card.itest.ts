@@ -1,6 +1,7 @@
 import type { Instant } from '@berelax/core'
 import { instantFromIso } from '@berelax/core'
 import { createConnection, type Sql, withUnitOfWork, writeSetting } from '@berelax/db'
+import { createFixturePrincipal, type FixturePrincipal } from '@berelax/fixtures'
 import type { SealedToken } from '@berelax/google'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
 import {
@@ -13,6 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { renderIntegrationsPage } from '../app/(admin)/settings/integrations/connection-card.ts'
 import { integrationsView } from '../app/(admin)/settings/integrations/handler.ts'
 import { POST as testConnectionRoute } from '../app/(admin)/settings/integrations/test-connection/route.ts'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * G-CONN-07 — the connection card, against a real database and a real DOM.
@@ -108,15 +110,28 @@ const CELLS: readonly Cell[] = [390, 768, 1440].flatMap((width) =>
 )
 
 let sql: Sql
+/*
+  W-SYS-11 — the Test-connection route is an admin route, and this suite calls it DIRECTLY.
+
+  There is no server here (see the header), so the fetch patch other suites use does not apply: the requests
+  below are `new Request(...)` objects handed straight to the exported handler, and the handler now refuses
+  one carrying no live staff session. The cookie therefore goes on the Request, which is the honest shape —
+  it is what a browser would have sent.
+
+  The principal is created here and removed in `afterAll`: no deployment seeds a staff credential (Y8-staff).
+*/
+let adminPrincipal: FixturePrincipal | undefined
 let browser: Browser
 let connectionId = ''
 
 beforeAll(async () => {
   sql = createConnection({ url: DATABASE_URL, max: 4 })
+  adminPrincipal = await createFixturePrincipal(sql, { role: 'owner' })
   browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 120_000)
 
 afterAll(async () => {
+  await adminPrincipal?.cleanup()
   await browser?.close()
   await setSetting(PUBLISHING_STATUS, 'testing')
   await setSetting(GBP_ACCESS, false)
@@ -418,7 +433,12 @@ describe('acceptance — Test connection refuses rather than reporting a success
     await testConnectionRoute(
       new Request('http://localhost/settings/integrations/test-connection', {
         method: 'POST',
-        headers: { 'content-type': type },
+        headers: {
+          'content-type': type,
+          // The session the handler's guard resolves. On the Request rather than through a fetch patch,
+          // because this route is called directly and no fetch happens at all.
+          cookie: `${ADMIN_SESSION_COOKIE}=${adminPrincipal?.sessionToken ?? ''}`,
+        },
         ...(body === null ? {} : { body }),
       }),
     )
