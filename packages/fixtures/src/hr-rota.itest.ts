@@ -726,7 +726,7 @@ describe('acceptance — publishing writes an immutable rota_version', () => {
             where rota_version_id = ${versionId}::uuid`,
     )
     expect(refusal).toMatch(/A published rota version is immutable/)
-    expect(refusal).toMatch(/ZW001/)
+    expect(refusal).toMatch(/ZW006/)
   })
 
   it('refuses a DELETE against a published version and against its assignments', async () => {
@@ -734,10 +734,10 @@ describe('acceptance — publishing writes an immutable rota_version', () => {
       await refusalOf(
         (tx) => tx`delete from rota_version_assignment where rota_version_id = ${versionId}::uuid`,
       ),
-    ).toMatch(/ZW001/)
+    ).toMatch(/ZW006/)
     expect(
       await refusalOf((tx) => tx`delete from rota_version where id = ${versionId}::uuid`),
-    ).toMatch(/ZW001/)
+    ).toMatch(/ZW006/)
   })
 
   it('refuses an UPDATE to the published version row itself', async () => {
@@ -745,14 +745,14 @@ describe('acceptance — publishing writes an immutable rota_version', () => {
       (tx) =>
         tx`update rota_version set published_by = 'somebody else' where id = ${versionId}::uuid`,
     )
-    expect(refusal).toMatch(/ZW001/)
+    expect(refusal).toMatch(/ZW006/)
   })
 
   it('keeps the snapshot, ids and all, when the draft shift it came from is deleted', async () => {
     // The teeth of the snapshot decision, and of the one that followed it. `shift_assignment.shift_id` is
     // ON DELETE CASCADE, so a version that REFERENCED the draft would lose rows here with no error at all —
     // an immutable table quietly shedding rows. And `source_shift_id` is a plain uuid rather than a foreign
-    // key, because `on delete set null` arrives as an UPDATE and ZW001 refuses every UPDATE: with the
+    // key, because `on delete set null` arrives as an UPDATE and ZW006 refuses every UPDATE: with the
     // foreign key, this delete was IMPOSSIBLE and the draft roster could never be rewritten again. This
     // case is what found that, by way of its own cleanup failing.
     const before = await readRotaVersionAssignments(sql, versionId)
@@ -912,12 +912,12 @@ describe('acceptance — a swap and a claim re-run the validator and record the 
       (tx) =>
         tx`update rota_change_request set decision = 'applied' where id = ${result.requestId}::uuid`,
     )
-    expect(refusal).toMatch(/ZW002/)
+    expect(refusal).toMatch(/ZW007/)
     expect(
       await refusalOf(
         (tx) => tx`delete from rota_change_request where id = ${result.requestId}::uuid`,
       ),
-    ).toMatch(/ZW002/)
+    ).toMatch(/ZW007/)
   })
 
   it('refuses an open shift claimed by a therapist with an expired mandatory credential', async () => {

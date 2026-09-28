@@ -82,11 +82,19 @@ export const MERGE_REFUSALS = [
 ] as const
 export type MergeRefusal = (typeof MERGE_REFUSALS)[number]
 
-/** SQLSTATEs 0069 raises, so a caller can tell one refusal from another without reading prose. */
+/**
+ * SQLSTATEs 0069 raises, so a caller can tell one refusal from another without reading prose.
+ *
+ * `ZT005`-`ZT007` and not `ZT001`-`ZT003`, which 0068's payment tender holds. 0069 and 0068 both reached
+ * for class `ZT` in worktrees that could not see each other, so for eleven merges these three constants
+ * named the overpayment ceiling, a tender that gives no change and a missing tender reference as well as
+ * the three rules below — and `mergeRefusalOf` would have reported an overpayment as an append-only
+ * violation. 0099 moved this side; `packages/db/src/sqlstate-registry.ts` is what now refuses the next one.
+ */
 export const MERGE_SQLSTATE = {
-  mergeRecordImmutable: 'ZT001',
-  survivorIsATombstone: 'ZT002',
-  chainTooLong: 'ZT003',
+  mergeRecordImmutable: 'ZT005',
+  survivorIsATombstone: 'ZT006',
+  chainTooLong: 'ZT007',
 } as const
 
 /** Audit actions this module writes. A named constant, so a test can count a delta on one. */
@@ -844,7 +852,7 @@ export async function mergeCustomers(
     }
   }
 
-  // 0069's trigger refuses this too (ZT002). Checked here as well so the caller gets a typed refusal
+  // 0069's trigger refuses this too (ZT006). Checked here as well so the caller gets a typed refusal
   // naming the live record instead of a SQLSTATE it would have to translate.
   const survivorNow = await mergeSurvivorOf(uow.sql, plan.survivorId)
   if (survivorNow !== plan.survivorId) {

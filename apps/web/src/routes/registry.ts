@@ -516,7 +516,7 @@ export const ROUTES = [
     changefreq: null,
     why:
       'C-AUTO-08s pipeline board: the six ordered columns and the cards dragged between them, with every ' +
-      'move written as a transition the database refuses to omit (ZU001). A handler answering text/html ' +
+      'move written as a transition the database refuses to omit (ZU008). A handler answering text/html ' +
       'rather than a document, for the reason the Messages inbox, the template editor, the compliance ' +
       'calendar and the duplicate queue give: a registry document must be served in BOTH locales, which ' +
       'needs an Arabic admin document and the W-SYS-01 shell, and `?dir=rtl` re-renders this English ' +

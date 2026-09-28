@@ -21,7 +21,7 @@ import {
  * A variance measured against it would change after the fact: move a Tuesday shift an hour later next month
  * and a therapist who was on time becomes an hour late on a day already approved and already paid. Every
  * function here therefore takes the ROSTER as an argument, and the one caller that supplies it supplies it
- * from `rota_version_assignment` — a table no UPDATE can reach (ZW001).
+ * from `rota_version_assignment` — a table no UPDATE can reach (ZW006).
  *
  * The same argument makes the grace window an ARGUMENT rather than a literal, and a VERSIONED row rather
  * than an `app_setting` value: attendance is asked about the past more insistently than anything else in

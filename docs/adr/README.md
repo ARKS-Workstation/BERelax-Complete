@@ -44,6 +44,7 @@ a decision the table does not list.
 | [0042](0042-publication-is-refused-at-the-permission-layer-and-in-the-database.md) | Publication is refused at the permission layer and in the database, never by a prompt | — |
 | [0041](0041-leave-approval-never-cancels-an-appointment.md) | Approving leave never cancels an appointment; the coverage refusal is a difference; a leave period is stored over trading-session instants | — |
 | [0045](0045-analytics-retention-is-a-policy-table-and-a-guarded-default-partition.md) | Analytics retention is a policy table the job reads; the missing partition is a guarded default that refuses every row | — |
+| [0043](0043-a-private-sqlstate-is-five-characters-and-comes-from-a-registry.md) | A private SQLSTATE is all five characters and comes from a registry; two rules may share a class and never a code | — |
 | [0046](0046-first-party-measurement-plan.md) | The measurement plan is code: one closed taxonomy, one funnel vocabulary derived from a single tuple, and a funnel bucketed on business_day | — |
 | [0044](0044-a-filed-vat-return-is-a-snapshot-not-a-query.md) | A filed VAT return is a snapshot of bytes with a hash over exactly those bytes, signed by two different people; a correction is a new version | — |
 | [0048](0048-the-marketing-kill-switch-cannot-reach-transactional-traffic.md) | The kill switch is read in a function whose parameter cannot be a transactional message; its state has one row; the non-production default is computed, not stored | — |

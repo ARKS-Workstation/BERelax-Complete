@@ -1344,12 +1344,12 @@ describe('the merge record', () => {
             (inner) => inner.sql`update merge_record set reason = 'edited' where id = ${id}`,
           ),
         ),
-      ).toBe('ZT001')
+      ).toBe('ZT005')
       expect(
         await sqlstateOf(
           attempt(uow, (inner) => inner.sql`delete from merge_record where id = ${id}`),
         ),
-      ).toBe('ZT001')
+      ).toBe('ZT005')
       expect(
         await sqlstateOf(
           attempt(
@@ -1358,7 +1358,7 @@ describe('the merge record', () => {
               inner.sql`update merge_record_table set rows_moved = 99 where merge_record_id = ${id}`,
           ),
         ),
-      ).toBe('ZT001')
+      ).toBe('ZT005')
       expect(
         await sqlstateOf(
           attempt(
@@ -1366,7 +1366,7 @@ describe('the merge record', () => {
             (inner) => inner.sql`delete from merge_record_table where merge_record_id = ${id}`,
           ),
         ),
-      ).toBe('ZT001')
+      ).toBe('ZT005')
       // The control: a SELECT on the same rows works, so the four refusals above are about the operation
       // and not about a row the probe cannot see.
       expect(

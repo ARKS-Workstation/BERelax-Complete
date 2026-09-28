@@ -252,6 +252,11 @@ jobs:
       - name: Schema conventions (timestamptz, integer money)
         run: pnpm db:conventions
 
+      # One private SQLSTATE, one rule. Derived from the migrations, so a code two units both took fails
+      # here rather than at the merge where one of them has already shipped a translator matching it.
+      - name: Private SQLSTATE registry
+        run: pnpm sqlstate
+
       - name: Byte budgets
         run: pnpm budgets
 

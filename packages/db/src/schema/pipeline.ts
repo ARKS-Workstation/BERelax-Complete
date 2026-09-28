@@ -24,13 +24,13 @@ import { flow } from './flow.ts'
  *   - **A stage change is refused unless the move is recorded.** `customer_pipeline_card_records_every_move`
  *     is a DEFERRED constraint trigger: at COMMIT it requires a `pipelineStageTransition` row for exactly
  *     this move — same contact, same from, same to, and `occurredAt` equal to the card's `stageEnteredAt`.
- *     `db.update(customerPipelineCard).set({ stageKey })` typechecks perfectly and raises ZU001 when the
+ *     `db.update(customerPipelineCard).set({ stageKey })` typechecks perfectly and raises ZU008 when the
  *     transaction commits, which is the correct outcome: a move is `moveCard`, which writes both rows.
  *   - **Positions are gapless, and the rule is a table-level one.** `displayOrder` is 1..n over every row
- *     including the archived ones; `pipeline_stage_positions_are_gapless` (ZU003) is a deferred constraint
+ *     including the archived ones; `pipeline_stage_positions_are_gapless` (ZU010) is a deferred constraint
  *     trigger, and the UNIQUE below is `deferrable initially deferred` — which is what lets a reorder pass
  *     through the intermediate states every shuffle has. Neither property is expressible here.
- *   - **`pipelineStageTransition` is append-only.** UPDATE and DELETE raise ZU002 for every role including
+ *   - **`pipelineStageTransition` is append-only.** UPDATE and DELETE raise ZU009 for every role including
  *     the owner, and both are revoked from `berelax_app` along with TRUNCATE.
  *   - **`pipelineStageTransition.customerId` is NOT a foreign key**, and that is 0056's decision for
  *     `consent` rather than an omission: a cascade would fire the refusal trigger and make
@@ -50,7 +50,7 @@ export const pipelineStage = pgTable(
   'pipeline_stage',
   {
     stageKey: text('stage_key').primaryKey(),
-    /** 1..n over every row, archived ones included. Unique (deferred) and gapless (ZU003). */
+    /** 1..n over every row, archived ones included. Unique (deferred) and gapless (ZU010). */
     displayOrder: smallint('display_order').notNull(),
     /** What the column means. Required: a stage nobody can define is two stages in one column. */
     description: text('description').notNull(),
