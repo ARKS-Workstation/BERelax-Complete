@@ -6,8 +6,9 @@ import { tokensCss } from '@berelax/ui'
  *
  * ## Why this page renders no admin chrome
  *
- * Every other admin screen calls `renderAdminBanner(view.chrome)`, and `adminChromeFor` reads the database
- * for the Google re-authorisation notice. This one deliberately does not. A page served to somebody who is
+ * Every other admin screen renders the Google re-authorisation notice, and `adminChromeFor` reads the
+ * database to build it. This one deliberately renders no admin chrome at all — the call is absent, not
+ * merely unreached, and `google-reauth-banner.test.ts` exempts this file by name with the reason. A page served to somebody who is
  * not signed in must not render anything derived from the business's state — the banner says whether the
  * Google connection needs attention, which is an operational fact about this salon and not something an
  * unauthenticated visitor is owed. It also keeps the page cheap: the login screen is the one admin URL a

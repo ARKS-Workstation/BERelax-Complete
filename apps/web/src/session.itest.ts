@@ -633,6 +633,65 @@ describe('acceptance — the wiring itself is asserted, so deleting it fails rat
     }
   })
 
+  /**
+   * The session's own statements, run as `berelax_app` rather than as the owner.
+   *
+   * This is the check that has caught five units in this build, and every other case in this file is blind
+   * to it: the test pool connects with `DATABASE_URL`, which is the OWNER, and so does `next start` in this
+   * harness. A route or a grant the APPLICATION role may not use therefore passes every assertion here and
+   * fails on the first real request — and for THIS unit the first real request is somebody signing in, so
+   * the failure would be nobody able to reach the admin at all.
+   *
+   * `set role berelax_app` inside a transaction is how it is reachable: the role is `nologin`, so it cannot
+   * be connected as. The role is reset in a `finally`, because a pooled connection left with the role set
+   * would hand it to whatever suite ran next — which would present as a permission error in a file that
+   * never touched this one.
+   */
+  it('runs its own reads and writes as berelax_app, not only as the owner', async () => {
+    const asApp = await sql.begin(async (tx) => {
+      await tx`set local role berelax_app`
+      const [who] = await tx<{ who: string }[]>`select current_user as who`
+      // The control: if `set local role` silently did nothing, every assertion below would be the owner's
+      // and would prove the opposite of what this case claims.
+      expect(who?.who, 'set local role did not take effect, so this case measures the owner').toBe(
+        'berelax_app',
+      )
+
+      // The exact join `readStaffSession` makes. A token naming no row is the right probe: the question is
+      // whether the application role may EXECUTE the statement, not what it returns.
+      const session = await tx<{ n: string }[]>`
+        select count(*)::text as n
+          from staff_session s
+          join staff_credential c on c.id = s.credential_id
+          join employee e on e.id = c.employee_id
+         where s.token_hash = ${Buffer.alloc(32, 7)}
+      `
+      // The exact read `readStaffCredentialByReference` makes.
+      const credential = await tx<{ n: string }[]>`
+        select count(*)::text as n
+          from staff_credential c
+          join employee e on e.id = c.employee_id
+         where e.staff_reference = 'Fixture principal nobody'
+      `
+      // And the three writes a sign-in performs: mint a session, revoke one, burn the TOTP counter.
+      const [writes] = await tx<
+        { insert_session: boolean; revoke_session: boolean; burn_counter: boolean }[]
+      >`
+        select has_table_privilege('staff_session', 'INSERT')    as insert_session,
+               has_table_privilege('staff_session', 'UPDATE')    as revoke_session,
+               has_table_privilege('staff_credential', 'UPDATE') as burn_counter
+      `
+      return { session: session[0]?.n, credential: credential[0]?.n, writes }
+    })
+
+    // Reaching here at all is the assertion: a privilege the application role lacks raises 42501 above.
+    expect(asApp.session).toBe('0')
+    expect(asApp.credential).toBe('0')
+    expect(asApp.writes?.insert_session, 'berelax_app cannot mint a session').toBe(true)
+    expect(asApp.writes?.revoke_session, 'berelax_app cannot revoke a session').toBe(true)
+    expect(asApp.writes?.burn_counter, 'berelax_app cannot burn a TOTP counter').toBe(true)
+  })
+
   it('constrains staff_credential.role to exactly the roles the matrix declares', async () => {
     const [employee] = await sql<{ id: string }[]>`
       select id from employee order by staff_reference limit 1

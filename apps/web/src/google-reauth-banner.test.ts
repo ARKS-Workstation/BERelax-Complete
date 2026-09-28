@@ -110,9 +110,42 @@ const source = (file: string): string => readFileSync(join(ADMIN, file), 'utf8')
 /** A DOCUMENT emitter: a file that writes a doctype. A fragment, a handler and a route do not. */
 const isDocument = (file: string): boolean => source(file).includes('<!doctype html>')
 
+/**
+ * Admin documents that must NOT carry the banner, by name and with the reason (W-SYS-11).
+ *
+ * The banner says whether this salon's Google connection needs attention, which is an operational fact
+ * about the business. `login/render.ts` is served to somebody who is NOT signed in — it is the one admin
+ * document that is, by definition — so it renders no admin chrome and reads no row on GET. Telling an
+ * unauthenticated visitor the state of the business's integrations is a disclosure, and a small one only
+ * because the banner is currently small.
+ *
+ * A Set of exact names rather than a predicate over the path, so a second exemption is a line somebody
+ * writes deliberately with a reason beside it. It does NOT change `isDocument`: the login screen IS a
+ * document and must stay in the walk, or the case asserting that non-documents never render a banner would
+ * be quietly asserting it about a file that is one.
+ */
+const CHROMELESS: ReadonlySet<string> = new Set(['login/render.ts'])
+
 describe('every admin document carries the banner', () => {
   const files = adminFiles()
   const documents = files.filter(isDocument)
+  /** The documents the banner rule applies to. */
+  const chromed = documents.filter((file) => !CHROMELESS.has(file))
+
+  it('exempts only real documents, and only ones that really render no banner', () => {
+    // A stale exemption is how this list rots: a name kept for a deleted file, or misspelled, exempts
+    // nothing while looking like it exempts something. Both halves are checked, so an exemption cannot be
+    // used to hide a document that DOES render a banner either.
+    for (const exempt of CHROMELESS) {
+      expect(documents, `${exempt} is exempted but is not an admin document`).toContain(exempt)
+      expect(
+        source(exempt).includes('renderAdminBanner('),
+        `${exempt} is exempted from the banner and yet renders one`,
+      ).toBe(false)
+    }
+    // And the exemption must stay small: it is a disclosure boundary, not a way round the rule.
+    expect(CHROMELESS.size).toBeLessThanOrEqual(1)
+  })
 
   it('finds admin documents at all, which is the non-vacuity control', () => {
     // A floor rather than an exact number: the count goes up when somebody builds an admin screen, and a
@@ -122,7 +155,7 @@ describe('every admin document carries the banner', () => {
   })
 
   it('calls renderAdminBanner in every one of them', () => {
-    const missing = documents.filter((file) => !source(file).includes('renderAdminBanner('))
+    const missing = chromed.filter((file) => !source(file).includes('renderAdminBanner('))
     expect(
       missing,
       'an admin document that renders no Google re-auth banner: an operator on it would not be told the ' +
@@ -141,7 +174,7 @@ describe('every admin document carries the banner', () => {
   })
 
   it('emits the banner inside <main>, where a landmark can hold it', () => {
-    for (const file of documents) {
+    for (const file of chromed) {
       const text = source(file)
       const banner = text.indexOf('renderAdminBanner(')
       const main = text.indexOf("'<main>'")
