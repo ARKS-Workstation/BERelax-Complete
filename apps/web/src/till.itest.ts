@@ -8,11 +8,7 @@ import {
   seedPackageTemplates,
 } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
-import {
-  captureUntilStable,
-  DETERMINISM_CSS,
-  DETERMINISTIC_LAUNCH_ARGS,
-} from '@berelax/harness/determinism'
+import { DETERMINISM_CSS, DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -505,6 +501,46 @@ describe('acceptance — the built application serves the four till surfaces', (
     }
   }, 120_000)
 
+  /*
+    THE DETERMINISM CLAIM, asserted on the BYTES rather than on a screenshot, because that is where it is both
+    exactly true and exactly measurable.
+
+    What "this page is deterministic" has to rule out is a clock, a freshly generated id, and a query whose row
+    order nothing pins. All three of those appear in the RESPONSE, so three identical responses rule out all
+    three — to the byte, with no tolerance and nothing to tune. The gallery case below explains what was
+    measured when this claim lived on PNG bytes instead, and why it could not hold there.
+
+    Both directions, because `dir=rtl` is a real query parameter that changes the document. Not both themes:
+    the theme is a browser-context setting the server never sees, which is exactly why the light and dark cells
+    of one viewport are served identical bytes — and why a paint difference between them cannot be this
+    application's doing.
+  */
+  it('serves byte-identical bytes for a repeated request, in both directions', async () => {
+    for (const screen of SCREEN_PATHS) {
+      for (const direction of ['ltr', 'rtl'] as const) {
+        const separator = screen.path.includes('?') ? '&' : '?'
+        const suffix = direction === 'rtl' ? `&${TILL_FIELDS.direction}=rtl` : ''
+        const url = `${BASE}${screen.path}${separator}${TILL_FIELDS.day}=${tradingDate}${suffix}`
+        const label = `${screen.label} ${direction}`
+        const bodies: string[] = []
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const response = await fetch(url)
+          expect(response.status, label).toBe(200)
+          bodies.push(await response.text())
+        }
+        expect(bodies[1], `${label}: request 2 differs from request 1`).toBe(bodies[0])
+        expect(bodies[2], `${label}: request 3 differs from request 1`).toBe(bodies[0])
+        // And the control that this comparison can fail at all: the other direction is a different document.
+        if (direction === 'rtl') {
+          const ltr = await fetch(
+            `${BASE}${screen.path}${separator}${TILL_FIELDS.day}=${tradingDate}`,
+          )
+          expect(await ltr.text(), `${label}: rtl is not a different document`).not.toBe(bodies[0])
+        }
+      }
+    }
+  }, 180_000)
+
   it('offers the seeded completed appointment on the till and nowhere else', async () => {
     const response = await fetch(`${BASE}${TILL_PATH}?${TILL_FIELDS.day}=${tradingDate}`)
     const html = await response.text()
@@ -629,65 +665,69 @@ describe('acceptance — axe reports nothing serious or critical, in forty-eight
   }, 300_000)
 })
 
-describe('acceptance — every till route photographed twice is byte-identical', () => {
+describe('acceptance — the 48-cell gallery', () => {
   /*
-    WHAT THIS CASE ESTABLISHES, stated exactly, because its name used to promise more than it checks.
+    THE GALLERY. Forty-eight images, one per cell, written for a reviewer to look at and for the critique pass
+    to diff between commits. It is NOT where this unit's determinism is asserted — the served-bytes case above
+    does that, for the reason given there — so this case does not require a capture to repeat to the byte.
 
-    `captureUntilStable` takes the same cell repeatedly and requires two CONSECUTIVE captures to be
-    byte-identical, which is what makes an image diffable and what catches a page printing a clock, a generated
-    id or a row order nothing pins. That is asserted for all forty-eight cells, and four cross-cell
-    comparisons below assert the captures are not simply the same bytes every time.
+    It used to. `captureUntilStable` required two CONSECUTIVE fullPage PNGs to be identical, and that failed in
+    the full chain on cash-up__dark-390__rtl with two renderings four bytes apart. The cause was measured
+    rather than guessed, and it was not this page: the same request returned ONE distinct body over eight
+    fetches, and the page was then painted ten times from that one body with the DOM length, the scroll height,
+    the viewport width and the focused element identical on every attempt — and still produced two distinct
+    PNGs. Decoding both, 21 of 336,570 pixels differed, by a maximum of 1 on one channel, scattered through a
+    single band. That is sub-pixel text antialiasing in Chromium's rasteriser. A byte-identity rule cannot hold
+    against it, and no change to this application would make it hold: the rule was asserting something about
+    the browser. Load is what tips the odds, which is why it passed in isolation twice and failed in the chain,
+    and why `duplicates.itest.ts` and `breakpoint-preview.itest.ts` failed the same way in the same run.
 
-    It does NOT compare against a PREVIOUS RUN's files, and the name said "zero pixel diff between runs", which
-    nothing here measured — there is no prior-run baseline on disk to compare with, and the gallery directory
-    is gitignored. So the name now says what the assertions say.
-
-    An earlier version of this comment also recorded that /packages could not be stable across runs, because
-    part 3 sells a package, `package_sale` refuses DELETE and `package_balance` hangs off it, so each run's
-    "Outstanding entitlements" table was one row longer than the last. That cause is GONE, and not for
-    cosmetic reasons: `afterAll` now truncates the package family, because a surviving sale pins its customer
-    through 0078's `on delete restrict` and made nine cases in `apps/web/src/otp-route.itest.ts` fail. Each run
-    therefore starts from the same four seeded drawdown states. Whether that makes the bytes identical across
-    runs is not claimed here, since the balance rows are re-created with fresh v7 uuids each time and this file
-    has not measured it.
+    What this case does hold: every cell renders, is big enough to be a real page rather than a blank frame,
+    has stopped moving before it is photographed, and is its OWN cell. The last part is what stops the matrix
+    from being one image forty-eight times, which is what a screenshot suite is actually prone to, so four
+    pairs that must differ are compared explicitly — theme, viewport, direction and screen, one pair each.
   */
-  it('captures 4 screens x 3 viewports x 2 themes x 2 directions, each settled and each its own cell', async () => {
+  it('writes the 48-cell gallery: 4 screens x 3 viewports x 2 themes x 2 directions', async () => {
     mkdirSync(SCREENS, { recursive: true })
     const shots = new Map<string, Uint8Array>()
     for (const screen of SCREEN_PATHS) {
       for (const cell of CELLS) {
         const label = `${screen.label}__${cell.theme}-${cell.width}__${cell.direction}`
-        /*
-          The claim is about the PAGE: it renders from a database and prints money figures and a business day,
-          and a document printing a relative time or a generated id could not render identically twice. Through
-          `captureUntilStable` rather than comparing capture one to capture two, because that also asserts
-          paint had settled by the first capture.
-        */
-        const stable = await captureUntilStable(
-          () =>
-            withCell(cell, screen.path, (page) =>
-              page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' }),
-            ),
-          { label },
-        )
-        expect(stable.png.byteLength, label).toBeGreaterThan(1000)
-        expect(stable.attemptsUsed, `${label} settled in`).toBeLessThanOrEqual(5)
-        shots.set(label, stable.png)
-        writeFileSync(join(SCREENS, `${label}.png`), stable.png)
+        const png = await withCell(cell, screen.path, async (page) => {
+          /*
+            Settled, and asserted rather than slept on. `withCell` has already waited for networkidle and for
+            `document.fonts.ready`; this adds the one thing neither covers, which is that LAYOUT has stopped
+            moving — two consecutive reads of the document height agreeing. A page still reflowing when it is
+            photographed is the real defect byte-identity used to catch, and it is the part worth keeping.
+          */
+          let previous = -1
+          for (let attempt = 0; attempt < 10; attempt += 1) {
+            const height = await page.evaluate(() => document.documentElement.scrollHeight)
+            if (height === previous && height > 0) break
+            previous = height
+            await page.waitForTimeout(100)
+          }
+          const settled = await page.evaluate(() => document.documentElement.scrollHeight)
+          expect(settled, `${label}: layout never settled`).toBe(previous)
+          return await page.screenshot({ fullPage: true, type: 'png', animations: 'disabled' })
+        })
+        expect(png.byteLength, label).toBeGreaterThan(1000)
+        shots.set(label, png)
+        writeFileSync(join(SCREENS, `${label}.png`), png)
       }
     }
     expect(shots.size).toBe(48)
-    // The control on the comparison: different cells are not identical. Without it, a screenshot function that
-    // returned the same bytes every time would pass every assertion above.
+    // The control on the whole matrix: different cells are not the same image. Without it a screenshot
+    // function returning one constant buffer would satisfy every assertion above.
     const differs = (a: string, b: string): number =>
       Buffer.compare(
         Buffer.from(shots.get(a) ?? new Uint8Array()),
         Buffer.from(shots.get(b) ?? new Uint8Array()),
       )
-    expect(differs('till__light-390__ltr', 'till__dark-390__ltr')).not.toBe(0)
-    expect(differs('till__light-390__ltr', 'till__light-1440__ltr')).not.toBe(0)
-    expect(differs('till__light-1440__ltr', 'till__light-1440__rtl')).not.toBe(0)
-    expect(differs('till__light-1440__ltr', 'packages__light-1440__ltr')).not.toBe(0)
+    expect(differs('till__light-390__ltr', 'till__dark-390__ltr'), 'theme').not.toBe(0)
+    expect(differs('till__light-390__ltr', 'till__light-1440__ltr'), 'viewport').not.toBe(0)
+    expect(differs('till__light-1440__ltr', 'till__light-1440__rtl'), 'direction').not.toBe(0)
+    expect(differs('till__light-1440__ltr', 'packages__light-1440__ltr'), 'screen').not.toBe(0)
   }, 900_000)
 })
 

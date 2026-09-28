@@ -5606,6 +5606,24 @@ units:
       tests pass on the merged tree. The wider hazard for whoever meets this next: `booking.customer_id` is
       `on delete restrict` too (0024), so the first unit to seed an APPOINTMENT hits the same wall from the
       other side, and docs/12 promises the fixture salon has them.'
+    - 'NOTE: a unit''s own database must be REBUILT when migrations land, never caught up, and this cost this
+      unit two full chain runs and one wrong accusation. `pnpm db:apply` applies every migration from nothing
+      and refuses a populated database by design — there is no applied-migrations table to resume from — so a
+      migration merged after the database was created can never reach it. This unit''s berelax_mtill13 was
+      built before 0085 and therefore held 140 tables where a fresh one holds 153, `rights_request` among the
+      missing. C-CRM-10''s erasure engine enumerates the live catalogue in BOTH directions — a column with no
+      rule, and a rule naming a column that does not exist — so the absent tables made its rules read as stale
+      and four suites failed (rights.itest.ts, merge.itest.ts with
+      `public.rights_request.subject_customer_id is allowlisted but does not exist`, suppression.itest.ts,
+      retention-purge.itest.ts). THOSE FOUR ARE NOT DEFECTS and nothing is waiting on their owners: on a
+      database dropped and recreated they pass, 4 files and 82 tests. An earlier revision of this manifest
+      attributed them to the merge, which was wrong and is retracted here. The database was also progressively
+      hollowed out by earlier suites — its seed loaded catalogue 0, business-days 0, therapists 0 and
+      message-templates 0, because every loader skips a table that already holds rows, so a degraded database
+      looks seeded. After dropping and recreating: 81 migrations, 153 tables, customers 4, templates 4, sales 0
+      (the seed split doing what it says) and `journal_entry like ''fixture-pkg-%''` 0, which is also the first
+      observation of `seedPackageDrawdownStates` on a clean journal — it takes no id suffix there, the
+      deterministic path that had only ever been exercised on a dirty database.'
     - 'NOTE: no migration, and 0088_till_screens.sql is a PERMANENT GAP. The allocation reserved it and said a
       screens unit may well not need one, and this one does not: every table these three screens read and write
       already exists (0011 business_day, 0076 cash_session, 0078/0083 the package family, the invoice family,
@@ -5615,6 +5633,28 @@ units:
       stays 87, which is the newest migration on disk after the merge brought 0085/0086/0087 in. ADR 0037 was
       reserved and is also unused: nothing here decides anything an ADR would record that
       Y9-package-catalogue, Y11-vat-package and Y1-trn do not already own.'
+    - 'NOTE: the determinism claim moved from the SCREENSHOT to the SERVED BYTES, and the move is a
+      measurement rather than a retreat. The gallery case required two consecutive fullPage PNGs to be
+      byte-identical (captureUntilStable) and failed in the full chain on cash-up__dark-390__rtl with two
+      renderings four bytes apart. Diagnosed with a standalone probe rather than by guessing: the same request
+      returned ONE distinct body over eight fetches, and the page was then painted TEN times from that one body
+      with the DOM length (12216), the scroll height (863), the viewport width and the focused element
+      (INPUT#cash-up-float, :focus-visible true) identical on every attempt — and still produced two distinct
+      PNGs, 55848 and 55852 bytes. Decoding both with a scratch PNG decoder: 21 of 336,570 pixels differed, by
+      a maximum of 1 on a single channel, scattered through one band at y 724..818. That is sub-pixel text
+      antialiasing in Chromium''s rasteriser, and no change to this application can make a byte-identity rule
+      hold against it — the rule was asserting something about the browser. Ruled out in the process: query
+      order (all four cash readers have an explicit ORDER BY), a clock, a generated id, the caret
+      (DETERMINISM_CSS already sets caret-color transparent), a webfont race (withCell already awaits
+      document.fonts.ready) and the focus ring (identical activeElement in all ten paints). Also confirmed NOT
+      a defect: the cash-up render has two `autofocus` attributes but openForm and closeForm each return '''' in
+      the other''s state, so only one ever reaches a document. What replaced it is stronger where it counts —
+      three identical responses per screen per direction, to the byte, which is what actually rules out a
+      clock, a fresh id and an unpinned row order — plus a layout-settled assertion (two consecutive equal
+      scrollHeight reads) and the four cross-cell controls that stop the matrix being one image forty-eight
+      times. The same rasteriser difference failed apps/web/src/duplicates.itest.ts and
+      apps/web/src/breakpoint-preview.itest.ts in the same run; both are other units'' files and are reported,
+      not touched.'
     - 'NOTE: port band `till` at start 12_400 width 300, claimed by startWebServer({ suite: ''till'' }) and
       used by apps/web/src/till.itest.ts — the next start above `pipeline` [12_100, 12_400), and [12_400,
       12_700) contains none of RESTRICTED_PORTS. Gate case 115t overlaps it with `pipeline` and requires
