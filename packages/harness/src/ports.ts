@@ -79,6 +79,16 @@ export const TEST_PORT_BANDS = {
   // flight in another worktree", which was true when it was written: that unit is this one, and the
   // allocation has now landed. [11_800, 12_100) contains none of RESTRICTED_PORTS.
   'quick-book': { start: 11_800, width: 300 },
+  // W-SITE-10's publication control plane, which needs a real server for the claims a pure test cannot
+  // make: the publish endpoint answers 403 to the SEO agent's credential over HTTP, and the synthetic
+  // weight check fetches the rendered document from the application it is about to publish — so the bytes
+  // it weighs are the bytes the route produces rather than a fixture's. 13_400 is the band this unit was
+  // allocated; 12_400 through 13_300 are allocations held by units in flight in other worktrees, and a band
+  // chosen from what one worktree can see is exactly how `template-editor` and `book-flow` came to share
+  // one. [13_400, 13_700) contains none of RESTRICTED_PORTS — the highest entry in that table below the
+  // ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the floor — so the
+  // browser-unsafe exclusion this registry keeps costs this band nothing and `usableWidth` is the full 300.
+  publication: { start: 13_400, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */
