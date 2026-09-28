@@ -3523,11 +3523,13 @@ units:
     - 'NOTE: the migration number is a placeholder. `00xx_sqlstate_reallocation.sql` must be allocated a
       real number when this unit starts and not before, because five units in flight hold 0088 through 0092
       and a number allocated at plan time is a number two branches can claim. ALLOCATED: 0094, with
-      SCHEMA_VERSION 94, gate block `// 121a-121z.` and ADR 0043. 0088 and 0092 were still held when this
-      unit ran; 0089, 0090, 0091 and 0093 had landed.'
+      SCHEMA_VERSION 94, gate block `// 121a-121z.` and ADR 0043. On the rebase before the final run 0092
+      had landed with P-HR-09 and 0088 had been released as a permanent gap by M-TILL-13, so the run on
+      disk is 1..94 less the permanent gaps and 0095-0098 are held by units in flight.'
     - 'NOTE: the inventory NOTE above was WRONG about which of the thirteen were collisions, and the
       correction is the unit''s main finding. Measured on the tree this unit ran against: 129 private codes
-      across 26 classes (not 116 across 24 - 0086, 0087, 0089, 0091 and 0093 had landed since), thirteen of
+      across 26 classes (not 116 across 24 - 0086, 0087, 0089, 0091 and 0093 had landed since; 144 after
+      0092 and this unit''s own nine), thirteen of
       them raised by more than one migration FILE. But only NINE are two different rules. Four - ZB001,
       ZB002, ZL002 and ZV002 - are ONE rule each whose function a later migration `create or replace`s
       (assert_room_capacity and assert_room_capacity_covers_commitments in 0038, raise_if_period_locked in
@@ -3542,13 +3544,16 @@ units:
     - 'NOTE: codes adopted as inventory rather than reallocated, because a class cannot be recalled from a
       worktree that has already raised it: ZY001-ZY008 (0085, landed), ZY009-ZY010 (0089, landed),
       ZY011-ZY014 (0091, landed), ZZ001-ZZ005 (0093, landed), and the sub-bands the integrator reserved to
-      units in flight - ZY015-ZY020 (0092) plus ZY041+, ZY051+, ZY061+, ZY071+ and ZY081+. This unit
+      units in flight - plus ZY041+, ZY051+, ZY061+, ZY071+ and ZY081+. ZY015-ZY020 (0092, P-HR-09)
+      landed on the integration branch while this unit ran and were adopted into the registry on the
+      rebase, which is the gate doing its job: `pnpm sqlstate` named all six by code and by migration.
+      This unit
       allocated NONE of those bands: the nine moved codes are the next free subclass of the class each rule
       already sat in, which takes nothing from anybody in flight. The reserved bands are NOT in the registry,
       because a registry entry for a code no migration raises is exactly what the third gate direction
       refuses - a reservation is not an allocation, and that is the distinction the class convention lost.'
     - 'NOTE: measured and left alone, not deferred, because no acceptance line asks for it and inventing a
-      translator would be worse than a blank one (brief rule 15): 29 of the 138 registered codes have NO
+      translator would be worse than a blank one (brief rule 15): 38 of the 144 registered codes have NO
       translator in any first-party module and reach their caller as a raw postgres.js error - among them all
       of 0043''s KEK rules, 0050''s and 0054''s staff-secret rules, 0082''s clinical intake rules, 0080''s
       and 0081''s messaging and rota rules, 0087''s promotional window and 0089''s VAT201 mapping. The

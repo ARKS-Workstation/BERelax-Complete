@@ -45,7 +45,7 @@ const declaring = (name: string): string[] =>
 
 describe('the private SQLSTATE registry', () => {
   it('covers enough of the schema for the assertions below to mean anything', () => {
-    // ADR 0002. 138 entries across 26 classes when this was written; floors far below that and far above
+    // ADR 0002. 144 entries across 26 classes when this was written; floors far below that and far above
     // zero, so an import that resolved to an empty array fails here.
     expect(PRIVATE_SQLSTATES.length).toBeGreaterThan(80)
     expect(new Set(PRIVATE_SQLSTATES.map((entry) => entry.code.slice(0, 2))).size).toBeGreaterThan(

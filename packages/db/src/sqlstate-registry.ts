@@ -74,7 +74,7 @@ export interface PrivateSqlState {
    *
    * `[]` is not an omission to be filled in with something plausible: it says the refusal reaches its
    * caller as a raw `postgres.js` error, which is a fact about this tree that was invisible before the
-   * registry existed. 32 of these codes had none when this file was written, and `pnpm sqlstate` prints
+   * registry existed. 38 of these codes had none when this file was written, and `pnpm sqlstate` prints
    * the figure on every run rather than leaving it to be read out of a comment. The gate checks `[]` in both directions, so a
    * translator added later fails the build until the entry names it.
    */
@@ -1359,6 +1359,50 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     migration: '0091',
     raisedBy: ['refuse_flow_run_reidentification'],
     translators: ['packages/db/src/repositories/flow-run.ts'],
+  },
+  // ZY015-ZY020 are P-HR-09's, ADOPTED as inventory rather than reallocated: 0092 had already raised them in
+  // a worktree this unit could not see, and a class cannot be recalled from a branch that has shipped it.
+  {
+    code: 'ZY015',
+    rule: 'A leave approval and its override rows are append-only: a withdrawal is a cancellation row.',
+    migration: '0092',
+    raisedBy: ['refuse_leave_approval_record_edit'],
+    translators: [],
+  },
+  {
+    code: 'ZY016',
+    rule: 'A leave-conflict override may be taken only by the owner or a manager.',
+    migration: '0092',
+    raisedBy: ['refuse_unauthorised_leave_override'],
+    translators: [],
+  },
+  {
+    code: 'ZY017',
+    rule: 'A leave-approval delegation whose window never opens is refused when it is written.',
+    migration: '0092',
+    raisedBy: ['refuse_unusable_leave_delegation'],
+    translators: [],
+  },
+  {
+    code: 'ZY018',
+    rule: "An approval may not cite another deputy's delegation, or one whose window it falls outside.",
+    migration: '0092',
+    raisedBy: ['assert_leave_approval_matches_request'],
+    translators: [],
+  },
+  {
+    code: 'ZY019',
+    rule: 'An approval record may only exist against a leave request whose status is approved.',
+    migration: '0092',
+    raisedBy: ['assert_leave_approval_matches_request'],
+    translators: [],
+  },
+  {
+    code: 'ZY020',
+    rule: 'A full day of leave is stored over its trading session, never over calendar midnight.',
+    migration: '0092',
+    raisedBy: ['assert_leave_period_is_not_calendar_bounded'],
+    translators: [],
   },
   {
     code: 'ZZ001',

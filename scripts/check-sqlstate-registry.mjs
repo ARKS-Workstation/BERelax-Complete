@@ -46,7 +46,8 @@ import {
  *
  * A glob that stops matching, a regex that stops matching or a corpus reader that returns an empty map all
  * produce a clean run over nothing, and "no problems" over an empty set is the failure this whole suite
- * exists to catch. Set well under the figures measured when this was written (86 migrations, 138 codes, 138 entries) and far
+ * exists to catch. Set well under the figures measured when this was written (87 migrations, 144 codes,
+ * 144 entries) and far
  * above zero, so the check fails rather than congratulating itself.
  */
 const FLOORS = { migrations: 60, codes: 80, entries: 80 }
