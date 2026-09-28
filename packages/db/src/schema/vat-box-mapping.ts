@@ -13,9 +13,9 @@ import { account } from './ledger.ts'
  *
  * Four things this mirror cannot express, which therefore live only in the migration:
  *
- *   - `vat201_mapping_is_complete()` and its two DEFERRED constraint triggers, which raise **ZY001** when
+ *   - `vat201_mapping_is_complete()` and its two DEFERRED constraint triggers, which raise **ZY009** when
  *     an account feeds the return or does not and nothing says which;
- *   - `vat201_measure_matches_the_account()`, which raises **ZY002** because a revenue account cannot
+ *   - `vat201_measure_matches_the_account()`, which raises **ZY010** because a revenue account cannot
  *     hold tax — mapping 4010 as `measure = 'tax'` would report the net as VAT, about twenty-one times
  *     the right figure, on a return whose drill-down still reconciles to it;
  *   - the seven functions that ARE the return engine: `vat201_box_line()` (the drill-down),
@@ -83,7 +83,7 @@ export const vat201BoxMapping = pgTable(
     accountCode: text('account_code')
       .primaryKey()
       .references(() => account.code),
-    /** 'box' | 'unallocated' | 'out_of_scope'. The absence of a ROW is what ZY001 refuses. */
+    /** 'box' | 'unallocated' | 'out_of_scope'. The absence of a ROW is what ZY009 refuses. */
     disposition: text('disposition').notNull(),
     boxNo: integer('box_no').references(() => vat201Box.boxNo),
     /** 'net_supplies' (the value of the supply) | 'tax' (the VAT on it). */

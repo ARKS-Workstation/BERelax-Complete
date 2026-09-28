@@ -100,7 +100,7 @@ describe('the sign rule', () => {
   it('offers exactly the vocabulary the mapping rows may hold', () => {
     // A vocabulary that drifted from the migration's CHECK would make a valid mapping row unreadable here
     // while remaining perfectly valid in the database. `unattributed` is in the dispositions and NOT in
-    // the migration's CHECK on purpose: ZY001 makes it unreachable as a row, and the partition proof needs
+    // the migration's CHECK on purpose: ZY009 makes it unreachable as a row, and the partition proof needs
     // to be able to represent its own failing case.
     expect([...VAT201_MEASURES]).toEqual(['net_supplies', 'tax'])
     expect([...VAT201_CONTRIBUTIONS]).toEqual(['credit_less_debit', 'debit_less_credit'])

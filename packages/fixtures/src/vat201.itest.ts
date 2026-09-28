@@ -438,7 +438,7 @@ describe('acceptance — every account carries exactly one attribution or an exp
     for (const row of rows) expect(row.note.length, row.account_code).toBeGreaterThan(20)
   })
 
-  it('refuses an account with no attribution at COMMIT, naming it (ZY001)', async () => {
+  it('refuses an account with no attribution at COMMIT, naming it (ZY009)', async () => {
     // A DEFERRED constraint trigger, so the refusal arrives at COMMIT and the only honest fixture is a
     // transaction that actually tries to commit. Deleting the row rolls back with it.
     const refusal = await sql
@@ -449,7 +449,7 @@ describe('acceptance — every account carries exactly one attribution or an exp
         () => undefined,
         (error: unknown) => error as { message?: string; code?: string },
       )
-    expect(refusal?.code).toBe('ZY001')
+    expect(refusal?.code).toBe('ZY009')
     expect(refusal?.message).toContain('Vat201MappingIncomplete')
     expect(refusal?.message).toContain(ACCOUNTS.treatmentRevenue as string)
     // The control: the mapping row is still there, so the refusal was the trigger and not the delete
@@ -461,7 +461,7 @@ describe('acceptance — every account carries exactly one attribution or an exp
     expect(still?.n).toBe('1')
   })
 
-  it('refuses a revenue account mapped as tax, which would report the net as VAT (ZY002)', async () => {
+  it('refuses a revenue account mapped as tax, which would report the net as VAT (ZY010)', async () => {
     const refusal = await sql
       .begin(async (tx) => {
         await tx`
@@ -473,7 +473,7 @@ describe('acceptance — every account carries exactly one attribution or an exp
         () => undefined,
         (error: unknown) => error as { message?: string; code?: string },
       )
-    expect(refusal?.code).toBe('ZY002')
+    expect(refusal?.code).toBe('ZY010')
     expect(refusal?.message).toContain('cannot hold tax')
   })
 

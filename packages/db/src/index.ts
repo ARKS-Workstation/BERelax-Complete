@@ -2336,10 +2336,10 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // The seed is five INSERT … SELECTs off the chart rather than 62 retyped codes, and it caught a real
 // mistake while being written: 0034 reclassified 5060 Staff accommodation from recoverable to BLOCKED, so
 // a list typed from 0018 would have mapped it into the input box. An account a LATER migration adds gets
-// no row at all, which `vat201_mapping_is_complete()` refuses (ZY001, deferred so an account and its
+// no row at all, which `vat201_mapping_is_complete()` refuses (ZY009, deferred so an account and its
 // attribution may arrive in either order) — that is the acceptance line "a test enumerates the chart and
 // fails on an untagged account", enforced by the database instead of by a test that has to remember to
-// run. ZY002 is the one rule here that is double entry rather than a VAT question, and it is refused
+// run. ZY010 is the one rule here that is double entry rather than a VAT question, and it is refused
 // rather than reported: a revenue account mapped as `measure = 'tax'` would report the whole net as VAT,
 // about twenty-one times the right figure, on a return whose drill-down still reconciles to it.
 //

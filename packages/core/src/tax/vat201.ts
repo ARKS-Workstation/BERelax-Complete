@@ -64,7 +64,7 @@ export type Vat201Contribution = (typeof VAT201_CONTRIBUTIONS)[number]
 /**
  * What an account's attribution says about it.
  *
- * `unattributed` is not a state the database permits — ZY001 refuses an account with no mapping row — and
+ * `unattributed` is not a state the database permits — ZY009 refuses an account with no mapping row — and
  * it is in the vocabulary because the exhaustive-partition acceptance line is a PROOF, and a proof whose
  * failing case cannot be represented is not one.
  */
@@ -267,7 +267,7 @@ export interface Vat201PartitionCensus {
   readonly linesInPeriod: number
   readonly linesEnumerated: number
   readonly linesDistinct: number
-  /** Lines whose account carries no attribution. ZY001 makes this unreachable; it is COUNTED anyway. */
+  /** Lines whose account carries no attribution. ZY009 makes this unreachable; it is COUNTED anyway. */
   readonly unattributed: readonly string[]
   /** `entryId/lineNo` seen more than once. A line counted twice is a box total silently too large. */
   readonly duplicated: readonly string[]

@@ -36,7 +36,7 @@
 -- Not 63 hand-typed codes. The initial values are DERIVED from `account.vat_box` and `account.type`, which
 -- makes two things true that a retyped list cannot: the seed cannot disagree with the chart on the day it
 -- runs, and an account a LATER migration adds gets no row at all — which `vat201_mapping_is_complete()`
--- refuses (ZY001), instead of the account silently dropping out of the return. That is the acceptance line
+-- refuses (ZY009), instead of the account silently dropping out of the return. That is the acceptance line
 -- "a test enumerates the chart and fails on an untagged account", enforced by the database rather than by a
 -- test that has to remember to run.
 --
@@ -73,16 +73,24 @@
 -- well, with a control that requires a deliberately wrong total to be detected, because a structural
 -- guarantee nobody has watched fail is not evidence.
 --
--- ## Private SQLSTATEs: ZY001 and ZY002, in a FRESH class
+-- ## Private SQLSTATEs: ZY009 and ZY010, in a class this file does NOT own
 --
 -- `packages/db/src/sqlstate-uniqueness.test.ts` records thirteen codes already standing for two rules each,
--- and measured before this file was written ZA through ZX are all in use: only ZY and ZZ were free. Taking
--- "the next number in a plausible class" would have made one file's translator report another file's refusal
--- with a plausible message and the wrong cause. ZY is unowned, so ZY001 and ZY002 collide with nothing, and
--- ZZ is now the ONLY free class left — recorded here because the next unit that needs one has to know.
+-- and measured before this file was written ZA through ZX were all in use with only ZY and ZZ free. This file
+-- therefore took ZY001 and ZY002 as a fresh class. That was already false by the time it merged: `0085` had
+-- moved its own eight codes into ZY (it and `0084` had both taken ZA), and two other units in flight reasoned
+-- their way to ZY as well — `0091` took ZY001-ZY004 and `0092` took ZY001-ZY006. FOUR migrations claimed
+-- ZY001 at once, none of them able to see the others.
 --
---   ZY001  Vat201MappingIncomplete — an account feeds the return, or does not, and nothing says which
---   ZY002  Vat201MeasureNotPossible — a revenue or expense account cannot hold tax, and a VAT control
+-- So the convention that a CLASS identifies one migration file is over, and the replacement is W-SYS-12's
+-- provisional answer, applied here because no free class remained to give anybody: a refusal is identified by
+-- ALL FIVE characters, and two unrelated rules may share a class as long as they never share a code. `0085`
+-- holds ZY001-ZY008, this file holds ZY009-ZY010, `0091` holds ZY011-ZY014, `0092` holds ZY015-ZY020 and
+-- `0093` holds ZZ001-ZZ005. The check that catches a breach is the uniqueness test, which is the only reason
+-- four simultaneous claims on one code were noticed at all.
+--
+--   ZY009  Vat201MappingIncomplete — an account feeds the return, or does not, and nothing says which
+--   ZY010  Vat201MeasureNotPossible — a revenue or expense account cannot hold tax, and a VAT control
 --          account cannot hold the value of a supply
 --
 -- See docs/OPEN-QUESTIONS.md (Y11-vat201-boxes, Y11-tax-agent, Y11-vat-package, Y11-rounding) and
@@ -148,7 +156,7 @@ create table vat201_box_mapping (
   --               A guessed box number would be indistinguishable from a confirmed one, which is the
   --               failure this state exists to avoid (brief rule 15).
   -- out_of_scope  the account feeds no part of the return, DECIDED. Never "not yet classified": that is
-  --               what the absence of a row means, and ZY001 refuses it.
+  --               what the absence of a row means, and ZY009 refuses it.
   disposition      text        not null
                      check (disposition in ('box', 'unallocated', 'out_of_scope')),
   box_no           integer     references vat201_box (box_no),
@@ -194,7 +202,7 @@ create index vat201_box_mapping_box_idx on vat201_box_mapping (box_no, account_c
   where box_no is not null;
 
 -- ---------------------------------------------------------------------------------------------
--- ZY001 — every account is attributed, one way or the other
+-- ZY009 — every account is attributed, one way or the other
 -- ---------------------------------------------------------------------------------------------
 -- DEFERRED, because an account and its attribution are two INSERTs in one transaction and a migration
 -- adding an account has to be able to write them in either order.
@@ -222,13 +230,13 @@ begin
       'naming its open question, or an explicit out_of_scope marker with a reason. An account with no row '
       'drops out of the return silently, which is the one failure a VAT201 working paper cannot survive.',
       v_count, v_missing
-      using errcode = 'ZY001';
+      using errcode = 'ZY009';
   end if;
   return null;
 end $$;
 
 comment on function vat201_mapping_is_complete() is
-  'Raises ZY001. Deferred to COMMIT so an account and its attribution may be inserted in either order, '
+  'Raises ZY009. Deferred to COMMIT so an account and its attribution may be inserted in either order, '
   'and fires for every role including the owner: the application holds no write privilege here, so every '
   'writer is a migration or a psql session.';
 
@@ -241,7 +249,7 @@ create constraint trigger account_carries_a_vat201_attribution
 -- with no attribution, and an attribution deleted from under an account that already had one.
 --
 -- One consequence, stated because it was found by trying: an account can no longer be DELETEd on its own.
--- The foreign key refuses removing the account first and ZY001 refuses removing the attribution first, so
+-- The foreign key refuses removing the account first and ZY009 refuses removing the attribution first, so
 -- both statements have to be in one transaction. That is correct — an account with entries against it is
 -- not removable at all — and it is the kind of thing a later migration discovers at the worst moment.
 create constraint trigger vat201_mapping_covers_every_account
@@ -250,7 +258,7 @@ create constraint trigger vat201_mapping_covers_every_account
   for each row execute function vat201_mapping_is_complete();
 
 -- ---------------------------------------------------------------------------------------------
--- ZY002 — a revenue account cannot hold tax, and a VAT control account cannot hold a supply
+-- ZY010 — a revenue account cannot hold tax, and a VAT control account cannot hold a supply
 -- ---------------------------------------------------------------------------------------------
 -- The one rule in this file that is NOT a VAT question, which is why it is enforced rather than reported:
 -- it is double entry. 4010 Treatment revenue holds the NET of a sale, so `measure = 'tax'` on it would put
@@ -279,7 +287,7 @@ begin
       'control account (2030, 2035, 1080). Mapping it as measure = ''tax'' would report the whole net as '
       'VAT — about twenty-one times the right figure, on a return whose drill-down still reconciles.',
       new.account_code, v_type
-      using errcode = 'ZY002';
+      using errcode = 'ZY010';
   end if;
 
   if new.measure = 'net_supplies' and v_type not in ('revenue', 'expense') then
@@ -288,14 +296,14 @@ begin
       'account carries tax, not the value it was charged on; mapping it as measure = ''net_supplies'' '
       'would report the tax as though it were turnover.',
       new.account_code, v_type
-      using errcode = 'ZY002';
+      using errcode = 'ZY010';
   end if;
 
   return new;
 end $$;
 
 comment on function vat201_measure_matches_the_account() is
-  'Raises ZY002. Double entry rather than a VAT question, which is why it is refused and the drift '
+  'Raises ZY010. Double entry rather than a VAT question, which is why it is refused and the drift '
   'against account.vat_box is only reported: a revenue account mapped as tax reports the net as VAT.';
 
 create trigger vat201_box_mapping_measure_is_possible
@@ -647,7 +655,7 @@ comment on function vat201_box_total(date, date) is
   'and its drill-down is the defect this unit exists to prevent.';
 
 -- The other two buckets, by account, so nothing in the period is reported only as a total. `unattributed`
--- is included although ZY001 makes it unreachable: the acceptance line is a partition proof, and a proof
+-- is included although ZY009 makes it unreachable: the acceptance line is a partition proof, and a proof
 -- whose failing case cannot be represented is not one.
 create function vat201_unboxed_total(p_from date, p_to date)
 returns table (
@@ -695,7 +703,7 @@ comment on function vat201_unboxed_total(date, date) is
 --   lines_enumerated  what vat201_box_line() returned. GREATER than the population means a line was
 --                     duplicated, which is the failure mode the LATERAL document join can produce.
 --   lines_distinct    distinct (entry_id, line_no). Equal to lines_in_period when nothing was dropped.
---   unattributed      lines whose account has no mapping row. ZY001 makes this unreachable; it is counted
+--   unattributed      lines whose account has no mapping row. ZY009 makes this unreachable; it is counted
 --                     so that "unreachable" is a measurement rather than an assertion.
 create function vat201_partition_census(p_from date, p_to date)
 returns table (
@@ -736,7 +744,7 @@ $$;
 comment on function vat201_partition_census(date, date) is
   'The exhaustive-partition acceptance line as seven counts a psql session can reproduce. '
   'lines_enumerated > lines_in_period is a duplicated line; lines_distinct < lines_in_period is a dropped '
-  'one; unattributed > 0 is an account ZY001 should have refused.';
+  'one; unattributed > 0 is an account ZY009 should have refused.';
 
 -- Where the mapping and the chart no longer agree. Reported and not refused: see the header.
 create function vat201_mapping_disagreement()

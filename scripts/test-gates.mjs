@@ -32134,7 +32134,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 //            Four parts, because the unit's claims are of four kinds.
 //
 //            The PROBES are known-bad fixtures against real PostgreSQL. Every rule
-//            `0089_vat201_mapping.sql` adds is a DATABASE rule — two triggers raising ZY001 and ZY002, four
+//            `0089_vat201_mapping.sql` adds is a DATABASE rule — two triggers raising ZY009 and ZY010, four
 //            CHECKs, and seven functions that ARE the return engine — and a constraint is only a gate once
 //            something has been seen to bounce off it (ADR 0003). Each asserts what refused it BY NAME,
 //            because a bare non-zero exit is also what a typo in a column name produces. `VERBOSITY=verbose`
@@ -32269,7 +32269,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       // state that means nothing — the line drops out of every box and out of the census that is supposed
       // to notice. Deferred, so the refusal arrives at COMMIT rather than at the DELETE.
       name: 'vat201 gate rejects an account whose attribution has been deleted',
-      rule: 'ZY001',
+      rule: 'ZY009',
       sql: "delete from vat201_box_mapping where account_code = '4010'",
     },
     {
@@ -32283,7 +32283,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       // later migration that never wrote its attribution. This is what makes "a test enumerates the chart
       // and fails on an untagged account" a property of the DATABASE rather than of a test run.
       name: 'vat201 gate rejects a new account inserted with no attribution',
-      rule: 'ZY001',
+      rule: 'ZY009',
       sql:
         'insert into account (chart_id, code, name, type, normal_balance, contra, vat_box, ' +
         "input_vat_recoverable) values ('standard-spa-uae', '4099', 'Gate probe revenue', 'revenue', " +
@@ -32294,14 +32294,14 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       // the NET of a sale, so measure = 'tax' would report the whole net as VAT — about twenty-one times
       // the right figure, on a return whose drill-down still reconciles to it.
       name: 'vat201 gate rejects a revenue account mapped as tax',
-      rule: 'ZY002',
+      rule: 'ZY010',
       sql: "update vat201_box_mapping set measure = 'tax' where account_code = '4010'",
     },
     {
       // The mirror, and the reason the rule is stated in both directions: 2030 carries tax and no supply
       // value, so mapping it as a supply would report the tax as though it were turnover.
       name: 'vat201 gate rejects a VAT control account mapped as a supply value',
-      rule: 'ZY002',
+      rule: 'ZY010',
       sql: "update vat201_box_mapping set measure = 'net_supplies' where account_code = '2030'",
     },
     {
@@ -32504,7 +32504,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       // 116r. The exhaustive partition, as four separate failures. `lines_enumerated` greater than the
       //       population is a DUPLICATED line — which the LATERAL document join can produce, and which
       //       makes a box total silently too large; `lines_distinct` short of it is a DROPPED one; and
-      //       `unattributed` is an account ZY001 should have refused. A single boolean cannot tell them
+      //       `unattributed` is an account ZY009 should have refused. A single boolean cannot tell them
       //       apart and they are fixed in different places.
       const vat201Partition = vat201Probe(
         `${VAT201_NO_LOCKS}; ${VAT201_SALE}; ${VAT201_DISCOUNT}; ` +
