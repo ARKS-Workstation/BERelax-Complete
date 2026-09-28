@@ -1019,7 +1019,14 @@ describe('the credential class, which no other assertion in this file reached', 
 describe('erasing a customer with clinical data', () => {
   it('destroys the data keys, so decrypting fails with a KEY error rather than returning nothing', async () => {
     const customerId = ids.clinical
-    const kek = generateKek('v1')
+    // The ACTIVE version, read from the database, never the literal 'v1'. `rotation.itest.ts` retires the
+    // seeded version and activates one of its own, and 0043 refuses to ENCRYPT under a retired KEK
+    // (`KekRetiredCannotEncrypt`) — correctly, because a retired key is kept so rows sealed with it can be
+    // decrypted and re-wrapped, not so new rows can be written under it. This fixture hardcoded 'v1' and so
+    // passed alone and failed in the suite, with a message about key lifecycle rather than about erasure.
+    const [active] = await sql<{ v: string | null }[]>`select clinical.active_kek_version() as v`
+    if (!active?.v) throw new Error('no active KEK version; migration 0043 seeds one')
+    const kek = generateKek(active.v)
 
     // A template, the consent that authorises an answer against it (0082's deferred gate refuses without
     // one), and a real sealed payload — so the decryption assertions are about a payload that genuinely
@@ -1150,7 +1157,17 @@ describe('erasing a customer with clinical data', () => {
         from clinical.dek_destruction
        where target_table = 'intake_submission' and record_id = ${submissionId}::uuid
     `
-    expect(destruction?.kekVersion).toBe('v1')
+    // The version the row was sealed UNDER, whatever that was — not the literal 'v1'. This is the same
+    // defect as the `generateKek` call above and the half that survived the first fix: the assertion read
+    // 'v1', so the case failed after `rotation.itest.ts` had activated a version of its own. It also MASKED
+    // gate case 112p, which breaks the rotation queue's destroyed-key skip and expects this file to fail on
+    // a `not.toContain` — with the case dying on this line first, the gate saw a non-zero exit carrying the
+    // wrong reason and reported itself broken rather than the mutation caught.
+    //
+    // Recording the version at destruction is the point of the column: an operator reading the row needs to
+    // know which KEK the ciphertext was under when its key was destroyed, and `destroy_customer_deks`
+    // deliberately leaves `kek_version` alone so 0043's sealed-row trigger admits the write.
+    expect(destruction?.kekVersion).toBe(active.v)
     expect(destruction?.requestId).toBeDefined()
 
     // The consent that authorised the processing is RETAINED: it holds no health content, and destroying

@@ -116,6 +116,42 @@ export const CREDENTIAL_COLUMN_PATTERN = '(^|_)(token|code_hash|sha256|hmac|secr
  * narrowing the pattern keeps the exclusion visible: a reader can see which two were let through and why,
  * which is not true of a regex that quietly never matched them.
  */
+/**
+ * Schemas the NAME-BASED probes do not look in, and there is exactly one.
+ *
+ * `payload` is the CMS's own storage (ADR 0019 puts Payload inside this app and this database). Its tables
+ * are created and migrated by Payload rather than by `packages/db/migrations`, and the five columns probes
+ * 2 and 4 found in it are `cms_user.email` and `cms_user.reset_password_token` — a STAFF login and its
+ * reset credential, not a customer's — plus `journal_posts.body`, `pages.body` and
+ * `service_narrative.body`, which are published website copy an author wrote. A data subject never
+ * authenticates to the CMS and no row in it is keyed by one. Before this exclusion the engine REFUSED every
+ * erasure once the CMS suites had created those tables, which is the check being right about the wrong
+ * thing: they are contact-shaped column NAMES rather than anybody's contact details.
+ *
+ * **It applies to probes 2, 4 and 5 only, and that asymmetry is the whole point.** Probe 1 — a customer
+ * reference, the merge registry's own pattern — still looks in `payload`, and so does probe 3, which is
+ * anchored on whatever probe 1 finds. So the day a CMS collection gains a `customer_id` (a form
+ * submission, an enquiry, a review reply naming its author) it is enumerated, it has no rule, and the
+ * erasure refuses until somebody classifies it. The exclusion says "these column names are not customer
+ * contact details in this schema", never "this schema cannot hold customer data".
+ *
+ * Deliberately NOT added to `MERGE_CATALOGUE_EXCLUDED_SCHEMAS`: that constant is the merge's, it is shared
+ * with probe 1, and widening it would change what a MERGE enumerates to fix a problem in this unit's
+ * name-based probes.
+ *
+ * **The gap this leaves, stated rather than implied.** A CMS collection holding a customer's contact detail
+ * with NO reference to `customer` escapes all five probes: probes 1 and 3 never see it because nothing links
+ * it to a subject, and probes 2, 4 and 5 are excluded from the schema. Nothing in the build has such a
+ * collection today. It is written down instead of guarded because the only guard available fires on
+ * `payload.cms_user.email` — a staff login — which is the refusal this exclusion exists to remove.
+ *
+ * `privacy-coverage.test.ts` pins both halves of the reasoning above: the set is closed at one schema, and
+ * the exclusion is asserted to appear in the `contact`, `credential` and `free_text` CTEs and in NONE of
+ * `base`, `reference`, `subject_tables` or `fk_child`. The asymmetry is the justification, so widening the
+ * predicate — the natural way to "fix" the next refusal — fails by name rather than passing quietly.
+ */
+export const COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS: readonly string[] = Object.freeze(['payload'])
+
 export const FREE_TEXT_NOTE_PATTERN = '(^notes$|_note$)'
 export const FREE_TEXT_NOTE_EXCLUSIONS: readonly string[] = Object.freeze([
   'provisional_note',
@@ -208,6 +244,8 @@ export async function erasureCoverage(sql: Sql): Promise<readonly ProbedColumnRo
       select table_schema, table_name, column_name
         from base
        where column_name = any (${[...CONTACT_DETAIL_COLUMNS]}::text[])
+         -- See COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS. Probe 1 still looks everywhere.
+         and table_schema <> all (${[...COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS]}::text[])
     ),
     -- Probe 3: a child whose only link to a subject is a foreign key to a subject-scoped table, and which
     -- none of the other probes already reached. not exists against the union rather than a NOT IN over a
@@ -238,7 +276,9 @@ export async function erasureCoverage(sql: Sql): Promise<readonly ProbedColumnRo
     -- Probe 4.
     credential as (
       select table_schema, table_name, column_name
-        from base where column_name ~ ${CREDENTIAL_COLUMN_PATTERN}
+        from base
+       where column_name ~ ${CREDENTIAL_COLUMN_PATTERN}
+         and table_schema <> all (${[...COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS]}::text[])
     ),
     -- Probe 5: free text on a subject-scoped table only, so the probe makes a claim it can keep.
     free_text as (
@@ -252,6 +292,7 @@ export async function erasureCoverage(sql: Sql): Promise<readonly ProbedColumnRo
        where b.data_type in ('text', 'varchar', 'bpchar')
          and b.column_name ~ ${FREE_TEXT_NOTE_PATTERN}
          and b.column_name <> all (${[...FREE_TEXT_NOTE_EXCLUSIONS]}::text[])
+         and b.table_schema <> all (${[...COVERAGE_NAME_PROBE_EXCLUDED_SCHEMAS]}::text[])
     ),
     probed as (
       select table_schema, table_name, column_name, 'customer_reference' as axis from reference
