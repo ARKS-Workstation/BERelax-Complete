@@ -63,18 +63,21 @@ function problemText(problem: LoginProblem): string {
 }
 
 const LOGIN_CSS = `
-main { max-width: 26rem; margin: 0 auto; padding: var(--space-6, 2rem) var(--space-4, 1rem); }
-h1 { font-size: 1.25rem; margin-bottom: var(--space-2, 0.5rem); }
-.lede { color: var(--colour-ink-muted, #555); margin-bottom: var(--space-5, 1.5rem); }
-label { display: block; font-weight: 600; margin-bottom: var(--space-1, 0.25rem); }
-input { display: block; width: 100%; padding: 0.6rem; margin-bottom: var(--space-4, 1rem);
-        border: 1px solid var(--colour-rule, #999); border-radius: 4px; font: inherit; }
-button { padding: 0.65rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer;
-         border: 1px solid var(--colour-rule, #999); border-radius: 4px; }
-.problem { border-inline-start: 4px solid var(--colour-danger, #b00); padding: 0.75rem 1rem;
-           margin-bottom: var(--space-4, 1rem); background: var(--colour-surface-sunken, #f6f6f6); }
-.note { margin-top: var(--space-6, 2rem); font-size: 0.875rem;
-        color: var(--colour-ink-muted, #555); }
+main { max-width: 26rem; margin: 0 auto; padding: var(--space-8) var(--gutter); }
+h1 { font-size: 1.25rem; margin-bottom: var(--space-2); }
+.lede { color: var(--color-ink-2); margin-bottom: var(--space-6); }
+label { display: block; font-weight: 600; margin-bottom: var(--space-1); }
+input { display: block; width: 100%; padding: var(--space-3); margin-bottom: var(--space-5);
+        border: 1px solid var(--color-border); border-radius: var(--radius-1);
+        font: inherit; color: var(--color-ink); background: var(--color-surface); }
+input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+button { padding: var(--space-3) var(--space-5); font: inherit; font-weight: 600; cursor: pointer;
+         border: 1px solid var(--color-border-strong); border-radius: var(--radius-1);
+         color: var(--color-ink); background: var(--color-surface-raised); }
+.problem { border-inline-start: var(--space-1) solid var(--color-danger);
+           padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5);
+           background: var(--color-ground-sunk); }
+.note { margin-top: var(--space-8); font-size: 0.875rem; color: var(--color-ink-3); }
 `
 
 function field(args: {
