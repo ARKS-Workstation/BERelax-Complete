@@ -11639,10 +11639,17 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
         // template's own `version` and refuses a mismatch, and NULL is distinct from 20043. Without it this
         // control failed with ZJ004 — and it had been failing since 0082 landed with C-CRM-08, unnoticed
         // because the batch verifies that followed ran `verify:except-gates` and never reached this suite.
+        // EVERY not-null column without a default, and the three that are constrained rather than free:
+        // `aad_context` must equal 'template_version=' || template_version (0082's
+        // intake_submission_aad_context_matches_version), `data_origin` is 'synthetic' or 'real', and
+        // `retain_until` must be strictly after `submitted_at`. The first version of this fix supplied
+        // `template_version` alone and moved the failure from one not-null column to the next, which is
+        // what a control accumulating columns from later migrations looks like when nobody runs it.
         'insert into clinical.intake_submission (id, customer_id, template_id, template_version, ' +
-        'payload_ciphertext, payload_nonce, wrapped_data_key, kek_version, aad_fingerprint, ' +
-        'submitted_via) values (' +
-        `${GATE_ID}, ${CUSTOMER}, ${GATE_ID}, 20043, ${BYTES}, ${BYTES}, ${BYTES}, ${ACTIVE}, ` +
+        'aad_context, data_origin, retain_until, payload_ciphertext, payload_nonce, wrapped_data_key, ' +
+        'kek_version, aad_fingerprint, submitted_via) values (' +
+        `${GATE_ID}, ${CUSTOMER}, ${GATE_ID}, 20043, 'template_version=20043', 'synthetic', ` +
+        `now() + interval '25 years', ${BYTES}, ${BYTES}, ${BYTES}, ${ACTIVE}, ` +
         "'gate-fingerprint', 'online'); " +
         "update clinical.kek_version set status = 'retired', retired_at = now() " +
         "where status = 'active'; " +

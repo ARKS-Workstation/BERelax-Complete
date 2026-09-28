@@ -7382,7 +7382,9 @@ units:
       named actor moved THIS record, so re-pointing it would put a move nobody made into the survivor''s history
       - the invoice argument, for a log. The stated cost is that readCardHistory for a survivor does not include
       the loser''s moves, and nothing in this build reads that history to make a decision.'
-    - 'NOTE: the per-flow max-enrolment limit is NOT implemented here and is DEFERRED to C-AUTO-07, which owns it
+    - 'NOTE: the per-flow max-enrolment limit is NOT implemented here and is DEFERRED to C-AUTO-07, which owns it.
+      DEFERRAL SATISFIED: 0091 enforces one active enrolment per contact per flow with a partial unique index and
+      the per-flow cap with a named refusal, and C-AUTO-07''s suite drives both
       - C-AUTO-06''s NOTE says the per-flow cap, the already-enrolled outcome and the idempotency of a trigger
       are that unit''s, and its provisional line names the figure (5,000 active enrolments per flow). Inventing
       the threshold here would be inventing a number nobody has agreed, in the wrong unit. What IS built and
@@ -10154,7 +10156,9 @@ units:
       exists to prevent. reassignAppointment therefore refuses an absent client gender by name, the same
       refusal createBooking makes. DEFERRED to W-SYS-01: acting on the queue from a browser, which needs the
       admin session an actor and a reason can be attributed to; and to whichever unit collects a client''s
-      gender, which B-AVAIL-05''s NOTE already defers.'
+      gender, which B-AVAIL-05''s NOTE already defers. DEFERRAL SATISFIED for the session half: W-SYS-11 built
+      it (that reference named W-SYS-01, which never owned a session), and the queue controls themselves are
+      simply unbuilt rather than owned by it.'
     - 'NOTE: two of the four reasons are in the vocabulary and nothing raises them yet, deliberately.
       REASSIGNMENT_REASONS is {credential_expiry, leave_approved, therapist_archived, manual} and 0065
       mirrors it as a CHECK; the pair itest parses the accepted set out of pg_constraint and asserts it
