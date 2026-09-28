@@ -177,9 +177,6 @@ const dubai = (date: string, hhmm: string): string => `${date} ${hhmm}:00+04`
 const nextCalendarDay = (day: string): string =>
   new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
 
-/** A delay that lets a concurrent transaction reach the statement it must block on. */
-const settle = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
 /**
  * The trading hours every fixture date has, as `leaveCoveragePeriod` wants them.
  *
@@ -461,6 +458,8 @@ async function commitAppointment(args: {
   readonly to: string
   /** The calendar date the treatment starts on, when it is not the trading date. */
   readonly startsOn?: string
+  /** Anything but `confirmed` is for a case about what the report must NOT list. */
+  readonly status?: 'confirmed' | 'cancelled_by_customer'
 }): Promise<string> {
   const startDate = args.startsOn ?? args.tradingDate
   const endDate = args.to < args.from ? nextCalendarDay(startDate) : startDate
@@ -473,7 +472,8 @@ async function commitAppointment(args: {
             'solo'::service_shape, ${idOf(args.therapist)}::uuid, ${roomId(args.room)}::uuid,
             tstzrange(${dubai(startDate, args.from)}::timestamptz,
                       ${dubai(endDate, args.to)}::timestamptz, '[)'),
-            'confirmed', 1, ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES},
+            ${args.status ?? 'confirmed'}::appointment_status, 1,
+            ${TURNAROUND_MINUTES}, ${BUFFER_MINUTES},
             ${GROSS_FILS}, ${NET_FILS}, ${VAT_FILS}, ${VAT_RATE_BP})
     returning id::text as id
   `
@@ -640,6 +640,7 @@ beforeAll(async () => {
   for (const reference of [
     'pair-a',
     'pair-b',
+    'race-extra',
     'spare-one',
     'spare-two',
     'spare-three',
@@ -673,9 +674,28 @@ beforeAll(async () => {
 
   // The race day has its own three, so the concurrency case is not reporting on a floor an earlier case
   // changed — and its two contenders are not the pair the coverage case takes leave from.
-  for (const reference of ['race-a', 'race-b', 'race-spare']) {
+  for (const reference of ['race-a', 'race-b', 'race-spare', 'race-extra']) {
     await roster({ reference, tradingDate: RACE_DAY, from: '11', until: '02' })
   }
+
+  // The second pool, WARMED. Not hygiene: postgres.js connects lazily, so a pool used for the first time
+  // inside a race spends its first milliseconds on a TCP handshake and an authentication round trip while
+  // the other transaction runs to completion — and the two approvals the concurrency case starts "together"
+  // then do not overlap at all. That is how the first version of that case passed with the coverage lock
+  // REMOVED: it was not testing concurrency, it was testing a connection handshake.
+  await probe`select 1 as warm`
+
+  // The coverage lock row for the race day, created HERE rather than by the first approval, and this is what
+  // makes the concurrency case about the `for update` rather than about an accident. `approveLeaveRequest`
+  // ensures the row with `insert ... on conflict do nothing` before locking it, and an INSERT of a key that
+  // does not exist yet BLOCKS a concurrent insert of the same key on the unique index until the first
+  // transaction ends — so on the very first approval of a date the two transactions serialise whether or not
+  // anything takes a row lock, and a gate case removing the `for update` reported "nothing was rejected".
+  // With the row already there the insert is a no-op for both, and the lock is the only thing left.
+  await sql`
+    insert into leave_coverage_lock (trading_date) values (${RACE_DAY}::date)
+    on conflict (trading_date) do nothing
+  `
   // `lonely` is the only one on the floor on EARLIER, which is already below the minimum of two. That is the
   // pre-existing shortfall case: their leave must not be refused for a segment nobody covered anyway.
   await roster({ reference: 'lonely', tradingDate: EARLIER, from: '11', until: '02' })
@@ -864,6 +884,57 @@ describe('acceptance — N overlapping appointments produce N complete rows, and
        where idempotency_key = ${`leave.approved:${leaveRequestId}`}
     `
     expect(event?.n).toBe('0')
+  }, 60_000)
+
+  it('excludes a cancelled appointment and another therapist’s, so the report is only this leave’s', async () => {
+    const leaveRequestId = await requestLeave('taker', QUIET_DAY)
+
+    // One appointment that IS this leave's, so the case cannot pass by the report being empty.
+    const mine = await commitAppointment({
+      handle: 'narrowing-mine',
+      tradingDate: QUIET_DAY,
+      therapist: 'taker',
+      room: `${MARKER}-a`,
+      // Late in the session, and deliberately not 13:00: the reassignment case below moves an appointment
+      // at 13:00 in this room, and the first version of this case took the slot from it — a capacity
+      // refusal in another case, from a fixture, which is the noise brief rule 12 is about.
+      from: '23:00',
+      to: '00:00',
+    })
+
+    // Cancelled, so it holds no therapist and no room: `holds_resources` is GENERATED from the status
+    // (0024). Listing it would put a booking that no longer exists on a manager's screen as something to
+    // resolve — and the approval would not commit until they resolved it, which they cannot.
+    const cancelled = await commitAppointment({
+      handle: 'narrowing-cancelled',
+      tradingDate: QUIET_DAY,
+      therapist: 'taker',
+      room: `${MARKER}-b`,
+      from: '17:00',
+      to: '18:00',
+      status: 'cancelled_by_customer',
+    })
+
+    // Another therapist's, inside the same period. Not this leave's problem, and without the narrowing the
+    // report would list the whole diary — after which the first thing anybody does is look for a way to
+    // switch the check off.
+    const somebodyElses = await commitAppointment({
+      handle: 'narrowing-other',
+      tradingDate: QUIET_DAY,
+      therapist: 'receiver',
+      room: `${MARKER}-c`,
+      from: '22:00',
+      to: '23:00',
+    })
+
+    // Deliberately NOT narrowed by `appointmentIds`: the claim is about what the report contains, and a
+    // narrowed read cannot make it.
+    const report = await readLeaveApprovalConflicts(sql, { leaveRequestId })
+    const listed = report.map((row) => row.appointmentId)
+    expect(listed).toContain(mine)
+    expect(listed).not.toContain(cancelled)
+    expect(listed).not.toContain(somebodyElses)
+    for (const row of report) expect(row.therapistId).toBe(idOf('taker'))
   }, 60_000)
 
   it('resolves one by a P-HR-04 reassignment and one by an audited override, then commits', async () => {
@@ -1166,44 +1237,126 @@ describe('acceptance — delegation is time-bounded: three cases at the transact
 // ------------------------------------------------------------------------------------------------
 
 describe('acceptance — two overlapping approvals for different therapists, concurrently', () => {
-  it('refuses the second by the coverage check INSIDE its transaction, not by a race', async () => {
-    // Three therapists on the race day and a minimum of two, so the FIRST approval is legitimately
-    // grantable and the second is not. A fixture where both are refused would prove nothing about the
-    // second, and a fixture where both are grantable would prove nothing at all.
-    //
-    // Nothing in the schema makes these two transactions see each other: two approvals for two DIFFERENT
-    // employees touch no common row, and `leave_request_no_overlapping_approved` is per employee. The
-    // `leave_coverage_lock` row for the date is the whole mechanism.
-    const first = await requestLeave('race-a', RACE_DAY)
-    const second = await requestLeave('race-b', RACE_DAY)
+  const input = (
+    leaveRequestId: string,
+    approver = { employeeId: idOf('manager'), role: 'manager' },
+  ) => ({
+    leaveRequestId,
+    approver,
+    fromTradingDate: RACE_DAY,
+    toTradingDate: RACE_DAY,
+    notificationTemplateKey: 'hr.leave_approved',
+  })
 
-    const input = (leaveRequestId: string) => ({
-      leaveRequestId,
-      approver: { employeeId: idOf('manager'), role: 'manager' },
-      fromTradingDate: RACE_DAY,
-      toTradingDate: RACE_DAY,
-      notificationTemplateKey: 'hr.leave_approved',
+  /**
+   * How many backends in this database are WAITING on a lock, from a third connection.
+   *
+   * Read out of the server's own view of itself rather than inferred from a stopwatch, which is brief rule
+   * 23's point: "it did not finish in 500 ms" measures the machine, and this measures the WORK — a
+   * transaction queued behind a lock it has asked for and not been given.
+   *
+   * `pg_stat_activity.wait_event_type` and not `pg_locks` joined to `pg_class`, which is what the first
+   * version of this probe did and it could never have seen anything: `select ... for update` takes a ROW
+   * lock, so the waiter queues on the holder's transaction id — `locktype = 'transactionid'` with a NULL
+   * `relation` — and a join on `relation` drops exactly the row being looked for. The assertion then failed
+   * with "no transaction is queued", about a transaction that was queued.
+   */
+  async function backendsWaitingOnALock(): Promise<number> {
+    const [row] = await sql<{ n: string }[]>`
+      select count(*)::text as n
+        from pg_stat_activity
+       where datname = current_database()
+         and wait_event_type = 'Lock'
+         and pid <> pg_backend_pid()
+    `
+    return Number(row?.n ?? '0')
+  }
+
+  it('waits for the coverage lock rather than reading a floor another transaction is changing', async () => {
+    // The lock is HELD by a transaction of this test's own, so the approval's wait is observable rather than
+    // a matter of timing. `race-a`'s approval would otherwise be granted — the point is where it stops.
+    const leaveRequestId = await requestLeave('race-a', RACE_DAY)
+
+    let release = (): void => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const holder = sql.begin(async (tx) => {
+      await tx`
+        insert into leave_coverage_lock (trading_date) values (${RACE_DAY}::date)
+        on conflict (trading_date) do nothing
+      `
+      await tx`
+        select trading_date from leave_coverage_lock where trading_date = ${RACE_DAY}::date for update
+      `
+      await released
     })
 
-    // Both on their own connections, started together. The second's coverage read happens after the first
-    // commits, because the lock is held across the first transaction.
-    const [firstResult, secondResult] = await Promise.allSettled([
+    // An approver who may not decide, so this case consumes nobody's leave: the authority is judged AFTER the
+    // lock is taken, so the transaction still queues for it, and `race-a` stays pending for the race below.
+    const blocked = approveLeaveRequest(
+      probe,
+      ACTOR,
+      input(leaveRequestId, { employeeId: idOf('peer'), role: 'marketer' }),
+      DEPS,
+    ).then(
+      () => 'committed',
+      (error: unknown) => leaveRequestRefusalOf(error) ?? 'unknown refusal',
+    )
+
+    let queued = 0
+    try {
+      // Polled for the CONDITION rather than slept for a duration, and bounded so a failure is a failure
+      // rather than a hang.
+      for (let attempt = 0; attempt < 60 && queued === 0; attempt += 1) {
+        queued = await backendsWaitingOnALock()
+        if (queued === 0) await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    } finally {
+      // In a `finally`, and this is not tidiness: the first version released the lock AFTER the assertion, so
+      // the run where the assertion failed left the holder open for the rest of the file — and the next case
+      // timed out after two minutes waiting for a lock this one still held. A failing case must fail alone.
+      release()
+      await holder
+    }
+
+    expect(
+      queued,
+      'no backend is waiting on a lock, so the approval read the floor without queueing for anything',
+    ).toBeGreaterThan(0)
+    // And it completes once the lock is free, which is what makes the assertion above about the LOCK rather
+    // than about an approval that had failed for some other reason.
+    expect(await blocked).toBe('approval_refused')
+    expect((await readLeaveRequest(sql, leaveRequestId))?.status).toBe('pending')
+  }, 90_000)
+
+  it('starts two together and exactly one commits, the other refused by the coverage check', async () => {
+    // Four therapists are rostered on the race day and `race-extra` is not asking for leave, so the floor is
+    // four: the first of these two approvals leaves three and the second would leave two — still at the
+    // minimum. A third request is therefore needed to reach the edge, and `race-a`'s from the case above is
+    // it: approved first, the floor is three, and then exactly one of the two below can be granted.
+    await approveLeaveRequest(sql, ACTOR, input(await requestLeave('race-a', RACE_DAY)), DEPS)
+
+    const first = await requestLeave('race-b', RACE_DAY)
+    const second = await requestLeave('race-spare', RACE_DAY)
+
+    // Started TOGETHER on two real connections, with no stagger. A delay large enough to let the first
+    // COMMIT would make this pass without any serialisation at all, because the second's read would then see
+    // the committed leave anyway — the case would prove the coverage check and nothing about the lock.
+    //
+    // The WINNER is therefore undecided, so the claim is about the PAIR: exactly one commits, and the other
+    // is refused by the coverage check naming a segment. Which one is which is not a fact about the code.
+    const results = await Promise.allSettled([
       approveLeaveRequest(sql, ACTOR, input(first), DEPS),
-      (async () => {
-        // A small delay so the ORDER is decided rather than tossed: this case is about the second approval
-        // meeting the first's committed leave, and an undecided winner would make the assertion below true
-        // of whichever ran first.
-        await settle(150)
-        return approveLeaveRequest(probe, ACTOR, input(second), {
-          coverage: async (args) => coverage(args),
-          decide,
-        })
-      })(),
+      approveLeaveRequest(probe, ACTOR, input(second), DEPS),
     ])
 
-    expect(firstResult.status, JSON.stringify(firstResult)).toBe('fulfilled')
-    expect(secondResult.status).toBe('rejected')
-    const reason = secondResult.status === 'rejected' ? secondResult.reason : null
+    const fulfilled = results.filter((result) => result.status === 'fulfilled')
+    const rejected = results.filter((result) => result.status === 'rejected')
+    expect(fulfilled, JSON.stringify(results)).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+
+    const reason = rejected[0]?.status === 'rejected' ? rejected[0].reason : null
     expect(leaveRequestRefusalOf(reason)).toBe('approval_refused')
     expect((reason as { details?: Record<string, unknown> }).details?.['leaveRefusal']).toBe(
       'coverage_would_break',
@@ -1211,9 +1364,13 @@ describe('acceptance — two overlapping approvals for different therapists, con
     // The refusal names a segment, which is what says the COVERAGE CHECK refused rather than a constraint.
     expect((reason as Error).message).toContain(`${RACE_DAY} 11:00-11:30`)
 
-    // And the rows: the first committed, the second did not.
-    expect((await readLeaveRequest(sql, first))?.status).toBe('approved')
-    expect((await readLeaveRequest(sql, second))?.status).toBe('pending')
+    // And the rows: exactly one of the two is approved. Read back, because a transaction that refused and
+    // committed anyway would have returned the same error.
+    const statuses = [
+      (await readLeaveRequest(sql, first))?.status,
+      (await readLeaveRequest(sql, second))?.status,
+    ]
+    expect([...statuses].sort()).toEqual(['approved', 'pending'])
   }, 120_000)
 })
 

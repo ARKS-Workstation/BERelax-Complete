@@ -19,11 +19,14 @@ import {
   type FloorPresence,
   judgeLeaveConflictOverride,
   LEAVE_APPROVAL_REFUSALS,
+  LEAVE_APPROVAL_SESSIONLESS_CEILING_ROLE,
   LEAVE_OVERRIDE_ROLES,
   type LeaveApprovalDelegation,
   type LeaveConflict,
   leavePeriodCovers,
   mayOverrideLeaveConflict,
+  narrowLeaveApprovalAccess,
+  resolveLeaveApprovalAccess,
 } from './leave-approval.ts'
 import type { WorkingHoursRules } from './rates.ts'
 import type {
@@ -547,5 +550,45 @@ describe('acceptance — the whole decision, and the order the refusals come in'
       },
     })
     expect(answer.kind === 'refused' && answer.refusal).toBe('conflicts_unresolved')
+  })
+})
+
+describe('acceptance — the screen’s ?role= can only NARROW, and that is proved without a server', () => {
+  const CEILING = resolveLeaveApprovalAccess(LEAVE_APPROVAL_SESSIONLESS_CEILING_ROLE)
+
+  it('is never wider than the ceiling in any field, for every role this system has', () => {
+    // The property, over every role rather than over the three somebody thought of. A `||` in any one of the
+    // three fields is the one-character escalation, and it shows up here as `owner` widening the ceiling.
+    for (const role of ROLES) {
+      const narrowed = narrowLeaveApprovalAccess(resolveLeaveApprovalAccess(role), CEILING)
+      expect(narrowed.mayApprove && !CEILING.mayApprove, role).toBe(false)
+      expect(narrowed.mayOverride && !CEILING.mayOverride, role).toBe(false)
+      expect(narrowed.maySeeConflicts && !CEILING.maySeeConflicts, role).toBe(false)
+    }
+  })
+
+  it('and is never wider than the CLAIMED role either, which is the other direction', () => {
+    for (const role of ROLES) {
+      const claimed = resolveLeaveApprovalAccess(role)
+      const narrowed = narrowLeaveApprovalAccess(claimed, CEILING)
+      expect(narrowed.mayApprove && !claimed.mayApprove, role).toBe(false)
+      expect(narrowed.mayOverride && !claimed.mayOverride, role).toBe(false)
+      expect(narrowed.maySeeConflicts && !claimed.maySeeConflicts, role).toBe(false)
+    }
+  })
+
+  it('the intersection is not vacuous: the ceiling itself sees and may do everything the screen offers', () => {
+    // ADR 0002. A ceiling that permitted nothing would satisfy both properties above while making the screen
+    // blank for everybody, so the widest reader is asserted to be a real one.
+    expect(CEILING).toEqual({ mayApprove: true, mayOverride: true, maySeeConflicts: true })
+  })
+
+  it('and a marketer is narrowed out of the conflict report, which is the case that matters', () => {
+    const marketer = narrowLeaveApprovalAccess(resolveLeaveApprovalAccess('marketer'), CEILING)
+    expect(marketer).toEqual({ mayApprove: false, mayOverride: false, maySeeConflicts: false })
+    // A therapist may read a booking and may not approve or override, which is the mixed case: a narrowing
+    // that collapsed to all-or-nothing would pass every assertion above.
+    const therapist = narrowLeaveApprovalAccess(resolveLeaveApprovalAccess('therapist'), CEILING)
+    expect(therapist).toEqual({ mayApprove: false, mayOverride: false, maySeeConflicts: true })
   })
 })

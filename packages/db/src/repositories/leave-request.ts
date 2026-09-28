@@ -1020,6 +1020,13 @@ export async function approveLeaveRequest(
  * `on conflict do nothing` then `for update`, rather than an upsert that returns the row: the insert is only
  * there so the first approval of a date does not find nothing to lock, and two transactions inserting the
  * same date are settled by the primary key with neither of them raising.
+ *
+ * Worth knowing, because it hid a gate case: an INSERT of a key that does not exist yet already BLOCKS a
+ * concurrent insert of the same key until the first transaction ends. So on the VERY FIRST approval of a
+ * trading date the two transactions serialise whether or not anything takes a row lock — and the `for update`
+ * is what serialises the second and every later approval of that date, which is every approval in production
+ * after the first. `hr-leave-approval.itest.ts` therefore creates the race day's lock row in `beforeAll`, so
+ * its concurrency case exercises the lock rather than the incidental blocking of the insert.
  */
 async function lockCoverageDates(
   uow: UnitOfWork,

@@ -32157,7 +32157,6 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   const ELIGIBILITY = 'packages/db/src/repositories/eligibility.ts'
   const MIGRATION = 'packages/db/migrations/0092_leave_approval.sql'
   const RENDER = 'apps/web/app/(admin)/hr/leave/[id]/render.ts'
-  const ROUTE = 'apps/web/app/(admin)/hr/leave/[id]/route.ts'
 
   const PURE_SUITE = 'packages/core/src/hr/leave-approval.test.ts'
   const SCAN_SUITE = 'packages/fixtures/src/hr-leave-approval.test.ts'
@@ -32201,7 +32200,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       '  const known = new Set([])',
       PURE_SUITE,
     ),
-    'does NOT refuse for a segment that was already short without this leave',
+    'reports a pre-existing breach rather than attributing it to the approval',
   )
 
   // 119b. The delta computed the other way round: the floor judged WITHOUT the leave subtracted from both
@@ -32249,7 +32248,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       ROWS_SUITE,
       leaveRowsRun,
     ),
-    'reports all three with customer, service, room, therapist and start',
+    'excludes a cancelled appointment',
   )
 
   // 119e. The report widened to every therapist's appointments in the period, not just the one going on
@@ -32264,7 +32263,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       ROWS_SUITE,
       leaveRowsRun,
     ),
-    'reports all three with customer, service, room, therapist and start',
+    'excludes a cancelled appointment',
   )
 
   // 119f. The defect this unit shipped and the integration run found. `reassigned` decided by "the therapist
@@ -32345,17 +32344,28 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     ),
     'refuses the second by the coverage check INSIDE its transaction',
   )
+  // 119j's own note: the suite it names starts both approvals with no stagger, deliberately. An earlier
+  // version slept 150 ms before the second, which let the first COMMIT first — so the second's read saw the
+  // committed leave whether or not a lock existed, and this case reported "exited zero" about a repository
+  // with the serialisation removed.
 
   // 119k. The withdrawal leaving the approval live. `leave_approval_live` is where the predicate lives, for
   //       `employee_approved_leave`'s reason (0030), and an approval that stayed live after the leave was
   //       withdrawn shows a therapist as blocked after their holiday was cancelled — with availability
   //       correctly restored beside it, so the two halves of the screen disagree.
+  //
+  //       Mutated as the READ rather than as the write, and that is the sharper version of the same defect:
+  //       `readLiveLeaveApproval` asking `leave_approval` instead of `leave_approval_live` is the `not
+  //       exists` forgotten, which is exactly what `employee_approved_leave` exists as a view to prevent
+  //       (0030). The first version of this case added a SQL COMMENT to the cancellation insert, which
+  //       changed nothing and reported FAIL about a repository that was fine — `withEditedFile`'s no-op
+  //       guard cannot catch that, because the edit does change bytes.
   checkRejectedBy(
     'leave gate: a withdrawal that does not clear what the approval created is caught',
     leaveApprovalRegression(
       REPO,
-      '      await uow.sql`\n        insert into leave_approval_cancellation (leave_request_id, cancelled_by, actor_role, reason)',
-      '      await uow.sql`\n        insert into leave_approval_cancellation (leave_request_id, cancelled_by, actor_role, reason)\n        -- the row the view excludes on, written where nothing reads it',
+      '      from leave_approval_live\n     where leave_request_id = ${leaveRequestId}::uuid',
+      '      from leave_approval\n     where leave_request_id = ${leaveRequestId}::uuid',
       ROWS_SUITE,
       leaveRowsRun,
     ),
@@ -32461,23 +32471,34 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       '  return source',
       SCAN_SUITE,
     ),
-    'no transition the approval path can trigger is a cancellation or a no-show',
+    'the strip is load-bearing',
   )
 
-  // 119s. The `?role=` narrowing turned into a widening. The intersection is one expression precisely so
-  //       there is nowhere for a widening to hide, and the mutation is the one somebody writes to make a
-  //       screen show more: drop the ceiling from the conjunction. It is a real escalation — a marketer would
-  //       be served the conflict report, which names a client and a service.
+  // 119s. The `?role=` narrowing turned into a widening: `&&` becomes `||`, which is the one-character
+  //       version of the escalation — a marketer would be served the conflict report, which names a client
+  //       and a service.
+  //
+  //       Mutated in `@berelax/core` and run against the PURE suite, and the first version of this case is
+  //       why. It edited the ROUTE and ran the web suite, and reported "exited zero; nothing was rejected"
+  //       — because `next start` serves whatever `.next` was last built, so editing a route source changes
+  //       nothing an HTTP request can see. That is rule 17's warning arriving as a gate case that could
+  //       never fire. `/clients/[id]/flags` had already recorded the remedy: the ceiling and the narrowing
+  //       live in core, "so the property that matters — this can only NARROW — is proved by a pure test
+  //       rather than by serving the page. A ceiling whose only test needs a server is a ceiling somebody
+  //       removes without ever seeing it fail."
   checkRejectedBy(
-    'leave gate: a ?role= that widens rather than narrows is caught',
+    'leave gate: a ?role= narrowing that widens instead is caught',
     leaveApprovalRegression(
-      ROUTE,
-      "      maySeeConflicts: can(claimedRole, 'booking:read') && can(CEILING_ROLE, 'booking:read'),",
-      '      maySeeConflicts: true,',
-      'apps/web/src/leave-approval.itest.ts',
-      leaveRowsRun,
+      CORE,
+      '    maySeeConflicts: claimed.maySeeConflicts && ceiling.maySeeConflicts,',
+      '    maySeeConflicts: claimed.maySeeConflicts || ceiling.maySeeConflicts,',
+      PURE_SUITE,
     ),
-    'withholds the conflict report from a marketer',
+    // The CLAIMED direction, not the ceiling one, and the difference is worth stating: the ceiling holds all
+    // three capabilities, so `claimed || ceiling` never exceeds IT — the property that catches a disjunction
+    // is the one saying the answer is never wider than what the claimed role itself holds. Naming the
+    // ceiling case reported "exited non-zero but did not report" while two other cases were red.
+    'never wider than the CLAIMED role',
   )
 
   // 119t. The conflict table kept for a reader who may not see it, with only the wording changed. A render
@@ -32540,12 +32561,16 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   // 119x. The pre-existing shortfall folded into the caused breaches on the screen. A manager told that six
   //       segments are short when this leave caused two of them goes looking for four shifts that are nothing
   //       to do with it — and the refusal and the screen then disagree about what the approval did.
+  //
+  //       The first version of this case removed the sentence AFTER the one the assertion reads, so the
+  //       suite passed and the case reported FAIL about a render that was fine. The anchor now carries the
+  //       wording the test actually looks for.
   checkRejectedBy(
     'leave gate: a screen that attributes a pre-existing shortfall to the approval is caught',
     leaveApprovalRegression(
       RENDER,
-      "        'reported and not refused on: refusing here would make leave unapprovable for a shortfall the ' +",
-      "        'caused by approving this leave: ' +",
+      '        `${view.preexistingBreachCount} segment(s) are already short without this leave. They are ` +',
+      '        `${view.preexistingBreachCount} more segment(s) are short. They are ` +',
       RENDER_SUITE,
     ),
     'reports a pre-existing shortfall separately',

@@ -10356,11 +10356,25 @@ units:
       instants", and until this trigger the only thing making that true was the caller having used
       leaveCoveragePeriod(). leave_request takes a bare tstzrange, the submission path is P-HR-14''s, and a
       caller that wrote two calendar midnights would produce a row that looks completely ordinary and
-      silently leaves two tails rostered. The rule is stated as what it FORBIDS - a bound may not fall
-      strictly inside a trading session - rather than as an equality against opens_at, because a date the
-      premises does not trade on has no session to align to and leaveCoveragePeriod correctly falls back to
-      calendar midnights there. It constrains every future writer of the table, which is the point: a second
-      writer is how the first writer''s rule gets lost.'
+      silently leaves two tails rostered. The rule is stated as what it FORBIDS - a bound at LOCAL MIDNIGHT
+      may not fall inside an open trading session - rather than as an equality against opens_at, because a
+      date the premises does not trade on has no session to align to and leaveCoveragePeriod correctly falls
+      back to calendar midnights there. It shipped for an hour as the broader "no bound may fall strictly
+      inside a session", which is the same claim in a more plausible costume and is WRONG: a partial day off
+      is stored as 11:00-15:00 and five existing suites store one, so the broad rule refused them all.
+      availability-perf.itest.ts - a file this unit never touched - is what said so, from a gate run, which is
+      the only thing that could have. It constrains every future writer of the table, which is the point: a
+      second writer is how the first writer''s rule gets lost.'
+    - 'NOTE: the ?role= narrowing lives in @berelax/core (narrowLeaveApprovalAccess) and not in the route, and
+      the reason is a gate case that could never fire. The first version intersected the claimed role with the
+      ceiling inside route.ts and the known-bad fixture mutated that expression and drove the built
+      application - which reported "exited zero; nothing was rejected", because `next start` serves whatever
+      .next was last built, so editing a route source changes nothing an HTTP request can see. That is brief
+      rule 17 arriving as a check whose stated claim is not what it measures. /clients/[id]/flags had already
+      recorded the remedy in its own words: the ceiling and the narrowing live in core, "so the property that
+      matters - this can only NARROW - is proved by a pure test rather than by serving the page. A ceiling
+      whose only test needs a server is a ceiling somebody removes without ever seeing it fail." The property
+      is asserted over EVERY role in both directions, with a case proving the ceiling is not vacuous.'
     - 'NOTE: leave_conflict_override.appointment_id is a PLAIN column with no foreign key, which is the one
       referential decision in 0092 that looks like an omission. 0081 records both halves of why neither
       action works for an append-only row: ON DELETE SET NULL arrives as an UPDATE, which ZY001 refuses, and

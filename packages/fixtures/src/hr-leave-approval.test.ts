@@ -419,6 +419,58 @@ async function sneak(uow: UnitOfWork, id: string) {
   })
 })
 
+describe('the scan itself, whose two mechanisms are easy to break silently', () => {
+  it('CONTROL: the strip is load-bearing — a comment naming a status is not read as code', () => {
+    // Why the strip exists, as a case rather than as a sentence. Every file in the approval closure explains
+    // at length why this unit must not write a cancellation, and `reassignment.ts` explains why a
+    // reassignment does not change a status — so a scan that read comments would report both as cancellation
+    // paths. `check-schema-conventions.mjs` records the mirror mistake: reporting the word "timestamp" in a
+    // sentence about timestamps.
+    //
+    // Asserted on a fixture rather than on a real file, because whether any CURRENT comment happens to spell
+    // a status in single quotes is not the claim: the claim is that a comment cannot be read as code.
+    const commented = [
+      "// this module must never write 'cancelled_by_salon', and nothing here does",
+      '/* nor a `no_show`, and not even this: "no_show" */',
+      'export const reachable = 1',
+    ].join('\n')
+    expect(withoutComments(commented)).not.toContain("'cancelled_by_salon'")
+    expect(withoutComments(commented)).not.toContain('"no_show"')
+    // And the other half: the text DOES contain it, so the assertions above are about the strip rather than
+    // about a fixture that never held the string.
+    expect(commented).toContain("'cancelled_by_salon'")
+    expect(commented).toContain('"no_show"')
+    // Strings are KEPT, which is the property the other direction needs: blanking them would leave the scan
+    // unable to match a status anywhere, which is the vacuous pass in its purest form.
+    expect(withoutComments("const x = 'cancelled_by_salon'")).toContain("'cancelled_by_salon'")
+  })
+
+  it('CONTROL: the appointment-update matcher is about the appointment table and no other', () => {
+    // The mirror mistake, and it shipped: the first version scanned line by line for `set status`, so
+    // `update leave_request set status = 'approved'` was reported as an appointment write. The statements in
+    // this repository span several lines, so the matcher is statement-shaped.
+    const approval = [
+      'await uow.sql`',
+      "  update leave_request set status = 'approved' where id = ${id}",
+      '`',
+    ].join('\n')
+    const cancellation = [
+      'await uow.sql`',
+      "  update appointment set status = 'cancelled_by_salon' where id = ${id}",
+      '`',
+    ].join('\n')
+    const flag = [
+      'await uow.sql`',
+      '  update appointment_reassignment_flag set status = 1',
+      '`',
+    ].join('\n')
+    expect([...approval.matchAll(APPOINTMENT_UPDATE)]).toHaveLength(0)
+    expect([...cancellation.matchAll(APPOINTMENT_UPDATE)]).toHaveLength(1)
+    // `\bappointment\b`, so the flag table P-HR-04 updates on every clearance is not read as the appointment.
+    expect([...flag.matchAll(APPOINTMENT_UPDATE)]).toHaveLength(0)
+  })
+})
+
 describe('the refusal vocabularies are disjoint across the two layers', () => {
   it('shares no name between the core decision and the repository', () => {
     // Two vocabularies, two layers, and a name in both would make `details.refusal` ambiguous: a caller

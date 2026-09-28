@@ -83,7 +83,7 @@
 --   ZY003  a delegation's window is not usable
 --   ZY004  an approval does not name a delegation that authorises it
 --   ZY005  an approval's period or status does not match the request it approves
---   ZY006  a leave period begins or ends inside a trading session, so a tail would stay rostered
+--   ZY006  a leave period is bounded by a midnight inside an open session, so a tail would stay rostered
 --
 -- Class `ZY` because it is UNOWNED. `packages/db/src/sqlstate-uniqueness.test.ts` records thirteen codes that
 -- already stand for two unrelated rules each, and `ZA` through `ZX` are all taken — only `ZY` and `ZZ` were
@@ -97,7 +97,7 @@
 begin;
 
 -- ---------------------------------------------------------------------------------------------
--- A leave period is aligned to trading sessions, and the DATABASE holds it so
+-- A leave period may not be bounded by a midnight the premises is open across
 -- ---------------------------------------------------------------------------------------------
 -- The acceptance line is "leave periods are stored over business_day open/close instants", and until this
 -- trigger the only thing making that true was the caller having used `leaveCoveragePeriod()`. That is not
@@ -105,50 +105,76 @@ begin;
 -- that wrote two calendar midnights would produce a row that looks completely ordinary and silently leaves
 -- two tails rostered — the previous session's last two hours at the start, and the leave's own at the end.
 --
--- The rule is stated as what it forbids rather than as what it requires, and that is deliberate. "The lower
--- bound must equal some business_day.opens_at" would refuse leave over a date the premises does not trade
--- on, where `leaveCoveragePeriod` correctly falls back to a calendar midnight because there is no session to
--- align to. "The bound may not fall strictly INSIDE a trading session" permits that and still refuses every
--- misalignment that matters: calendar midnight on a normal day is inside the previous session, so a leave day
--- written the obvious wrong way is refused by name.
+-- ## What the rule is, and the two readings that are wrong
 --
--- A trigger on a table this migration did not create, which is worth flagging rather than doing quietly.
--- 0030 created `leave_request` and left the alignment decision to P-HR; 0066 took it in core and said the
--- writing and approving were P-HR-09's. This is that decision arriving in the schema, and it constrains
--- every future writer of the table — which is the point, since a second writer is exactly how the first
--- writer's rule gets lost.
-create function assert_leave_period_is_session_aligned() returns trigger
+-- It forbids one thing: a bound at LOCAL MIDNIGHT falling strictly inside an open trading session. That is
+-- exactly the calendar-alignment mistake — trading runs 11:00–02:00, so midnight is the middle of a session
+-- — and it is the narrowest rule that catches it.
+--
+-- *"The lower bound must equal some `business_day.opens_at`"* is wrong in the strict direction twice. It
+-- would refuse leave over a date the premises does not trade on, where `leaveCoveragePeriod` correctly falls
+-- back to a calendar midnight because there is no session to align to. And it would refuse a PARTIAL day,
+-- which is a real thing: a half day off is stored as 11:00–15:00, and `tp_net` in `eligibility.ts` subtracts
+-- the fragment exactly as it subtracts a whole session.
+--
+-- *"No bound may fall strictly inside a session"* is the same mistake in a more plausible costume, and it is
+-- the rule this trigger shipped with for an hour. It forbids every partial day — five existing suites store
+-- one (11:00–15:00, 12:00–14:00, 15:00–17:00, 18:00–19:00) — and `availability-perf.itest.ts` is the file
+-- that said so, from a gate run, about a suite this unit never touched.
+--
+-- `at time zone 'Asia/Dubai'` is written out here, which the schema already does for this exact question:
+-- `business_day.crosses_midnight` is `(closes_at at time zone 'Asia/Dubai')::date > trading_date` (0011). The
+-- zone is a fact about the premises rather than about a session, so it cannot be read off the row.
+--
+-- ## A trigger on a table this migration did not create
+--
+-- Flagged rather than done quietly. 0030 created `leave_request` and left the alignment decision to P-HR;
+-- 0066 took it in core and said the writing and approving were P-HR-09's. This is that decision arriving in
+-- the schema, and it constrains every future writer of the table — which is the point, since a second writer
+-- is exactly how the first writer's rule gets lost.
+create function assert_leave_period_is_not_calendar_bounded() returns trigger
 language plpgsql
 as $$
 declare
   breached record;
+  at_midnight constant time := time '00:00';
 begin
   select bd.trading_date, bd.opens_at, bd.closes_at into breached
     from business_day bd
-   where (lower(new.period) > bd.opens_at and lower(new.period) < bd.closes_at)
-      or (upper(new.period) > bd.opens_at and upper(new.period) < bd.closes_at)
+   where (
+           lower(new.period) > bd.opens_at
+           and lower(new.period) < bd.closes_at
+           and (lower(new.period) at time zone 'Asia/Dubai')::time = at_midnight
+         )
+      or (
+           upper(new.period) > bd.opens_at
+           and upper(new.period) < bd.closes_at
+           and (upper(new.period) at time zone 'Asia/Dubai')::time = at_midnight
+         )
    order by bd.trading_date
    limit 1;
   if found then
     raise exception
-      'Leave period % begins or ends INSIDE trading date %''s session (% to %). Trading crosses midnight, '
-      'so a leave day aligned to the calendar starts in the middle of the previous session and leaves its '
-      'last two hours rostered — the therapist is still bookable for a 01:30 treatment on a day they are on '
-      'leave for. leaveCoveragePeriod() in @berelax/core is the one function that computes these bounds.',
+      'Leave period % is bounded by a midnight that falls inside trading date %''s session (% to %). '
+      'Trading crosses midnight, so a leave day aligned to the CALENDAR starts in the middle of the previous '
+      'session and leaves its last two hours rostered — the therapist is still bookable for a 01:30 '
+      'treatment on a day they are on leave for. A leave day covers its trading session, and '
+      'leaveCoveragePeriod() in @berelax/core is the one function that computes those bounds. A PARTIAL day '
+      'is not this: it is any other pair of instants, and it is permitted.',
       new.period, breached.trading_date, breached.opens_at, breached.closes_at
       using errcode = 'ZY006';
   end if;
   return new;
 end $$;
 
-comment on function assert_leave_period_is_session_aligned() is
-  'Raises ZY006 (LeavePeriodNotSessionAligned) for a leave period whose bound falls strictly inside a '
-  'trading session. Stated as a prohibition rather than as an equality so a date the premises does not '
-  'trade on, where the period falls back to calendar midnights, is still storable.';
+comment on function assert_leave_period_is_not_calendar_bounded() is
+  'Raises ZY006 (LeavePeriodCalendarBounded) for a leave period bounded by a local midnight inside an open '
+  'trading session — the calendar-alignment mistake, and nothing else. A partial day is permitted, and so is '
+  'a midnight on a date the premises does not trade on, where there is no session to align to.';
 
-create trigger leave_request_period_is_session_aligned
+create trigger leave_request_period_is_not_calendar_bounded
   before insert on leave_request
-  for each row execute function assert_leave_period_is_session_aligned();
+  for each row execute function assert_leave_period_is_not_calendar_bounded();
 
 -- ---------------------------------------------------------------------------------------------
 -- leave_approval_delegation — time-bounded authority to decide somebody else's leave

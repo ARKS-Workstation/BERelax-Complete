@@ -21,8 +21,14 @@ Three things, and each one is a refusal to do something that would look like a f
 
 3. **A leave period is stored over trading-session instants, and the database holds it so.** A day of leave on
    the 17th runs 11:00 on the 17th to 02:00 on the 18th. `leaveCoveragePeriod()` in `@berelax/core` computes
-   it, and migration 0092 refuses (`ZY006`) any `leave_request.period` whose bound falls strictly inside a
-   trading session — so the rule does not depend on the caller having used that function.
+   it, and migration 0092 refuses (`ZY006`) a `leave_request.period` bounded by a LOCAL MIDNIGHT that falls
+   inside an open trading session — so the rule does not depend on the caller having used that function.
+
+   The rule is that narrow on purpose. "No bound may fall strictly inside a session" is the same claim in a
+   more plausible costume and it is wrong: a PARTIAL day off is stored as 11:00–15:00, five existing suites
+   store one, and `tp_net` in `eligibility.ts` subtracts the fragment exactly as it subtracts a whole session.
+   That version shipped for an hour and `availability-perf.itest.ts` — a file this unit never touched — is what
+   said so, from a gate run.
 
 ## Why an approval may not cancel a booking
 

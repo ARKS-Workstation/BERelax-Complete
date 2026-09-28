@@ -532,6 +532,65 @@ export function mayOverrideLeaveConflict(role: Role): boolean {
   return LEAVE_OVERRIDE_ROLES.includes(role)
 }
 
+/**
+ * The widest reader the leave screen serves until there is an admin session.
+ *
+ * `manager` and not `owner`, which is the narrower of the two available ceilings: the manager holds
+ * `leave:approve` and `booking:read`, which is everything that screen shows, and nothing an owner holds beyond
+ * that is on it. A ceiling of `owner` would be a wider grant that bought nothing.
+ */
+export const LEAVE_APPROVAL_SESSIONLESS_CEILING_ROLE: Role = 'manager'
+
+/** What a reader of one leave request may do and see. Three booleans, decided from the F07 matrix. */
+export interface LeaveApprovalAccess {
+  readonly mayApprove: boolean
+  readonly mayOverride: boolean
+  /**
+   * Whether the conflict report may be shown at all.
+   *
+   * `booking:read`, because the report names a client, a service and a room. It is the one thing on that
+   * screen that is somebody else's business, and a count is withheld with it: a number is enough to tell
+   * somebody whether a named colleague has bookings.
+   */
+  readonly maySeeConflicts: boolean
+}
+
+export function resolveLeaveApprovalAccess(role: Role): LeaveApprovalAccess {
+  return {
+    mayApprove: can(role, LEAVE_APPROVAL_PERMISSION),
+    mayOverride: mayOverrideLeaveConflict(role),
+    maySeeConflicts: can(role, 'booking:read'),
+  }
+}
+
+/**
+ * Two access answers intersected, which is how a claimed role can only ever NARROW a ceiling.
+ *
+ * There is no admin session until W-SYS-11, so the leave screen takes the reader's role from `?role=`. A role
+ * IS a permission, so taking one from a query string would be an escalation with a query string — unless the
+ * decision is taken for the claimed role and then intersected with the ceiling's, which is what this does.
+ *
+ * It lives in `@berelax/core` and not in the route for the reason `/clients/[id]/flags` records for its own
+ * ceiling: "the property that matters — this can only NARROW — is proved by a pure test rather than by serving
+ * the page. A ceiling whose only test needs a server is a ceiling somebody removes without ever seeing it
+ * fail." That is not a preference. A gate case that mutated the route and drove the built application reported
+ * "nothing was rejected", because `next start` serves whatever `.next` was last built — so a narrowing whose
+ * only home is a route handler has no known-bad fixture at all.
+ *
+ * Every field is a conjunction, and the property test asserts over every role that the narrowed answer is
+ * never wider than the ceiling's in any field. A `||` in any one of them is the one-character escalation.
+ */
+export function narrowLeaveApprovalAccess(
+  claimed: LeaveApprovalAccess,
+  ceiling: LeaveApprovalAccess,
+): LeaveApprovalAccess {
+  return {
+    mayApprove: claimed.mayApprove && ceiling.mayApprove,
+    mayOverride: claimed.mayOverride && ceiling.mayOverride,
+    maySeeConflicts: claimed.maySeeConflicts && ceiling.maySeeConflicts,
+  }
+}
+
 export type LeaveOverrideVerdict =
   | { readonly permitted: true }
   | {

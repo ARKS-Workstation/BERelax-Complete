@@ -1,21 +1,21 @@
 import { loadConfig } from '@berelax/config'
 import {
   ASIA_DUBAI,
-  can,
   coverageBreachesCausedBy,
   type FloorPresence,
   type HeldCredential,
   instantFromIso,
-  LEAVE_APPROVAL_PERMISSION,
+  LEAVE_APPROVAL_SESSIONLESS_CEILING_ROLE,
   localDate,
   localTime,
-  mayOverrideLeaveConflict,
+  narrowLeaveApprovalAccess,
   type Period,
   ROLES,
   type Role,
   type RotaCoverageRules,
   type RotaTherapist,
   type RotaTradingDay,
+  resolveLeaveApprovalAccess,
   toLocal,
   type WorkingHoursRules,
 } from '@berelax/core'
@@ -74,12 +74,14 @@ import {
  * ## `?role=` can only NARROW, and that is what makes it safe to take from a query
  *
  * A role IS a permission, so taking one from a query string would be an escalation with a query string. The
- * decision is therefore taken for the claimed role and then intersected with {@link CEILING_ROLE}'s, exactly
- * as `/clients/[id]/flags` does one directory group along. Every consequence follows from that intersection:
+ * decision is therefore taken for the claimed role and then intersected with {@link CEILING_ROLE}'s, by
+ * `narrowLeaveApprovalAccess` in `@berelax/core` — exactly as `/clients/[id]/flags` does one directory group
+ * along, and in core for the reason that route gives: the property that matters, this can only NARROW, is
+ * proved by a pure test rather than by serving the page. Every consequence follows from that intersection:
  *
  *   - `?role=owner` does not unlock a write, because there is no write on this page at all.
  *   - `?role=owner` does not widen what is SHOWN either: the ceiling is `manager`, which holds
- *     `leave:approve` and `employee:read`, so the widest reader this page will serve is a floor manager.
+ *     `leave:approve` and `booking:read`, so the widest reader this page will serve is a floor manager.
  *   - `?role=therapist` and `?role=marketer` are narrowings, and a marketer is refused the conflict report —
  *     which names a customer and a service, and is the one thing on this page that is somebody else's
  *     business.
@@ -100,11 +102,10 @@ export const dynamic = 'force-dynamic'
 /**
  * The widest reader this page serves until there is a session.
  *
- * `manager` and not `owner`, which is the narrower of the two available ceilings: the manager holds
- * `leave:approve` and `employee:read`, which is everything this page needs to show, and nothing an owner holds
- * beyond that is on it. A ceiling of `owner` would be a wider grant that bought nothing.
+ * Re-exported from `@berelax/core` rather than chosen here, so the ceiling the pure property test asserts
+ * about is the ceiling this route applies. Two spellings would be two ceilings.
  */
-const CEILING_ROLE: Role = 'manager'
+const CEILING_ROLE: Role = LEAVE_APPROVAL_SESSIONLESS_CEILING_ROLE
 
 const isRole = (value: string): value is Role => (ROLES as readonly string[]).includes(value)
 
@@ -178,16 +179,16 @@ export async function GET(
     }
     const direction = url.searchParams.get('dir') === 'rtl' ? 'rtl' : 'ltr'
 
-    // The intersection IS the narrowing, and it is one expression so there is nowhere for a widening to
-    // hide: every capability is the claimed role's AND the ceiling's.
+    // The narrowing is `@berelax/core`'s, not this file's, and that is deliberate: a ceiling whose only test
+    // needs a server is a ceiling somebody removes without ever seeing it fail — and a gate case that
+    // mutated an earlier version of this expression reported "nothing was rejected", because `next start`
+    // serves whatever `.next` was last built. `/clients/[id]/flags` had already recorded the remedy.
     const access = {
       role: claimedRole,
-      mayApprove:
-        can(claimedRole, LEAVE_APPROVAL_PERMISSION) && can(CEILING_ROLE, LEAVE_APPROVAL_PERMISSION),
-      mayOverride: mayOverrideLeaveConflict(claimedRole) && mayOverrideLeaveConflict(CEILING_ROLE),
-      // The conflict report names a customer and a service. `booking:read` is the grant that says a role
-      // may see a booking at all, and it is intersected the same way.
-      maySeeConflicts: can(claimedRole, 'booking:read') && can(CEILING_ROLE, 'booking:read'),
+      ...narrowLeaveApprovalAccess(
+        resolveLeaveApprovalAccess(claimedRole),
+        resolveLeaveApprovalAccess(CEILING_ROLE),
+      ),
     }
 
     const outcome = await withSql(async (sql) => {
