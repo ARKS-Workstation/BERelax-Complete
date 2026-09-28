@@ -123,9 +123,20 @@ function withoutComments(source: string): string {
 
 /** `delete from customer` / `truncate … customer …` with nothing narrowing it. */
 const UNQUALIFIED = [
-  /delete\s+from\s+customer\s*(?:`|;|$)/im,
-  /truncate\s+(?:table\s+)?(?:[a-z_]+\s*,\s*)*customer\b/im,
+  /delete from customer\s*(?:`|;)/i,
+  /truncate (?:table )?(?:[a-z_]+, )*customer\b/i,
 ]
+
+/**
+ * Whitespace collapsed to single spaces, because a statement is not a line.
+ *
+ * The first version of the pattern above ended `(?:`|;|$)` with the `m` flag, so `delete from customer` at
+ * the end of a LINE matched even when the next line was `where phone_e164 = any (…)` — a correctly scoped
+ * delete reported as an offence, and C-AUTO-07 hit it and reformatted its own SQL onto one line rather than
+ * argue with the check. A check that makes people rewrite correct code to appease it is a check that is
+ * wrong. Collapsing first means the predicate is seen wherever the author put it, and `$` can go.
+ */
+const oneLine = (code: string): string => code.replace(/\s+/g, ' ')
 
 describe('the seeded customers survive every suite', () => {
   it('finds no unqualified delete of the customer table, and reads enough files to mean it', () => {
@@ -136,7 +147,7 @@ describe('the seeded customers survive every suite', () => {
     ).toBeGreaterThan(200)
 
     const offenders = files.filter((file) => {
-      const code = withoutComments(readFileSync(file, 'utf8'))
+      const code = oneLine(withoutComments(readFileSync(file, 'utf8')))
       return UNQUALIFIED.some((pattern) => pattern.test(code))
     })
     expect(
@@ -160,10 +171,14 @@ describe('the seeded customers survive every suite', () => {
     // The control for the scan above, both directions, on strings this case owns.
     const prose = '// `delete from customer` is what customer-identity.itest.ts used to do\n'
     const statement = 'await sql`delete from customer`\n'
-    expect(UNQUALIFIED.some((pattern) => pattern.test(withoutComments(prose)))).toBe(false)
-    expect(UNQUALIFIED.some((pattern) => pattern.test(withoutComments(statement)))).toBe(true)
+    expect(UNQUALIFIED.some((pattern) => pattern.test(oneLine(withoutComments(prose))))).toBe(false)
+    expect(UNQUALIFIED.some((pattern) => pattern.test(oneLine(withoutComments(statement))))).toBe(
+      true,
+    )
     // And a scoped delete is not an offence, which is the distinction the whole case rests on.
     const scoped = 'await sql`delete from customer where phone_match_key = any (${keys}::text[])`\n'
-    expect(UNQUALIFIED.some((pattern) => pattern.test(withoutComments(scoped)))).toBe(false)
+    expect(UNQUALIFIED.some((pattern) => pattern.test(oneLine(withoutComments(scoped))))).toBe(
+      false,
+    )
   })
 })

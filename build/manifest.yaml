@@ -6069,7 +6069,7 @@ units:
       lines, an exhaustive partition proof that every line in the period is attributed exactly once, and
       drill-down from box to line to source document. Deterministic and regenerable years later.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - M-TILL-10
@@ -6098,12 +6098,237 @@ units:
       to box 1 in the redemption period, asserted from seeded data spanning two periods
     - 'the box mapping lives in a table, not in code: a test changes a mapping row and asserts the return
       output changes without any code edit'
+    - 'NOTE: migration 0089_vat201_mapping.sql and SCHEMA_VERSION = 89. 88 and 90-92 were held by units in
+      flight in other worktrees, so 0089 follows 0087 on disk; gate case 90a walks the migrations that EXIST
+      rather than consecutive integers, so the run is 49..82 plus 86, 87 and 89 and the held numbers cost
+      nothing. 22, 41, 44, 47, 71 and 74 stay PERMANENT gaps and were not reused: renumbering into a gap is
+      how two branches come to apply one number to different SQL. SCHEMA_VERSION tracks the NEWEST migration
+      on disk, so if 0090+ lands first the integrator sets it to that number rather than to this unit''s.'
+    - 'NOTE: the SQLSTATE class is ZY, and it is FRESH. Measured before the file was written, because
+      packages/db/src/sqlstate-uniqueness.test.ts records THIRTEEN codes already standing for two rules each:
+      ZA through ZX are all in use and only ZY and ZZ were free. "The next number in a plausible class" would
+      have made one file''s translator report another file''s refusal with a plausible message and the wrong
+      cause, which is that test''s whole subject. ZY001 is Vat201MappingIncomplete and ZY002 is
+      Vat201MeasureNotPossible, and they collide with nothing. **ZZ IS NOW THE ONLY FREE PRIVATE CLASS LEFT**
+      — recorded here, in the migration header and in the migration ledger, because the next unit that needs
+      one has to know before it starts rather than after. A unit that needs a class beyond ZZ needs the
+      namespace decision that test''s allowlist comment already describes as unit-sized.'
+    - 'NOTE: account.vat_box could NOT be the mapping, and this is M-VAT-03''s recorded finding rather than a
+      preference. Every recoverable expense account carries `recoverable_input_tax` as well as 1080 does, so
+      a sum over the grouping added the rent expense to the input VAT — measured at 2,006,706 fils where the
+      claim was 6,706. And the grouping is not fine enough in the other direction either: `reverse_charge` is
+      carried by BOTH 2035 and 6075, which belong in different COLUMNS of one box on opposite SIDES of the
+      arithmetic, while the standard-rated box is the mirror case — ONE box fed by TWO groupings
+      (standard_rated_supplies for the value, output_tax for the tax). Neither shape is expressible by a
+      grouping-to-box table, so vat201_box_mapping is keyed on the ACCOUNT, one row each, stating three
+      things the chart does not: box_no (what Y11-vat201-boxes answers), measure (net_supplies or tax) and
+      contribution (which direction is positive).'
+    - 'NOTE: contribution is derived from account.type and NEVER from normal_balance, and 4095 Discounts and
+      allowances is the whole reason. It is a CONTRA revenue account sitting on the debit side, and its
+      contribution is credit_less_debit all the same because it belongs to the output side of the return: a
+      500-fils discount must REDUCE box 1 by 500. Deriving from normal_balance gets it exactly backwards on
+      the one account in the chart where the two differ, and the return still balances. Asserted in both
+      directions in packages/core/src/tax/vat201.test.ts and again as a DEBIT to 4095 in gate probe 116m.'
+    - 'NOTE: the seed is five INSERT … SELECTs off the chart rather than 62 retyped codes, and it caught a
+      real mistake while being written: 0034 reclassified 5060 Staff accommodation from recoverable to
+      BLOCKED, so a list typed from 0018''s insert would have mapped it into the input box. The rows are
+      STORED and not a view — a view would be the derivation again, and the derivation is exactly what a tax
+      agent has to be able to overrule per account. An account a LATER migration adds gets no row at all,
+      which vat201_mapping_is_complete() refuses (ZY001, DEFERRED so an account and its attribution may
+      arrive in either order, and firing from both tables because an account with no attribution and an
+      attribution deleted from under an account are different defects). That is the acceptance line "a test
+      enumerates the chart and fails on an untagged account", enforced by the DATABASE instead of by a test
+      that has to remember to run. One consequence worth knowing: an account can no longer be DELETEd without
+      its mapping row going in the same transaction, because the FK refuses one order and ZY001 the other.'
+    - 'NOTE: drift between the mapping and account.vat_box is REPORTED and not refused, and that is the one
+      place this unit deliberately declines to enforce something. reclassifyAccountRecoverability (M-VAT-02)
+      is a sanctioned audited owner operation that UPDATEs account.vat_box, so a trigger here would refuse
+      the very change the chart exists to permit — it would fire on M-VAT-02''s own suite. What exists instead
+      is vat201_mapping_disagreement(), a section of the working paper that must be empty and a
+      not-fileable reason when it is not, asserted empty with a control that retags an account inside a
+      rolled-back transaction and requires the row to appear. A refusal nobody can satisfy is worse than a
+      measurement somebody reads.'
+    - 'NOTE: how a box total is proven equal to the sum of its drill-down lines, exact to the fils, in four
+      layers. (1) STRUCTURALLY: vat201_box_total() is an AGGREGATE OVER vat201_box_line(), so the total and
+      the lines a preparer is shown when they click a box are one definition — two queries would be two
+      `where` clauses that agree until somebody edits one. (2) In the itest, RE-SUMMED from the drill-down in
+      TypeScript BigInt per box, with a vacuity floor of three boxes carrying figures and a control asserting
+      that sum + 1n does NOT equal the box. (3) In packages/core, recomputed by summariseVat201 over the same
+      rows and compared, plus core''s vat201SignedFils against the SQL `case` LINE BY LINE over every line in
+      the period rather than over a sample. (4) In gate probe 116m, against the ledger summed a SECOND way
+      inside the probe straight off journal_line, with 116n making that comparison see a ONE-FILS difference.
+      The one thing none of the four can do alone: a structural guarantee nobody has watched fail is not
+      evidence, which is why every layer has a control that must fail.'
+    - 'NOTE: the join from a journal line to its attribution is a LEFT JOIN, which is the dangerous direction
+      handled on purpose. An INNER join would DROP a line whose account has no attribution — the line would
+      vanish from the return AND from the census meant to notice, and both would report success. LEFT JOIN
+      plus coalesce(disposition, ''unattributed'') makes the same defect a visible bucket with a count, and the
+      itest and gate case 116r both SEE it by deleting an attribution inside a rolled-back transaction (the
+      trigger fires at COMMIT, so the hole is visible to a query in between — the only way that failing case
+      can be represented without committing one). vat201_entry_document() is likewise joined LATERALLY with
+      NO LIMIT: an entry resolving to two documents therefore DUPLICATES a line and the census fails, so
+      document uniqueness is proved BY the partition proof instead of being assumed by a `limit 1` that would
+      have hidden it.'
+    - 'NOTE: nothing in the engine divides, rounds, multiplies or names a VAT rate, and that is the answer to
+      [UNVERIFIED] Y11-rounding rather than a style choice. Every figure is a SUM of journal_line.debit_fils
+      and credit_fils as they were POSTED, so whichever way the convention is answered no box total can move
+      by a fils: it decides how an invoice SPLIT its gross at the moment it was issued, which is M-TILL''s,
+      and a filed period cannot be restated by re-reading it. Stated as a checkable claim
+      (NO_ARITHMETIC_BEYOND_ADDITION in packages/core/src/tax/vat201.ts) and enforced by gate cases 116u-116v
+      over the TypeScript and the SQL, with a division and a round(…::numeric) planted in each and required
+      to be found. The one figure in the fixture the answer moves is the redemption: 66,667 + 3,333 half-up
+      against 66,666 + 3,334 truncated, and 70,000 either way — so the itest asserts net + vat = the gross
+      released exactly, holding the sum while the split stays the open question.'
+    - 'NOTE: the working papers REFUSE an open period, and periodStatusOn (M-VAT-06) is the only reader of
+      "is this date closed?" that they use. Both ends of the range, because a lock covering half a VAT quarter
+      leaves days a posting can still reach; and two DIFFERENT locks over one period is refused as well,
+      because period_lock_no_overlap makes one lock per date, so two over one VAT period means the period as
+      filed is not the period as closed and which one the paper describes would depend on the dates it was
+      given. There is no draft mode for an open period and that is the strict safe option rather than an
+      omission: a paper for a period that can still change is a paper somebody files. A mid-period estimate
+      is a different artefact and is nobody''s yet.'
+    - 'NOTE: nothing in the papers reads a CLOCK — not a frozen one, none. The acceptance line says
+      byte-identical under the frozen clock, and the paper contains no instant at all: a generatedAt would
+      make two runs a second apart differ, and the property worth having is that the paper is a function of
+      the ROWS. Every collection is ordered by SQL, every figure is a decimal string of integer fils, and
+      canonicaliseVat201WorkingPapers sorts keys recursively, so two reads five years apart produce the same
+      bytes and the same contentHash. Asserted three ways with a control requiring two DIFFERENT periods to
+      produce different bytes. The formatVersion tag is the first key for period_trial_balance_hash()''s
+      reason: a future canonical form has to be INCOMPARABLE rather than merely unequal, so a changed
+      serialisation reads as a different kind of artefact instead of as the figures having moved.'
+    - 'NOTE: the fixture''s three closed months are PICKED, not fixed, and the reserved span is enormous on
+      purpose. journal_entry and journal_line refuse DELETE for every role including the owner (ZL001), so a
+      fixed month would DOUBLE every committed figure on a second run against the same database — M-TILL-10''s
+      recorded defect (7), which read 430,003 fils where 33,334 was expected, from its own first run. The
+      suite finds a virgin three-month window inside VAT201_RESERVED_SPAN, now 2150-01..2199-12: six hundred
+      months, two hundred runs per database. It was three years at first and gate block 116 is why it is not
+      — that block runs the suite once per mutant, so three years would be exhausted inside one
+      `pnpm gates:only` and the failure would arrive as "the fixture threw" in a case about something else.
+      The append-only claim is about DELETE and NOT about TRUNCATE, which several files in this repository
+      get wrong: packages/db/src/repositories/journal.itest.ts runs `truncate journal_line, journal_entry
+      cascade` in its beforeAll and a BEFORE DELETE row trigger cannot see a TRUNCATE, while
+      packages/fixtures/src/credit-note.itest.ts, payment.itest.ts, manual-payment.itest.ts,
+      sell-package.itest.ts, cash-session.itest.ts, issue-credit-note.itest.ts and
+      packages/db/src/schema/cash-session.ts all state in comments that nothing truncates the journal. It is
+      benign for every one of them — they all assert DELTAS, which holds either way — and it is reported
+      rather than fixed because those units are `done`. For THIS unit it is good news: packages/db runs
+      before packages/fixtures, so a full `pnpm test:integration` empties the span before this file reaches
+      it and the window search starts from the beginning every time, which means the six-hundred-month
+      budget is spent only by running this file repeatedly on its own. The truncate cannot land in the
+      middle of this file, because the suite is sequential and file-scoped, so the absolute figures are safe
+      in both orders — and if it ever did land there every figure would read ZERO and the suite would fail
+      loudly rather than quietly agreeing with itself.
+      Measured free rather than assumed: no date in packages, apps or scripts falls in the 2100s except three
+      unrelated expiry dates in 2100, and nothing bounds a date that far out (journal_entry.entry_date has no
+      FK to business_day, and business_day carries no range CHECK). Three months is the MINIMUM the acceptance
+      lines need: a sale month BEFORE the return month for the package line, and a correction month AFTER it,
+      because a dated reversal posts into the first OPEN period. The thirteenth… the two-hundred-and-first run
+      throws with the remedy rather than wrapping onto a month that already holds entries.'
+    - 'NOTE: ZERO-RATED is covered on the PURCHASE side, and the output side is reported as a zero WITH its
+      reason rather than invented. The provisional chart (Y8-coa) carries no zero-rated and no exempt REVENUE
+      account, so a zero-rated SUPPLY cannot be posted at all: adding an account would be a claim about what
+      the business sells that nobody has made, and a box number for one would be a number nobody has given
+      (brief rule 15). So the worked example''s zero-rated case is a zero-rated PURCHASE — real, in the ledger,
+      contributing its value to the input box and nothing to its tax column — and
+      vat201UnrepresentableGroupings() reports zero_rated_supplies and exempt_supplies as structural zeros
+      carrying Y8-coa, derived from `account` rather than from a list so that a grouping which acquires an
+      account tomorrow stops being unrepresentable with nobody editing a file. "We made no zero-rated
+      supplies" and "nothing here can express one" are answers a tax agent has to be able to tell apart. This
+      is the one acceptance line satisfied in part rather than in full, and it is recorded as such.'
+    - 'NOTE: blocked input VAT is IN SCOPE and UNALLOCATED, which is the honest state rather than a
+      placeholder for one. The expenditure is real and the tax on it was borne rather than claimed, so 6090
+      and 5060 cannot be out_of_scope; and whether the blocked VALUE appears in the input box''s value column
+      is a question Y11-vat201-boxes'' wording does not reach — it asks for the numbers for standard-rated
+      sales, reverse charge and recoverable input VAT and stops there — so no box number is guessed and the
+      sub-question is LOGGED AS ITS OWN: Y11-vat201-blocked-box in docs/OPEN-QUESTIONS.md, which is what the
+      two unallocated rows and the not-fileable reason both name. Filing a genuinely unasked question under
+      one that IS asked is how it comes to be answered by implication, which is the third time this build has
+      surfaced a sub-question by having to write a rule down (M-TILL-10 recorded the second: whether
+      forfeited package consideration is a supply at all). Answering it is `set disposition = ''box'', box_no
+      = N` on two rows, or making them out_of_scope if the answer is that blocked expenditure appears
+      nowhere — a different edit and a different figure, so it cannot be the default. 6090 also carries
+      the net AND the blocked VAT in ONE debit (post-bill: "blocked VAT is part of what the thing cost"), so
+      the ledger cannot separate them at all — the 2,000 disclosure figure comes from
+      bill_line.blocked_input_vat_fils, which is M-VAT-02''s working paper, and the itest asserts both figures
+      because neither is derivable from the other. A non-zero unallocated bucket is a not-fileable reason.'
+    - 'NOTE: the reconciliations this unit closes, and the ones it does not. M-VAT-03 recorded that the output
+      box is summed from the LEDGER and the input working paper from bill_line, so a bill can satisfy one
+      source and not the other — and the two therefore have to be compared or the disagreement is nobody''s.
+      Two identities are closed here, both over the bill columns a single query can reach: the reverse-charge
+      output tax (ledger 2035 against bill.reverse_charge_output_vat_fils) and the input tax claimed (ledger
+      1080 against bill.recoverable_input_vat_fils PLUS bill.reverse_charge_input_vat_fils — added, because
+      both claims live on one account in the ledger and in two columns on the bill). Both asserted at zero
+      with BOTH SIDES required non-zero, because two zeros reconcile perfectly and say nothing. The full
+      four-identity reconciliation — invoice gross less credit-note gross against revenue plus output VAT, and
+      the rest — is M-VAT-12''s closed-month report (verified `todo`, and it depends on this unit), and is
+      deliberately not duplicated here.'
+    - 'NOTE: files beyond the four listed, and the one the manifest got wrong. ADDED:
+      packages/db/migrations/0089_vat201_mapping.sql, packages/fixtures/src/vat201.ts (the committed worked
+      example) and packages/fixtures/src/vat201.itest.ts (the PAIR, which the listed files cannot reach:
+      packages/db may not import packages/core, so nothing compiles the two summations against each other and
+      fixtures is the one package allowed to depend on both — the arrangement package-redemption.itest.ts and
+      period-close.itest.ts already have). EDITED: packages/db/src/index.ts (the export block, the ledger
+      paragraph for 89, SCHEMA_VERSION = 89), packages/core/src/tax/index.ts,
+      packages/db/src/schema/index.ts, packages/fixtures/src/index.ts, scripts/test-gates.mjs (block
+      116a-116z, forty cases, placed after 114a-114z and before 79a-79k), packages/db/src/settings-store.ts
+      and docs/OPEN-QUESTIONS.md (one new row, Y11-vat201-blocked-box; see the blocked-input-tax NOTE).
+      NO ADR was needed: every decision here is recorded in the migration header and in these notes, and
+      0038 was not taken — the highest on disk is still 0033. No server-starting suite was added, so no port
+      band was claimed and packages/harness/src/ports.ts is untouched.'
+    - 'NOTE: one file outside this unit changed, and it is the MECHANISM rather than a courtesy.
+      packages/db/src/settings-store.ts gains `vat201_box` as an unconfirmedAssumptionRows() source. docs/12
+      §2 asks for ONE screen listing everything to settle, and a placeholder BOX NUMBER that did not appear on
+      it would be indistinguishable from one somebody had confirmed — and the thing it would be
+      indistinguishable from is a filing. Per BOX and not per table, because an agent can confirm the
+      standard-rated box without confirming the reverse charge. The row leaves the panel by a migration
+      clearing is_provisional AND cleaning the label in one statement, which
+      vat201_box_provisional_label_is_marked makes inseparable in both directions (it uses
+      is_placeholder_text from 0026 — brief rule 15''s own mechanism). The itest asserts it THROUGH that
+      reader rather than through a query of its own, with a control requiring the panel to be reporting other
+      sources too.'
+    - 'NOTE: defects found in THIS unit''s own work, both of which had reported a pass. (1) The
+      byte-identical case was GREEN against a canonical form whose bigint branch had been replaced with
+      `Number(value) + 1` — two runs of an equally wrong serialiser agree perfectly, so "the bytes are stable"
+      says nothing about what is IN them, and the acceptance line is about an artefact somebody compares
+      years later. Found by gate mutant 116z, which is what the mutants are for. The itest now asserts every
+      non-zero box figure INTO the bytes as an exact quoted decimal string, with a vacuity floor of six
+      figures and an assertion that no bigint is ever written as a JSON number — the form that would round
+      silently at 2^53. (2) Three of the gate cases themselves reported a wrong verdict: the control for
+      116m moved the attribution its own lookup reads the answer BY, so the comparison still agreed and the
+      control could not fail (it is a one-fils difference now); the planted hard-coded box number was
+      `const standardRatedBox = 1`, which the scan was RIGHT not to find because its patterns anchor a word
+      boundary before `box`, so the case reported a scan that had never fired about a scan that was fine; and
+      the dropped-line mutant asserted the error MESSAGE, which the mutation removes — M-TILL-10''s recorded
+      defect (8), and the anchor now names the TEST rather than a string the edit deletes.'
+    - 'NOTE: what the manifest got wrong. (1) artifacts/fixtures/vat201-worked-example.json is the wrong home
+      for the worked example. `artifacts/` holds no tracked files at all — it is where scripts/screenshots.mjs
+      and the media outbox WRITE, and its three existing subdirectories are gitignored — while the
+      repository''s convention for a committed worked example is a TypeScript constant in packages/fixtures:
+      RECOVERABILITY_WORKED_EXAMPLE, the payables aging example and REVERSE_CHARGE_WORKED_EXAMPLE are all
+      that shape, and a constant is typechecked and importable where a JSON blob is neither. So the worked
+      example is packages/fixtures/src/vat201.ts, and the files list is corrected rather than the file being
+      created to match the list. Left as it was it would have failed gate case 101 the moment the integrator
+      marked the unit `done`. M-VAT-12 (still `todo`) declares
+      artifacts/fixtures/closed-month-reconciliation.json and will meet the same choice. (2)
+      M-VAT-12 also declares apps/web/src/app/(admin)/... , a path shape this repository does not use
+      (apps/web/app/(admin)/...). (3) The acceptance line "their redemptions contribute to box 1" names a box
+      NUMBER, which is the one thing Y11-vat201-boxes says is unconfirmed; it is satisfied against the box the
+      standard-rated grouping MAPS to, read from the rows, because a test asserting the literal 1 would be
+      asserting the answer instead of reading it. (4) The zero-rated half of the worked-example acceptance
+      line is satisfiable only on the purchase side today; see the zero-rated NOTE. Nothing else in the
+      acceptance list was wrong.'
     files:
     - packages/core/src/tax/vat201.ts
     - packages/core/src/tax/vat201.test.ts
     - packages/db/src/schema/vat-box-mapping.ts
     - packages/db/src/queries/vat201-working-papers.ts
-    - artifacts/fixtures/vat201-worked-example.json
+    - packages/db/migrations/0089_vat201_mapping.sql
+    - packages/fixtures/src/vat201.ts
+    - packages/fixtures/src/vat201.itest.ts
+    - packages/db/src/index.ts
+    - packages/db/src/settings-store.ts
+    - scripts/test-gates.mjs
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-08
     order: 63
     title: Immutable VAT return snapshot with preparer and reviewer sign-off

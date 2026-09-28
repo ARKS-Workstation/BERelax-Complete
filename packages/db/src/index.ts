@@ -254,6 +254,29 @@ export {
   trialBalanceMovement,
 } from './queries/trial-balance.ts'
 export {
+  canonicaliseVat201WorkingPapers,
+  type Vat201BoxRow,
+  type Vat201DrillDownRow,
+  type Vat201MappingDisagreement,
+  type Vat201NotFileableReason,
+  type Vat201PartitionCensusRow,
+  type Vat201Period,
+  Vat201PeriodNotClosed,
+  type Vat201Reconciliation,
+  type Vat201UnboxedRow,
+  type Vat201UnrepresentableGrouping,
+  type Vat201WorkingPapers,
+  vat201Boxes,
+  vat201BoxForGrouping,
+  vat201ContentHash,
+  vat201DrillDown,
+  vat201MappingDisagreements,
+  vat201PartitionCensus,
+  vat201UnboxedTotals,
+  vat201UnrepresentableGroupings,
+  vat201WorkingPapers,
+} from './queries/vat201-working-papers.ts'
+export {
   type AgentDefinitionRow,
   type AgentHeartbeatRow,
   type AgentOutcome,
@@ -2354,6 +2377,71 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // itself is NOT deferred with it — 2030 is credited here) and the seeded fixture packages, because what the
 // business sells is a fact nobody has stated.
 //
+// 89 is 0089_vat201_mapping.sql: the VAT201 box mapping as ROWS, the return engine that sums them, and the
+// drill-down from a box to a journal line to the document behind it (M-VAT-07). [UNVERIFIED]
+// Y11-vat201-boxes is open — the real box numbers await an FTA-registered tax agent, Y11-tax-agent records
+// that review as not optional — and its recorded provisional answer is "Box 1 / Box 3 / Box 10 as
+// placeholders, held in a data table with a test proving the mapping is data not code". The clause after
+// the comma is the whole design: `vat201_box` and `vat201_box_mapping` are rows, and
+// `packages/fixtures/src/vat201.itest.ts` UPDATEs one row and asserts a figure lands in a different box
+// with a control proving it was in the first box beforehand. A mapping written as `if (grouping =
+// 'standard_rated_supplies') then 1` is one nobody can correct without a deploy, and the one thing
+// everybody agrees about this unit is that an agent will hand back different numbers.
+//
+// The mapping is keyed on the ACCOUNT and NOT on `account.vat_box`, which is M-VAT-03's recorded finding
+// rather than a preference: every recoverable expense account carries `recoverable_input_tax` as well as
+// 1080 does, so summing the grouping added the rent expense to the input VAT (measured: 2,006,706 fils
+// where the claim was 6,706); and `reverse_charge` is carried by BOTH 2035 and 6075, which belong in
+// different COLUMNS of the box on opposite SIDES of the arithmetic. So each row states three things the
+// chart does not — `box_no` (what Y11-vat201-boxes answers), `measure` (the value of the supply or the tax
+// on it) and `contribution` (which direction is positive). `contribution` is derived at seed time from
+// `account.type` and never from `normal_balance`: 4095 Discounts and allowances is a CONTRA revenue
+// account on the debit side whose contribution is still `credit_less_debit`, because a 500-fils discount
+// must REDUCE box 1 — the one account in the chart where the two rules differ, and deriving from
+// `normal_balance` gets it exactly backwards on a return that still balances.
+//
+// The seed is five INSERT … SELECTs off the chart rather than 62 retyped codes, and it caught a real
+// mistake while being written: 0034 reclassified 5060 Staff accommodation from recoverable to BLOCKED, so
+// a list typed from 0018 would have mapped it into the input box. An account a LATER migration adds gets
+// no row at all, which `vat201_mapping_is_complete()` refuses (ZY009, deferred so an account and its
+// attribution may arrive in either order) — that is the acceptance line "a test enumerates the chart and
+// fails on an untagged account", enforced by the database instead of by a test that has to remember to
+// run. ZY010 is the one rule here that is double entry rather than a VAT question, and it is refused
+// rather than reported: a revenue account mapped as `measure = 'tax'` would report the whole net as VAT,
+// about twenty-one times the right figure, on a return whose drill-down still reconciles to it.
+//
+// What is NOT refused is drift against `account.vat_box`. `reclassifyAccountRecoverability` (M-VAT-02) is
+// a sanctioned audited owner operation that UPDATEs that column, and a trigger here would refuse the very
+// change the chart exists to permit — so `vat201_mapping_disagreement()` REPORTS it, the working paper
+// carries it as a section that must be empty, and the itest asserts it is empty with a control that
+// retags an account and requires the row to appear. A refusal nobody can satisfy is worse than a
+// measurement somebody reads.
+//
+// `vat201_box_total()` is an AGGREGATE OVER `vat201_box_line()` and never a second query over the journal.
+// That is the structural half of "a box total equals the sum of its drill-down lines, exact to the fils":
+// two queries are two `where` clauses that agree until somebody edits one, and a one-fils disagreement
+// between a box and the lines a preparer is shown when they click it is the defect this unit exists to
+// prevent. The join from a line to its attribution is a LEFT JOIN on purpose — an INNER one would DROP a
+// line whose account has no attribution, and both the return and the census meant to notice would report
+// success — so an unattributed line becomes a visible bucket with a count instead. Nothing in the file
+// divides, rounds, multiplies or names a VAT rate, which is why the answer to [UNVERIFIED] Y11-rounding
+// cannot move a box total by a fils: it decides how an invoice SPLIT its gross when it was issued, which
+// is M-TILL's, and a filed period cannot be restated by re-reading it.
+//
+// The SQLSTATE class is ZY, and it is FRESH. `packages/db/src/sqlstate-uniqueness.test.ts` records
+// thirteen codes already standing for two rules each, and measured before this file was written ZA
+// through ZX are all in use: only ZY and ZZ were free. Taking "the next number in a plausible class"
+// would have made one file's translator report another file's refusal with a plausible message and the
+// wrong cause. **ZZ is now the only free class left**, which is recorded here because the next unit that
+// needs one has to know before it starts rather than after.
+//
+// 78 through 81 are allocations held by units in flight in other worktrees, so 82 is not a gap in the
+// record: gate case 90a walks the migrations that EXIST on disk rather than consecutive integers, which is
+// what makes a non-contiguous allocation cost nothing. 83, 84, 86 and 87 landed together as the second
+// batch of five; 85 was allocated to C-CRM-10, whose worktree survived a container restart with the work
+// uncommitted, so 85 is HELD rather than free and rather than a permanent gap — it will land with that
+// unit. 88 is the next number nobody holds.
+//
 // 84 is 0084_contraindication.sql: the boolean-only crossing — the one thing the booking layer may ever
 // learn about a clinical record, made into a shape that can carry nothing else. 0008 created
 // `clinical.contraindication_flag` with five booleans and 0009 built the view over it; 0082 wrote no flag
@@ -2594,10 +2682,10 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // agreed.
 //
 // Every number allocated through 87 has now landed, and 91 has landed on top of it: the run on disk is
-// 1..87 less the permanent gaps above, plus 91. 85 — held while C-CRM-10's worktree carried the work
-// uncommitted — arrived with that unit rather than becoming a gap, and 91 arrived out of order for the same
-// reason. 88, 89, 90 and 92 are allocations held by units in flight in other worktrees, so 93 is the next
-// number nobody holds; if one of the four turns out to need no migration it becomes a permanent gap like 22,
+// 1..87 less the permanent gaps above, plus 89 and 91. 85 — held while C-CRM-10's worktree carried the work
+// uncommitted — arrived with that unit rather than becoming a gap, and 89 and 91 arrived out of order for
+// the same reason. 88, 90, 92 and 93 are allocations held by units in flight in other worktrees, so 94 is
+// the next number nobody holds; if one of the four turns out to need no migration it becomes a permanent gap like 22,
 // 41, 44, 47, 71 and 74 and is NOT renumbered, because renumbering to close a gap is how two branches come
 // to apply one number to different SQL. Gate case 90a walks the migrations that EXIST on disk rather than
 // consecutive integers, which is what makes a non-contiguous allocation cost nothing.
