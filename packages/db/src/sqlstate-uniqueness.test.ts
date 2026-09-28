@@ -44,15 +44,12 @@ const MIGRATIONS = 'packages/db/migrations'
  * updated with it. That is unit-sized and is **W-SYS-12** in the manifest, which is where the namespace
  * decision is taken: the CLASS stops identifying a migration file, a refusal is identified by all five
  * characters, and the registry allocates them. `ZY` went to 0085 when C-CRM-09 and C-CRM-10 turned out to
- * have taken `ZA` in worktrees that could not see each other, which this check caught on the first run after
- * that merge and is the reason it exists.
- *
- * The sentence that followed said `ZZ` was the only free class left. That was true for one merge. 0091
- * landed next and did NOT take it: it holds `ZY011`-`ZY014` beside 0085's `ZY001`-`ZY008`, which is
- * W-SYS-12's namespace decision applied before its allocator exists — a unit takes a subclass RANGE, and
- * two unrelated rules may share a class as long as they never share a code. So `ZZ` is still unspent, and a
- * unit arriving here should ask the integrator for a range rather than reach for it. Until the registry
- * lands, THIS check is the only thing that would catch the next collision, and it catches it at a merge.
+ * have taken `ZA` in worktrees that could not see each other, which this check caught on the first run
+ * after that merge and is the reason it exists. `ZZ` was the last free class after that and **0093
+ * (W-SITE-10) has taken it**, ZZ001-ZZ005 — so there is now NO free class, and a migration needing a
+ * private code before W-SYS-12 lands must either extend an existing family, which is what this check
+ * refuses, or wait for the allocator. That is the point at which the convention has run out rather than
+ * merely become awkward.
  *
  * This sentence used to say the work was "recorded as such in the manifest" when nothing in the manifest
  * owned it. The file was added to catch a code standing for two rules; it carried a claim standing for

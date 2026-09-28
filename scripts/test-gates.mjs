@@ -34353,6 +34353,502 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 120a-120z. (W-SITE-10) The publication control plane: the lint that must be the profile's, the machine
+//            the DATABASE enforces, the hash that must be of the approved content, and the weight check
+//            that must measure something.
+//
+//            The unit's claim is that nothing reaches the public without passing the lint, being approved by
+//            a named human against a content hash, and leaving an append-only record. Every one of those
+//            four is a refusal in a layer that can be silently disabled, and each case below disables one
+//            and requires the suite that claims it to go red.
+//
+//            120a to 120c are the lint, and they separate "derived from `regulatory_profile`" from
+//            "hard-coded with a lookup wrapped round it" — the distinction case 66's fixture already had to
+//            draw for the credential registry. 120a drops the profile's claim half by flipping the policy
+//            the lint is called with, which is the mutation that leaves a lint that still refuses
+//            solicitations and still reports rule names: the corpus of banned strings is the only thing that
+//            sees it. 120b makes the lint refuse everything, which every "zero false negatives" assertion
+//            would pass — the permitted corpus is the control, and this is what proves it is one. 120c
+//            replaces the derived vocabulary with a constant, which would make
+//            `publication_lint_pass.terms_checked` report a number nobody measured.
+//
+//            120d and 120e are the state machine. 120d widens `draft -> published`, which is the whole
+//            failure the unit exists against stated as one array entry. 120e makes the missing-approval
+//            branch dead, so a record may be published citing a lint pass and nobody's approval.
+//
+//            120f and 120g are the content hash, and they are the pair: 120f folds whitespace INSIDE a
+//            line, so approved copy could be republished respaced; 120g drops the region names, so a
+//            paragraph moved from the standfirst into the title reaches the same digest as the page the
+//            approver read. Both leave a hash that still changes when a word changes, which is the half
+//            anybody would test by hand.
+//
+//            120h to 120k are the weight check, and 120h is the one worth reading twice: it removes the
+//            zero-measurement refusal, after which a page that measures nothing is inside every budget and
+//            the whole layer reports success for ever. ADR 0002, in the one place in this unit where the
+//            check can stop examining anything without anything else changing. 120i loses the preloads from
+//            the critical set — the fonts and the art-directed hero, which are most of the weight. 120j
+//            inverts the compression rule, which measures an uncompressed stylesheet against a gzip budget
+//            and an AVIF gzipped. 120k swallows an unrenderable document, which would make a page that will
+//            not render the lightest page on the site and therefore the easiest to publish.
+//
+//            120l is structural: the budget has to come from `homeBudgetLimit('critical-above-fold')` and
+//            from nowhere else, because docs/08 SS8's figure is stated once in `apps/web/src/home/budget.ts`
+//            and a second copy is a number nobody compares. Its known-bad fixture is the predicate evaluated
+//            over mutated text, which is case 90d's shape.
+//
+//            120m grants the SEO agent `content:publish`. The acceptance line is a SET assertion plus a 403,
+//            and this is what stops the set assertion going stale: it is the mutation that opens the cage,
+//            and it must be visible from this unit's own suite rather than only from G-SEO-02's.
+//
+//            120n drives migration 0093 as statements, which is the only way its refusals can be checked at
+//            all: the database the suites run against has already had the file applied, so an edit to it
+//            changes nothing a statement can see and a PASS would be a report about a file nothing read
+//            (114h's finding, restated). Seven refusals and two controls, and the evidence CHECK is reached
+//            ON PURPOSE — the surface is walked to `approved` first and the weight figures are supplied, so
+//            the ordering trigger and the weight trigger cannot answer instead. Without that the case would
+//            report PASS about a rule it never reached, which is this unit's dominant defect class.
+{
+  const PUB_LINT = 'packages/core/src/compliance/banned-claims.ts'
+  const PUB_MACHINE = 'packages/core/src/publication/state-machine.ts'
+  const PUB_CONTENT = 'packages/core/src/publication/content.ts'
+  const PUB_WEIGHT = 'packages/core/src/publication/weight.ts'
+  const PUB_GATE = 'apps/web/src/publication/publish-gate.ts'
+  const PUB_AGENT = 'packages/core/src/access/principals/seo-agent.ts'
+
+  const PUB_LINT_SUITE = 'packages/core/src/compliance/banned-claims.test.ts'
+  const PUB_MACHINE_SUITE = 'packages/core/src/publication/state-machine.test.ts'
+  const PUB_CONTENT_SUITE = 'packages/core/src/publication/content.test.ts'
+  const PUB_WEIGHT_SUITE = 'packages/core/src/publication/weight.test.ts'
+  const PUB_GATE_SUITE = 'apps/web/src/publication/publish-gate.test.ts'
+  const PUB_DB_SUITE = 'packages/fixtures/src/publication-control-plane.itest.ts'
+
+  const pubUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const pubDb = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Deliberately NOT named like block 114's `withChokeEdit`, block 107's or block 106's helper: three
+   * blocks have now defined a helper of this shape and identical bodies made git treat two blocks as
+   * shared context and INTERLEAVE them, which had to be rebuilt from whole sides. The name and the
+   * parameter order here are this block's own.
+   */
+  const withPublicationBreak = (path, anchor, replacement, args) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', args),
+    )
+
+  // 120a. The profile's claim half dropped, by flipping the policy the lint is called with. Every other
+  //       rule still fires, every finding still carries a rule name, and only the corpus of banned strings
+  //       can see it — which is what that corpus is for.
+  checkRejectedBy(
+    'publication lint: the profile’s banned terms silently skipped is caught',
+    withPublicationBreak(
+      PUB_LINT,
+      'for (const finding of lintPublicDisplayName(region.text, policy)) {',
+      'for (const finding of lintPublicDisplayName(region.text, {\n' +
+        '      ...policy,\n' +
+        '      medicalClaimsPermitted: true,\n' +
+        '    })) {',
+      pubUnit(PUB_LINT_SUITE),
+    ),
+    'zero false negatives',
+  )
+
+  // 120b. The lint refusing everything. Every "zero false negatives" assertion passes; the permitted
+  //       corpus is the only thing that does not, which is the whole reason it has 35 entries.
+  checkRejectedBy(
+    'publication lint: a lint that refuses compliant copy is caught',
+    withPublicationBreak(
+      PUB_LINT,
+      '  for (const region of regions) {\n',
+      '  for (const region of regions) {\n' +
+        "    findings.push({ region: region.region, rule: 'banned_claim_term', term: 'x', why: 'x' })\n",
+      pubUnit(PUB_LINT_SUITE),
+    ),
+    'zero false positives',
+  )
+
+  // 120c. The vocabulary as a constant. `terms_checked` would then record a figure nobody measured, and
+  //       0093's `> 0` CHECK would be satisfied by a lint comparing against nothing at all.
+  checkRejectedBy(
+    'publication lint: a hard-coded vocabulary instead of the profile’s is caught',
+    withPublicationBreak(
+      PUB_LINT,
+      '  return Object.freeze([\n    ...(policy.medicalClaimsPermitted ? [] : policy.bannedClaimTerms),',
+      "  return Object.freeze([\n    'therapeutic',\n    'cure',\n    'heal',",
+      pubUnit(PUB_LINT_SUITE),
+    ),
+    'DERIVED from the policy',
+  )
+
+  // 120d. `draft -> published`, which is the unit's whole subject as one array entry: a page put live
+  //       without a lint pass, an approval or anybody having read it.
+  checkRejectedBy(
+    'publication machine: a draft that may reach published is caught',
+    withPublicationBreak(
+      PUB_MACHINE,
+      "  draft: Object.freeze(['draft', 'lint_passed'] as const),",
+      "  draft: Object.freeze(['draft', 'lint_passed', 'published'] as const),",
+      pubUnit(PUB_MACHINE_SUITE),
+    ),
+    'one step at a time',
+  )
+
+  // 120e. The missing-approval branch made dead. The record then cites a lint pass and nobody's approval,
+  //       which is publication by a machine — the thing docs/07 SS3 makes a human act.
+  checkRejectedBy(
+    'publication machine: publishing with no approval cited is caught',
+    withPublicationBreak(
+      PUB_MACHINE,
+      "  if (to === 'published' && evidence.approvalId === null) {",
+      "  if (false && to === 'published' && evidence.approvalId === null) {",
+      pubUnit(PUB_MACHINE_SUITE),
+    ),
+    'published_without_approval',
+  )
+
+  // 120f. Whitespace folded INSIDE a line. Approved copy could then be republished respaced, and the hash
+  //       still changes when a word changes — which is the half anybody would check by hand.
+  checkRejectedBy(
+    'publication hash: folding whitespace inside a line is caught',
+    withPublicationBreak(
+      PUB_CONTENT,
+      "    .map((line) => line.replace(/[ \\t]+$/g, ''))",
+      "    .map((line) => line.replace(/[ \\t]+/g, ' '))",
+      pubUnit(PUB_CONTENT_SUITE),
+    ),
+    'INSIDE a line',
+  )
+
+  // 120g. The region names dropped from the digest. A paragraph moved from the standfirst into the title
+  //       then reaches the same hash as the page the approver actually read.
+  checkRejectedBy(
+    'publication hash: dropping the region names is caught',
+    withPublicationBreak(
+      PUB_CONTENT,
+      '    .map((region) => `${region.region}\\n${normalise(region.text)}`)',
+      '    .map((region) => `${normalise(region.text)}`)',
+      pubUnit(PUB_CONTENT_SUITE),
+    ),
+    // `a region renamed` and not `moved between regions`, and the first spelling of this case had the wrong
+    // one — which this gate then caught, in exactly the way it exists to. With the names dropped, a
+    // paragraph MOVED between regions still changes the digest, because the order of the texts changed; the
+    // only assertion that can see the names is the one whose text sequence is identical.
+    'a region renamed',
+  )
+
+  // 120h. The zero-measurement refusal removed. After this a page that measures nothing is inside every
+  //       budget and the whole third enforcement layer reports success for ever — ADR 0002 exactly, in the
+  //       one place in this unit where a check can stop examining anything with nothing else changing.
+  checkRejectedBy(
+    'publication weight: a page that measures nothing being passed is caught',
+    withPublicationBreak(
+      PUB_WEIGHT,
+      '  if (measured <= 0) {',
+      '  if (measured < 0) {',
+      pubUnit(PUB_WEIGHT_SUITE),
+    ),
+    'refuses a zero measurement',
+  )
+
+  // 120i. The preloads lost from the critical set: the two fonts and the art-directed hero poster, which
+  //       are most of the weight. The measurement still returns a plausible number, which is why only the
+  //       set assertion sees it.
+  checkRejectedBy(
+    'publication weight: losing the head’s preloads from the critical set is caught',
+    withPublicationBreak(
+      PUB_GATE,
+      "    if (rel !== 'stylesheet' && rel !== 'preload') continue",
+      "    if (rel !== 'stylesheet') continue",
+      pubUnit(PUB_GATE_SUITE),
+    ),
+    'every preload',
+  )
+
+  // 120j. The compression rule inverted: an uncompressed stylesheet measured against a gzip budget, and an
+  //       AVIF gzipped. docs/08 SS8's figures are gzip figures, and `home/budget.ts` records the run where
+  //       comparing a raw figure with a compressed limit reported a page 1.8KB over for no reason.
+  checkRejectedBy(
+    'publication weight: inverting the compression rule is caught',
+    withPublicationBreak(
+      PUB_GATE,
+      '  return ALREADY_COMPRESSED.test(contentType) ? body.length : gzipSync(body, { level: 9 }).length',
+      '  return ALREADY_COMPRESSED.test(contentType) ? gzipSync(body, { level: 9 }).length : body.length',
+      pubUnit(PUB_GATE_SUITE),
+    ),
+    'the compression rule',
+  )
+
+  // 120k. An unrenderable document swallowed. A page that will not render would become the lightest page on
+  //       the site and therefore the easiest to publish, which is the wrong direction for every layer here.
+  checkRejectedBy(
+    'publication weight: a document that cannot be fetched being weighed as zero is caught',
+    withPublicationBreak(
+      PUB_GATE,
+      '  const document = await fetchResource(subject.path)\n',
+      '  const document = await fetchResource(subject.path).catch(() => ({\n' +
+        "    contentType: 'text/html',\n" +
+        "    body: Buffer.from(''),\n" +
+        '  }))\n',
+      pubUnit(PUB_GATE_SUITE),
+    ),
+    'weightless',
+  )
+
+  // 120l. The budget has to come from the one place docs/08 SS8's figure is stated. Structural, because the
+  //       assertion is about what the file SAYS: a literal here would pass every unit test in the gate's own
+  //       suite, which asserts the figure against `HOME_BUDGET` rather than against the gate.
+  {
+    const readsTheBudget = (text) =>
+      text.includes("homeBudgetLimit('critical-above-fold')") &&
+      !/const\s+\w*[Bb]udget\w*\s*=\s*\d/.test(text) &&
+      !/\b25[06][ _]?\d{0,3}\s*\*\s*(?:1024|KIB)/.test(text)
+    const gateText = readFileSync(PUB_GATE, 'utf8')
+    check(
+      'publication weight: the gate reads its budget from docs/08 §8’s one statement of it',
+      readsTheBudget(gateText),
+      `${PUB_GATE} must take the critical-above-fold figure from homeBudgetLimit and hold no literal of ` +
+        'its own; a second copy of 250KB is a number nobody compares',
+    )
+    // The known-bad fixture, evaluated over mutated text rather than by running anything — case 90d's
+    // shape. Both spellings a second copy actually arrives as.
+    check(
+      'publication weight: and the check notices a budget literal written into the gate',
+      !readsTheBudget(gateText.replace("homeBudgetLimit('critical-above-fold')", '250 * 1024')) &&
+        !readsTheBudget(`const criticalBudget = 256000\n${gateText}`),
+      'the structural check accepted a hard-coded budget, so it is not a check',
+    )
+  }
+
+  // 120m. The cage opened. The acceptance line is a SET assertion plus a 403, and a set assertion nobody
+  //       has watched fail is the thing this stops: `content:publish` in the agent's own grant list.
+  checkRejectedBy(
+    'publication authorisation: granting the SEO agent content:publish is caught',
+    withPublicationBreak(
+      PUB_AGENT,
+      "export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n  'catalogue:read',",
+      'export const SEO_AGENT_GRANTS: readonly Permission[] = Object.freeze([\n' +
+        "  'content:publish',\n  'catalogue:read',",
+      pubDb(PUB_DB_SUITE),
+    ),
+    'content:publish',
+  )
+
+  // 120n. Migration 0093 driven as statements. See the block header on why the file itself is not mutated.
+  {
+    const pubDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+    /**
+     * The declarations and the legal walk to `approved`, as one plpgsql prologue.
+     *
+     * A `do` block rather than `\set`, because every probe needs the id of a row it just inserted and psql
+     * cannot capture one from a single `-c`. The surface is a fresh uuid per probe, so no probe can be
+     * satisfied — or defeated — by a row another one left.
+     */
+    const pubDeclare =
+      "v_surface text := 'gate/120n-' || gen_random_uuid()::text; " +
+      "v_hash text := repeat('a', 64); v_other text := repeat('b', 64); " +
+      'v_lint uuid; v_appr uuid; v_rec uuid;'
+    const pubWalk =
+      'insert into publication_record (surface, state, content_sha256, recorded_at, actor_kind, ' +
+      "actor_label) values (v_surface, 'draft', v_hash, now(), 'staff', 'Approver 01'); " +
+      'insert into publication_lint_pass (surface, content_sha256, regulatory_profile_version, ' +
+      'terms_checked, linted_at, actor_kind, actor_label) values (v_surface, v_hash, ' +
+      "(select version from regulatory_profile_current), 20, now(), 'staff', 'Approver 01') " +
+      'returning id into v_lint; ' +
+      'insert into publication_record (surface, state, content_sha256, lint_pass_id, recorded_at, ' +
+      "actor_kind, actor_label) values (v_surface, 'lint_passed', v_hash, v_lint, now(), 'staff', " +
+      "'Approver 01'); " +
+      'insert into publication_approval (lint_pass_id, content_sha256, approver_user_id, ' +
+      'approver_display_name, approver_role, approved_at) values (v_lint, v_hash, ' +
+      "'gate-120n', 'Approver 01', 'owner', now()) returning id into v_appr; " +
+      'insert into publication_record (surface, state, content_sha256, lint_pass_id, recorded_at, ' +
+      "actor_kind, actor_label) values (v_surface, 'approved', v_hash, v_lint, now(), 'staff', " +
+      "'Approver 01'); "
+
+    /**
+     * One probe, inside a transaction.
+     *
+     * `VERBOSITY=verbose` is not optional and 114h's first run is why: psql's DEFAULT verbosity prints the
+     * message and not the SQLSTATE or the CONSTRAINT NAME, so every probe would bounce off the right rule
+     * and `checkRejectedBy` would report that it had not. `end` is `rollback` for the immediate refusals
+     * and `commit` for the deferred one — a `deferrable initially deferred` trigger fires at COMMIT and a
+     * rolled-back transaction never reaches it, so a ZZ004 probe that rolled back would prove nothing.
+     */
+    const publicationProbe = (body, { walk = true, end = 'rollback' } = {}) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        pubDbUrl ?? '',
+        '-c',
+        `begin; do $$ declare ${pubDeclare} begin ${walk ? pubWalk : ''}${body} end $$; ${end};`,
+      ])
+
+    const publishedRow = (columns, values) =>
+      `insert into publication_record (surface, state, content_sha256, ${columns}) values ` +
+      `(v_surface, 'published', v_hash, ${values}); `
+
+    // The evidence CHECK, reached on purpose: the walk satisfies the ordering and the weight figures are
+    // supplied, so this is the only rule left to answer. Asserted by CONSTRAINT NAME rather than by 23514,
+    // because half a dozen other CHECKs in this schema raise the same SQLSTATE.
+    checkRejectedBy(
+      'publication plane: the database refuses state=published with no lint pass and no approval',
+      publicationProbe(
+        publishedRow(
+          'recorded_at, actor_kind, actor_label, measured_critical_path_bytes, ' +
+            'critical_path_budget_bytes',
+          "now(), 'staff', 'Approver 01', 180000, 256000",
+        ),
+      ),
+      'publication_record_published_needs_evidence',
+    )
+
+    checkRejectedBy(
+      'publication plane: the database refuses a state that does not follow the one before it',
+      publicationProbe(
+        'insert into publication_record (surface, state, content_sha256, recorded_at, actor_kind, ' +
+          "actor_label) values (v_surface, 'lint_passed', v_hash, now(), 'staff', 'Approver 01'); ",
+        { walk: false },
+      ),
+      'ZZ002',
+    )
+
+    // The hash chain, from the approval's end. This is what "approving content whose hash differs from the
+    // linted content is refused" is, and it is a key rather than a trigger so it holds during a restore.
+    checkRejectedBy(
+      'publication plane: the database refuses an approval of a hash the lint did not pass',
+      publicationProbe(
+        'insert into publication_approval (lint_pass_id, content_sha256, approver_user_id, ' +
+          'approver_display_name, approver_role, approved_at) values (v_lint, v_other, ' +
+          "'gate-120n', 'Approver 01', 'owner', now()); ",
+      ),
+      'publication_approval_is_for_the_linted_content',
+    )
+
+    // And from the record's end: publishing content the approval did not approve.
+    checkRejectedBy(
+      'publication plane: the database refuses publishing a hash the approval did not approve',
+      publicationProbe(
+        'insert into publication_record (surface, state, content_sha256, lint_pass_id, approval_id, ' +
+          'measured_critical_path_bytes, critical_path_budget_bytes, recorded_at, actor_kind, ' +
+          "actor_label) values (v_surface, 'published', v_other, v_lint, v_appr, 180000, 256000, " +
+          "now(), 'staff', 'Approver 01'); ",
+      ),
+      'publication_record_is_the_approved_content',
+    )
+
+    checkRejectedBy(
+      'publication plane: the database refuses an over-budget publication, with the measured number',
+      publicationProbe(
+        publishedRow(
+          'lint_pass_id, approval_id, measured_critical_path_bytes, critical_path_budget_bytes, ' +
+            'recorded_at, actor_kind, actor_label',
+          "v_lint, v_appr, 300000, 256000, now(), 'staff', 'Approver 01'",
+        ),
+      ),
+      '300000',
+    )
+
+    checkRejectedBy(
+      'publication plane: the database refuses a publication carrying no weight measurement at all',
+      publicationProbe(
+        publishedRow(
+          'lint_pass_id, approval_id, recorded_at, actor_kind, actor_label',
+          "v_lint, v_appr, now(), 'staff', 'Approver 01'",
+        ),
+      ),
+      'ZZ005',
+    )
+
+    checkRejectedBy(
+      'publication plane: the database refuses an UPDATE of a publication record',
+      publicationProbe(
+        "update publication_record set actor_label = 'Somebody Else' where surface = v_surface; ",
+      ),
+      'ZZ001',
+    )
+
+    checkRejectedBy(
+      'publication plane: the database refuses a DELETE of a lint pass',
+      publicationProbe('delete from publication_lint_pass where id = v_lint; '),
+      'ZZ001',
+    )
+
+    // The deferred one, and the only probe that commits: a `deferrable initially deferred` trigger fires at
+    // COMMIT, so a rolled-back probe would never reach it. Nothing persists — the raise aborts the whole
+    // transaction, including the walk.
+    checkRejectedBy(
+      'publication plane: the database refuses a publish with no audit_event in the same transaction',
+      publicationProbe(
+        publishedRow(
+          'lint_pass_id, approval_id, measured_critical_path_bytes, critical_path_budget_bytes, ' +
+            'recorded_at, actor_kind, actor_label',
+          "v_lint, v_appr, 180000, 256000, now(), 'staff', 'Approver 01'",
+        ),
+        { end: 'commit' },
+      ),
+      'ZZ004',
+    )
+
+    // The two controls, which must PASS. Without them every refusal above is satisfied by a plane that
+    // refuses everything — and "no page can be published" is in fact the state this site starts in, so the
+    // positive cases are the only thing that proves the plane is a plane.
+    const legal = publicationProbe(
+      publishedRow(
+        'lint_pass_id, approval_id, measured_critical_path_bytes, critical_path_budget_bytes, ' +
+          'recorded_at, actor_kind, actor_label',
+        "v_lint, v_appr, 180000, 256000, now(), 'staff', 'Approver 01'",
+      ),
+    )
+    check(
+      'publication plane: the database accepts the legal sequence draft -> lint_passed -> approved -> published',
+      !legal.failed,
+      legal.output,
+    )
+    const audited = publicationProbe(
+      publishedRow(
+        'lint_pass_id, approval_id, measured_critical_path_bytes, critical_path_budget_bytes, ' +
+          'recorded_at, actor_kind, actor_label',
+        "v_lint, v_appr, 180000, 256000, now(), 'staff', 'Approver 01'",
+      ).replace('; ', ' returning id into v_rec; ') +
+        'insert into audit_event (actor_kind, actor_label, action, entity_type, entity_id, operation) ' +
+        "values ('staff', 'Approver 01', 'publication.publish', 'publication_record', " +
+        "v_rec::text, 'create'); ",
+      { end: 'commit' },
+    )
+    check(
+      'publication plane: and COMMITS one whose audit_event is in the same transaction',
+      !audited.failed,
+      audited.output,
+    )
+  }
+
+  // 120z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module under test, or a corpus that had gone
+  //       empty would all report as fourteen passing cases.
+  {
+    for (const suite of [
+      PUB_LINT_SUITE,
+      PUB_MACHINE_SUITE,
+      PUB_CONTENT_SUITE,
+      PUB_WEIGHT_SUITE,
+      PUB_GATE_SUITE,
+    ]) {
+      const green = run('pnpm', pubUnit(suite))
+      check(`publication plane: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const db = run('pnpm', pubDb(PUB_DB_SUITE))
+    check(`publication plane: ${PUB_DB_SUITE} passes unedited`, !db.failed, db.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -837,6 +837,33 @@ export {
   type RenderedWording,
   readPreferenceSubject,
 } from './repositories/preference-centre.ts'
+/*
+  W-SITE-10's publication control plane. The only module in the build that writes `publication_lint_pass`,
+  `publication_approval` and `publication_record`: 0093 makes all three append-only for every role, so a
+  caller reaching for `db.update(publicationRecord)` gets ZZ001 rather than a second write path.
+*/
+export {
+  type ApprovalInput,
+  type LintPassInput,
+  PUBLICATION_AUDIT_ACTIONS,
+  PUBLICATION_REFUSALS,
+  PUBLICATION_SQLSTATE,
+  type PublicationPositionRow,
+  type PublicationRecordRow,
+  type PublicationRefusal,
+  type PublishInput,
+  publicationContentHash,
+  publicationHistory,
+  publicationPosition,
+  publicationRecordById,
+  publicationRefusalOf,
+  publicationSqlstateOf,
+  publishSurface,
+  recordApproval,
+  recordDraft,
+  recordLintPass,
+  revertSurfaceTo,
+} from './repositories/publication.ts'
 export {
   type ClearedReassignmentFlag,
   clearReassignmentFlags,
@@ -2740,8 +2767,48 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // to apply one number to different SQL. Gate case 90a walks the migrations that EXIST on disk rather than
 // consecutive integers, which is what makes a non-contiguous allocation cost nothing.
 //
+// 93 is 0093_publication.sql: nothing reaches the public without a lint pass, a named approval against a
+// content hash, and an append-only record — and none of those four facts is a promise a caller keeps
+// (W-SITE-10). Three of the four halves already existed and were correct: `access/publication.ts`
+// authorises a publication, `packages/cms/src/publication.ts` lints CMS copy against the profile in force,
+// and `apps/web/src/media/publish-gate.ts` refuses a slot image over its byte budget. What no layer held was
+// the SEQUENCE — nothing recorded that a lint had passed, nothing recorded who approved WHAT, and nothing
+// stopped a row reaching a published state without either. The tables are `publication_lint_pass` (the
+// surface, the sha256 of exactly what was linted, WHICH `regulatory_profile` version decided it, and how
+// many terms the pass actually compared against — `> 0`, because a lint over an empty vocabulary passes
+// everything and a row recording it would be evidence for a check that examined nothing),
+// `publication_approval` (the approver's id with their display name and role SNAPSHOTTED beside it, so a
+// later rename cannot rewrite who approved what) and `publication_record` (one appended row per state, the
+// weight the publish-time check measured and the budget it judged against, and `supersedes_id` for a
+// correction or a revert). Four layers make the claims properties of the database rather than of the
+// caller: a CHECK — `publication_record_published_needs_evidence` — because it answers an UPDATE as well as
+// an INSERT and still answers when a restore has triggers off; COMPOSITE foreign keys
+// `(lint_pass_id, content_sha256)` and `(approval_id, content_sha256)`, so approving or publishing content
+// whose hash differs from the linted or approved content is `23503` naming a constraint rather than a
+// trigger somebody can disable, and cannot be satisfied by editing the parent because the parent is
+// append-only; a BEFORE INSERT trigger for the ORDERING, which a CHECK cannot express because it cannot
+// read the previous row; and a `deferrable initially deferred` constraint trigger for the audit row, which
+// is 0081's ZW003 shape and is what makes "every publish writes an audit_event IN THE SAME TRANSACTION"
+// unfalsifiable — an audit row written afterwards in a second transaction does not satisfy it. The file
+// also inserts one new `regulatory_profile` version, appending `clinic` to `banned_claim_terms` and copying
+// every other column FROM the row in force rather than restating it (`opening-balances.itest.ts`'s lesson):
+// 0004's list was written for service display names, where the word cannot appear, and the lexicon's
+// stemmer stops at plurals and `-ing` on purpose, so `clinical` does not match `clinic`. `ZZ001`
+// (append-only), `ZZ002` (a state that does not follow the one before it), `ZZ003` (a correction naming no
+// superseded record, the wrong one, or another surface's), `ZZ004` (a published record with no audit row at
+// COMMIT) and `ZZ005` (over the weight budget, with both numbers in the message) are its private
+// SQLSTATEs. `ZZ` because it is the LAST free class: see the paragraph below and
+// `packages/db/src/sqlstate-uniqueness.test.ts`, whose header says the same thing.
+//
+// Every number allocated through 87 has now landed: the run on disk is 1..87 less the permanent gaps above,
+// and 85 — held while C-CRM-10's worktree carried the work uncommitted — arrived with that unit rather than
+// becoming a gap. 88 through 92 are allocations held by five units in flight in other worktrees, and 93 is
+// this file, W-SITE-10's, which has landed. So 94 is the next number nobody holds. Gate case 90a walks the
+// migrations that EXIST on disk rather than consecutive integers, which is what makes a non-contiguous
+// allocation cost nothing — and it is why 88 through 92 arriving after 93 needs no renumbering here.
+//
 // This note replaced five copies of itself. Every batch merge resolved the allocation sentence by keeping
 // both sides, and four of the five surviving copies then described a set of held numbers that had since
 // landed — in the file whose own rule is that a second statement of a fact drifts. There is one now, it is
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead.
-export const SCHEMA_VERSION = 91 as const
+export const SCHEMA_VERSION = 93 as const

@@ -236,6 +236,15 @@ describe('the erasure rule registry', () => {
         expect(rule.parent, rule.key).toBeDefined()
       }
     }
+    // The control on the pattern above, in both directions. A regex assertion over an empty registry passes,
+    // and a regex that stopped discriminating would too — so the unit that BUILT the registry must still
+    // account for most of it, and the set of registering units must be small enough to read.
+    const registrars = [...new Set([...ERASURE_RULES.values()].map((r) => r.registeredBy))]
+    expect(registrars).toContain('C-CRM-10')
+    expect(registrars.length).toBeLessThan(6)
+    expect(
+      [...ERASURE_RULES.values()].filter((r) => r.registeredBy === 'C-CRM-10').length,
+    ).toBeGreaterThan(ERASURE_RULES.size / 2)
   })
 
   it('the control: a registry entry owned by nobody is refused by the shape the case checks', () => {

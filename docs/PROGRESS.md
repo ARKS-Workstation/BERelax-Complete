@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**123 / 210 units complete.**
+**124 / 210 units complete.**
 
 ## Next up
 
@@ -160,7 +160,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 140 | `W-SITE-04` | Home route: the anchored page with a real LCP hero | `W-SITE-03`, `W-SYS-07` | — | — |
 | [x] | 141 | `W-SYS-08` | Payload CMS v3 embedded, content model and the catalogue boundary | `F07`, `F09`, `W-SYS-01` | — | — |
 | [x] | 142 | `W-SITE-07` | CMS-driven routes, internal linking and breadcrumbs | `W-SITE-03`, `W-SITE-05`, `W-SYS-08` | — | Y1-licence |
-| [ ] | 143 | `W-SITE-10` | Publication control plane: banned-claims lint, named approval, immutable record | `F06`, `F09`, `W-SITE-07`, `W-SYS-08` | — | Y1-licence |
+| [x] | 143 | `W-SITE-10` | Publication control plane: banned-claims lint, named approval, immutable record | `F06`, `F09`, `W-SITE-07`, `W-SYS-08` | — | Y1-licence |
 | [x] | 144 | `W-SYS-09` | Media slots: declared constraints, required alt and the junk-alt filter | `W-SYS-05`, `W-SYS-08` | — | Y12-photos |
 | [ ] | 145 | `W-SITE-06` | Therapist routes and the publishing guard | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `W-SITE-03`, `W-SYS-09` | — | Y12-consent-photo, Y8-staff |
 | [ ] | 146 | `W-SITE-08` | Sitemaps, hreflang, IndexNow and the publish propagation pipeline | `H02`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07` | M4 | — |

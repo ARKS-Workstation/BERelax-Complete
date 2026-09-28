@@ -247,6 +247,26 @@ export const ROUTES = [
       'token part of the resource identity and appear in every log line and Referer for one page.',
   },
   {
+    id: 'publication-publish',
+    path: '/api/v1/publication/publish',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SITE-10s publication control plane: the one door to the public. It lints the copy against the ' +
+      'profile in force, fetches and weighs the rendered document, and then writes the lint pass, the ' +
+      'approval and the publication record — so a curl gets the same answer as the button, which is what ' +
+      'makes the SEO agents 403 an assertion about the endpoint rather than about a screen. Under /api ' +
+      'for the three reasons the media publish endpoint above records: the proxy exemption turns a ' +
+      'mistyped spelling into a 308 rather than a 301 that would downgrade this POST to a GET with the ' +
+      'body dropped; a publish is not a document, so a locale would give one endpoint two URLs; and an ' +
+      'endpoint under /api is somewhere a curl naturally goes. Dynamic by necessity: it reads the ' +
+      'regulatory profile, renders the page it is about to publish, and writes four rows on every request.',
+  },
+  {
     id: 'book',
     path: '/book',
     kind: 'document',

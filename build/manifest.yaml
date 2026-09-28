@@ -2027,12 +2027,18 @@ units:
       frequency cap are injected evaluators; their stores are C-CRM-03/04 and C-AUTO-03'
     files:
     - packages/messaging/src/send.ts
-    - packages/messaging/src/gate/
+    - packages/messaging/src/gate/index.ts
     - packages/messaging/src/send.test.ts
     - packages/messaging/src/gate/fail-closed.test.ts
     - packages/messaging/src/transports/smsala.ts
     - .dependency-cruiser.cjs
     - scripts/test-boundaries.mjs
+    - 'NOTE: two declared paths were corrected by W-SITE-10, which found gate case 101 already red on the
+      commit it branched from: `packages/messaging/src/gate.ts` and `packages/messaging/src/gate.fail-closed.test.ts`
+      do not exist, because the gate became a DIRECTORY (`gate/decide.ts`, `gate/window.ts`, `gate/wire.ts`
+      and their suites) when C-AUTO-04 split it. The files are `gate/index.ts` and `gate/fail-closed.test.ts`.
+      Nothing about this unit changed; only the record of where its code lives, which is the exact rot case
+      101 exists to catch.'
   - id: B-LIFE-02
     order: 34
     title: 'Phone-first identity: E.164 normalisation, dedup match keys and SMS OTP'
@@ -14208,7 +14214,7 @@ units:
       a content hash, and leaving an append-only publication record — with the SEO agent's publish permission
       denied at the permission layer.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F06
@@ -14241,11 +14247,72 @@ units:
     - Reverting to a prior publication record restores the exact approved content hash, writes a new record,
       and leaves the superseded record readable (assertions on all three)
     files:
-    - packages/db/migrations/00XX_publication.sql
+    - packages/db/migrations/0093_publication.sql
+    - packages/db/src/schema/publication.ts
+    - packages/db/src/repositories/publication.ts
     - packages/core/src/compliance/banned-claims.ts
+    - packages/core/src/compliance/banned-claims.test.ts
     - packages/core/src/publication/state-machine.ts
-    - apps/web/src/actions/publish.ts
-    - tests/publication/control-plane.spec.ts
+    - packages/core/src/publication/state-machine.test.ts
+    - packages/core/src/publication/content.ts
+    - packages/core/src/publication/content.test.ts
+    - packages/core/src/publication/weight.ts
+    - packages/core/src/publication/weight.test.ts
+    - apps/web/src/publication/publish-gate.ts
+    - apps/web/src/publication/publish-gate.test.ts
+    - apps/web/app/api/v1/publication/publish/route.ts
+    - apps/web/app/api/v1/publication/publish/handler.ts
+    - apps/web/src/publication.itest.ts
+    - packages/fixtures/src/publication-control-plane.itest.ts
+    - docs/adr/0042-publication-is-refused-at-the-permission-layer-and-in-the-database.md
+    - scripts/test-gates.mjs
+    - 'NOTE: the declared paths were `00XX_publication.sql`, `apps/web/src/actions/publish.ts` and
+      `tests/publication/control-plane.spec.ts`. The migration resolved to 0093. There is no `actions/`
+      directory in this application and no `tests/` directory in this repository: a publish is a route
+      handler under `apps/web/app/api/v1/` (the shape `api/v1/media/publish` already uses, and the shape the
+      403 assertion needs, because an endpoint under /api is somewhere a curl naturally goes), and an
+      integration suite lives beside the code it drives. The paths above are what exists, because gate case
+      101 checks that a done unit''s declared files are real.'
+    - 'NOTE: the publish endpoint reads the caller from Payload''s own session or from a DECLARED AGENT
+      PRINCIPAL named in the request, resolved in ONE function (`callerOf`) so that W-SYS-11''s session
+      changes that function and no route''s authorisation. Taking a principal id from a request is safe for
+      a stronger reason than the `?role=` narrowing on `/clients/[id]/flags`: a role IS a permission, but an
+      agent principal resolves through its own closed grant list and never through a role, so claiming to be
+      one can only lose capability. An undeclared id is refused as unauthenticated rather than defaulted, and
+      a request presenting both a session and a named principal is refused rather than resolved. W-SYS-11
+      replaces the session half; nothing about the authorisation changes with it.'
+    - 'NOTE: the approver''s display name is a REQUIRED field on the publish request and is refused when
+      absent, at the route and again by `publication_approval_name_is_stated`. There is no default and no
+      development bypass, because the only value a default could supply is the name of a person (brief rule
+      10). W-SYS-11''s session will carry it; until then the caller states it and the snapshot is what was
+      stated.'
+    - 'NOTE: deferred to **W-SYS-12** — this unit took `ZZ`, which was the LAST free private SQLSTATE class,
+      for ZZ001-ZZ005. The convention that a class identifies a migration file now has no allocation left in
+      it at all: a migration needing a refusal code before that unit lands must extend an existing family,
+      which `packages/db/src/sqlstate-uniqueness.test.ts` refuses, or wait. The ledger note before
+      SCHEMA_VERSION and that test''s header both say so.'
+    - 'NOTE: `clinic` reached `banned_claim_terms` by revising the column''s DEFAULT and then reconciling the
+      row in force to every column''s default — migration 0058''s shape. A first version appended the term to
+      the ROW alone and `pnpm verify` failed in this unit''s own suite four profile versions later:
+      `restoreSeededProfile()` in `packages/fixtures/src/hr-credentials.itest.ts` and the equivalents in
+      `catalogue-compliance.itest.ts` and `therapist-eligibility.itest.ts` restore the seeded profile by
+      inserting a row that names `source_note` and nothing else, so every other column takes its DEFAULT.
+      That is the right design and gate case 75 protects it — it HEALS a database a killed suite left
+      polluted — so a term added only to the row cannot survive an integration run and must not be made to.'
+    - 'NOTE: the slot-budget half of the publish-time check reaches W-SYS-09''s rules through W-SYS-10''s
+      `assessMediaForPublication`, which measures the objects in the bucket. The refusal is composed and
+      mapped here and is asserted at that level; the per-rung AVIF weights those rules judge are asserted
+      against real derivative ladders in `apps/web/src/breakpoint-preview.itest.ts` and
+      `packages/fixtures/src/media-derivatives.itest.ts`, and are not re-measured here. No page in this build
+      names a media row yet, so the list is empty in practice until a CMS document does.'
+    - 'NOTE: the critical-path weight is measured from the rendered document and its declared critical
+      resources, not from a browser: a publish cannot start one. That makes this layer a slightly
+      conservative estimate of the figure `apps/web/src/home.itest.ts` measures in Chromium rather than a
+      second definition of it, which is why the two do not replace each other — this one fires before the
+      page is public and cannot see the paint, and the CI one sees the paint and fires after the commit. The
+      `requests-before-lcp` and `dom-nodes` halves of docs/08 SS8''s table are deliberately NOT judged here:
+      both need the LCP identity, and a synthetic count of them would be a number that disagreed with the
+      CI layer''s for reasons nobody could act on.'
   - id: W-SYS-09
     order: 144
     title: 'Media slots: declared constraints, required alt and the junk-alt filter'
