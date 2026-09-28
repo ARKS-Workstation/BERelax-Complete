@@ -353,12 +353,19 @@ describe('no module under apps/web takes a principal from the request', () => {
 })
 
 describe('the wiring is asserted, so deleting it fails rather than reverting quietly', () => {
-  it('has at least one module under apps/web importing @berelax/auth', () => {
+  it('has at least one NON-TEST module under apps/web importing @berelax/auth', () => {
     // W-SYS-11's second acceptance line. Before this unit NOTHING in apps/web imported the package, and
     // that state was invisible: it is the absence of a line, and no test anywhere fails for an absence.
     // An IMPORT, not a mention — a comment naming the package does not count as wiring.
-    const importers = webSources().filter((file) =>
-      /from\s+'@berelax\/auth'/.test(readFileSync(file, 'utf8')),
+    //
+    // NON-TEST is load-bearing and was not in the first version of this case. `session.itest.ts` imports
+    // `totpAt` to compute a code, so with test files counted the scan was satisfied by its OWN suite: gate
+    // case 117c broke the import in `src/session.ts` — the actual wiring — and this still passed. A scan a
+    // test can satisfy on behalf of the code it is testing measures nothing.
+    const importers = webSources().filter(
+      (file) =>
+        !/\.(?:test|itest)\.tsx?$/.test(file) &&
+        /from\s+'@berelax\/auth'/.test(readFileSync(file, 'utf8')),
     )
     expect(
       importers,
@@ -367,9 +374,14 @@ describe('the wiring is asserted, so deleting it fails rather than reverting qui
     ).not.toEqual([])
   })
 
-  it('has at least one module reading a staff session', () => {
-    const readers = webSources().filter((file) =>
-      /readStaffSession/.test(readFileSync(file, 'utf8')),
+  it('has at least one NON-TEST module reading a staff session', () => {
+    // Non-test for the same reason as the case above: `session.itest.ts` calls `readStaffSession` directly
+    // to assert the live/expired/unknown distinction, so counting tests would let the suite vouch for
+    // wiring that had been deleted.
+    const readers = webSources().filter(
+      (file) =>
+        !/\.(?:test|itest)\.tsx?$/.test(file) &&
+        /readStaffSession/.test(readFileSync(file, 'utf8')),
     )
     expect(readers, 'nothing under apps/web resolves a session cookie to a row').not.toEqual([])
   })
