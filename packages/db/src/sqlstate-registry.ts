@@ -1722,6 +1722,60 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_payment_intent_instrument_is_a_gateway_kind'],
     translators: ['packages/db/src/repositories/payment-intent.ts'],
   },
+  // ZY171-ZY177 are P-HR-13's, of the ZY171-ZY180 band; ZY178-ZY180 are left free. Seven and not one
+  // because each names a different thing to go and do — among them "correct it with a reversal", "wait for
+  // the period to close", "post the journal entry first", "end the employment first", "recompute the
+  // liability" and "record a punch correction instead" — which is 0061's argument for a private code at
+  // all.
+  {
+    code: 'ZY171',
+    rule: 'A gratuity accrual, settlement or closed-period labour adjustment row may not be updated or deleted.',
+    migration: '0107',
+    raisedBy: ['refuse_gratuity_record_change'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY172',
+    rule: 'A correcting gratuity accrual must supersede one over the same employee and the same month.',
+    migration: '0107',
+    raisedBy: ['assert_gratuity_correction_names_its_original'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY173',
+    rule: "A gratuity accrual's entry must be a two-line gratuity_accrual posting debiting an expense account and crediting a liability account for the accrued amount.",
+    migration: '0107',
+    raisedBy: ['assert_gratuity_accrual_is_posted'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY174',
+    rule: 'A gratuity accrual for an open month is dated at its month end, and one for a locked month names that lock and is dated outside every lock.',
+    migration: '0107',
+    raisedBy: ['assert_gratuity_accrual_period'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY175',
+    rule: "A gratuity settlement must discharge exactly the employee's live accrued liability.",
+    migration: '0107',
+    raisedBy: ['assert_gratuity_settlement_clears_the_liability'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY176',
+    rule: 'A gratuity settlement may only be recorded for an employee whose employment has ended, and must snapshot that date.',
+    migration: '0107',
+    raisedBy: ['assert_gratuity_settlement_is_for_a_leaver'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
+  {
+    code: 'ZY177',
+    rule: 'A closed-period labour adjustment must name the locked period containing the work and carry an entry dated outside every lock.',
+    migration: '0107',
+    raisedBy: ['assert_closed_period_labour_adjustment'],
+    translators: ['packages/db/src/repositories/gratuity.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

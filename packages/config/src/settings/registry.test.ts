@@ -73,13 +73,37 @@ describe('registry integrity — properties over the whole registry, not example
     }
   })
 
-  it('exactly one compliance-locked setting is the accountant’s, and it is the package one', () => {
+  /**
+   * The compliance-locked settings the accountant may change, named one by one.
+   *
+   * This list is the whole point of the case: widening the accountant's reach inside this tier has to be a
+   * deliberate edit HERE and never a side effect of adding a setting somewhere else. It grew from one to
+   * four when P-HR-13 added the three gratuity account codes, and the reason they belong on it is the same
+   * reason the package policy does — which account a liability lands in is a revenue-recognition decision
+   * that reaches a filed return, and the accountant already holds `ledger:post`, `period:lock` and
+   * `vat_return:prepare`. Fetching the owner to answer a bookkeeping question is how a locked setting comes
+   * to be worked around.
+   *
+   * The customer-safety locks — same-gender matching, the promotional window, review auto-send — stay with
+   * the owner ALONE, and the assertion below is what keeps them off this list.
+   */
+  it('only accounting-policy settings are the accountant’s, and they are named one by one', () => {
     const accountants = SETTINGS.filter(
       (s) => s.tier === 'compliance_locked' && s.editableBy.includes('accountant'),
     ).map((s) => s.key)
-    // Named, so widening the accountant's reach inside this tier is a deliberate edit to this list and
-    // not a side effect of adding a setting. The customer-safety locks stay with the owner alone.
-    expect(accountants).toEqual(['packages.unredeemed_balance_policy'])
+    expect(accountants).toEqual([
+      'packages.unredeemed_balance_policy',
+      'hr.gratuity_expense_account',
+      'hr.gratuity_liability_account',
+      'hr.gratuity_settlement_payable_account',
+    ])
+    // The control, in the direction the list itself cannot state: every compliance-locked setting that is
+    // NOT on it must still be owner-only. Without this, appending a customer-safety lock to the array above
+    // would be enough to relax it, and the case would pass having approved exactly what it exists to refuse.
+    for (const setting of SETTINGS.filter((s) => s.tier === 'compliance_locked')) {
+      if (accountants.includes(setting.key)) continue
+      expect([...setting.editableBy], `${setting.key} must stay owner-only`).toEqual(['owner'])
+    }
   })
 
   it('a manager is refused the package balance policy and the accountant is not', () => {

@@ -11765,8 +11765,14 @@ units:
       these tables exist to refuse. That gap is a ledger-side adjustment rather than a punch. P-HR-12 was
       its first owner and did not build it — that unit''s payroll_deduction only ever REDUCES pay, and
       unrecorded work in a closed month needs an UPWARD adjustment, which nothing in the payroll schema can
-      express — so the gap is deferred to P-HR-13 (monthly gratuity accrual posted to the append-only
-      ledger, still todo), which is the HR unit that posts to the ledger. (3) THE PUBLIC-HOLIDAY FLAG, which P-HR-05
+      express — so the gap is deferred to P-HR-13 (DEFERRAL SATISFIED — monthly
+      gratuity accrual posted to the append-only ledger, which is the HR unit that posts to the ledger, and
+      it has since BUILT this): `closed_period_labour_adjustment` in migration 0107 records the work as a
+      ledger-side accrual — wages expense against wages payable, dated in the next OPEN period and naming
+      the locked one (ZY177) — with the amount STATED by an authoriser rather than derived, because deriving
+      it means deciding what a day of a monthly salary is worth, which Y9-deductions records as unanswered.
+      What is still open is whether such work is payable at all and who may authorise it, which stays on
+      Y9-attendance. (3) THE PUBLIC-HOLIDAY FLAG, which P-HR-05
       and P-HR-06 both deferred to Y9-overtime: premises_closure is a floor and not a calendar, so the flag
       reaches summariseTimesheet as an argument and both callers leave it unset. P-HR-10 builds the calendar.
       (4) PAYING ANYBODY. weighted_minute_bp is whole basis-point-minutes and deliberately not money: what an
@@ -12428,7 +12434,7 @@ units:
       corrections by dated reversal, and a reconciliation test tying the liability account to the accrual
       rows.'
     owner: claude
-    status: todo
+    status: done
     size: M
     milestone: M6
     depends_on:
@@ -12470,12 +12476,122 @@ units:
       asserting no account code literal in the job
     - accruing into a locked period is refused; the entry lands in the next open period with a dated reference
       to the locked one
+    - 'NOTE: allocations actually used. Migration 0107 (`0107_hr_gratuity.sql`), SCHEMA_VERSION 107, gate
+      block `// 135a-135z.`, ADR 0057, and private SQLSTATEs ZY171-ZY177 of the allocated ZY171-ZY180 band —
+      ZY178-ZY180 are left FREE. The manifest listed the migration as a glob (`*_hr_gratuity.sql`) and it
+      landed as 0107. The allocated test port band 17_300 was NOT used and is NOT declared in
+      TEST_PORT_BANDS: this unit starts no server, because it has no route and its two integration suites
+      drive the repository and the job against real PostgreSQL. A declared-and-unused band fails
+      test-ports.test.ts, so declaring it would have been the defect.'
+    - 'NOTE: the allocation note in packages/db/src/index.ts still says "106 is the first number nobody
+      holds". That is now stale by one — 0107 exists — and it was left alone deliberately: the instruction
+      for this unit was to add a paragraph before the note and not to edit the note''s prose, and
+      allocation-note.test.ts refuses a second next-free claim in any wording. The integrating merge owns
+      that sentence.'
+    - 'NOTE: Y9-gratuity was genuinely NEW and was added to OPEN-QUESTIONS section A2. Two other questions
+      were EXTENDED rather than duplicated, which is the discipline P-HR-12 recorded after finding one of its
+      "new" questions already written down. (1) Y9-attendance has carried the closed-period attendance gap
+      since 0086 and pointed it at P-HR-12; that row is now re-pointed here and says what was built, and
+      P-HR-13 is added to its owners column. (2) The underlying figure the gratuity day-rate needs — what a
+      day of a monthly salary is worth — is ALREADY recorded on Y9-deductions and on Y9-overtime, so
+      Y9-gratuity cross-references both rather than opening a third row for it. No second row was added for
+      anything.'
+    - 'NOTE: P-HR-07''s closed-period attendance gap is BUILT, not deferred again.
+      `closed_period_labour_adjustment` records work done on a date in a closed accounting period that no
+      punch captured: wages expense against wages payable, dated in the next OPEN period and naming the
+      locked one (ZY177), upward only, with an authoriser distinct from the recorder and a reason in their own
+      words. The AMOUNT is stated by the authoriser and is never derived, and that is the part that stays
+      open: deriving it means deciding what a day of a monthly salary is worth (Y9-deductions), and a derived
+      figure would be indistinguishable on the ledger from an authorised one. It credits a PAYABLE rather
+      than reaching into a payroll run, so P-HR-12''s constraint is satisfied by not needing it — a completed
+      run is immutable (ZY141) and only the completing statement may write its header figures (ZY142).
+      **What remains open and is recorded on Y9-attendance: whether unrecorded work in a closed month is
+      payable at all, and who may authorise it.** There is no admin screen for it; recording one is a write
+      with an actor and belongs with whichever unit builds the HR write surface.'
+    - 'NOTE: there is deliberately NO CAP column on gratuity_rule. docs/04 section 7 names no cap and the
+      SHAPE of one is as unknown as its number — a ceiling on the days earned, on the months that earn, or on
+      the total as a multiple of the wage are three different columns — so a nullable one would be a place to
+      put a figure the engine would then apply to the wrong quantity. Uncapped is the prudent direction for a
+      liability. This is 0066''s position on carry-over expiry: answering Y9-gratuity with a cap needs a
+      UNIT, not a value, and ADR 0057 is what a later unit has to change rather than adding a field.'
+    - 'NOTE: three readings are this build''s and none is a flag on the rule row, for 0066''s reason that a
+      policy the engine would have to honour two ways is worse as a column than unexpressible. The wage is
+      the wage as at the accrual month applied to the whole of service (the "final wage" reading); a month
+      straddling a band boundary earns at the higher rate for the whole month; and probation months earn
+      nothing but still COUNT as service. Each is the direction that makes the liability LARGER, because
+      understating what an employee is owed is the error that leaves no trace, and all three are stated on
+      Y9-gratuity.'
+    - 'NOTE: the daily-wage divisor is its OWN column and not labour_cost_rule.monthly_wage_days_divisor
+      (0081), although version 1 of both carries 30. That one is a FORECAST''s divisor flagged against
+      Y9-overtime and P-HR-07''s NOTE declines to pay anybody with it; this is a statutory entitlement basis
+      flagged against Y9-gratuity. One column serving both would clear the Unconfirmed Assumptions panel for
+      an answer nobody gave — and 0081 itself draws the same distinction between its paid_minutes_per_day and
+      working_hours_rule.ordinary_minutes_per_day: "two figures that happen to be equal".'
+    - 'NOTE: the pass REFUSES to accrue for an employee whose employment record is still provisional, and
+      that is an addition beyond the acceptance list rather than one of its lines. Service length MULTIPLIES
+      the whole liability, and the nineteen seeded employees carry employed_from = 1970-01-01, an epoch
+      placeholder 0050''s seeder chose precisely because it cannot be mistaken for a transcribed fact — so
+      accruing against one would owe fifty-six years of gratuity rather than a slightly wrong figure. It is
+      reported SEPARATELY from being unpriced, because "put the wage in" and "confirm the HR file"
+      (Y8-staff) are different things to go and do.'
+    - 'NOTE: the fk_child erasure probe (C-CRM-10, ADR 0034) reaches NONE of this migration''s columns, so no
+      column needs an inherits_parent classification. Checked against the live schema rather than assumed:
+      every foreign-key parent here — employee, journal_entry, period_lock, gratuity_rule and gratuity_accrual
+      itself — was queried for a column matching the probe''s customer/contact pattern and none has one.
+      Gratuity is about employees, as payroll is.'
+    - 'NOTE: two consequences of this schema that surprise anybody tidying up. (1) Once a gratuity_accrual
+      names a period_lock, that lock can NEVER be deleted: locked_period_id references it and the accrual
+      refuses DELETE for every role (ZY171). That is ADR 0026 made structural — a closed period a liability
+      has been posted against is not one anybody may re-open — and it is asserted as its own case. (2)
+      Neither integration suite TRUNCATES its tables, although both were first written to. Every accrual row
+      names a journal_entry and journal_entry refuses DELETE for every role including the owner (ZL001), so
+      emptying the accrual table leaves its entries behind and the next run dies on journal_entry_pkey. Both
+      suites are ensure-then-assert with stable ids instead, and each was run TWICE to prove it.'
+    - 'NOTE: gratuity_accrual_movement_is_positive is UNREACHABLE while assert_gratuity_accrual_is_posted
+      (ZY173) exists, and its test says so rather than pretending otherwise. A zero-fils journal line is
+      refused by journal_line_exactly_one_side (0018), so no entry a zero-movement accrual could name can
+      agree with it, and ZY173 fires first because PostgreSQL evaluates BEFORE triggers before table CHECKs.
+      The CHECK is the layer that survives the trigger being dropped, so it is asserted to EXIST rather than
+      to fire — which is the honest form of the claim under ADR 0003.'
+    - 'NOTE: scoped out. (1) AN ADMIN SCREEN. No acceptance line asks for one and the manifest''s file list
+      names none; a gratuity schedule and a settlement form are writes with an actor, and recording a
+      settlement or a closed-period adjustment from a browser belongs with whichever unit builds the HR write
+      surface. The figures are readable through the repository and the liability view. (2) PAYING THE
+      SETTLEMENT. The settlement entry discharges the liability against a PAYABLE; the money leaves through
+      P-HR-12''s payroll run, which this unit does not touch. Nothing here adds a gratuity line to a payslip,
+      because a payslip pins every figure it prints (ADR 0054) and a settlement is not a monthly component.
+      (3) A COMMITTED SECOND RULE VERSION. gratuityRulesFor picks the version governing each accrual month
+      and the pure suite asserts the per-date selection over two versions, but no version 2 is inserted
+      anywhere: gratuity_rule has no write grant for the application role, and a committed second version
+      would change what every later suite''s liability was judged against. (4) THE OVER-ACCRUAL CORRECTION
+      AS A JOB. correctGratuityOverAccrual and postGratuityCorrection exist and are exercised end to end, but
+      the PASS does not invoke them: a negative movement means somebody has to decide which figure was wrong,
+      so the pass names the employee and stops accruing them. Automating that would be the build choosing
+      whether a wage or a liability was the mistake.'
     files:
     - packages/core/src/hr/gratuity.ts
     - packages/core/src/hr/gratuity.test.ts
-    - packages/db/migrations/*_hr_gratuity.sql
-    - apps/worker/src/jobs/gratuity-accrual.ts
+    - packages/core/src/hr/gratuity.property.test.ts
+    - packages/core/src/index.ts
+    - packages/db/migrations/0107_hr_gratuity.sql
+    - packages/db/src/schema/gratuity.ts
+    - packages/db/src/schema/index.ts
     - packages/db/src/repositories/gratuity.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/settings-store.ts
+    - packages/db/src/index.ts
+    - packages/shared/src/gratuity-accounts.ts
+    - packages/shared/src/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/config/src/settings/registry.test.ts
+    - apps/worker/src/jobs/gratuity-accrual.ts
+    - apps/worker/src/jobs/gratuity-accrual.itest.ts
+    - apps/worker/src/registry.ts
+    - packages/fixtures/src/hr-gratuity.test.ts
+    - packages/fixtures/src/hr-gratuity.itest.ts
+    - docs/OPEN-QUESTIONS.md
+    - docs/adr/0057-a-gratuity-liability-is-cumulative-and-a-month-is-its-difference.md
+    - scripts/test-gates.mjs
   - id: P-HR-14
     order: 103
     title: Therapist self-service portal and staff notifications

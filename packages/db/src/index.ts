@@ -1001,6 +1001,30 @@ export {
   recordWpsExport,
   type WpsExportRow,
 } from './repositories/payroll.ts'
+export {
+  type ClosedPeriodLabourAdjustmentInput,
+  GRATUITY_SQLSTATE,
+  type GratuityAccrualInput,
+  type GratuityAccrualRow,
+  type GratuityEmployeeRow,
+  type GratuityLiabilityRow,
+  type GratuityMonthTotalRow,
+  type GratuityRuleRow,
+  type GratuitySettlementInput,
+  gratuityError,
+  isGratuityAppendOnlyViolation,
+  isGratuityPeriodDatingRefusal,
+  postClosedPeriodLabourAdjustment,
+  postGratuityAccrual,
+  postGratuityCorrection,
+  postGratuitySettlement,
+  readGratuityAccruals,
+  readGratuityEmployees,
+  readGratuityLiabilities,
+  readGratuityRules,
+  readGratuityTotalsByMonth,
+  type WrittenGratuityAccrual,
+} from './repositories/gratuity.ts'
 /*
   C-AUTO-08's pipeline board. `PIPELINE_ENROLMENT_PATH` is exported for one assertion and it is an
   acceptance criterion: a stage entry enrols through `enrolOnLiveVersion`, the writer C-AUTO-06 published,
@@ -3597,12 +3621,62 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // five different things to go and do. `ZY166`-`ZY170` are unused and deliberately NOT registered — an entry
 // for a code no migration raises is what direction 3 of the gate refuses, and that is the direction which
 // lets the registry shrink.
+// ---------------------------------------------------------------------------------------------
+// 0107 — end-of-service gratuity: the liability that grows every month (P-HR-13)
+// ---------------------------------------------------------------------------------------------
+// Four tables. `gratuity_rule` holds the FIGURES as a versioned provisional row, because docs/04 section 7
+// says exactly one thing about this subject — that gratuity is an accruing balance-sheet liability accrued
+// monthly — and no rate, band, cap, divisor or wage basis anywhere. That section also says where the HR
+// figures go instead and why, naming `working_hours_rule` (0059) and `leave_entitlement_rule` (0066), so
+// this is that shape: flagged against Y9-gratuity, on the Unconfirmed Assumptions panel, and answered by
+// publishing a NEW version rather than by editing a document. Gratuity is asked about the PAST for
+// payroll's reason — a settlement recomputed after a rate change must use the rate that applied then.
+//
+// There is deliberately NO CAP COLUMN. docs/04 names none, and the SHAPE of a cap is as unknown as its
+// number: a ceiling on the days earned, on the months that earn, or on the total as a multiple of the wage
+// are three different columns, so a nullable one would be a place to put a figure the engine would then
+// apply to the wrong quantity. That is 0066's reasoning about carry-over expiry — a policy the code would
+// silently mis-apply is worse as a column than left unexpressible.
+//
+// `gratuity_accrual` is the month's movement, and the month's movement is a DIFFERENCE: the whole liability
+// owed at the month end minus what is already on the books. ADR 0057 is why that way round. Twelve
+// independently-rounded twelfths do not sum to a year, the residue is permanent in a journal that cannot be
+// edited (ADR 0017), and it grows over a career. Making the cumulative figure the primitive also means a
+// wage rise lands as one catch-up movement in the month it is known — so nothing here can require a
+// COMPLETED PAYROLL RUN to be rewritten, which is the constraint P-HR-12 handed over (ZY141 makes a
+// completed run immutable and ZY142 lets only the completing statement write its header figures).
+//
+// `gratuity_settlement` discharges a leaver's liability to exactly zero, enforced rather than asserted:
+// ZY175 refuses any figure other than the live accrued total from `employee_gratuity_liability`, the view
+// that excludes every accrual some correction supersedes.
+//
+// `closed_period_labour_adjustment` answers a gap Y9-attendance has carried since 0086 and that P-HR-12
+// re-pointed here. Attendance for a day in a CLOSED accounting period with no punch at all cannot be
+// entered, because `attendance_correction.corrects_event_id` is NOT NULL — a correction amends a record and
+// cannot invent one. P-HR-12 could not take it either: `payroll_deduction` only ever REDUCES pay, and
+// unrecorded work needs an UPWARD adjustment. So it is a ledger-side accrual, wages expense against wages
+// payable, and the AMOUNT is stated by whoever authorises it and never derived — deriving it means deciding
+// what a day of a monthly salary is worth, which Y9-deductions records as unanswered, and a derived figure
+// would be indistinguishable on the ledger from an authorised one.
+//
+// The DEBIT AND CREDIT ACCOUNTS are resolved from `app_setting` and never written into a posting rule,
+// because `chart_of_accounts` is itself provisional against Y8-coa (0018 says so on the table). ZY173
+// checks the account TYPES — expense debited, liability credited — and deliberately not the codes, which is
+// the shape 0104 gave a tip with ZY146.
+//
+// Seven private SQLSTATEs, `ZY171`-`ZY177` of the `ZY171`-`ZY180` band, allocated through
+// `packages/db/src/sqlstate-registry.ts` (ADR 0043); `ZY178`-`ZY180` are left free. Seven and not one
+// because each has a different thing to go and do: "correct it with a reversal", "wait for the period to
+// close", "post the journal entry first", "end the employment first", "recompute the liability" and "record
+// a punch correction instead" are six different answers.
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
-// them. 100 through 105 are allocations held by six units in flight in other worktrees — W-SYS-13, W-SYS-14,
-// M-VAT-09, M-VAT-12, P-HR-12 and Y-PAY-01, in that order — so 106 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// them. 100 through 107 have all landed now, each with the unit that held it — W-SYS-13, W-SYS-14, M-VAT-09,
+// M-VAT-12, P-HR-12, Y-PAY-01, Y-PAY-02 and P-HR-13, in that order. 108 and 109 were held by A-FIRST-03 and
+// A-MEAS-01 and RELEASED: both turned out to need no migration at all, so both are permanent gaps rather
+// than numbers anybody is waiting on, and 110 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3627,4 +3701,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 106 as const
+export const SCHEMA_VERSION = 107 as const
