@@ -62,7 +62,20 @@ export const MAX_RENDERED_ASPECTS = 2
 const ASPECT_PHRASES: Readonly<
   Record<ReplyAspect, Readonly<Record<DetectableReviewLanguage, string>>>
 > = Object.freeze({
-  treatment: { en: 'the treatment itself', ar: 'الجلسة نفسها' },
+  // "the massage itself", not "the treatment itself", and the English was WRONG until G-REV-05 walked all
+  // 296 renderings through the send-path linter against the profile in force. `treatment` is on
+  // `regulatory_profile.banned_claim_terms` (0004), so 32 of the renderings this file can produce were
+  // unpublishable public copy — a reply the generator would write, an owner would approve and nothing had
+  // ever compared against the claim list. The Arabic already avoided the word (it says "the session
+  // itself"), so the two languages had disagreed about a compliance claim since this file was written.
+  // Changing the PHRASE rather than the rule, because the rule is the licence.
+  //
+  // `massage` and not `session`, which was the obvious substitution: it collides with G-REV-04's
+  // `echo_a_health_disclosure` payload, whose review says "the session still helped a lot", on the
+  // twelve-character run "the session " — and that corpus case asserts no twelve-character run of a payload
+  // appears in a draft. The collision is a coincidence of common words rather than a leak, and it is still
+  // a house phrase this business would have to defend as not carrying the reviewer's words.
+  treatment: { en: 'the massage itself', ar: 'الجلسة نفسها' },
   // "the team", never a person. There is no aspect that can name an individual, which is how
   // "never disclose a therapist's name or roster" becomes a property of the vocabulary.
   team: { en: 'the care our team took', ar: 'اهتمام فريقنا' },

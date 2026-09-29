@@ -282,6 +282,20 @@ export {
 } from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export {
+  deliverApprovedReply,
+  type ReplyDelivered,
+  type ReplyDeliveryDeps,
+  type ReplyDeliveryInput,
+  type ReplyDeliveryMode,
+  ReplyDeliveryRefused,
+  type ReplyLintReproduction,
+  type ReplySubmitter,
+  readReplyLintContext,
+  replyContentSha256,
+  replyDeliveryRefusalRulesOf,
+  reproduceReplyLint,
+} from './reviews/deliver.ts'
+export {
   DRAFT_DECLINED_REASONS,
   type DraftDeclinedReason,
   type DraftRunSummary,

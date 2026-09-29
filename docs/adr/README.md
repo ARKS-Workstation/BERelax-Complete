@@ -60,6 +60,7 @@ a decision the table does not list.
 | [0059](0059-an-opaque-category-code-is-a-property-of-the-whole-payload.md) | An opaque category code is a property of the whole payload, not of the code: the mapping is total by compilation and written out, the external payload is an allowlist projection whose drops are counted, and a figure travels only with the terminal funnel stage — because a price beside a code on a public price list is one row of the mapping | — |
 | [0050](0050-a-suite-may-delete-only-what-it-created.md) | A suite may remove rows it created; anything wider is declared, with the loader that restores a seeded table named, and the run itself checks that the seeded rows survived | — |
 | [0058](0058-origination-precedence-is-strict-and-a-click-id-outlives-the-tuple.md) | Origination is resolved in strict precedence — UTM, then click id, then referrer, then direct — and a click id is persisted verbatim whatever won, because the tuple and the ad-platform join key are different facts; an own-host referrer is no new origination rather than direct, and the registrable domain comes from a declared bounded suffix table whose worst case is a referral grouped one label too broadly | — |
+| [0063](0063-the-reply-linter-is-a-send-path-chokepoint-the-database-enforces.md) | The reply linter is a send-path chokepoint: not injectable, identical in both delivery modes, and a delivery timestamp is impossible without a lint stamp the database can see; provenance is asked of a machine draft and content of every reply | — |
 
 ## Writing one
 

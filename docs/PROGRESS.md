@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**143 / 211 units complete.**
+**144 / 211 units complete.**
 
 ## Next up
 
@@ -183,7 +183,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
 | [x] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
 | [x] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
-| [ ] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
+| [x] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |
 | [ ] | 166 | `G-REV-06` | Approval queue: Copy reply, deep link, Marked as posted | `G-REV-05`, `W-SYS-01`, `W-SYS-02`, `W-SYS-03`, `W-SYS-04`, `W-SYS-05`, `W-SYS-06`, `W-SYS-07`, `W-SYS-08`, `W-SYS-09`, `W-SYS-10` | — | — |
 | [ ] | 167 | `G-REV-07` | API delivery mode: the legacy v4 reviews adapter, isolated, flipped by a row | `G-CONN-05`, `G-REV-06`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13` | — | Y3-gbp-api, Y2-gbp-status, Y2-listing-owner |
 | [x] | 168 | `G-SEO-01` | GSC warehouse: nightly snapshots, startRow paging, the rare-query gap | `G-AGT-01`, `G-CONN-05` | — | — |

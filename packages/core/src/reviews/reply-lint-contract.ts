@@ -31,7 +31,10 @@ import {
  * argument and has no default, so G-REV-05 replaces the implementation without touching the generator,
  * and the criteria above are asserted against something that runs today.
  *
- * **G-REV-05 still owns**, and this file deliberately does not attempt:
+ * **G-REV-05 owns the rest, and has now built it** in `./reply-linter.ts`, whose
+ * `SEND_PATH_LINT_RULES` is a superset of {@link HOUSE_DRAFT_LINT_RULES} — asserted in
+ * `reply-linter.test.ts` rather than promised here. What this file deliberately does not attempt, and
+ * that module does:
  *
  *   - the banned-claims lexicon read from `regulatory_profile` (a row, not a constant);
  *   - therapist-name detection against the **live employee roster** (an integration concern — the
@@ -39,7 +42,9 @@ import {
  *   - the health-disclosure echo rule in its full form, including the fixture pair that proves an
  *     identical draft passes when the review carries no health phrase;
  *   - the 1,200-character cap applied to the *final rendered reply including any auto-appended
- *     signature* — there is no signature layer yet, so the cap here is on the draft;
+ *     signature*. The RENDERING is here — {@link renderFinalReply}, the one implementation both
+ *     linters measure — because a second answer to "how long is this reply" is the defect the cap
+ *     criterion is about. The generator appends no signature, so today the two agree;
  *   - the send-path chokepoint, so that an unlinted draft is refused by the delivery function itself;
  *   - recording the lint version and content hash on the approved reply.
  *
@@ -83,6 +88,19 @@ export type HouseDraftLintRule = (typeof HOUSE_DRAFT_LINT_RULES)[number]
  */
 export const REPLY_LENGTH_CAP = 1_200
 
+/**
+ * Where a candidate reply came from, which decides one rule and no others.
+ *
+ * `not_a_house_skeleton_rendering` is a statement about the GENERATOR — a draft it produced must be one of
+ * the finitely many strings {@link renderReplySkeleton} can make — so it cannot be asked of a reply a human
+ * has edited in the approval queue, which is the ordinary case on the send path (docs/10 §6: the owner sees
+ * the draft, edits it, posts it). Every other rule applies identically to both, because every other rule is
+ * about what the sentence SAYS rather than about who wrote it.
+ *
+ * The default is `machine_draft`, the stricter reading: a caller that says nothing gets the rule.
+ */
+export type ReplyOrigin = 'machine_draft' | 'approved_by_a_human'
+
 /** A candidate draft, and what the linter needs in order to judge it. */
 export interface ReplyLintCandidate {
   readonly draft: string
@@ -90,6 +108,51 @@ export interface ReplyLintCandidate {
   readonly language: DetectableReviewLanguage
   /** The review this answers, for the echo rule. `null` for a star-only review. */
   readonly reviewText: string | null
+  /**
+   * Google's display name for the reviewer, verbatim, for G-REV-05's
+   * `confirms_the_reviewer_was_a_client` rule. Absent means the question is not asked, which is what the
+   * generator wants: `buildReviewReplyPrompt` is never told the name (docs/07 §4), so the generator has
+   * nothing to leak and nothing to check.
+   */
+  readonly reviewerDisplayName?: string | null
+  /**
+   * The signature appended to the reply before it is measured and judged. `null` or absent is no signature.
+   *
+   * On the candidate rather than on the linter because it is a property of the reply being judged, not of
+   * the rule set: the same linter judges a reply with a signature and one without, and the length cap is
+   * asserted against the RENDERED total either way (G-REV-05's criterion).
+   */
+  readonly signature?: string | null
+  /** Defaults to `machine_draft`. See {@link ReplyOrigin}. */
+  readonly origin?: ReplyOrigin
+}
+
+/**
+ * What separates a reply from its signature. Two newlines, so the signature is its own paragraph.
+ *
+ * A constant rather than a literal in {@link renderFinalReply} because it counts towards
+ * {@link REPLY_LENGTH_CAP}: a test that asserts the cap at exactly 1,200 has to be able to compute the
+ * rendered length, and a separator only the renderer knows about makes that arithmetic a guess.
+ */
+export const REPLY_SIGNATURE_SEPARATOR = '\n\n'
+
+/**
+ * The bytes that are actually published: the draft, and the signature if there is one.
+ *
+ * ONE implementation, here in the seam, because two things measure it — {@link HOUSE_DRAFT_LINTER}'s cap
+ * and G-REV-05's send-path linter — and a second rendering would be a second answer to "how long is this
+ * reply" (the brief's rule about a fact stated twice). A blank signature renders as no signature rather
+ * than as a trailing separator, so a setting somebody cleared does not silently spend two characters of
+ * the cap.
+ */
+export function renderFinalReply(args: {
+  readonly draft: string
+  readonly signature?: string | null
+}): string {
+  const signature = (args.signature ?? '').trim()
+  return signature.length === 0
+    ? args.draft
+    : `${args.draft}${REPLY_SIGNATURE_SEPARATOR}${signature}`
 }
 
 export interface ReplyLintFinding {
@@ -215,10 +278,17 @@ export const HOUSE_DRAFT_LINTER: ReplyLinter = {
       return findings
     }
 
-    if (!isHouseReplyRendering(candidate.draft, candidate.language)) {
+    if (
+      (candidate.origin ?? 'machine_draft') === 'machine_draft' &&
+      !isHouseReplyRendering(candidate.draft, candidate.language)
+    ) {
       finding('not_a_house_skeleton_rendering')
     }
-    if ([...candidate.draft].length > REPLY_LENGTH_CAP) finding('exceeds_length_cap')
+    // The RENDERED reply, through the shared renderer: the generator appends no signature today, so this
+    // is the draft — but measuring the draft directly here would be the second implementation of the cap
+    // that G-REV-05's criterion is about, and it would read as correct while under-counting by however
+    // long the signature is.
+    if ([...renderFinalReply(candidate)].length > REPLY_LENGTH_CAP) finding('exceeds_length_cap')
     if (textNamesAnIndividual(candidate.draft)) finding('names_an_individual')
     if (mentionsMoneyOrDiscount(candidate.draft)) finding('promises_discount_or_refund')
     if (admitsFaultOrLiability(candidate.draft)) finding('admits_fault')

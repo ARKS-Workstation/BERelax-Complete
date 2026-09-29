@@ -1,8 +1,10 @@
+import { SEND_PATH_LINT_VERSION } from '@berelax/core'
 import {
   createConnection,
   getReview,
   ingestApiReview,
   listReviewQueue,
+  type ReplyLintStamp,
   reconcileApiReviewId,
   recordManualReview,
   recordReplyConfirmedByGoogle,
@@ -13,6 +15,7 @@ import {
 } from '@berelax/db'
 import { REVIEW_FIXTURES, type Review } from '@berelax/providers/google'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { replyContentSha256 } from './reviews/deliver.ts'
 
 /**
  * G-REV-01 — the review queue's two paths, against a real database and the real review fixtures.
@@ -47,6 +50,22 @@ const ANONYMOUS = 'A Google user'
 let sql: Sql
 let connectionId = ''
 let otherConnectionId = ''
+
+/**
+ * The lint stamp both delivery writers now demand (0113, G-REV-05).
+ *
+ * This file is about the two delivery MODES coexisting on one row, not about the linter, so it records a
+ * stamp over the reply it is delivering rather than linting one: the version is the real
+ * `SEND_PATH_LINT_VERSION` and the digest is computed by the real `replyContentSha256`, so the stamp is a
+ * true statement about these bytes and `google_reviews_reply_lint_sha256_is_hex` has something real to
+ * accept. What the linter does with a reply is `packages/google/src/reviews/reply-delivery.itest.ts`, which
+ * drives `deliverApprovedReply` and asserts the refusals.
+ */
+const deliveryStamp = (reply: string): ReplyLintStamp => ({
+  approvedText: reply,
+  lintVersion: SEND_PATH_LINT_VERSION,
+  contentSha256: replyContentSha256(reply),
+})
 
 /** Looks a fixture up by id so a test names the case it means rather than an array index. */
 function fixture(reviewId: string): Review {
@@ -235,7 +254,9 @@ describe('acceptance — reconciliation backfills the row, it does not add one',
       }),
     )
     await sql`update google_reviews set reply_draft = ${draft} where id = ${id}`
-    await withUnitOfWork(sql, OWNER, (uow) => recordReplyPostedManually(uow, id))
+    await withUnitOfWork(sql, OWNER, (uow) =>
+      recordReplyPostedManually(uow, id, deliveryStamp(draft)),
+    )
     return id
   }
 
@@ -356,12 +377,17 @@ describe('acceptance — reconciliation backfills the row, it does not add one',
   })
 })
 
+/** A reply for the delivery-mode cases, which are about the timestamps rather than about the words. */
+const API_REPLY = 'Thank you for the rating. We look forward to welcoming you back.'
+
 describe('acceptance — the delivery modes coexist, per row', () => {
   it('records an api delivery in two steps and refuses to also post it by hand', async () => {
     const { id } = await withUnitOfWork(sql, OWNER, (uow) =>
       ingestApiReview(uow, apiPayload('rev-5-ar', '2026-09-11T09:10:00.000Z')),
     )
-    await withUnitOfWork(sql, OWNER, (uow) => recordReplySubmittedToApi(uow, id))
+    await withUnitOfWork(sql, OWNER, (uow) =>
+      recordReplySubmittedToApi(uow, id, deliveryStamp(API_REPLY)),
+    )
     await withUnitOfWork(sql, OWNER, (uow) => recordReplyConfirmedByGoogle(uow, id))
 
     const stored = await getReview(sql, id)
@@ -373,7 +399,9 @@ describe('acceptance — the delivery modes coexist, per row', () => {
     // The control, and the reason the mode is a column: a row that says both would be unanswerable
     // afterwards, so the database refuses it rather than storing a contradiction.
     await expect(
-      withUnitOfWork(sql, OWNER, (uow) => recordReplyPostedManually(uow, id)),
+      withUnitOfWork(sql, OWNER, (uow) =>
+        recordReplyPostedManually(uow, id, deliveryStamp(API_REPLY)),
+      ),
     ).rejects.toThrow(/google_reviews_delivery_fields_match_mode/)
   })
 
@@ -383,7 +411,9 @@ describe('acceptance — the delivery modes coexist, per row', () => {
     const { id } = await withUnitOfWork(sql, OWNER, (uow) =>
       ingestApiReview(uow, apiPayload('rev-1-allegation', '2026-09-16T11:10:00.000Z')),
     )
-    await withUnitOfWork(sql, OWNER, (uow) => recordReplyPostedManually(uow, id))
+    await withUnitOfWork(sql, OWNER, (uow) =>
+      recordReplyPostedManually(uow, id, deliveryStamp(API_REPLY)),
+    )
     const stored = await getReview(sql, id)
     expect(stored?.deliveryMode).toBe('manual')
     expect(stored?.postedManuallyAtIso).not.toBeNull()

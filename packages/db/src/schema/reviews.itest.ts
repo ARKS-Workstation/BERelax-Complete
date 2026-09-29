@@ -65,6 +65,27 @@ async function seedConnection(sub: string, placeId: string): Promise<string> {
 
 type ReviewColumns = Record<string, string | number | null | Date | undefined>
 
+/**
+ * A lint stamp, for the two cases that set a delivery timestamp.
+ *
+ * 0113's `google_reviews_delivery_needs_a_lint_pass` refuses `submitted_at` or `posted_manually_at` on a row
+ * carrying no lint stamp, which is G-REV-05's send-path chokepoint as a floor. These two cases are about the
+ * TIMESTAMPS excluding each other per row, so they present a stamp rather than linting anything.
+ *
+ * The version is a visible stand-in and deliberately NOT the real `SEND_PATH_LINT_VERSION`: this package may
+ * not import `packages/core` (ADR 0001), so a copy of the real string here could only be a copy, and a copy
+ * of a version is the thing that goes stale silently. That the real version is what gets STORED is asserted
+ * in `packages/google/src/reviews/reply-delivery.itest.ts`, where the constant is nameable. The digest is a
+ * fixed 64 lower-case hex characters because `google_reviews_reply_lint_sha256_is_hex` requires that shape
+ * and nothing here computes one.
+ */
+const LINT_STAMP: ReviewColumns = {
+  reply_approved_text: 'Thank you for the rating. We look forward to welcoming you back.',
+  reply_lint_version: 'lint-version-stand-in',
+  reply_lint_content_sha256: 'f'.repeat(64),
+  reply_lint_passed_at: '2026-09-16T05:59:00.000Z',
+}
+
 async function insertReview(
   connectionId: string,
   placeId: string,
@@ -196,6 +217,7 @@ describe('acceptance — the delivery timestamps coexist and exclude each other 
     const id = await insertReview(connection, PLACE_A, {
       delivery_mode: 'manual',
       posted_manually_at: '2026-09-16T06:00:00.000Z',
+      ...LINT_STAMP,
     })
     const [row] = await sql<{ submitted_at: Date | null; posted_manually_at: Date | null }[]>`
       select submitted_at, posted_manually_at from google_reviews where id = ${id}
@@ -213,6 +235,7 @@ describe('acceptance — the delivery timestamps coexist and exclude each other 
       google_update_time: '2026-09-13T15:20:00.000Z',
       submitted_at: '2026-09-13T16:00:00.000Z',
       confirmed_at: '2026-09-13T16:00:04.000Z',
+      ...LINT_STAMP,
     })
     const [row] = await sql<
       { submitted_at: Date | null; confirmed_at: Date | null; posted_manually_at: Date | null }[]
@@ -228,8 +251,12 @@ describe('acceptance — the delivery timestamps coexist and exclude each other 
 
   it('rejects a row that populates both modes, in either direction', async () => {
     const connection = await seedConnection('sub-both', PLACE_A)
+    // The stamp is present so that the CONTRADICTION is the only thing wrong with these rows. Without it
+    // they also break 0113's `google_reviews_delivery_needs_a_lint_pass`, PostgreSQL may report either
+    // constraint, and this case would be asserting a name it happened to get rather than the rule it means.
     await expect(
       insertReview(connection, PLACE_A, {
+        ...LINT_STAMP,
         delivery_mode: 'api',
         submitted_at: '2026-09-16T06:00:00.000Z',
         posted_manually_at: '2026-09-16T06:05:00.000Z',
@@ -237,6 +264,7 @@ describe('acceptance — the delivery timestamps coexist and exclude each other 
     ).rejects.toThrow(/google_reviews_delivery_fields_match_mode/)
     await expect(
       insertReview(connection, PLACE_A, {
+        ...LINT_STAMP,
         delivery_mode: 'manual',
         submitted_at: '2026-09-16T06:00:00.000Z',
         posted_manually_at: '2026-09-16T06:05:00.000Z',

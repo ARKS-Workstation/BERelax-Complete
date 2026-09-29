@@ -1210,6 +1210,7 @@ export {
   type IngestedReview,
   ingestApiReview,
   listReviewQueue,
+  listStaffDisplayNames,
   listUndraftedReviews,
   type ManualReviewInput,
   type QuarantineWriteOutcome,
@@ -1217,6 +1218,7 @@ export {
   type ReconciliationInput,
   type ReconciliationOutcome,
   type ReplyDraftInput,
+  type ReplyLintStamp,
   type ReviewRoutingVerdictInput,
   type RoutingWriteOutcome,
   reconcileApiReviewId,
@@ -3567,7 +3569,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // run first", "record an attendance correction" and "name a liability account" are four different things to
 // go and do, which is 0061's argument for a private code at all.
 //
-// 106 is Y-PAY-02: `payment_intent`, its append-only `payment_intent_transaction`, and five refusals. The
+// 106 is 0106_payment_intent.sql (Y-PAY-02): `payment_intent`, its append-only
+// `payment_intent_transaction`, and five refusals. The
 // two tables are ordinary and the refusals are the unit. ZY162 is the one worth reading — an intent's state
 // or any of its three figures may change only by advancing `last_transaction_id` to a NEW transaction row
 // belonging to that intent — because it is where "the gateway, never the client, is the only thing that can
@@ -3622,7 +3625,7 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // for a code no migration raises is what direction 3 of the gate refuses, and that is the direction which
 // lets the registry shrink.
 // ---------------------------------------------------------------------------------------------
-// 0107 — end-of-service gratuity: the liability that grows every month (P-HR-13)
+// 107 is 0107_hr_gratuity.sql — end-of-service gratuity: the liability that grows every month (P-HR-13)
 // ---------------------------------------------------------------------------------------------
 // Four tables. `gratuity_rule` holds the FIGURES as a versioned provisional row, because docs/04 section 7
 // says exactly one thing about this subject — that gratuity is an accruing balance-sheet liability accrued
@@ -3670,13 +3673,46 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // close", "post the journal entry first", "end the employment first", "recompute the liability" and "record
 // a punch correction instead" are six different answers.
 //
+// 113 is 0113_reply_lint_stamp.sql — the reply lint stamp, and the delivery timestamp that cannot exist
+// without one (G-REV-05).
+//
+// Four columns on `google_reviews` and four CHECKs, and the unit is one of them:
+// `google_reviews_delivery_needs_a_lint_pass` refuses `submitted_at` (API mode) or `posted_manually_at`
+// (fallback mode, which is the launch mode) on a row carrying no `reply_lint_version`. docs/10 §6 says the
+// same linter runs in both modes and the manifest says a caller cannot route around it; the TypeScript half
+// is that `recordReplySubmittedToApi` and `recordReplyPostedManually` now take the stamp as a required
+// argument, and this constraint is what still holds when somebody writes the UPDATE by hand. One constraint
+// covering both modes rather than one each, because the claim is about delivery: a per-mode pair is the
+// shape that ends up covering one of them.
+//
+// `reply_approved_text` is deliberately not `reply_draft`. 0048's draft is the MACHINE's sentence and its
+// writer is guarded by `reply_draft is null` so that an owner's edit is never overwritten — which means the
+// moment anybody edits anything the two are different facts, and the one that matters afterwards is what
+// was published. It is the only thing `reply_lint_content_sha256` can be a hash of, and it is what
+// G-REV-06's *Copy reply* puts on the clipboard byte for byte.
+//
+// `google_reviews_reply_approved_text_within_cap` carries 1,200, which is a second statement of
+// `REPLY_LENGTH_CAP` and therefore arrives with the check that refuses a disagreement:
+// `packages/google/src/reviews/reply-delivery.itest.ts` reads the constraint's own definition out of
+// `pg_constraint` and asserts the number in it equals the constant. That suite and not the one beside the
+// other `google_reviews` probes, because ADR 0001 forbids `packages/db` from importing `packages/core` and
+// a test there could not name the constant. The direction that drift would take is the dangerous one — a
+// database still accepting what the linter had started refusing.
+//
+// NO private SQLSTATE, and the band ZY211-ZY220 allocated to this unit is released unused. Every refusal
+// here is an ordinary 23514 naming its own constraint, and a private code is for a refusal with a runbook
+// answer (ADR 0043, 0061): the answer to all four of these is the same sentence — lint the reply and
+// deliver it through the send path.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
 // them. 100 through 107 have all landed now, each with the unit that held it — W-SYS-13, W-SYS-14, M-VAT-09,
 // M-VAT-12, P-HR-12, Y-PAY-01, Y-PAY-02 and P-HR-13, in that order. 108 and 109 were held by A-FIRST-03 and
 // A-MEAS-01 and RELEASED: both turned out to need no migration at all, so both are permanent gaps rather
-// than numbers anybody is waiting on, and 110 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// than numbers anybody is waiting on. 110 through 113 were then handed out together to the units of one
+// batch: 113 has landed with G-REV-05, 110, 111 and 112 are still in their own worktrees, and 114 is the
+// first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3701,4 +3737,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 107 as const
+export const SCHEMA_VERSION = 113 as const
