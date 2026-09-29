@@ -157,6 +157,14 @@ jobs:
       - name: Private document choke point
         run: pnpm private-documents
 
+      # Nothing but an opaque category code leaves the building. Seven rules no type and no import rule can
+      # express: a cast that forges the branded payload, the projection turning into a spread, a category code
+      # spelled at a call site, a service-name column reaching the guard, the guard reaching the network, an
+      # analytics destination host outside the declared adapters, and a funnel stage copied rather than
+      # derived.
+      - name: Egress guard
+        run: pnpm egress
+
       # A tax document prints stored figures and derives none of them, declares only the Arabic weights
       # the PDF actually embeds, and builds right-to-left from the dir attribute rather than from a
       # direction mark. Three rules a review does not reliably catch on a template.

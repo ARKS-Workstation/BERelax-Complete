@@ -75,11 +75,18 @@ const isGateSuite = (file: string): boolean => file.endsWith(join('scripts', 'te
  * sacrificed to a pattern. A file whose declared job is to search for these strings is exempt by NAME, not by
  * shape, and `the-exemptions-are-used` below asserts each one still matches a file that exists — so an
  * exemption kept for a check somebody deleted fails here rather than widening this scan silently.
+ *
+ * A-MEAS-01's `scripts/check-egress-guard.mjs` is the fourth and arrived by the same route from the other
+ * direction: it holds the network globals it FORBIDS as the patterns it searches for, and it exempts THIS
+ * file by path from its own destination-host rule — and a path containing the word puts the file inside
+ * `ABOUT_WPS`. Two checks, each named in the other's allowance, each reported by the other. Exempt from rule 1
+ * only: rule 2 still covers all four, so a real submission URL in one is still caught.
  */
 const OTHER_CHECKS: readonly string[] = [
   join('scripts', 'test-no-autofile.mjs'),
   join('scripts', 'check-send-chokepoint.mjs'),
   join('scripts', 'check-private-documents.mjs'),
+  join('scripts', 'check-egress-guard.mjs'),
 ]
 
 const isOtherCheck = (file: string): boolean => OTHER_CHECKS.some((name) => file.endsWith(name))

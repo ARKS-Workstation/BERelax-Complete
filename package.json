@@ -25,6 +25,7 @@
     "db:migrate:dry": "node scripts/migrate-dry-run.mjs",
     "deps": "node scripts/check-dependencies.mjs",
     "documents": "node scripts/check-tax-documents.mjs",
+    "egress": "node scripts/check-egress-guard.mjs",
     "fixtures": "tsx scripts/fixture-digest.mjs",
     "fonts": "node scripts/emit-font-metrics.mjs",
     "fonts:emit": "node scripts/emit-font-metrics.mjs --emit",
@@ -65,7 +66,7 @@
     "tokens": "tsx scripts/emit-tokens.mjs",
     "tokens:emit": "tsx scripts/emit-tokens.mjs --emit",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/web/tsconfig.json",
-    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm no-autofile && pnpm structured-data && pnpm chokepoint && pnpm send-chokepoint && pnpm private-documents && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm sqlstate && pnpm budgets && pnpm gate-registry && pnpm gates:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm boundaries && pnpm boundaries:test && pnpm purity && pnpm invisibles && pnpm secrets && pnpm rotation && pnpm pii && pnpm deps && pnpm licences && pnpm container && pnpm palette && pnpm tokens && pnpm colours && pnpm cms && pnpm documents && pnpm no-invoice-mutation && pnpm no-autofile && pnpm structured-data && pnpm chokepoint && pnpm send-chokepoint && pnpm private-documents && pnpm egress && pnpm layout && pnpm jobs && pnpm adr && pnpm progress:check && pnpm media && pnpm fixtures && pnpm fonts && pnpm critique && pnpm a11y && pnpm touch-targets && pnpm coverage && pnpm test:integration && pnpm db:migrate:dry && pnpm db:drift && pnpm db:conventions && pnpm sqlstate && pnpm budgets && pnpm gate-registry && pnpm gates:test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

@@ -41942,6 +41942,426 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 137a-137z. (A-MEAS-01) The egress guard: every category code shown to be opaque, and every way round the
+//            guard shown to FAIL.
+//
+//            The unit's claim is an absence — no service name, health term or free text leaves the building
+//            — so it cannot be tested by a passing assertion, only by checks seen to fail on the day one
+//            would. Three mechanisms carry it and each is broken separately here, because a typo in one is
+//            invisible while the other two still hold:
+//
+//              * the MAPPING (137a-137d): total over a template-literal union so an unmapped row is a `tsc`
+//                error, injective so two categories cannot merge into one, and opaque — which is a separate
+//                mechanism from the shape, because `MASSAGE_01` satisfies `^[A-Z]+_[0-9]{2,}$` perfectly.
+//                The first version of that control in the suite listed it as something the pattern should
+//                refuse, and was wrong;
+//              * the ALLOWLIST (137e-137g): the payload is a projection of a committed tuple, and the drop
+//                counter is what makes a removed field an incident rather than an absence. The mutation that
+//                matters leaves a system that WORKS — replace the walk with a spread and every field a test
+//                asserts is still present, while every rogue field travels and every count reads zero;
+//              * the SCAN (137h-137n), which is the half no type and no import rule can express: a cast that
+//                forges the brand, a code spelled at a call site, a name-bearing column reaching the guard, a
+//                network global inside it, a destination host outside the declared adapters, and a funnel
+//                stage copied instead of derived.
+//
+//            137m is load-bearing beyond its own rule. The destination hosts are assembled from parts, and
+//            the first version of that list joined every host on `\.` — so it spelled `google.analytics.com`
+//            when the Measurement Protocol host is `google-analytics.com`, with a HYPHEN, and the rule could
+//            not see the one endpoint it exists for. No control inside the scanner can catch that: a pattern
+//            and any sample built from the same array agree with each other whatever the array says. Only a
+//            case that plants a REAL endpoint does, which is this one.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20), and the URL in
+//            137m is assembled from parts for the reason block 132 assembles its own: a working submission
+//            endpoint has no business being greppable in this repository even inside a gate.
+{
+  const CODES = 'packages/core/src/analytics/category-codes.ts'
+  const GUARD = 'packages/core/src/analytics/egress-guard.ts'
+  const SCANNER = 'scripts/check-egress-guard.mjs'
+  const SUITE = 'packages/core/src/analytics/egress-guard.test.ts'
+  const ITEST = 'packages/fixtures/src/egress-catalogue.itest.ts'
+  const FIXTURE = 'packages/fixtures/src/__gate_fixture__.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const scan = () => run('pnpm', ['egress'])
+  const scanExpectingFailure = () => runExpectingFailure('pnpm', ['egress'])
+  const suiteExpectingFailure = (file) => runExpectingFailure('pnpm', unit(file))
+
+  // 137a. A row with no code. The `Record` over CatalogueRefKey makes this a type error too, and that is the
+  //       point rather than a duplication: `vitest` does not typecheck (brief rule 28), so the suite is what
+  //       says so when somebody runs the tests and not the build.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(source, "    'variant:arabic:massage_with_shaving:120': 'SVV_32',\n", ''),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: a catalogue row with no category code fails the enumerating test',
+      result,
+      'has no category code',
+    )
+  }
+
+  // 137b. Two rows sharing one code. Not an error anywhere: it is two conversion streams reported as one, so
+  //       one category appears never to convert while the other over-reports, and nothing in an ad platform
+  //       says which.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(
+          source,
+          "    'service:arabic:normal_massage': 'SVC_05',",
+          "    'service:arabic:normal_massage': 'SVC_01',",
+        ),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: two catalogue rows sharing one code fails the injectivity assertion',
+      result,
+      'assigns each code to exactly one ref',
+    )
+  }
+
+  // 137c. A readable code. It satisfies the shape pattern, so this is the case that proves the opacity
+  //       assertion is a SECOND mechanism and not a restatement of the first.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(
+          replaceOnce(source, "  'SVC_01',\n", "  'MASSAGE_01',\n"),
+          "    'service:asian:normal_massage': 'SVC_01',",
+          "    'service:asian:normal_massage': 'MASSAGE_01',",
+        ),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: a code sharing a token with the catalogue fails the opacity assertion',
+      result,
+      'so a reader of the wire can decode it',
+    )
+  }
+
+  // 137d. A code nothing maps to. The other direction, and without it a code could sit in the tuple for ever
+  //       as a bucket that is empty by construction — ADR 0046's note on REACHABLE_FUNNEL_STAGES.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(source, "  'PKG_01',\n] as const", "  'PKG_01',\n  'PKG_02',\n] as const"),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: a declared code no ref reaches fails the both-directions assertion',
+      result,
+      'reaches every declared code',
+    )
+  }
+
+  // 137e. The projection replaced by a spread, behaviourally. The system still works, which is why the scan
+  //       rule in 137i exists as well: this case proves the suite notices, that one proves it cannot be
+  //       reintroduced somewhere the suite does not look.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const fields: Record<string, unknown> = {}\n',
+          '  const fields: Record<string, unknown> = {}\n  Object.assign(fields, carried)\n',
+        ),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: a payload spread past the allowlist fails the drop-counting test',
+      result,
+      'drops a rogue field and counts the drop',
+    )
+  }
+
+  // 137f. The value rule undone — "just always send the value", which is the change somebody makes to get a
+  //       conversion value into a funnel step. A figure beside an opaque code on a public price list is one
+  //       row of the mapping, and a few hundred of them are the menu.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          '    if (subject.eventType === FUNNEL_TERMINAL_STAGE) {',
+          '    if (subject.eventType !== undefined) {',
+        ),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: carrying a figure outside the terminal stage fails the value rule',
+      result,
+      'carries a figure for the terminal stage and refuses one anywhere else',
+    )
+  }
+
+  // 137g. The health lexicon's negative direction, which is the one that decides whether it can exist at all.
+  //       `pain` as a STEM flags `painting`; a gate that fires on ordinary English is a gate somebody
+  //       switches off rather than fixes, which is the `readFileSync` lesson from M-VAT-09 (ADR 0052).
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          "  { term: 'pain', match: 'word' },",
+          "  { term: 'pain', match: 'stem' },",
+        ),
+      () => suiteExpectingFailure(SUITE),
+    )
+    checkRejectedBy(
+      'egress: a health stem that flags ordinary English fails the lexicon negative control',
+      result,
+      'flags nothing a real payload can contain',
+    )
+  }
+
+  // 137h. A cast that forges the brand. The type cannot refuse one, and a forged payload has had no allowlist
+  //       applied — so it can carry a name, an intake answer or a price on a non-terminal event, and
+  //       A-MEAS-03's adapters accept it because the type says it is fine.
+  {
+    const result = withFixture(
+      FIXTURE,
+      [
+        "import type { EgressPayload } from '@berelax/core'",
+        '',
+        'export const forged = { eventType: 1 } as unknown as EgressPayload',
+      ].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a cast that forges a branded payload is caught',
+      result,
+      'egress-brand-minted-outside-the-guard',
+    )
+  }
+
+  // 137i. The projection replaced by a spread, structurally. Read from the source because the mutation leaves
+  //       a system that works — see 137e.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const fields: Record<string, unknown> = {}\n',
+          '  const fields: Record<string, unknown> = {}\n  Object.assign(fields, carried)\n',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a spread into the payload is caught by the scan',
+      result,
+      'egress-projection-walks-the-allowlist',
+    )
+  }
+
+  // 137j. A category code spelled at a call site: a second assignment nothing holds equal to the table.
+  {
+    const result = withFixture(FIXTURE, ["export const CATEGORY = 'SVV_11'"].join('\n'), () =>
+      scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a category code written outside the table is caught',
+      result,
+      'egress-category-code-literal-outside-the-table',
+    )
+  }
+
+  // 137k. A name-bearing column reaching the guard. "No service name leaves the building" is cheapest to hold
+  //       one step earlier: nothing brings one in, so there is nothing to drop by mistake.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          '  readonly quantity: number\n  /** Money received',
+          '  readonly quantity: number\n  readonly publicDisplayName: string\n  /** Money received',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a service-name field reaching the guard is caught',
+      result,
+      'egress-guard-holds-a-catalogue-name',
+    )
+  }
+
+  // 137l. The guard reaching the network. `fetch` is a global, so `core-must-be-pure` in
+  //       `.dependency-cruiser.cjs` cannot see it — a module graph has nothing to draw an edge to.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          'export function serialiseEgressPayload(payload: EgressPayload): string {',
+          'export function serialiseEgressPayload(payload: EgressPayload): string {\n  void fetch(String(payload))',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: the guard reaching the network is caught',
+      result,
+      'egress-guard-reaches-the-network',
+    )
+  }
+
+  // 137m. A REAL destination endpoint, assembled from parts. See the block header: this case is the only
+  //       thing that can catch a host list which no longer spells the host, and it has already caught one.
+  {
+    const host = ['google', '-', 'analytics', '.', 'com'].join('')
+    const result = withFixture(
+      FIXTURE,
+      [`export const ENDPOINT = 'https://www.${host}/mp/collect'`].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: posting to an analytics destination outside the declared adapters is caught',
+      result,
+      'analytics-destination-outside-the-declared-adapters',
+    )
+  }
+
+  // 137n. A funnel stage copied instead of derived. The two coming apart means the funnel and the ad
+  //       platforms disagree about what a conversion is, and the value rule stops moving with a ninth stage.
+  {
+    const result = withEditedFile(
+      GUARD,
+      (source) =>
+        replaceOnce(
+          source,
+          '    if (subject.eventType === FUNNEL_TERMINAL_STAGE) {',
+          "    if (subject.eventType === 'paid') {",
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a funnel stage written as a literal in the guard is caught',
+      result,
+      'egress-event-type-is-derived-from-the-funnel',
+    )
+  }
+
+  // 137o. The scanner's own controls, both of them, because each is a different claim. A code-literal
+  //       allowance that matches nothing is a hole waiting for the next thing written there.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          'const CODE_LITERAL_ALLOWED = new Map([\n',
+          "const CODE_LITERAL_ALLOWED = new Map([\n  ['packages/core/src/index.ts', 'excuses nothing'],\n",
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a code-literal allowance that excuses nothing fails the scanner own control',
+      result,
+      'allowance excuses nothing',
+    )
+  }
+
+  // 137p. And the sibling exemption's control, which is deliberately the OTHER one: those entries are allowed
+  //       to match nothing — no sibling check names a destination host today — so what must hold is that each
+  //       still resolves to a file that EXISTS. A renamed sibling would otherwise leave the exemption pointed
+  //       at nothing, and the next file to take that path would inherit it. Two of the existing scans have
+  //       already fired on each other's pattern text, which is why the set is there at all.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          "  [\n    'scripts/test-no-autofile.mjs',",
+          "  [\n    'scripts/test-no-autofile-renamed.mjs',",
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'egress: a sibling exemption pointing at nothing fails the scanner own control',
+      result,
+      'does not exist',
+    )
+  }
+
+  // 137q. The seeded rows are the other half of "every seeded catalogue row": without the integration suite,
+  //       the enumerating test iterates a list this build wrote about itself (ADR 0002). Dropping a footprint
+  //       leaves a real `price_on_request` row with no code, and only a suite that reads rows can say so.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const PRICE_ON_REQUEST_FOOTPRINTS = ['four_hands', 'couple', 'not_modelled'] as const",
+          "export const PRICE_ON_REQUEST_FOOTPRINTS = ['four_hands', 'couple'] as const",
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    )
+    checkRejectedBy(
+      'egress: a seeded price-on-request row with no category code fails the integration suite',
+      result,
+      'which has no category code',
+    )
+  }
+
+  // 137r. And the service half of the same claim, in the direction that catches a catalogue that grew: the
+  //       enumeration must still be exactly the rows the seed wrote.
+  {
+    const result = withEditedFile(
+      CODES,
+      (source) =>
+        replaceOnce(
+          source,
+          "  refs.push({ kind: 'package_template' })",
+          "  refs.push({ kind: 'package_template' })\n  refs.push({ kind: 'service', style: 'asian', treatmentKey: 'normal_massage' })",
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST)),
+    )
+    checkRejectedBy(
+      'egress: an enumerated service the catalogue does not hold fails the integration suite',
+      result,
+      'projects onto exactly the eight enumerated service refs',
+    )
+  }
+
+  // 137s-137z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing a module, or a scanner that refused the
+  //            clean tree would all report as a block of passing cases.
+  {
+    const clean = scan()
+    check('egress: the unedited repository passes the egress scan', !clean.failed, clean.output)
+
+    const green = run('pnpm', unit(SUITE))
+    check(`egress: ${SUITE} passes unedited`, !green.failed, green.output)
+
+    const rows = run('pnpm', integration(ITEST))
+    check(`egress: ${ITEST} passes unedited`, !rows.failed, rows.output)
+
+    const pure = run('pnpm', ['purity'])
+    check('egress: the guard passes pnpm purity', !pure.failed, pure.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -42792,6 +43212,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm chokepoint',
     'pnpm send-chokepoint',
     'pnpm private-documents',
+    // A-MEAS-01's egress guard, in the position `pnpm verify` runs it. Registered here because that is what
+    // makes dropping it from CI a failing build rather than the silent loss of the one check that says
+    // nothing but an opaque category code leaves the building.
+    'pnpm egress',
     'pnpm layout',
     'pnpm jobs',
     'pnpm adr',
