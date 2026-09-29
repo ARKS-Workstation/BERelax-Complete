@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sha256Hex } from '../hash.ts'
 import { createFakeMediaStorage, PUT_LOG } from './fake.ts'
 import { IMMUTABLE_CACHE_CONTROL, PRIVATE_CACHE_CONTROL } from './port.ts'
+import { createDocumentUrlSigner, DOCUMENT_SIGNATURE_PARAMS } from './signing.ts'
 
 /**
  * docs/12 §1: a stub must never look like it works.
@@ -192,5 +193,111 @@ describe('the fake media storage outbox', () => {
     await expect(store.head({ bucket: 'public', key })).rejects.toThrow(
       /\[outbox-missing-metadata\]/,
     )
+  })
+})
+
+/**
+ * The fake's signing verb (W-SYS-14): the three ways it refuses, and the one way it works.
+ *
+ * ADR 0022 rule 2 — *a fake that only ever succeeds hides every error path, and the error paths are most of
+ * the work.* The failures here are SCRIPTED and never random, so a retry path can be driven without the
+ * suite becoming flaky.
+ *
+ * The key is a literal and is not a credential: no deployment holds it, nothing can be opened with it, and
+ * it carries the placeholder vocabulary `scripts/check-secrets.mjs` looks for.
+ */
+describe('the fake media storage signing verb', () => {
+  const signer = () =>
+    createDocumentUrlSigner({
+      current: {
+        version: 'v1',
+        secret: 'fixture-unused-never-a-real-document-signing-key',
+      },
+    })
+  const DOCUMENT = '0191f2c4-6b3a-7c1d-9e04-5a7b8c9d0e1f'
+  const KEY = 'documents/tax_invoice/fixture.pdf'
+  /*
+    Both instants come from `AT`, the injected clock this suite already builds the adapter with — not from
+    `Date.now()`.
+
+    The adapter judges "is this expiry in the future" against its INJECTED clock (`assertSignable`), and the
+    verifier is handed an instant by its caller. Mixing the two — a real-clock expiry against an `AT`-based
+    adapter — happens to pass today only because `AT` is in the past, and would invert the moment `AT` moved
+    forward or the suite was run with a frozen clock. One clock, stated once.
+  */
+  const at = (): number => Math.floor(Date.parse(AT) / 1000)
+  const soon = (): number => at() + 900
+
+  const withObject = async (options: Parameters<typeof createFakeMediaStorage>[0] = {}) => {
+    const store = createFakeMediaStorage({ outbox, now: () => AT, ...options })
+    await store.put({
+      bucket: 'private',
+      key: KEY,
+      body,
+      contentType: 'application/pdf',
+      cacheControl: PRIVATE_CACHE_CONTROL,
+    })
+    return store
+  }
+
+  const request = () => ({
+    bucket: 'private' as const,
+    key: KEY,
+    documentId: DOCUMENT,
+    documentClass: 'tax_invoice',
+    expiresAtEpochSeconds: soon(),
+  })
+
+  it('signs a stored private object, and the signature verifies against that document', async () => {
+    const store = await withObject({ signer: signer() })
+    const result = await store.sign(request())
+    const params = new URLSearchParams(result.query)
+    expect(params.get(DOCUMENT_SIGNATURE_PARAMS.keyVersion)).toBe('v1')
+    expect(result.nonce).toBe(params.get(DOCUMENT_SIGNATURE_PARAMS.nonce))
+    expect(signer().verify(params, { documentId: DOCUMENT }, at()).kind).toBe('valid')
+  })
+
+  it('refuses to sign when no signer is configured, by a name that says what to do', async () => {
+    const store = await withObject()
+    await expect(store.sign(request())).rejects.toThrow(/\[document-signing-not-configured\]/)
+  })
+
+  it('refuses a SCRIPTED number of signings and then works, so a retry path can be driven', async () => {
+    const store = await withObject({ signer: signer(), refuseToSign: 2 })
+    await expect(store.sign(request())).rejects.toThrow(/\[document-signing-refused\]/)
+    await expect(store.sign(request())).rejects.toThrow(/\[document-signing-refused\]/)
+    // The control, and the one that matters: an adapter armed for two failures must recover on the third.
+    // Without it, `refuseToSign` could be a permanent dead end and both cases above would still pass.
+    await expect(store.sign(request())).resolves.toBeDefined()
+  })
+
+  it("refuses for ever when armed with 'always'", async () => {
+    const store = await withObject({ signer: signer(), refuseToSign: 'always' })
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(store.sign(request())).rejects.toThrow(/\[document-signing-refused\]/)
+    }
+  })
+
+  it('refuses to sign an object that is NOT in the bucket', async () => {
+    // A signed 404 is not an authorisation: it reaches the reader as "we have lost your document", which is
+    // a far worse thing to say than "there is nothing to sign".
+    const store = await withObject({ signer: signer() })
+    await expect(
+      store.sign({ ...request(), key: 'documents/tax_invoice/never-written.pdf' }),
+    ).rejects.toThrow(/\[signing-an-absent-object\]/)
+  })
+
+  it('refuses to sign a PUBLIC object even when it is there', async () => {
+    const store = createFakeMediaStorage({ outbox, now: () => AT, signer: signer() })
+    await store.put({
+      bucket: 'public',
+      key: 'm/x/y/hero-mobile-414.avif',
+      body,
+      contentType: 'image/avif',
+      cacheControl: IMMUTABLE_CACHE_CONTROL,
+    })
+    await expect(
+      store.sign({ ...request(), bucket: 'public', key: 'm/x/y/hero-mobile-414.avif' }),
+    ).rejects.toThrow(/\[signing-a-public-object\]/)
   })
 })

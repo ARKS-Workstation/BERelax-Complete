@@ -18,6 +18,7 @@ import type { Actor, FinalisedCheckout, Sql } from '@berelax/db'
 import { createConnection, finaliseCheckout, readInvoice, readJournalEntry } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { assertMappingReconciles, checkoutMapping } from './checkout.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -172,9 +173,7 @@ afterAll(async () => {
   // is the only legal removal, and it must happen before the customer goes because
   // `invoice.customer_id` is ON DELETE RESTRICT. Every referencing table is NAMED rather than reached
   // with CASCADE, so the next one to reference `invoice` fails loudly here.
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`

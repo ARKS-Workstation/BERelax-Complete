@@ -49,6 +49,10 @@ a decision the table does not list.
 | [0044](0044-a-filed-vat-return-is-a-snapshot-not-a-query.md) | A filed VAT return is a snapshot of bytes with a hash over exactly those bytes, signed by two different people; a correction is a new version | — |
 | [0048](0048-the-marketing-kill-switch-cannot-reach-transactional-traffic.md) | The kill switch is read in a function whose parameter cannot be a transactional message; its state has one row; the non-production default is computed, not stored | — |
 | [0047](0047-commission-is-reproducible-by-pinning-its-version-and-its-as-of.md) | A commission run pins the rule version that judged it and the instant it read the books at; nothing is seeded, because no structure is configured | — |
+| [0049](0049-places-aggregate-only-while-the-caching-terms-are-unverified.md) | Places reads are aggregate only; review content is never cached while the terms are unverified | — |
+| [0052](0052-no-autofile-is-structural.md) | The absence of a filing capability is enforced by checks that fail when it appears — a boundary rule for the import, a scan for the global, the name and the credential; the Zoho export is one-way bytes for a signed return | — |
+| [0051](0051-a-private-document-is-fetched-through-one-route-against-a-detached-signature.md) | A private document is fetched through one route against a detached HMAC over the document, verified without the provider; a valid signature authorises a fetch and never a principal, and a clinical or salary document is single-use in the database | — |
+| [0053](0053-a-report-over-a-closed-period-proves-it-read-as-of-the-lock-rather-than-filtering-silently.md) | A report over a closed period records the lock's own instant and carries a line counting the rows written after it, rather than filtering its reads on `created_at` — which would hide a reopened period behind figures that still look as filed | — |
 | [0050](0050-a-suite-may-delete-only-what-it-created.md) | A suite may remove rows it created; anything wider is declared, with the loader that restores a seeded table named, and the run itself checks that the seeded rows survived | — |
 
 ## Writing one

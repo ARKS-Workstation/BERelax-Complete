@@ -141,6 +141,30 @@ export const TEST_PORT_BANDS = {
   // [14_000, 14_300) is unallocated, so nothing else reaches into this one. [14_300, 14_600) contains none of RESTRICTED_PORTS — the highest entry in that table below the
   // ephemeral floor is 6697 — so `usableWidth` is the full 300.
   commission: { start: 14_300, width: 300 },
+  // G-REV-02's paste form, which needs a real server for the one claim a pure render cannot make: that the
+  // form completes in a SINGLE POST. Counting requests is a property of a browser submitting a real form to a
+  // real handler, and the 303 that follows it is what makes "one POST" different from "one request". 13_500
+  // was the band this unit was allocated, and it did NOT survive the merge: [13_500, 13_800) reaches into
+  // `leave-approval` at [13_300, 13_600), which is the third overlap this registry has caught and the second
+  // the integrator issued rather than a unit picking for itself. MOVED to 14_900, the next start above
+  // `marketing-kill-switch` [14_600, 14_900). Two suites sharing a band is worse than a collision that fails
+  // to start, because the second `next start` cannot bind and the suite answers from the FIRST one's server.
+  // [14_900, 15_200) contains none of RESTRICTED_PORTS.
+  'reviews-paste': { start: 14_900, width: 300 },
+  // W-SYS-14's private document route, which needs a real server for every claim it makes, because all of
+  // them are about a RESPONSE rather than a return value: 403 for an unsigned request, 403 with a DIFFERENT
+  // named reason for an expired one, 403 for a signature swapped onto another document's path, 403 for a
+  // receptionist holding a valid link to a payslip, and the bytes plus their `content-disposition` for a
+  // reader who passes all three gates. The acceptance line says so in as many words — "a test drives a real
+  // served response rather than asserting on a function" — because a handler exercised as a function is a
+  // handler whose status codes nobody has seen.
+  //
+  // 15_500 is the band this unit was allocated; 14_900 through 15_400 are allocations held by units in
+  // flight in other worktrees, and a band chosen from what one worktree can see is exactly how
+  // `template-editor` and `book-flow` came to share one. [15_500, 15_800) contains none of
+  // RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697, and Chromium's own
+  // list has nothing between 10080 and the floor — so `usableWidth` is the full 300.
+  documents: { start: 15_500, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

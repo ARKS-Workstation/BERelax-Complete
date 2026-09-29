@@ -3697,6 +3697,27 @@ units:
       the wrong shape. SCHEMA_VERSION stays 99 because no migration landed. Private SQLSTATEs ZY101-ZY110 are
       UNUSED: nothing here raises from PL/pgSQL. Test port band 15_200 is UNUSED: no suite here starts a
       server. Gate block 128a-128o. ADR 0050.'
+    - 'NOTE: the merge hazard this unit predicted, and the remedy it took. `@berelax/fixtures` now exports
+      `truncateInvoiceFamily` and `truncatePackageFamily`, which moved sixteen suites'' table lists into one
+      module - the right fix, and it moved the STATEMENT out of a `*.itest.ts`. The scan walked test files by
+      filename, so 98 declarations went stale in one merge and the shared statement they described became
+      unguarded. `TEST_SUPPORT_MODULES` in suite-table-ownership.ts now names that module, and ONE declaration
+      for it replaced nineteen. The hand-patch of the nine package-family truncate statements this unit made
+      before the helpers existed was discarded in favour of them, with the six `commission_line` declarations
+      that went with it.'
+    - 'NOTE: and the hole the merge exposed, which was this unit''s own. `truncate ${LIST.join('', '')}` has no
+      table names in its text, so adding the helper module to the scanned set found NOTHING in it - a scan
+      silently covering less than it claims, which is the failure ADR 0002 is about and which any suite could
+      have used to evade this rule. The scan now RESOLVES a table list written as a frozen array of string
+      literals in the same module, and a list it cannot resolve is a finding
+      (`a-statement-whose-scope-cannot-be-read-is-declared`) rather than silence. Five such statements exist and
+      are declared: a per-run test schema in numbering.itest.ts, a partition name read from `tableoid` in
+      analytics.itest.ts, and a loop over three table names in vat-return-signoff.itest.ts.'
+    - 'NOTE: brief rule 27''s own check answered UNSAFE about itself here, twice over - `grep -qa test-gates.mjs`
+      matches the checking shell''s own argv, and `git -C ""` from an unreadable cwd resolves against the
+      caller and reports every process as live in your worktree. Both are hardened in
+      docs/CONTRIBUTING-AGENT-BRIEF.md as a third trap, because a guard that cries wolf is a guard people stop
+      reading - and this unit committed a captured `__boundary_fixture__` while that guard was mis-answering.'
   - id: W-SYS-14
     order: 41.8
     title: 'Private document storage: the signed URL, and the audited download'
@@ -3707,7 +3728,7 @@ units:
       adapter behind it, a route that refuses an unsigned or expired request by name, and an audit row per
       download.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-05
@@ -3751,6 +3772,54 @@ units:
       chooses, so a statutory document is readable by anyone who learns the path.'
     - 'NOTE: order 41.8, after W-SYS-12 and W-SYS-13, for the same reason they sit there - it depends only on
       `done` units, so any order is topologically valid, and the documents it protects already exist.'
+    - 'NOTE: what this unit BUILT, because the acceptance list is about refusals and the shape is worth
+      stating. `private_document` (migration 0101) is the REGISTER: one row per object in the private bucket,
+      with the class that decides who may read it, the content hash that says which bytes it is, and the
+      use policy derived from the class. `private_document_fetch` is the record that a copy left the
+      business. `MediaStorage.sign()` mints a DETACHED HMAC over the document — id, class, expiry, nonce,
+      key version — verified in this process rather than by the provider, which is what keeps "this link
+      expired" and "somebody is guessing" apart (a presigned Spaces URL is checked by Spaces and every
+      refusal arrives as one third-party 403). `/documents/{id}` applies three gates in order: the staff
+      session, the signature, then the authorisation matrix. ADR 0051 is the argument, including why
+      M-VAT-11''s stored grant was right for its problem and is not rewritten here.'
+    - 'NOTE: the screen that OFFERS a download is DEFERRED and has an owner rather than an implication.
+      Nothing in the product mints a link yet: there is no document list for a customer or an employee, and
+      inventing a mint ENDPOINT would be inventing an unauthenticated one that hands a link to anybody who
+      asks — which is the whole of what the 403 exists to prevent (M-VAT-11 makes the same argument for why
+      its mint is a function). The capability is complete and proven: `apps/web/src/documents.itest.ts`
+      mints links through `MediaStorage.sign` the way that screen will. Owner: W-SYS-01, which owns the
+      admin shell and the estate the list belongs in; it calls `MediaStorage.sign` and needs no new
+      capability.'
+    - 'NOTE: `payslip` and `clinical_extract` are declared in `PRIVATE_DOCUMENT_CLASSES` with NO producer.
+      Nothing in the build renders either today — P-HR-07 and P-HR-11 compute the figures and render no
+      per-employee document, and C-CRM-10''s erasure writes no export file. They are declared anyway because
+      the class that must be SINGLE-USE is the one to get right early, and a class added by the unit that
+      first needs one would be a class added under deadline. Both are exercised end to end against
+      registered fixtures, so they are tested rather than merely listed. The unit that renders a payslip
+      registers it with `registerPrivateDocument` and stores it with `storeTaxDocumentPdf`''s pattern;
+      `pnpm private-documents` refuses any other path.'
+    - 'NOTE: `obligation_evidence`''s own route (M-VAT-11) is deliberately NOT rewritten onto this scheme.
+      Its stored grant, its mint function and its 403 work and are tested, and converting them would be a
+      diff across a `done` unit to reach a scheme whose only advantage there is uniformity. What this unit
+      does instead is register `compliance_evidence` as a document class so the register is complete and a
+      second evidence producer has one place to go. The cost — two link schemes in one codebase — is stated
+      in ADR 0051 rather than discovered. Owner of any future convergence: whichever unit next touches the
+      compliance evidence estate.'
+    - 'NOTE: added beyond the list — `pnpm private-documents`
+      (scripts/check-private-documents.mjs), five rules with seven known-bad fixtures and six controls in
+      scripts/test-gates.mjs block 129. Rule four (`private-document-signature-verified-in-one-place`) was
+      DEAD when it was written: its pattern required a character before `sign`, so it matched
+      `documentSigner.verify(` and missed `signer.verify(` — the spelling the route uses. It was found by
+      probing every rule against a deliberate violation before writing the gate cases, which is ADR 0003
+      arriving from inside the unit rather than after it.'
+    - 'NOTE: found while working and NOT fixed here, because it is another unit''s code and outside this
+      scope: `apps/web/app/(admin)/packages/route.ts` never calls `guardAdminRoute`, so
+      `apps/web/src/admin-guard.test.ts` fails three cases on this batch base before any of this unit''s
+      changes (verified by stashing them). The route serves `/packages`, which `requiresAdminSession`
+      claims, and it exports two handlers with zero guard calls. A third pre-existing failure in the same
+      file reports a module under apps/web choosing a principal, a role or a permission from the query
+      string. These are W-SYS-11''s check firing on M-TILL-13''s route and belong to whoever owns that
+      pair; they will fail the integrating `pnpm verify` whoever runs it.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'
@@ -5437,7 +5506,15 @@ units:
       tax invoice.'' in both languages. It has no table of its own either — a receipt acknowledges a
       payment and the till sale and tender rows are M-TILL-05 to M-TILL-11 — so today it renders from
       the same stored document shape with its tax statement suppressed. RECEIPT_SOURCE records that.'
-    - 'NOTE: deferred to W-SYS-14 — private storage and the signed URL. (It read M-TILL-13 and M-VAT-11 until both went `done` without ever owning storage; W-SYS-14 was added for it.) Nothing in the
+    - 'NOTE: DEFERRAL SATISFIED by W-SYS-14. `MediaStorage` now has a signing verb, `private_document` and
+      `private_document_fetch` (migration 0101) are the register and the audited fetch log, and
+      `/documents/{id}` refuses an unsigned, expired, forged, replayed or unpermitted request with 403 by
+      name. ADR 0051 records the scheme. What this unit''s own `writeTaxDocumentPdf()` still is — a
+      caller-chosen path — survives for the golden-comparison suite and is confined to scripts and tests by
+      `pnpm private-documents`; production code takes `storeTaxDocumentPdf`. The original NOTE follows, kept
+      because it is the record of what was true when it was written. Deferred to W-SYS-14 — private storage
+      and the signed URL. (It read M-TILL-13 and M-VAT-11 until both went `done` without ever owning
+      storage; W-SYS-14 was added for it.) Nothing in the
       repository can sign a URL: MediaStorage (packages/media/src/storage/port.ts) exposes put, head,
       get and list and no signing, there is no DigitalOcean Spaces adapter at all (W-SYS-05''s
       [no-real-media-storage-adapter]), and there is no document route to return 403 from. The unsigned
@@ -7024,8 +7101,17 @@ units:
       the itest, so an export added and not classified fails — and the two that require sign-off are asserted to
       be exactly finaliseVatReturn and vatReturnForFiling, so a third arriving without its own behavioural case
       fails there rather than passing silently. The one-way Zoho export itself is deferred to M-VAT-09, which
-      owns it and reads vat_return_for_filing(); a VAT return SCREEN is deferred to M-VAT-12, whose
-      closed-month report is the nearest surface and which depends on this unit.'
+      owns it and reads vat_return_for_filing() — DEFERRAL SATISFIED for the export: M-VAT-09 landed it as
+      packages/db/src/services/zoho-export.ts, whose one read is vatReturnForFiling and whose refusal is the
+      same ZY055. The VAT return SCREEN is a different thing and is NOT satisfied. M-VAT-12 built the
+      closed-month reconciliation at apps/web/app/(admin)/accounts/reconciliation/, whose last line
+      reconciles the output tax the documents carry against the tax in the box the output_tax grouping maps
+      to — so the box figure this unit snapshots has a surface a reviewer can read it on. What nobody has
+      built is a screen over the vat_return SNAPSHOT itself: the stored figures read back through
+      vat_return_box_figure, the two signatures, the amendment chain and the finalisation. M-VAT-12 re-pointed
+      that at M-VAT-09, which was todo when it wrote the sentence and is done by the time this merged, so at
+      the merge it is deferred to R-REP-02, which is todo, builds statements tied to the ledger and is the
+      reporting surface a stored-figures screen belongs on.'
     - 'NOTE: a snapshot may not make an unfileable return look fileable, and that is a CHECK rather than a
       service guard: vat_return_fileable_only_when_nothing_in_it_refuses_filing reads the HASHED BYTES, so
       fileable = true is impossible while the snapshot carries a notFileableReasons entry or a box marked
@@ -7106,7 +7192,7 @@ units:
       plus a repository-wide identifier grep. The Zoho Books export is one-way, allowed only for a signed
       return.'
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - M-VAT-08
@@ -7123,12 +7209,55 @@ units:
     - every export writes an audit_event carrying the exporting user, the return version and the file hash
     - an ADR records that the absence is structural and that re-adding a network dependency to the tax modules
       fails the boundary gate
+    - 'NOTE: the acceptance line names ReturnNotSigned, and no such class was added. That refusal already
+      exists: M-VAT-08 shipped it as VatReturnNotSignedOff, raised by ZY055 from vat_return_for_filing()
+      itself (migration 0095), and the export simply lets it through. Two error classes for one database
+      rule is the second-statement-of-a-fact problem in the place it reads worst, because a caller
+      branching on the wrong one is a screen that cannot tell a missing signature from an unknown failure.
+      packages/db/src/services/zoho-export.itest.ts asserts the name AND the SQLSTATE, so the refusal is
+      identified by the rule rather than by a message.'
+    - 'NOTE: this unit takes NO migration and raises NO new private SQLSTATE, and that is a decision rather
+      than an omission - migration number 0102 and the codes ZY121 to ZY130 allocated to it are left unused
+      and free for a later unit. Every other refusal around the VAT return is a trigger or a CHECK, for the
+      reason ADR 0044 and migration 0087 record, and the argument does not transfer here: an export WRITES NO
+      ROW.
+      Its whole content is a read plus formatting, so there is nothing a psql session could write for a
+      trigger to refuse - which is exactly why 0095 put the sign-off refusal on a READ. The evidence of an
+      export is therefore an audit_event, append-only in the database (ADR 0008), written by the same
+      function that produces the bytes and in the same transaction, so the file and the evidence of it
+      cannot separate. The cost, stated in ADR 0052: the audit trail is the only index of exports, and
+      "which returns have been handed over" is a query over audit_event by action rather than a join. A
+      later unit that needs exports as first-class records adds the table and the deferred audit trigger.'
+    - 'NOTE: the file is NOT Zoho Books own import format, and nothing guessed one. Which columns that
+      package expects for a VAT return is unanswered by every document in the handover, so it is recorded
+      as [UNVERIFIED] Y11-zoho-import and the export declares its own tag, berelax.vat201.zoho.v1: four
+      labelled CSV sections carrying the signed snapshot box figures in integer fils, its content hash and
+      its own reasons against filing, with no TRN, registered name, address or authority reference (brief
+      rule 15). Answering that question adds a new format version beside this one rather than changing what
+      every previously exported file meant, and the bytes are frozen against
+      packages/db/src/services/zoho-export.fixture.csv so any change is visible in a diff.'
+    - 'NOTE: the identifier pattern is enforced exactly as this entry states it, and where it is porous is
+      written down rather than widened: submitVatReturn has Vat between the two words it joins, and e-file
+      spelled with a hyphen is not in it. A check quietly enforcing something broader than its own
+      specification makes the two disagree in the direction nobody reads. That porosity is why the unit has
+      six refusals and not one - the boundary rule and the network-global scan are what close it, because a
+      filing path has to reach the network under SOME name.'
     files:
     - scripts/test-no-autofile.mjs
     - .dependency-cruiser.cjs
     - packages/db/src/services/zoho-export.ts
+    - packages/db/src/services/zoho-export.test.ts
     - packages/db/src/services/zoho-export.itest.ts
-    - docs/adr/00xx-no-autofile-is-structural.md
+    - packages/db/src/services/zoho-export.fixture.csv
+    - package.json
+    - .github/workflows/ci.yml
+    - scripts/test-gates.mjs
+    - scripts/test-boundaries.mjs
+    - packages/db/src/index.ts
+    - build/secret-inventory.json
+    - docs/adr/0052-no-autofile-is-structural.md
+    - docs/adr/README.md
+    - docs/OPEN-QUESTIONS.md
   - id: M-VAT-10
     order: 65
     title: Compliance calendar engine and blocking obligations
@@ -7427,7 +7556,7 @@ units:
       to VAT boxes, with named identities rather than a narrative, zero unexplained variance, and a deliberately
       injected fixture defect proving the report actually examines something.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H03
@@ -7449,11 +7578,203 @@ units:
     - a deliberately injected fixture defect (one payment row absent from the fixture) makes the report
       fail with a named variance line, proving the gate fires — per the lesson in ADR 0002
     - the report is exportable for the tax agent and every export writes an audit_event
+    - 'NOTE: THE FINDING THIS UNIT EXISTS TO REPORT — there is no seeded closed month, so the first
+      acceptance line as written could only ever have passed over nothing. Measured on a database created,
+      migrated and seeded from clean: `pnpm seed` writes ZERO `appointment` rows, ZERO `invoice` rows and NO
+      `period_lock`, and `packages/fixtures/src/salon.ts` records the same finding in its own header — the
+      seeder prints "250 appointments, 188 invoices" from `generateSalon`''s counts rather than from what the
+      loaders wrote, which is why it has been easy to miss. A report over August 2026 therefore reconciles
+      seven empty figures against seven empty figures and reports zero variance, which is exactly the check
+      ADR 0002 says is worse than one that fails. So the month the report is asserted against is BUILT by
+      `packages/db/src/queries/month-reconciliation.itest.ts` through the real services, out of a reserved
+      span (2200-01 .. 2249-12, measured free: the years in any date literal under packages, apps or scripts
+      are 2000-2036, 2080-2100, 2120-2139 and 2150-2199), and `examinedRows` is asserted at a HAND-COUNTED 31
+      — 16 journal lines, 8 documents, 7 appointments — so an empty month cannot pass as a clean one.
+      Loading appointments and invoices into the seed is NOT done here, for the reason salon.ts gives: a
+      suddenly non-empty `appointment` table changes what every `done` unit''s suite sees, and that needs its
+      own integrating verify rather than a change slipped in beside a reporting unit.'
+    - 'NOTE: which function is the ONE SOURCE of every figure, which is the question this unit had to answer
+      before it wrote a line. A reconciliation report is where a second derivation of a money figure creeps
+      in, and two plausible numbers with nothing able to say which was filed is worse than one missing one.
+      So the module header carries the table and it is repeated here: the ledger movement over a period is
+      `trialBalanceMovement` (M-VAT-01); the deferred package liability is `readPackageLiability` (M-TILL-10),
+      called at both ends of the period and subtracted; a VAT201 box figure is `vat201Boxes` and the box a
+      grouping maps to is `vat201BoxForGrouping` (M-VAT-07); the canonical bytes of a money artefact are
+      `canonicaliseVat201WorkingPapers` (M-VAT-07, used rather than copied); the instant a closed period is
+      read at is `commissionPeriodSource` (P-HR-11); and whether a date is inside a closed period is
+      `periodStatusOn` (M-VAT-06), reached ONLY through that — this file deliberately never calls it, because
+      a report permitted by one reading of the lock and refused by another is the defect that one-reader
+      arrangement exists to prevent. The DOCUMENT aggregates (invoice gross, credit-note gross, tendered,
+      refunded, released, appointment counts) have no prior source: measured, nothing in packages, apps or
+      scripts sums `invoice.gross_total` or `payment.applied_fils` over a period, so this module is their
+      first source and `MONTH_RECONCILIATION_DERIVED_HERE` names them so a second one fails a test.'
+    - 'NOTE: the ONE figure this unit had to refine, and how the refinement is tied back rather than trusted.
+      Three identities need the ledger movement per JOURNAL SOURCE — an invoice''s revenue and a package
+      redemption''s revenue land on the same accounts and answer to different documents — and
+      `trialBalanceMovement` returns the movement per ACCOUNT with no source dimension, which cannot be
+      changed without changing a function nine `done` units assert against. So `ledgerCensus` computes the
+      movement per (account, source) pair AND `ledger_census_against_the_trial_balance` is a LINE OF THE
+      REPORT: the census summed back over every source against `trialBalanceMovement`''s own figure. The
+      refinement is therefore not a second answer — it is an answer the report itself holds to the one source,
+      and a wrong date predicate makes that line non-zero instead of making four other lines quietly agree
+      with each other. Gate case 131f is the mutant. "Revenue" and "output tax" are read off `account.type`
+      and `account.vat_box` rather than written as 4010 and 2030: M-TILL-13 measured that box 1 is TWO tags,
+      and a report naming the codes would be wrong the first time an account joined the chart.'
+    - 'NOTE: as of the lock is a LINE and not a silent filter, which is a deliberate divergence from the
+      obvious reading of migration 0097''s ZY076 and the argument is worth having. `sourceAsOf` IS the lock''s
+      own `locked_at` for a closed period, from `commissionPeriodSource`, and it is stored on the report so a
+      regeneration years later reads at the same instant. What the report does not do is filter every read on
+      `created_at <= sourceAsOf`. Two reasons. (1) The package liability and the ledger movement come from
+      functions that take no such filter, and re-deriving them with one is the second derivation this whole
+      module is arranged to avoid. (2) More importantly a silent filter would HIDE the case it exists for: a
+      period reopened by migration (ADR 0026 makes that the one sanctioned route, and
+      `vat-return-signoff.itest.ts` does exactly it) and posted into again would still report the figures as
+      filed, with nothing anywhere saying the ledger behind them had moved — which is the failure M-VAT-08''s
+      header describes as silently restating every return already filed. So the discipline is VISIBLE:
+      `rows_created_after_the_period_lock` counts, across invoice, credit_note, payment, refund, package_sale,
+      package_redemption and journal_entry, the rows dated inside the period written after `sourceAsOf`. Zero
+      is what makes "as of the lock" and "as of now" the same answer; non-zero is a named variance and an
+      export blocker. It is a check that has been SEEN TO FIRE: the itest reads an open month at an instant
+      250 years before it was written and requires the count to be 15, with the closed months at 0.'
+    - 'NOTE: ADR 0053 is taken, and it is the one decision here that binds units still to land. "A report
+      over a closed period PROVES it read as of the lock, rather than filtering silently" narrows a reading
+      of migration 0097''s ZY076 that R-REP-02, H-MIG-07 and M-VAT-13 would each otherwise have to guess at:
+      R-REP-02''s "re-running the statements for a locked period produces byte-identical output" is the same
+      claim, and the answer is a census over the period plus figures read at the period''s own dates, never a
+      created_at filter on the statement queries. The ADR also states what it does NOT weaken: ZY076''s filter
+      stays exactly as it is for a commission run, because a run stores one figure per therapist and has no
+      second source to disagree with, where a reconciliation''s whole content IS a disagreement between two
+      sources and filtering one of them manufactures one.'
+    - 'NOTE: NO MIGRATION, no private SQLSTATE and no port band. Allocation 0103 is LEFT UNUSED and
+      becomes a permanent gap like 22, 41, 44, 47, 71, 74 and 88; ZY131-ZY140 are left FREE rather than taken
+      and unused; `packages/harness/src/ports.ts` is untouched because no suite here starts a server; ADR 0053
+      is not taken. `SCHEMA_VERSION` stays at 99 and NO paragraph was added to the ledger in
+      `packages/db/src/index.ts` — there is no migration for one to describe — and the allocation note''s prose
+      was not edited, which is the integrator''s. The decision is that the artefact is BYTES plus an
+      `audit_event`, both of which already exist: a `month_reconciliation_export` table holding the same bytes
+      a second time is precisely the duplication 0095''s header argues against for `vat_return`, and
+      `audit_event` is already append-only (ADR 0008) with a JSON payload, separately indexed for the export
+      operation since 0005 because an unusually large export is the insider-threat signal. The refusal that
+      would have needed a CHECK is `exportMonthReconciliation` reading the report''s own
+      `notExportableReasons`, enumerated through `MONTH_RECONCILIATION_CONSUMERS` against the module''s REAL
+      export list — M-VAT-08''s `VAT_RETURN_CONSUMERS` arrangement, for M-VAT-08''s reason.'
+    - 'NOTE: a provisional box number is a CAVEAT and not an export blocker, and getting that backwards made
+      the export uncallable for an afternoon. M-VAT-08''s `vat_return` may not be FILEABLE while a box number
+      is provisional, which is right for a FILING. This report is the working paper handed TO the
+      FTA-registered agent so the numbering can be confirmed, and Y11-tax-agent records that review as not
+      optional — so with every box provisional today, treating it as a blocker means shipping an export
+      nothing can ever call, which is what the first version did and what its own itest caught.
+      `notExportableReasons` therefore holds the things that make the paper WRONG (an unexplained variance,
+      rows written after the lock, an open period, a standard-rated tax grouping that maps to no box) and
+      `caveats` holds what is UNCONFIRMED about a paper that is right. `caveats` is never empty: its last
+      entry names Y11-tax-agent and says in terms that the arithmetic is asserted by the build and the
+      correctness against FTA practice is not. The screen renders them as two separate banners for the reason
+      M-VAT-11''s does: adding an unanswered question to a variance count shows red on a month that reconciles
+      exactly, and after a fortnight of that nobody reads the red count.'
+    - 'NOTE: defects found in THIS unit''s own work, and what found each. (1) The VAT box was looked up by
+      grouping `standard_rated_supplies` with measure `tax`, which matches NO mapping row — the tax sits on
+      `output_tax` (2030) and the supplies on the revenue accounts, exactly as M-TILL-13''s note records — so
+      the last step of the chain reconciled against a silent zero. Found by the itest. Gate 131c is the
+      mutant. (2) The credit note''s ledger entry was classified under source `refund`. A credit note posts
+      `source = ''reversal''` and debits revenue and output VAT; `refund` moves MONEY and touches no revenue
+      account. The revenue identity was therefore out by every credit note in the month. Found by the itest;
+      gate 131a. (3) An `excluded` line''s claim was computed as an EQUALITY, so one no-show read as a
+      variance and the no-show and cancellation lines both failed on a month that reconciled to the fil. The
+      fix is that the claim of an excluded population is that its RIGHT side is empty, which needed a fourth
+      line kind; gate 131d. (4) Every line carried BOTH a `varianceFils` and a `varianceRows`, and the row
+      one subtracted three documents from six journal lines and published -3 as a variance on a line that
+      balanced exactly. Collapsed into one `variance` in the line''s own measure. (5) The committed worked
+      example omitted the redemption''s VAT from its output-tax figure — the same fact as (1) from the other
+      side. Found by `packages/fixtures/src/month-reconciliation.test.ts`, which re-derives every identity
+      from the documents it lists rather than trusting the figure beside them; gate 131m. (6) Its package
+      liability was checked as sold PLUS redeemed rather than minus, which is M-TILL-10''s recorded defect (7)
+      arriving in a test instead of a figure; gate 131o. (7) A gate anchor and a SQL comment each carried a
+      backtick or a `${}` inside a plain string: the first closed the tagged template literal it was inside
+      and broke the parse, the second is a Biome diagnostic and `pnpm lint` treats one as an error.'
+    - 'NOTE: what the manifest got wrong, both of which M-VAT-07 predicted in its own notes. (1)
+      `artifacts/fixtures/closed-month-reconciliation.json` is the wrong home for the worked example:
+      `artifacts/` holds no tracked file in this repository — it is where `scripts/screenshots.mjs` and the
+      media outbox WRITE — while this build''s convention for a committed worked example is a TypeScript
+      constant in `packages/fixtures` (`RECOVERABILITY_WORKED_EXAMPLE`, `REVERSE_CHARGE_WORKED_EXAMPLE` and
+      `VAT201_WORKED_EXAMPLE_BOXES` are all that shape), and a constant is typechecked and importable where a
+      JSON blob is neither. Gate case 101 asks GIT whether a declared path is tracked, so the JSON would have
+      failed it the moment this unit was marked done. So it is `packages/fixtures/src/month-reconciliation.ts`
+      and the files list is corrected rather than the file created to match the list. (2)
+      `apps/web/src/app/(admin)/accounts/reconciliation/page.tsx` is a path shape this repository does not use
+      (`apps/web/app/(admin)/...`), and a `page.tsx` is the wrong KIND as well: the route registry is in exact
+      bijection with the filesystem and requires every DOCUMENT in both locales, which needs an Arabic admin
+      document and the W-SYS-01 shell. It is therefore a handler answering text/html with a pure `render.ts`
+      beside it, which is what the compliance calendar, the Messages inbox and the credentials screen all do.
+      Nothing else in the acceptance list was wrong.'
+    - 'NOTE: files beyond the four listed. ADDED: `packages/fixtures/src/month-reconciliation.ts` (the worked
+      example, replacing the JSON) and `packages/fixtures/src/month-reconciliation.test.ts` (its PAIR, which
+      the db suite cannot be: `packages/db` may never import `packages/fixtures`, so nothing else can compare
+      the worked example against `MONTH_RECONCILIATION_LINE_IDS`, and that import is how the two halves agree
+      on which lines exist); `apps/web/app/(admin)/accounts/reconciliation/route.ts` and `render.ts` (the
+      screen, at the corrected path); `apps/web/src/month-reconciliation-render.test.ts` (the pure render
+      suite, plus the scans of the route''s own decisions — no default month, no figure derived, every figure
+      carried as a string — which only the text can see). EDITED: `packages/db/src/index.ts` (the export block
+      only; no ledger paragraph and SCHEMA_VERSION unchanged at 99, because there is no migration),
+      `packages/fixtures/src/index.ts`, `apps/web/src/routes/registry.ts` (one route entry in path order, and
+      `/accounts` added to ADMIN_GROUP_PREFIXES so the proxy refuses the route before the handler runs and
+      every later accounts screen arrives noindex and guarded before it is written) and
+      `scripts/test-gates.mjs` (block 131a-131z, twenty-five cases plus the control, placed after 126a-126z
+      and before 79a-79k). ADDED beside them: `docs/adr/0053-...md` and its row in `docs/adr/README.md`,
+      which `pnpm adr` requires — an ADR the index does not link is a record nobody finds.'
+    - 'NOTE: what is DEFERRED and which unit owns it. (1) A POST that exports. `exportMonthReconciliation`
+      writes an `audit_event` and therefore needs an actor and a recipient, and a GET has neither to name —
+      inventing either would put a fabricated name in an append-only trail. The function is built, asserted
+      and exported; the route is read-only and says so, and gate 131u refuses an export call appearing in it.
+      M-VAT-09 owns the one-way filing export and is the unit with a signed-in principal to name. (2) A
+      SERVED-BYTES integration suite for the screen. No server-starting suite was added, so test port band
+      16_100 is left unclaimed — `apps/web/src/test-ports.test.ts` fails a band declared and not used, so
+      claiming it would have been a failing test. What the screen''s decisions are asserted through instead is
+      the pure render suite plus source scans; the served route is reached by `route-spine.itest.ts`''s
+      registry walk and by `admin-guard.test.ts`, both of which already cover it. (3) The purchase side. The
+      report excludes `supplier_bill` by NAME rather than by omission: M-VAT-02 owns the payables
+      reconciliation and M-VAT-03 the input-tax working paper, and restating either is the duplication this
+      unit exists not to make. (4) A zero-rated or exempt SALE, and a voucher. The provisional chart carries
+      no zero-rated revenue account and no unit has built the voucher tables, so `voucher_sale` and
+      `voucher_redemption` are classified as `other` — excluded by name, with no document side claimed for
+      code that does not exist. WORKED_EXAMPLE_NOT_COVERED states all four in the fixture, and its own test
+      requires every gap to name a unit, an open question or an ADR.'
+    - 'NOTE: what this file leaves behind, and the one lever that removes most of it. The integration suite
+      runs sequentially against ONE database and earlier files leave rows behind (brief rule 12), and the
+      first version of this suite added 21 appointments and 4 rooms PER RUN to a database other suites read —
+      measured at 980 accumulated appointment rows across this unit''s own development, in a table `pnpm seed`
+      leaves empty. The lever is the BOOKING: `appointment.booking_id` is on delete cascade (0024) and
+      `invoice_appointment.appointment_id` and `package_redemption.appointment_id` deliberately carry no
+      foreign key, so deleting three bookings removes the 21 appointments with no RESTRICT anywhere and the
+      rooms are then free — `checkout-finalise.itest.ts`''s arrangement. Measured after the fix: appointments
+      980 -> 0 and this file''s 4 rooms gone. What CANNOT go is stated in the afterAll rather than left to be
+      discovered: the journal entries (ZL001 refuses the owner, which is why the window is searched for), the
+      documents and payments (`invoice` refuses DELETE and `truncate` would take every other suite''s
+      documents with it, so this file deliberately does not), the customer (pinned by invoice.customer_id ON
+      DELETE RESTRICT against a row nothing can delete) and the service, variant and package template version
+      (pinned by package_template_line and package_balance). All of it is dated in 2200 or keyed to this
+      file''s own marker, so no suite reading "today" can see any of it.'
+    - 'NOTE: three baseline failures in the merged tree are NOT this unit''s, verified by stashing this
+      unit''s whole diff and re-running at the base commit (8716718): `apps/web/src/admin-guard.test.ts` fails
+      "finds a guard call in every guarded admin route file" and "finds one guard call per exported handler"
+      naming `app/(admin)/(admin)/packages/route.ts`, and "finds no searchParams read of a principal" naming
+      `app/(admin)/hr/leave/[id]/route.ts`. `apps/web/src/routes/registry.test.ts` passes 41/41 at the base
+      and passes 41/41 with this unit''s route added. The base also predates the G-REV-02 merge that added gate
+      block 127a-127z, so this unit''s block follows 126a-126z on disk here and the integrator will find it
+      after 127a-127z; it is placed before 79a-79k either way, which is the rule.'
     files:
     - packages/db/src/queries/month-reconciliation.ts
     - packages/db/src/queries/month-reconciliation.itest.ts
-    - artifacts/fixtures/closed-month-reconciliation.json
-    - apps/web/src/app/(admin)/accounts/reconciliation/page.tsx
+    - packages/db/src/index.ts
+    - packages/fixtures/src/month-reconciliation.ts
+    - packages/fixtures/src/month-reconciliation.test.ts
+    - packages/fixtures/src/index.ts
+    - apps/web/app/(admin)/accounts/reconciliation/route.ts
+    - apps/web/app/(admin)/accounts/reconciliation/render.ts
+    - apps/web/src/month-reconciliation-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - scripts/test-gates.mjs
+    - docs/adr/0053-a-report-over-a-closed-period-proves-it-read-as-of-the-lock-rather-than-filtering-silently.md
+    - docs/adr/README.md
   - id: M-VAT-13
     order: 68
     title: Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures
@@ -17324,9 +17645,11 @@ units:
       allowed-elsewhere control in scripts/test-gates.mjs (cases 27/28). The information_schema assertion required
       by the acceptance line covers the applied schema; the gate covers the migration before it is applied
       anywhere'
-    - 'NOTE deferred to G-REV-02: nothing calls this unit''s repository yet. The paste form, the defensive email
-      parse, the Places count tripwire and the Monday nudge are G-REV-02, and the job that walks the API list and
-      calls reconcileApiReviewId belongs with the unit that gets API access. This unit ships the shape, the
+    - 'NOTE deferred to G-REV-02 — DEFERRAL SATISFIED for the four callers: G-REV-02 shipped the paste form, the
+      defensive email parse, the Places count tripwire and the Monday nudge, and they call this unit''s
+      repository. What remains is NOT G-REV-02''s: the job that walks the API list and calls
+      reconcileApiReviewId belongs with the unit that gets API access, which no unit is yet, because API
+      access is an open question (Y3-gbp-api) rather than work somebody owes. This unit ships the shape, the
       constraints, ingestApiReview, recordManualReview, reconcileApiReviewId, the three delivery recorders and the
       connection-scoped queue read'
     - 'NOTE deferred to G-REV-03 (DEFERRAL SATISFIED) and G-REV-04: reply_draft exists as a column here but nothing generates, lints or
@@ -17345,7 +17668,7 @@ units:
       Google changes its template; a daily Places call reading only aggregate rating and count so an increase
       can be detected; and a Monday 09:00 nudge when nothing has been reported.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-MSG-01
@@ -17380,12 +17703,77 @@ units:
       on a frozen clock in both the fired and not-fired branches, and writes a heartbeat either way
     - 'packages/core/src/reviews/email-parse.ts is pure: a dependency-cruiser assertion plus the core-must-be-pure
       gate prove it takes the raw body as an argument and performs no I/O and no clock read'
+    - 'NOTE: the paste form is `route.ts` + `handler.ts` + `render.ts` + `view.ts` under
+      apps/web/app/(admin)/reviews/paste/, not the `page.tsx` this entry names. Every admin surface in this
+      build has made the same choice and records the same reason: apps/web/src/routes/registry.ts requires
+      every registry DOCUMENT to be served in both locales, so a page.tsx here would need an Arabic admin
+      document that W-SYS-01 has not built and would join a screenshot matrix whose RTL half must be a real
+      Arabic route. The three HR screens, the two settings screens, the diary, the pipeline board, the
+      Messages inbox, the template editor, the duplicate queue and the quick-book screen all give it'
+    - 'NOTE: this entry names no migration and needed one — 0094_review_fallback_intake.sql, SCHEMA_VERSION
+      94. G-REV-01''s tables were checked first and `google_reviews` can hold neither shape: a forwarded
+      notification nothing could read has no rating, so it could not satisfy `rating` NOT NULL and inventing
+      one is the guess docs/12 §1 forbids; and an aggregate reading is two numbers whose whole value is that
+      yesterday''s are still there to compare against, which a column on `google_capabilities` would lose.
+      So `review_intake_email` holds the forwarded bodies and `google_place_aggregate` one reading per
+      listing per TRADING DATE, plus the two `agent_definition` rows 0021''s contract requires of a cron'
+    - 'NOTE: no private SQLSTATE was taken, deliberately. 116 codes exist across 24 classes and `ZZ` was the
+      last free class when this unit ran, with W-SYS-12 holding it. The refusals that need a name are raised
+      in application code instead — `PLACES_ANSWERED_ABOUT_ANOTHER_PLACE`,
+      `review-inbound-ambiguous-listing`, `review-inbound-no-listing` and the four
+      `REVIEW_EMAIL_PARSE_REFUSALS` — and each is asserted by name. The database''s own refusals here are
+      ordinary `check_violation`s, which is what a CHECK over one row reads perfectly well as'
+    - 'NOTE deferred to Y8-inbound-review-address: the HTTP transport for the forwarded email refuses every
+      request. `POST /api/v1/reviews/inbound` answers 503 `inbound_not_configured` until
+      `REVIEW_INBOUND_SECRET` is set, because there is no verified receiving domain (Y6-email-sender) and no
+      way to know a request is the relay''s — and an unauthenticated endpoint that feeds review text into a
+      drafting pipeline is the injection path docs/10 §7 names about an unverified Pub/Sub webhook. The parse
+      and the write behind it are complete and exercised end to end against real PostgreSQL
+      (packages/google/src/reviews/inbound-email.ts and its itest), and the paste form is the intake path
+      that works meanwhile. No unit owned an inbound webhook, so this unit built it and the question is the
+      credential rather than the code'
+    - 'NOTE deferred to Y7-owner-notification-address: no table in this build holds a contact address for the
+      owner, so the shipped tripwire and nudge record their decision, report `no_recipient_on_file` and send
+      nothing. Migration 0075 had to record the same gap for the Google re-auth ladder and P-HR-06 for the
+      rota notice. `google_connections.google_email` is deliberately NOT used: docs/10 §5 says the listing
+      may still be held by a former agency, so emailing it would be a disclosure to a third party chosen by
+      the build rather than by the owner. Both branches of both passes are asserted against a fixture address
+      on a `.invalid` domain, and `NO_OWNER_CONTACT_ON_FILE` answering null is asserted as the shipped state'
+    - 'NOTE: `review:record` was added to the F07 permission catalogue and granted to the front desk, because
+      no existing permission meant "may record a published review". It deliberately does NOT cover approving
+      a REPLY — a reply is published under the business''s name and docs/07 §4 requires a human with the
+      authority to say it — and G-REV-05 owns that permission. The paste route is the first admin route in
+      apps/web/src/routes/registry.ts that is authenticated: it reads Payload''s own verified session through
+      `principalForRequest` and refuses on `can()` in BOTH verbs, with no `?role=` parameter anywhere, so it
+      survives W-SYS-11''s repository-wide scan rather than becoming what fails it'
+    - 'NOTE: ADR 0043 records the aggregate-only decision; gate block 121a-121z in scripts/test-gates.mjs is
+      this unit''s, with 21 known-bad fixtures; the port band `reviews-paste` is 13_500 in
+      @berelax/harness/ports. Two defects this unit''s own checks found in its own work are recorded in the
+      gate block''s header and in the suites: a 401 page that rendered the forwarded review''s full text, the
+      connection id and the Google account email (caught by asserting the BYTES of the refusal document), and
+      four gate cases that mutated apps/web sources and ran the e2e — which serves the last BUILD, so all
+      four reported "nothing was rejected" against a stale one. The row claims moved to
+      apps/web/src/reviews-paste-handler.itest.ts, which sees an edit immediately'
     files:
-    - apps/web/app/(admin)/reviews/paste/page.tsx
+    - apps/web/app/(admin)/reviews/paste/route.ts
+    - apps/web/app/(admin)/reviews/paste/handler.ts
+    - apps/web/app/(admin)/reviews/paste/render.ts
+    - apps/web/app/(admin)/reviews/paste/view.ts
+    - apps/web/app/api/v1/reviews/inbound/route.ts
+    - apps/web/src/reviews-paste.itest.ts
+    - apps/web/src/reviews-paste-handler.itest.ts
     - packages/google/src/adapters/places-aggregate.ts
+    - packages/google/src/reviews/inbound-email.ts
     - packages/core/src/reviews/email-parse.ts
+    - packages/core/src/reviews/notification-fixtures.ts
+    - packages/core/src/reviews/count-phrase.ts
+    - packages/db/migrations/0094_review_fallback_intake.sql
+    - packages/db/src/repositories/review-intake.ts
+    - packages/providers/src/google/fake-places.ts
     - apps/worker/src/jobs/review-count-tripwire.ts
     - apps/worker/src/jobs/review-monday-nudge.ts
+    - apps/worker/src/jobs/review-notice-sender.ts
+    - apps/worker/src/jobs/review-fallback-intake.itest.ts
   - id: G-REV-03
     order: 163
     title: The safety routing table as executable, settings-proof policy
@@ -17414,10 +17802,11 @@ units:
       false, asserted against the settings registry default'
     - Every verdict persists the matched rule id and the lexicon version onto the review row, and a test
       reproduces a historical verdict from the stored version alone
-    - 'NOTE deferred to G-REV-02 and G-REV-04: nothing SCHEDULES routing. The table, the lexicon and the
-      verdict write are complete and exercised end to end, but no agent or cron walks the unrouted queue —
-      G-REV-02 owns the intake that creates the rows and G-REV-04 the reply generator that consumes a
-      verdict, and a cron here would be an agent with nothing to read on the day it landed. The partial
+    - 'NOTE deferred to G-REV-02 — DEFERRAL SATISFIED, the rows now exist — and to G-REV-04, which still owes
+      the consumer: nothing SCHEDULES routing. The table, the lexicon and the verdict write are complete and
+      exercised end to end, and G-REV-02''s intake now creates the rows a walker would read; what is still
+      missing is G-REV-04''s reply generator to consume a verdict, and a cron landing before it would be an
+      agent whose output nothing acts on. The partial
       index google_reviews_unrouted_idx is the read that job will make'
     - 'NOTE: the migration is 0037_review_routing_verdict.sql, not the 0044 this entry originally named —
       units land in a different order from the one the plan numbered them in, and SCHEMA_VERSION is 37'

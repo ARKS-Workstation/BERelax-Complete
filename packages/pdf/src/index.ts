@@ -20,7 +20,12 @@ export type { PageSetup, PdfRenderer } from './render.ts'
 export { A4_DOCUMENT, assertPdfWellFormed, createPdfRenderer, embeddedBaseFonts } from './render.ts'
 export type { TaxDocumentRequest } from './render-document.ts'
 export {
+  type DocumentByteStore,
+  PRIVATE_DOCUMENTS_PREFIX,
+  privateDocumentKey,
   renderTaxDocumentPdf,
+  type StoredTaxDocument,
+  storeTaxDocumentPdf,
   taxDocumentHtml,
   taxDocumentView,
   writeTaxDocumentPdf,

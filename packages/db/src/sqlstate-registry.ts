@@ -1588,6 +1588,27 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     translators: [],
   },
   {
+    code: 'ZY111',
+    rule: 'A single-use private document may not be fetched a second time with the same signature.',
+    migration: '0101',
+    raisedBy: ['assert_single_use_document_not_replayed'],
+    translators: ['packages/db/src/repositories/private-document.ts'],
+  },
+  {
+    code: 'ZY112',
+    rule: 'The private-document register and its fetch log are append-only: UPDATE and DELETE raise.',
+    migration: '0101',
+    raisedBy: ['refuse_private_document_rewrite'],
+    translators: [],
+  },
+  {
+    code: 'ZY113',
+    rule: "A private document's class must be one @berelax/core's catalogue declares.",
+    migration: '0101',
+    raisedBy: ['assert_private_document_class_known'],
+    translators: [],
+  },
+  {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
     migration: '0093',

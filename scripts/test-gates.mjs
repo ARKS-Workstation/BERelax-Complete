@@ -38163,6 +38163,441 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 127a-127z. (G-REV-02) The fallback intake: the bytes that must survive, the fence the injected sentence
+//            cannot leave, the aggregate that must not be cached, and both branches of two crons.
+//
+// docs/10 §6 is the whole specification of this unit and its first sentence is the reason these cases exist:
+// *"the fallback is the launch mode. Not an error state."* Every check below is about a claim that would still
+// read correctly with the feature quietly broken, which is this build's dominant defect class:
+//
+//   - **A parser that guesses.** The mangled fixture has a rating a human can read (*"four stars out of
+//     five"*) and no label a machine can. A parser relaxed to find a digit would file it as a four-star
+//     review, docs/07 §4 row 1 would then permit an auto-send, and nothing would look wrong. So the case
+//     that matters is not "the parse succeeds" but "the parse refuses, and the bytes survive".
+//   - **A byte claim asserted with `toContain`.** `expect(stored).toContain(fixture)` passes for a parser
+//     that appended, prefixed or re-encoded. The suite compares `Buffer`s read back out of the database, and
+//     127d proves it by making the writer trim.
+//   - **An injection boundary asserted against a comment.** `not.toContain(payload)` on the instruction
+//     section passes for a builder that leaked a paraphrase and passes vacuously for one that emits no
+//     instructions at all. The suite compares the bytes BEFORE the fence with those of a benign review's
+//     prompt, and 127f proves it by interpolating the review text into the instruction constant.
+//   - **A table scan that scans one table.** *"None of those body strings is present in any table"* is only
+//     worth asserting as a walk of the whole catalogue, and 127h proves the walk by narrowing it.
+//   - **A cron with one branch.** An email that goes out on an increase is half the claim; the other half is
+//     that nothing goes out otherwise, and 127i and 127k break each direction separately.
+//
+// The helper names here carry a `paste` prefix on purpose. Two gate blocks whose local helpers are named
+// identically make git treat them as shared context and interleave them on merge, which has happened twice.
+{
+  const PASTE_PARSER = 'packages/core/src/reviews/email-parse.ts'
+  const PASTE_PARSER_SUITE = 'packages/core/src/reviews/email-parse.test.ts'
+  const PASTE_INTAKE_WRITER = 'packages/db/src/repositories/review-intake.ts'
+  const PASTE_INBOUND_SUITE = 'packages/google/src/reviews/inbound-email.itest.ts'
+  const PASTE_PROMPT = 'packages/core/src/reviews/prompt-builder.ts'
+  const PASTE_ADAPTER = 'packages/google/src/adapters/places-aggregate.ts'
+  const PASTE_ADAPTER_SUITE = 'packages/google/src/adapters/places-aggregate.test.ts'
+  const PASTE_TRIPWIRE = 'apps/worker/src/jobs/review-count-tripwire.ts'
+  const PASTE_NUDGE = 'apps/worker/src/jobs/review-monday-nudge.ts'
+  const PASTE_WORKER_SUITE = 'apps/worker/src/jobs/review-fallback-intake.itest.ts'
+  const PASTE_HANDLER = 'apps/web/app/(admin)/reviews/paste/handler.ts'
+  const PASTE_E2E = 'apps/web/src/reviews-paste.itest.ts'
+  // The handler suite, and it exists because of what 127m-127p found. The e2e drives the BUILT application:
+  // `next start` serves whatever `.next` was last built, so a gate case that edits an `apps/web` source file
+  // and runs the e2e reports "exited zero; nothing was rejected" against a stale build. Four cases in the
+  // first version of this block did exactly that. So the row, the audit actor, the two refusals, the refusal
+  // page's contents and the redirect are asserted by a suite that calls the handler directly and therefore
+  // sees an edit immediately; the e2e keeps the one claim that needs a browser.
+  const PASTE_HANDLER_SUITE = 'apps/web/src/reviews-paste-handler.itest.ts'
+  const PASTE_PHRASE = 'packages/core/src/reviews/count-phrase.ts'
+  const PASTE_PHRASE_SUITE = 'packages/core/src/reviews/count-phrase.test.ts'
+
+  const pasteUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const pasteIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const pasteCruise = () => ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages']
+
+  // 127a. An imported CLOCK, from a module neither existing check knows about. `node:perf_hooks` is not in
+  //       `core-must-be-pure`'s alternation and `check-core-purity.mjs` greps for `Date.now`, `new Date()`
+  //       and `process.` — an imported `performance` is none of those. So both existing checks pass for a
+  //       parser whose answer depends on when it ran, and this is the rule that does not.
+  checkRejectedBy(
+    'review intake: a clock imported into the parser is rejected by name',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) => `import { performance } from 'node:perf_hooks'\n${text}`,
+      () => runExpectingFailure('pnpm', pasteCruise()),
+    ),
+    'review-email-parse-takes-its-input-as-an-argument',
+  )
+
+  // 127b. The control, and it is not a formality: the rule is an allowlist, so a rule written as "no
+  //       dependencies at all" would reject the parser's own import of `../time.ts` and would have to be
+  //       relaxed to nothing within the week. `@berelax/shared` must pass.
+  {
+    const permitted = withEditedFile(
+      PASTE_PARSER,
+      (text) => `import { AppError } from '@berelax/shared'\nvoid AppError\n${text}`,
+      () => run('pnpm', pasteCruise()),
+    )
+    check(
+      'review intake: the parser may still import @berelax/shared',
+      !permitted.failed,
+      permitted.output,
+    )
+  }
+
+  // 127c. `new Date(instant)` in the parser. The GENERAL purity rule permits it — `time.ts` legitimately
+  //       renders an injected instant that way — so this is the scoped no-`Date` rule G-REV-02 added for
+  //       `packages/core/src/reviews`, and without the scope the mutation below is invisible.
+  checkRejectedBy(
+    'review intake: a Date in the review estate is rejected by the scoped purity rule',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (rawBody.trim().length === 0) return needsPaste(',
+          '  const parsedAt = new Date(options.receivedAt).getUTCFullYear()\n' +
+            '  void parsedAt\n' +
+            '  if (rawBody.trim().length === 0) return needsPaste(',
+        ),
+      () => runExpectingFailure('node', ['scripts/check-core-purity.mjs']),
+    ),
+    'email-parse.ts',
+  )
+
+  // 127d. The writer trims the body. This is the mutation the acceptance line is written against — *asserted
+  //       by comparing stored bytes to the fixture* — and it is the one a `toContain` would miss: a trimmed
+  //       body still contains every word of the fixture.
+  checkRejectedBy(
+    'review intake: a writer that trims the forwarded body fails the byte comparison',
+    withEditedFile(
+      PASTE_INTAKE_WRITER,
+      (text) =>
+        replaceOnce(
+          text,
+          '      ${input.rawBody}, ${digest}, ${bytes}, ${input.receivedAtIso}',
+          '      ${input.rawBody.trim()}, ${digest}, ${bytes}, ${input.receivedAtIso}',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_INBOUND_SUITE)),
+    ),
+    'keeps leading and trailing whitespace',
+  )
+
+  // 127e. The parser falls back to a template rather than refusing. This is the mutation that makes the
+  //       mangled fixture stop being a paste request: `labelled_plain.extract` then reads it, finds no
+  //       reviewer, and the refusal becomes `reviewer_unreadable` — a body nobody could read, filed under a
+  //       reason that says one FIELD moved. The suite asserts the refusal by name for exactly this reason.
+  checkRejectedBy(
+    'review intake: a parser that falls back to a template instead of refusing is caught',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const matcher = MATCHERS.find((candidate) => candidate.recognises(rawBody, lines))\n' +
+            "  if (matcher === undefined) return needsPaste('no_template_recognised')",
+          '  const matcher =\n' +
+            '    MATCHERS.find((candidate) => candidate.recognises(rawBody, lines)) ?? MATCHERS[0]\n' +
+            "  if (matcher === undefined) return needsPaste('no_template_recognised')",
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'refuses by name',
+  )
+
+  // 127e2. And a rating counted out of a row that is not a row. `ratingFromGlyphs` requires every character
+  //        to be one of the two star glyphs; relax it to a count and `★★★★ (4 of 5)` reads as four, which is
+  //        a rating docs/07 §4 row 1 would permit an auto-send against.
+  checkRejectedBy(
+    'review intake: a rating counted from stars anywhere in a field is caught',
+    withEditedFile(
+      PASTE_PARSER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (glyphs.length === 0 || glyphs.length > 5) return null\n' +
+            '  if (glyphs.some((glyph) => glyph !== FILLED_STAR && glyph !== UNFILLED_STAR)) return null',
+          '  void UNFILLED_STAR',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'refuses a glyph row with anything else in it',
+  )
+
+  // 127f. The review text reaches the INSTRUCTIONS. The mutation is the realistic one — somebody adds the
+  //       review to the prompt's preamble to give the model context — and it is what the byte-for-byte
+  //       comparison against a benign review's prompt exists to catch. A `not.toContain(payload)` on the
+  //       instruction section would also catch this exact string and would NOT catch a paraphrase, which is
+  //       why the suite compares the bytes instead.
+  checkRejectedBy(
+    'review intake: review text interpolated into the instruction section is caught',
+    withEditedFile(
+      PASTE_PROMPT,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const text = [INSTRUCTIONS, facts, region, CLOSING_INSTRUCTION].join('\\n\\n')",
+          '  const text = [`${INSTRUCTIONS}\\nCONTEXT: ${body}`, facts, region, CLOSING_INSTRUCTION].join(\n' +
+            "    '\\n\\n',\n" +
+            '  )',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PARSER_SUITE)),
+    ),
+    'leaves the bytes before the fence identical',
+  )
+
+  // 127g. The adapter keeps the review bodies. ADR 0049's decision is that the RETURN TYPE cannot hold one,
+  //       and the suite asserts it by walking the returned value rather than by naming its fields — which is
+  //       what makes this mutation visible. A test that named the fields would keep passing.
+  checkRejectedBy(
+    'review intake: an adapter that carries the curated bodies through is caught',
+    withEditedFile(
+      PASTE_ADAPTER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    curatedReviewsDiscarded: details.reviews.length,',
+          '    curatedReviewsDiscarded: details.reviews.length,\n' +
+            '    // @ts-expect-error gate fixture: the reading must not be able to hold a body\n' +
+            '    reviews: details.reviews.map((review) => review.text),',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_ADAPTER_SUITE)),
+    ),
+    'drops every curated body',
+  )
+
+  // 127h. The table scan narrowed to one table. The claim is *none of those body strings is present in ANY
+  //       table*, and the control that makes the scan credible is the smuggled body — so narrowing the walk
+  //       must make that control fail. Without this case the scan could be examining nothing and reporting a
+  //       pass, which is ADR 0002 exactly.
+  checkRejectedBy(
+    'review intake: a body scan narrowed to one table stops finding a smuggled body',
+    withEditedFile(
+      PASTE_WORKER_SUITE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      and table_name in (select table_name from information_schema.tables\n',
+          "      and table_name = 'google_place_aggregate'\n" +
+            '      and table_name in (select table_name from information_schema.tables\n',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'leaves none of the three fixture bodies in ANY table',
+  )
+
+  // 127i. The tripwire notifies on any CHANGE rather than on an increase. A count that went down means a
+  //       review was deleted, so the email's one action — read the new reviews — does not exist. Both
+  //       downward cases must fail.
+  checkRejectedBy(
+    'review intake: a tripwire that emails on a decrease is caught',
+    withEditedFile(
+      PASTE_TRIPWIRE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (currentCount < previousCount) {\n' +
+            "    return { kind: 'decreased', from: previousCount, to: currentCount }\n" +
+            '  }',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'sends ZERO when the count went DOWN',
+  )
+
+  // 127j. The idempotency removed. `already_read_today` is what a reclaimed pg-boss job reaches, and without
+  //       it a second pass on one trading date emails the owner about the same reviews twice.
+  checkRejectedBy(
+    'review intake: a tripwire that re-reads the same trading date emails twice',
+    withEditedFile(
+      PASTE_TRIPWIRE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (written.kind === 'already_read_today') {",
+          '    if (false as boolean) {',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'reads once per trading date',
+  )
+
+  // 127k. The nudge fires whatever the window says. This is the other half of *"only when no review was
+  //       reported in the preceding 7 days"*, and a suite with only the fired branch would be satisfied by a
+  //       pass that always nudged.
+  checkRejectedBy(
+    'review intake: a nudge that ignores what was reported is caught',
+    withEditedFile(
+      PASTE_NUDGE,
+      (text) => replaceOnce(text, '    if (reported > 0) {', '    if (reported > 1000) {'),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'does NOT fire when something was reported inside the window',
+  )
+
+  // 127l. The heartbeat. `withAgentRun` is INSIDE the pass rather than around it in the handler, precisely so
+  //       that "writes a heartbeat either way" is a claim a test driving the pass can make. Take the wrapper
+  //       out and the pass still works and the heartbeat stops moving — which is a weekly cron nobody is
+  //       watching.
+  checkRejectedBy(
+    'review intake: a nudge that records no agent run is caught',
+    withEditedFile(
+      PASTE_NUDGE,
+      (text) =>
+        replaceOnce(
+          text,
+          '      results.push(...(await nudgeEveryListing(deps)))',
+          '      void results',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_WORKER_SUITE)),
+    ),
+    'both branches',
+  )
+
+  // 127m. The paste form's authorisation. The matrix check removed, and the SERVER must still refuse: a
+  //       disabled control is not a guard, and the e2e posts with `curl`-shaped requests for that reason.
+  checkRejectedBy(
+    'review intake: a paste form that does not consult the permission matrix is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!can(principal.role satisfies Role, REVIEWS_PASTE_PERMISSION)) return 'forbidden'",
+          '  void REVIEWS_PASTE_PERMISSION',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    'refuses a role the matrix does not trust',
+  )
+
+  // 127n. The refusal page shows what it refuses. This is a defect this unit's own e2e found in its first
+  //       version: the 401 document carried the forwarded review's full text, the connection id and the
+  //       Google account email. The `reveal` flag is the fix, and this is what stops it being removed.
+  checkRejectedBy(
+    'review intake: a 401 page that renders the forwarded text is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const listings = extra.reveal ? await listingsFor(deps.sql) : []',
+          '  const listings = await listingsFor(deps.sql)',
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    'shows NOTHING from the database on a refusal page',
+  )
+
+  // 127o. One POST. The acceptance line names it, and the mutation is the one that would arrive by accident:
+  //       a handler that renders the confirmation instead of redirecting. The browser then reloads on the
+  //       POST, and a refresh files the same review twice under two ids — `google_review_id` is NULL on a
+  //       pasted row, so nothing in the database refuses the duplicate.
+  checkRejectedBy(
+    'review intake: a paste form that answers 200 instead of redirecting is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) => replaceOnce(text, '    status: 303,', '    status: 200,'),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    "records source='paste'",
+  )
+
+  // 127p. `source='paste'` becomes `'manual'`. Both are in migration 0020's vocabulary and they are different
+  //       facts — which one it was is the question an audit of the intake path asks — so the suite asserts the
+  //       value rather than merely that a row exists.
+  checkRejectedBy(
+    'review intake: a paste recorded under the wrong source is caught',
+    withEditedFile(
+      PASTE_HANDLER,
+      (text) => replaceOnce(text, "        source: 'paste',", "        source: 'manual',"),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_HANDLER_SUITE)),
+    ),
+    "records source='paste'",
+  )
+
+  // 127p2. The POST counter, which is the e2e's whole instrument. Nothing here can mutate the APPLICATION and
+  //        see the e2e notice — `next start` serves the last build — so what this case breaks is the counter
+  //        itself: point it at a path nothing requests and the count is zero, which must fail the
+  //        single-submission assertion. Without it, a listener that never fired would satisfy
+  //        `toHaveLength(1)` for a page that posted three times, and the claim the browser is there to make
+  //        would be resting on nothing.
+  checkRejectedBy(
+    'review intake: an e2e POST counter that records nothing fails the single-submission claim',
+    withEditedFile(
+      PASTE_E2E,
+      (text) =>
+        replaceOnce(
+          text,
+          "    if (request.method() === 'POST') posts.push(request.url())",
+          "    if (request.method() === 'POST' && request.url().includes('/nope')) posts.push(request.url())",
+        ),
+      () => runExpectingFailure('pnpm', pasteIntegration(PASTE_E2E)),
+    ),
+    'posts exactly once',
+  )
+
+  // 127q. The English plural. `{{count}} new reviews` reads "1 new reviews" and an increase of one is the
+  //       commonest case there is; the Arabic dual is the same defect one language along, and neither is
+  //       visible to a test that only ever passes 2.
+  checkRejectedBy(
+    'review intake: an English-shaped plural is caught for a count of one',
+    withEditedFile(
+      PASTE_PHRASE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  return count === 1 ? '1 new review' : `${count} new reviews`",
+          '  return `${count} new reviews`',
+        ),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PHRASE_SUITE)),
+    ),
+    'reads "1 new review" and not "1 new reviews"',
+  )
+
+  // 127r. And the Arabic dual, which is the case an English-shaped renderer gets wrong for the very number
+  //       the acceptance line uses.
+  checkRejectedBy(
+    'review intake: the Arabic dual collapsed into the plural is caught',
+    withEditedFile(
+      PASTE_PHRASE,
+      (text) => replaceOnce(text, "  if (count === 2) return 'تقييمان جديدان'\n", ''),
+      () => runExpectingFailure('pnpm', pasteUnit(PASTE_PHRASE_SUITE)),
+    ),
+    'uses the DUAL for two',
+  )
+
+  // 127z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing a module, or a scanner that refused the clean tree
+  //       would all report as sixteen passing cases.
+  {
+    const clean = run('pnpm', pasteCruise())
+    check(
+      'review intake: the unedited repository passes the boundary cruise',
+      !clean.failed,
+      clean.output,
+    )
+    const pure = run('node', ['scripts/check-core-purity.mjs'])
+    check('review intake: the unedited repository is pure', !pure.failed, pure.output)
+    for (const suite of [PASTE_PARSER_SUITE, PASTE_ADAPTER_SUITE, PASTE_PHRASE_SUITE]) {
+      const green = run('pnpm', pasteUnit(suite))
+      check(`review intake: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    for (const suite of [PASTE_INBOUND_SUITE, PASTE_WORKER_SUITE, PASTE_HANDLER_SUITE, PASTE_E2E]) {
+      const green = run('pnpm', pasteIntegration(suite))
+      check(`review intake: ${suite} passes unedited`, !green.failed, green.output)
+    }
+  }
+}
+
 // 128a-128z. (W-SYS-13) A suite may delete only what it created: the scan shown to read code rather than
 //            prose, the declaration shown to be checked in both directions, and the run invariant shown to
 //            fail the run that lost a row.
@@ -38185,6 +38620,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 //                with no restoring loader, and the customer line that may never have one.
 //              - the RUN INVARIANT (128k-128m). A committed loss fails the run even when every test passes,
 //                and a loader that cannot repair what it created is what the invariant catches first.
+//              - the SCAN'S OWN REACH (128p-128q). A statement whose table list is interpolated, and a
+//                support module renamed out from under its declaration. Both are the same failure — the scan
+//                quietly covering less than it claims — and both arrived for real when sixteen suites' table
+//                lists moved into one shared teardown.
 //
 //            128e is the one worth reading twice. The scan's whole difficulty is that a dozen files quote
 //            `delete from customer` in a test NAME or a privilege list — `it('refuses DELETE from the
@@ -38515,6 +38954,50 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'a-comment-states-its-own-suite',
   )
 
+  // 128p. A statement whose table list is INTERPOLATED, with nothing declaring it. The evasion this rule had
+  //       to close, and it was not hypothetical: sixteen suites' invoice and package table lists moved into
+  //       `truncateInvoiceFamily`/`truncatePackageFamily`, which issue `truncate ${LIST.join(', ')}` — text
+  //       with no table names in it at all. Adding that module to the scanned set found NOTHING in it until
+  //       the list could be resolved, and a scan that silently sees nothing in the one statement sixteen
+  //       suites now share is worse than no scan (ADR 0002).
+  //
+  //       The fixture blinds the resolver rather than the pattern, so the statement is still SEEN and only its
+  //       list becomes unreadable — which is the state a suite hiding a truncate behind a computed name
+  //       produces, and it must be reported rather than passed over.
+  checkRejectedBy(
+    'suite ownership: a truncate whose table list cannot be resolved is refused, not ignored',
+    withEditedFile(
+      OWNERSHIP,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const entries = [...(declaration[1] as string).matchAll(/'([a-z_][a-z_0-9]*)'/g)].map(",
+          "  const entries = [...(declaration[1] as string).matchAll(/'([a-z_][a-z_0-9]{60,})'/g)].map(",
+        ),
+      guard,
+    ),
+    'a-statement-whose-scope-cannot-be-read-is-declared',
+  )
+
+  // 128q. A support module renamed out from under its declaration. `TEST_SUPPORT_MODULES` is how the rule
+  //       keeps covering a statement that has moved out of a `*.itest.ts`, and a name that no longer resolves
+  //       would make the scan quietly stop reading the one statement sixteen suites share — the same silence
+  //       128p is about, arriving by a different route.
+  checkRejectedBy(
+    'suite ownership: a support module the scan can no longer find is refused',
+    withEditedFile(
+      OWNERSHIP,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'packages/fixtures/src/invoice-family.ts',\n])",
+          "  'packages/fixtures/src/__gate_fixture__moved.ts',\n])",
+        ),
+      guard,
+    ),
+    'a-support-module-is-still-there',
+  )
+
   // 128o. The control for all of the above: the committed tree passes both suites, and no fixture survived.
   //       Without it the fourteen failures are satisfied by a scan that refuses everything.
   {
@@ -38542,6 +39025,1435 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
       !existsSync(FIXTURE_SUITE),
       `${FIXTURE_SUITE} survived a fixture, and every later gate reading the suites will now fail`,
     )
+  }
+}
+
+// 129a-129z. (W-SYS-14) The private document: every refusal shown to fire, and the one place they all go
+//            through shown to be the only one.
+//
+//            The unit exists because nothing failed when it was ignored. `writeTaxDocumentPdf()` took a
+//            `path` and called `writeFileSync`, so a filed tax invoice — issuer TRN, customer, every line
+//            and every figure — was readable by anybody who learned the path with nothing recording a read;
+//            and private storage had been DEFERRED by M-TILL-12 to M-TILL-13 and M-VAT-11, both of which
+//            went `done` without ever owning it. Three units, no owner, no failing check.
+//
+//            So `pnpm private-documents` holds five rules and each has a fixture here. 129a and 129b are the
+//            two INSERT rules: a second writer of either table is a document with no audit row or a fetch
+//            nobody recorded, and both look exactly like working code. 129c is the rule that closes the hole
+//            the unit was added for — a production caller of `writeTaxDocumentPdf`. 129d is the second
+//            verifier, and it is the case worth reading twice: the rule it proves was DEAD when it was
+//            written. Its pattern opened with `[A-Za-z_$][\w$]*`, which forces a character before `sign`, so
+//            it matched `documentSigner.verify(` and missed `signer.verify(` — the spelling the route
+//            actually uses. Nothing in the build would have said so; it was found by probing each rule
+//            against a deliberate violation, which is what this block is. 129e is the class catalogue
+//            disagreeing with migration 0101, in both directions, plus the vacuity guard for the parse
+//            itself.
+//
+//            129j through 129n drive migration 0101 as statements, because the three refusals are the
+//            database's and a TypeScript test cannot make them fire. 129m is the one a per-statement guard
+//            would miss: two fetch rows for one nonce in ONE multi-row insert, which is the shape a batch
+//            recorder would produce.
+//
+//            129p and 129q are the two halves of the SIGNATURE that a served response proves and a unit test
+//            cannot: the refusal an unsigned request gets is the ROUTE's 403 and not a storage error, and the
+//            permission is the matrix's rather than a second copy. They are asserted by driving the suite
+//            that drives the server, so a route that stopped calling the guard or the matrix fails here.
+{
+  const GATE = 'scripts/check-private-documents.mjs'
+  const REGISTRY_ROUTE = 'apps/web/src/routes/registry.ts'
+  const CATALOGUE = 'packages/core/src/documents/private-document.ts'
+  const MIGRATION_0101 = 'packages/db/migrations/0101_private_document.sql'
+  /** A file that is under the scan and is nobody's permitted writer, verifier or document producer. */
+  const INNOCENT = 'apps/web/src/media/publish-gate.ts'
+  const SIGNING_SUITE = 'packages/media/src/storage/signing.test.ts'
+  const CATALOGUE_SUITE = 'packages/core/src/documents/private-document.test.ts'
+  const FAKE_SUITE = 'packages/media/src/storage/fake.test.ts'
+  const PORT_SUITE = 'packages/media/src/storage/port.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const documents = () => runExpectingFailure('pnpm', ['private-documents'])
+
+  /** Appends a line to a file that must survive, so the anchor is the file's own end. */
+  const appending = (line) => (text) => `${text}\n${line}\n`
+
+  // 129a. A second writer of the register. The audit row is written by `registerPrivateDocument` in the same
+  //       transaction as the row, so a second INSERT is a private document nobody can account for — and it
+  //       typechecks, passes every test, and reads as ordinary data access.
+  checkRejectedBy(
+    'private documents: a second writer of the register is refused',
+    withEditedFile(
+      INNOCENT,
+      appending('const __gateRegister = () => `insert into private_document (bytes) values (1)`'),
+      documents,
+    ),
+    'private-document-register-is-the-one-writer',
+  )
+
+  // 129b. And of the fetch log. The triggers are on the TABLE so a second inserter still cannot replay a
+  //       single-use link — what it can do is take a copy of a statutory document with no audit row, which
+  //       is the half the triggers do not cover.
+  checkRejectedBy(
+    'private documents: a second recorder of a fetch is refused',
+    withEditedFile(
+      INNOCENT,
+      appending(
+        'const __gateFetch = () => `insert into private_document_fetch (bytes) values (1)`',
+      ),
+      documents,
+    ),
+    'private-document-fetch-is-recorded-in-one-place',
+  )
+
+  // 129c. THE hole. A production caller of `writeTaxDocumentPdf` writes a statutory document to a path the
+  //       caller chooses — readable by anybody who learns it, with no audit row for a read — and that is
+  //       exactly the line of code this unit was added to make impossible.
+  checkRejectedBy(
+    'private documents: a production caller of the caller-chosen path is refused',
+    withEditedFile(INNOCENT, appending('const __gateWrite = () => writeTaxDocumentPdf'), documents),
+    'private-document-must-not-be-written-to-a-caller-path',
+  )
+
+  // 129d. A second verifier. The rule this proves was dead when it was written — see the block header — so
+  //       this case is the only reason it is not still dead. The receiver is named `signer`, which is the
+  //       spelling the first pattern could not see.
+  checkRejectedBy(
+    'private documents: a second verifier of a signature is refused',
+    withEditedFile(
+      INNOCENT,
+      appending(
+        'const __gateVerify = (signer: { verify: (n: number) => void }) => signer.verify(1)',
+      ),
+      documents,
+    ),
+    'private-document-signature-verified-in-one-place',
+  )
+
+  // 129e. The catalogue and the migration disagreeing, from the TypeScript side: a class `@berelax/core`
+  //       declares and `private_document_class_is_known()` does not is a document nobody can store, and
+  //       nothing else in the build would say so.
+  checkRejectedBy(
+    'private documents: a class in the catalogue and not in the migration is refused',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'compliance_evidence',\n] as const",
+          "  'compliance_evidence',\n  'bank_statement',\n] as const",
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129f. And from the SQL side, which is the direction that produces a document nobody can READ: the row
+  //       stores, the route resolves no permission for it, and deny-by-default hides it for ever.
+  checkRejectedBy(
+    'private documents: a class in the migration and not in the catalogue is refused',
+    withEditedFile(
+      MIGRATION_0101,
+      (text) =>
+        replaceOnce(
+          text,
+          "             'compliance_evidence'\n           )",
+          "             'compliance_evidence',\n             'bank_statement'\n           )",
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129g. The vacuity guard on the comparison itself. Break the shape the gate reads the catalogue out of
+  //       and it must FAIL rather than report agreement it never measured (ADR 0002). Without this case a
+  //       rename of the constant would silently turn rule five off.
+  checkRejectedBy(
+    'private documents: a class list the gate cannot parse is a failure, not a pass',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const PRIVATE_DOCUMENT_CLASSES = [',
+          'export const PRIVATE_DOCUMENT_CLASS_NAMES = [',
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129h. The route must stay DECLARED. The registry is what the sitemap, the `hreflang` set, the screenshot
+  //       matrix and the `x-robots-tag` policy all read, so a route served and not declared is a private
+  //       document outside every one of them at once — and none of those omissions is a build error on its
+  //       own.
+  //
+  //       The first version of this case removed `'/documents'` from `ADMIN_GROUP_PREFIXES` instead and
+  //       asserted that `registry.test.ts` failed. It did not: that suite's noindex property covers
+  //       DOCUMENTS, and this route is a handler, so the case reported FAIL about a rule that was simply not
+  //       the one being broken. The prefix is still load-bearing — `isAdminPath` and the proxy read it — and
+  //       the check that fires on its absence lives in `admin-guard.test.ts`, which is where it belongs.
+  checkRejectedBy(
+    'private documents: the document route dropped from the route registry is refused',
+    withEditedFile(
+      REGISTRY_ROUTE,
+      // The PATH and not the id: the bijection is over paths, so renaming the id would leave it intact and
+      // the case would report FAIL about a rule nothing had broken — which is the mistake the first version
+      // of 129h already made once in this block.
+      (text) =>
+        replaceOnce(text, "    path: '/documents/[id]',", "    path: '/documents/[docId]',"),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/routes/registry.test.ts')),
+    ),
+    'registry-entry-without-route',
+  )
+
+  // 129i. And the noindex PREFIX, whose absence `admin-guard.test.ts` is the check for: without `/documents`
+  //       in `ADMIN_GROUP_PREFIXES`, `isAdminPath` stops claiming the route, so the proxy stops refusing an
+  //       admin path with no cookie and the `x-robots-tag` policy stops covering it.
+  //
+  //       Stated plainly because it affects how to read this case: `admin-guard.test.ts` ALREADY fails three
+  //       cases on this batch base, for a defect in another unit's route (`app/(admin)/packages/route.ts`
+  //       never calls the guard). So `runExpectingFailure` is satisfied here whatever this edit does, and the
+  //       whole weight is on the rule string — a sentence that names THIS route and appears only when the
+  //       prefix is gone. That is what `checkRejectedBy` is for, and it is why asserting on a bare non-zero
+  //       exit is never enough (ADR 0003).
+  checkRejectedBy(
+    'private documents: the document route dropped from the noindex prefixes is refused',
+    withEditedFile(
+      REGISTRY_ROUTE,
+      (text) => replaceOnce(text, "  '/documents',\n", ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/admin-guard.test.ts')),
+    ),
+    'serves /documents/[id], which isAdminPath does not claim',
+  )
+
+  // 129j-129n. Migration 0101 driven as statements.
+  //
+  //       Every probe runs inside begin/rollback, so one that is wrongly ACCEPTED leaves nothing behind —
+  //       which matters more here than usual, because both tables refuse DELETE for every role including the
+  //       owner, so a leaked fixture row could not be cleaned up afterwards.
+  //
+  //       `VERBOSITY=verbose` is what makes the assertion possible at all: psql's default verbosity prints
+  //       the message and NOT the SQLSTATE, so a probe would bounce off the right trigger and be reported as
+  //       "did not report ZY111". That is 114h's finding, restated because this block repeats its shape.
+  //
+  //       `withTriggersOff` is the second layer. The triggers are BEFORE INSERT so they always win, which
+  //       means the CHECK constraints beside them are never exercised by an ordinary probe — and the CHECKs
+  //       are the layer that matters most, because they are the ones that hold under
+  //       `session_replication_role = 'replica'`, which is how a restore from a dump runs.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    const psql = (statements, withTriggersOff = false) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${withTriggersOff ? "set local session_replication_role = 'replica'; " : ''}` +
+          `${statements} rollback;`,
+      ])
+
+    /** A fixed uuid per probe, so a statement can reference the row it just inserted. */
+    const ID = '00000000-0000-4000-8000-00000000f14e'
+    const register = (documentClass, usePolicy, key = 'documents/gate/probe.pdf') =>
+      `insert into private_document (id, document_class, storage_key, content_sha256, bytes, ` +
+      `content_type, use_policy, subject_kind, subject_id, registered_by) values ('${ID}', ` +
+      `'${documentClass}', '${key}', repeat('a', 64), 10, 'application/pdf', '${usePolicy}', ` +
+      `'gate', 'probe', 'gate case 129');`
+    const fetched = (nonce) =>
+      `insert into private_document_fetch (private_document_id, signature_nonce, ` +
+      `signature_key_version, fetched_by_role, fetched_by, bytes) values ('${ID}', '${nonce}', ` +
+      `'v1', 'owner', 'gate', 10);`
+
+    // 129j. A document class the catalogue does not declare, refused by the trigger with the sentence, and by
+    //       the CHECK under a restore. Deny-by-default fails in the WRONG DIRECTION without it: an
+    //       unclassified document has no permission mapped to it, so it is one nobody can ever fetch and
+    //       nobody can ever notice is unfetchable.
+    checkRejectedBy(
+      'private documents: the database refuses an unknown document class',
+      psql(register('bank_statement', 'replayable')),
+      'ZY113',
+    )
+    checkRejectedBy(
+      'private documents: the CHECK refuses an unknown class with triggers off, as a restore runs',
+      psql(register('bank_statement', 'replayable'), true),
+      'private_document_class_is_known',
+    )
+
+    // 129k. The use policy disagreeing with the class. A row claiming a payslip is replayable is the one row
+    //       that would turn the replay defence off for the documents it exists for, and it is a CHECK rather
+    //       than a trigger because it must hold under a restore too.
+    checkRejectedBy(
+      'private documents: the CHECK refuses a payslip declared replayable',
+      psql(register('payslip', 'replayable'), true),
+      'private_document_use_policy_matches_class',
+    )
+
+    // 129l. The replay. A second fetch of one nonce against a single_use document.
+    checkRejectedBy(
+      'private documents: the database refuses a second fetch of a single-use link',
+      psql(
+        `${register('payslip', 'single_use')} ${fetched('gate-nonce-aaaaaa')} ` +
+          `${fetched('gate-nonce-aaaaaa')}`,
+      ),
+      'ZY111',
+    )
+
+    // 129m. The same thing as ONE multi-row insert, which is the shape a batch recorder produces and the one
+    //       a read-then-insert guard would miss: a BEFORE ROW trigger's query sees the rows its own statement
+    //       has already inserted, and this is what proves it.
+    checkRejectedBy(
+      'private documents: the database refuses a replayed nonce inside ONE insert statement',
+      psql(
+        `${register('payslip', 'single_use')} insert into private_document_fetch ` +
+          `(private_document_id, signature_nonce, signature_key_version, fetched_by_role, ` +
+          `fetched_by, bytes) values ('${ID}', 'gate-nonce-bbbbbb', 'v1', 'owner', 'gate', 10), ` +
+          `('${ID}', 'gate-nonce-bbbbbb', 'v1', 'owner', 'gate', 10);`,
+      ),
+      'ZY111',
+    )
+
+    // 129n. Both tables are append-only. The register is what an audited download NAMES, so a repointable
+    //       storage key would make a recorded download name bytes that were never served.
+    for (const [what, statements] of [
+      [
+        'an UPDATE of a register row',
+        `${register('tax_invoice', 'replayable')} update private_document set storage_key = ` +
+          `'documents/gate/other.pdf' where id = '${ID}';`,
+      ],
+      [
+        'a DELETE of a register row',
+        `${register('tax_invoice', 'replayable')} delete from private_document where id = '${ID}';`,
+      ],
+      [
+        'an UPDATE of a fetch row',
+        `${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-cccccc')} ` +
+          `update private_document_fetch set bytes = 1 where private_document_id = '${ID}';`,
+      ],
+      [
+        'a DELETE of a fetch row',
+        `${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-dddddd')} ` +
+          `delete from private_document_fetch where private_document_id = '${ID}';`,
+      ],
+    ]) {
+      checkRejectedBy(`private documents: the database refuses ${what}`, psql(statements), 'ZY112')
+    }
+
+    // The control, and it is not a formality: a trigger pair that refused every INSERT would satisfy every
+    // case above while making the whole capability unusable — which is the version of this rule somebody
+    // deletes. A replayable document fetched TWICE with one link must be accepted.
+    const permitted = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-eeeeee')} ` +
+        `${fetched('gate-nonce-eeeeee')} rollback;`,
+    ])
+    check(
+      'private documents: the database accepts two fetches of one REPLAYABLE link',
+      !permitted.failed,
+      permitted.output,
+    )
+
+    // And the pair the two places "which classes exist" is written down have to agree on, driven with the
+    // migration's own function rather than with a list this case composed. SQL cannot read the catalogue, so
+    // this is held equal behaviourally or not at all — 0098's arrangement for `settings:write`.
+    const classes = run('psql', [
+      '--no-psqlrc',
+      '-t',
+      '-A',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      "select string_agg(c, ',' order by c) from (values ('tax_invoice'),('tax_credit_note')," +
+        "('vat_return_snapshot'),('payslip'),('clinical_extract'),('compliance_evidence')," +
+        "('bank_statement')) as t(c) where private_document_class_is_known(c)",
+    ])
+    check(
+      'private documents: the database knows exactly the catalogue classes and not one more',
+      !classes.failed &&
+        classes.output.trim() ===
+          'clinical_extract,compliance_evidence,payslip,tax_credit_note,tax_invoice,vat_return_snapshot',
+      `private_document_class_is_known() answered ${JSON.stringify(classes.output.trim())} and must ` +
+        'answer exactly the six classes PRIVATE_DOCUMENT_CLASSES declares — `bank_statement` is in the ' +
+        'probe precisely so a function answering `true` for everything fails here rather than passing.',
+    )
+  }
+
+  // 129p. The signature verifier with the MAC and the expiry checks SWAPPED. It is the mutation the unit's
+  //       third acceptance line exists against, and it is invisible in review: every link still works, every
+  //       expired link is still refused, and the only thing that changes is that a FORGED signature with a
+  //       back-dated expiry is reported as a stale link — so the log stops distinguishing "somebody kept an
+  //       old email" from "somebody is guessing".
+  checkRejectedBy(
+    'private documents: expiry judged before the MAC is caught by the signing suite',
+    withEditedFile(
+      'packages/media/src/storage/signing.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '      const secret = byVersion.get(keyVersion)',
+          '      if (expiresAtEpochSeconds <= nowEpochSeconds) {\n' +
+            "        return { kind: 'refused', reason: 'signature_expired' }\n" +
+            '      }\n' +
+            '      const secret = byVersion.get(keyVersion)',
+        ),
+      () => runExpectingFailure('pnpm', unit(SIGNING_SUITE)),
+    ),
+    'signature_invalid',
+  )
+
+  // 129q. The document id dropped from the signed payload — a signature over the wrong thing. Every link
+  //       then opens every document, and the ONLY case in the build that notices is the swapped-path one,
+  //       which is why the id is in the path alone and never as its own parameter.
+  checkRejectedBy(
+    'private documents: a signature that does not cover the document is caught',
+    withEditedFile(
+      'packages/media/src/storage/signing.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '    DOCUMENT_SIGNING_SCHEME,\n    subject.documentId,\n    subject.documentClass,',
+          '    DOCUMENT_SIGNING_SCHEME,\n    subject.documentClass,',
+        ),
+      () => runExpectingFailure('pnpm', unit(SIGNING_SUITE)),
+    ),
+    'swapped path',
+  )
+
+  // 129r. The matrix check removed from the route. A valid signature would then BE permission, which is the
+  //       one sentence this unit is built on — and a receptionist's link to a payslip would serve the wage.
+  checkRejectedBy(
+    'private documents: the route without the matrix check is caught by the catalogue suite',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!can(role, definition.permission)) return 'permission_denied'",
+          "  if (false) return 'permission_denied'",
+        ),
+      () => runExpectingFailure('pnpm', unit(CATALOGUE_SUITE)),
+    ),
+    'permission_denied',
+  )
+
+  // 129s. The fake adapter's armed refusal made permanent. `refuseToSign: 2` must recover on the third call,
+  //       or the "declared failure can be armed" half of ADR 0022 is a dead end dressed as a script.
+  checkRejectedBy(
+    'private documents: an armed signing failure that never recovers is caught',
+    withEditedFile(
+      'packages/media/src/storage/fake.ts',
+      (text) => replaceOnce(text, '        armedSigningFailures -= 1\n', ''),
+      () => runExpectingFailure('pnpm', unit(FAKE_SUITE)),
+    ),
+    'document-signing-refused',
+  )
+
+  // 129t. And the port's own refusal: signing a PUBLIC object. Remove it and the derivative origin becomes a
+  //       thing somebody can mint an authorisation for, which is one step from a signature check on every
+  //       image on the site.
+  checkRejectedBy(
+    'private documents: signing a public object must stay refused',
+    withEditedFile(
+      'packages/media/src/storage/port.ts',
+      (text) => replaceOnce(text, "  if (request.bucket !== 'private') {", '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(PORT_SUITE)),
+    ),
+    'signing-a-public-object',
+  )
+
+  // 129z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as a block of passing cases.
+  {
+    const clean = run('pnpm', ['private-documents'])
+    check(
+      'private documents: the unedited repository passes the scanner',
+      !clean.failed,
+      clean.output,
+    )
+    for (const suite of [SIGNING_SUITE, CATALOGUE_SUITE, FAKE_SUITE, PORT_SUITE]) {
+      const green = run('pnpm', unit(suite))
+      check(`private documents: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const gateSelf = run('node', [GATE])
+    check(
+      'private documents: the gate script runs clean on the committed tree',
+      !gateSelf.failed,
+      gateSelf.output,
+    )
+  }
+}
+
+// 130a-130z. (M-VAT-09) The absence of a filing capability, proven, and the bytes of the Zoho export.
+//
+//            An absence is a claim about what the build CANNOT do, so it cannot be tested by a passing
+//            assertion — only by a check that is seen to FAIL on the day the ability appears. That is the
+//            whole subject of this block, and it is why there are four scans and a boundary rule rather
+//            than one: docs/01 decision 13 and ADR 0017 say the codebase has no capability to file a
+//            return, *"absent, not disabled, because a future maintainer will eventually switch a flag
+//            on"*, and until this unit every enforcement of that sentence was the sentence.
+//
+//            Each of the five mechanisms is broken separately, because each is one expression and a typo
+//            in one branch is invisible while the other four still fire — the defect the ledger fixture in
+//            `scripts/test-boundaries.mjs` caught for `core-must-be-pure`:
+//
+//              * the IDENTIFIER scan (130a-130e), including the two directions its matcher must
+//                discriminate in. The negative direction is not a formality: `efile` as a substring hits
+//                `writeFileSync`, `readFileSync`, `sourceFiles` and `captureFilename`, which this
+//                repository uses about forty times between them, so a matcher without segment alignment
+//                fails the tree and gets switched off rather than fixed;
+//              * the NETWORK-GLOBAL scan (130f), which exists because `fetch` is a global and a module
+//                graph is blind to it;
+//              * the CREDENTIAL scan (130g) and the runtime half of the same claim (130u);
+//              * the ONE-WAY and THROUGH-THE-DOOR scans (130h-130j), which are about the export module's
+//                own surface and its refusal to hold a raw query;
+//              * the BOUNDARY rule (130k-130o), in both directions — a rule narrowed until it covers
+//                nothing and a rule widened until it covers everything are the same dead rule.
+//
+//            The BYTES are the other half (130p-130t). The deliverable is a file an accountant is handed,
+//            so the contract is `packages/db/src/services/zoho-export.fixture.csv`: a reordered section, a
+//            lost line and a `1000` that became `1000.0` are all invisible to a field-by-field assertion.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const SCANNER = 'scripts/test-no-autofile.mjs'
+  const EXPORT_MODULE = 'packages/db/src/services/zoho-export.ts'
+  const CONFIG = '.dependency-cruiser.cjs'
+  const FIXTURE = 'packages/db/src/services/zoho-export.fixture.csv'
+  const UNIT_SUITE = 'packages/db/src/services/zoho-export.test.ts'
+  const ITEST_SUITE = 'packages/db/src/services/zoho-export.itest.ts'
+  const BOUNDARY_RULE = 'tax-and-filing-must-not-reach-the-network'
+
+  const scan = () => run('pnpm', ['no-autofile'])
+  const scanExpectingFailure = () => runExpectingFailure('pnpm', ['no-autofile'])
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+  const cruise = () => ['exec', 'depcruise', '--config', CONFIG, 'packages', 'apps']
+
+  // 130a. The name a submission helper would carry, written where one would actually be written: a
+  //       repository module rather than the tax estate. The scan is tree-wide for exactly this reason —
+  //       a job, a route or a script is where somebody puts "just post the figures" and none of them is
+  //       under packages/core/src/tax.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      [
+        'export async function submitReturn(returnId: string): Promise<void> {',
+        '  await Promise.resolve(returnId)',
+        '}',
+      ].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a submitReturn export is caught',
+      result,
+      'no-autofile-identifier',
+    )
+  }
+
+  // 130b. The kebab spelling, which is the one a route path arrives in and the one a JavaScript-identifier
+  //       tokeniser would never see. `-` is a token character in this scan for this case alone.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      ["export const ROUTE = '/api/tax/auto-file'"].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an auto-file route path is caught',
+      result,
+      'no-autofile-identifier',
+    )
+  }
+
+  // 130c. And `efile` as a whole segment of a longer name, which is the alternative most likely to be
+  //       removed by somebody "fixing the false positives" — see 130e for what the false positives are.
+  {
+    const result = withFixture(
+      'packages/db/src/__gate_fixture__.ts',
+      ['export const efileEndpoint = null'].join('\n'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy('no-autofile: an efile segment is caught', result, 'no-autofile-identifier')
+  }
+
+  // 130d. A TERM DROPPED from the pattern is caught by the scan's own control. The pattern is quoted in
+  //       ADR 0052 and in the manifest acceptance line, so a shortened one makes the three disagree in
+  //       the direction nobody reads.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          '/(auto[_-]?file|submitReturn|fta[_-]?api|efile|file[_-]?return)/i',
+          '/(auto[_-]?file|submitReturn|fta[_-]?api|file[_-]?return)/i',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: dropping a term from the pattern fails the scan own control',
+      result,
+      'no longer flags "efile"',
+    )
+  }
+
+  // 130e. And the other direction, which is the one that decides whether this gate can exist at all. With
+  //       segment alignment removed, `efile` matches the `eFile` inside `writeFileSync` — so the scan
+  //       reports its own negative control rather than forty false positives. A gate that fires on
+  //       `readFileSync` is a gate somebody deletes.
+  {
+    const result = withEditedFile(
+      SCANNER,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const aligned = ranges.some(([start]) => start === from) && ranges.some(([, end]) => end === to)',
+          '  const aligned = true',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a matcher without segment alignment flags writeFileSync',
+      result,
+      'flags "writeFileSync"',
+    )
+  }
+
+  // 130f. The network-capable global. This is the half `tax-and-filing-must-not-reach-the-network` cannot
+  //       hold: `fetch` is a global, so a module graph has nothing to draw an edge to, and 130m-130o would
+  //       all pass for an export that called it.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filename = zohoExportFilename(filing)',
+          '  const filename = zohoExportFilename(filing)\n  await fetch(filing.returnId)',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: the export calling fetch is caught although depcruise cannot see it',
+      result,
+      'no-autofile-network-global',
+    )
+  }
+
+  // 130g. A credential read. The acceptance line is that the export "succeeds with no environment
+  //       variables or credentials set", and a module that reads one has somewhere for a credential to
+  //       arrive — which is the first half of a filing path, before any network call is written.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          "    line('amount_unit', 'fils'),",
+          "    line('amount_unit', process.env['ZOHO_UNIT'] ?? 'fils'),",
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: the export reading process.env is caught',
+      result,
+      'no-autofile-export-reads-no-credentials',
+    )
+  }
+
+  // 130h. A read path back from the accounting package, as a name. "The module exposes no read path from
+  //       Zoho" is an acceptance line about an absence, and this is the enumeration that makes it a check.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          'export function zohoExportFilename(',
+          'export function importFromZoho(): void {}\n\nexport function zohoExportFilename(',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an importFromZoho export is caught',
+      result,
+      'no-autofile-export-is-one-way',
+    )
+  }
+
+  // 130i. A raw query, which is how the sign-off gate would stop applying without any check being deleted.
+  //       `vat_return` is deliberately readable — a preparer must see what they are about to sign — so a
+  //       `select … from vat_return` here answers the same question with no refusal attached to it.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filename = zohoExportFilename(filing)',
+          '  const filename = zohoExportFilename(filing)\n' +
+            '  await uow.sql`select 1 from vat_return`',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a raw query in the export is caught',
+      result,
+      'no-autofile-export-goes-through-the-filing-door',
+    )
+  }
+
+  // 130j. And the other direction of the same rule, because 130i is satisfied by a module that reads
+  //       nothing at all: the door has to be seen to be USED. An export rewritten to take its figures from
+  //       its caller would otherwise pass every scan in this block.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId)',
+          '  const filing = input as unknown as VatReturnForFiling',
+        ),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: an export that never calls the filing door is caught',
+      result,
+      'no-autofile-export-goes-through-the-filing-door',
+    )
+  }
+
+  // 130k. The boundary rule NARROWED until it no longer covers the export. The rule and the scan hold the
+  //       same list of modules in two files, so the failure mode is one of them moving — and a rule that
+  //       names a file it no longer matches reads exactly like a rule that works.
+  {
+    const result = withEditedFile(
+      CONFIG,
+      (source) => replaceOnce(source, 'services/zoho-export', 'services/zoho-export-moved'),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a boundary rule that stops covering the export is caught',
+      result,
+      'no-autofile-boundary-covers-the-estate',
+    )
+  }
+
+  // 130l. And WIDENED until it covers everything, which is the same dead rule from the other side: it
+  //       would satisfy "covers the estate" while saying nothing about what it is aimed at. `pnpm
+  //       boundaries` was once reduced to zero modules while reporting success (ADR 0002); a rule reduced
+  //       to "all of them" is the same class of silence.
+  {
+    const result = withEditedFile(
+      CONFIG,
+      (source) => replaceOnce(source, "'^packages/core/src/tax/|' +", "'^packages/|' +"),
+      () => scanExpectingFailure(),
+    )
+    checkRejectedBy(
+      'no-autofile: a boundary rule widened to every package is caught',
+      result,
+      'no-autofile-boundary-covers-the-estate',
+    )
+  }
+
+  // 130m. The boundary rule itself, on a Node builtin, in the tax estate. The acceptance line asks for
+  //       exactly this: `scripts/test-gates.mjs` proves the rule rejects a deliberately illegal fixture
+  //       import BY RULE NAME. An ordinary module rather than a `.test.ts`, because the rule exempts the
+  //       test files — `zoho-export.itest.ts` imports node:http in order to replace it with a throwing
+  //       stub, which is the opposite of using it.
+  {
+    const result = withFixture(
+      'packages/core/src/tax/__gate_fixture__.ts',
+      ["import { request } from 'node:https'", 'export const illegal = request'].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'no-autofile: the tax estate reaching node:https is refused',
+      result,
+      BOUNDARY_RULE,
+    )
+  }
+
+  // 130n. The CLIENT-LIBRARY branch of the same alternation, which `core-must-be-pure` does not cover at
+  //       all: that rule forbids http, https and net and none of the seven packages. Uninstalled, so it
+  //       resolves to its bare name — the third of the three resolution shapes core-must-be-pure's comment
+  //       records, and the one that left `no-lucide-outside-the-icon-wrapper` configured, green and dead.
+  {
+    const result = withFixture(
+      'packages/core/src/tax/__gate_fixture__.ts',
+      ["import axios from 'axios'", 'export const illegal = axios'].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy('no-autofile: the tax estate reaching axios is refused', result, BOUNDARY_RULE)
+  }
+
+  // 130o. And the outward-facing-package branch, as an edit to the export itself — the branch a real
+  //       gateway would arrive through, and the one no other rule in the config covers for packages/db.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          "import { AppError } from '@berelax/shared'\nimport * as google from '@berelax/google'",
+        ),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'no-autofile: the export reaching an outward-facing package is refused',
+      result,
+      BOUNDARY_RULE,
+    )
+  }
+
+  // 130p. The bytes are the contract. One character of the committed fixture, and the suite that asserts
+  //       it must fail — otherwise the fixture is a file nobody compares and every claim about the
+  //       deliverable is unheld.
+  {
+    const result = withEditedFile(
+      FIXTURE,
+      (source) => replaceOnce(source, 'net_tax_due_fils,600', 'net_tax_due_fils,601'),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: a one-fils edit to the export fixture fails the byte suite',
+      result,
+      'renders the committed fixture',
+    )
+  }
+
+  // 130q. The row order taken out of the renderer. The file's order must be a property of the figures
+  //       rather than of the order a JSON parser walked an array in: a snapshot lists its boxes in
+  //       whatever order the working papers built them, and two exports of one return that differ only in
+  //       row order are two different file hashes for one artefact.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    boxes: [...boxes].sort((a, b) => a.displayOrder - b.displayOrder || a.boxNo - b.boxNo),',
+          '    boxes,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an unsorted box list fails the order suite',
+      result,
+      'orders boxes by display order',
+    )
+  }
+
+  // 130r. The totals made wrong in the one direction that still looks plausible: a SUM where the return
+  //       needs a difference. Output tax plus input tax is a number, it is positive, it moves when the
+  //       ledger moves, and it is what the business would pay if somebody typed it into a return.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    netTaxDueFils: output.tax - input.tax,',
+          '    netTaxDueFils: output.tax + input.tax,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: net tax due as a sum fails the reconciliation suite',
+      result,
+      'sums each side and subtracts',
+    )
+  }
+
+  // 130s. RFC 4180 quoting removed. A label with a comma in it then shifts every column after it, and the
+  //       figures an accountant reads land under the wrong headings — a corruption that no total would
+  //       reveal, because the totals are correct.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const needsQuoting = /[",\\r\\n]/.test(raw) || raw !== raw.trim()',
+          '  const needsQuoting = false',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an unquoted field fails the CSV suite',
+      result,
+      'quotes a field that would otherwise break the row',
+    )
+  }
+
+  // 130t. The refusal wrapped in a generic error, which is the realistic way "runs only for a signed
+  //       return" stops being reportable: the export still refuses, and a screen can no longer tell
+  //       "two people have not signed this" from "the database is down".
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId)',
+          '  const filing = await vatReturnForFiling(uow.sql, input.returnId).catch(() => {\n' +
+            "    throw new Error('the export failed')\n" +
+            '  })',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: a swallowed ZY055 fails the sign-off suite',
+      result,
+      'refuses an unsigned return by name',
+    )
+  }
+
+  // 130u. The audit row without the file hash. The acceptance line names three things it must carry, and
+  //       the hash is the one that makes the row answer a question: without it the trail records that
+  //       somebody exported something, which is what a log already does.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      returnVersion: filing.version,\n      fileHash,',
+          '      returnVersion: filing.version,',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an audit row without the file hash fails the audit suite',
+      result,
+      'carrying the user, the version and the file hash',
+    )
+  }
+
+  // 130v. A credential the export REQUIRES, which is the runtime half of 130g. The scan catches the read;
+  //       this catches the dependency — an export that cannot run without something configured is an
+  //       export somebody will configure, and the thing they will configure it with is a token.
+  {
+    const result = withEditedFile(
+      EXPORT_MODULE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const document = renderZohoVatReturn(filing)',
+          "  if (process.env['ZOHO_TOKEN'] === undefined) throw new Error('no Zoho credentials')\n" +
+            '  const document = renderZohoVatReturn(filing)',
+        ),
+      () => runExpectingFailure('pnpm', integration(ITEST_SUITE)),
+    )
+    checkRejectedBy(
+      'no-autofile: an export needing a credential fails the cleared-environment suite',
+      result,
+      'succeeds with the environment emptied',
+    )
+  }
+
+  // 130w. Dropping the step from `pnpm verify`. The failure mode of the convention this whole block
+  //       enforces is that nothing fails when it is ignored, so the registration has to be load-bearing
+  //       too: case 29's array and the workflow are what stop a gate being quietly removed from CI.
+  {
+    const result = withEditedFile(
+      'package.json',
+      (source) => replaceOnce(source, ' && pnpm no-autofile', ''),
+      () => runExpectingFailure('pnpm', ['gate-registry']),
+    )
+    checkRejectedBy(
+      'no-autofile: dropping the step from verify fails the gate registry',
+      result,
+      'pnpm no-autofile',
+    )
+  }
+
+  // 130z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as a block of passing cases — which is the shape of every gate this file
+  //       has caught dying.
+  {
+    const clean = scan()
+    check('no-autofile: the unedited repository passes the scanner', !clean.failed, clean.output)
+
+    const cruised = run('pnpm', cruise())
+    check(
+      'no-autofile: the unedited repository passes the boundary rule',
+      !cruised.failed,
+      cruised.output,
+    )
+
+    const bytes = run('pnpm', unit(UNIT_SUITE))
+    check('no-autofile: the byte suite passes unedited', !bytes.failed, bytes.output)
+
+    const behaviour = run('pnpm', integration(ITEST_SUITE))
+    check('no-autofile: the export suite passes unedited', !behaviour.failed, behaviour.output)
+
+    const registry = run('pnpm', ['gate-registry'])
+    check('no-autofile: the gate registry passes unedited', !registry.failed, registry.output)
+  }
+}
+
+// 131a-131z. (M-VAT-12) The closed-month reconciliation: every identity shown to be able to FAIL, and every
+//            figure shown to come from the one function that owns it.
+//
+//            This unit's defects are all one shape, and it is the shape a reconciliation report invites: a
+//            report that reconciles for the wrong reason. Two zeros agree perfectly; a figure derived twice
+//            agrees with itself; a month with nothing in it has no variance at all. So every case below
+//            mutates ONE decision and names the ONE suite that has to notice — and the three cases that
+//            matter most (131a, 131c, 131m) are mutations back to a defect this unit actually shipped and
+//            its own suite caught.
+//
+//            **The rows suite builds its own closed month, and that is not a convenience.** `pnpm seed`
+//            writes zero `appointment` rows, zero `invoice` rows and no `period_lock`, so the "seeded closed
+//            month" the acceptance line names does not exist: a report over August 2026 reconciles seven
+//            empty figures against seven empty figures. Every case here therefore runs
+//            `packages/db/src/queries/month-reconciliation.itest.ts`, which posts a month through the real
+//            services and asserts `examinedRows` at a hand-counted figure.
+//
+//            **The window is searched for, not fixed.** `journal_entry` refuses DELETE for every role
+//            including the owner, so each run of that suite consumes three months out of a reserved span of
+//            six hundred (2200-01 .. 2249-12). This block runs it roughly a dozen times, so one
+//            `pnpm gates:only --only '// 131a'` spends about three years of it — which is why the span is
+//            fifty years and not five.
+//
+//            **The migration is absent on purpose and there is no case about one.** This unit adds no
+//            migration and raises no private SQLSTATE: the artefact is bytes plus an `audit_event`, both of
+//            which exist, and a second append-only table holding the same bytes is the duplication 0095's
+//            header argues against. There is therefore nothing here for a schema scan to mutate.
+{
+  const MODULE = 'packages/db/src/queries/month-reconciliation.ts'
+  const WORKED = 'packages/fixtures/src/month-reconciliation.ts'
+  const RENDER = 'apps/web/app/(admin)/accounts/reconciliation/render.ts'
+  const ROUTE = 'apps/web/app/(admin)/accounts/reconciliation/route.ts'
+
+  const ROWS_SUITE = 'packages/db/src/queries/month-reconciliation.itest.ts'
+  const WORKED_SUITE = 'packages/fixtures/src/month-reconciliation.test.ts'
+  const RENDER_SUITE = 'apps/web/src/month-reconciliation-render.test.ts'
+
+  const reconUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const reconRows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block and not `reconciliationMutant`, deliberately: blocks 106, 107, 113 and 125 all
+   * record what a shared helper NAME cost them — git found two identically shaped bodies as shared context
+   * and interleaved the blocks, and the merge had to rebuild both from whole sides.
+   */
+  const brokenReconSource = (path, anchor, replacement, suite, runner = reconRows) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  /**
+   * TWO anchored edits, for a mutation that has to stay internally consistent to be interesting.
+   *
+   * 131a needs one: moving a source between two classes with only ONE edit leaves it claimed by no class at
+   * all, and `assertEverySourceIsClassified` then throws while the report is being built — every test skips,
+   * and the case proves the classifier fires rather than that the identity does. 131x is the case about the
+   * classifier, and it is anchored on the refusal's own sentence for exactly that reason.
+   */
+  const brokenReconPair = (path, edits, suite, runner = reconRows) =>
+    withEditedFile(
+      path,
+      (text) =>
+        edits.reduce((acc, [anchor, replacement]) => replaceOnce(acc, anchor, replacement), text),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 131a. The credit note's entry read under the `refund` source instead of `reversal`. This is the defect
+  //       this file shipped: a credit note posts `source = 'reversal'` and debits revenue and output VAT,
+  //       while `refund` moves MONEY and touches no revenue account — so the revenue identity compares
+  //       credit-note gross against nothing and is out by every credit note in the month.
+  checkRejectedBy(
+    'month reconciliation: the credit-note entry classified as a refund rather than a reversal is caught',
+    brokenReconPair(
+      MODULE,
+      [
+        // SWAPPED rather than replaced, so every source is still claimed by exactly one class and what
+        // fails is the identity rather than the classifier.
+        ["  document_sale: ['sale', 'reversal'],", "  document_sale: ['sale', 'refund'],"],
+        ["  receipt: ['payment', 'refund'],", "  receipt: ['payment', 'reversal'],"],
+      ],
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131b. The refund ADDED to what was tendered instead of subtracted. Money handed back read as money
+  //       received, which is a figure that looks exactly like a busier month.
+  checkRejectedBy(
+    'month reconciliation: a refund added to the tenders rather than subtracted is caught',
+    brokenReconSource(
+      MODULE,
+      'documents.paymentAppliedFils - documents.refundFils,',
+      'documents.paymentAppliedFils + documents.refundFils,',
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131c. The VAT box looked up by the SUPPLIES tag instead of the tax tag — the second defect this file
+  //       shipped. `standard_rated_supplies` with measure `tax` matches no mapping row, so the box side of
+  //       the last step in the chain is silently zero and the report reconciles the tax against nothing.
+  checkRejectedBy(
+    'month reconciliation: the output-tax box looked up by the supplies tag is caught',
+    brokenReconSource(
+      MODULE,
+      "vat201BoxForGrouping(sql, 'output_tax', 'tax'),",
+      "vat201BoxForGrouping(sql, 'standard_rated_supplies', 'tax'),",
+      ROWS_SUITE,
+    ),
+    'carries the chain to the VAT box',
+  )
+
+  // 131d. An excluded population read as an EQUALITY. One no-show in the month then reads as a variance,
+  //       which is the defect that turns "these are not revenue" into "the month does not reconcile" — and
+  //       after a fortnight of a report that always has three variances nobody reads the variances.
+  checkRejectedBy(
+    'month reconciliation: an excluded population read as an equality is caught',
+    brokenReconSource(
+      MODULE,
+      "  return input.kind === 'excluded' ? right : left - right",
+      '  return left - right',
+      ROWS_SUITE,
+    ),
+    // The no-show line's own FIGURES are unchanged by this mutation — one no-show, none of them billed — so
+    // what notices is the report's variance LIST, not the assertions about the figures. Anchored on the test
+    // that reads that list, which is the mistake this anchor started as.
+    'reports no unexplained variance line at all',
+  )
+
+  // 131e. The journal half of the as-of census dropped. The count then misses exactly the rows a reopened
+  //       period would have added to the LEDGER, which is the only half that restates a filed figure.
+  checkRejectedBy(
+    'month reconciliation: the as-of census blind to journal entries is caught',
+    brokenReconSource(
+      MODULE,
+      // Anchored on the fragment that carries no interpolation, and multiplied out rather than deleted:
+      // the clause's own text holds three `${}` placeholders, and a gate anchor containing one reads to
+      // Biome as a template literal somebody forgot to make a template literal.
+      '+ (select count(*) from journal_entry',
+      '+ (select 0 * count(*) from journal_entry',
+      ROWS_SUITE,
+    ),
+    'counts the rows written after the instant it read at',
+  )
+
+  // 131f. The trial-balance movement read over an empty range. The tie-back line then compares a census of
+  //       sixteen journal lines against a movement of none — which is the whole reason the refinement this
+  //       report makes is held to `trialBalanceMovement` by a LINE rather than by a comment.
+  checkRejectedBy(
+    'month reconciliation: the census tied to a trial balance over the wrong range is caught',
+    brokenReconSource(
+      MODULE,
+      'trialBalanceMovement(sql, dayBefore(period.startsOn), period.endsOn),',
+      'trialBalanceMovement(sql, period.endsOn, period.endsOn),',
+      ROWS_SUITE,
+    ),
+    'ties its own per-source refinement back to the trial balance',
+  )
+
+  // 131g. Two lines transposed in the report. Identical figures, different bytes — so the acceptance line
+  //       about regenerating byte-identically is exactly what a reordering breaks, and the declared id list
+  //       is what refuses it before any caller can see the difference.
+  checkRejectedBy(
+    'month reconciliation: the lines built in a different order from the declared list is caught',
+    brokenReconSource(
+      MODULE,
+      "      id: 'no_shows_excluded_from_revenue',",
+      "      id: 'cancellations_excluded_from_revenue',",
+      ROWS_SUITE,
+    ),
+    // The declared-list check throws while the report is being built, so every test SKIPS and no test name
+    // reaches the output. The anchor is the refusal's own sentence, which exists nowhere else in the tree.
+    'the order is part of the contract',
+  )
+
+  // 131h. The package liability read at the wrong end of the period. Both sides of that line come from ONE
+  //       function, so the identity still holds for the wrong month — the figure is what has to be asserted,
+  //       and this case is what proves the suite asserts it rather than only the variance.
+  checkRejectedBy(
+    'month reconciliation: the package liability read at the start of the period is caught',
+    brokenReconSource(
+      MODULE,
+      'readPackageLiability(sql, period.endsOn),',
+      'readPackageLiability(sql, dayBefore(period.startsOn)),',
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131i. The refund's own source class dropped from the tender identity. The money out is then in the
+  //       documents and not in the ledger side, so a month with a refund in it never reconciles — and the
+  //       figure it is out by is the refund, which reads like a missing payment.
+  checkRejectedBy(
+    'month reconciliation: the receipt source class dropped from the tender identity is caught',
+    brokenReconSource(MODULE, "    ...inClass(tenders, 'receipt'),\n", '', ROWS_SUITE),
+    'holds the four named identities',
+  )
+
+  // 131j. The export's soundness guard removed. A reconciliation with an unexplained variance is then
+  //       handed to an FTA-registered agent, whose paper says on its own face that it does not add up.
+  checkRejectedBy(
+    'month reconciliation: exporting a report that does not reconcile is caught',
+    brokenReconSource(
+      MODULE,
+      '  if (report.notExportableReasons.length > 0) {\n' +
+        '    throw new MonthReconciliationNotExportable(report.period, report.notExportableReasons)\n' +
+        '  }',
+      '',
+      ROWS_SUITE,
+    ),
+    'refuses to export the defective month',
+  )
+
+  // 131k. The audit row dropped from the export. "Every export writes an audit_event" is the acceptance
+  //       line, and the failure is silent by construction: the bytes still leave the building.
+  checkRejectedBy(
+    'month reconciliation: an export that writes no audit_event is caught',
+    brokenReconSource(
+      MODULE,
+      "  await uow.audit.record({\n    action: 'money.month_reconciliation.export',",
+      "  await Promise.resolve({\n    action: 'money.month_reconciliation.export',",
+      ROWS_SUITE,
+    ),
+    'writes one audit_event',
+  )
+
+  // 131l. A SECOND canonicaliser planted in place of M-VAT-07's. It serialises every bigint as a JSON
+  //       NUMBER, which rounds silently above 2^53 in whatever reads the artefact years later — and two
+  //       runs of an equally wrong serialiser agree perfectly, so the byte-identity case alone would pass.
+  checkRejectedBy(
+    'month reconciliation: a second serialiser writing bigints as JSON numbers is caught',
+    brokenReconSource(
+      MODULE,
+      '  return canonicaliseVat201WorkingPapers(report)',
+      '  return JSON.stringify(report, (_key, value) =>\n' +
+        "    typeof value === 'bigint' ? Number(value) : value,\n  )",
+      ROWS_SUITE,
+    ),
+    'writes every non-zero figure into the bytes as a quoted decimal string',
+  )
+
+  // 131m. The redemption's VAT dropped from the worked example's output-tax figure — the third defect this
+  //       unit shipped, and the one a committed worked example exists to catch. A redemption recognises
+  //       output tax with no invoice behind it, so the box is a thousand fils above the documents.
+  checkRejectedBy(
+    'month reconciliation: the worked example omitting the redemption VAT is caught',
+    brokenReconSource(
+      WORKED,
+      '    WORKED_TREATMENT_VAT * 2 + WORKED_TREATMENT_VAT - WORKED_TREATMENT_VAT + WORKED_TREATMENT_VAT,',
+      '    WORKED_TREATMENT_VAT * 2 + WORKED_TREATMENT_VAT - WORKED_TREATMENT_VAT,',
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'derives every identity from the documents it lists',
+  )
+
+  // 131n. The one line that makes no claim relabelled as one that does. A figure nothing checks would then
+  //       be counted among the checks, which is the arithmetic by which a report comes to look thorough.
+  checkRejectedBy(
+    'month reconciliation: a stated figure counted as a checked one is caught',
+    brokenReconSource(
+      WORKED,
+      "  treasury_movements_excluded_from_receipts: {\n    kind: 'stated',",
+      "  treasury_movements_excluded_from_receipts: {\n    kind: 'excluded',",
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'distinguishes the kinds',
+  )
+
+  // 131o. The worked example's package liability summed instead of subtracted. Sold plus redeemed is
+  //       84,000 against a liability that moved by 42,000 — double, which is M-TILL-10's recorded defect (7)
+  //       arriving in a committed figure instead of in a test.
+  checkRejectedBy(
+    'month reconciliation: the worked liability stated as sold PLUS redeemed is caught',
+    brokenReconSource(
+      WORKED,
+      '  packageLiabilityFils: WORKED_TREATMENT_GROSS * 3 - WORKED_TREATMENT_GROSS,',
+      '  packageLiabilityFils: WORKED_TREATMENT_GROSS * 3 + WORKED_TREATMENT_GROSS,',
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'derives every identity from the documents it lists',
+  )
+
+  // 131p. A gap in the worked example left with no owner. A list of uncovered cases naming nobody reads as
+  //       a list of things that are fine, which is how a gap becomes a guarantee.
+  checkRejectedBy(
+    'month reconciliation: an uncovered case with no owning unit or question is caught',
+    brokenReconSource(
+      WORKED,
+      "  'A reverse charge. It posts to 2035, which maps to its own VAT201 box and is on the purchase side, ' +\n" +
+        "    'and M-VAT-03 owns the working paper that reconciles it.',",
+      "  'A reverse charge. It posts to its own box on the purchase side.',",
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'names the unit or question that owns each gap',
+  )
+
+  // 131q. A variance rendered as a tick. The page then says the month reconciles while showing the figure
+  //       it is out by, and the reader who trusts the verdict column files it.
+  checkRejectedBy(
+    'month reconciliation: the screen showing a variance as a holding line is caught',
+    brokenReconSource(
+      RENDER,
+      "  if (line.variance === '0') {",
+      '  if (true) {',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'shows a variance AS a variance',
+  )
+
+  // 131r. `formatFils` reimplemented through `Number`. Above 2^53 the page prints a figure one fil below
+  //       the ledger's, which is the rounding every figure in this unit is a string to avoid.
+  checkRejectedBy(
+    'month reconciliation: a fils figure rendered through Number is caught',
+    brokenReconSource(
+      RENDER,
+      "  const negative = fils.startsWith('-')",
+      // Concatenation and not a template literal, for 131e's reason: `${` inside a plain string is a
+      // Biome diagnostic, and `pnpm lint` treats one as an error.
+      "  return 'AED ' + (Number(fils) / 100).toFixed(2)\n  const negative = fils.startsWith('-')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'renders a figure above 2^53 exactly',
+  )
+
+  // 131s. The `stated` verdict collapsed into the holding one, so a figure nothing claimed is shown with
+  //       the same tick as a figure that was checked — 131n's defect, one layer out, on the screen.
+  checkRejectedBy(
+    'month reconciliation: the screen ticking a line that claims nothing is caught',
+    brokenReconSource(
+      RENDER,
+      "  if (line.kind === 'stated') {",
+      '  if (false) {',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'shows a `stated` line as claiming nothing',
+  )
+
+  // 131t. The unconfirmed-box caveats folded away. The page then shows a month that reconciles exactly and
+  //       says nothing about the box numbers being placeholders, which is the one thing a tax agent is being
+  //       handed the paper to confirm.
+  checkRejectedBy(
+    'month reconciliation: the screen hiding what is unconfirmed is caught',
+    brokenReconSource(
+      RENDER,
+      "    view.caveats.length === 0\n      ? ''",
+      "    true\n      ? ''",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'separates what is unconfirmed from what does not add up',
+  )
+
+  // 131u. The export moved into the GET. An export is an `audit_event` with an actor on it, and a GET has no
+  //       actor to name — so the row would carry a fabricated one into an append-only trail, or none at all.
+  checkRejectedBy(
+    'month reconciliation: the route exporting from a GET is caught',
+    brokenReconSource(
+      ROUTE,
+      '      const report = await monthReconciliation(sql, period, nowIso)',
+      '      const report = await monthReconciliation(sql, period, nowIso)\n' +
+        "      if (false) await exportMonthReconciliation(null as never, report, '')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'mutates nothing',
+  )
+
+  // 131v. The route given a default month. A page that answers for "last month" answers a different
+  //       question every month, so the link a reviewer cites stops meaning what it meant — and nothing about
+  //       the page would look wrong on the day it changed.
+  checkRejectedBy(
+    'month reconciliation: the route defaulting to a month rather than refusing is caught',
+    brokenReconSource(
+      ROUTE,
+      '    const period = requested === null ? null : periodFrom(requested)',
+      "    const period = periodFrom(requested ?? '2026-08')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    // A default supplied to `periodFrom` makes the 400 branch dead code while leaving `status: 400` in the
+    // file, so a scan for the status could not see it — and the first version of this case reported PASS
+    // about a route that had just acquired a default month. The scan now states the SHAPE: a missing
+    // parameter yields no period, and no fallback operator may reach `periodFrom`.
+    'answers 400 rather than defaulting to a month',
+  )
+
+  // 131w. The route summing something of its own. The page is the report; a route that computed a figure
+  //       would be the second derivation this unit is arranged around not making, and it would be the copy a
+  //       screen reads while the hash still verifies the other.
+  checkRejectedBy(
+    'month reconciliation: the route deriving a figure of its own is caught',
+    brokenReconSource(
+      ROUTE,
+      '      const lines: ReconciliationLineView[] = report.lines.map((line) => ({',
+      '      const total = report.lines.reduce((sum, row) => sum + row.variance, 0n)\n' +
+        '      void total\n' +
+        '      const lines: ReconciliationLineView[] = report.lines.map((line) => ({',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'computes no figure of its own',
+  )
+
+  // 131x. The classification's schema check made one-directional. A source the schema permits and no class
+  //       claims then makes every identity silently ignore whatever it posted, and the report goes on saying
+  //       zero variance about a month it has stopped examining.
+  checkRejectedBy(
+    'month reconciliation: an unclassified journal source going unnoticed is caught',
+    brokenReconSource(MODULE, "    'payroll',\n", '', ROWS_SUITE),
+    // Throws while the report is being built, so the anchor is the refusal's own remedy sentence rather
+    // than a test name that never runs.
+    'Add each to JOURNAL_SOURCE_CLASSES',
+  )
+
+  // 131y. The consumer enumeration allowed to go stale. M-VAT-08's arrangement, restated: an export added
+  //       and not classified is a door nobody has decided the rules for.
+  checkRejectedBy(
+    'month reconciliation: a consumer missing from the declared enumeration is caught',
+    brokenReconSource(MODULE, "  'classifyJournalSources',\n", '', ROWS_SUITE),
+    'enumerates its consumers against its own real export list',
+  )
+
+  // 131z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing a module, or a scanner that refused the clean tree
+  //       would all report as twenty-five passing cases.
+  {
+    for (const suite of [WORKED_SUITE, RENDER_SUITE]) {
+      const green = run('pnpm', reconUnit(suite))
+      check(`month reconciliation: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const rows = run('pnpm', reconRows(ROWS_SUITE))
+    check(`month reconciliation: ${ROWS_SUITE} passes unedited`, !rows.failed, rows.output)
   }
 }
 
@@ -39382,6 +41294,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     // against a document table — the half of "an issued invoice is never edited" that is a rule about the
     // repository rather than a rule in the database.
     'pnpm no-invoice-mutation',
+    // M-VAT-09's absence gate, in the position `pnpm verify` runs it. Registered here because that is
+    // what makes dropping it from CI a failing build rather than a silent loss of the one check that
+    // enforces "the codebase has no capability to file a return".
+    'pnpm no-autofile',
     'pnpm structured-data',
     'pnpm audit:online',
     'pnpm palette',
@@ -39390,6 +41306,7 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm cms',
     'pnpm chokepoint',
     'pnpm send-chokepoint',
+    'pnpm private-documents',
     'pnpm layout',
     'pnpm jobs',
     'pnpm adr',

@@ -1019,6 +1019,22 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
 
   // --- financial: the documents a regulator reads ------------------------------------------------
   rule({
+    key: 'public.commission_line.invoice_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.invoice.customer_id',
+    why:
+      'A commission line points at the invoice the commission was earned on. It carries no identity of its ' +
+      'own — the employee is named by `staff_reference` and the customer appears nowhere on the row — so the ' +
+      'column is a pointer at a document whose own rule decides the matter, which is what ' +
+      '`inherits_parent` means here: whatever happens to `public.invoice.customer_id` happens to this, and ' +
+      'a second answer beside it would be a second answer about one invoice. It is classified at all ' +
+      "because the catalogue's foreign-key child probe finds it and the erasure REFUSES to run with an " +
+      "unclassified column (ADR 0034) — it was P-HR-11 landing 0097 that made nine of this suite's cases " +
+      'fail, which is the probe working rather than a gap in it.',
+    registeredBy: 'P-HR-11',
+  }),
+  rule({
     key: 'public.invoice.customer_id',
     dataClass: 'financial',
     action: 'retain_statutory',
@@ -1535,6 +1551,24 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'make the review answerable. A reviewer exercising a right does so against Google. The absence of ' +
       'a join is what makes this true, and it is checked: there is no customer id on this table.',
     registeredBy: 'C-CRM-10',
+  }),
+  rule({
+    key: 'public.review_intake_email.raw_body_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The sha256 of a forwarded Google review notification (migration 0094), caught by the CREDENTIAL ' +
+      'probe on the `_sha256` column-name family. It is a digest and not a credential: nothing resolves ' +
+      'it, nothing authenticates against it, and it exists so a parsed intake row can be tied to the ' +
+      'bytes it came from without holding a second copy of them. ' +
+      'It is not customer data either, for the reason `google_reviews.reviewer_display_name` gives one ' +
+      'entry along and on the same grounds: a review is left by a member of the public on a PUBLISHED ' +
+      'Google listing, this table carries no customer id and no foreign key to one — checked, not ' +
+      'assumed — and a reviewer exercising a right does so against Google. ' +
+      'The `raw_body` column beside it is deliberately NOT named here, because no probe finds it and a ' +
+      'rule for a column nobody probes would make this registry read as broader than it is. If a probe ' +
+      'ever reaches it, the answer is the same one and it needs its own entry saying so.',
+    registeredBy: 'G-REV-02',
   }),
   rule({
     key: 'public.invoice.issuer_phone',

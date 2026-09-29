@@ -17,6 +17,7 @@ import {
 } from '@berelax/db'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { ELEVEN_FILS_EXPECTED, FIXTURE_ISSUER, FIXTURE_TRN, invoiceFixture } from './invoice.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -67,9 +68,7 @@ beforeEach(async () => {
   // `refund` — which is the loud failure that comment predicted. Named rather than
   // reached with CASCADE, so the next table to reference `invoice` fails here loudly instead of having
   // its rows removed by a statement that never mentioned it.
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  await truncateInvoiceFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

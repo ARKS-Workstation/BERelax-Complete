@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { loadConfig } from '@berelax/config'
-import { createFakeMediaStorage, type MediaStorage } from '@berelax/media/storage'
+import {
+  createDocumentUrlSigner,
+  createFakeMediaStorage,
+  type DocumentSigningKeyRing,
+  type DocumentUrlSigner,
+  type MediaStorage,
+} from '@berelax/media/storage'
 import { AppError } from '@berelax/shared'
 
 /**
@@ -50,6 +56,54 @@ export function mediaOutboxRoot(): string {
   return join(repositoryRoot(), 'artifacts', 'media-outbox')
 }
 
+/**
+ * The key ring every private-document link is signed and verified under, or `undefined` (W-SYS-14).
+ *
+ * `undefined` rather than a throw, and the distinction is the whole point: a deployment with no
+ * `DOCUMENT_URL_SIGNING_SECRET` must still serve every image on the site, so the absence cannot be fatal
+ * here. It becomes fatal at the moment somebody asks for a document, where the store answers
+ * `[document-signing-not-configured]` by name — no document rather than a document with no authorisation.
+ * Throwing from this function would take the derivative origin down over a missing DOCUMENT key, which is
+ * `[no-real-media-storage-adapter]`'s failure mode inverted.
+ *
+ * The retired slot is read and never written to: `createDocumentUrlSigner` signs with the current key and
+ * consults both to verify, so a rotation is a one-way door rather than a state where two keys are current.
+ */
+export function documentSigningKeyRing(): DocumentSigningKeyRing | undefined {
+  const config = loadConfig()
+  const secret = config.DOCUMENT_URL_SIGNING_SECRET
+  if (secret === undefined || secret.trim() === '') return undefined
+  const retiredSecret = config.DOCUMENT_URL_SIGNING_SECRET_PREVIOUS
+  return {
+    current: {
+      // `v1` when no label is set. A version label is only ever compared byte for byte, so a default is
+      // safe in a way a default SECRET would not be — and a deployment that set a key and forgot the label
+      // must produce working links rather than fail to boot over a string nobody reads.
+      version: config.DOCUMENT_URL_SIGNING_SECRET_VERSION ?? 'v1',
+      secret,
+    },
+    ...(retiredSecret === undefined || retiredSecret.trim() === ''
+      ? {}
+      : {
+          retired: {
+            version: config.DOCUMENT_URL_SIGNING_SECRET_PREVIOUS_VERSION ?? 'v0',
+            secret: retiredSecret,
+          },
+        }),
+  }
+}
+
+let cachedSigner: DocumentUrlSigner | undefined
+
+/** The signer, or `undefined` when no key is configured. Cached with the adapter, for the same reason. */
+export function appDocumentUrlSigner(): DocumentUrlSigner | undefined {
+  if (cachedSigner !== undefined) return cachedSigner
+  const ring = documentSigningKeyRing()
+  if (ring === undefined) return undefined
+  cachedSigner = createDocumentUrlSigner(ring)
+  return cachedSigner
+}
+
 let cached: MediaStorage | undefined
 
 export function appMediaStorage(): MediaStorage {
@@ -65,6 +119,13 @@ export function appMediaStorage(): MediaStorage {
       { details: { mode } },
     )
   }
-  cached = createFakeMediaStorage({ outbox: mediaOutboxRoot() })
+  const signer = appDocumentUrlSigner()
+  cached = createFakeMediaStorage({
+    outbox: mediaOutboxRoot(),
+    // Spread rather than `signer: appDocumentUrlSigner()`, because `exactOptionalPropertyTypes` refuses an
+    // explicit `undefined` for an optional property — and the adapter's own refusal already distinguishes
+    // "no key configured" from "the store refused", so passing one would say the same thing twice.
+    ...(signer === undefined ? {} : { signer }),
+  })
   return cached
 }

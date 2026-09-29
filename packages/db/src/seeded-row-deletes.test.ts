@@ -6,11 +6,13 @@ import {
   DECLARED_UNQUALIFIED,
   duplicateDeclarations,
   GUARD_SUITE,
+  missingSupportModules,
   NEVER_DECLARABLE,
+  scannedFiles,
   sourceFiles,
   sqlLiterals,
   staleDeclarations,
-  testFiles,
+  UNRESOLVED_LIST,
   undeclaredSites,
   unqualifiedInSource,
   unqualifiedSites,
@@ -51,7 +53,7 @@ import {
  */
 
 /** Every test file, integration or unit, under the roots — excluding this one. */
-const FILES = testFiles().filter((file) => file !== GUARD_SUITE)
+const FILES = scannedFiles().filter((file) => file !== GUARD_SUITE)
 const SITES = unqualifiedSites(FILES)
 
 describe('the seeded customers survive every suite', () => {
@@ -95,16 +97,39 @@ describe('the seeded customers survive every suite', () => {
 
 describe('every unqualified statement is scoped or declared', () => {
   it('leaves no site neither scoped nor declared', () => {
-    const offenders = undeclaredSites(SITES).map(
-      ({ site, table }) =>
-        `${site.file}:${site.line} → ${table}   (${site.statement.slice(0, 90)})`,
-    )
+    const offenders = undeclaredSites(SITES)
+      .filter(({ table }) => table !== UNRESOLVED_LIST)
+      .map(
+        ({ site, table }) =>
+          `${site.file}:${site.line} → ${table}   (${site.statement.slice(0, 90)})`,
+      )
     expect(
       offenders,
       'a-suite-may-delete-only-what-it-created: this statement names a table and no rows. Either scope it ' +
         'to the rows the suite created, or add an entry to DECLARED_UNQUALIFIED in ' +
         'packages/db/src/suite-table-ownership.ts naming the file, the table and why that suite owns it ' +
         '(ADR 0050)',
+    ).toEqual([])
+  })
+
+  it('leaves no statement whose scope it cannot read undeclared', () => {
+    // A `truncate` over an interpolated name has no table names in its text, so the scan can neither approve
+    // it nor accuse it — and silence would be the wrong answer, because that is exactly how a suite evades
+    // this rule whether or not it means to. It was not hypothetical: the two shared teardowns this
+    // repository moved its table lists into are written that way, and adding that module to the scanned set
+    // found NOTHING in it until the list could be resolved.
+    //
+    // A list written as a frozen array of string literals in the same module IS resolved. Anything else
+    // lands here and has to be declared with the reason its scope is safe.
+    const unreadable = undeclaredSites(SITES)
+      .filter(({ table }) => table === UNRESOLVED_LIST)
+      .map(({ site }) => `${site.file}:${site.line}   (${site.statement.slice(0, 80)})`)
+    expect(
+      unreadable,
+      'a-statement-whose-scope-cannot-be-read-is-declared: this delete or truncate takes its tables from an ' +
+        `interpolation the scan cannot resolve. Declare it against '${UNRESOLVED_LIST}' saying why its ` +
+        'scope is safe, or move the table list into a frozen array of string literals in the same module, ' +
+        'which the scan does read',
     ).toEqual([])
   })
 
@@ -121,6 +146,16 @@ describe('every unqualified statement is scoped or declared', () => {
         'Either the statement was scoped — in which case remove the entry, because a declaration left ' +
         'behind is standing permission to put the statement back — or the scan has stopped seeing it, ' +
         'which is worse and is why this is the floor',
+    ).toEqual([])
+  })
+
+  it('still has every support module it declares', () => {
+    // A support module renamed or removed out from under a declaration is how this scan goes quiet: the
+    // statement it holds is shared by sixteen suites, and none of them mentions a table any more.
+    expect(
+      missingSupportModules(),
+      'a-support-module-is-still-there: TEST_SUPPORT_MODULES names a file that does not exist, so the ' +
+        'statement it held is no longer scanned by anything',
     ).toEqual([])
   })
 
@@ -219,7 +254,27 @@ describe('the scan reads code and not prose', () => {
     const literals = sqlLiterals(
       `await sql\`delete from customer where id = ${interp('id')} and x = ${interp('y')}\``,
     )
-    expect(literals[0]?.text).toBe('delete from customer where id =  ?  and x =  ? ')
+    // ` ?id ` and not ` ? `: the placeholder keeps the interpolation's first IDENTIFIER, which is what lets
+    // `truncate ${LIST}` be recognised as a statement whose table list has to be resolved rather than
+    // silently read as a statement with no tables. Spaced both sides, because collapsing an interpolation to
+    // nothing could splice the identifiers either side of it into one word.
+    expect(literals[0]?.text).toBe('delete from customer where id =  ?id  and x =  ?y ')
+  })
+
+  it('resolves a table list written as a frozen array in the same module', () => {
+    // The mechanism the two shared teardowns depend on, both directions, on strings this case owns.
+    const module = [
+      "const FAMILY: readonly string[] = Object.freeze(['refund', 'payment', 'invoice'])",
+      `await sql.unsafe(\`truncate ${interp("FAMILY.join(', ')")}\`)`,
+    ].join('\n')
+    expect(unqualifiedInSource(module).flatMap((site) => site.tables)).toEqual([
+      'refund',
+      'payment',
+      'invoice',
+    ])
+    // And a list the scan CANNOT read is reported as unreadable rather than passed over in silence.
+    const opaque = `await sql.unsafe(\`truncate ${interp('whateverThisIs')}\`)`
+    expect(unqualifiedInSource(opaque).flatMap((site) => site.tables)).toEqual([UNRESOLVED_LIST])
   })
 })
 

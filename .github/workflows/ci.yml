@@ -149,6 +149,14 @@ jobs:
       - name: Messaging send choke point
         run: pnpm send-chokepoint
 
+      # One place every private document goes through. Five rules no type and no import rule can express: a
+      # second `insert into private_document` (a document with no audit row), a second
+      # `insert into private_document_fetch` (a fetch nobody recorded), a production caller of
+      # writeTaxDocumentPdf (a statutory document on a caller-chosen path, which is the hole W-SYS-14 closes),
+      # a second verifier of a signature, and the class catalogue disagreeing with migration 0101.
+      - name: Private document choke point
+        run: pnpm private-documents
+
       # A tax document prints stored figures and derives none of them, declares only the Arabic weights
       # the PDF actually embeds, and builds right-to-left from the dir attribute rather than from a
       # direction mark. Three rules a review does not reliably catch on a template.
@@ -161,6 +169,14 @@ jobs:
       # in the tree, which is otherwise refused at run time by a trigger rather than by the build.
       - name: No invoice mutation
         run: pnpm no-invoice-mutation
+
+      # There is no way to file a tax return from this codebase, and the absence is a claim about what the
+      # build CANNOT do — so it needs a check that fails on the day the ability appears (ADR 0052). Four
+      # scans: the identifier anywhere in the tree, the network-capable GLOBALS over the tax estate (which
+      # dependency-cruiser cannot see at all), the export reading no credentials, and the boundary rule
+      # still covering every module this one names.
+      - name: No auto-file capability
+        run: pnpm no-autofile
 
       # Every JSON-LD block this site serves is built by one function, and an invalid graph fails the build
       # rather than warning. The rules a review does not catch: a plausible coordinate nothing stands behind,

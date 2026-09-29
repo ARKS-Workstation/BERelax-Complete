@@ -22,6 +22,7 @@ import {
 } from '@berelax/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { assertMappingReconciles, checkoutMapping } from './checkout.ts'
+import { truncateInvoiceFamily, truncatePackageFamily } from './invoice-family.ts'
 import { packageSaleMapping } from './package.ts'
 import { packageRedemptionMapping } from './package-redemption.ts'
 import {
@@ -131,9 +132,9 @@ beforeAll(async () => {
 
     It used to read one of the four the consent loader seeds, on the reasoning that a package sale pins
     whoever it names so an invented customer would be undeletable. The reasoning was right and the conclusion
-    was wrong: a suite was emptying the table, so the seeded customers did not survive one integration run
-    and `pnpm seed` is not run again between suites — the read returned undefined and the booking insert
-    failed on `UNDEFINED_VALUE`. The pin is the real problem
+    was wrong: a suite was emptying the table, so the seeded customers did not survive one integration run and
+    `pnpm seed` is not run again between suites — the read returned undefined and the booking insert failed on
+    `UNDEFINED_VALUE`. The pin is the real problem
     and `afterAll` now removes it, by truncating the package family before deleting this row.
   */
   const [customer] = await sql<{ id: string }[]>`
@@ -339,9 +340,7 @@ afterAll(async () => {
   // RESTRICT. Every referencing table is NAMED rather than reached with CASCADE, so the next one to reference
   // `invoice` fails loudly here. `package_redemption` and `payment` are in the package truncate for 0083's
   // reason: PostgreSQL refuses a TRUNCATE while a referencing table is absent from the statement.
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   /*
     And the package family, which an earlier version of this file deliberately left standing. That was wrong,
     and the reason it was wrong is worth keeping.
@@ -351,19 +350,17 @@ afterAll(async () => {
     `package_sale` pins its `customer_id` through an `on delete restrict` foreign key and 0078 refuses DELETE
     on the sale, so the customer can never be deleted again — and nine cases elsewhere failed on that foreign
     key when a suite tried. This file's own probe sale pinned a seeded customer exactly the same way, so
-    leaving it standing was the same defect in a second place. The TEMPLATES this truncate does remove are
-    restored by the `packages` loader, which is what the `restoredBy` on this file's declaration in
-    `packages/db/src/suite-table-ownership.ts` claims and what the integration run's own invariant checks.
+    leaving it standing was the same defect in a second place. The TEMPLATES this truncate removes are
+    restored by the `packages` loader, which is what the `restoredBy` on `truncatePackageFamily`'s declaration
+    in `packages/db/src/suite-table-declarations.ts` claims and what the integration run's own invariant
+    checks.
 
     `truncate` is the only statement that removes an append-only row, so it is the only cleanup available, and
     it is what all five of the other package suites do. `apps/web/src/till.itest.ts` builds the four drawdown
     states in its own `beforeAll` and truncates them again afterwards, so nothing here is photographing rows
     this statement takes away.
   */
-  await sql?.unsafe(
-    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-      'package_template_version, package_template',
-  )
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`

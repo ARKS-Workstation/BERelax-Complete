@@ -1,5 +1,6 @@
 import { CMS_ROBOTS_TAG, PAYLOAD_ADMIN_ROUTE, PAYLOAD_API_ROUTE } from '@berelax/cms'
 import { sharp } from '@berelax/media/sharp'
+import { CMS_SCHEMA } from '@berelax/shared'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig } from 'payload'
@@ -11,7 +12,7 @@ import { PAYLOAD_GLOBALS } from './src/globals/index.ts'
  *
  * Three decisions in here are the ones worth reading before changing anything:
  *
- * **1. `schemaName: 'payload'`.** Payload migrates its own tables on its own release cycle, and
+ * **1. `schemaName: CMS_SCHEMA`.** Payload migrates its own tables on its own release cycle, and
  * `pnpm db:drift` compares every base table in the schemas it lists against a hand-written Drizzle mirror
  * in BOTH directions. A Payload table in `public` therefore fails the build looking like a forgotten
  * migration — on whoever's branch happens to be next. pg-boss has the same shape and is handled the same
@@ -142,7 +143,12 @@ export default buildConfig({
   typescript: { outputFile: `${import.meta.dirname}/.next/payload-types.ts` },
   db: postgresAdapter({
     pool: { connectionString: process.env['DATABASE_URL'] ?? '' },
-    schemaName: 'payload',
+    // `CMS_SCHEMA` from `@berelax/shared` rather than the literal, because `packages/db`'s catalogue probes
+    // have to name this schema in order to EXCLUDE it — see MERGE_CATALOGUE_EXCLUDED_SCHEMAS for why — and
+    // two spellings of it would make the exclusion silently stop matching. It comes from `shared` and not
+    // from `db` because `scripts/check-cms-boundary.mjs` imports this file with Node's strip-only TypeScript
+    // loader, which refuses the parameter property in `packages/db/src/audit.ts`.
+    schemaName: CMS_SCHEMA,
     // UUIDv7 rather than a serial. Two reasons: a document id appears in URLs and in the audit trail, and
     // `audit_event.actor_id` is a `uuid` column — a serial admin-user id could not be recorded as the
     // actor at all.

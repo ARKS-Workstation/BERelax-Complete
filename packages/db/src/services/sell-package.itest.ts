@@ -1,3 +1,4 @@
+import { truncatePackageFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -155,26 +156,12 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql?.unsafe(
-    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
-    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
-    // from the statement. It refuses on the CONSTRAINT and not on the rows, so `commission_line` arriving in
-    // 0097 broke this statement whether or not any commission had ever been run.
-    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-      'package_template_version, package_template',
-  )
+  if (sql !== undefined) await truncatePackageFamily(sql)
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
-  await sql.unsafe(
-    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
-    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
-    // from the statement. It refuses on the CONSTRAINT and not on the rows, so `commission_line` arriving in
-    // 0097 broke this statement whether or not any commission had ever been run.
-    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
-      'package_template_version, package_template',
-  )
+  await truncatePackageFamily(sql)
   nonce += 1
 })
 
@@ -944,12 +931,7 @@ describe('a sold balance never changes when the template is edited', () => {
     let totalSales = 0
 
     for (const seed of [11, 101, 1_009, 7_919, 20_260_101, 31_337, 424_242, 999_983]) {
-      await sql.unsafe(
-        // 0083: `package_redemption` and `payment` both reference this family now, and PostgreSQL
-        // refuses a TRUNCATE while a referencing table is missing from the statement.
-        'truncate commission_line, package_redemption, payment, package_balance, package_sale, ' +
-          'package_template_line, package_template_version, package_template',
-      )
+      await truncatePackageFamily(sql)
       const random = lcg(seed)
       const key = keyFor(`weave_${seed}`)
       const recorded: Recorded[] = []

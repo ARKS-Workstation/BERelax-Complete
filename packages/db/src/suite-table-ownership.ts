@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -82,6 +82,36 @@ export {
   NEVER_DECLARABLE,
   restorableTables,
 } from './suite-table-declarations.ts'
+
+/**
+ * Modules that are test code by PURPOSE and not by filename, scanned as if they were suites.
+ *
+ * `packages/fixtures/src/invoice-family.ts` is the case that forced this, and it is the right shape rather
+ * than an exception. Sixteen suites each restated the invoice and package family table lists; migration 0097
+ * gave `commission_line` a foreign key to both `invoice` and `package_redemption`, every one of those lists
+ * went stale at once, and four suites failed in their own teardowns. The lists now live once, in that module,
+ * behind `truncateInvoiceFamily` and `truncatePackageFamily` — which is this unit's own principle applied to
+ * the statement rather than to the declaration.
+ *
+ * But it moves the statement OUT of a `*.itest.ts`, and a scan that walks test files by filename stops seeing
+ * it: sixteen declarations went stale in one merge and the shared statement they described became unguarded.
+ * Naming the module here is what keeps the rule covering the statement wherever it lives. An entry that does
+ * not exist is a failure rather than a silent skip, because a support module removed or renamed is exactly
+ * how the scan would go quiet.
+ */
+export const TEST_SUPPORT_MODULES: readonly string[] = Object.freeze([
+  'packages/fixtures/src/invoice-family.ts',
+])
+
+/** Every file the rule applies to: the test files, plus the support modules they delegate cleanup to. */
+export function scannedFiles(): string[] {
+  return [...testFiles(), ...TEST_SUPPORT_MODULES.filter((module) => existsSync(module))]
+}
+
+/** Support modules that have been renamed or removed out from under a declaration. */
+export function missingSupportModules(): string[] {
+  return TEST_SUPPORT_MODULES.filter((module) => !existsSync(module))
+}
 
 /** Every test file under the roots, repository-relative. */
 export function testFiles(): string[] {
@@ -202,10 +232,18 @@ function readLiteral(source: string, start: number): { text: string; next: numbe
     }
     if (char === quote) return { text, next: i + 1 }
     if (quote === '`' && char === '$' && source[i + 1] === '{') {
-      i = skipInterpolation(source, i + 2)
+      const close = skipInterpolation(source, i + 2)
       // `?` is what postgres.js sends anyway, so the text still reads as SQL. Spaced on both sides because
       // collapsing the interpolation to nothing could splice the identifiers either side into one word.
-      text += ' ? '
+      //
+      // The first IDENTIFIER of the expression is kept with it, and that is not decoration. A statement whose
+      // table list is interpolated — `truncate ${INVOICE_FAMILY_TABLES.join(', ')}` — has no table names in
+      // its text at all, so a scan that dropped the expression could not see the statement and could not say
+      // it could not see it. Keeping the name is what lets the list be resolved where it is written.
+      const expression = source.slice(i + 2, close - 1)
+      const identifier = /[A-Za-z_$][\w$]*/.exec(expression)?.[0] ?? ''
+      i = close
+      text += ` ?${identifier} `
       continue
     }
     text += char
@@ -266,9 +304,23 @@ function skipTrivia(source: string, at: number): number {
  * those has the keyword in the middle of something else. Requiring statement position keeps them out
  * without a list of phrases to ignore, which is the form of exception that goes stale.
  */
-function parseStatement(statement: string): Omit<UnqualifiedSite, 'file' | 'line'> | undefined {
+function parseStatement(statement: string): ParsedStatement | undefined {
   const table = '[a-z_][a-z_0-9]*(?:\\.[a-z_][a-z_0-9]*)?'
   const list = `${table}(?:\\s*,\\s*${table})*`
+  const interpolated = /^(delete\s+from|truncate(?:\s+table)?)\s+\?([A-Za-z_$][\w$]*)/i.exec(
+    statement,
+  )
+  if (interpolated !== null) {
+    // A statement whose tables are interpolated. Its scope cannot be read from its own text, so it is a site
+    // whose table list has to be RESOLVED — see `resolveList`. Unresolved is a finding and never a skip: a
+    // truncate the scan cannot read is exactly how a suite would evade this rule, deliberately or not.
+    return {
+      kind: /^truncate/i.test(interpolated[1] as string) ? 'truncate' : 'delete',
+      tables: [],
+      statement: statement.trim(),
+      listName: interpolated[2] as string,
+    }
+  }
   const match = new RegExp(`^(delete\\s+from|truncate(?:\\s+table)?)\\s+(${list})`, 'i').exec(
     statement,
   )
@@ -527,6 +579,30 @@ export function sourceFiles(): string[] {
  * against a copy of this parser. A control that re-implements what it controls is not a control: it passes
  * while the real scan is broken, which is the shape of vacuous test ADR 0002 is about.
  */
+type ParsedStatement = Omit<UnqualifiedSite, 'file' | 'line'> & { readonly listName?: string }
+
+/**
+ * The tables a named `readonly string[]` in the same source holds, or `undefined`.
+ *
+ * Deliberately one idiom and not an evaluator: a frozen array of string literals, which is how both of this
+ * repository's shared truncate lists are written. Anything else is left UNRESOLVED and reported, because a
+ * resolver that guessed would be worse than one that says it cannot tell — this whole unit exists because a
+ * check that quietly covers less than it claims reads exactly like a repository with no problems.
+ */
+export function resolveList(source: string, name: string): string[] | undefined {
+  const declaration = new RegExp(
+    `\\b${name}\\s*(?::[^=]*)?=\\s*(?:Object\\.freeze\\()?\\[([^\\]]*)\\]`,
+  ).exec(source)
+  if (declaration === null) return undefined
+  const entries = [...(declaration[1] as string).matchAll(/'([a-z_][a-z_0-9]*)'/g)].map(
+    (entry) => entry[1] as string,
+  )
+  return entries.length > 0 ? entries : undefined
+}
+
+/** What a site whose list could not be resolved is declared as. */
+export const UNRESOLVED_LIST = '<unresolved-list>'
+
 export function unqualifiedInSource(source: string, file = '<inline>'): UnqualifiedSite[] {
   const out: UnqualifiedSite[] = []
   for (const literal of sqlLiterals(source)) {
@@ -536,7 +612,11 @@ export function unqualifiedInSource(source: string, file = '<inline>'): Unqualif
     // than argue with the check, which is a check making people write worse code.
     for (const segment of literal.text.split(';')) {
       const parsed = parseStatement(segment.replace(/\s+/g, ' ').trim())
-      if (parsed !== undefined) out.push({ file, line: literal.line, ...parsed })
+      if (parsed === undefined) continue
+      const { listName, ...site } = parsed
+      const tables =
+        listName === undefined ? site.tables : (resolveList(source, listName) ?? [UNRESOLVED_LIST])
+      out.push({ file, line: literal.line, ...site, tables })
     }
   }
   return out

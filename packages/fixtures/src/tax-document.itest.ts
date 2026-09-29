@@ -24,6 +24,7 @@ import { createPdfRenderer, type PdfRenderer, renderTaxDocumentPdf } from '@bere
 import { arabicFallbacksFor, extractPdfText, findLine, visualLines } from '@berelax/pdf/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FIXTURE_TRN, invoiceFixture, TWO_LINES_AT_ELEVEN_FILS } from './invoice.ts'
+import { truncateInvoiceFamily } from './invoice-family.ts'
 import { syntheticPerson } from './synthetic.ts'
 
 /**
@@ -78,10 +79,9 @@ afterAll(async () => {
   // undeletable by whoever touches it next, in a suite that runs sequentially against one database in an
   // order no file controls (brief rule 12). Removing what this file created is the rule ADR 0050 states,
   // and it is why the truncate is here as well as in `beforeEach`: `beforeEach` leaves the last test's
-  // rows standing.
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  // rows standing. The table list is `truncateInvoiceFamily`'s and not this file's, which is what stops it
+  // going stale the next time a migration references the family.
+  await truncateInvoiceFamily(sql)
   await sql`delete from customer where phone_e164 = ${PERSON.phone}`
   await renderer?.close()
   await sql.end({ timeout: 5 })
@@ -95,9 +95,7 @@ beforeEach(async () => {
   // `refund` — which is the loud failure that comment predicted. Named rather than
   // reached with CASCADE, so the next table to reference `invoice` fails here loudly instead of having
   // its rows removed by a statement that never mentioned it.
-  await sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  await truncateInvoiceFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

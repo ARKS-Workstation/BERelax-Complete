@@ -1,4 +1,5 @@
 import { loadConfig } from '@berelax/config'
+import type { Instant } from '@berelax/core'
 import {
   createConnection,
   readMessagingControls,
@@ -14,6 +15,7 @@ import {
   type MessagingControlDirection,
   type MessagingControlKey,
 } from '@berelax/shared'
+import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { guardAdminRoute } from '../../../../src/session.ts'
 import { controlViewsFrom, renderControlsHtml } from './render.ts'
 
@@ -68,6 +70,7 @@ const HTML = {
 /** The whole page, for a GET or for the answer to a POST. One renderer, so the two cannot diverge. */
 async function page(
   sql: Sql,
+  request: Request,
   role: string,
   notice: { readonly kind: 'refused' | 'done'; readonly detail: string } | null,
 ): Promise<Response> {
@@ -98,6 +101,9 @@ async function page(
       role,
       mayToggle,
       notice,
+      // The re-auth banner's source, read per request like every other admin screen's: this console is where
+      // somebody looks when messages are not arriving, so "the Google connection is dead" belongs on it.
+      chrome: await adminChromeFor({ sql, now: Date.now() as Instant, request }),
     }),
     { headers: HTML },
   )
@@ -109,7 +115,7 @@ export async function GET(request: Request): Promise<Response> {
   const authorised = await guardAdminRoute(request)
   if ('response' in authorised) return authorised.response
   try {
-    return await withSql((sql) => page(sql, authorised.principal.role, null))
+    return await withSql((sql) => page(sql, request, authorised.principal.role, null))
   } catch (error) {
     // Plain text and a 503: a blank page here would read as "nothing is stopping promotional sending", which
     // is the one wrong answer this screen can give.
@@ -184,7 +190,7 @@ export async function POST(request: Request): Promise<Response> {
     */
     const status = isAppError(error) && error.kind === 'forbidden' ? 403 : 400
     return await withSql(async (sql) => {
-      const answer = await page(sql, role, { kind: 'refused', detail })
+      const answer = await page(sql, request, role, { kind: 'refused', detail })
       return new Response(await answer.text(), { status, headers: HTML })
     })
   }
@@ -206,13 +212,13 @@ export async function POST(request: Request): Promise<Response> {
             at: Date.now(),
           }),
       )
-      return await page(sql, role, {
+      return await page(sql, request, role, {
         kind: 'done',
         detail: `${controlKey} is now ${moved.after.engaged ? 'engaged' : 'not engaged'}.`,
       })
     } catch (error) {
       const detail = isAppError(error) ? error.message : 'The change could not be recorded.'
-      const answer = await page(sql, role, { kind: 'refused', detail })
+      const answer = await page(sql, request, role, { kind: 'refused', detail })
       // 409 rather than 400 for the two refusals a well-formed request can still get — a no-op toggle and a
       // blank reason — because the request is valid and the state is what refused it.
       return new Response(await answer.text(), { status: 409, headers: HTML })

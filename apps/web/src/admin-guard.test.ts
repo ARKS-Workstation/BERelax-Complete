@@ -146,33 +146,47 @@ describe('every admin handler calls the guard, and the login screen does not', (
   const GUARD_CALLS = new RegExp(GUARD_CALL.source, 'g')
 
   it('finds a guard call in every guarded admin route file', () => {
+    /*
+      COLLECTED, not asserted per route, and the difference is not style.
+
+      This case used to assert inside the loop, so the first unguarded route threw and the run ended there.
+      The integrating verify reported exactly one offender — `/packages` — and a reader who fixed it would
+      have believed the estate was closed. It was not: `/till`, `/till/cash-up` and `/reviews/paste` were
+      unguarded too, four routes across two units, and nothing said so. A check that names one of four is
+      worse than a count, because it reads like a complete answer.
+    */
     const routes = adminRoutesOnDisk().filter((route) => requiresAdminSession(route.path))
     expect(routes.length).toBeGreaterThanOrEqual(25)
-    for (const route of routes) {
-      const source = readFileSync(join(APP_DIR, route.file), 'utf8')
-      expect(
-        GUARD_CALL.test(source),
-        `app/(admin)/${route.file} serves ${route.path} and never calls the session guard. Add ` +
-          '`const authorised = await guardAdminRoute(request)` as its first statement.',
-      ).toBe(true)
-    }
+    const unguarded = routes
+      .filter((route) => !GUARD_CALL.test(readFileSync(join(APP_DIR, route.file), 'utf8')))
+      .map((route) => `app/(admin)/${route.file} serves ${route.path}`)
+    expect(
+      unguarded,
+      'admin routes that never call the session guard. Add `const authorised = await ' +
+        'guardAdminRoute(request)` as the first statement of EVERY exported handler — every one of them, ' +
+        'because this list is complete.',
+    ).toEqual([])
   })
 
   it('finds one guard call per exported handler, so a second method is not left open', () => {
     // The defect this is written for: a route gains a POST beside its GET and only the GET is guarded. The
     // integration suite drives ONE method per route, so it would not see it.
+    // Collected for the reason the case above gives: one name out of four reads as the whole answer.
+    const short: string[] = []
     for (const route of adminRoutesOnDisk().filter((r) => requiresAdminSession(r.path))) {
       const source = readFileSync(join(APP_DIR, route.file), 'utf8')
       const handlers = [
         ...source.matchAll(/^export async function (?:GET|POST|PUT|PATCH|DELETE)\(/gm),
       ]
       const guards = [...source.matchAll(new RegExp(GUARD_CALLS.source, 'g'))]
-      expect(
-        guards.length,
-        `app/(admin)/${route.file} exports ${handlers.length} handler(s) but calls the guard ` +
-          `${guards.length} time(s) — every exported method needs its own call.`,
-      ).toBeGreaterThanOrEqual(handlers.length)
+      if (guards.length < handlers.length) {
+        short.push(
+          `app/(admin)/${route.file} exports ${handlers.length} handler(s) but calls the guard ` +
+            `${guards.length} time(s)`,
+        )
+      }
     }
+    expect(short, 'every exported method needs its own guard call').toEqual([])
   })
 
   it('does not guard the login screen, which would be a loop', () => {
@@ -313,6 +327,61 @@ function webSources(): readonly string[] {
 /** This scan's own file names the parameters it forbids, which is not a read of one. */
 const isScanItself = (file: string): boolean => file.endsWith('admin-guard.test.ts')
 
+/**
+ * The source with its comments blanked, because a scan for a READ must not match a sentence ABOUT one.
+ *
+ * The integrating verify reported `app/(admin)/hr/leave/[id]/route.ts` as taking its role from the query
+ * string. It does not — it was changed to read the session, and the header of that change EXPLAINS the old
+ * line by quoting it, `url.searchParams.get('role')`, so that a reader learns why the parameter went. The
+ * scan matched the explanation. That is this repository's most-repeated defect in its purest form: the check
+ * measured the file's TEXT while claiming to measure its CODE, and the remedy it forced on the author would
+ * have been to delete the sentence that says what happened — making the history unreadable to satisfy a
+ * regexp.
+ *
+ * A character walk rather than a regexp, for the reason `seeded-row-deletes.test.ts` gives: `//` inside a
+ * string literal (`'https://…'` appears all over this app) is not a comment, and a pattern that treats it as
+ * one blanks the rest of a real line of code and hides a genuine read.
+ */
+function codeOnly(source: string): string {
+  let out = ''
+  let at = 0
+  while (at < source.length) {
+    const two = source.slice(at, at + 2)
+    if (two === '//') {
+      const end = source.indexOf('\n', at)
+      at = end === -1 ? source.length : end
+      continue
+    }
+    if (two === '/*') {
+      const end = source.indexOf('*/', at + 2)
+      at = end === -1 ? source.length : end + 2
+      continue
+    }
+    const ch = source[at] as string
+    if (ch === "'" || ch === '"' || ch === '`') {
+      // A string is kept: a read written as `searchParams.get('role')` is code wherever it sits, and a
+      // template literal may hold one. Escapes are honoured so a closing quote is not missed.
+      out += ch
+      at += 1
+      while (at < source.length && source[at] !== ch) {
+        if (source[at] === '\\') {
+          out += source.slice(at, at + 2)
+          at += 2
+          continue
+        }
+        out += source[at]
+        at += 1
+      }
+      out += ch
+      at += 1
+      continue
+    }
+    out += ch
+    at += 1
+  }
+  return out
+}
+
 describe('no module under apps/web takes a principal from the request', () => {
   it('scans a non-trivial number of files, so an empty walk cannot pass', () => {
     // ADR 0002. A scan whose failure mode is "found nothing, reported success" is not a scan.
@@ -330,7 +399,7 @@ describe('no module under apps/web takes a principal from the request', () => {
         `]`,
     )
     const offenders = webSources().filter(
-      (file) => !isScanItself(file) && reads.test(readFileSync(file, 'utf8')),
+      (file) => !isScanItself(file) && reads.test(codeOnly(readFileSync(file, 'utf8'))),
     )
     expect(
       offenders,
@@ -340,13 +409,31 @@ describe('no module under apps/web takes a principal from the request', () => {
     ).toEqual([])
   })
 
+  it('reads code and not prose, and still sees a read that is really there', () => {
+    // Both directions, because blanking comments is exactly the change that could make the scan above pass
+    // over everything. The first fixture is the shape of the hr/leave header; the second is a real read with
+    // a comment beside it, and a walk that dropped too much would let it through.
+    const prose =
+      "// it read `url.searchParams.get('role')` while W-SYS-11 was in flight\nconst a = 1\n"
+    const code =
+      "const role = url.searchParams.get('role') // taken from the query, which is the defect\n"
+    const reads = /searchParams\s*\.\s*get\(\s*['"`](?:employee|role|actor|principal|staff)['"`]/
+    expect(reads.test(codeOnly(prose)), 'a quoted read inside a comment is prose').toBe(false)
+    expect(reads.test(codeOnly(code)), 'a read with a comment after it is still a read').toBe(true)
+    // And a `//` inside a string is not a comment: blanking from there would eat the read that follows.
+    const inString = "const base = 'https://example.test' + url.searchParams.get('role')\n"
+    expect(reads.test(codeOnly(inString)), 'a // inside a string does not start a comment').toBe(
+      true,
+    )
+  })
+
   it('finds no `required(url, ...)` helper pulling an employee out of a URL', () => {
     // The specific shape the two clinical routes used before this unit. Matched separately because the read
     // went through a local helper, so scanning only for `searchParams.get` would have missed both of the
     // routes this unit actually changed — which is the whole reason the first scan is not enough.
     const helper = /required\(\s*url\s*,\s*['"](?:employee|role|actor|principal|staff)['"]/
     const offenders = webSources().filter(
-      (file) => !isScanItself(file) && helper.test(readFileSync(file, 'utf8')),
+      (file) => !isScanItself(file) && helper.test(codeOnly(readFileSync(file, 'utf8'))),
     )
     expect(offenders, 'a route takes its reader from the URL through a helper').toEqual([])
   })

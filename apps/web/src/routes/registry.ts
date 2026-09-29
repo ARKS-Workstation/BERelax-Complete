@@ -147,6 +147,31 @@ export const ROUTES = [
       'the business does.',
   },
   {
+    id: 'month-reconciliation',
+    path: '/accounts/reconciliation',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-VAT-12s closed-month reconciliation: bookings to invoices to payments to journal to VAT boxes, ' +
+      'as named claims with the two figures each one compares, the variance between them and the FUNCTION ' +
+      'each figure came from. It is the artefact an FTA-registered tax agent is handed (Y11-tax-agent), so ' +
+      'it is a list of checkable claims rather than a narrative. A handler answering text/html rather than ' +
+      'a document, for the reason the compliance calendar and the Messages inbox give: a document must be ' +
+      'served in both locales, which would need an Arabic admin document and the W-SYS-01 shell, and would ' +
+      'join a screenshot matrix whose RTL half has to be a real Arabic route. Dynamic, and ?period=YYYY-MM ' +
+      'is REQUIRED with no default: a page answering for "last month" answers a different question every ' +
+      'month, so a link to it could not be cited and a screenshot of it could not be repeated. NO ' +
+      'sampleParams, although the path takes a query: the months that exist depend on which periods have ' +
+      'been closed, and a sample month would be a URL the harness opened against a period that may not be ' +
+      'there. The /accounts prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and it is ' +
+      'authenticated since W-SYS-11. It shows no TRN, no customer name and no phone number: every figure ' +
+      'on it is an aggregate.',
+  },
+  {
     id: 'facts',
     path: '/api/facts',
     kind: 'handler',
@@ -265,6 +290,27 @@ export const ROUTES = [
       'body dropped; a publish is not a document, so a locale would give one endpoint two URLs; and an ' +
       'endpoint under /api is somewhere a curl naturally goes. Dynamic by necessity: it reads the ' +
       'regulatory profile, renders the page it is about to publish, and writes four rows on every request.',
+  },
+  {
+    id: 'reviews-inbound',
+    path: '/api/v1/reviews/inbound',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-02s inbound intake: where a forwarded Google review notification arrives. The owner forwards ' +
+      'the email and the parse reads the reviewer, the rating and the text - or, when Google has changed the ' +
+      'template, files the body byte for byte as a job for a person (docs/10 SS6). It REFUSES every request ' +
+      'today with 503 inbound_not_configured, because REVIEW_INBOUND_SECRET is unset in every environment ' +
+      'and there is no verified receiving domain (Y8-inbound-review-address, Y6-email-sender): an ' +
+      'unauthenticated endpoint here is an injection path into the drafting pipeline, which is what docs/10 ' +
+      'SS7 says about an unverified Pub/Sub webhook. Under /api rather than beside the paste form for the ' +
+      'three reasons the media publish endpoint records - /api is exempt from proxy.ts canonicalisation so a ' +
+      'trailing slash is a 308 rather than a 301 that would drop the POST body, it is locale-neutral, and it ' +
+      'is somewhere a relay naturally posts. Dynamic because it reads the clock once and writes.',
   },
   {
     id: 'book',
@@ -527,6 +573,28 @@ export const ROUTES = [
       'about where every card is right now: a prerendered copy would draw cards in columns they left. The ' +
       '/crm prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, so the CRM screens the manifest puts ' +
       'beside it arrive excluded rather than being indexed until somebody reads Search Console.',
+  },
+  {
+    id: 'private-document',
+    path: '/documents/[id]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-14s private document download: the ONE route every private document this build writes is ' +
+      'fetched through — filed tax invoices and credit notes, VAT return snapshots, payslips, clinical ' +
+      'extracts, compliance evidence. Before it, writeTaxDocumentPdf() wrote a tax invoice to a path a ' +
+      'caller chose, so a statutory document was readable by anybody who learned the path and nothing ' +
+      'recorded a read. A handler rather than a document for the reason the evidence route gives: it ' +
+      'returns a STATUS CODE and a byte stream, and "403 without a signature" is a status code. Every ' +
+      'refusal is 403 and never 404, deliberately: a 404 for an id that does not exist and a 403 for one ' +
+      'that does would answer "does this business hold a payslip for employee X" to anybody who can guess ' +
+      'a uuid. Three gates in order — the session, then the signature, then the authorisation matrix — ' +
+      'because a valid signature authorises a FETCH and never a principal. Covered by the ADMIN_GROUP_' +
+      'PREFIXES noindex, and the response repeats the directive itself so a direct hit cannot lose it.',
   },
   {
     id: 'faq',
@@ -962,6 +1030,31 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'reviews-paste',
+    path: '/reviews/paste',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-02s paste form: the review intake path that always works. The Business Profile API is not ' +
+      'approved (Y3-gbp-api), so nothing polls Google - a review reaches this system because somebody ' +
+      'forwarded the notification email or typed it in here, and docs/10 SS6 measures the typing at ninety ' +
+      'seconds. A handler rather than a document for the reason the diary, the pipeline board, the Messages ' +
+      'inbox, the template editor, the compliance calendar, the duplicate queue and the quick-book screen ' +
+      'all give: a registry document must be served in BOTH locales, which needs an Arabic admin document ' +
+      'and the W-SYS-01 shell. It WRITES - one POST creates the review, its audit row and the resolution of ' +
+      'the forwarded message it came from, in one transaction - and it IS authenticated, which makes it the ' +
+      'first admin route in this registry that is: it reads Payloads own verified session through ' +
+      'the admin session through `guardAdminRoute` and refuses on the F07 matrix with `review:record`, in BOTH verbs, because the ' +
+      'page shows a forwarded reviews full text. There is deliberately no ?role= parameter, which is what ' +
+      'keeps it on the right side of W-SYS-11s scan. Dynamic because the row it writes carries an instant ' +
+      'derived from a typed date and the future-date refusal reads the clock. Covered by the new /reviews ' +
+      'noindex prefix in ADMIN_GROUP_PREFIXES.',
+  },
+  {
     id: 'robots-txt',
     path: '/robots.txt',
     kind: 'handler',
@@ -1298,6 +1391,12 @@ export type RouteId = Route['id']
  * a person's clinical file. The second route under a prefix arrives noindex on the commit that creates it
  * rather than on the commit that remembers to, and for that one the difference is a health record.
  *
+ * `/documents` is W-SYS-14's, and it holds one route today: the signed private-document download, which
+ * serves the bytes of a filed tax invoice, a VAT return snapshot, a payslip or a clinical extract. A prefix
+ * rather than an entry because the screen that OFFERS a download is what goes beside it, and a screen
+ * listing which documents exist for one customer or one employee is the index of the filing cabinet — worse
+ * to leak than any single document, because it is the map.
+ *
  * `/crm` is C-AUTO-08's, and it holds one route today: the pipeline board. A prefix rather than an entry
  * because C-CRM-01's NOTE already allocates the estate there ("C-AUTO-08 already owns
  * apps/web/app/(admin)/crm/"), and what goes beside a board is the flow editor (C-AUTO-09) and whatever
@@ -1306,15 +1405,27 @@ export type RouteId = Route['id']
  *
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
+  // M-VAT-12's closed-month reconciliation. A prefix rather than a bare path because the accounts estate
+  // will grow — R-REP-02's three financial statements and M-VAT-09's filing export both land under it —
+  // and a prefix added with the first route covers every one of them the moment it exists.
+  '/accounts',
   '/analytics',
   '/clients',
   '/compliance',
   '/crm',
+  // W-SYS-14. `/documents` holds one route today — the signed private-document download — and it is a
+  // prefix rather than an entry because what goes beside it is the screen that OFFERS the download, and a
+  // screen listing which documents exist for a customer or an employee is the index of the filing cabinet.
+  // The second route under a prefix arrives noindex on the commit that creates it.
+  '/documents',
   '/hr',
   '/messaging',
   // M-TILL-13. `/packages` and `/till` both cover a whole group: the cash-up screen sits under `/till` and
   // arrives noindex before it is written, which is what this list is for.
   '/packages',
+  // G-REV-02's paste form. A prefix rather than a bare path because the reviews admin will grow a queue and
+  // an approval screen (G-REV-04, G-REV-05), and a prefix added with the first route covers them all.
+  '/reviews',
   '/settings',
   '/till',
 ]

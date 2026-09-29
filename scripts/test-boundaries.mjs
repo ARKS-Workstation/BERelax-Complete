@@ -254,6 +254,30 @@ const CASES = [
     file: 'packages/db/src/adapters/__boundary_fixture__.ts',
     source: ["import { connect } from 'node:net'", 'export const illegal = connect', ''].join('\n'),
   },
+  // M-VAT-09 asks dependency-cruiser to prove the tax modules and the return export path reach no
+  // network. ADR 0052: the absence of a filing capability is the claim, and an absence is only checked by
+  // something that fails when it appears. Two of the rule's three `to` branches are asserted here, for the
+  // reason the ledger and payment fixtures above record — the `to` is a single alternation and a typo in
+  // one branch is invisible while the others fire. The THIRD branch, an outward-facing workspace package,
+  // needs an edit to a shipped module rather than a new file, because the rule names the three db modules
+  // exactly; it is gate case 130o. `scripts/test-no-autofile.mjs` holds the same estate list and fails if
+  // this rule stops covering any of it.
+  {
+    rule: 'tax-and-filing-must-not-reach-the-network',
+    file: 'packages/core/src/tax/__boundary_fixture__.ts',
+    source: ["import { request } from 'node:https'", 'export const illegal = request', ''].join(
+      '\n',
+    ),
+  },
+  {
+    rule: 'tax-and-filing-must-not-reach-the-network',
+    // A client library rather than a builtin, and UNINSTALLED — so it resolves to its bare name, which is
+    // the third of the three resolution shapes `core-must-be-pure`'s comment records and the one that left
+    // `no-lucide-outside-the-icon-wrapper` configured, green and dead. `core-must-be-pure` covers none of
+    // the eight client packages, so this branch is the only thing that does.
+    file: 'packages/core/src/tax/__boundary_fixture__.ts',
+    source: ["import axios from 'axios'", 'export const illegal = axios', ''].join('\n'),
+  },
 ]
 
 let failures = 0
@@ -282,7 +306,7 @@ for (const { rule, file, source } of CASES) {
   // The directory is part of the case identity: four cases share `core-must-be-pure`, and without the
   // scope in the line the output cannot say which of them ran.
   const scope =
-    /packages\/core\/src\/(ledger|pricing|availability|checkout)\//.exec(file)?.[1] ??
+    /packages\/core\/src\/(ledger|pricing|availability|checkout|tax)\//.exec(file)?.[1] ??
     /packages\/db\/src\/(repositories|adapters)\//.exec(file)?.[1]
   console.log(
     `${caught ? 'PASS' : 'FAIL'}  ${rule} — ${scope === undefined ? '' : `${scope}: `}` +

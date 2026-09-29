@@ -103,6 +103,19 @@ function fakeStorage(options: FakeOptions = {}): MediaStorage {
       }
       return SOURCE
     },
+    /**
+     * The signing verb W-SYS-14 added to the port, on a double whose subject is not signing.
+     *
+     * It THROWS rather than returning a plausible query string. A double that answered a well-formed
+     * signature would make these tests pass over a scheme nobody had exercised, which is the one thing
+     * docs/12 section 1 forbids a stand-in from doing.
+     */
+    async sign(request) {
+      throw new Error(
+        `[document-signing-not-configured] this in-memory double does not sign; ${request.documentId} ` +
+          'belongs in packages/media/src/storage/signing.test.ts',
+      )
+    },
     async list(): Promise<readonly string[]> {
       return [...objects.keys()]
     },

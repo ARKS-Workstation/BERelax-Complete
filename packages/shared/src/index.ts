@@ -150,6 +150,11 @@ export {
   REVIEW_AUTOSEND_SETTING_KEY,
   REVIEW_AUTOSEND_SETTING_KEYS,
   REVIEW_COOLING_OFF_SETTING_KEY,
+  REVIEW_COUNT_TRIPWIRE_AGENT,
+  REVIEW_FALLBACK_TEMPLATE_KEY_LIST,
+  REVIEW_FALLBACK_TEMPLATE_KEYS,
+  REVIEW_MONDAY_NUDGE_AGENT,
+  REVIEW_NUDGE_LOOKBACK_DAYS,
   REVIEW_REPLY_LANGUAGES_SETTING_KEY,
   REVIEW_REPLY_MODES,
   type ReviewAutosendSettingKey,
@@ -300,6 +305,14 @@ export type Brand<T, B extends string> = T & { readonly __brand: B }
  * resolves here and `isAppError` still answers true for every error raised anywhere.
  */
 export { AppError, type ErrorKind, isAppError } from './app-error.ts'
+
+/**
+ * The CMS's schema name, from its own module. G-REV-02 moved it out of `payload.config.ts` because that file
+ * is loaded by a strip-only loader, and `packages/db`'s catalogue probes need the name without loading the
+ * CMS at all: `merge-participants.ts` excludes the schema by this constant rather than by the literal, so the
+ * exclusion and the `schemaName` Payload is configured with cannot drift apart.
+ */
+export { CMS_SCHEMA } from './cms-schema.ts'
 export {
   addressLines,
   addressOneLine,

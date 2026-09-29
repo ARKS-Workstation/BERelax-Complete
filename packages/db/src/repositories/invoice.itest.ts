@@ -1,3 +1,4 @@
+import { truncateInvoiceFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -150,10 +151,7 @@ afterAll(async () => {
  * copy of that list is the defect this repository fights hardest: the next table to reference `invoice`
  * would be added to one copy and not the other, and the copy that was missed fails somewhere else.
  */
-const truncateDocuments = () =>
-  sql.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+const truncateDocuments = () => truncateInvoiceFamily(sql)
 
 beforeEach(async () => {
   await truncateDocuments()

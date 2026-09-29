@@ -35,6 +35,8 @@ import {
   CONSENT_PURPOSES,
   GOOGLE_REAUTH_TEMPLATE_KEY_LIST,
   REAUTH_REASSURANCE_SENTENCE,
+  REVIEW_FALLBACK_TEMPLATE_KEY_LIST,
+  REVIEW_FALLBACK_TEMPLATE_KEYS,
   SEND_GATING_CONSENT_PURPOSES,
 } from '@berelax/shared'
 import { describe, expect, it } from 'vitest'
@@ -242,6 +244,56 @@ describe('the shipped promotional templates are held to the same rules as the tr
  * single spelling; `CONNECTION_STATE_COPY.broken.detail` in `@berelax/core` carries it too, and
  * `packages/core/src/google/reauth.test.ts` asserts that end.
  */
+describe('the fallback intake notices (G-REV-02)', () => {
+  const fallback = DEFAULT_TEMPLATES.filter((template) =>
+    REVIEW_FALLBACK_TEMPLATE_KEY_LIST.includes(template.key),
+  )
+
+  it('ships both keys in both locales, so the claims below are about something', () => {
+    expect(REVIEW_FALLBACK_TEMPLATE_KEY_LIST.length).toBe(2)
+    for (const key of REVIEW_FALLBACK_TEMPLATE_KEY_LIST) {
+      const locales = fallback.filter((template) => template.key === key).map((t) => t.locale)
+      expect(new Set(locales), key).toEqual(new Set(['en', 'ar']))
+    }
+  })
+
+  it('is transactional, because a review that arrived is not marketing', () => {
+    // The contrast with `review.request` two entries along is the point: ASKING a customer for a review is
+    // promotional and consent-gated, TELLING the owner one arrived is a service message. Getting this the
+    // wrong way round would either put a compliance gate in front of a notice about the business's own
+    // listing, or send marketing with no consent check at all.
+    for (const template of fallback) {
+      expect(template.messageClass, `${template.key}/${template.locale}`).toBe('transactional')
+      expect(template.approvalState, `${template.key}/${template.locale}`).toBe('approved')
+      expect(template.channel).toBe('email')
+    }
+  })
+
+  it('carries the deep link in every body and names no reviewer, rating or review text', () => {
+    // The tripwire reads the Places AGGREGATE, which is two numbers (ADR 0049), and the nudge knows even
+    // less. A variable for any of these would be a variable nothing could fill.
+    for (const template of fallback) {
+      expect(template.variables, `${template.key}/${template.locale}`).toContain('link')
+      for (const forbidden of ['reviewer', 'rating', 'text', 'comment', 'author']) {
+        expect(template.variables, `${template.key}/${template.locale}`).not.toContain(forbidden)
+      }
+    }
+  })
+
+  it('renders the count as a PHRASE and not as a bare number', () => {
+    // `{{count}} new reviews` reads "1 new reviews", and an increase of one is the commonest case there is.
+    // `reviewCountPhrase` in `@berelax/core` is what the `reviews` variable holds.
+    const increase = fallback.filter(
+      (template) => template.key === REVIEW_FALLBACK_TEMPLATE_KEYS.countIncrease,
+    )
+    expect(increase.length).toBe(2)
+    for (const template of increase) {
+      expect(template.variables).toContain('reviews')
+      expect(template.variables).not.toContain('count')
+    }
+  })
+})
+
 describe('the Google re-auth notices', () => {
   const reauth = DEFAULT_TEMPLATES.filter((template) =>
     GOOGLE_REAUTH_TEMPLATE_KEY_LIST.includes(template.key),

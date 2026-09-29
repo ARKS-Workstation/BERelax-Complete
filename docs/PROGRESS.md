@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**133 / 211 units complete.**
+**137 / 211 units complete.**
 
 ## Next up
 
-1. **W-SYS-14 — Private document storage: the signed URL, and the audited download**
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **M-VAT-09 — Absence of auto-file, proven, and the Zoho Books export**
+1. **M-VAT-13 — Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures**
+1. **C-AUTO-09 — Node-graph journey builder, with misrouting made impossible**
 
 ## All units
 
@@ -59,7 +59,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 41.5 | `W-SYS-11` | The admin session — mounting F07's auth in the web app | `F07`, `W-SYS-01` | — | — |
 | [x] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
 | [x] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
-| [ ] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
+| [x] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |
 | [x] | 44 | `M-TILL-02` | Append-only journal schema, period locks and the posting repository | `F04`, `F06`, `M-TILL-01` | — | — |
@@ -82,10 +82,10 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 61 | `M-VAT-06` | Period close and lock workflow, corrections by dated reversal | `M-TILL-08`, `M-VAT-05` | — | — |
 | [x] | 62 | `M-VAT-07` | VAT201 box mapping and working papers with drill-down | `M-TILL-10`, `M-VAT-02`, `M-VAT-03`, `M-VAT-06` | — | Y11-tax-agent, Y11-vat-package |
 | [x] | 63 | `M-VAT-08` | Immutable VAT return snapshot with preparer and reviewer sign-off | `F07`, `M-VAT-07` | — | Y11-tax-agent |
-| [ ] | 64 | `M-VAT-09` | Absence of auto-file, proven, and the Zoho Books export | `M-VAT-08` | — | — |
+| [x] | 64 | `M-VAT-09` | Absence of auto-file, proven, and the Zoho Books export | `M-VAT-08` | — | — |
 | [x] | 65 | `M-VAT-10` | Compliance calendar engine and blocking obligations | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F09` | — | — |
 | [x] | 66 | `M-VAT-11` | Compliance calendar reminders, escalation, evidence and the unverified dashboard | `H02`, `M-VAT-10` | — | — |
-| [ ] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
+| [x] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
 | [x] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
 | [x] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
@@ -180,7 +180,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 159 | `G-CONN-08` | Non-dismissible re-auth banner, escalating notification ladder, one-click reconnect | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-CONN-07` | — | — |
 | [x] | 160 | `G-CONN-09` | Disconnect with revocation at Google, zeroisation, and the offboarding runbook | `F06`, `G-CONN-04` | — | — |
 | [x] | 161 | `G-REV-01` | Review data model: nullable google_review_id, delivery_mode as a column | `G-CONN-01` | — | — |
-| [ ] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
+| [x] | 162 | `G-REV-02` | Fallback intake: paste form, defensive email parse, Places count tripwire, Monday nudge | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `G-AGT-01`, `G-REV-01` | — | Y3-gbp-api, Y2-gbp-status |
 | [x] | 163 | `G-REV-03` | The safety routing table as executable, settings-proof policy | `G-REV-01` | — | — |
 | [x] | 164 | `G-REV-04` | Reply generator: house-voice templates plus LLM, review text as untrusted data | `G-AGT-01`, `G-REV-03`, `H02` | — | — |
 | [ ] | 165 | `G-REV-05` | The reply linter, blocking on the send path, one known-bad fixture per rule | `G-REV-04`, `W-SITE-01`, `W-SITE-02`, `W-SITE-03`, `W-SITE-04`, `W-SITE-05`, `W-SITE-06`, `W-SITE-07`, `W-SITE-08`, `W-SITE-09`, `W-SITE-10`, `W-SITE-11` | — | — |

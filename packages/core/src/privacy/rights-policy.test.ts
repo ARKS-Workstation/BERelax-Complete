@@ -241,7 +241,16 @@ describe('the erasure rule registry', () => {
     // account for most of it, and the set of registering units must be small enough to read.
     const registrars = [...new Set([...ERASURE_RULES.values()].map((r) => r.registeredBy))]
     expect(registrars).toContain('C-CRM-10')
-    expect(registrars.length).toBeLessThan(6)
+    /*
+      A legibility ceiling and not a rule, which is why it moved from 6 to 10 when P-HR-11 became the sixth.
+
+      What the case actually means is asserted twice over and neither part is this number: C-CRM-10 still
+      accounts for the majority (below), and the NAMED list two cases down makes a new registrar a diff
+      somebody reads. A cap tight enough to trip on the next honest classification would be a check that fails
+      for the right reason and asks for the wrong fix — the sixth unit to classify a table it created is the
+      registry working, not a set growing out of hand.
+    */
+    expect(registrars.length).toBeLessThan(10)
     expect(
       [...ERASURE_RULES.values()].filter((r) => r.registeredBy === 'C-CRM-10').length,
     ).toBeGreaterThan(ERASURE_RULES.size / 2)
@@ -270,6 +279,36 @@ describe('the erasure rule registry', () => {
       'more than one unit classifies columns now, which is the point',
     ).toBeGreaterThan(1)
     for (const owner of owners) expect(UNIT_ID.test(owner), owner).toBe(true)
+  })
+
+  it('is still mostly C-CRM-10, and every other registering unit is one that had to classify a table', () => {
+    // The control the widened assertion above needs. `registeredBy` is a string, so a typo would satisfy the
+    // shape; this says the set of units is small, deliberate and led by the unit that built the engine.
+    const units = new Set([...ERASURE_RULES.values()].map((rule) => rule.registeredBy))
+    expect(units.has('C-CRM-10')).toBe(true)
+    const byCcrm10 = [...ERASURE_RULES.values()].filter((rule) => rule.registeredBy === 'C-CRM-10')
+    expect(byCcrm10.length).toBeGreaterThan(ERASURE_RULES.size / 2)
+    /*
+      And the others are NAMED rather than counted, so a unit added here is a diff somebody reads. This line
+      is a tripwire and it did its job: it read `['C-CRM-10', 'G-REV-02']` when three merges had since added
+      rules, and the integrating verify failed on it rather than letting the set grow unwatched.
+
+      Each name is here because its unit had to classify a table it created, which is the claim this case
+      makes: C-AUTO-07's two flow-run columns, W-SITE-10's three publication columns, W-SYS-11's
+      `staff_credential` and `staff_session` — two tables the credential probe finds and no customer appears
+      in — G-REV-02's `review_intake_email`, whose body holds a customer's own words about this business, and
+      P-HR-11's `commission_line.invoice_id`, a pointer at an invoice whose own rule decides the matter.
+      A fourth spelling of one unit's id, or a unit that registered a rule for a table it did not create,
+      fails here and nowhere else.
+    */
+    expect([...units].sort()).toEqual([
+      'C-AUTO-07',
+      'C-CRM-10',
+      'G-REV-02',
+      'P-HR-11',
+      'W-SITE-10',
+      'W-SYS-11',
+    ])
   })
 
   it('keeps the four retaining actions distinct, because their justifications are different', () => {

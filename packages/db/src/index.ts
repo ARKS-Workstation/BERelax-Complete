@@ -202,6 +202,34 @@ export {
   type InputVatRecoveryWorkingPaper,
   inputVatRecovery,
 } from './queries/input-vat-recovery.ts'
+// M-VAT-12's closed-month reconciliation. The report READS every figure a `done` unit already derives —
+// `trialBalanceMovement`, `readPackageLiability`, `vat201Boxes` and `commissionPeriodSource` — and its own
+// module header carries the table naming which function owns which, because a reconciliation report is
+// exactly where a second derivation of a money figure creeps in.
+export {
+  assertEverySourceIsClassified,
+  classifyJournalSources,
+  exportMonthReconciliation,
+  JOURNAL_SOURCE_CLASSES,
+  type JournalSourceClass,
+  MONTH_RECONCILIATION_CONSUMERS,
+  MONTH_RECONCILIATION_CONSUMERS_REQUIRING_SOUNDNESS,
+  MONTH_RECONCILIATION_DERIVED_HERE,
+  MONTH_RECONCILIATION_FORMAT_VERSION,
+  MONTH_RECONCILIATION_LINE_IDS,
+  type MonthReconciliation,
+  type MonthReconciliationExport,
+  type MonthReconciliationLineId,
+  MonthReconciliationNotExportable,
+  type MonthReconciliationPeriod,
+  monthReconciliation,
+  monthReconciliationBytes,
+  type ReconciliationLine,
+  type ReconciliationLineKind,
+  type ReconciliationMeasure,
+  type ReconciliationSide,
+  type SourceClassificationCensus,
+} from './queries/month-reconciliation.ts'
 export {
   bucketTotalFils,
   type OutstandingPayable,
@@ -943,6 +971,17 @@ export {
   type RenderedWording,
   readPreferenceSubject,
 } from './repositories/preference-centre.ts'
+export {
+  authoriseDocumentFetch,
+  type DocumentFetchArgs,
+  type DocumentFetchRefusal,
+  type PrivateDocumentRecord,
+  type RegisteredPrivateDocument,
+  type RegisterPrivateDocumentArgs,
+  readPrivateDocument,
+  recordDocumentFetch,
+  registerPrivateDocument,
+} from './repositories/private-document.ts'
 /*
   W-SITE-10's publication control plane. The only module in the build that writes `publication_lint_pass`,
   `publication_approval` and `publication_record`: 0093 makes all three append-only for every role, so a
@@ -1029,6 +1068,29 @@ export {
   type TradingDateResolver,
   type TradingDayHours,
 } from './repositories/reschedule.ts'
+export {
+  type AggregateWriteOutcome,
+  type AwaitingPasteItem,
+  countReviewsReportedBetween,
+  getAwaitingPasteItem,
+  type IntakeResolutionOutcome,
+  listAwaitingPaste,
+  listReviewIntakeTargets,
+  type NeedsPasteInput,
+  type ParsedForwardInput,
+  type PlaceAggregateReadingInput,
+  type PlaceAggregateRow,
+  type RecordedForward,
+  type ReviewIntakeTarget,
+  rawBodyByteLength,
+  rawBodyDigest,
+  readPreviousPlaceAggregate,
+  recordAggregateNotification,
+  recordNeedsPasteForward,
+  recordParsedForward,
+  recordPlaceAggregateReading,
+  resolveIntakeWithReview,
+} from './repositories/review-intake.ts'
 export {
   type ApiIngestOutcome,
   type ApiReviewPayload,
@@ -1644,6 +1706,26 @@ export {
   vatReturnSigningRoles,
   vatReturnSignOffState,
 } from './services/vat-return-signoff.ts'
+// M-VAT-09. The one-way Zoho Books export, beside the return it reads: bytes a person carries into the
+// accounting package, never a call. `renderZohoVatReturn` and `zohoExportFilename` are exported beside the
+// service because a screen has to be able to name the download before asking for it; what is NOT exported
+// anywhere is a way to reach the figures except through `vatReturnForFiling` (ADR 0052).
+export {
+  type ExportVatReturnForZohoInput,
+  exportVatReturnForZoho,
+  renderZohoVatReturn,
+  ZOHO_EXPORT_FORMAT_VERSION,
+  ZOHO_EXPORT_MEDIA_TYPE,
+  ZOHO_EXPORT_SURFACE,
+  type ZohoExportBoxRow,
+  type ZohoExportNotFileableRow,
+  ZohoExportSnapshotUnreadable,
+  type ZohoExportSurfaceEntry,
+  type ZohoExportTotals,
+  type ZohoVatReturnDocument,
+  type ZohoVatReturnExport,
+  zohoExportFilename,
+} from './services/zoho-export.ts'
 export {
   type AvailabilityLimits,
   GENDER_MATCHING_SETTING_KEY,
@@ -3039,6 +3121,100 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 //
 
 //
+// 94 is 0094_review_fallback_intake.sql: the forwarded notification that could not be read, and the Places
+// aggregate the count tripwire compares against (G-REV-02). Two tables, and the argument for each is that
+// neither thing it has to remember is a REVIEW. A forward nothing could parse has no rating, so it could not
+// satisfy `google_reviews.rating` (NOT NULL, 1-5), and inventing one to make it fit is the guess docs/12 §1
+// forbids in its worst form — a one-star review filed at four stars is auto-send eligible under docs/07 §4.
+// So `review_intake_email` holds the BYTES and nothing interpreted, with a closed two-value status
+// (`parsed` | `needs_paste`) because a third outcome would be a state nothing decides: the parser returns one
+// of two shapes. And an aggregate reading is not a review either — it is two numbers about the listing whose
+// only value is that yesterday's are still there to compare against, which a column on `google_capabilities`
+// would hold and lose. `google_place_aggregate` therefore has no text column AT ALL, which is what turns the
+// acceptance line's scan — none of those review bodies appears in any table — into a property of the SCHEMA
+// rather than a promise about the adapter, and it is the strictest safe reading of the caching terms docs/10
+// §6 marks unverified (the ADR this file cites for that is the one renumbered to 0049 at merge).
+//
+// It takes NO private SQLSTATE, and said so in a header written before W-SYS-12 landed: the refusals here are
+// ordinary `check_violation`s, and the ones that need a name are raised in application code and asserted by
+// name (`PLACES_ANSWERED_ABOUT_ANOTHER_PLACE` in `packages/google`, the parse refusals in
+// `packages/core/src/reviews/email-parse.ts`). It is the last file written under the convention that a
+// private CLASS identifies one migration, and the only one of the seven in that wave that declined to spend
+// the last class — which is the reasoning 0099 replaced with a registry.
+//
+// Its two `agent_definition` rows are the first crons in this build whose subject is something that happened
+// OUTSIDE the system: the tripwire reads the Places aggregate daily and reports an increase, the nudge
+// reports a week of silence on a Monday. Separate agents rather than one, for 0033's reason — a shared
+// heartbeat would be minutes old for ever and would make a dead weekly pass invisible behind a healthy daily
+// one — and their declared intervals (24 hours, 7 days) are what give the watchdog's "no success within
+// twice the interval" something to mean for each.
+//
+// 95 is 0095_vat_return.sql: the VAT return as a SEALED SNAPSHOT — the figures as bytes, a hash over exactly
+// those bytes, two named signatures from two different people, and no way to edit any of it (M-VAT-08).
+// M-VAT-07's working papers are a FUNCTION OF THE LEDGER, recomputed on every read, which is right for a
+// working paper and wrong for a filed return: a return is a statement made on a date about a period, and the
+// one thing it must not do is change when the ledger behind it does. So `vat_return` stores `snapshot_json` —
+// exactly the bytes `canonicaliseVat201WorkingPapers()` produced — and
+// `content_hash = encode(sha256(convert_to(snapshot_json, 'UTF8')), 'hex')` as a CHECK, which is the same
+// value `vat201ContentHash()` computes in TypeScript over the same bytes. That CHECK does not claim the bytes
+// are what the ledger said, and the header says so: what claims that is
+// `services/vat-return-signoff.itest.ts`, which regenerates the papers with the clock five years on and
+// requires the hash back identical.
+//
+// **The figures are VIEWS over those bytes and not a second table**, which is the one decision in this file
+// worth arguing with. `vat_return_box_figure` and `vat_return_not_fileable_reason` read
+// `vat_return.snapshot_json` and touch nothing else — no `journal_line`, no `vat201_box_total()` — so a figure
+// cannot move when the ledger does, and gate case 122t asserts that over the view definitions with a fixture
+// that plants a join to `vat201_box_line`. A box TABLE was written first and is worse in the way this build
+// keeps paying for: a second statement of a fact drifts, nothing in SQL can prove two copies of a figure
+// agree, and the copy that disagrees is the one a screen reads while the hash still verifies the other. It
+// also needs three rules the view needs none of — a refusal for a row appended to a sealed return in a later
+// transaction, one for a figure that is not the figure in the hashed bytes, and one for a snapshot committed
+// with no rows at all. The cost is that a view carries no index, which is nothing here: a VAT return is
+// quarterly and every read names one id. Seven scalar columns are duplicated between the row and the bytes on
+// purpose — a return is looked up by period and a `psql` session should not have to parse JSON — and two
+// CHECKs compare each one against its own value inside the snapshot, so the duplication is refused the chance
+// to drift rather than merely discouraged.
+//
+// `fileable` is the trap this unit could most easily have walked into and it is shut by a CHECK, not by a
+// service: `vat_return_fileable_only_when_nothing_in_it_refuses_filing` reads the HASHED BYTES, so `true` is
+// impossible while the snapshot carries a `notFileableReasons` entry or a box marked `isProvisional`. Every
+// box is provisional today ([UNVERIFIED] Y11-vat201-boxes, and Y11-tax-agent records an FTA-registered
+// agent's review as not optional), so the answer is always false and the row says why. The GENERATING CODE
+// VERSION is two columns and neither is a number anybody typed: `format_version` is the canonical form's own
+// tag from the paper, and `engine_signature` is `vat201_engine_signature()` — the sha256 of
+// `pg_get_functiondef()` over the seven SQL functions that compute a VAT201 figure, which raises `ZY056` when
+// the catalogue holds a different number of them than the list names, because a hash of six definitions out
+// of seven would be quietly wrong in the one column whose job is to differ when the code differs.
+//
+// Sign-off is `vat_return_sign_off`, one row per capacity, and PREPARER AND REVIEWER ARE TWO DIFFERENT PEOPLE
+// refused in the database: `unique (return_id, signatory_user_id)` is the storage layer that survives a
+// restore with triggers off, and `ZY052` (`SamePersonSignOff`) fires first and names the person and the
+// capacity they already signed in — 0093's two-layer pattern, for 0093's reason. The signatory's display name
+// and role are SNAPSHOTTED beside their id so a later rename cannot rewrite who signed (0026's argument,
+// `publication_approval`'s shape). Who MAY sign is `vat_return_signing_roles()`, a function rather than a
+// literal inside the CHECK so the list can be READ from outside it:
+// `packages/fixtures/src/vat-return-signoff.itest.ts` requires it to equal the roles holding
+// `vat_return:prepare` in `core/src/access/permissions.ts`, for all eight roles individually, which is the
+// only thing stopping the two drifting — `packages/db` may not import `packages/core`, so nothing compiles
+// them against each other. Deny by default: manager, receptionist, therapist, marketer, auditor and system
+// are refused by absence, with `ZY053` naming the role and the permitted set.
+//
+// `vat_return_finalisation` is the row a filing cites and `ZY055` refuses it unless both capacities have
+// signed; `vat_return_for_filing()` raises the same code, so the refusal reaches a READ as well as a write
+// and M-VAT-09's one-way export cannot be built without coming through it. Both read
+// `vat_return_sign_off_state()`, the ONE reader of "is this signed" — `periodStatusOn`'s arrangement for "is
+// this date closed", for the same reason. The base tables stay readable deliberately: a preparer has to be
+// able to see the figures they are about to sign, and what is guarded is the door labelled FILING.
+// `closed_period_id` is a plain column and NOT a foreign key to `period_lock`, which is 0086's releasable-pin
+// test rather than a shortcut — a lock CAN be deleted and four suites delete their own, while a `vat_return`
+// row can be deleted by nobody, so a reference from here would pin every lock it names for ever. `ZY051`
+// (append-only, every role including the owner), `ZY052`, `ZY053`, `ZY054` (an amendment that is not the next
+// version of the period in force, describes another period, or forks a superseded one), `ZY055`, `ZY056` and
+// `ZY057` (a signature or a finalisation with no `audit_event` at COMMIT, 0081's ZW003 and 0093's ZZ004
+// shape) are its private SQLSTATEs — band `ZY051`-`ZY057` of a class that no longer identifies a file, with
+// `ZY058`-`ZY060` left free rather than taken and unused.
+//
 // 96 is 0096_analytics_schema.sql: the `analytics` schema, its monthly partitions, and the 90-day raw
 // retention as a thing that RUNS (A-FIRST-01). Nine tables — `visitor`, `session`, `event`, `funnel_step`,
 // `attribution`, the three daily rollups and `retention_policy` — with `event` and `funnel_step` RANGE
@@ -3147,11 +3323,49 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the seed runs as the owner, and an event trigger cannot tell a suite's own row from a seeded one — which is
 // the whole distinction (ADR 0050). 100 is therefore released and NOT renumbered, like 22, 41, 44, 47, 71, 74
 // and 88 before it, for the reason the paragraph below gives.
+// 101 is 0101_private_document.sql: the register of every private document, and the fetch that cannot be
+// replayed or lost (W-SYS-14). Two tables. `private_document` is one row per object in the private bucket —
+// the class that decides who may read it, the storage key, the content hash that says which bytes it is, and
+// the `use_policy` derived from the class. `private_document_fetch` is one row per authorised fetch, written
+// in the SAME transaction as the authorisation, which is what makes "a download the trail is missing"
+// unrepresentable rather than unlikely. The hole it closes is not abstract: `writeTaxDocumentPdf()` in
+// `@berelax/pdf` took a `path` and called `writeFileSync`, so a filed tax invoice — issuer TRN, customer,
+// every line and every figure — was readable by anybody who learned the path, and private storage had been
+// DEFERRED by M-TILL-12 to M-TILL-13 and M-VAT-11, both of which went `done` without ever owning it.
+//
+// A REGISTER rather than a `storage_key` column on each producer's row, and that is the whole design
+// decision. Five producers each with a private path is five routes, five permission checks and five chances
+// that the sixth producer has none — which is what the deferral chain looks like after three units. One
+// register means one route, one permission check read out of the authorisation matrix rather than copied, one
+// audit action, and an answer to "what private documents does this business hold" that is a SELECT rather
+// than a survey. There is deliberately NO `bucket` column: every row is in the private bucket by definition,
+// and a column able to say `public` is a column somebody sets to `public`.
+//
+// Three private SQLSTATEs, `ZY111`-`ZY113`, from the range this unit was allocated (`ZY111`-`ZY120`);
+// `ZY114`-`ZY120` are unused. `ZY111` a single-use link fetched twice — a payslip and a clinical extract are
+// `single_use`, and the trigger takes `for update` on the register row before it looks, because a
+// read-then-insert in TypeScript is two statements and two concurrent fetches of one forwarded link both
+// pass the read. That lock is the reason the check is here and not in the repository, and it is 0023's
+// row-locked counter used as a mutex rather than as a sequence. `ZY112` an UPDATE or DELETE on either table:
+// the register is what an audited download NAMES, so a repointable storage key would make a recorded
+// download name bytes that were never served, and the fetch log is the record that a copy left the business.
+// `ZY113` a document class outside `PRIVATE_DOCUMENT_CLASSES` in `@berelax/core` — deny-by-default fails in
+// the WRONG DIRECTION without it, because an unclassified document has no permission mapped to it and is
+// therefore one nobody can fetch and nobody can notice is unfetchable. That closed set is the one figure in
+// the file that exists in two places, held equal behaviourally by gate case 129j rather than trusted, which
+// is 0098's arrangement for `settings:write`. Codes are allocated by
+// `packages/db/src/sqlstate-registry.ts` and not by reading the migrations a worktree can see (ADR 0043).
+//
+// The fetch log is deliberately not `audit_event`, and it writes one anyway. `audit_event` is partitioned
+// with a JSON `after`, so "has this nonce been burned" would be a JSON containment query on the hot path of
+// every download and the uniqueness the replay defence needs could not be a constraint at all. This table is
+// the CONSTRAINT; the audit row is the narrative.
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
-// existed, and less 94, which G-REV-02 holds in another worktree. 85, 89, 91, 92, 93, 95, 96, 97, 98 and 99
-// arrived out of order, each with the unit that held it. So 100 is the next number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
+// them. 100 through 105 are allocations held by six units in flight in other worktrees — W-SYS-13, W-SYS-14,
+// M-VAT-09, M-VAT-12, P-HR-12 and Y-PAY-01, in that order — so 106 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3176,4 +3390,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 99 as const
+export const SCHEMA_VERSION = 101 as const

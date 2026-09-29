@@ -250,12 +250,19 @@ caught a real defect in this repository.
     open right now". Only the process list can:
 
         for pid in $(ls /proc | grep -E '^[0-9]+$'); do
-          grep -qa test-gates.mjs "/proc/$pid/cmdline" 2>/dev/null || continue
-          [ "$(git -C "$(readlink /proc/$pid/cwd)" rev-parse --show-toplevel 2>/dev/null)" = "$PWD" ] &&
+          cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' '\n' | grep -qx 'scripts/test-gates.mjs' || continue
+          cw=$(readlink "/proc/$pid/cwd" 2>/dev/null); [ -n "$cw" ] || continue
+          [ "$(git -C "$cw" rev-parse --show-toplevel 2>/dev/null)" = "$PWD" ] &&
             echo "UNSAFE: gate run live as pid $pid"
         done
 
-    Two traps in writing that check, both of which produced a wrong answer before this wording:
+    A THIRD trap, found by W-SYS-13 answering "UNSAFE" about itself: `grep -qa test-gates.mjs` on the raw
+    cmdline matches the CHECK'S OWN SHELL, because the loop above has that string in its argv. And
+    `git -C ""` — which is what an unreadable `cwd` gives you, for a process that has exited between the `ls`
+    and the `readlink` — resolves against the CALLER's directory and reports every process as live in your
+    worktree. So match the script as its own argument, and refuse an empty cwd rather than passing it on.
+
+    Two other traps, both of which produced a wrong answer before this wording:
     matching the script name as a SUBSTRING of the command line flags a watcher shell spawned as
     `bash -c "until pgrep -f 'scripts/test-gates.mjs'; do sleep 10; done"`, which runs nothing but
     `sleep`; and comparing the process's cwd by path PREFIX flags every worktree, because the agent

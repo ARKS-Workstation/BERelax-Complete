@@ -181,6 +181,35 @@ module.exports = {
       },
     },
     {
+      name: 'review-email-parse-takes-its-input-as-an-argument',
+      comment:
+        'packages/core/src/reviews/email-parse.ts may depend on NOTHING outside packages/core and ' +
+        'packages/shared. G-REV-02s acceptance line asks for a dependency-cruiser assertion plus the ' +
+        'core-must-be-pure gate to prove the parser takes the raw body as an argument and performs no I/O ' +
+        'and no clock read, and this is the half the purity script cannot make. ' +
+        'WHY IT IS NOT REDUNDANT WITH core-must-be-pure, which is the obvious objection. That rule names a ' +
+        'list: fs, http, https, net, dns, child_process, worker_threads, and the four frameworks. It does ' +
+        'not name node:perf_hooks, whose `performance.now()` is a clock read, and it does not name ' +
+        'node:crypto, node:os or node:timers. check-core-purity.mjs does not see them either, because it ' +
+        'greps for `Date.now`, `new Date()`, `process.`, `fetch(`, `Math.random(`, `globalThis` and ' +
+        '`console.` — an imported clock is none of those. So both existing checks pass for a parser that ' +
+        'reads `performance.now()`, and a parse whose answer depends on when it ran is a parse that cannot ' +
+        'be replayed against the bytes it was given. An allowlist closes the whole class at once instead ' +
+        'of extending two lists every time Node grows a module. ' +
+        'WHY IT IS SCOPED TO ONE FILE rather than to the directory. The rest of packages/core/src/reviews ' +
+        'legitimately imports the compliance lexicon and the escalation tables, and would keep doing so; ' +
+        'this module is the one whose contract is *a string and an instant in, a value out*, and it is the ' +
+        'one an inbound email reaches first. Widening it to the directory would either ban imports that are ' +
+        'correct or be relaxed to nothing within the week. ' +
+        'The known-bad fixture in scripts/test-gates.mjs adds `import { performance } from ' +
+        '"node:perf_hooks"` and asserts THIS rule fires by name — deliberately a module that core-must-be-pure ' +
+        'does not list, so the fixture proves this rule rather than an older one shadowing it, and a ' +
+        'control fixture importing @berelax/shared must pass.',
+      severity: 'error',
+      from: { path: '^packages/core/src/reviews/email-parse\\.ts$' },
+      to: { pathNot: '^packages/(core|shared)/' },
+    },
+    {
       name: 'reviews-generator-must-not-reach-clinical-data',
       comment:
         'The review reply prompt builder and the reply generator must not import packages/clinical or ' +
@@ -378,6 +407,47 @@ module.exports = {
           '^(node:)?(http|https|net|tls|dgram|dns|http2)$|' +
           '(^|/)node_modules/(undici|axios|node-fetch|got|superagent|ky|request|form-data)/|' +
           '^(undici|axios|node-fetch|got|superagent|ky|request|form-data)(/|$)',
+      },
+    },
+    {
+      name: 'tax-and-filing-must-not-reach-the-network',
+      comment:
+        'The tax modules and the return export path may not reach an HTTP client, a socket, a name ' +
+        'resolver or an outward-facing package. ADR 0017 and docs/01 decision 13 say the codebase has NO ' +
+        'CAPABILITY TO FILE A RETURN — "absent, not disabled, because a future maintainer will eventually ' +
+        'switch a flag on" — and ADR 0052 is what turns that sentence into something a build can refuse. ' +
+        'A prohibition nothing enforces is a comment, and the comment in this case is about the one ' +
+        'artefact whose liability sits with the taxable person rather than with this software. ' +
+        'WHY IT IS A SEPARATE RULE FROM core-must-be-pure. That rule covers packages/core and forbids ' +
+        'http, https and net — three of the eight builtins that reach a network, and none of the seven ' +
+        'client libraries. It also cannot reach packages/db at all, where the snapshot, the filing door ' +
+        'and the export live, and db legitimately does I/O, so there is no purity rule to extend. The ' +
+        'estate here is therefore named: packages/core/src/tax, the working papers, the sealed return, ' +
+        'and the Zoho export. scripts/test-no-autofile.mjs holds the same list and fails if this rule ' +
+        'stops covering any of it, so the two cannot drift apart. ' +
+        'WHAT THIS RULE CANNOT SEE, stated rather than left to be discovered: `fetch` is a global, so a ' +
+        'module graph is blind to it, exactly as the payments rule above records. The other half is ' +
+        'scripts/test-no-autofile.mjs, which scans the same files for the network-capable globals and ' +
+        'for the identifiers a filing path would be named after. Neither half is the claim on its own. ' +
+        'THE TEST FILES ARE EXEMPT, for the payments rule’s reason and the same way round: ' +
+        'zoho-export.itest.ts imports node:http and node:https in order to REPLACE their `request` with ' +
+        'a throwing stub, which is how it proves the export completes with no network and no credentials ' +
+        'at all. A rule that condemned that file would leave the claim unprovable.',
+      severity: 'error',
+      from: {
+        path:
+          '^packages/core/src/tax/|' +
+          '^packages/db/src/queries/vat201-working-papers\\.ts$|' +
+          '^packages/db/src/services/vat-return-signoff\\.ts$|' +
+          '^packages/db/src/services/zoho-export\\.ts$',
+        pathNot: '\\.(test|itest)\\.ts$',
+      },
+      to: {
+        path:
+          '^(node:)?(http|https|net|tls|dgram|dns|http2)$|' +
+          '(^|/)node_modules/(undici|axios|node-fetch|got|superagent|ky|request|form-data)/|' +
+          '^(undici|axios|node-fetch|got|superagent|ky|request|form-data)(/|$)|' +
+          '^packages/(google|messaging|providers)/',
       },
     },
     {

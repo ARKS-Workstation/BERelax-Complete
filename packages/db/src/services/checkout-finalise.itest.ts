@@ -1,3 +1,4 @@
+import { truncateInvoiceFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -326,9 +327,7 @@ afterAll(async () => {
   // table is NAMED rather than
   // reached with CASCADE, so the next one to reference `invoice` fails loudly here instead of having
   // its rows removed by a statement that never mentioned it.
-  await sql?.unsafe(
-    'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
-  )
+  if (sql !== undefined) await truncateInvoiceFamily(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from service where treatment_key = ${PROBE}`
   await sql`delete from rooms where notes = ${MARKER}`

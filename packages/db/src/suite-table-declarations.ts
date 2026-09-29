@@ -102,29 +102,9 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
   },
   {
     file: 'packages/db/src/repositories/invoice.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the repository suite owns every invoice it reads, and the same file probes `delete from invoice` as the application role to prove ZI003 refuses it',
-  },
-  {
-    file: 'packages/db/src/services/checkout-finalise.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'finalisation is asserted against the documents this file issues; no loader writes an invoice',
+    tables: ['invoice'],
+    kind: 'refused',
+    why: 'issued as the application role to prove ZI003 refuses it. This file used to own the invoice family here too; the statement moved to `truncateInvoiceFamily` and this entry shrank to the probe, which is the direction the stale-declaration rule exists to allow',
   },
   {
     file: 'packages/db/src/services/issue-credit-note.itest.ts',
@@ -142,19 +122,6 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     why: 'a credit note is asserted against the invoice this file issued for it, and both series restart from 1 here',
   },
   {
-    file: 'packages/fixtures/src/checkout-finalisation.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the finalisation walkthrough issues its own invoice per case and asserts the series number it got',
-  },
-  {
     file: 'packages/fixtures/src/credit-note.itest.ts',
     tables: [
       'credit_note_line',
@@ -169,57 +136,77 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     kind: 'owns',
     why: 'the credit-note walkthrough owns both documents it asserts on, and both series restart from 1 here',
   },
+
+  // ## The shared family teardowns
+  //
+  // ONE entry for the module that holds both statements, and it replaced NINETEEN — one per suite that used
+  // to restate the table list. That is the same argument this whole rule makes, turned on the rule's own
+  // subject: sixteen suites each spelled the invoice and package lists, migration 0097 gave `commission_line`
+  // a foreign key to both `invoice` and `package_redemption`, every list went stale at once and four suites
+  // failed in their own teardowns. The lists live once now.
+  //
+  // One entry rather than one per helper because a (file, table) pair carries one reason, and `payment` and
+  // `commission_line` are in BOTH lists deliberately — `payment` references `invoice` and `package_sale`, so
+  // whichever family is emptied first has to name it.
+  //
+  // `packages/fixtures/src/invoice-family.itest.ts` is what stops this declaration drifting: it derives both
+  // closures from `pg_constraint` and fails when a written list and the schema disagree. So the claim here is
+  // about ONE statement whose scope another check proves, which is the arrangement this rule wants everywhere.
   {
-    file: 'packages/fixtures/src/invoice-document.itest.ts',
+    file: 'packages/fixtures/src/invoice-family.ts',
     tables: [
       'refund',
       'checkout_finalisation',
       'payment',
+      'commission_line',
       'invoice_appointment',
       'invoice_line',
       'invoice',
+      'package_redemption',
+      'package_balance',
+      'package_sale',
+      'package_template_line',
+      'package_template_version',
+      'package_template',
     ],
     kind: 'owns',
-    why: 'the rendered document is compared against the invoice this file issued, down to its number',
+    restoredBy: 'packages',
+    why: 'the shared teardown for both document families, called by the suites that issue their own invoices and sell their own packages. `invoice` refuses DELETE for every role (ZI003) so truncate by the owner is the only legal removal, and PostgreSQL requires every referencing table in the statement. Of the thirteen the seed writes only the three package templates, and `seedPackageTemplates` restores those',
+  },
+
+  // ## The review intake (G-REV-02)
+  //
+  // Four tables the seed does not write — checked against the derivation rather than assumed, because a
+  // declaration that guessed would be the defect this rule is about. The intake is asserted as the whole
+  // contents of each table, which is production behaviour: a fallback email is matched against every place
+  // aggregate there is, so a row another suite left behind is a different answer rather than extra noise.
+  {
+    file: 'packages/google/src/reviews/inbound-email.itest.ts',
+    tables: [
+      'review_intake_email',
+      'google_place_aggregate',
+      'google_reviews',
+      'google_connections',
+    ],
+    kind: 'owns',
+    why: 'the intake is asserted as the whole contents of these four tables, and a connection or aggregate left by another suite would be resolved against instead of this file\u2019s; no loader writes any of them, because a connection carries a real OAuth refresh token',
   },
   {
-    file: 'packages/fixtures/src/payment.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
+    file: 'apps/web/src/reviews-paste.itest.ts',
+    tables: ['review_intake_email', 'google_place_aggregate'],
     kind: 'owns',
-    why: 'the payment pair is asserted against this file’s own invoice and its own `TAX-INV` numbering',
+    why: 'the paste route is asserted by the intake row it creates and the aggregate it matched, both counted as totals; the same file scopes its `google_reviews` and `google_connections` deletes to its own place id and sub, which is why they are absent here',
   },
   {
-    file: 'packages/fixtures/src/tax-document.itest.ts',
+    file: 'apps/worker/src/jobs/review-fallback-intake.itest.ts',
     tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
+      'review_intake_email',
+      'google_place_aggregate',
+      'google_reviews',
+      'google_connections',
     ],
     kind: 'owns',
-    why: 'the statutory document set is this file’s own, numbered from a series it resets',
-  },
-  {
-    file: 'packages/fixtures/src/rights.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the erasure probe has to know every invoice in the database is its own subject’s, or a retained document elsewhere would read as a failure to erase',
+    why: 'the job is asserted by which intake rows it promoted to reviews, over the whole table, so every row in all four has to be one this file put there',
   },
 
   // ## The cash session family
@@ -270,19 +257,6 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     tables: ['cash_session_adjustment', 'cash_drop', 'cash_session'],
     kind: 'owns',
     why: 'the till screen is rendered against the session this suite opens, and a session another suite left open would be the one it displayed',
-  },
-  {
-    file: 'apps/web/src/till.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the receipt and the day’s takings on the screen are this suite’s own documents',
   },
 
   // ## The booking family
@@ -429,6 +403,30 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     why: 'the job is asserted by the alerts it raises over the runs this file inserts',
   },
 
+  // ## Statements whose scope the scan cannot read
+  //
+  // Each takes its table from an interpolation, so there is no list to resolve and the reason has to be
+  // written down instead. Kept apart from every other kind because the claim is different: not "this suite
+  // owns the table" but "the scan cannot see which table this is, and here is why that is safe".
+  {
+    file: 'packages/db/src/repositories/numbering.itest.ts',
+    tables: ['<unresolved-list>'],
+    kind: 'owns',
+    why: 'truncates the `issued_document` table of TEST_SCHEMA \u2014 a table in the per-run schema this file creates and drops, so it owns every row in it by construction. The name is a template literal over the schema, which is why no list can be resolved; a suite whose tables are its own schema is the strongest form of this rule rather than an exception to it',
+  },
+  {
+    file: 'packages/db/src/analytics.itest.ts',
+    tables: ['<unresolved-list>'],
+    kind: 'refused',
+    why: 'deletes from a PARTITION whose name the probe has just read out of `tableoid`, to prove the append-only rule reaches a partition and not merely the parent. The name cannot be known before the query runs, and the case asserts the refusal rather than the removal',
+  },
+  {
+    file: 'packages/db/src/services/vat-return-signoff.itest.ts',
+    tables: ['<unresolved-list>'],
+    kind: 'refused',
+    why: 'loops the three sealed return tables as the application role and asserts 42501 on each, so the table name is the loop variable. Nothing is removed \u2014 that is the whole assertion',
+  },
+
   // ## Append-only probes
   //
   // Each of these is issued to prove the database REFUSES it. Nothing is removed, so ownership does not
@@ -503,80 +501,6 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     restoredBy: 'business-days',
     why: 'the trading calendar is asserted row by row over the window this file generates, and the fixture horizon overlaps it, so the seeded days would be indistinguishable from the ones under test',
   },
-
-  // ## The package family
-  {
-    file: 'packages/db/src/services/sell-package.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  {
-    file: 'packages/fixtures/src/package.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  {
-    file: 'packages/fixtures/src/package-redemption.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  {
-    file: 'packages/fixtures/src/till-receipt.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  {
-    file: 'apps/web/src/till.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  {
-    file: 'apps/worker/src/jobs/package-expiry.itest.ts',
-    tables: ['commission_line'],
-    kind: 'owns',
-    why: 'named only because PostgreSQL refuses a TRUNCATE while a table referencing one of the others is left out of the statement, and migration 0097 gave `commission_line` a `package_redemption_id`. This suite owns no commission line and the table is empty unless `hr-commission.itest.ts` has run, which truncates its own rows itself. It refuses on the CONSTRAINT and not on the rows, so leaving it out failed these statements for every row count \u2014 measured at 8716718, before this unit: 44 cases across five files, red on a list nobody had touched',
-  },
-  //
-  // M-TILL-13's decision, kept: the seed writes the four fixture TEMPLATES and no sales, because
-  // `package_sale.customer_id` is `on delete restrict` and `package_sale` refuses DELETE, so one seeded
-  // sale would pin its customer for the life of the database. The suites truncate the family to start from
-  // none, and `seedPackageTemplates` is what puts the templates back — which is why that loader had to stop
-  // short-circuiting on a non-empty table (see `packages/fixtures/src/package-seed.ts`).
-  {
-    file: 'packages/db/src/services/sell-package.itest.ts',
-    tables: [
-      'package_redemption',
-      'payment',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'a sale is asserted against the template version this file saved, and the version numbers restart from 1 here',
-  },
-  {
-    file: 'packages/fixtures/src/package.itest.ts',
-    tables: [
-      'package_redemption',
-      'payment',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'the template mapping is asserted as the whole list of templates, so a seeded one is an extra row in the answer',
-  },
   {
     file: 'packages/fixtures/src/seeded-tables.itest.ts',
     tables: ['package_template', 'package_template_version', 'package_template_line'],
@@ -585,74 +509,9 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
   },
   {
     file: 'packages/fixtures/src/package-redemption.itest.ts',
-    tables: [
-      'package_redemption',
-      'payment',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'the drawdown is asserted against the balance this file sold, and a seeded balance would be drawn down instead; the same file also issues a bare `delete from package_redemption` as the application role to show ZG007 refuses it',
-  },
-  {
-    file: 'packages/fixtures/src/till-receipt.itest.ts',
-    tables: [
-      'package_redemption',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'the receipt lines for a package are asserted against the sale this file made. `payment` is named by this statement too and is declared with the invoice family below, because one (file, table) pair carries one reason',
-  },
-  {
-    file: 'packages/fixtures/src/till-receipt.itest.ts',
-    tables: [
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the receipt is rendered from this file’s own invoice and its own series number',
-  },
-  {
-    file: 'apps/web/src/till.itest.ts',
-    tables: [
-      'package_redemption',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'this suite calls `seedPackageDrawdownStates` to put the four drawdown states on the screen and truncates them away afterwards, which is the arrangement M-TILL-13 chose so that no seeded sale pins a customer',
-  },
-  {
-    file: 'apps/worker/src/jobs/package-expiry.itest.ts',
-    tables: [
-      'package_redemption',
-      'payment',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'expiry is asserted as the set of balances the job touched, so every balance has to be one this file aged',
+    tables: ['package_redemption'],
+    kind: 'refused',
+    why: 'issued as the application role to show ZG007 refuses it. The truncate that used to stand beside it moved to `truncatePackageFamily`, so this entry is the probe alone',
   },
   {
     file: 'packages/fixtures/src/hr-commission.itest.ts',
