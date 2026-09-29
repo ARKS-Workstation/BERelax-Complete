@@ -18447,7 +18447,7 @@ units:
       back publicly, never confirm a named reviewer was a client, never admit fault, 1,200-character cap,
       language match. It sits on the send path, so a caller cannot route around it.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - G-REV-04
@@ -18479,10 +18479,133 @@ units:
       by the delivery function itself, asserted without going through any UI'
     - The approved reply records the lint version and the content hash, and a test reproduces the lint decision
       from the stored version alone
+    - 'NOTE on the shape that makes ''blocking on the send path'' a fact rather than a signature, locked as ADR
+      0063. Three mechanisms, and three because each one alone holds only while somebody remembers it. (1)
+      deliverApprovedReply takes NO linter: it reads regulatory_profile_current and the staff roster itself and
+      constructs sendPathReplyLinter, so there is no argument on the send path that can change a verdict. An
+      injectable linter is a chokepoint with a parameter for walking past it, and the way that gets used is not
+      malice -- a test that wanted a permissive one, then a caller that copied the test. (2)
+      recordReplySubmittedToApi and recordReplyPostedManually now take ReplyLintStamp as a REQUIRED argument,
+      and packages/db may not import packages/core (ADR 0001), so nothing in the write layer can produce a
+      stamp -- only record one. (3) 0113s google_reviews_delivery_needs_a_lint_pass refuses submitted_at or
+      posted_manually_at on a row with no reply_lint_version, which is what holds when somebody writes the
+      UPDATE by hand. One constraint over both modes rather than one each, because a per-mode pair is the shape
+      that ends up covering one of them -- and the one that would be forgotten is fallback mode, where WE send
+      nothing and which is the launch mode (docs/10 SS6). Gate 141i is the known-bad fixture: it drops the
+      stamp from the production write and the database refuses the delivery by name'
+    - 'NOTE: the fifteen rules are a SUPERSET of G-REV-04s HOUSE_DRAFT_LINT_RULES, asserted in
+      reply-linter.test.ts rather than promised in a comment, because the generator depends on that sentence
+      being true. Five of the fifteen are the existing PUBLIC_NAME_RULES reported verbatim: a published reply
+      is public copy, so it goes through lintPublicDisplayName -- the same function a service display name and
+      CMS copy go through -- and no rule was invented for it. That is what makes the licence flip reach this
+      linter: the day Y1-licence is answered and the profile row changes, the reply linter becomes stricter or
+      looser with no deploy, which a term list in packages/core could not do. unpermitted_staff_title is
+      strictly weaker than names_an_individual for a reply, and it is kept rather than filtered out of the
+      shared lints output, because filtering a rule out is an exemption and an exemption invented here would
+      be invisible to that lints own tests'
+    - 'NOTE on a live defect this unit found in G-REV-04, and the check that found it. Walking all 296 house
+      renderings through the send-path linter against the profile IN FORCE refused 32 of them: the English
+      treatment aspect rendered as ''the treatment itself'' and treatment is on
+      regulatory_profile.banned_claim_terms (0004). So the generators own closed vocabulary contained a
+      compliance claim, an owner would have approved it, and nothing in the build had ever compared a house
+      rendering against the claim list -- the Arabic for the same aspect had never used the word, so the two
+      languages had disagreed about a claim since G-REV-04. Fixed by changing the PHRASE to ''the massage
+      itself'', not the rule, because the rule is the licence. NOT ''the session itself'', which was the
+      obvious substitution: it collides with G-REV-04s echo_a_health_disclosure payload on the
+      twelve-character run ''the session '' and that corpus case asserts no such run of a payload appears in a
+      draft. Gate 141c puts the old phrase back and asserts the walk refuses it by banned_claim_term'
+    - 'NOTE on why the roster rule and the capitalisation heuristic are TWO rules. textNamesAnIndividual fires
+      on a provider title or a capitalised non-sentence-initial word, so it misses exactly the spellings a
+      hurried human writes -- a lower-case name, an all-caps one. If the roster rule shared its name the roster
+      claim would be unprovable: the fixture would be refused before and after the therapist existed and
+      nothing would have been shown. The fixture names the rostered label in LOWER CASE, so the same reply is
+      DELIVERED with the roster empty and REFUSED once an admin has set a display name, with no code change and
+      no lexicon edit. The roster is read on every delivery and never cached, because a cache makes that claim
+      false for as long as it lives'
+    - 'NOTE: no invented name anywhere. The rostered label is ''Roster Fixture 05'' and the reviewer label is
+      ''Fixture Reviewer B'' -- record labels of the family packages/fixtures/src/synthetic.ts argues for and
+      notification-fixtures.ts already uses -- and both are exported constants, so the integration test inserts
+      the same bytes it lints against rather than a second spelling of them. Several fixtures quote a term the
+      reply must not contain (cupping, full service, nurse); each is a term of a shipped lexicon, quoted from
+      it, and none is a claim about this business'
+    - 'NOTE deferred to G-REV-06: the SOURCE of the auto-appended signature. The cap criterion needs the
+      mechanism, so renderFinalReply is the one implementation both linters measure and deliverApprovedReply
+      takes signature: string | null -- 1,200 passes and 1,201 is refused with the signature counted, and the
+      control is that the DRAFT alone is inside the cap in the refused case. What the business signs replies
+      with is OPEN-QUESTIONS Y9-reply-signature, added by this unit: a plausible sign-off would be
+      indistinguishable from a configured one and would publish under the owners name (brief rule 15). ADR 0063
+      records the consequence the settings card will meet -- a signature is linted like the rest of the reply,
+      so one naming a person cannot be configured into a reply'
+    - 'NOTE deferred to G-REV-06: mandatory human approval itself, the Copy reply control, the deep link and
+      the Marked as posted action. This unit ships the function that screen calls, and it takes the approved
+      text as an ARGUMENT rather than reading reply_draft, precisely so that the bytes an owner edited are the
+      bytes that are judged. G-REV-06s ''editing re-lints'' criterion is satisfied by calling this function,
+      and its ''the approved text hash is immutable afterwards, proven by a rejected UPDATE'' is NOT built
+      here: 0113 makes the stamp whole-or-nothing and within the cap, and immutability after delivery is a
+      trigger that unit should add'
+    - 'NOTE deferred to G-REV-07: the API-mode submitter is an injected port (ReplySubmitter) and not a
+      Business Profile client. That units dependency rule forbids the v4 host string from living anywhere but
+      its own adapter, so building half of one here would create the second place it lives. What this unit owns
+      is that nothing reaches the port unlinted, asserted with a transport spy at ZERO calls on a refusal --
+      and gate 141b is the fixture for it, moving the submit call above the lint, which leaves the throw and
+      the missing timestamp intact so only the spy notices'
+    - 'NOTE on the boundary this unit does not close, with no guess in place of it. lintPublicDisplayName is
+      Latin-script by construction (lexiconTokens splits on everything outside [a-z0-9]), so an ARABIC reply
+      produces no banned-claim findings -- the same documented boundary the display-name lint carries, where
+      Arabic public copy is linted at the surface it is rendered on (W-SITE-05, W-SITE-10). Every OTHER rule
+      here is bilingual, because every other vocabulary it reaches already carries its Arabic spellings
+      (escalation lexicon, money terms, fault terms, the clitic-tolerant matcher). An Arabic claim list
+      invented here would be indistinguishable from one the profile had configured, which is brief rule 15, so
+      the gap is stated rather than filled'
+    - 'NOTE on what the stored lint version pins, and what it does not. reply_lint_version resolves back
+      through replyLinterFor to the RULE SET that took the decision -- the device
+      REVIEW_ESCALATION_LEXICON_VERSION is, and an unknown version answers null rather than falling back to
+      todays rules, which would report the current answer as the historical one. It does NOT pin the
+      regulatory profile or the roster, both of which are live rows, so a reply that passed under one profile
+      can be refused under the next -- correctly, because the profile is the licence and not the rule set.
+      regulatory_profile is append-only and versioned so the historical profile is recoverable; reading it back
+      BY version is not built, and reproduceReplyLint says so rather than implying it. The hash is checked
+      first and separately, because text that no longer matches its digest is a row that was edited and rules
+      that no longer clear it is a decision that changed -- conflating them explains an edit as a rule change'
+    - 'NOTE: two suites outside this unit were changed and neither is a test weakened to fit. review-queue.itest
+      passes a real stamp (real SEND_PATH_LINT_VERSION, real replyContentSha256) at its four delivery call
+      sites, because the writers signature changed. reviews.itest carries a stamp on the two cases that set a
+      delivery timestamp, with a VISIBLE stand-in version rather than a copy of the real string -- packages/db
+      may not import packages/core, so a copy there could only go stale. Its ''both modes populated'' probe now
+      carries the stamp too, so the contradiction is the only thing wrong with those rows: without it they also
+      break the new constraint, PostgreSQL may report either, and the probe would be asserting whichever name
+      it happened to get'
+    - 'NOTE on a pre-existing ledger defect fixed in passing, because this units migration could not be
+      documented on top of it. Gate case 90a requires an unbroken run of documented migrations ending at the
+      newest, matching paragraphs that open ''// N is NNNN_slug.sql''. 0106 opened ''// 106 is Y-PAY-02:'' and
+      0107 opened ''// 0107 -- ...'', so neither was documented by that scan and the run ending at the newest
+      migration was EMPTY: 90a was failing on the baseline before this unit touched anything. Both openings
+      were corrected, which restores the run to 49..107, and 0113 extends it to 49..113'
+    - 'NOTE on allocations. USED: migration 0113, gate block 141a-141z, ADR 0063. UNUSED and free to release:
+      the private SQLSTATE band ZY211-ZY220, because every refusal 0113 adds is an ordinary 23514 naming its
+      own constraint and a private code is for a refusal with a runbook answer (ADR 0043) -- the answer to all
+      four of these is one sentence, lint the reply and deliver it through the send path; and the test port band
+      start 16700 width 300, because nothing here starts a server (a DECLARED but unused band fails
+      test-ports.test.ts, so it was not declared)'
     files:
     - packages/core/src/reviews/reply-linter.ts
     - packages/core/src/reviews/reply-linter.fixtures/
+    - packages/core/src/reviews/reply-linter.test.ts
+    - packages/core/src/reviews/reply-lint-contract.ts
+    - packages/core/src/reviews/skeletons.ts
+    - packages/core/src/reviews/index.ts
     - packages/google/src/reviews/deliver.ts
+    - packages/google/src/reviews/reply-delivery.itest.ts
+    - packages/google/src/review-queue.itest.ts
+    - packages/google/src/index.ts
+    - packages/db/migrations/0113_reply_lint_stamp.sql
+    - packages/db/src/repositories/reviews.ts
+    - packages/db/src/schema/reviews.ts
+    - packages/db/src/schema/reviews.itest.ts
+    - packages/db/src/index.ts
+    - docs/adr/0063-the-reply-linter-is-a-send-path-chokepoint-the-database-enforces.md
+    - docs/adr/README.md
+    - docs/OPEN-QUESTIONS.md
     - scripts/test-gates.mjs
   - id: G-REV-06
     order: 166

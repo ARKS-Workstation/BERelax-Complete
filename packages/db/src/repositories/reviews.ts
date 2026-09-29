@@ -298,16 +298,78 @@ export async function reconcileApiReviewId(
 }
 
 /**
+ * The lint pass a delivery has to present, as data (migration 0113).
+ *
+ * The same boundary `ReviewRoutingVerdictInput` and `ReplyDraftInput` describe, and for the sharper reason:
+ * `packages/db` may not import `packages/core` (ADR 0001), so there is nothing here that COULD lint a reply.
+ * A delivery write can therefore only record that a linter passed one — which is what makes
+ * `packages/google/src/reviews/deliver.ts` the only place a reply is judged, and what makes this a required
+ * argument rather than an option a caller may leave out.
+ *
+ * The database refuses the rest: `google_reviews_reply_lint_stamp_is_whole` refuses a half-written stamp,
+ * `google_reviews_reply_lint_sha256_is_hex` refuses a digest that would never compare equal,
+ * `google_reviews_reply_approved_text_within_cap` refuses a reply over the published cap, and
+ * `google_reviews_delivery_needs_a_lint_pass` refuses either delivery timestamp without one.
+ */
+export interface ReplyLintStamp {
+  /** The exact bytes that were linted and are being delivered, signature included. */
+  readonly approvedText: string
+  /** The rule set that cleared it — `SEND_PATH_LINT_VERSION` in `@berelax/core`. */
+  readonly lintVersion: string
+  /** sha256 of `approvedText`, lower-case hex. Computed by the caller; compared, never trusted. */
+  readonly contentSha256: string
+}
+
+/**
+ * Refuses a stamp that is missing a part, before the constraint has to.
+ *
+ * The constraints are the guarantee. This exists for the message: a caller that forgot the hash reads
+ * `google_reviews_reply_lint_stamp_is_whole` and has to go and find out which of four columns it means,
+ * where an `AppError` naming the field is the difference between a send path that explains itself and one
+ * that reports a SQLSTATE.
+ */
+function assertLintStamp(stamp: ReplyLintStamp): void {
+  const missing = [
+    stamp.approvedText.trim().length === 0 ? 'approvedText' : null,
+    stamp.lintVersion.trim().length === 0 ? 'lintVersion' : null,
+    /^[0-9a-f]{64}$/.test(stamp.contentSha256) ? null : 'contentSha256',
+  ].filter((field): field is string => field !== null)
+  if (missing.length > 0) {
+    throw new AppError(
+      'validation',
+      `A reply delivery needs a whole lint stamp; ${missing.join(' and ')} ` +
+        `${missing.length === 1 ? 'is' : 'are'} missing or malformed. A delivery nobody can re-judge is ` +
+        'not one to publish, which is why the database refuses one too.',
+    )
+  }
+}
+
+/**
  * The reply went out through the API, and the two-step acknowledgement that mode allows.
  *
  * Both writes set `delivery_mode` as well as the timestamp, because a review ingested in API mode can
  * still be answered by hand when access lapses, and the row must say which actually happened. The
  * check constraint refuses the contradiction — an API submission on a row already posted by hand —
  * rather than leaving a row that reads as both.
+ *
+ * The lint stamp is written in the SAME statement as the timestamp (0113). Not for tidiness: two statements
+ * is two chances for one of them to be rolled back, and a delivered row whose stamp is missing is exactly
+ * the state `google_reviews_delivery_needs_a_lint_pass` exists to make unreachable.
  */
-export async function recordReplySubmittedToApi(uow: UnitOfWork, reviewId: string): Promise<void> {
+export async function recordReplySubmittedToApi(
+  uow: UnitOfWork,
+  reviewId: string,
+  stamp: ReplyLintStamp,
+): Promise<void> {
+  assertLintStamp(stamp)
   const rows = await uow.sql<{ id: string }[]>`
-    update google_reviews set delivery_mode = 'api', submitted_at = now()
+    update google_reviews set
+      reply_approved_text       = ${stamp.approvedText},
+      reply_lint_version        = ${stamp.lintVersion},
+      reply_lint_content_sha256 = ${stamp.contentSha256},
+      reply_lint_passed_at      = now(),
+      delivery_mode             = 'api',
+      submitted_at              = now()
     where id = ${reviewId} returning id
   `
   if (rows[0] === undefined) throw notFound(reviewId)
@@ -316,7 +378,12 @@ export async function recordReplySubmittedToApi(uow: UnitOfWork, reviewId: strin
     entityType: 'google_review',
     entityId: reviewId,
     operation: 'update',
-    after: { deliveryMode: 'api' satisfies ReviewDeliveryMode, submitted: true },
+    after: {
+      deliveryMode: 'api' satisfies ReviewDeliveryMode,
+      submitted: true,
+      lintVersion: stamp.lintVersion,
+      contentSha256: stamp.contentSha256,
+    },
   })
 }
 
@@ -338,10 +405,28 @@ export async function recordReplyConfirmedByGoogle(
   })
 }
 
-/** The owner pasted the reply into Google themselves and clicked *Marked as posted*. */
-export async function recordReplyPostedManually(uow: UnitOfWork, reviewId: string): Promise<void> {
+/**
+ * The owner pasted the reply into Google themselves and clicked *Marked as posted*.
+ *
+ * Takes the same stamp as the API write, and that is docs/10 §6's *"the reply path is identical in both
+ * modes"* expressed where it cannot be forgotten. Fallback mode is the LAUNCH mode, so this is the path
+ * every reply takes for the first weeks — a linter that ran only on the API path would be a linter that had
+ * never run.
+ */
+export async function recordReplyPostedManually(
+  uow: UnitOfWork,
+  reviewId: string,
+  stamp: ReplyLintStamp,
+): Promise<void> {
+  assertLintStamp(stamp)
   const rows = await uow.sql<{ id: string }[]>`
-    update google_reviews set delivery_mode = 'manual', posted_manually_at = now()
+    update google_reviews set
+      reply_approved_text       = ${stamp.approvedText},
+      reply_lint_version        = ${stamp.lintVersion},
+      reply_lint_content_sha256 = ${stamp.contentSha256},
+      reply_lint_passed_at      = now(),
+      delivery_mode             = 'manual',
+      posted_manually_at        = now()
     where id = ${reviewId} returning id
   `
   if (rows[0] === undefined) throw notFound(reviewId)
@@ -350,8 +435,34 @@ export async function recordReplyPostedManually(uow: UnitOfWork, reviewId: strin
     entityType: 'google_review',
     entityId: reviewId,
     operation: 'update',
-    after: { deliveryMode: 'manual' satisfies ReviewDeliveryMode, postedManually: true },
+    after: {
+      deliveryMode: 'manual' satisfies ReviewDeliveryMode,
+      postedManually: true,
+      lintVersion: stamp.lintVersion,
+      contentSha256: stamp.contentSha256,
+    },
   })
+}
+
+/**
+ * Every display name the staff roster currently holds.
+ *
+ * The read behind the reply linter's `names_a_rostered_therapist` rule, and it is a read of `employee`
+ * living in the reviews repository on purpose: it is part of the send path and has exactly one caller
+ * (`deliverApprovedReply`). `packages/google` may not reach `packages/hr`, and a general-purpose staff-name
+ * reader is an invitation to a second caller with its own idea of which names count.
+ *
+ * `display_name is not null` is the whole filter, and it is what makes the rule LIVE: the seed writes
+ * nineteen therapists with NULL display names (ADR 0020 — a therapist page needs a name and a recorded
+ * consent), so the roster is empty until an admin sets one, and the day one is set the linter starts
+ * refusing replies containing it with no deploy and no lexicon edit. Not restricted to therapists: anybody
+ * whose name an admin has published is somebody a public reply must not place on a shift.
+ */
+export async function listStaffDisplayNames(sql: Sql): Promise<readonly string[]> {
+  const rows = await sql<{ display_name: string }[]>`
+    select display_name from employee where display_name is not null order by display_name
+  `
+  return Object.freeze(rows.map((row) => row.display_name))
 }
 
 function notFound(reviewId: string): AppError {
@@ -637,6 +748,17 @@ export interface QueuedReview {
   /** Why no draft was produced, when the model's response showed signs of having been steered. */
   readonly draftQuarantineReason: string | null
   readonly draftQuarantinedAtIso: string | null
+  /**
+   * The send-path lint stamp (0113). All four together or none.
+   *
+   * `replyApprovedText` is what was delivered, which after an owner's edit is not `replyDraft`. The version
+   * and the hash are what make the decision reproducible: resolve the version back to the rule set that
+   * took it, check the text still hashes to the digest, and re-run.
+   */
+  readonly replyApprovedText: string | null
+  readonly replyLintVersion: string | null
+  readonly replyLintContentSha256: string | null
+  readonly replyLintPassedAtIso: string | null
 }
 
 interface ReviewRow {
@@ -666,6 +788,10 @@ interface ReviewRow {
   readonly reply_draft_generated_at: Date | null
   readonly draft_quarantine_reason: string | null
   readonly draft_quarantined_at: Date | null
+  readonly reply_approved_text: string | null
+  readonly reply_lint_version: string | null
+  readonly reply_lint_content_sha256: string | null
+  readonly reply_lint_passed_at: Date | null
 }
 
 const toQueued = (row: ReviewRow): QueuedReview => ({
@@ -695,6 +821,10 @@ const toQueued = (row: ReviewRow): QueuedReview => ({
   replyDraftGeneratedAtIso: row.reply_draft_generated_at?.toISOString() ?? null,
   draftQuarantineReason: row.draft_quarantine_reason,
   draftQuarantinedAtIso: row.draft_quarantined_at?.toISOString() ?? null,
+  replyApprovedText: row.reply_approved_text,
+  replyLintVersion: row.reply_lint_version,
+  replyLintContentSha256: row.reply_lint_content_sha256,
+  replyLintPassedAtIso: row.reply_lint_passed_at?.toISOString() ?? null,
 })
 
 const REVIEW_COLUMNS =
@@ -703,7 +833,8 @@ const REVIEW_COLUMNS =
   'routing_verdict, routing_rule_id, routing_lexicon_version, routed_at, ' +
   'reply_draft_skeleton_id, reply_draft_aspects, reply_draft_language, reply_draft_prompt_version, ' +
   'reply_draft_prompt_fingerprint, reply_draft_generated_at, draft_quarantine_reason, ' +
-  'draft_quarantined_at'
+  'draft_quarantined_at, reply_approved_text, reply_lint_version, reply_lint_content_sha256, ' +
+  'reply_lint_passed_at'
 
 /**
  * The queue for one listing of one connection, newest first.

@@ -321,5 +321,14 @@ caught a real defect in this repository.
   explicitly and add a `NOTE:` line to the manifest saying what was deferred and to which unit.
 - Format with `pnpm exec biome check --write <paths>` before typechecking; Biome reformats, which will
   otherwise break a later string match.
-- Do not mark the unit `done` in the manifest and do not commit. Report what you did and what
-  `pnpm verify` said.
+- Work in the git worktree you were given, never in the main checkout and never in another worktree.
+  Set the unit's `status: done` in `build/manifest.yaml`, run `pnpm progress`, and COMMIT on the branch
+  your dispatch names. Do not push, and do not merge anything into your branch — the integrator merges.
+  Touch no other unit's manifest entry except to record a deferral you are handing it.
+
+  This paragraph used to read "do not mark the unit `done` in the manifest and do not commit", which was
+  true when a unit's work was reviewed in the working tree and stopped being true when units moved into
+  worktrees of their own. Every dispatch since has said the opposite, and a unit that followed this file
+  rather than its dispatch would have left its work uncommitted in a worktree nobody reads. G-REV-05
+  reported the contradiction rather than guessing, which is why it is fixed here instead of in a
+  fourteenth dispatch.

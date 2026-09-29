@@ -1210,6 +1210,7 @@ export {
   type IngestedReview,
   ingestApiReview,
   listReviewQueue,
+  listStaffDisplayNames,
   listUndraftedReviews,
   type ManualReviewInput,
   type QuarantineWriteOutcome,
@@ -1217,6 +1218,7 @@ export {
   type ReconciliationInput,
   type ReconciliationOutcome,
   type ReplyDraftInput,
+  type ReplyLintStamp,
   type ReviewRoutingVerdictInput,
   type RoutingWriteOutcome,
   reconcileApiReviewId,
@@ -3772,16 +3774,48 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // schema has ON DELETE CASCADE and the application role holds no DELETE or TRUNCATE anywhere in it: a run
 // that should not have happened is recorded as having happened, which is what an audit trail is.
 //
+// 113 is 0113_reply_lint_stamp.sql — the reply lint stamp, and the delivery timestamp that cannot exist
+// without one (G-REV-05).
+//
+// Four columns on `google_reviews` and four CHECKs, and the unit is one of them:
+// `google_reviews_delivery_needs_a_lint_pass` refuses `submitted_at` (API mode) or `posted_manually_at`
+// (fallback mode, which is the launch mode) on a row carrying no `reply_lint_version`. docs/10 §6 says the
+// same linter runs in both modes and the manifest says a caller cannot route around it; the TypeScript half
+// is that `recordReplySubmittedToApi` and `recordReplyPostedManually` now take the stamp as a required
+// argument, and this constraint is what still holds when somebody writes the UPDATE by hand. One constraint
+// covering both modes rather than one each, because the claim is about delivery: a per-mode pair is the
+// shape that ends up covering one of them.
+//
+// `reply_approved_text` is deliberately not `reply_draft`. 0048's draft is the MACHINE's sentence and its
+// writer is guarded by `reply_draft is null` so that an owner's edit is never overwritten — which means the
+// moment anybody edits anything the two are different facts, and the one that matters afterwards is what
+// was published. It is the only thing `reply_lint_content_sha256` can be a hash of, and it is what
+// G-REV-06's *Copy reply* puts on the clipboard byte for byte.
+//
+// `google_reviews_reply_approved_text_within_cap` carries 1,200, which is a second statement of
+// `REPLY_LENGTH_CAP` and therefore arrives with the check that refuses a disagreement:
+// `packages/google/src/reviews/reply-delivery.itest.ts` reads the constraint's own definition out of
+// `pg_constraint` and asserts the number in it equals the constant. That suite and not the one beside the
+// other `google_reviews` probes, because ADR 0001 forbids `packages/db` from importing `packages/core` and
+// a test there could not name the constant. The direction that drift would take is the dangerous one — a
+// database still accepting what the linter had started refusing.
+//
+// NO private SQLSTATE, and the band ZY211-ZY220 allocated to this unit is released unused. Every refusal
+// here is an ordinary 23514 naming its own constraint, and a private code is for a refusal with a runbook
+// answer (ADR 0043, 0061): the answer to all four of these is the same sentence — lint the reply and
+// deliver it through the send path.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
 // them. 100 through 107 have all landed now, each with the unit that held it — W-SYS-13, W-SYS-14, M-VAT-09,
 // M-VAT-12, P-HR-12, Y-PAY-01, Y-PAY-02 and P-HR-13, in that order. 108 and 109 were held by A-FIRST-03 and
 // A-MEAS-01 and RELEASED: both turned out to need no migration at all, so both are permanent gaps rather
-// than numbers anybody is waiting on. 110 has landed with R-REP-01 and 111 with H-MIG-01, out of order and
-// before 110 — which is the arrangement this note exists for: the number is a high-water mark and not a
-// count. 112 was held by A-FIRST-04 and released unused, so it is a permanent gap; 113 is held by G-REV-05,
-// still in flight; so 114 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// than numbers anybody is waiting on. 110 through 113 were handed out together to the units of one batch,
+// and all four have now landed or released: 110 with R-REP-01, 111 with H-MIG-01 (out of order, before
+// 110 — which is the arrangement this note exists for: the number is a high-water mark and not a count),
+// 112 released unused by A-FIRST-04 and so a permanent gap, and 113 with G-REV-05. 114 is the first number
+// nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3806,4 +3840,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 111 as const
+export const SCHEMA_VERSION = 113 as const

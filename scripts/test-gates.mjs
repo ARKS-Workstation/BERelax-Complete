@@ -44307,6 +44307,372 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 141a-141z. (G-REV-05) The reply linter on the send path: every rule shown to be able to stop firing, and
+//            the delivery shown to be refused rather than merely judged.
+//
+// docs/10 §6 gives this unit one sentence — *"the same linter runs"*, in both delivery modes — and the
+// manifest gives the claim that has to be proved: *"it sits on the send path, so a caller cannot route around
+// it."* Every case below breaks one mechanism and asserts that a named test notices, because the whole of
+// this unit is the kind of thing that reads correctly while doing nothing:
+//
+//   - **A linter that is called and ignored.** `deliverApprovedReply` can lint, log the findings and deliver
+//     anyway, and every unit test of the rules still passes. 141a deletes the throw.
+//   - **A rule with no fixture.** ADR 0003 one layer in: `SEND_PATH_LINT_RULES` reaches four vocabularies
+//     that live in other files, so a rule can stop firing because a list moved. 141d adds a rule and no
+//     fixture.
+//   - **A live read turned into a constant.** The roster rule's entire claim is that adding a therapist
+//     changes the answer. A cached or empty roster passes every unit test, because the unit tests supply the
+//     roster. 141e empties the read.
+//   - **A rule about the REVIEW turned into a word list.** `echoes_health_disclosure` is only worth having if
+//     it refuses a reply for what the REVIEWER disclosed; a list of health words refuses the same reply
+//     against a review that said nothing, which is a different rule with the same name. 141f makes it one.
+//   - **A cap measured on the wrong string.** The criterion names the rendered reply INCLUDING the signature,
+//     and a cap on the draft reads as correct while under-counting. 141g and 141n break the two halves
+//     separately.
+//   - **A floor that is not there.** 141i takes the stamp out of the production write and asserts the
+//     DATABASE refuses the delivery, which is the only form in which "a caller cannot route around it" is a
+//     fact rather than a signature.
+//   - **A reproduction that answers with today's rules.** 141j makes it resolve to the current linter, which
+//     reports the current answer as the historical one — and passes the happy-path case while doing it.
+//
+// The helper names carry a `reply` prefix for block 127's reason: two gate blocks with identically named
+// local helpers make git treat them as shared context and interleave them on merge.
+{
+  const REPLY_LINTER = 'packages/core/src/reviews/reply-linter.ts'
+  const REPLY_CONTRACT = 'packages/core/src/reviews/reply-lint-contract.ts'
+  const REPLY_FIXTURES = 'packages/core/src/reviews/reply-linter.fixtures/index.ts'
+  const REPLY_SKELETONS = 'packages/core/src/reviews/skeletons.ts'
+  const REPLY_DELIVER = 'packages/google/src/reviews/deliver.ts'
+  const REPLY_WRITER = 'packages/db/src/repositories/reviews.ts'
+  const REPLY_SUITE = 'packages/core/src/reviews/reply-linter.test.ts'
+  const REPLY_ITEST = 'packages/google/src/reviews/reply-delivery.itest.ts'
+
+  const replyUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const replyIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  // 141a. The linter runs and its verdict is discarded. This is the defect the acceptance criterion is
+  //       written against — "the proof is a send attempt that is REFUSED" — and it is invisible to every
+  //       test of the rules themselves, because the rules still answer correctly.
+  checkRejectedBy(
+    'reply linter: a send path that lints and delivers anyway is caught by the refusal case',
+    withEditedFile(
+      REPLY_DELIVER,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (findings.length > 0) {\n    throw new ReplyDeliveryRefused(input.reviewId, input.mode, findings)\n  }',
+          'if (findings.length > 0 && false) {\n    throw new ReplyDeliveryRefused(input.reviewId, input.mode, findings)\n  }',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'the send path delivered a reply it should have refused',
+  )
+
+  // 141b. The same mechanism from the other end: the API submitter reached BEFORE the lint. A send path that
+  //       submits first and refuses afterwards passes 141a's case — the throw is still there and no
+  //       timestamp is written — while the reply is already on the listing. Only the spy at zero calls sees
+  //       it, which is why that assertion exists rather than a reading of the source.
+  checkRejectedBy(
+    'reply linter: a transport reached before the lint is caught by the spy at zero calls',
+    withEditedFile(
+      REPLY_DELIVER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const context = await readReplyLintContext(deps.sql)',
+          "  if (input.mode === 'api' && deps.submitter !== null) {\n" +
+            '    await deps.submitter.submit({ review, reply: input.approvedReply })\n' +
+            '  }\n' +
+            '  const context = await readReplyLintContext(deps.sql)',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    // The claim's own name rather than a rule name, and it has to be: the lint still throws under this
+    // edit, so the assertion that fails is the SPY at zero calls and its diff carries the reply rather
+    // than a rule. The title is what names the claim "nothing reaches the transport".
+    'refuses an unlinted draft in BOTH delivery modes',
+  )
+
+  // 141c. The house vocabulary put back the way G-REV-05 found it. `treatment` is on
+  //       `regulatory_profile.banned_claim_terms`, so 32 of the 296 renderings the generator can produce were
+  //       unpublishable public copy and nothing had ever compared one against the claim list. This case is
+  //       what stops that returning, and it is the reason the walk is in an integration suite: the unit
+  //       test's stand-in profile carries one term and cannot see it.
+  checkRejectedBy(
+    'reply linter: a house aspect phrase carrying a banned claim is caught against the profile in force',
+    withEditedFile(
+      REPLY_SKELETONS,
+      (text) =>
+        replaceOnce(
+          text,
+          "  treatment: { en: 'the massage itself', ar:",
+          "  treatment: { en: 'the treatment itself', ar:",
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'banned_claim_term',
+  )
+
+  // 141d. A rule with no known-bad fixture (ADR 0003). The acceptance line asks for a test that fails if the
+  //       fixture count is less than the rule count, and the shape that catches it is a comparison of the two
+  //       LISTS: a length test passes when a rule is added and an existing fixture is duplicated.
+  checkRejectedBy(
+    'reply linter: a rule added with no fixture fails the fixture-per-rule case',
+    withEditedFile(
+      REPLY_LINTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'language_mismatch',\n] as const\nexport type SendPathLintRule",
+          "  'language_mismatch',\n  '__gate_fixture_rule__',\n] as const\nexport type SendPathLintRule",
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    '__gate_fixture_rule__',
+  )
+
+  // 141e. The roster read emptied. The criterion is that adding a therapist changes the answer with no code
+  //       change, so the failure has to come from the read rather than from the rule — and no unit test can
+  //       see it, because a unit test hands the roster in.
+  //
+  //       `and 1 = 0` rather than inverting the `is not null`: inverting it returns rows whose
+  //       `display_name` IS null, the linter then crashes in `reviewTokens`, and nine tests fail with a
+  //       TypeError naming no rule at all — a non-zero exit that ADR 0003 is explicitly not satisfied by. The
+  //       first version of this case did exactly that.
+  checkRejectedBy(
+    'reply linter: a roster read that returns nothing is caught by the live-roster case',
+    withEditedFile(
+      REPLY_WRITER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const rows = await sql<{ display_name: string }[]>`\n    select display_name from employee where display_name is not null order by display_name\n  `',
+          '  const rows = await sql<{ display_name: string }[]>`\n    select display_name from employee where display_name is not null and 1 = 0 order by display_name\n  `',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'names_a_rostered_therapist',
+  )
+
+  // 141f. The health-disclosure rule reduced to a word list: it stops reading the review and compares the
+  //       reply against the lexicon directly. The half of the fixture pair that fails is the one that
+  //       matters — the identical reply must PASS against a review that disclosed nothing — and a rule
+  //       carrying its own list of health words would refuse it.
+  checkRejectedBy(
+    'reply linter: a health-echo rule that ignores the review is caught by the fixture pair',
+    withEditedFile(
+      REPLY_LINTER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const matches = matchReviewEscalations(reviewText, lexicon)',
+          '  const matches = matchReviewEscalations(reviewText ?? reply, lexicon)',
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'echoes_health_disclosure',
+  )
+
+  // 141g. The cap measured on the draft rather than on what is published. Reads as correct, under-counts by
+  //       however long the signature is, and is exactly the criterion's own wording.
+  checkRejectedBy(
+    'reply linter: a cap measured on the draft rather than the rendered reply is caught at 1,201',
+    withEditedFile(
+      REPLY_LINTER,
+      (text) =>
+        replaceOnce(
+          text,
+          'if ([...reply].length > REPLY_LENGTH_CAP) finding(',
+          'if ([...candidate.draft].length > REPLY_LENGTH_CAP) finding(',
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'exceeds_length_cap',
+  )
+
+  // 141h. The language rule reduced to its first half: the reply is in the language it CLAIMS, and nothing
+  //       compares that against the review. Every English reply to an English review still passes, so the
+  //       only thing that notices is the Arabic pair.
+  checkRejectedBy(
+    'reply linter: a language rule that never looks at the review is caught by the Arabic pair',
+    withEditedFile(
+      REPLY_LINTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "  const reviewLanguage = detectReviewLanguage(candidate.reviewText)\n  return reviewLanguage !== 'unknown' && reviewLanguage !== candidate.language",
+          '  return false',
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'language_mismatch',
+  )
+
+  // 141i. The floor, and the only case here that proves it. The stamp is dropped from the production write —
+  //       which a TypeScript signature cannot prevent, because the argument is still accepted and simply not
+  //       used — and the DATABASE refuses the delivery by name. Without 0113's constraint this edit would
+  //       produce a delivered row carrying no evidence that anything had judged it.
+  checkRejectedBy(
+    'reply linter: a delivery write that drops the lint stamp is refused by the database',
+    withEditedFile(
+      REPLY_WRITER,
+      (text) =>
+        replaceOnce(
+          text,
+          "      reply_approved_text       = ${stamp.approvedText},\n      reply_lint_version        = ${stamp.lintVersion},\n      reply_lint_content_sha256 = ${stamp.contentSha256},\n      reply_lint_passed_at      = now(),\n      delivery_mode             = 'manual',",
+          "      delivery_mode             = 'manual',",
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'google_reviews_delivery_needs_a_lint_pass',
+  )
+
+  // 141j. The reproduction resolved to TODAY's rules instead of the stored version. The happy-path case still
+  //       passes — the stored version is the current one — so the only thing that notices is the control
+  //       about a version this build has never had, which is why that control is in the suite.
+  checkRejectedBy(
+    'reply linter: a reproduction that falls back to the current rules is caught by the unknown version',
+    withEditedFile(
+      REPLY_DELIVER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const linter = replyLinterFor(version, context)',
+          '  const linter = sendPathReplyLinter(context)',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'unknown_lint_version',
+  )
+
+  // 141k. The content hash stored and never compared. A hash nobody checks is a column, not evidence, and
+  //       the reply that has been edited since it was judged is precisely the one it exists to catch.
+  checkRejectedBy(
+    'reply linter: a content hash that is never compared is caught by the tampered row',
+    withEditedFile(
+      REPLY_DELIVER,
+      (text) => replaceOnce(text, '  if (actual !== digest) {', '  if (actual.length < 0) {'),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'content_changed',
+  )
+
+  // 141l. The two statements of the cap pulled apart. The number is in 0113 as a CHECK and in
+  //       `REPLY_LENGTH_CAP` in TypeScript, and the direction that drift takes is the dangerous one: a
+  //       database still accepting what the linter has started refusing.
+  checkRejectedBy(
+    'reply linter: a cap constant that disagrees with the database constraint is caught',
+    withEditedFile(
+      REPLY_CONTRACT,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const REPLY_LENGTH_CAP = 1_200',
+          'export const REPLY_LENGTH_CAP = 1_300',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'carries the same cap in the database as the linter does in code',
+  )
+
+  // 141m. The origin default flipped to the permissive reading. The generator passes no origin, so this turns
+  //       `not_a_house_skeleton_rendering` off for the one caller it exists for, and every other rule still
+  //       answers correctly.
+  checkRejectedBy(
+    'reply linter: an origin defaulting to human-approved turns the house-rendering rule off',
+    withEditedFile(
+      REPLY_LINTER,
+      (text) =>
+        replaceOnce(
+          text,
+          "        (candidate.origin ?? 'machine_draft') === 'machine_draft' &&",
+          "        (candidate.origin ?? 'approved_by_a_human') === 'machine_draft' &&",
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'not_a_house_skeleton_rendering',
+  )
+
+  // 141n. The signature dropped at rendering time rather than at measuring time. The cap then measures a
+  //       reply nobody would have published, and the bytes handed to the transport are not the bytes that
+  //       were judged — the other half of 141g, broken in the one place both linters share.
+  checkRejectedBy(
+    'reply linter: a renderer that drops the signature is caught by the shared cap case',
+    withEditedFile(
+      REPLY_CONTRACT,
+      (text) =>
+        replaceOnce(
+          text,
+          '  return signature.length === 0\n    ? args.draft\n    : `${args.draft}${REPLY_SIGNATURE_SEPARATOR}${signature}`',
+          '  return args.draft',
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'measures the same rendering in the house-draft linter',
+  )
+
+  // 141o. The reviewer's display name stopped being read off the row. `confirms_the_reviewer_was_a_client` is
+  //       the one rule whose input comes from the review record rather than from the caller, so an edit here
+  //       is invisible to a unit test that passes the name in.
+  checkRejectedBy(
+    'reply linter: a send path that does not read the reviewer name is caught by the confirmation case',
+    withEditedFile(
+      REPLY_DELIVER,
+      (text) =>
+        replaceOnce(
+          text,
+          '    reviewerDisplayName: review.reviewerDisplayName,\n    signature: deps.signature,',
+          '    reviewerDisplayName: null,\n    signature: deps.signature,',
+        ),
+      () => runExpectingFailure('pnpm', replyIntegration(REPLY_ITEST)),
+    ),
+    'confirms_the_reviewer_was_a_client',
+  )
+
+  // 141p. A fixture that no longer breaks its own rule. The fixture list is data and the assertion reads it,
+  //       so a fixture edited into something publishable would leave the count intact and the claim empty —
+  //       which is the ADR 0003 failure arriving through the fixture rather than through the rule.
+  checkRejectedBy(
+    'reply linter: a fixture edited into something publishable fails its own rule assertion',
+    withEditedFile(
+      REPLY_FIXTURES,
+      (text) =>
+        replaceOnce(
+          text,
+          'draft: `${FRAME} We have arranged a refund for the visit.`,',
+          'draft: `${FRAME} We hope to see you again.`,',
+        ),
+      () => runExpectingFailure('pnpm', replyUnit(REPLY_SUITE)),
+    ),
+    'promises_discount_or_refund',
+  )
+
+  // 141t-141z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing a module, or a linter that refused
+  //            everything would all read as a block of passing cases — and the last of those is the specific
+  //            way a lint gate goes wrong.
+  {
+    const green = run('pnpm', replyUnit(REPLY_SUITE))
+    check(`reply linter: ${REPLY_SUITE} passes unedited`, !green.failed, green.output)
+
+    const rows = run('pnpm', replyIntegration(REPLY_ITEST))
+    check(`reply linter: ${REPLY_ITEST} passes unedited`, !rows.failed, rows.output)
+
+    const pure = run('pnpm', ['purity'])
+    check('reply linter: the linter passes pnpm purity', !pure.failed, pure.output)
+
+    const drift = run('pnpm', ['db:drift'])
+    check('reply linter: 0113 and its Drizzle mirror agree', !drift.failed, drift.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

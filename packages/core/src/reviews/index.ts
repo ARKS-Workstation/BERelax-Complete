@@ -15,6 +15,12 @@
  * the bytes unmodified; the whole directory is under a scoped no-`Date`, no-`Intl` rule in
  * `scripts/check-core-purity.mjs`.
  *
+ * G-REV-05 adds the send-path linter itself — `reply-linter.ts`, the rule set the delivery function runs in
+ * both delivery modes — and `reply-linter.fixtures/`, one deliberately unpublishable reply per rule plus the
+ * pairs that prove three of the rules are about what they claim. Pure in the same way: the regulatory
+ * profile, the staff roster and the escalation lexicon are arguments, because the whole point of the roster
+ * rule is that it reads a live row and `packages/core` reads no database.
+ *
  * G-REV-04 adds the house-voice skeletons, the prompt builder that puts review text inside exactly one
  * delimited untrusted region, the screen that refuses a model response showing signs of having been
  * steered by it, and the reply-linter seam G-REV-05 will implement in full. All of it pure: the clock,
@@ -30,5 +36,7 @@ export * from './notification-fixtures.ts'
 export * from './prompt-builder.ts'
 export * from './red-team-corpus.ts'
 export * from './reply-lint-contract.ts'
+export * from './reply-linter.fixtures/index.ts'
+export * from './reply-linter.ts'
 export * from './routing.ts'
 export * from './skeletons.ts'

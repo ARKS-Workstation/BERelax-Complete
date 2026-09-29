@@ -101,6 +101,27 @@ export const googleReview = pgTable(
      */
     draftQuarantineReason: text('draft_quarantine_reason'),
     draftQuarantinedAt: timestamp('draft_quarantined_at', { withTimezone: true }),
+    /**
+     * The send-path lint stamp (migration 0113). All four together or none.
+     *
+     * `replyApprovedText` is the bytes that were linted and delivered, which is NOT `replyDraft`: that is
+     * the machine's sentence and the thing an owner edits in the approval queue, and after an edit the two
+     * differ. What was published is the one a stored hash can be over, and it is what G-REV-06's *Copy
+     * reply* places on the clipboard byte for byte.
+     *
+     * 0113 also carries the claim that makes the linter a chokepoint rather than a habit:
+     * `google_reviews_delivery_needs_a_lint_pass` refuses `submitted_at` or `posted_manually_at` on a row
+     * with no `reply_lint_version`, and `google_reviews_reply_approved_text_within_cap` carries the
+     * 1,200-character cap. Both are invisible here, because `pnpm db:drift` compares columns only;
+     * `packages/google/src/reviews/reply-delivery.itest.ts` asserts them by name against the applied
+     * schema — and holds the cap's number equal to `REPLY_LENGTH_CAP`, which is the only thing standing
+     * between two statements of one figure. That suite and not `reviews.itest.ts`, because ADR 0001
+     * forbids `packages/db` from importing `packages/core`, so a test here could not name the constant.
+     */
+    replyApprovedText: text('reply_approved_text'),
+    replyLintVersion: text('reply_lint_version'),
+    replyLintContentSha256: text('reply_lint_content_sha256'),
+    replyLintPassedAt: timestamp('reply_lint_passed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
