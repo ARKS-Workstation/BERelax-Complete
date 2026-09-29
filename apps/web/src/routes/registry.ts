@@ -147,6 +147,31 @@ export const ROUTES = [
       'the business does.',
   },
   {
+    id: 'month-reconciliation',
+    path: '/accounts/reconciliation',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'M-VAT-12s closed-month reconciliation: bookings to invoices to payments to journal to VAT boxes, ' +
+      'as named claims with the two figures each one compares, the variance between them and the FUNCTION ' +
+      'each figure came from. It is the artefact an FTA-registered tax agent is handed (Y11-tax-agent), so ' +
+      'it is a list of checkable claims rather than a narrative. A handler answering text/html rather than ' +
+      'a document, for the reason the compliance calendar and the Messages inbox give: a document must be ' +
+      'served in both locales, which would need an Arabic admin document and the W-SYS-01 shell, and would ' +
+      'join a screenshot matrix whose RTL half has to be a real Arabic route. Dynamic, and ?period=YYYY-MM ' +
+      'is REQUIRED with no default: a page answering for "last month" answers a different question every ' +
+      'month, so a link to it could not be cited and a screenshot of it could not be repeated. NO ' +
+      'sampleParams, although the path takes a query: the months that exist depend on which periods have ' +
+      'been closed, and a sample month would be a URL the harness opened against a period that may not be ' +
+      'there. The /accounts prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and it is ' +
+      'authenticated since W-SYS-11. It shows no TRN, no customer name and no phone number: every figure ' +
+      'on it is an aggregate.',
+  },
+  {
     id: 'facts',
     path: '/api/facts',
     kind: 'handler',
@@ -1306,6 +1331,10 @@ export type RouteId = Route['id']
  *
  */
 export const ADMIN_GROUP_PREFIXES: readonly string[] = [
+  // M-VAT-12's closed-month reconciliation. A prefix rather than a bare path because the accounts estate
+  // will grow — R-REP-02's three financial statements and M-VAT-09's filing export both land under it —
+  // and a prefix added with the first route covers every one of them the moment it exists.
+  '/accounts',
   '/analytics',
   '/clients',
   '/compliance',

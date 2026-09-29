@@ -202,6 +202,34 @@ export {
   type InputVatRecoveryWorkingPaper,
   inputVatRecovery,
 } from './queries/input-vat-recovery.ts'
+// M-VAT-12's closed-month reconciliation. The report READS every figure a `done` unit already derives —
+// `trialBalanceMovement`, `readPackageLiability`, `vat201Boxes` and `commissionPeriodSource` — and its own
+// module header carries the table naming which function owns which, because a reconciliation report is
+// exactly where a second derivation of a money figure creeps in.
+export {
+  assertEverySourceIsClassified,
+  classifyJournalSources,
+  exportMonthReconciliation,
+  JOURNAL_SOURCE_CLASSES,
+  type JournalSourceClass,
+  MONTH_RECONCILIATION_CONSUMERS,
+  MONTH_RECONCILIATION_CONSUMERS_REQUIRING_SOUNDNESS,
+  MONTH_RECONCILIATION_DERIVED_HERE,
+  MONTH_RECONCILIATION_FORMAT_VERSION,
+  MONTH_RECONCILIATION_LINE_IDS,
+  type MonthReconciliation,
+  type MonthReconciliationExport,
+  type MonthReconciliationLineId,
+  MonthReconciliationNotExportable,
+  type MonthReconciliationPeriod,
+  monthReconciliation,
+  monthReconciliationBytes,
+  type ReconciliationLine,
+  type ReconciliationLineKind,
+  type ReconciliationMeasure,
+  type ReconciliationSide,
+  type SourceClassificationCensus,
+} from './queries/month-reconciliation.ts'
 export {
   bucketTotalFils,
   type OutstandingPayable,
