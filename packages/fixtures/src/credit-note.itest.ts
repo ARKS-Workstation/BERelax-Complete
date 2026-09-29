@@ -23,6 +23,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { creditNoteMapping, creditNoteReconciliation } from './credit-note.ts'
 import { FIXTURE_ISSUER } from './invoice.ts'
+import { truncateDocumentFamily } from './invoice-family.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -118,10 +119,7 @@ afterAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql.unsafe(
-    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
-      'invoice_appointment, invoice_line, invoice',
-  )
+  await truncateDocumentFamily(sql)
   await sql`
     update document_series set next_number = 1, period_key = ''
      where code in ('TAX-INV', 'CR-NOTE')

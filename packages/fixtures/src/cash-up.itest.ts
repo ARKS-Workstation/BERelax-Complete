@@ -26,6 +26,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { cashDropMapping, cashSessionCorrectionMapping, cashUpMapping } from './cash-up.ts'
 import { FIXTURE_ISSUER } from './invoice.ts'
+import { truncateCashFamily, truncateDocumentFamily } from './invoice-family.ts'
 
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url)
@@ -126,16 +127,13 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await sql?.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  if (sql !== undefined) await truncateCashFamily(sql)
   await sql?.end({ timeout: 5 })
 })
 
 beforeEach(async () => {
-  await sql.unsafe(
-    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
-      'invoice_appointment, invoice_line, invoice',
-  )
-  await sql.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  await truncateDocumentFamily(sql)
+  await truncateCashFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

@@ -83,74 +83,34 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
   //
   // `invoice` refuses DELETE for every role (ZI003), so TRUNCATE as the owner is the only legal removal —
   // and PostgreSQL refuses a truncate while a table referencing one of the named tables is left out, which
-  // is why each of these statements is a list rather than one name. Each suite numbers its own documents
-  // from the `TAX-INV` series and asserts on the series, so it has to start from none.
-  {
-    file: 'packages/db/src/adapters/manual-payment.itest.ts',
-    tables: [
-      'credit_note_line',
-      'credit_note',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the adapter suite issues and refunds its own invoices and asserts on the series numbers, so it starts from none; no loader writes an invoice',
-  },
+  // is why the statement is a list rather than one name. Each suite numbers its own documents from the
+  // `TAX-INV` series and asserts on the series, so it has to start from none.
+  //
+  // Only the REFUSED probe is declared per suite now. Every suite that empties the family calls the shared
+  // statement below instead, so there is one entry for it and none here: eight entries that named the same
+  // eight tables with eight different reasons were removed when the statements moved, because a declaration
+  // that matches no statement is standing permission to write one back.
   {
     file: 'packages/db/src/repositories/invoice.itest.ts',
     tables: ['invoice'],
     kind: 'refused',
     why: 'issued as the application role to prove ZI003 refuses it. This file used to own the invoice family here too; the statement moved to `truncateInvoiceFamily` and this entry shrank to the probe, which is the direction the stale-declaration rule exists to allow',
   },
-  {
-    file: 'packages/db/src/services/issue-credit-note.itest.ts',
-    tables: [
-      'credit_note_line',
-      'credit_note',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'a credit note is asserted against the invoice this file issued for it, and both series restart from 1 here',
-  },
-  {
-    file: 'packages/fixtures/src/credit-note.itest.ts',
-    tables: [
-      'credit_note_line',
-      'credit_note',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the credit-note walkthrough owns both documents it asserts on, and both series restart from 1 here',
-  },
 
   // ## The shared family teardowns
   //
-  // ONE entry for the module that holds both statements, and it replaced NINETEEN — one per suite that used
-  // to restate the table list. That is the same argument this whole rule makes, turned on the rule's own
+  // ONE entry for the module that holds all five statements, and it replaced TWENTY-EIGHT — one per suite
+  // that used to restate a table list. That is the same argument this whole rule makes, turned on the rule's own
   // subject: sixteen suites each spelled the invoice and package lists, migration 0097 gave `commission_line`
   // a foreign key to both `invoice` and `package_redemption`, every list went stale at once and four suites
   // failed in their own teardowns. The lists live once now.
   //
   // One entry rather than one per helper because a (file, table) pair carries one reason, and `payment` and
-  // `commission_line` are in BOTH lists deliberately — `payment` references `invoice` and `package_sale`, so
+  // `commission_line` are in more than one list deliberately — `payment` references `invoice` and `package_sale`, so
   // whichever family is emptied first has to name it.
   //
-  // `packages/fixtures/src/invoice-family.itest.ts` is what stops this declaration drifting: it derives both
-  // closures from `pg_constraint` and fails when a written list and the schema disagree. So the claim here is
+  // `packages/fixtures/src/invoice-family.itest.ts` is what stops this declaration drifting: it derives all
+  // five closures from `pg_constraint` and fails when a written list and the schema disagree. So the claim here is
   // about ONE statement whose scope another check proves, which is the arrangement this rule wants everywhere.
   {
     file: 'packages/fixtures/src/invoice-family.ts',
@@ -168,10 +128,20 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
       'package_template_line',
       'package_template_version',
       'package_template',
+      'credit_note_line',
+      'credit_note',
+      'cash_session_adjustment',
+      'cash_drop',
+      'employee_tip',
+      'cash_session',
+      'payslip',
+      'commission_run',
+      'commission_rule_band',
+      'commission_rule',
     ],
     kind: 'owns',
     restoredBy: 'packages',
-    why: 'the shared teardown for both document families, called by the suites that issue their own invoices and sell their own packages. `invoice` refuses DELETE for every role (ZI003) so truncate by the owner is the only legal removal, and PostgreSQL requires every referencing table in the statement. Of the thirteen the seed writes only the three package templates, and `seedPackageTemplates` restores those',
+    why: 'the shared teardown for all five families — invoice, credit note, package, cash and commission — called by the suites that issue their own documents, sell their own packages and open their own drawers. `invoice` refuses DELETE for every role (ZI003) and a closed `cash_session` refuses it for every role including the owner, so truncate by the owner is the only legal removal, and PostgreSQL requires every referencing table in the statement. Of the twenty-three the seed writes only the three package templates, and `seedPackageTemplates` restores those',
   },
 
   // ## The payroll run (P-HR-12)
@@ -225,55 +195,13 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     why: 'the job is asserted by which intake rows it promoted to reviews, over the whole table, so every row in all four has to be one this file put there',
   },
 
-  // ## The cash session family
-  {
-    file: 'packages/db/src/services/cash-session.itest.ts',
-    tables: ['cash_session_adjustment', 'cash_drop', 'cash_session'],
-    kind: 'owns',
-    why: 'a till session is opened and closed by this file per case, and the close asserts on the only open session there is; no loader opens one',
-  },
-  {
-    file: 'packages/db/src/services/cash-session.itest.ts',
-    tables: [
-      'credit_note_line',
-      'credit_note',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the takings a session counts are the payments this file recorded, so the invoice family is its own too',
-  },
-  {
-    file: 'packages/fixtures/src/cash-up.itest.ts',
-    tables: ['cash_session_adjustment', 'cash_drop', 'cash_session'],
-    kind: 'owns',
-    why: 'the cash-up walkthrough opens the session it reconciles and asserts on the only one open',
-  },
-  {
-    file: 'packages/fixtures/src/cash-up.itest.ts',
-    tables: [
-      'credit_note_line',
-      'credit_note',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-    ],
-    kind: 'owns',
-    why: 'the declared float is reconciled against the payments this file recorded and nothing else',
-  },
-  {
-    file: 'apps/web/src/till.itest.ts',
-    tables: ['cash_session_adjustment', 'cash_drop', 'cash_session'],
-    kind: 'owns',
-    why: 'the till screen is rendered against the session this suite opens, and a session another suite left open would be the one it displayed',
-  },
+  // ## The cash session family, the credit-note family and the commission family
+  //
+  // Nothing is declared per suite for any of the three. Each had its own hand-written table list — four
+  // copies of the cash one, five of the credit-note one — and each list went stale on one migration: 0104
+  // pointed `employee_tip` at `cash_session` and `payslip` at `commission_run`. The statements are in
+  // `packages/fixtures/src/invoice-family.ts` and declared there, once, with the derivation that keeps them
+  // honest in `invoice-family.itest.ts`.
 
   // ## The booking family
   //
@@ -528,30 +456,6 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     tables: ['package_redemption'],
     kind: 'refused',
     why: 'issued as the application role to show ZG007 refuses it. The truncate that used to stand beside it moved to `truncatePackageFamily`, so this entry is the probe alone',
-  },
-  {
-    file: 'packages/fixtures/src/hr-commission.itest.ts',
-    tables: [
-      'commission_line',
-      'commission_run',
-      'commission_rule_band',
-      'commission_rule',
-      'package_redemption',
-      'refund',
-      'checkout_finalisation',
-      'payment',
-      'invoice_appointment',
-      'invoice_line',
-      'invoice',
-      'package_balance',
-      'package_sale',
-      'package_template_line',
-      'package_template_version',
-      'package_template',
-    ],
-    kind: 'owns',
-    restoredBy: 'packages',
-    why: 'a commission run is asserted as a total over every line it produced, so every invoice, redemption and rule band in the database has to be one this file created',
   },
 ])
 

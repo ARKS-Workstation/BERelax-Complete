@@ -35,6 +35,11 @@ import {
 } from '@berelax/hr'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FIXTURE_TRN } from './invoice.ts'
+import {
+  truncateCommissionFamily,
+  truncateInvoiceFamily,
+  truncatePackageFamily,
+} from './invoice-family.ts'
 import { packageSaleMapping } from './package.ts'
 import {
   assertPackageRedemptionMappingReconciles,
@@ -145,11 +150,23 @@ let lockedAt: string
 /** Appointment ids, by the role each plays in the assertions below. */
 const appointments: Record<string, string> = {}
 
-const TRUNCATE =
-  'truncate commission_line, commission_run, commission_rule_band, commission_rule, ' +
-  'package_redemption, refund, checkout_finalisation, payment, invoice_appointment, invoice_line, ' +
-  'invoice, package_balance, package_sale, package_template_line, package_template_version, ' +
-  'package_template'
+/**
+ * The three families this file writes, each as its own legal statement.
+ *
+ * One hand-written list stood here naming all sixteen tables, and it broke twice in one merge: P-HR-11
+ * pointed `commission_line` at `invoice` and `package_redemption`, and P-HR-12 pointed `payslip` at
+ * `commission_run`. The second one sent all twenty-two cases to SKIPPED, because a `beforeAll` that throws
+ * does not report as a failure against the thing it was setting up. The lists live in `./invoice-family.ts`
+ * now, where `invoice-family.itest.ts` derives each closure from `pg_constraint` and fails on the list rather
+ * than in a `beforeAll`.
+ */
+const truncateAll = async (connection: Sql): Promise<void> => {
+  // Commission first: it is the only one of the three that references the other two, so emptying it makes
+  // the two statements that follow legal whatever order the schema grows in.
+  await truncateCommissionFamily(connection)
+  await truncateInvoiceFamily(connection)
+  await truncatePackageFamily(connection)
+}
 
 const ISSUER = {
   legalName: 'BE RELAX SPA - L.L.C - O.P.C',
@@ -336,7 +353,7 @@ beforeAll(async () => {
   // A lock over 2081 left behind by an earlier run of THIS file would refuse every posting below with
   // ZL002 and every case would report that instead — gate 103's and 105's reason for the same delete.
   await sql`delete from period_lock where starts_on >= '2081-01-01' and ends_on <= '2081-12-31'`
-  await sql.unsafe(TRUNCATE)
+  await truncateAll(sql)
 
   const [buyer] = await sql<{ id: string }[]>`select id from customer order by id limit 1`
   if (buyer === undefined) throw new Error('run `pnpm seed`: a customer is needed')
@@ -573,7 +590,7 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
-  await sql?.unsafe(TRUNCATE)
+  if (sql !== undefined) await truncateAll(sql)
   await sql`delete from booking where notes = ${MARKER}`
   await sql`delete from period_lock where starts_on >= '2081-01-01' and ends_on <= '2081-12-31'`
   await sql`delete from business_day where trading_date = any(${[...DAYS]}::date[])`

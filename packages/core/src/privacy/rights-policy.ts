@@ -747,6 +747,48 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
       'date, which is a fact about the site and not about a person.',
     registeredBy: 'W-SITE-10',
   }),
+
+  /**
+   * Two later digests probe 4 finds by the same name family, and they do NOT land the same way.
+   *
+   * `CREDENTIAL_COLUMN_PATTERN` matched both the moment their tables arrived, and both went unclassified
+   * until `rights.itest.ts` refused a whole erasure over them — which is ADR 0034 working: an unclassified
+   * column stops the erasure rather than being quietly passed over. What the two need is different, and
+   * lumping them together as "another hash, not customer data" is the classification this comment exists to
+   * refuse.
+   */
+  rule({
+    key: 'public.private_document.content_sha256',
+    dataClass: 'operational',
+    action: 'retain_append_only',
+    why:
+      'The sha256 of the bytes of a filed document (0101). `private_document` refuses UPDATE and DELETE ' +
+      'for every role including the owner, so neither a redaction nor a deletion of this column is ' +
+      'available — the retention is structural before it is a policy. It is also the right answer: the ' +
+      'register exists so that "what private documents exist" is a SELECT rather than a survey of five ' +
+      'producers, and a digest is what says which BYTES an object is. It is not what says who the object ' +
+      'is about — `subject_kind` and `subject_id` are, and they are a polymorphic pair with no foreign ' +
+      'key, so no probe’s column-name pattern reaches them. That is stated here because the reader of ' +
+      'this rule is the one most likely to need it.',
+    subjectReason:
+      'The register of which private documents this business holds — a class, a storage key, a size and a ' +
+      'hash of the bytes — is append-only and outlives the erasure of the person a document is about. It ' +
+      'carries no name, no contact detail and none of the content itself.',
+    registeredBy: 'W-SYS-14',
+  }),
+  rule({
+    key: 'public.wps_export.file_sha256',
+    dataClass: 'not_customer_data',
+    action: 'not_customer_data',
+    why:
+      'The sha256 of the salary-information file submitted for a payroll run (0104), found by probe 4 on ' +
+      'the `_sha256` family. The subject of a WPS export is the EMPLOYEE — P-HR-01’s subject, not this ' +
+      'CRM’s customer — which is the same direction as `publication_approval.content_sha256` above. ' +
+      '`wps_export` is append-only for every role including the owner (ZY144) and the application role ' +
+      'holds no UPDATE or DELETE on it, so nothing could be done here even if the classification were ' +
+      'wrong.',
+    registeredBy: 'P-HR-12',
+  }),
   rule({
     key: 'public.google_connections.*',
     dataClass: 'not_customer_data',

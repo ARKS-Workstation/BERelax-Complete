@@ -190,9 +190,26 @@ describe('the analytics schema', () => {
       select exists (select 1 from pg_namespace where nspname = 'analytics') as present
     `
     expect(row?.present).toBe(true)
-    // The ledger and the migration cannot disagree about which number this schema arrived under, and gate
-    // case 90c holds SCHEMA_VERSION equal to the newest migration on disk from the other side.
-    expect(SCHEMA_VERSION).toBe(96)
+    // The number this schema arrived under is read from the migration that creates it, not written twice.
+    // `expect(SCHEMA_VERSION).toBe(96)` stood here and was true for exactly as long as 0096 was the newest
+    // migration on disk: SCHEMA_VERSION is the HIGHEST migration (allocation-note.test.ts holds it to that,
+    // and gate case 90c from the other side), never the one that created any particular object, so the
+    // assertion started failing at 0097 and said nothing about analytics when it did. What is actually
+    // claimed is that the schema arrived in 0096 and the ledger has not gone backwards past it.
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const migrations = new URL('../migrations/', import.meta.url)
+    const creators = readdirSync(migrations)
+      .filter((file) => file.endsWith('.sql'))
+      .filter((file) =>
+        /create\s+schema\s+(if\s+not\s+exists\s+)?analytics\b/i.test(
+          readFileSync(new URL(file, migrations), 'utf8'),
+        ),
+      )
+    expect(
+      creators,
+      'no migration creates the analytics schema, so this case read nothing',
+    ).toEqual(['0096_analytics_schema.sql'])
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(96)
   })
 
   it('holds the nine tables this unit creates, and a retention policy for every one of them', async () => {

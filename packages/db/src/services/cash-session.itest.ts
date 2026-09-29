@@ -1,3 +1,4 @@
+import { truncateCashFamily, truncateDocumentFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -146,7 +147,7 @@ afterAll(async () => {
   // The locks this file takes, and the sessions. TRUNCATE rather than DELETE, because a closed session
   // refuses DELETE for every role including the owner — which is the unit's guarantee, not an obstacle to
   // work around.
-  await sql?.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  if (sql !== undefined) await truncateCashFamily(sql)
   await sql?.unsafe(`delete from period_lock where period_id like 'MTILL11-%'`)
   await sql?.end({ timeout: 5 })
 })
@@ -155,13 +156,10 @@ beforeEach(async () => {
   // Every table that references `invoice` is NAMED: PostgreSQL refuses a truncate while a referencing
   // table is missing from the statement, and `invoice` refuses DELETE for every role (ZI003), so a
   // truncate as the owner is the only way to clear it. The list is 0072's.
-  await sql.unsafe(
-    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
-      'invoice_appointment, invoice_line, invoice',
-  )
+  await truncateDocumentFamily(sql)
   // Both tables that reference `cash_session` are NAMED: PostgreSQL refuses a truncate while a
   // referencing table is missing from the statement.
-  await sql.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  await truncateCashFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'

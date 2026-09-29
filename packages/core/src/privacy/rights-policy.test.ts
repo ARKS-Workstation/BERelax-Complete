@@ -299,15 +299,20 @@ describe('the erasure rule registry', () => {
       in — G-REV-02's `review_intake_email`, whose body holds a customer's own words about this business, and
       P-HR-11's `commission_line.invoice_id`, a pointer at an invoice whose own rule decides the matter.
       A fourth spelling of one unit's id, or a unit that registered a rule for a table it did not create,
-      fails here and nowhere else.
+      fails here and nowhere else. It did its job a second time: W-SYS-14's `private_document.content_sha256`
+      and P-HR-12's `wps_export.file_sha256` were both unclassified when they merged, which ADR 0034 turned
+      into a refused erasure rather than a silently unclassified column — nine cases in `rights.itest.ts`
+      failed with "the catalogue holds columns no erasure rule classifies" until each got a rule.
     */
     expect([...units].sort()).toEqual([
       'C-AUTO-07',
       'C-CRM-10',
       'G-REV-02',
       'P-HR-11',
+      'P-HR-12',
       'W-SITE-10',
       'W-SYS-11',
+      'W-SYS-14',
     ])
   })
 

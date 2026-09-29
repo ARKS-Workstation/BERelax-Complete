@@ -1,5 +1,6 @@
 import http from 'node:http'
 import https from 'node:https'
+import { truncateDocumentFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -196,10 +197,7 @@ afterAll(async () => {
  * and come first, because `refund.credit_note_id` is now a real key into the second of them.
  */
 beforeEach(async () => {
-  await sql.unsafe(
-    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
-      'invoice_appointment, invoice_line, invoice',
-  )
+  await truncateDocumentFamily(sql)
   await sql`
     update document_series
        set next_number = 1, period_key = '', prefix = 'TI-', padding = 5, reset_policy = 'annual'
@@ -240,17 +238,35 @@ async function stateOf(
 describe('the tender-type registry', () => {
   it('holds every way the business takes money, with an account for each', async () => {
     const types = await readTenderTypes(sql)
-    expect(types.map((type) => type.code)).toEqual(['cash', 'card_in_salon', 'bank_transfer'])
+    expect(types.map((type) => type.code)).toEqual([
+      'cash',
+      'card_in_salon',
+      'bank_transfer',
+      'card_online',
+    ])
     // Card money goes to the terminal clearing account and NOT the bank: the terminal settles in a
-    // batch, net of fees, days later.
-    expect(types.map((type) => type.postingAccountCode)).toEqual(['1010', '1040', '1020'])
+    // batch, net of fees, days later. `card_online` clears through 1030, the gateway's own account,
+    // for the same reason and a different counterparty.
+    expect(types.map((type) => type.postingAccountCode)).toEqual(['1010', '1040', '1020', '1030'])
     expect(types.filter((type) => type.givesChange).map((type) => type.code)).toEqual(['cash'])
     expect(types.filter((type) => type.requiresReference).map((type) => type.code)).toEqual([
       'card_in_salon',
       'bank_transfer',
+      'card_online',
     ])
-    // All three are the manual adapter's today, which is the honest answer: there is no gateway yet.
-    expect(new Set(types.map((type) => type.adapter))).toEqual(new Set(['manual']))
+    // The split on `adapter`, asserted in both directions rather than as one set. What stood here was
+    // `expect(new Set(types.map((t) => t.adapter))).toEqual(new Set(['manual']))` under the sentence "all
+    // three are the manual adapter's today, which is the honest answer: there is no gateway yet" — true
+    // when it was written and false the moment Y-PAY-01's 0105 inserted the fourth row. This file is about
+    // the MANUAL adapter, so what it should say is which types are its own and which are not.
+    expect(types.filter((type) => type.adapter === 'manual').map((type) => type.code)).toEqual([
+      'cash',
+      'card_in_salon',
+      'bank_transfer',
+    ])
+    expect(types.filter((type) => type.adapter === 'gateway').map((type) => type.code)).toEqual([
+      'card_online',
+    ])
     expect(types.every((type) => type.retiredAt === null)).toBe(true)
   })
 

@@ -1,3 +1,4 @@
+import { truncateDocumentFamily } from '@berelax/fixtures'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Actor } from '../audit.ts'
 import { createConnection, type Sql } from '../connection.ts'
@@ -125,17 +126,16 @@ afterAll(async () => {
  * (0072's header says why), so the invoice half of this list is unchanged from what 0068 left.
  */
 /**
- * The truncate above, named so the table list is stated ONCE.
+ * The truncate, named so the call site reads as one thing — the LIST itself is stated in
+ * `@berelax/fixtures`' `DOCUMENT_FAMILY_TABLES`, which is where it belongs.
  *
- * The outbox-collision case below reproduces what `beforeEach` does between tests, and a second copy of
- * this list is exactly the defect the comment above warns about: the next table to reference one of
- * these would be added to one copy and missed in the other.
+ * It was written out here, and the comment above warned in as many words that "the next table to reference
+ * one of these would be added to one copy and missed in the other". That is exactly what happened:
+ * P-HR-11 pointed `commission_line` at `invoice`, five files carried this same list, and all five failed in
+ * `beforeEach` with `cannot truncate a table referenced in a foreign key constraint`. A warning in a comment
+ * is not a check; `invoice-family.itest.ts` derives the closure from `pg_constraint` and is.
  */
-const truncateDocuments = () =>
-  sql.unsafe(
-    'truncate credit_note_line, credit_note, refund, checkout_finalisation, payment, ' +
-      'invoice_appointment, invoice_line, invoice',
-  )
+const truncateDocuments = () => truncateDocumentFamily(sql)
 
 beforeEach(async () => {
   await truncateDocuments()

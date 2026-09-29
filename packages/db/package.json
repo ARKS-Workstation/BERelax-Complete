@@ -10,6 +10,9 @@
     "@berelax/config": "workspace:*",
     "@berelax/shared": "workspace:*"
   },
+  "devDependencies": {
+    "@berelax/fixtures": "workspace:*"
+  },
   "scripts": {
     "typecheck": "tsc --build"
   }

@@ -7,6 +7,7 @@ import {
   FIXTURE_PACKAGE_SHAPES,
   seedPackageDrawdownStates,
   seedPackageTemplates,
+  truncateCashFamily,
   truncateInvoiceFamily,
   truncatePackageFamily,
 } from '@berelax/fixtures'
@@ -356,7 +357,7 @@ afterAll(async () => {
     three for the same reason. Without it this file's second run cannot take cash on its own cash-up day, and
     the failure arrives as a package sale refusing for a reason that names neither the drawer nor this file.
   */
-  await sql?.unsafe('truncate cash_session_adjustment, cash_drop, cash_session')
+  if (sql !== undefined) await truncateCashFamily(sql)
   /*
     And the package family, for a harder reason than tidiness. Every `package_sale` this file writes — the
     four seeded drawdown states and the one part 3 buys through the browser — pins its `customer_id` through

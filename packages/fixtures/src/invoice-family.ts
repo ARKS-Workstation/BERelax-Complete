@@ -97,3 +97,117 @@ export const PACKAGE_FAMILY_TABLES: readonly string[] = Object.freeze([
 export async function truncatePackageFamily(sql: Sql): Promise<void> {
   await sql.unsafe(`truncate ${PACKAGE_FAMILY_TABLES.join(', ')}`)
 }
+
+/**
+ * The credit-note family, and why it is separate from the invoice one.
+ *
+ * `credit_note` carries NO foreign key to `invoice` — 0072's header says why: a credit note names the document
+ * it corrects by its display number, not by its id, because the two are independently numbered statements and
+ * a key would make one deletable only with the other. So the two closures touch in exactly one table,
+ * `refund`, which references `invoice` AND `credit_note` (the reference 0068 deferred and 0072 added).
+ *
+ * That is why this list is stated apart and then UNIONED below rather than merged by hand: a suite that writes
+ * credit notes writes invoices too, and the statement it needs is both closures at once.
+ */
+export const CREDIT_NOTE_FAMILY_TABLES: readonly string[] = Object.freeze([
+  'credit_note_line',
+  'credit_note',
+  'refund',
+])
+
+/**
+ * What a suite that writes both documents empties: the two closures above, each table once.
+ *
+ * Five suites carried the same nine-table statement character for character and all five missed
+ * `commission_line` when P-HR-11 pointed it at `invoice`; each then failed in `beforeEach` with `cannot
+ * truncate a table referenced in a foreign key constraint`, a sentence about PostgreSQL and not about the
+ * thing under test. This is the fifth statement of the list becoming the only one.
+ *
+ * ## Why it is written out and not spread from the two arrays above
+ *
+ * It was `[...CREDIT_NOTE_FAMILY_TABLES, ...INVOICE_FAMILY_TABLES.filter(…)]` first, which is shorter and
+ * obviously correct — and it made the statement UNREADABLE to `suite-table-ownership.ts`, which resolves a
+ * `truncate ${LIST.join(', ')}` by reading frozen string literals in the same module. A computed list gives
+ * it `<unresolved-list>`: the one statement five suites share would have been the one statement nothing
+ * could check the scope of, which is worse than five checkable copies (ADR 0002). So the names are literals
+ * here, and `invoice-family.itest.ts` holds this array equal to the UNION of the two closures it derives
+ * from `pg_constraint` — the derivation is in the check, where a derivation belongs, and the statement stays
+ * something a scanner can read.
+ *
+ * `refund` is in both closures and is named ONCE: PostgreSQL refuses a truncate that names a table twice.
+ */
+export const DOCUMENT_FAMILY_TABLES: readonly string[] = Object.freeze([
+  'credit_note_line',
+  'credit_note',
+  'refund',
+  'checkout_finalisation',
+  'payment',
+  'commission_line',
+  'invoice_appointment',
+  'invoice_line',
+  'invoice',
+])
+
+/** Empties both document closures as the OWNER, for a suite that writes invoices and credit notes. */
+export async function truncateDocumentFamily(sql: Sql): Promise<void> {
+  await sql.unsafe(`truncate ${DOCUMENT_FAMILY_TABLES.join(', ')}`)
+}
+
+/**
+ * The cash family, and the table that broke four more teardowns the same way.
+ *
+ * Four suites each wrote out the same three cash tables. P-HR-12's `employee_tip` then took a foreign key to
+ * `cash_session`, because a tip declared at the till is counted in the drawer it was declared at and paid
+ * through payroll, and every one of those statements became illegal at once.
+ *
+ * The cost of that one key was not four teardowns. One of the four threw in its `afterAll` three lines before
+ * the statement that removed the probe service it had published, so the probe survived the run — and the next
+ * fixture loader to publish a catalogue was refused by `service_publish_without_compat_row` on a row it had
+ * never heard of. Eighteen files failed for one line in a nineteenth, and not one of the eighteen messages
+ * mentioned a drawer.
+ *
+ * A truncate is forced here rather than chosen, exactly as it is for the invoice family: a closed
+ * `cash_session` refuses DELETE for every role including the owner, so a counted drawer cannot be removed a
+ * row at a time.
+ */
+export const CASH_FAMILY_TABLES: readonly string[] = Object.freeze([
+  'cash_session_adjustment',
+  'cash_drop',
+  'employee_tip',
+  'cash_session',
+])
+
+/** Empties the cash family as the OWNER, drawer counts and declared tips included. */
+export async function truncateCashFamily(sql: Sql): Promise<void> {
+  await sql.unsafe(`truncate ${CASH_FAMILY_TABLES.join(', ')}`)
+}
+
+/**
+ * The commission family, and the fourth table one migration broke.
+ *
+ * The commission suite wrote out sixteen tables in one statement: its own four, and then the whole invoice and
+ * package families, because `commission_line` references `invoice` and `package_redemption`.
+ *
+ * P-HR-12's `payslip` then took a foreign key to `commission_run` — a payslip discharges the commission a run
+ * computed — and all twenty-two of that suite's cases went to SKIPPED. That is how a `beforeAll` failure
+ * presents, and it is the least visible of the four ways this one list has now broken: a skipped case reports
+ * neither a pass nor a failure, and a run that skips a whole file still exits green in a summary somebody
+ * scrolls past.
+ *
+ * Emptied as its own statement rather than merged into the other two: nothing outside this closure references
+ * any of the five, so `truncate` over them is legal alone, and the invoice statement that follows may then
+ * name an already-empty `commission_line` — TRUNCATE is idempotent over an empty table. Three legal statements
+ * in a row beat one hand-merged union that no derivation checks.
+ */
+export const COMMISSION_FAMILY_TABLES: readonly string[] = Object.freeze([
+  'payslip',
+  'commission_line',
+  'commission_run',
+  'commission_rule_band',
+  'commission_rule',
+])
+
+/** Empties the commission family as the OWNER, the payslips that discharge a run included. */
+export async function truncateCommissionFamily(sql: Sql): Promise<void> {
+  await sql.unsafe(`truncate ${COMMISSION_FAMILY_TABLES.join(', ')}`)
+}

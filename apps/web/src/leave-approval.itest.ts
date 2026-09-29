@@ -1,20 +1,36 @@
-import { ASIA_DUBAI, leaveCoveragePeriod, localDate, localTime } from '@berelax/core'
+import { ASIA_DUBAI, leaveCoveragePeriod, localDate, localTime, type Role } from '@berelax/core'
 import { createConnection, type Sql, writeLeaveRequest } from '@berelax/db'
+import { createFixturePrincipal } from '@berelax/fixtures'
 import { auditPage, blockingViolations, describeViolation } from '@berelax/harness/accessibility'
+import { installAdminBrowserCookie } from '@berelax/harness/admin-session'
 import { DETERMINISTIC_LAUNCH_ARGS } from '@berelax/harness/determinism'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import { type Browser, chromium, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
 
 /**
  * P-HR-09's screen, driven against the built application.
  *
  * Four claims live here and nowhere else, because none of them can be checked by reading a view object:
  *
- *   1. **The `?role=` narrowing is enforced by the RUNNING route.** A marketer is served the page with the
- *      conflict report withheld, and a manager is served it with the report. The pure render test can only
- *      prove that a view with `maySeeConflicts: false` prints the withheld wording — it cannot prove that the
- *      route ever builds such a view, which is the half that matters.
+ *   1. **The narrowing is enforced by the RUNNING route, on the SESSION's role.** A marketer is served the
+ *      page with the conflict report withheld, and a manager is served it with the report. The pure render
+ *      test can only prove that a view with `maySeeConflicts: false` prints the withheld wording — it cannot
+ *      prove that the route ever builds such a view, which is the half that matters.
+ *
+ *      Every case here used to say `?role=marketer` on the URL, and W-SYS-11 removed that line from the
+ *      route: the role is the signed-in principal's, read through `guardAdminRoute`, and a repository-wide
+ *      scan now refuses any query parameter that chooses a principal, a role or a permission. This file was
+ *      not updated with it, so seven of its nine cases were served `/login` and failed — and the two that
+ *      passed are the more interesting half: `serves the request with the robots header the registry
+ *      declares` asserted 200, `text/html`, noindex and no-store, every one of which the SIGN-IN page also
+ *      answers. It passed against a document that has nothing to do with this screen. It now also asserts a
+ *      field only the leave page prints, so it cannot pass on the login page again (ADR 0002).
+ *
+ *      One principal per role is minted in `beforeAll` and the cookie goes on each request, rather than
+ *      patching `globalThis.fetch` the way the single-role suites do: this file's subject IS the difference
+ *      between four roles, so it needs four cookies in one process.
  *   2. **The noindex header is the proxy's**, derived from the registry's `/hr` prefix, and not something the
  *      document claims about itself.
  *   3. **The period is printed as instants, and the leave day ends at 02:00 on the following date.** Read off
@@ -56,6 +72,20 @@ let browser: Browser
 let sql: Sql
 let employeeId = ''
 let leaveRequestId = ''
+let restoreAdminBrowser: (() => void) | undefined
+/** One admin session per role this file asserts about, by role name. */
+const cookies = new Map<Role, string>()
+
+/** The request init that presents `role`'s session. Throws rather than silently fetching as nobody. */
+function as(role: Role): RequestInit {
+  const cookie = cookies.get(role)
+  if (cookie === undefined) {
+    throw new Error(
+      `No fixture session was minted for ${role}, so this case would fetch as nobody.`,
+    )
+  }
+  return { headers: { cookie } }
+}
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 4 })
@@ -114,12 +144,31 @@ beforeAll(async () => {
     },
   })
   BASE = server.origin
+  /*
+    A session per role, and the browser's separately.
+
+    `installAdminBrowserCookie` patches `chromium.launch`, so it runs BEFORE the launch below — it has to
+    reach the browser that line is about to make. `manager` is the browser's role because the two Playwright
+    cases audit the page with the conflict report present, which is the widest document this screen renders.
+  */
+  for (const role of ['marketer', 'manager', 'owner', 'therapist'] as const) {
+    const principal = await createFixturePrincipal(sql, { role })
+    cookies.set(role, `${ADMIN_SESSION_COOKIE}=${principal.sessionToken ?? ''}`)
+  }
+  const managerToken = (cookies.get('manager') ?? '').split('=')[1] ?? ''
+  restoreAdminBrowser = installAdminBrowserCookie(chromium, {
+    origin: BASE,
+    name: ADMIN_SESSION_COOKIE,
+    token: managerToken,
+  })
   browser = await chromium.launch({ args: [...DETERMINISTIC_LAUNCH_ARGS] })
 }, 300_000)
 
 afterAll(async () => {
   await browser?.close()
   await server?.stop()
+  // Restored before the database work, so a failure there still leaves `chromium.launch` as it was found.
+  restoreAdminBrowser?.()
   if (employeeId !== '') {
     await sql`delete from employee_skill where employee_id = ${employeeId}::uuid`
   }
@@ -155,9 +204,13 @@ async function withPage<T>(path: string, body: (page: Page) => Promise<T>): Prom
 
 describe('acceptance — the route answers HTML, noindex, and the period as instants', () => {
   it('serves the request with the robots header the registry declares', async () => {
-    const response = await fetch(`${BASE}${pagePath()}`)
+    const response = await fetch(`${BASE}${pagePath()}`, as('manager'))
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('text/html')
+    // Asserted here and not only in the period case below: 200, `text/html`, noindex and no-store are all
+    // true of the SIGN-IN page too, which is what this case was passing against while the other seven
+    // failed. A field only this screen prints is what makes the four headers above a claim about it.
+    expect(await response.clone().text()).toContain('data-field="tradingDates"')
     // Derived from the registry by the proxy: `/hr` is a prefix in ADMIN_GROUP_PREFIXES, so a screen added
     // beside this one arrives noindex rather than needing to be remembered.
     expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive')
@@ -165,7 +218,7 @@ describe('acceptance — the route answers HTML, noindex, and the period as inst
   }, 60_000)
 
   it('prints both ends of the stored period, and the leave day ends at 02:00 the NEXT date', async () => {
-    const html = await (await fetch(`${BASE}${pagePath()}`)).text()
+    const html = await (await fetch(`${BASE}${pagePath()}`, as('manager'))).text()
     // The claim the whole unit rests on, read off the document: a leave day on the 17th runs to 02:00 on
     // the 18th. The control is the second assertion — a calendar-aligned day would end at 00:00 on the
     // 18th, and a naive one would end at 23:59 on the 17th.
@@ -175,19 +228,39 @@ describe('acceptance — the route answers HTML, noindex, and the period as inst
   }, 60_000)
 
   it('answers 404 for a request that does not exist, and 400 for a role that is not a role', async () => {
-    const missing = await fetch(`${BASE}/hr/leave/00000000-0000-7000-8000-000000000000`)
+    const missing = await fetch(
+      `${BASE}/hr/leave/00000000-0000-7000-8000-000000000000`,
+      as('manager'),
+    )
     expect(missing.status).toBe(404)
-    const nonsense = await fetch(`${BASE}${pagePath('?role=supervisor')}`)
-    expect(nonsense.status).toBe(400)
-    // Named, so an operator learns their role was a typo rather than being served a narrower page.
-    expect(await nonsense.text()).toContain('is not a role this system knows')
+    /*
+      The 400 half was `?role=supervisor` and cannot be written over HTTP any more, so what replaced it is
+      the reason why — not a deletion.
+
+      The route still refuses a role it does not know (`is not a role this system knows`), deliberately, and
+      that branch is now unreachable through a request: the role comes from `staff_credential.role`, and
+      `staff_credential_role_is_a_known_role` is a CHECK over the same eight names `ROLES` declares. So the
+      claim this case can still make is that the database is what makes the branch unreachable. Asserted by
+      the constraint's NAME, because a refusal for some other reason — a bad hash, a missing employee —
+      would otherwise read as this one.
+    */
+    const refused = await sql`
+      insert into staff_credential (employee_id, role, password_hash)
+      values (${employeeId}::uuid, 'supervisor', 'scrypt$notused')
+    `.then(
+      () => null,
+      (error: unknown) => error as { code?: string; message?: string },
+    )
+    expect(refused, 'the database accepted a role that is not a role').not.toBeNull()
+    expect(refused?.code).toBe('23514')
+    expect(refused?.message).toContain('staff_credential_role_is_a_known_role')
   }, 60_000)
 })
 
-describe('acceptance — ?role= narrows and never widens, decided on the server', () => {
+describe('acceptance — the session\u2019s role narrows and never widens, decided on the server', () => {
   it('withholds the conflict report from a marketer and serves it to a manager', async () => {
-    const asMarketer = await (await fetch(`${BASE}${pagePath('?role=marketer')}`)).text()
-    const asManager = await (await fetch(`${BASE}${pagePath('?role=manager')}`)).text()
+    const asMarketer = await (await fetch(`${BASE}${pagePath()}`, as('marketer'))).text()
+    const asManager = await (await fetch(`${BASE}${pagePath()}`, as('manager'))).text()
     // Both halves, because either alone is satisfied by a route that withholds from everybody or from
     // nobody. The report itself is empty for this request — no appointment overlaps it — so the assertion is
     // about the SECTION being withheld rather than about a row count, which is the distinction that matters:
@@ -198,11 +271,11 @@ describe('acceptance — ?role= narrows and never widens, decided on the server'
     expect(asManager).not.toContain('data-conflicts="withheld"')
   }, 60_000)
 
-  it('does not widen for ?role=owner: the ceiling is a manager, and the page has no write either way', async () => {
-    const asOwner = await (await fetch(`${BASE}${pagePath('?role=owner')}`)).text()
+  it('does not widen for an owner: the ceiling is a manager, and the page has no write either way', async () => {
+    const asOwner = await (await fetch(`${BASE}${pagePath()}`, as('owner'))).text()
     // The owner holds every permission, so if the intersection were missing this page would report the same
     // capabilities either way — which it does, because a manager holds both of them. What must NOT appear at
-    // any role is a control: the page is read-only, and `?role=` cannot make it otherwise.
+    // any role is a control: the page is read-only, and no role can make it otherwise.
     expect(asOwner).toContain('data-field="writes"')
     expect(asOwner).toContain('Read-only.')
     expect(asOwner).not.toContain('<form')
@@ -210,7 +283,7 @@ describe('acceptance — ?role= narrows and never widens, decided on the server'
   }, 60_000)
 
   it('shows a therapist the page without the approval or override authority', async () => {
-    const asTherapist = await (await fetch(`${BASE}${pagePath('?role=therapist')}`)).text()
+    const asTherapist = await (await fetch(`${BASE}${pagePath()}`, as('therapist'))).text()
     expect(asTherapist).toContain('does not hold the approval permission')
     expect(asTherapist).toContain('does not hold the override authority')
   }, 60_000)
@@ -218,7 +291,7 @@ describe('acceptance — ?role= narrows and never widens, decided on the server'
 
 describe('acceptance — axe reports nothing serious or critical, and the audit fires', () => {
   it('audits the rendered page clean', async () => {
-    const violations = await withPage(pagePath('?role=manager'), async (page) => {
+    const violations = await withPage(pagePath(), async (page) => {
       const result = await auditPage(page, {
         page: '/hr/leave/[id]',
         viewport: { name: '1440', width: 1440, height: 900, scale: 1, why: 'P-HR-09 acceptance' },
@@ -234,7 +307,7 @@ describe('acceptance — axe reports nothing serious or critical, and the audit 
     // The control (ADR 0003). An image with no alternative text is a serious violation, injected into the
     // rendered document, so a clean answer above means the audit ran rather than that it found nothing to
     // look at.
-    const violations = await withPage(pagePath('?role=manager'), async (page) => {
+    const violations = await withPage(pagePath(), async (page) => {
       await page.evaluate(() => {
         const broken = document.createElement('img')
         broken.src =
@@ -255,9 +328,11 @@ describe('acceptance — axe reports nothing serious or critical, and the audit 
 
 describe('acceptance — ?dir=rtl re-renders the same document mirrored', () => {
   it('sets dir on the html element', async () => {
-    const mirrored = await (await fetch(`${BASE}${pagePath('?dir=rtl')}`)).text()
+    // `?dir=` stays a query parameter and is the one that may: direction is a rendering choice, not a
+    // principal, a role or a permission, which is the distinction W-SYS-11's scan draws.
+    const mirrored = await (await fetch(`${BASE}${pagePath('?dir=rtl')}`, as('manager'))).text()
     expect(mirrored).toContain('<html lang="en" dir="rtl">')
-    const upright = await (await fetch(`${BASE}${pagePath()}`)).text()
+    const upright = await (await fetch(`${BASE}${pagePath()}`, as('manager'))).text()
     expect(upright).toContain('<html lang="en" dir="ltr">')
   }, 60_000)
 })
