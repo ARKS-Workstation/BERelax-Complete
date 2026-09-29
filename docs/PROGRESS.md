@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**132 / 211 units complete.**
+**133 / 211 units complete.**
 
 ## Next up
 
-1. **W-SYS-13 — Test isolation: a suite may delete only what it created**
 1. **W-SYS-14 — Private document storage: the signed URL, and the audited download**
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
+1. **M-VAT-09 — Absence of auto-file, proven, and the Zoho Books export**
 
 ## All units
 
@@ -58,7 +58,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 41 | `B-UI-05` | Magic-link token service and the manage-booking page | `B-LIFE-03`, `B-MSG-03`, `B-UI-02` | M1 | — |
 | [x] | 41.5 | `W-SYS-11` | The admin session — mounting F07's auth in the web app | `F07`, `W-SYS-01` | — | — |
 | [x] | 41.6 | `W-SYS-12` | Private SQLSTATE allocation: one code, one rule, with an allocator | — | — | — |
-| [ ] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
+| [x] | 41.7 | `W-SYS-13` | Test isolation: a suite may delete only what it created | — | — | — |
 | [ ] | 41.8 | `W-SYS-14` | Private document storage: the signed URL, and the audited download | `W-SYS-05`, `F06` | — | — |
 | [ ] | 42 | `B-M1` | M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop | `B-CAT-06`, `B-MSG-04`, `B-UI-04`, `B-UI-05` | M1 | — |
 | [x] | 43 | `M-TILL-01` | Chart of accounts and the pure double-entry ledger kernel | `F05` | — | Y8-coa |

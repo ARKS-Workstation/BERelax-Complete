@@ -144,11 +144,10 @@ afterAll(async () => {
   if (created.heldChallenge !== '') {
     await sql`delete from booking_session where id = ${created.heldChallenge}::uuid`
   }
-  // The fixture booking, because `booking.customer_id` is ON DELETE RESTRICT and
-  // `packages/fixtures/src/customer-identity.itest.ts` USED TO clear the table with a bare
-  // `delete from customer`. One row left here turned all eleven of that file's cases red with a
-  // foreign-key message that named neither this file nor the row. That suite scopes its cleanup now — and
-  // the row still has to go, because the next suite to touch this customer meets the same restriction. The grants hanging off it go first: they carry no foreign key to
+  // The fixture booking, because `booking.customer_id` is ON DELETE RESTRICT. One row left here once turned
+  // all eleven cases of a suite elsewhere red with a foreign-key message that named neither this file nor
+  // the row, and the row still has to go whoever is next: the next suite to touch this customer meets the
+  // same restriction. The grants hanging off it go first: they carry no foreign key to
   // `booking` (0067, deliberately), so nothing removes them for us.
   if (heldCustomerId !== '') {
     await sql`

@@ -55,7 +55,7 @@ const RUN = Date.now().toString(36)
 let nonce = 0
 
 const TRUNCATE =
-  'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+  'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
   'package_template_version, package_template'
 
 beforeAll(async () => {

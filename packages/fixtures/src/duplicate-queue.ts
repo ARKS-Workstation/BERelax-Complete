@@ -40,8 +40,8 @@ import { customerLabel, syntheticPerson } from './synthetic.ts'
  * The records are on the unallocated `+971 59` prefix in a band nothing else uses (`generateSalon`'s
  * 1–140, the CRM suites' 4411 upward, the consent loaders' 9101–9104 and 9111–9112, the suppression
  * loader's 9201–9203, the bands at 9301 and 9401, and C-CRM-05's 9501–9503), and they are ENSURED rather
- * than created: `customer-identity.itest.ts` clears the whole `customer` table between its cases, so a
- * suite that trusted an earlier run would pass or fail on vitest's file ordering (brief rule 12).
+ * than created: a suite that trusted a row an earlier run left behind would pass or fail on vitest's file
+ * ordering (brief rule 12), and ensuring costs one statement.
  *
  * Nothing here is ever merged. A merge is not repeatable — `merge_record_one_merge_per_loser` makes the
  * second attempt `already_merged` and the copied consent rows cannot be removed — so a suite that merged a

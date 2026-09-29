@@ -287,10 +287,9 @@ export const CONSENT_SEED_INDEXES: Readonly<Record<ConsentSeedState, number>> = 
 /**
  * The four fixture contacts, from ONE builder.
  *
- * Exported because `packages/fixtures/src/consent.itest.ts` re-runs the seed in its own `beforeAll`: the
- * integration suite shares one database and `customer-identity.itest.ts` clears the whole `customer`
- * table between its cases, so a file that assumed the loader's contacts were still there would pass or
- * fail on vitest's file ordering (brief rule 12). Re-seeding is isolation by construction. It has to be
+ * Exported because the consent suite re-runs the seed in its own `beforeAll`: the integration suite shares
+ * one database in an order no file controls, so a file that assumed the loader's contacts were still there
+ * would pass or fail on that ordering (brief rule 12). Re-seeding is isolation by construction. It has to be
  * the same builder rather than a copy of it, or the file would assert about contacts the fixture does not
  * contain.
  */
@@ -355,10 +354,9 @@ export const SUPPRESSION_SEED_INDEXES = Object.freeze({
 /**
  * The five seeded entries, from ONE builder.
  *
- * Exported because `packages/fixtures/src/suppression.itest.ts` re-runs the seed in its own `beforeAll`:
- * the integration suite shares one database and `customer-identity.itest.ts` clears the whole `customer`
- * table between its cases, so a file that assumed these rows were still there would pass or fail on
- * vitest's file ordering (brief rule 12). `suppression` itself is append-only and nothing removes its
+ * Exported because the suppression suite re-runs the seed in its own `beforeAll`: the integration suite
+ * shares one database in an order no file controls, so a file that assumed these rows were still there
+ * would pass or fail on that ordering (brief rule 12). `suppression` itself is append-only and nothing removes its
  * rows, but the two entries that name a contact resolve that contact by phone — so the builder takes the
  * ids it is given rather than ones it remembers.
  */
@@ -469,10 +467,9 @@ function shift(date: string, offsetDays: number) {
  * After `catalogue` because every template line names a live `service_variant`. No longer after `consent`,
  * and the reason is the one thing this loader deliberately does not do.
  *
- * **It seeds no sales.** It did, and that broke nine cases in `apps/web/src/otp-route.itest.ts`:
+ * **It seeds no sales.** It did, and that broke nine cases in a suite this loader never touched:
  * `package_sale.customer_id` is `on delete restrict` and `package_sale` refuses DELETE, so a seeded sale pins
- * its customer for the life of the database and that file's bare `delete from customer` can never succeed
- * again. `package-seed.ts` carries the argument in full, and `seedPackageDrawdownStates` is the other half —
+ * its customer for the life of the database and no removal of that row can ever succeed again. `package-seed.ts` carries the argument in full, and `seedPackageDrawdownStates` is the other half —
  * called by the suite that displays the four states, which truncates them away afterwards as the other five
  * package suites do.
  *

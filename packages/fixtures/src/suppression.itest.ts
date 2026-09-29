@@ -98,9 +98,8 @@ import { syntheticPerson } from './synthetic.ts'
  *   - the probe recipients are FIXED synthetic numbers and their rows FIXED instants, so
  *     `suppression_one_record_per_instant` makes a second run of the suite a no-op rather than an
  *     accumulation;
- *   - the seeded entries are re-seeded in `beforeAll`, because `customer-identity.itest.ts` clears the
- *     whole `customer` table between its cases and the two seeded entries that name a contact resolve it
- *     by phone.
+ *   - the seeded entries are re-seeded in `beforeAll`, because the two that name a contact resolve it by
+ *     phone and nothing guarantees that contact is still the one the earlier run saw.
  *
  * `message` and `message_delivery_receipt` cannot be cleaned up even in principle, so every assertion
  * about a send is narrowed to this file's own recipients and none of them is a total.
@@ -1331,8 +1330,8 @@ describe('acceptance — the preference centre writes both halves', () => {
     // It names WHICH record the change was about, and there is one.
     expect(history[0]?.contactCustomerId).not.toBeNull()
     // It names the CURRENT contact only on the run that wrote it, and the reason is the whole design rather
-    // than a concession to re-runs. `customer-identity.itest.ts` clears the whole `customer` table between
-    // its cases, so `beforeAll` here re-creates this contact with a NEW uuid — while the suppression row
+    // than a concession to re-runs. `beforeAll` here re-creates this contact, which gives it a NEW uuid
+    // whenever the earlier one is gone — while the suppression row
     // from the earlier run is still there, carrying the old one, because `suppression` refuses UPDATE for
     // every role including the owner and the unique index is on the hashed DETAIL and not on the record.
     // That is the append-only log outliving the erasure of the identity it is about (docs/04 §4, §8), and it

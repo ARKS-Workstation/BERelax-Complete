@@ -38163,6 +38163,388 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 128a-128z. (W-SYS-13) A suite may delete only what it created: the scan shown to read code rather than
+//            prose, the declaration shown to be checked in both directions, and the run invariant shown to
+//            fail the run that lost a row.
+//
+//            The guard this replaced measured ONE table by name — `customer` — while 67 unqualified
+//            `delete`/`truncate` statements stood against `premises`, `business_day`, `app_setting`,
+//            `premises_hours`, `package_template` and others. That is not a small gap. These suites share
+//            one database in an order no file controls; `pnpm db:apply` refuses a populated database, so a
+//            row a suite removes cannot be migrated back; and a PARTLY emptied database looks seeded,
+//            because a fixture loader leaves a table that already holds rows alone. The three recorded
+//            failures are a bare `delete from customer` that skipped all 21 cases of a file it had never
+//            heard of, M-TILL-13 measuring 140 tables where 153 were expected, and a salon answering about
+//            a rota it no longer had.
+//
+//            So there are three mechanisms and each one is broken here, because a direction nobody has seen
+//            fire is not a direction (ADR 0003):
+//
+//              - the SCAN (128a-128f). Both prose directions, both predicate directions, and the floor.
+//              - the DECLARATIONS (128g-128j). A site with no entry, an entry with no site, a seeded table
+//                with no restoring loader, and the customer line that may never have one.
+//              - the RUN INVARIANT (128k-128m). A committed loss fails the run even when every test passes,
+//                and a loader that cannot repair what it created is what the invariant catches first.
+//
+//            128e is the one worth reading twice. The scan's whole difficulty is that a dozen files quote
+//            `delete from customer` in a test NAME or a privilege list — `it('refuses DELETE from the
+//            application role')`, `revoke truncate on ${table} from berelax_app` — and stripping comments
+//            does not help with either. Requiring the keyword to START a statement is what separates them,
+//            and the fixture proves the separation rather than asserting it.
+{
+  const OWNERSHIP = 'packages/db/src/suite-table-ownership.ts'
+  const DECLARATIONS = 'packages/db/src/suite-table-declarations.ts'
+  const PACKAGE_SEED = 'packages/fixtures/src/package-seed.ts'
+  const GUARD = 'packages/db/src/seeded-row-deletes.test.ts'
+  const OWNERSHIP_ITEST = 'packages/fixtures/src/seeded-tables.itest.ts'
+  const FIXTURE_SUITE = 'packages/fixtures/src/__gate_fixture__ownership.itest.ts'
+
+  /** The unit suite that holds the scan. */
+  const guard = () =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', GUARD])
+
+  /** The integration suite that holds the derivation and the repair property. */
+  const ownershipItest = () =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      OWNERSHIP_ITEST,
+    ])
+
+  /** A suite whose only statement is an unqualified delete of `<table>`. */
+  const offender = (table) =>
+    [
+      `// A gate fixture. Removed in a finally; if you are reading this in a diff, ${FIXTURE_SUITE}`,
+      '// escaped a killed run (brief rule 13) and must be deleted.',
+      "import { createConnection, type Sql } from '@berelax/db'",
+      "import { it } from 'vitest'",
+      "const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']",
+      'if (!url) throw new Error(`TEST_DATABASE_URL or DATABASE_URL is required.`)',
+      "it('empties a table it did not fill', async () => {",
+      '  const sql: Sql = createConnection({ url, max: 1 })',
+      `  await sql\`delete from ${table}\``,
+      '  await sql.end({ timeout: 5 })',
+      '})',
+    ].join('\n')
+
+  // 128a. A bare delete of a seeded table, in a file with no declaration. The defect itself, in the shape
+  //       the two original offenders had, and the case the `customer`-only guard could not have made about
+  //       any other table.
+  checkRejectedBy(
+    'suite ownership: an undeclared bare delete of a seeded table is refused',
+    withFixture(FIXTURE_SUITE, offender('premises_hours'), guard),
+    'a-suite-may-delete-only-what-it-created',
+  )
+
+  // 128b. The same statement against `customer`, which must ALSO fail the older, narrower case by its own
+  //       name. The acceptance asks for that line to be extended rather than replaced, and a line that
+  //       stopped firing while a more general one fired would be an extension nobody could tell from a
+  //       deletion.
+  {
+    const bare = withFixture(FIXTURE_SUITE, offender('customer'), guard)
+    checkRejectedBy(
+      'suite ownership: a bare delete of `customer` still fails the line that was written for it',
+      bare,
+      'the-seeded-customers-survive-every-suite',
+    )
+    check(
+      'suite ownership: and it fails the general rule in the same run',
+      bare.output.includes('a-suite-may-delete-only-what-it-created'),
+      `only the customer line fired, so the general rule does not cover it:\n${bare.output}`,
+    )
+  }
+
+  // 128c. A TRUNCATE, which has no predicate in SQL at all — so truncating the invoice family as its owner
+  //       has to become a declaration rather than a convention in a comment. Without this case the scan
+  //       could have handled `delete` only and reported nothing about the 40-odd truncates.
+  checkRejectedBy(
+    'suite ownership: an undeclared truncate is refused, because a truncate can never be scoped',
+    withFixture(
+      FIXTURE_SUITE,
+      offender('x').replace(
+        'delete from x',
+        'truncate package_template_line, package_template_version, package_template',
+      ),
+      guard,
+    ),
+    'a-suite-may-delete-only-what-it-created',
+  )
+
+  // 128d. A concatenated table list. Every suite that truncates the invoice family writes it over two string
+  //       literals because the list does not fit in a hundred columns, and a scan that read the halves
+  //       separately would report the first three tables and MISS `invoice` — the one table in the statement
+  //       whose rows cannot be re-inserted, because it refuses DELETE for every role.
+  checkRejectedBy(
+    'suite ownership: a table list split across two string literals is read as one statement',
+    withFixture(
+      FIXTURE_SUITE,
+      offender('x').replace(
+        'await sql`delete from x`',
+        "await sql.unsafe('truncate refund, checkout_finalisation, payment, ' +\n" +
+          "    'invoice_appointment, invoice_line, invoice')",
+      ),
+      guard,
+    ),
+    'a-suite-may-delete-only-what-it-created',
+  )
+
+  // 128e. The prose direction, which is the whole reason the scan requires statement POSITION. A dozen files
+  //       quote the statement in a test name or a privilege list, and the fixture puts both in one file: if
+  //       either were read as SQL this case would fail on a file that removes nothing.
+  {
+    const prose = [
+      `// A gate fixture. Removed in a finally; if you are reading this in a diff, ${FIXTURE_SUITE}`,
+      '// escaped a killed run (brief rule 13) and must be deleted.',
+      "import { it } from 'vitest'",
+      '// `delete from customer` is what two suites used to do, and this sentence is not that statement.',
+      "it('refuses DELETE from the application role on premises_hours', () => {})",
+      "it('has no TRUNCATE grant on package_template', () => {})",
+      "const revoke = 'revoke truncate on premises_hours from berelax_app'",
+      'void revoke',
+    ].join('\n')
+    const result = withFixture(FIXTURE_SUITE, prose, () =>
+      run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', GUARD]),
+    )
+    check(
+      'suite ownership: a test name and a privilege list are not read as statements',
+      !result.failed,
+      `the scan accused a file that removes nothing, which is how it would make people rewrite correct ` +
+        `code to appease it:\n${result.output}`,
+    )
+  }
+
+  // 128f. The floor, and it is DERIVED rather than a number somebody chose. A scan that stopped matching
+  //       reports zero sites, which makes "no undeclared site" pass over nothing — the exact failure ADR
+  //       0002 is about. It cannot make the stale-declaration direction pass: every one of the declarations
+  //       goes stale at once. The fixture blinds the statement pattern and the gate must say so.
+  checkRejectedBy(
+    'suite ownership: a scan that matches nothing fails on the declarations going stale',
+    withEditedFile(
+      OWNERSHIP,
+      (text) =>
+        replaceOnce(
+          text,
+          "const table = '[a-z_][a-z_0-9]*(?:\\\\.[a-z_][a-z_0-9]*)?'",
+          "const table = '[a-z_][a-z_0-9]{40,}'",
+        ),
+      guard,
+    ),
+    'declared-owner-still-describes-a-site',
+  )
+
+  // 128g. A declaration that no longer describes anything. The direction that lets the table SHRINK: an
+  //       entry left behind after its statement was scoped is standing permission for the next author to put
+  //       the statement back, which is how the allowlist this unit replaced came to exist.
+  checkRejectedBy(
+    'suite ownership: a declaration matching no statement is refused',
+    withEditedFile(
+      DECLARATIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freeze([',
+          'export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freeze([\n' +
+            "  {\n    file: 'packages/db/src/spine.itest.ts',\n    tables: ['regulatory_profile'],\n" +
+            "    kind: 'owns',\n" +
+            "    why: 'a gate fixture describing a statement that does not exist, which is the point of it',\n  },",
+        ),
+      guard,
+    ),
+    'declared-owner-still-describes-a-site',
+  )
+
+  // 128h. Two entries for one (file, table). Refused so the table stays auditable: two reasons for one
+  //       statement means the reader cannot tell which one covers the site in front of them.
+  checkRejectedBy(
+    'suite ownership: two declarations for one file and table are refused',
+    withEditedFile(
+      DECLARATIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    tables: ['period_lock'],",
+          "    tables: ['period_lock', 'period_lock'],",
+        ),
+      guard,
+    ),
+    'one-declaration-per-file-and-table',
+  )
+
+  // 128i. The customer line, which may never have a declaration in ANY wording. It was an allowlist that
+  //       had to STAY empty, and a comment cannot enforce that. Measured: the loader cannot repair the row —
+  //       `package_sale.customer_id` is `on delete restrict` with `package_sale` refusing DELETE, so one
+  //       seeded sale pins its customer for the life of the database.
+  checkRejectedBy(
+    'suite ownership: a declaration naming `customer` is refused whatever its reason says',
+    withEditedFile(
+      DECLARATIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    tables: ['otp_challenge', 'otp_phone_lock'],\n    kind: 'owns',\n    why: 'the route is asserted",
+          "    tables: ['otp_challenge', 'otp_phone_lock', 'customer'],\n    kind: 'owns',\n    why: 'the route is asserted",
+        ),
+      guard,
+    ),
+    'the-customer-allowlist-stays-empty',
+  )
+
+  // 128j. A seeded table declared as owned with nothing named to put the rows back. The direction that needs
+  //       a database, and the reason the derivation exists: `pnpm db:apply` refuses a populated database, so
+  //       a row lost here is lost for every later run against it.
+  checkRejectedBy(
+    'suite ownership: owning a seeded table with no restoring loader is refused',
+    withEditedFile(
+      DECLARATIONS,
+      (text) =>
+        replaceOnce(
+          text,
+          "    kind: 'owns',\n    restoredBy: 'business-days',",
+          "    kind: 'owns',",
+        ),
+      ownershipItest,
+    ),
+    'a-seeded-table-declaration-names-its-restoring-loader',
+  )
+
+  // 128k-128l. A loader that short-circuits on a non-empty table, and the TWO rules that must both fire on
+  //            it. This is the defect the manifest's NOTE calls "a loader that cannot repair what it
+  //            created", and the fixture restores the exact guard that was there — `count(*) from
+  //            package_template > 0`, which is idempotent per TABLE.
+  //
+  //            Two rules from one edit, deliberately. `every-loader-reaches-for-its-tables` says the
+  //            DERIVATION went blind: a loader that returns before it writes anything contributes no tables,
+  //            so the set the run invariant watches silently shrinks and every check built on it goes on
+  //            passing (ADR 0002). `the-seed-repairs-what-it-created` says the ROWS do not come back. A
+  //            reader who saw only the first would fix the attribution and leave the fixture salon
+  //            unrepairable; one who saw only the second would fix the repair and leave the derivation blind.
+  //
+  //            The first fixture written here was not equivalent to the defect and the gate said so: a guard
+  //            on the per-key set (`present.size > 0`) is satisfied the moment the versions are truncated, so
+  //            it repaired anyway and the case reported that nothing was rejected. Only the TABLE-level guard
+  //            reproduces the state that matters — templates standing, versions gone, loader reporting
+  //            nothing to do.
+  {
+    const shortCircuited = withEditedFile(
+      PACKAGE_SEED,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const keys = FIXTURE_PACKAGE_SHAPES.map((shape) => shape.templateKey)',
+          '  const keys = FIXTURE_PACKAGE_SHAPES.map((shape) => shape.templateKey)\n' +
+            '  const [existing] = await sql<{ n: string }[]>`select count(*)::text as n from package_template`\n' +
+            '  if (existing !== undefined && Number(existing.n) > 0) return NO_TEMPLATES',
+        ),
+      ownershipItest,
+    )
+    checkRejectedBy(
+      'suite ownership: a loader that short-circuits on a non-empty table is refused',
+      shortCircuited,
+      'every-loader-reaches-for-its-tables',
+    )
+    check(
+      'suite ownership: and the same loader is caught failing to repair what it created',
+      shortCircuited.output.includes('the-seed-repairs-what-it-created'),
+      'only the attribution rule fired, so a reader would fix the derivation and leave the fixture salon ' +
+        `unrepairable:\n${shortCircuited.output}`,
+    )
+  }
+
+  // 128m. The run invariant, end to end, and the case that makes it a gate rather than a hope: a suite whose
+  //       every test PASSES while it removes a seeded row must still fail the run. The removal is scoped —
+  //       so the static scan is silent by design — and committed, which is the only shape that reaches the
+  //       next run.
+  {
+    const losing = [
+      `// A gate fixture. Removed in a finally; if you are reading this in a diff, ${FIXTURE_SUITE}`,
+      '// escaped a killed run (brief rule 13) and must be deleted.',
+      "import { createConnection, type Sql } from '@berelax/db'",
+      "import { expect, it } from 'vitest'",
+      "const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']",
+      'if (!url) throw new Error(`TEST_DATABASE_URL or DATABASE_URL is required.`)',
+      "it('passes while removing a row the seed created', async () => {",
+      '  const sql: Sql = createConnection({ url, max: 1 })',
+      '  const gone = await sql`delete from price_on_request where id = (select id from price_on_request limit 1) returning id`',
+      '  expect(gone.length).toBe(1)',
+      '  await sql.end({ timeout: 5 })',
+      '})',
+    ].join('\n')
+    const result = withFixture(FIXTURE_SUITE, losing, () =>
+      runExpectingFailure('pnpm', [
+        'exec',
+        'vitest',
+        'run',
+        '-c',
+        'vitest.integration.config.ts',
+        FIXTURE_SUITE,
+      ]),
+    )
+    checkRejectedBy(
+      'suite ownership: a run that removed a seeded row fails even though every test passed',
+      result,
+      'seeded-rows-survive-the-integration-run',
+    )
+    check(
+      'suite ownership: and the invariant names the table, not merely that something changed',
+      result.output.includes('price_on_request'),
+      `the invariant fired without saying which table lost rows, which sends the reader nowhere:\n${result.output}`,
+    )
+  }
+
+  // 128n. A comment documenting another file's cleanup. Nine files ordered their own cleanup around two
+  //       suites clearing the `customer` table and wrote it down in the present tense; both were scoped, and
+  //       every one of those sentences then described something that does not happen. The check is derived:
+  //       a restatement is allowed only while the file it names really does hold the statement, so the
+  //       sentence fails at the moment that file is fixed rather than years later when somebody reads it.
+  checkRejectedBy(
+    'suite ownership: a comment describing another file’s cleanup is refused',
+    withEditedFile(
+      'packages/fixtures/src/merge.itest.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '  // Re-ensured rather than assumed: a file that trusted a fixture an earlier one created would pass or',
+          '  // Re-ensured rather than assumed: `customer-identity.itest.ts` clears the whole `customer` table,\n' +
+            '  // so a file that trusted a fixture an earlier one created would pass or',
+        ),
+      guard,
+    ),
+    'a-comment-states-its-own-suite',
+  )
+
+  // 128o. The control for all of the above: the committed tree passes both suites, and no fixture survived.
+  //       Without it the fourteen failures are satisfied by a scan that refuses everything.
+  {
+    const unit = run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', GUARD])
+    check(
+      'suite ownership: the committed tree passes the scan',
+      !unit.failed,
+      `the unedited tree did not pass the ownership scan:\n${unit.output}`,
+    )
+    const itest = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      OWNERSHIP_ITEST,
+    ])
+    check(
+      'suite ownership: the committed tree passes the derivation and the repair property',
+      !itest.failed,
+      `the unedited tree did not pass the seeded-table itest:\n${itest.output}`,
+    )
+    check(
+      'suite ownership: no fixture was left behind',
+      !existsSync(FIXTURE_SUITE),
+      `${FIXTURE_SUITE} survived a fixture, and every later gate reading the suites will now fail`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

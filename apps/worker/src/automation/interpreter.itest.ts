@@ -330,10 +330,10 @@ beforeAll(async () => {
   // foreign key (0056), so its records outlive the identity they are about — which is correct, and harmless
   // here because the recreated contacts get new uuids and therefore no consent at all until this file grants
   // it. `flow_run` and `flow_step_log` survive too, for the reason 0091 states: neither hangs off `customer`.
-  // The predicate is on the same LINE as the delete deliberately. `seeded-row-deletes.test.ts` reads
-  // `delete from customer` at the end of a line as an unqualified delete of the seeded contacts, which is
-  // the defect that suite exists to stop; a scoped delete whose `where` has been wrapped onto the next line
-  // reads the same to it. Keeping them together is free, and it puts the scope where a reader sees it first.
+  // The predicate is on the same LINE as the delete, which is now a readability choice rather than a
+  // requirement: the scan collapses whitespace before it looks for a statement, so a `where` wrapped onto
+  // the next line is seen wherever the author put it. Keeping them together puts the scope where a reader
+  // sees it first.
   await sql`
     delete from customer where phone_e164 between ${syntheticPerson(CONTACT_BAND_FIRST).phone}
        and ${syntheticPerson(CONTACT_BAND_FIRST + CONTACTS - 1).phone}

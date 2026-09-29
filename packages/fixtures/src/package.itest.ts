@@ -95,10 +95,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql?.unsafe(
-    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
-    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement — a package
-    // sale now writes a `payment` row (0083 §6) and a redemption hangs off a balance.
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
+    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
+    // from the statement — a package sale now writes a `payment` row (0083 §6), a redemption hangs off a
+    // balance, and 0097 gave `commission_line` a `package_redemption_id`. That last one is why this list has
+    // to be checked against the FK graph rather than remembered: it arrived with a unit that had no reason
+    // to read this file, and it broke this truncate for every role and every row count — PostgreSQL refuses
+    // on the CONSTRAINT, not on the rows, so an empty `commission_line` fails it just the same.
+    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
       'package_template_version, package_template',
   )
   await sql?.end({ timeout: 5 })
@@ -106,10 +110,14 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await sql.unsafe(
-    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
-    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement — a package
-    // sale now writes a `payment` row (0083 §6) and a redemption hangs off a balance.
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
+    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
+    // from the statement — a package sale now writes a `payment` row (0083 §6), a redemption hangs off a
+    // balance, and 0097 gave `commission_line` a `package_redemption_id`. That last one is why this list has
+    // to be checked against the FK graph rather than remembered: it arrived with a unit that had no reason
+    // to read this file, and it broke this truncate for every role and every row count — PostgreSQL refuses
+    // on the CONSTRAINT, not on the rows, so an empty `commission_line` fails it just the same.
+    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
       'package_template_version, package_template',
   )
   nonce += 1

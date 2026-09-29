@@ -156,9 +156,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql?.unsafe(
-    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
-    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement.
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
+    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
+    // from the statement. It refuses on the CONSTRAINT and not on the rows, so `commission_line` arriving in
+    // 0097 broke this statement whether or not any commission had ever been run.
+    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
       'package_template_version, package_template',
   )
   await sql?.end({ timeout: 5 })
@@ -166,9 +168,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await sql.unsafe(
-    // `package_redemption` and `payment` are NAMED because 0083 made both reference this family, and
-    // PostgreSQL refuses a TRUNCATE while a referencing table is missing from the statement.
-    'truncate package_redemption, payment, package_balance, package_sale, package_template_line, ' +
+    // `commission_line`, `package_redemption` and `payment` are NAMED because 0083 and 0097 made each of
+    // them reference this family, and PostgreSQL refuses a TRUNCATE while a referencing table is missing
+    // from the statement. It refuses on the CONSTRAINT and not on the rows, so `commission_line` arriving in
+    // 0097 broke this statement whether or not any commission had ever been run.
+    'truncate commission_line, package_redemption, payment, package_balance, package_sale, package_template_line, ' +
       'package_template_version, package_template',
   )
   nonce += 1
@@ -943,7 +947,7 @@ describe('a sold balance never changes when the template is edited', () => {
       await sql.unsafe(
         // 0083: `package_redemption` and `payment` both reference this family now, and PostgreSQL
         // refuses a TRUNCATE while a referencing table is missing from the statement.
-        'truncate package_redemption, payment, package_balance, package_sale, ' +
+        'truncate commission_line, package_redemption, payment, package_balance, package_sale, ' +
           'package_template_line, package_template_version, package_template',
       )
       const random = lcg(seed)

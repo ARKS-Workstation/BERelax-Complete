@@ -1688,6 +1688,16 @@ export {
   type WriteResult,
   writeSetting,
 } from './settings-store.ts'
+// The declarations only, never the scan: `./suite-table-ownership.ts` reaches for `node:fs` and this barrel
+// is imported by the application. The integration run's own invariant needs to know which tables a suite is
+// allowed to have emptied, and it runs from `packages/fixtures`.
+export {
+  DECLARED_UNQUALIFIED,
+  type DeclaredKind,
+  type DeclaredUnqualified,
+  NEVER_DECLARABLE,
+  restorableTables,
+} from './suite-table-declarations.ts'
 export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 
 // 41 is unused and will stay unused. W-SYS-06 reserved it, found it needed no schema change, and the
@@ -3127,6 +3137,16 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // DISENGAGEMENT that writes no audit event, because no UPDATE happened for one to hang off. Four codes and not
 // one because each has a different runbook answer, which is 0061's argument for a private code at all; the
 // CLASS identifies nothing any more, which is 0091's paragraph above and W-SYS-12's subject.
+//
+// 100 was allocated to W-SYS-13 and is not used. The unit is about what the SUITES may remove, not about
+// what the schema holds: a scan that derives every unqualified `delete`/`truncate` in a test file and refuses
+// one that is neither scoped nor declared, a derivation of the seeded tables from the loaders themselves, and
+// an invariant wrapped round the integration run that reads the seeded rows before it and again after it. No
+// table, column, constraint, trigger or private SQLSTATE. A DATABASE-level answer was considered and is the
+// wrong shape twice over: `revoke delete on customer from berelax` would stop the fixture loaders too, since
+// the seed runs as the owner, and an event trigger cannot tell a suite's own row from a seeded one — which is
+// the whole distinction (ADR 0050). 100 is therefore released and NOT renumbered, like 22, 41, 44, 47, 71, 74
+// and 88 before it, for the reason the paragraph below gives.
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already

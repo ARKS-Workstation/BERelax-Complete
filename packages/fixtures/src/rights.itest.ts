@@ -212,13 +212,12 @@ afterAll(async () => {
   /**
    * This file leaves NO invoice and no booking behind, and that is a convention rather than tidiness.
    *
-   * `customer-identity.itest.ts` USED TO clear the table with a bare `delete from customer`, and
-   * `invoice.customer_id` and `booking.customer_id` are both `ON DELETE RESTRICT` — so a single row of
-   * either, left behind by any suite that runs earlier, turns all eleven of that file's cases red with a
-   * foreign-key message that names neither this file nor the row. It happened: this suite's invoice fixture
-   * and its two fixture bookings did exactly that on the first full `pnpm test:integration`, in a file this
-   * unit never touched. `checkout-finalise.itest.ts` already carries this cleanup and its comment already
-   * names `customer-identity.itest.ts` as the reason; this is that convention, followed.
+   * `invoice.customer_id` and `booking.customer_id` are both `ON DELETE RESTRICT`, so a single row of
+   * either, left behind here, makes the customer it names undeletable by whoever touches that row next —
+   * and the failure arrives as a foreign-key message that names neither this file nor the row. It happened:
+   * this suite's invoice fixture and its two fixture bookings did exactly that on the first full
+   * `pnpm test:integration`, in a suite this unit never touched. Removing what this file created is the
+   * rule ADR 0050 states, not a courtesy to one other file.
    *
    * TRUNCATE and not DELETE for the invoice family: `invoice` refuses DELETE for every role including the
    * owner (ZI003, migration 0026) and `scripts/check-no-invoice-mutation.mjs` refuses the statement anywhere

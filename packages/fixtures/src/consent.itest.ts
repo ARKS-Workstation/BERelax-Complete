@@ -74,10 +74,10 @@ import { syntheticPerson } from './synthetic.ts'
  *   - the probe contacts are keyed on FIXED synthetic phone numbers and their rows on FIXED instants, so
  *     `consent_one_record_per_instant` makes a second run of the suite against the same database a no-op
  *     rather than an accumulation;
- *   - the fixture contacts are re-seeded in `beforeAll`. `customer-identity.itest.ts` clears the whole
- *     `customer` table between its cases, so a file that assumed the loader's four contacts were still
- *     there would pass or fail on vitest's file ordering. `seedConsent` is idempotent, and re-running it
- *     is isolation by construction rather than by luck.
+ *   - the fixture contacts are re-seeded in `beforeAll`. The integration suite shares one database in an
+ *     order no file controls, so a file that assumed the loader's four contacts were still there would
+ *     pass or fail on that ordering. `seedConsent` is idempotent, and re-running it is isolation by
+ *     construction rather than by luck.
  *
  * Anything that must be REFUSED, and the wording tamper, run inside a transaction that always rolls back
  * — `probe` below. A committed tamper would leave a stale hash in every later suite's view of the table,

@@ -74,12 +74,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Leave no invoice behind that references this file's customer, and no customer behind either.
-  // `invoice.customer_id` is ON DELETE RESTRICT, and both `apps/web/src/otp-route.itest.ts` and
-  // `customer-identity.itest.ts` USED TO clear the table with a bare `delete from customer` in their own
-  // setup — so an invoice left pointing at this row would fail THEIR foreign key, in a suite that runs
-  // sequentially against one database in an order no file controls. Both of those suites now scope their cleanup to the rows they created and `packages/db/src/seeded-row-deletes.test.ts` refuses the bare form, but a child row left behind still outlives this file and still fails somebody's foreign key. That is hazard 12 in the
-  // contributing brief, and it is why the truncate is here as well as in beforeEach: beforeEach leaves
-  // the last test's rows standing.
+  // `invoice.customer_id` is ON DELETE RESTRICT, so an invoice left pointing at this row makes the row
+  // undeletable by whoever touches it next, in a suite that runs sequentially against one database in an
+  // order no file controls (brief rule 12). Removing what this file created is the rule ADR 0050 states,
+  // and it is why the truncate is here as well as in `beforeEach`: `beforeEach` leaves the last test's
+  // rows standing.
   await sql.unsafe(
     'truncate refund, checkout_finalisation, payment, invoice_appointment, invoice_line, invoice',
   )

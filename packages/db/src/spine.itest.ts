@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from './connection.ts'
 import { createJobQueue, DEFAULT_QUEUE_OPTIONS, PGBOSS_SCHEMA } from './jobs/boss.ts'
+import { seedPremises } from './seed/premises.ts'
 
 /** Proves every F04 acceptance criterion against a real database. */
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
@@ -14,6 +15,19 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // The real trading hours, back, before the connection closes.
+  //
+  // The `premises_hours` cases below empty the table to prove `crosses_midnight` is generated from the
+  // times, and the last of them leaves it EMPTY. That is fine for this file and ruinous for the ones after
+  // it: 11:00–02:00 is the most load-bearing row in the database, and a suite reading a salon with no
+  // trading hours answers about a business that is never open. The suite runs sequentially against one
+  // database in an order no file controls (brief rule 12), so "a later file re-seeds" is not a plan.
+  //
+  // `seedPremises` is `packages/db`'s own seed, which is why this restore can be here at all — the
+  // `premises` loader in `packages/fixtures` calls the same function, and `packages/db` may not import
+  // `packages/fixtures`. The statements above are declared in `suite-table-ownership.ts` with
+  // `restoredBy: 'premises'`, and the integration run's own invariant is what proves the claim held.
+  if (sql !== undefined) await seedPremises(sql)
   await sql?.end({ timeout: 5 })
 })
 
