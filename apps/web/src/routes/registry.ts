@@ -647,6 +647,33 @@ export const ROUTES = [
       'makes it noindex.',
   },
   {
+    id: 'hr-payroll',
+    path: '/hr/payroll',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'P-HR-12s payroll console: which runs exist over a period, what each payslip is made of, and what is ' +
+      'blocking a WPS file. Its first job is to say on its face WHY no file can be produced - the employer ' +
+      'and agent identifiers are placeholders because Y8-wps is open, and a plausible establishment number ' +
+      'would produce a file that passes every check and pays staff against another employers registration ' +
+      '(brief rule 15 at its sharpest). A handler answering text/html rather than a document, for the ' +
+      'reason the five HR screens beside it give: a document must be served in both locales, which would ' +
+      'need an Arabic admin document nobody has built; the PAYSLIP is the bilingual artefact and it is a ' +
+      'PDF. READ-ONLY on purpose, twice over - computing a run is a write whose result nothing can delete ' +
+      '(ZY141), and an EXPORT is the insider-threat signal (0005s audit_event_export_idx), so neither ' +
+      'belongs behind a button on the page that lists them. It names no therapist: staff_reference is the ' +
+      'handle and nineteen employees have no name recorded (ADR 0020). Payslips are scoped by ' +
+      'mayReadPayslip in @berelax/core and another employees id is a 403 rather than an empty list, ' +
+      'because a filtered read answers "you have no payslip" about somebody elses pay; every read writes ' +
+      'an audit_event naming the actor and the row count. Dynamic because the answer is a claim about runs ' +
+      'completed minutes ago. The /hr prefix in ADMIN_GROUP_PREFIXES is what makes it noindex, and ' +
+      'authenticated since W-SYS-11.',
+  },
+  {
     id: 'hr-reassignment',
     path: '/hr/reassignment',
     kind: 'handler',
