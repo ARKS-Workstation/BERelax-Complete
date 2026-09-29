@@ -3567,7 +3567,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // run first", "record an attendance correction" and "name a liability account" are four different things to
 // go and do, which is 0061's argument for a private code at all.
 //
-// 106 is Y-PAY-02: `payment_intent`, its append-only `payment_intent_transaction`, and five refusals. The
+// 106 is 0106_payment_intent.sql (Y-PAY-02): `payment_intent`, its append-only
+// `payment_intent_transaction`, and five refusals. The
 // two tables are ordinary and the refusals are the unit. ZY162 is the one worth reading — an intent's state
 // or any of its three figures may change only by advancing `last_transaction_id` to a NEW transaction row
 // belonging to that intent — because it is where "the gateway, never the client, is the only thing that can
@@ -3670,13 +3671,72 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // close", "post the journal entry first", "end the employment first", "recompute the liability" and "record
 // a punch correction instead" are six different answers.
 //
+// 107 is 0107_hr_gratuity.sql: the end-of-service gratuity liability, and the five ways of getting it into
+// the journal wrongly (P-HR-13). The paragraph is restored rather than written: gate case 90a reported 107
+// as undocumented and 106 as documented under its UNIT name instead of its file, which is the loss that case
+// exists for, arriving in the two newest paragraphs at once. ADR 0057 holds the argument; 0107's own header
+// holds the five refusals. What belongs here is the decision the rest of this file has to live with: the
+// primitive is the WHOLE liability owed at a date, computed with one rounding, and a month's accrual is the
+// DIFFERENCE between that and what the books already hold — because twelve independently-rounded twelfths do
+// not sum to a year, the residue is permanent in a journal with no edit (ADR 0017), and nothing ever reports
+// it. `gratuity_rule` holds every figure as a versioned row flagged against `Y9-gratuity`, with no cap
+// column at all, because the SHAPE of a cap is as unknown as its number. `ZY171`-`ZY177` of the
+// `ZY171`-`ZY180` band; `ZY178`-`ZY180` are free.
+//
+// 110 is 0110_reporting_schema.sql: the `reporting` schema (R-REP-01) — four dimensions, three facts, all
+// materialised views over `public`, all keyed on `business_day`. Three things in it are decisions rather
+// than DDL, and ADR 0060 argues them at length.
+//
+// **Nothing in the schema states a fact of its own.** Every relation is derived and the only thing that
+// changes a row is `reporting.refresh_all()`. That is what makes the schema's absence from C-CRM-05's merge
+// registry and C-CRM-10's erasure catalogue — both of which enumerate `relkind in ('r','p')`, and a
+// materialised view is `'m'` — safe rather than a hole: a merge has nothing to re-point, and an erasure is
+// complete when the base row changes whether or not a refresh has run. It is only safe while it stays true,
+// so `dim_customer` carries no phone, no name, no label and no note, and `dim_staff` carries no wage.
+//
+// **`dim_date` is keyed on `business_day.trading_date` and has no calendar date of its own.** A dimension
+// generated from `generate_series` would be a twelfth statement of the trading calendar and the first one
+// entitled to disagree with it, because nothing would join the two. The cost is stated rather than hidden:
+// `reporting` cannot answer a question about a day the premises did not trade on, which is the right
+// refusal for every figure R-REP-02 through R-REP-08 asks for and a real limit on anything else.
+//
+// **The refresh is CONCURRENT, and the unique index on every view is what makes that legal.** A plain
+// refresh takes ACCESS EXCLUSIVE, so every reader blocks for the rebuild — and the tempting fix when a
+// concurrent refresh fails is to drop the keyword. So the absence of a usable unique index is refused
+// BEFORE the refresh (ZY182) rather than reported by PostgreSQL afterwards in a message naming neither the
+// view nor the remedy. `reporting.refresh_run` is append-only (ZY184) because R-REP-07 decides from it
+// whether a tile may render a number, and the one thing an editable freshness log permits is making a stale
+// view look current.
+//
+// `fact_sale` is keyed on `invoice.tax_point_date`, the date of SUPPLY, which 0026 already stores as a
+// trading date. `tax_point_date` has no foreign key to `business_day`, so an INNER JOIN would have looked
+// like the fix and would have DROPPED an off-calendar invoice — revenue leaving a revenue fact in silence.
+// `reporting.assert_business_day_keys` refuses the refresh instead (ZY185), naming every offending date, and
+// it is applied to `fact_appointment` and `fact_shift` too even though a foreign key already covers them:
+// one rule in one place is what a fact added later inherits.
+//
+// The holiday calendar is P-HR-10's and does not exist yet, so `reporting.calendar_observance` is the
+// minimum source for `dim_date`'s two flags — and the reason it is a new table rather than a read of
+// `premises_closure` is worth reading, because the obvious answer is exactly backwards: a closure means the
+// premises is SHUT, a shut date has no `business_day` row and therefore no `dim_date` row, while a public
+// holiday the salon TRADES THROUGH has no closure row at all (Y9-overtime says so). It ships EMPTY: every
+// date is `Y9-holiday-calendar`, and `calendar_observance_lunar_is_provisional` makes "every lunar-date
+// holiday row carries provisional = true" a refusal rather than a property of rows somebody seeded.
+//
+// Five private SQLSTATEs, `ZY181`-`ZY185` of the `ZY181`-`ZY190` band, allocated through
+// `packages/db/src/sqlstate-registry.ts` (ADR 0043); `ZY186`-`ZY190` are left free and deliberately
+// unregistered, because an entry for a code no migration raises is refused. Five and not one because each
+// names a different thing to go and do: register the view, index it, spell the name the registry holds,
+// re-run the refresh instead of editing its log, and generate the trading days the facts are keyed on.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
 // them. 100 through 107 have all landed now, each with the unit that held it — W-SYS-13, W-SYS-14, M-VAT-09,
 // M-VAT-12, P-HR-12, Y-PAY-01, Y-PAY-02 and P-HR-13, in that order. 108 and 109 were held by A-FIRST-03 and
 // A-MEAS-01 and RELEASED: both turned out to need no migration at all, so both are permanent gaps rather
-// than numbers anybody is waiting on, and 110 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// than numbers anybody is waiting on. 110 has landed with R-REP-01, which held it, so 111 is the first
+// number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3701,4 +3761,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 107 as const
+export const SCHEMA_VERSION = 110 as const

@@ -367,7 +367,13 @@ describe('acceptance — pgboss stays out of the drift checker', () => {
     // a deliberate act with a failing test to explain itself, rather than a surprise on someone else's
     // branch.
     const source = readFileSync('scripts/check-schema-drift.mjs', 'utf8')
-    const listed = [...source.matchAll(/schema:\s*'([a-z_]+)'/g)].map((match) => match[1])
+    // Read out of `OWNED_SCHEMAS`, which is where that list lives. It used to be a `schema: '…'` key on a
+    // per-directory object, and this case went on matching THAT shape long after A-FIRST-01 replaced it with
+    // a flat array — so `listed` was empty, the vacuity floor below was the only thing failing, and the two
+    // assertions this case is actually about were over an empty list. Found by R-REP-01 adding a third
+    // schema to the same array; the loss is not that unit's and the repair is one regex.
+    const declared = /const OWNED_SCHEMAS = \[([^\]]*)\]/.exec(source)?.[1] ?? ''
+    const listed = [...declared.matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
     expect(listed.length).toBeGreaterThan(0)
     expect(listed).not.toContain(PGBOSS_SCHEMA)
     // And the control: the schemas it does compare are the ones with mirrors.

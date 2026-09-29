@@ -56,6 +56,7 @@ import {
 } from './jobs/package-expiry.ts'
 import { RECONCILE_DLR_JOB } from './jobs/reconcile-dlr.ts'
 import { runRecurringCostCheck } from './jobs/recurring-cost-check.ts'
+import { REPORTING_REFRESH_JOB_DEFINITION } from './jobs/reporting-refresh.ts'
 import { RETENTION_PURGE_JOB_DEFINITION } from './jobs/retention-purge.ts'
 import { runReverseChargeExceptionReport } from './jobs/reverse-charge-exceptions.ts'
 import { REVIEW_COUNT_TRIPWIRE_JOB } from './jobs/review-count-tripwire.ts'
@@ -504,6 +505,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // makes the watchdog's "no success within twice the interval" alert mean something for each.
   REVIEW_COUNT_TRIPWIRE_JOB,
   REVIEW_MONDAY_NUDGE_JOB,
+  // R-REP-01's nightly reporting refresh at 03:55, and it is the first cron here whose subject is a CACHE
+  // rather than a record: nothing in the `reporting` schema states a fact of its own, so a pass that stops
+  // running breaks nothing and reports nothing — which is why it writes a `reporting.refresh_run` row per
+  // view per night even when a view comes back empty, and why R-REP-07 reads that table rather than a
+  // heartbeat to decide whether a tile may render a number. One agent and one cron: refreshing seven views
+  // is one obligation with one snapshot, and splitting it would be seven heartbeats for one pass.
+  REPORTING_REFRESH_JOB_DEFINITION,
 ]
 
 /**
