@@ -41427,6 +41427,521 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 136a-136z. (A-FIRST-03) Origination: the precedence shown to be a precedence rather than a coincidence,
+//            the click id that must survive a UTM set winning, the two normalisations that are deliberately
+//            asymmetric, and the label boundary whose absence is exploitable.
+//
+//            Almost every case here is a MUTATION, because almost every claim in this unit is about an
+//            answer the resolver could give a different way and still look right. "utm wins" is satisfied
+//            by a resolver that never reads a click id; "the click id is stored" is satisfied by one that
+//            stores it only when it won; `endsWith` passes every own-host test anybody writes by hand. So
+//            each case breaks one of those and requires the suite to fail BY THE NAME of the test that
+//            measures it — a bare non-zero exit would be satisfied by a syntax error.
+//
+//            136u is the one that is not a mutation of behaviour: the four basis words are written in the
+//            migration, in its Drizzle mirror and in the resolver, and cannot be written in one place —
+//            migrations are hand-written SQL (ADR 0006), `db:drift` needs the mirror to be a mirror, and
+//            `db` may never import `core` (ADR 0001). Three statements with nothing holding them equal is
+//            how a vocabulary drifts, so that case reads all three files. ADR 0058.
+{
+  const ORIGINATION = 'packages/core/src/analytics/origination.ts'
+  const ORIGINATION_SUITE = 'packages/core/src/analytics/origination.test.ts'
+  const ANALYTICS_MIGRATION = 'packages/db/migrations/0096_analytics_schema.sql'
+  const ANALYTICS_MIRROR = 'packages/db/src/schema/analytics.ts'
+  const PURITY_SCRIPT = 'scripts/check-core-purity.mjs'
+  const CORE_ANALYTICS_FIXTURE = 'packages/core/src/analytics/__gate_fixture__.ts'
+
+  // Named for this block: a helper called `unit` or `tsc` already exists in several others, and two
+  // helpers with one name in one generated slice is a redeclaration that fails before any case runs.
+  const af3Suite = () =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.config.ts',
+      ORIGINATION_SUITE,
+    ])
+  const af3SuiteClean = () =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ORIGINATION_SUITE])
+  const af3Tsc = () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const af3TscClean = () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const af3Purity = () => run('node', [PURITY_SCRIPT])
+  const af3Cruise = () =>
+    run('pnpm', ['exec', 'depcruise', '--config', '.dependency-cruiser.cjs', 'packages', 'apps'])
+
+  /** Break `origination.ts` one way and run its own suite against the result. */
+  const af3Mutate = (find, into) =>
+    withEditedFile(
+      ORIGINATION,
+      (text) => replaceOnce(text, find, into),
+      () => af3Suite(),
+    )
+
+  // --- the closed lists are closed at the type level --------------------------------------------
+  //
+  // 136a. A click-id parameter the tuple does not hold must not compile. `ClickIdParam` is derived from
+  //       `CLICK_ID_PARAMS`, so a near-miss is a build error rather than a fifth key in the `click_ids`
+  //       jsonb that no reconciliation query knows to look for.
+  {
+    const result = withFixture(
+      CORE_ANALYTICS_FIXTURE,
+      [
+        "import type { ClickIdParam } from '@berelax/core'",
+        "export const param: ClickIdParam = 'gclid_2'",
+      ].join('\n'),
+      () => af3Tsc(),
+    )
+    checkRejectedBy(
+      'afirst03 gate: a click-id parameter outside the tuple fails to compile',
+      result,
+      'gclid_2',
+    )
+  }
+
+  // 136b. The control on 136a, and it is load-bearing: a `ClickIdParam` of `never` would pass 136a while
+  //       rejecting all four real parameters too.
+  {
+    const result = withFixture(
+      CORE_ANALYTICS_FIXTURE,
+      [
+        "import type { ClickIdParam } from '@berelax/core'",
+        "export const param: ClickIdParam = 'gclid'",
+      ].join('\n'),
+      () => af3TscClean(),
+    )
+    check(
+      'afirst03 gate: and a declared click-id parameter compiles, so 136a is about the spelling',
+      !result.failed,
+      `tsc rejected a declared click-id parameter, so 136a proves nothing:\n${result.output}`,
+    )
+  }
+
+  // 136c. A fifth click id with no source/medium decision must fail `tsc`. `CLICK_ID_ORIGINATION` is a
+  //       `Record` over the tuple with no default branch, so the alternative — a platform silently
+  //       attributed to `direct` — is unrepresentable rather than merely discouraged.
+  {
+    const result = withEditedFile(
+      ORIGINATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "export const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'fbclid', 'msclkid'] as const",
+          "export const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'fbclid', 'msclkid', '__gate_click__'] as const",
+        ),
+      () => af3Tsc(),
+    )
+    checkRejectedBy(
+      'afirst03 gate: a fifth click id with no source and medium fails to compile',
+      result,
+      '__gate_click__',
+    )
+  }
+
+  // 136d. A basis outside `ORIGINATION_BASES` must not compile. The four words are also a CHECK constraint
+  //       in the database, so the alternative failure is a 23514 from A-FIRST-05's INSERT naming a
+  //       constraint rather than the rename that caused it.
+  {
+    const result = withFixture(
+      CORE_ANALYTICS_FIXTURE,
+      [
+        "import type { OriginationBasis } from '@berelax/core'",
+        "export const basis: OriginationBasis = 'clickid'",
+      ].join('\n'),
+      () => af3Tsc(),
+    )
+    checkRejectedBy('afirst03 gate: a basis outside the tuple fails to compile', result, 'clickid')
+  }
+
+  // --- the precedence is a precedence ------------------------------------------------------------
+  //
+  // 136e. Move the click id above the UTM set — the single most plausible wrong ordering, because a click
+  //       id feels more authoritative than a hand-typed parameter. The suite must catch it.
+  {
+    const result = af3Mutate(
+      "  if (utm.source !== '') {",
+      "  if (utm.source !== '' && winningClickId(clickIds) === null) {",
+    )
+    checkRejectedBy(
+      'afirst03 gate: a resolver that lets a click id outrank a UTM set is caught',
+      result,
+      'STILL persists the gclid',
+    )
+  }
+
+  // 136f. Keep the precedence and drop the click ids the winning basis did not use. This is the defect ADR
+  //       0058 is most about: the tuple still looks right, every dashboard still looks right, and the only
+  //       join key back to Google Ads is gone — invisible until somebody tries the reconciliation, by which
+  //       point the 90-day retention has removed the sessions.
+  {
+    const result = af3Mutate(
+      '  const clickIds = clickIdsFrom(params)',
+      "  const clickIds = utmFrom(params).source !== '' ? Object.freeze({}) : clickIdsFrom(params)",
+    )
+    checkRejectedBy(
+      'afirst03 gate: a resolver that discards click ids when a UTM set wins is caught',
+      result,
+      'STILL persists the gclid',
+    )
+    check(
+      'afirst03 gate: and the property over arbitrary queries catches it too, not only the matrix row',
+      result.output.includes('never answers direct when a click id is present'),
+      `only the fixed matrix row failed, so the property is not measuring the round trip:\n${result.output}`,
+    )
+  }
+
+  // 136g. Never case-folded. `Cj0KCQ` and `cj0kcq` are different ids and the one that reconciles is the one
+  //       that arrived, so lower-casing is the normalisation that looks tidy and breaks the only thing the
+  //       column is for.
+  {
+    const result = af3Mutate(
+      'const value = raw.slice(0, CLICK_ID_MAX_LENGTH)',
+      'const value = raw.slice(0, CLICK_ID_MAX_LENGTH).toLowerCase()',
+    )
+    checkRejectedBy(
+      'afirst03 gate: a click id that is lower-cased is caught',
+      result,
+      'round-trips a mixed-case gclid',
+    )
+  }
+
+  // 136h. Never trimmed, for the same reason: an opaque token's surrounding bytes are the platform's, not
+  //       ours to tidy.
+  {
+    const result = af3Mutate(
+      'const value = raw.slice(0, CLICK_ID_MAX_LENGTH)',
+      'const value = raw.slice(0, CLICK_ID_MAX_LENGTH).trim()',
+    )
+    checkRejectedBy(
+      'afirst03 gate: a click id that is trimmed is caught',
+      result,
+      'does not trim a click id',
+    )
+  }
+
+  // 136i. The cap has to be the cap. Remove it and the column is unbounded; the suite's 800-character
+  //       fixture is what says so.
+  {
+    const result = af3Mutate('const value = raw.slice(0, CLICK_ID_MAX_LENGTH)', 'const value = raw')
+    checkRejectedBy(
+      'afirst03 gate: a click id stored without the 512-character cap is caught',
+      result,
+      'caps a click id at 512',
+    )
+  }
+
+  // --- the two normalisations, which are asymmetric on purpose -----------------------------------
+  //
+  // 136j. `utm_source` must be lower-cased, or the traffic report shows two Googles.
+  {
+    const result = af3Mutate(
+      'source: trimmed(params.get(UTM_PARAMS.source)).toLowerCase(),',
+      'source: trimmed(params.get(UTM_PARAMS.source)),',
+    )
+    checkRejectedBy(
+      'afirst03 gate: a utm_source that is not lower-cased is caught',
+      result,
+      'lower-cases utm_source',
+    )
+  }
+
+  // 136k. And `utm_campaign` must NOT be. This is the case that stops somebody "fixing" the asymmetry:
+  //       lower-casing `Eid_Offer_2026` makes the analytics row stop matching the campaign name in the ad
+  //       platform, and both halves of the acceptance line are therefore a mutation each.
+  {
+    const result = af3Mutate(
+      'campaign: trimmed(params.get(UTM_PARAMS.campaign)),',
+      'campaign: trimmed(params.get(UTM_PARAMS.campaign)).toLowerCase(),',
+    )
+    checkRejectedBy(
+      'afirst03 gate: a utm_campaign that IS lower-cased is caught',
+      result,
+      'keeps the original case of utm_campaign',
+    )
+  }
+
+  // 136l. A UTM set with no medium must not borrow the direct medium. `'none'` is the one wrong answer that
+  //       is not refused by the database: it folds a real tagged source into untagged traffic in every
+  //       report cut on (source, medium).
+  {
+    const result = af3Mutate(
+      "export const UNSET_MEDIUM = 'unset'",
+      "export const UNSET_MEDIUM = 'none'",
+    )
+    checkRejectedBy(
+      'afirst03 gate: a UTM set with no medium spelled as the direct medium is caught',
+      result,
+      'the unset medium',
+    )
+  }
+
+  // --- the label boundary, which is the exploitable one ------------------------------------------
+  //
+  // 136m. `host.endsWith(own)` makes `notberelaxmassage.com` one of our own hosts, so a referral from an
+  //       attacker-chosen domain resolves to `no_new_origination` and the session's real origination is
+  //       never recorded. Every own-host test anybody writes by hand passes against it.
+  {
+    const result = af3Mutate(
+      'return candidate === ours || candidate.endsWith(`.${ours}`)',
+      'return candidate === ours || candidate.endsWith(ours)',
+    )
+    checkRejectedBy(
+      'afirst03 gate: an own-host test without the label boundary is caught',
+      result,
+      'the endsWith bug',
+    )
+  }
+
+  // 136n. An own-host referrer answered as `direct` overwrites a real origination with the absence of one,
+  //       and because `direct` is a legitimate answer nothing downstream can tell the two apart.
+  {
+    const result = af3Mutate(
+      "      return resolution({\n        kind: 'no_new_origination',",
+      "      return origination({\n        basis: 'direct',\n        source: DIRECT_SOURCE,\n        medium: DIRECT_MEDIUM,\n        campaign: '',\n        term: '',\n        content: '',\n      })\n      return resolution({\n        kind: 'no_new_origination',",
+    )
+    checkRejectedBy(
+      'afirst03 gate: an own-host referrer answered as direct is caught',
+      result,
+      'no new origination, not as direct',
+    )
+  }
+
+  // --- the registrable domain, and the table it consults -----------------------------------------
+  //
+  // 136o. Stop consulting the suffix table and `example.co.uk` becomes `co.uk` — every referral from a
+  //       multi-label suffix collapses onto the suffix itself, which is one row for every site in the
+  //       United Kingdom.
+  {
+    const result = af3Mutate(
+      'const take = MULTI_LABEL_PUBLIC_SUFFIXES.includes(lastTwo) ? 3 : 2',
+      'const take = 2',
+    )
+    checkRejectedBy(
+      'afirst03 gate: a registrable domain that ignores the suffix table is caught',
+      result,
+      'takes three labels',
+    )
+  }
+
+  // 136p. And the table itself has to stay a set. A duplicate is harmless to the lookup and is exactly the
+  //       shape of edit that arrives when two people add the same suffix, so the suite asserts the
+  //       invariant rather than trusting the diff.
+  {
+    const result = af3Mutate("  'ac.ae',", "  'ac.ae',\n  'ac.ae',")
+    checkRejectedBy(
+      'afirst03 gate: a duplicated public suffix is caught',
+      result,
+      'free of duplicates',
+    )
+  }
+
+  // 136q. A referrer is a WEB PAGE. `android-app://com.google.android.gm` parses and yields a hostname that
+  //       looks like a domain, so without the protocol test Gmail is reported as a referring website and
+  //       `about:blank` becomes a referral from the empty host.
+  {
+    const result = af3Mutate(
+      "  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { kind: 'none' }",
+      "  if (false) return { kind: 'none' }",
+    )
+    checkRejectedBy(
+      'afirst03 gate: a non-http referrer read as a referral is caught',
+      result,
+      'as direct rather than as a referral',
+    )
+  }
+
+  // 136r. The resolver version is stamped on every row so that a corrected resolver's answer is
+  //       distinguishable from the old one's. Blank it and `attribution_resolver_version_not_blank` would
+  //       refuse the INSERT — but only at A-FIRST-05's integration stage, which is why it is asserted here.
+  {
+    const result = af3Mutate(
+      "export const ORIGINATION_RESOLVER_VERSION = 'origination/1'",
+      "export const ORIGINATION_RESOLVER_VERSION = ''",
+    )
+    checkRejectedBy(
+      'afirst03 gate: a blank resolver version is caught',
+      result,
+      'stamps ORIGINATION_RESOLVER_VERSION',
+    )
+  }
+
+  // --- the property's floor has to be able to fail -----------------------------------------------
+  //
+  // 136s. The floor is the only thing standing between "500 generated cases" and "500 assertions about
+  //       `direct`" (brief rule 22), and a floor nobody has seen fail is not a floor. Degrade the generator
+  //       to the empty query and the property's own count must refuse the run.
+  {
+    const result = withEditedFile(
+      ORIGINATION_SUITE,
+      (text) =>
+        replaceOnce(
+          text,
+          'const arbitraryQuery = fc.oneof(',
+          "const arbitraryQuery = fc.constant('')\nconst __af3UnusedQuery = fc.oneof(",
+        ),
+      () => af3Suite(),
+    )
+    checkRejectedBy(
+      'afirst03 gate: a generator that cannot produce a click id fails the property floor',
+      result,
+      'generated cases carried a click id',
+    )
+  }
+
+  // --- purity, which is about this directory rather than this file -------------------------------
+  //
+  // 136t. A clock read anywhere in `packages/core/src/analytics` must fail `pnpm purity`. This unit takes no
+  //       instant at all — where a session came from is a function of its query string and its referrer —
+  //       and the resolved_at on the row is the WRITER's instant, so a `Date.now()` here could only be a
+  //       second opinion about something nobody asked this module.
+  {
+    const result = withFixture(CORE_ANALYTICS_FIXTURE, 'export const when = Date.now()', () =>
+      runExpectingFailure('node', [PURITY_SCRIPT]),
+    )
+    checkRejectedBy(
+      'afirst03 gate: a clock read in packages/core/src/analytics fails the purity gate',
+      result,
+      'reading the clock',
+    )
+  }
+
+  // --- the four basis words, in three files that cannot be one ----------------------------------
+  //
+  // 136u. `'utm' | 'click_id' | 'referrer' | 'direct'` is written in the migration (hand-written SQL, ADR
+  //       0006), in its Drizzle mirror (which `pnpm db:drift` compares against the migration, so it has to
+  //       restate them) and in the resolver (`db` may never import `core`, ADR 0001). None of the three can
+  //       be derived from another, so this case holds all three equal by reading them.
+  //
+  //       WHAT IT MEASURES: the quoted words inside the `attribution_basis_known` check in each SQL-bearing
+  //       file, and the quoted words inside `ORIGINATION_BASES`. It does not parse SQL, so it is deliberately
+  //       narrow — it slices from the constraint's own name and reads to the closing bracket of its `in (…)`.
+  {
+    const af3BasesInCheck = (path) => {
+      const text = readFileSync(path, 'utf8')
+      const at = text.indexOf('attribution_basis_known')
+      if (at === -1) return { where: path, bases: [], why: 'no attribution_basis_known constraint' }
+      const window = text.slice(at, at + 400)
+      const open = window.indexOf('in (')
+      const close = open === -1 ? -1 : window.indexOf(')', open)
+      if (open === -1 || close === -1) return { where: path, bases: [], why: 'no in (…) list' }
+      return {
+        where: path,
+        bases: [...window.slice(open, close).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort(),
+        why: '',
+      }
+    }
+    const af3BasesInResolver = () => {
+      const text = readFileSync(ORIGINATION, 'utf8')
+      const at = text.indexOf('export const ORIGINATION_BASES = [')
+      if (at === -1) return { where: ORIGINATION, bases: [], why: 'no ORIGINATION_BASES tuple' }
+      const window = text.slice(at, text.indexOf(']', at))
+      return {
+        where: ORIGINATION,
+        bases: [...window.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort(),
+        why: '',
+      }
+    }
+    const af3ThreeWay = () => [
+      af3BasesInCheck(ANALYTICS_MIGRATION),
+      af3BasesInCheck(ANALYTICS_MIRROR),
+      af3BasesInResolver(),
+    ]
+    const af3Agree = (readings) => {
+      const first = readings[0].bases.join(',')
+      return readings.every((r) => r.bases.length > 0 && r.bases.join(',') === first)
+    }
+
+    const live = af3ThreeWay()
+    check(
+      'afirst03 gate: the migration, its mirror and the resolver name the same four bases',
+      af3Agree(live),
+      `the four basis words disagree across the three files that state them:\n  ${live
+        .map((r) => `${r.where}: [${r.bases.join(', ')}]${r.why === '' ? '' : ` (${r.why})`}`)
+        .join('\n  ')}`,
+    )
+    // A scan that read nothing would agree with itself about nothing (ADR 0002).
+    check(
+      'afirst03 gate: and that scan actually read four bases out of each of the three files',
+      live.every((r) => r.bases.length === 4),
+      `expected four bases from each file, got:\n  ${live
+        .map((r) => `${r.where}: ${r.bases.length}`)
+        .join('\n  ')}`,
+    )
+    // The known-bad fixture (ADR 0003), found by the SAME code the live check runs — a second
+    // implementation here would be the very drift the case is about.
+    const renamed = withEditedFile(
+      ORIGINATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "= ['utm', 'click_id', 'referrer', 'direct'] as const",
+          "= ['utm', 'clickid', 'referrer', 'direct'] as const",
+        ),
+      () => af3ThreeWay(),
+    )
+    check(
+      'afirst03 gate: the scan finds a basis renamed in the resolver alone',
+      !af3Agree(renamed),
+      'a basis renamed in the resolver was not noticed, so the three-way check proves nothing',
+    )
+  }
+
+  // --- boundaries: the import half, which a global-scanning gate cannot see ---------------------
+  //
+  // 136v. An I/O import in the same directory must fail `pnpm boundaries` BY RULE NAME. A bare non-zero
+  //       exit is not evidence: an unreferenced fixture is also a `no-orphans` warning, and a warning is
+  //       not this rule firing.
+  {
+    const result = withFixture(
+      CORE_ANALYTICS_FIXTURE,
+      ["import { readFileSync } from 'node:fs'", 'export const illegal = readFileSync'].join('\n'),
+      () => af3Cruise(),
+    )
+    checkRejectedBy(
+      'afirst03 gate: an I/O import beside the resolver fails the boundary gate',
+      result,
+      'core-must-be-pure',
+    )
+    const allowed = withFixture(
+      CORE_ANALYTICS_FIXTURE,
+      [
+        "import { FUNNEL_STAGES } from '@berelax/shared'",
+        'export const first = FUNNEL_STAGES[0]',
+      ].join('\n'),
+      () => af3Cruise(),
+    )
+    check(
+      'afirst03 gate: and importing @berelax/shared is not what that rule forbids',
+      !allowed.output.includes('core-must-be-pure'),
+      `the rule fired on a module importing @berelax/shared alone, which would ban core:\n${allowed.output}`,
+    )
+  }
+
+  // 136w. The control every mutation above depends on: the suite, the purity gate and the boundary gate are
+  //       all green on this tree. A mutation test whose base is red proves nothing (ADR 0003), and
+  //       seventeen of the cases in this block are mutations.
+  {
+    const result = af3SuiteClean()
+    check(
+      'afirst03 gate: the origination suite passes on this tree',
+      !result.failed,
+      `the base is red, so every mutation above proves nothing:\n${result.output}`,
+    )
+    const purity = af3Purity()
+    check(
+      'afirst03 gate: and pnpm purity passes, having read the analytics directory',
+      !purity.failed && purity.output.includes('packages/core/src'),
+      `purity did not pass over packages/core/src:\n${purity.output}`,
+    )
+    const cruise = af3Cruise()
+    check(
+      'afirst03 gate: and pnpm boundaries passes on this tree',
+      !cruise.failed,
+      `the boundary gate is red, so 136u proves nothing about the fixture:\n${cruise.output}`,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

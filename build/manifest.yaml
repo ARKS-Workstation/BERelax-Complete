@@ -12717,7 +12717,7 @@ units:
       → referrer → direct, returning a normalised source/medium/campaign/term/content tuple plus every click
       id found, which is persisted on the session even when a UTM set wins the origination.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - A-FIRST-02
@@ -12732,9 +12732,67 @@ units:
     - utm_source is trimmed and lower-cased ('  Google ' and 'google' collapse to one value) while utm_campaign
       retains original case, both asserted
     - module lives in packages/core and passes pnpm purity
+    - 'NOTE: what was built beyond the files list, and why each edit was needed. (1)
+      packages/core/src/analytics/index.ts exports ./origination.ts, so packages/core/src/index.ts (which
+      already re-exports that barrel) carries the resolver and A-FIRST-05 finds it where it would look.
+      (2) docs/adr/0058 records four decisions the acceptance lines imply but do not state: the click id
+      surviving a UTM win, the own-host referrer being no_new_origination rather than direct, the
+      registrable domain coming from a declared bounded suffix table rather than the Public Suffix List
+      (which packages/core cannot read at all — no filesystem, no network), and the basis vocabulary being
+      asserted across three files rather than derived from one. docs/adr/README.md links it. (3)
+      scripts/test-gates.mjs block 136a-136w, 26 cases, 17 of them mutations of the shipped resolver.
+      (4) NOTHING in packages/db, packages/shared, apps/ or any gate script was edited: the vocabulary this
+      unit needs already exists (A-FIRST-01''s analytics.attribution columns, A-FIRST-02''s taxonomy), and
+      packages/core/src/analytics was already inside both pnpm purity''s root and core-must-be-pure''s
+      scope, so no gate had to be widened.'
+    - 'NOTE: allocations. Migration number 0108 was NOT used and is left unused — this unit is pure, adds no
+      table, no column and no SQLSTATE, so SCHEMA_VERSION is unchanged and no paragraph was added to
+      packages/db/src/index.ts. Private SQLSTATEs ZY181-ZY190 were NOT registered, because nothing here
+      raises one and an entry no migration raises fails pnpm sqlstate. Test port band 17_600 was NOT
+      declared, because nothing here starts a server and a declared-and-unused band fails
+      test-ports.test.ts. Used: gate block 136a-136z (as 136a-136w) and ADR number 0058.'
+    - 'NOTE: the click-id erasure question (ADR 0034, C-CRM-10), answered deliberately rather than by
+      omission. analytics.session.click_ids is a pseudonymous ad-click identifier and IS the kind of column
+      the foreign-key-child probe is about — but this unit adds no column at all, and the existing one is
+      reached by NONE of the five erasure probes: the analytics schema holds no customer_id and no contact
+      detail (probe 1 and 2 blind), click_ids matches neither CREDENTIAL_COLUMN_PATTERN nor
+      FREE_TEXT_NOTE_PATTERN (probes 4 and 5 blind), and analytics.session''s only foreign keys are to
+      analytics.visitor and public.business_day, neither of which is a subject table, so probe 3 is blind
+      too. That is A-FIRST-01''s decision, not a gap: it defers every customer reference to A-FIRST-08 and
+      packages/fixtures/src/analytics-privacy.itest.ts holds it honest from both ends (no analytics column
+      is probed, AND a fixture table carrying a customer_id, a phone_e164, a token and a notes column IS
+      enumerated and reported unclassified). So no rights-policy.ts entry was added, and classifying the
+      analytics store belongs to A-FIRST-08, which is the unit that first puts a customer near it.'
+    - 'NOTE: deferred — the basis vocabulary cannot be derived from one place and is asserted across three.
+      packages/db/migrations/0096_analytics_schema.sql holds attribution_basis_known as hand-written SQL
+      (ADR 0006), its Drizzle mirror restates it because pnpm db:drift compares the two, and db may never
+      import core (ADR 0001), so ORIGINATION_BASES cannot be the source either reads. Gate case 136u reads
+      all three files and requires the same four words. Moving the tuple into packages/shared and deriving
+      the mirror''s CHECK from it would be the stronger fix and is NOT taken here: it edits a merged unit''s
+      schema and puts pnpm db:drift (which needs a database) on this pure unit''s critical path. A-FIRST-05
+      is the unit that writes the row and is where a disagreement would surface.'
+    - 'NOTE: deferred — resolved_at, first-touch and last-touch. analytics.attribution.resolved_at is the
+      WRITER''s instant, so this resolver takes no instant at all and stamps none; A-FIRST-05 owns it. The
+      first-touch/last-touch pair docs/03 §6 names is a comparison ACROSS sessions and is A-FIRST-08''s,
+      which owns the denormalisation onto customer and booking. Meta''s fbp/fbc, which docs/02 §4 lists
+      beside the four click ids, are first-party COOKIES rather than query parameters and belong to
+      A-FIRST-05.'
+    - 'NOTE: deferred — the Public Suffix List. registrableDomain consults a declared 45-entry multi-label
+      suffix table with a last-two-labels fallback, which is correct for every single-label suffix and one
+      label too broad for a multi-label suffix nobody listed. ADR 0058 records why the real PSL is not
+      vendored (13k entries, its own update cadence, and packages/core may read neither a file nor the
+      network) and exactly what a miss costs: a reporting-granularity error confined to ORGANIC referrals,
+      never a change to whether a session is attributed and never a change to a UTM or click-id answer. No
+      unit is allocated to widen it; the table is widened when a real referrer is seen to be mis-grouped,
+      and origination.test.ts pins the fallback''s wrong answer on example.co.zz so the limitation is a
+      committed assertion rather than a sentence in a comment.'
     files:
     - packages/core/src/analytics/origination.ts
     - packages/core/src/analytics/origination.test.ts
+    - packages/core/src/analytics/index.ts
+    - docs/adr/0058-origination-precedence-is-strict-and-a-click-id-outlives-the-tuple.md
+    - docs/adr/README.md
+    - scripts/test-gates.mjs
   - id: A-FIRST-04
     order: 107
     title: Bot and AI-crawler classification with one shared source of truth

@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**139 / 211 units complete.**
+**140 / 211 units complete.**
 
 ## Next up
 
@@ -124,7 +124,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 103 | `P-HR-14` | Therapist self-service portal and staff notifications | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-09`, `P-HR-12` | — | — |
 | [x] | 104 | `A-FIRST-01` | Analytics schema, monthly partitions, 90-day raw retention | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 105 | `A-FIRST-02` | Event taxonomy and the funnel contract, pure | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F05`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
-| [ ] | 106 | `A-FIRST-03` | Origination resolver and click-id persistence, pure | `A-FIRST-02` | — | — |
+| [x] | 106 | `A-FIRST-03` | Origination resolver and click-id persistence, pure | `A-FIRST-02` | — | — |
 | [ ] | 107 | `A-FIRST-04` | Bot and AI-crawler classification with one shared source of truth | `A-FIRST-02` | — | — |
 | [ ] | 108 | `A-FIRST-05` | /api/collect ingest, session stitching and pre-consent staging | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04` | — | Y5-analytics-basis |
 | [ ] | 109 | `A-FIRST-06` | Typed browser collector and declarative interaction tracking | `A-FIRST-05`, `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05` | — | — |
