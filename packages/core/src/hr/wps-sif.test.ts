@@ -31,8 +31,11 @@ import {
  * `ibanChecksumValid` implements ISO 7064 mod-97-10, so a fixture has to satisfy real check digits. Every
  * IBAN in this file is built by {@link withCheckDigits} from a body of zeros and a serial — so the checksum
  * is genuine and the account number is visibly synthetic. A plausible-looking real account number would be a
- * bank identifier this build invented, which is brief rule 15's subject, and `AE07 0331 2345 6789 0123 456`
- * — the example that appears in every IBAN tutorial — is somebody's.
+ * bank identifier this build invented, which is brief rule 15's subject — and the well-known `AE…` example
+ * that appears in every IBAN tutorial is an account belonging to somebody, so it is not reproduced here.
+ * `pnpm pii` refuses a structurally valid UAE IBAN anywhere in the tree INCLUDING a comment, which is how
+ * the first version of this paragraph was caught: it quoted that example in full to explain why not to use
+ * it, which puts one more copy of a real account number in the repository for the sake of a sentence.
  *
  * The country code is `ZZ`, which ISO 3166 does not assign and never will: it is reserved for private use. So
  * no fixture here can be mistaken for a UAE account, and the validator's deliberate silence about
