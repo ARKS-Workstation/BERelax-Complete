@@ -92,8 +92,6 @@ const INSIDE_SESSION = `${YEAR}-07-01T01:30:00+04:00`
 const employees = new Map<string, string>()
 const of = (handle: string): string => employees.get(handle) as string
 
-const ROLLBACK = 'PHR13_JOB_ROLLBACK'
-
 async function makeEmployee(
   handle: string,
   args: { employedFrom: string; wage?: number | null; provisional?: boolean },

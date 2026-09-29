@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**139 / 211 units complete.**
+**140 / 211 units complete.**
 
 ## Next up
 
@@ -120,7 +120,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 99 | `P-HR-10` | Holiday calendar, lunar confirmation impact report, Ramadan dated override | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `P-HR-06` | — | — |
 | [x] | 100 | `P-HR-11` | Commission: versioned rules and a reproducible engine | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-07` | — | Y9-commission |
 | [x] | 101 | `P-HR-12` | Payroll run, bilingual payslips and the WPS export | `F10`, `P-HR-08`, `P-HR-11` | — | Y8-wps, Y9-tips |
-| [ ] | 102 | `P-HR-13` | Monthly gratuity accrual posted to the append-only ledger | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-12` | M6 | Y8-coa, Y9-gratuity |
+| [x] | 102 | `P-HR-13` | Monthly gratuity accrual posted to the append-only ledger | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `P-HR-12` | M6 | Y8-coa, Y9-gratuity |
 | [ ] | 103 | `P-HR-14` | Therapist self-service portal and staff notifications | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `P-HR-09`, `P-HR-12` | — | — |
 | [x] | 104 | `A-FIRST-01` | Analytics schema, monthly partitions, 90-day raw retention | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 105 | `A-FIRST-02` | Event taxonomy and the funnel contract, pure | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F05`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
