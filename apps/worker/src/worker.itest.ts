@@ -376,6 +376,14 @@ describe('acceptance — pgboss stays out of the drift checker', () => {
       letting `not.toContain` pass over an empty list (ADR 0002).
     */
     const source = readFileSync('scripts/check-schema-drift.mjs', 'utf8')
+    /*
+      Read out of `OWNED_SCHEMAS`, which is where that list lives.
+
+      It used to be a `schema: '…'` key on a per-directory object, and this case went on matching THAT shape
+      long after A-FIRST-01 replaced it with a flat array — so `listed` was empty, the vacuity floor below
+      was the only thing failing, and the two assertions this case is actually about were over an empty
+      list. `payload.itest.ts` carried the identical regex and the identical silence.
+    */
     const declaration = /const OWNED_SCHEMAS = \[([^\]]*)\]/.exec(source)
     expect(
       declaration,

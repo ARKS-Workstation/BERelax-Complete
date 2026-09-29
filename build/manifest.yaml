@@ -12165,6 +12165,19 @@ units:
       ordinary hours, proven by test
     - 'the impact report is deterministic: the same inputs produce byte-identical output under the frozen
       clock, asserted by a golden-file test'
+    - 'NOTE: deferred from R-REP-01, which needed the two flags before this unit existed. dim_date
+      (migration 0110) carries is_public_holiday, public_holiday_names, public_holiday_is_provisional,
+      public_holiday_is_lunar_dated, is_ramadan and ramadan_is_provisional, all read from
+      reporting.calendar_observance — the reporting schema''s own minimum source, shipped EMPTY because every
+      date is Y9-holiday-calendar. When this unit lands the operational calendar, change dim_date''s
+      definition to read it and DROP reporting.calendar_observance with its
+      calendar_observance_lunar_is_provisional CHECK: that CHECK refuses a lunar-dated observance which is
+      not provisional, and it is only safe while nothing in the build can record an announcement, which this
+      unit''s second acceptance line changes. Do NOT derive the flags from premises_closure: a closure means
+      the premises is SHUT, a shut date has no business_day row and therefore no dim_date row, while a public
+      holiday the salon trades through has no closure row at all (Y9-overtime). Ramadan HOURS need nothing
+      from this: dim_date.open_minutes derives from business_day.duration_seconds, so a dated
+      premises_hours_override plus a regeneration changes every denominator with no code change.'
     files:
     - packages/db/migrations/*_hr_holiday_calendar.sql
     - packages/core/src/hr/holiday-impact.ts
@@ -13477,7 +13490,7 @@ units:
       dim_staff, dim_customer, fact_appointment, fact_sale, fact_shift — as materialised views refreshed
       nightly and on demand, every fact keyed on business_day rather than calendar date.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-CRM-01
@@ -13533,6 +13546,35 @@ units:
       row carries provisional = true
     - 'on-demand refresh of a single view does not block reads: a concurrent SELECT succeeds during refresh
       in an integration test'
+    - 'NOTE: the holiday calendar is P-HR-10''s and does not exist yet, so dim_date''s flags read
+      reporting.calendar_observance — a table this unit creates as the reporting schema''s own minimum source
+      and ships EMPTY. DEFERRED TO P-HR-10: when its calendar lands, dim_date reads that and this table goes
+      with its calendar_observance_lunar_is_provisional CHECK. Deriving the flags from premises_closure looks
+      right and is exactly backwards: a closure means the premises is SHUT, a shut date has no business_day
+      row and therefore no dim_date row, while a public holiday the salon trades through has no closure row
+      at all (Y9-overtime says so). The FIGURES — which dates, in which year — are the new
+      Y9-holiday-calendar row in docs/OPEN-QUESTIONS.md; the mechanism is here and is exercised by fixtures.'
+    - 'NOTE: "every lunar-date holiday row carries provisional = true" is implemented as a CHECK
+      (calendar_observance_lunar_is_provisional) rather than as an assertion over seeded rows. Over rows it
+      would be vacuous on an empty table and would pass for ever once somebody added a confirmed one. It is
+      safe to refuse now because nothing in this build can record an announcement, and P-HR-10 owns that.'
+    - 'NOTE: fact_sale carries credit notes as well as invoices, with the credit note''s amounts NEGATED,
+      which the acceptance list does not ask for. An invoices-only sales fact makes every net-revenue figure
+      in R-REP-02 and R-REP-05 wrong by whatever was credited back, and makes the correction a second query
+      every consumer has to remember to subtract. Its grain is therefore the tax DOCUMENT, and the
+      integration suite asserts the day''s net revenue is zero for one sale plus its credit note.'
+    - 'NOTE: the seven materialised views are OUTSIDE pnpm db:drift, whose query is relkind in (''r'',''p''),
+      so only the two base tables are drift-checked — reporting is added to that gate''s OWNED_SCHEMAS for
+      them. The views'' shape is held instead by packages/db/src/reporting.itest.ts, which parses the Drizzle
+      mirror''s materializedView blocks and compares them to pg_attribute in both directions.'
+    - 'NOTE: gate case 90a was FAILING on the baseline of this batch, on four of its five cases: 0106''s
+      ledger paragraph opened with its unit name instead of its file name, so the scan could not see it, and
+      0107 had no paragraph at all — so the documented run did not reach the newest migration. Both are
+      restored in packages/db/src/index.ts alongside 0110''s own paragraph, which is what that case exists
+      for. This unit did not cause either loss and does not own 0106 or 0107.'
+    - 'NOTE: ADR 0060 locks the three decisions this unit''s dependants must not contradict — the schema
+      states no fact of its own, dim_date is keyed on business_day, and every refresh is CONCURRENT. The test
+      port band allocated to this unit was NOT used: nothing here starts a server.'
     files:
     - packages/db/migrations/NNNN_reporting_schema.sql
     - packages/db/src/schema/reporting.ts

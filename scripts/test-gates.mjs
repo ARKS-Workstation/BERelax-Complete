@@ -43077,6 +43077,393 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 138a-138z. (R-REP-01) The reporting schema: every rule about its SHAPE shown to fail, and every refusal
+//            the database makes shown to fire by name.
+//
+//            Seven materialised views are the substrate R-REP-02 through R-REP-08 read, so what matters
+//            about this unit is the rules that keep the shape true rather than any one figure in it. Four
+//            of them are predicates over a catalogue corpus — `packages/db/src/reporting/schema-rules.ts`,
+//            pure so that a corpus which DOES violate each one can be handed to them — and five are
+//            refusals the database makes with a private SQLSTATE. Each half fails in a way the other
+//            cannot see, which is why both are here:
+//
+//              * a PREDICATE that stops matching reports no findings, and the integration suite's "no
+//                findings over the live catalogue" then passes over a schema no refresh could touch. 138a
+//                to 138e break each predicate and require its own rule name;
+//              * a REFUSAL that stops firing is invisible to every predicate, because the shape is still
+//                right — what has gone is the thing that keeps it right when somebody adds the eighth
+//                view. 138f to 138m are psql probes inside `begin; … rollback;`, each asserting the rule
+//                by the name written for it rather than by a non-zero exit (ADR 0003).
+//
+//            138b is the one worth reading. `<instant>::date` is anchored on a column name ending `_at`
+//            with `+` rather than `*`, and this case is what that `+` is for: PostgreSQL deparses
+//            `date_trunc('month', trading_date)::date` — which is `dim_date.business_month`, correct and
+//            shipped — as `(date_trunc('month'::text, (bd.trading_date)::timestamp with time zone))::date`,
+//            and with `*` the leading class matched empty, took the closing parenthesis and reported that
+//            column as an instant truncation. The rule was right about the mistake and wrong about the
+//            catalogue, which is the way a scanner over deparsed SQL goes wrong.
+//
+//            138n and 138o are `pnpm db:drift` reaching a THIRD schema. The gate paired one mirror
+//            directory with one Postgres schema until A-FIRST-01 taught it otherwise; `reporting` is the
+//            first schema added since, and the two cases prove it is checked in both directions rather
+//            than sitting outside the gate with a green tick over it. Only the two BASE tables are in
+//            scope — the query is `relkind in ('r','p')` and a materialised view is `'m'` — which is why
+//            138p exists as well.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const RULES = 'packages/db/src/reporting/schema-rules.ts'
+  const RULES_SUITE = 'packages/db/src/reporting/schema-rules.test.ts'
+  const MIGRATION = 'packages/db/migrations/0110_reporting_schema.sql'
+  const MIRROR = 'packages/db/src/schema/reporting.ts'
+  const JOB = 'apps/worker/src/jobs/reporting-refresh.ts'
+  const REPORTING_ITEST = 'packages/db/src/reporting.itest.ts'
+  const GHOST_MIRROR = 'packages/db/src/schema/__gate_fixture_reporting__.ts'
+
+  const reportingUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const reportingIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  const reportingDbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+
+  /**
+   * One statement (or several, separated by `;`) inside a transaction that is always rolled back.
+   *
+   * `ON_ERROR_STOP=1` means psql abandons the script at the refusal, so the `rollback` is never reached —
+   * and nothing is left behind anyway, because abandoning the script closes the connection and PostgreSQL
+   * rolls the transaction back itself. That is the arrangement block 26b uses for the same reason.
+   */
+  const reportingProbe = (statement) =>
+    run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      reportingDbUrl ?? '',
+      '-c',
+      `begin; ${statement}; rollback;`,
+    ])
+
+  /** The issuer snapshot a probe invoice needs. `legal_entity.trn` is a placeholder the schema refuses. */
+  const PROBE_ISSUER =
+    "'BE RELAX SPA - L.L.C - O.P.C', 'BE RELAX - Massage Center and Spa', '100123456700003', " +
+    "'250 Al Meena Street', 'Abu Dhabi'"
+
+  // ---- the four predicates, each handed a corpus it must still judge correctly ------------------
+
+  // 138a. `numeric` removed from the inexact-type list. `sum(bigint)` returns `numeric` in PostgreSQL, so
+  //       this is the exact mistake a view author makes by writing the obvious aggregate — and money that
+  //       has stopped being integer fils is ADR 0007 gone with a green tick over it.
+  {
+    const result = withEditedFile(
+      RULES,
+      (source) => replaceOnce(source, "  'numeric',\n", ''),
+      () => runExpectingFailure('pnpm', reportingUnit(RULES_SUITE)),
+    )
+    checkRejectedBy(
+      'reporting: dropping numeric from the inexact-type list fails the money rule by name',
+      result,
+      'reporting-money-is-bigint-fils',
+    )
+  }
+
+  // 138b. The `at time zone` pattern removed, leaving only the `timezone(...)` function spelling. That is
+  //       the version of this rule that shipped first and it could not fire: PostgreSQL deparses a view body
+  //       keeping `AT TIME ZONE` as three words, so the one construct the rule exists for — a business day
+  //       taken by shifting an instant into the business zone and truncating it — was invisible to it while
+  //       the schema looked clean. The list is matched against what `pg_matviews` HOLDS, not against the SQL
+  //       somebody wrote, and this case is what holds that true.
+  {
+    const result = withEditedFile(
+      RULES,
+      (source) =>
+        replaceOnce(
+          source,
+          "    { name: 'at time zone', pattern: /\\bat\\s+time\\s+zone\\b/i },\n",
+          '',
+        ),
+      () => runExpectingFailure('pnpm', reportingUnit(RULES_SUITE)),
+    )
+    checkRejectedBy(
+      'reporting: a truncation rule that cannot see the deparsed AT TIME ZONE fails by name',
+      result,
+      'reporting-fact-is-keyed-on-business-day',
+    )
+  }
+
+  // 138c. The unique-index rule made to derive its relation set from the INDEX rows instead of taking the
+  //       views separately. A view with no index contributes no index rows, so the one case that matters —
+  //       a materialised view nobody indexed, which no concurrent refresh can touch — becomes invisible.
+  {
+    const result = withEditedFile(
+      RULES,
+      (source) =>
+        replaceOnce(
+          source,
+          '  return views\n    .filter(',
+          '  return [...new Set(indexes.map((index) => index.relation))]\n    .filter(',
+        ),
+      () => runExpectingFailure('pnpm', reportingUnit(RULES_SUITE)),
+    )
+    checkRejectedBy(
+      'reporting: a unique-index rule blind to a view with no index at all fails by name',
+      result,
+      'reporting-view-has-a-plain-unique-index',
+    )
+  }
+
+  // 138d. `now()` removed from the clock list. A view holding it changes on every refresh whether or not a
+  //       base row moved, so "two consecutive refreshes produce identical row checksums" is false by
+  //       construction and every comparison built on it is noise.
+  {
+    const result = withEditedFile(
+      RULES,
+      (source) => replaceOnce(source, "  'now()',\n", ''),
+      () => runExpectingFailure('pnpm', reportingUnit(RULES_SUITE)),
+    )
+    checkRejectedBy(
+      'reporting: dropping now() from the clock list fails the purity rule by name',
+      result,
+      'reporting-view-is-a-pure-function-of-its-base-tables',
+    )
+  }
+
+  // 138e. The integration suite enumerates the views from `pg_catalog` and compares them against a written
+  //       list. Shorten the list and the comparison must fail: without it, "the schema holds seven views"
+  //       is satisfied by a schema that holds whatever it holds.
+  {
+    const result = withEditedFile(
+      REPORTING_ITEST,
+      (source) => replaceOnce(source, "  'fact_shift',\n] as const", '] as const'),
+      () => runExpectingFailure('pnpm', reportingIntegration(REPORTING_ITEST)),
+    )
+    checkRejectedBy(
+      'reporting: the view enumeration is compared against a written list, not just to itself',
+      result,
+      'fact_shift',
+    )
+  }
+
+  // ---- the five refusals, as known-bad fixtures against real PostgreSQL ------------------------
+
+  // 138f. A materialised view the registry does not declare. This is the direction that matters: a view a
+  //       later R-REP unit adds and never registers is a view the nightly pass walks straight past, so its
+  //       rows are whatever they were the day it was created — with a green job beside them.
+  checkRejectedBy(
+    'reporting: an unregistered materialised view is refused before any refresh (ZY181)',
+    reportingProbe(
+      'create materialized view reporting.gate_fixture_unregistered as select 1 as x; ' +
+        'select reporting.assert_views_are_refreshable()',
+    ),
+    'reporting_registry_disagrees',
+  )
+
+  // 138g. And the other direction, without which 138f is satisfied by a check that reports every view as
+  //       unregistered all the time.
+  checkRejectedBy(
+    'reporting: a registry row naming no materialised view is refused too (ZY181)',
+    reportingProbe(
+      'insert into reporting.materialised_view (view_name, kind, grain, refresh_rank) values ' +
+        "('gate_fixture_missing', 'fact', 'a view that does not exist', 97); " +
+        'select reporting.assert_views_are_refreshable()',
+    ),
+    'gate_fixture_missing',
+  )
+
+  // 138h. A registered materialised view with no UNIQUE index. PostgreSQL's own message for this arrives
+  //       from the refresh and names neither the view nor the remedy, and the obvious remedy — dropping
+  //       CONCURRENTLY — makes every reader block for the rebuild. Hence a refusal before the refresh.
+  checkRejectedBy(
+    'reporting: a registered view with no unique index is refused before the refresh (ZY182)',
+    reportingProbe(
+      'create materialized view reporting.gate_fixture_unindexed as select 1 as x; ' +
+        'insert into reporting.materialised_view (view_name, kind, grain, refresh_rank) values ' +
+        "('gate_fixture_unindexed', 'dimension', 'one probe row for the gate suite', 96); " +
+        'select reporting.assert_views_are_refreshable()',
+    ),
+    'reporting_view_has_no_unique_index',
+  )
+
+  // 138i. A refresh of a name the registry does not hold. `reporting.refresh` is SECURITY DEFINER — only a
+  //       materialised view's owner may refresh it — and it interpolates an identifier, so this is the
+  //       injection guard as much as the typo guard.
+  checkRejectedBy(
+    'reporting: refreshing an unregistered name is refused rather than interpolated (ZY183)',
+    reportingProbe("select reporting.refresh('drop table invoice')"),
+    'reporting_view_not_registered',
+  )
+
+  // 138j. The freshness log refuses an edit. R-REP-07 decides from `reporting.refresh_run` whether a tile
+  //       may render a number at all, so the one thing an editable log permits is the state that rule
+  //       exists to refuse: a stale view made to look current.
+  checkRejectedBy(
+    'reporting: editing a refresh_run row is refused (ZY184)',
+    reportingProbe(
+      "select reporting.refresh('dim_staff', 'on_demand'); " +
+        "update reporting.refresh_run set row_count = 0 where view_name = 'dim_staff'",
+    ),
+    'reporting_refresh_run_append_only',
+  )
+
+  // 138k. A sale keyed on a date the trading calendar does not hold. `invoice.tax_point_date` has no
+  //       foreign key to `business_day`, and an inner join in `fact_sale` would have DROPPED this invoice —
+  //       revenue leaving a revenue fact in silence. The refusal names the date instead.
+  checkRejectedBy(
+    'reporting: a sale keyed off the trading calendar refuses the refresh rather than vanishing (ZY185)',
+    reportingProbe(
+      'insert into invoice (document_kind, series_code, period_key, number, display_number, ' +
+        'issuer_legal_name, issuer_trading_name, issuer_trn, issuer_address_snapshot, issuer_emirate, ' +
+        'customer_name_snapshot, issue_date, tax_point_date, net_total, vat_total, gross_total) values ' +
+        "('tax_invoice', 'TAX-INV', 'gate-offcal', 1, 'TI-GATE-OFFCAL-1', " +
+        PROBE_ISSUER +
+        ", 'Customer 0042', '1970-01-02'::date, '1970-01-01'::date, 19048, 952, 20000); " +
+        'insert into invoice_line (invoice_id, line_no, description_en, quantity, unit_gross_fils, ' +
+        'vat_rate_bp, line_net_fils, line_vat_fils) select id, 1, ' +
+        "'Asian Normal Massage', 1, 20000, 500, 19048, 952 from invoice " +
+        "where display_number = 'TI-GATE-OFFCAL-1'; " +
+        "select reporting.refresh('fact_sale', 'on_demand')",
+    ),
+    'reporting_fact_off_the_trading_calendar',
+  )
+
+  // 138l. A lunar-dated observance presented as settled. This is the acceptance line "every lunar-date
+  //       holiday row carries provisional = true" as a CHECK rather than as a property of rows somebody
+  //       seeded — which on an empty table would be vacuous, and would pass for ever once a confirmed row
+  //       was added.
+  checkRejectedBy(
+    'reporting: a lunar-dated observance that is not provisional is refused by name',
+    reportingProbe(
+      'insert into reporting.calendar_observance (kind, name, date_basis, starts_on, ends_on, ' +
+        "is_provisional, source) values ('public_holiday', 'gate fixture lunar', 'lunar', " +
+        "'2026-06-01'::date, '2026-06-01'::date, false, 'gate fixture')",
+    ),
+    'calendar_observance_lunar_is_provisional',
+  )
+
+  // 138m. The control for 138l, and it is not a formality: without it the refusal above is satisfied by a
+  //       table that refuses every insert, which is the same green tick over a different defect.
+  {
+    const accepted = reportingProbe(
+      'insert into reporting.calendar_observance (kind, name, date_basis, starts_on, ends_on, ' +
+        "is_provisional, source) values ('public_holiday', 'gate fixture fixed date', 'gregorian', " +
+        "'2026-06-01'::date, '2026-06-01'::date, false, 'gate fixture')",
+    )
+    check(
+      'reporting: the control — the same observance on a GREGORIAN date is accepted',
+      !accepted.failed,
+      accepted.output,
+    )
+  }
+
+  // ---- the gates this unit had to reach, in both directions -------------------------------------
+
+  // 138n. `pnpm db:drift` must see the `reporting` schema's base tables. The gate's `OWNED_SCHEMAS` gains
+  //       `reporting` in this unit's commit; before that, two tables created by a migration would have sat
+  //       outside the gate with nothing saying so — which is the hole that list exists to refuse.
+  checkRejectedBy(
+    'reporting: a column missing from the reporting mirror is caught by db:drift',
+    withEditedFile(
+      MIRROR,
+      (text) => replaceOnce(text, "    grain: text('grain').notNull(),\n", ''),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'reporting.materialised_view.grain: present in the database, missing from Drizzle',
+  )
+
+  // 138o. And the other direction: a mirror for a `reporting` table the database does not have. Without
+  //       this, 138n is satisfied by a gate that reports every reporting table as missing all the time.
+  checkRejectedBy(
+    'reporting: a Drizzle reporting table the database lacks is caught by db:drift',
+    withFixture(
+      GHOST_MIRROR,
+      [
+        "import { pgSchema, text } from 'drizzle-orm/pg-core'",
+        "const ghostReportingSchema = pgSchema('reporting')",
+        "export const ghostReportingTable = ghostReportingSchema.table('gate_fixture_ghost', {",
+        "  phantom: text('phantom'),",
+        '})',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'Drizzle declares table "reporting.gate_fixture_ghost" but the database has no such table',
+  )
+
+  // 138p. The seven materialised views are OUTSIDE `pnpm db:drift` — its query is `relkind in ('r','p')` —
+  //       so their shape is held by the integration suite reading `pg_attribute`. This case proves that
+  //       second mechanism exists: change a mirrored column name and the suite must fail. Without it the
+  //       views would be the only relations in this repository whose shape nothing compares to anything.
+  checkRejectedBy(
+    'reporting: a materialised view column the mirror renames is caught by the schema suite, by name',
+    withEditedFile(
+      MIRROR,
+      (text) =>
+        replaceOnce(
+          text,
+          "    openMinutes: integer('open_minutes'),",
+          "    openMinutes: integer('open_minute'),",
+        ),
+      () => runExpectingFailure('pnpm', reportingIntegration(REPORTING_ITEST)),
+    ),
+    'reporting-view-mirror-matches-the-catalogue',
+  )
+
+  // 138q. The nightly cron must name an `agent_definition` row. A cron with no agent has no declared
+  //       interval and no budget, so nothing watches it and nothing caps it — and a reporting refresh that
+  //       stops running is stale numbers with a green job beside them, which is the whole reason
+  //       `reporting.refresh_run` is written to on every pass.
+  checkRejectedBy(
+    'reporting: the nightly refresh cron without an agent fails the job registry by name',
+    withEditedFile(
+      JOB,
+      (text) => replaceOnce(text, '  agent: REPORTING_REFRESH_AGENT,\n', ''),
+      () => runExpectingFailure('pnpm', ['jobs']),
+    ),
+    'cron-without-an-agent',
+  )
+
+  // 138r. `reporting.refresh_run` documents itself as raising on UPDATE and DELETE, and the conventions
+  //       gate refuses a table that only half keeps that promise. The pair is where the defect hides: you
+  //       write one trigger, copy it for the other event, and forget to change the word.
+  checkRejectedBy(
+    'reporting: refresh_run with only one of its two refusal triggers fails the conventions gate',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          'create trigger refresh_run_no_delete before delete on reporting.refresh_run\n' +
+            '  for each row execute function reporting.refuse_refresh_run_change();\n',
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'append-only-table-must-refuse-update-and-delete',
+  )
+
+  // 138s. The control for the whole block: every check above is satisfied by something FAILING, so one of
+  //       them has to be satisfied by the tree passing. Both suites and both scanners, unedited.
+  {
+    const unit = run('pnpm', reportingUnit(RULES_SUITE))
+    check('reporting: the schema rules pass over the real tree', !unit.failed, unit.output)
+    const integration = run('pnpm', reportingIntegration(REPORTING_ITEST))
+    check(
+      'reporting: the schema and refusal suite passes over the real database',
+      !integration.failed,
+      integration.output,
+    )
+    const conventions = run('pnpm', ['db:conventions'])
+    check('reporting: the migration passes db:conventions', !conventions.failed, conventions.output)
+    const drift = run('pnpm', ['db:drift'])
+    check('reporting: the mirror passes db:drift', !drift.failed, drift.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -43,11 +43,17 @@ const MIRROR_DIRS = ['packages/db/src/schema', 'packages/clinical/src/schema']
  * `packages/db/migrations` (ADR 0019), and `pgboss` belongs to the queue library — neither is this
  * repository's to mirror. Stated as the schemas that ARE checked rather than as the ones that are not, so
  * a schema added by a migration and never mirrored is a failure here rather than an omission nobody sees.
+ *
+ * `reporting` (migration 0110, R-REP-01) is here for that reason and contributes only its two BASE tables:
+ * the query below is `relkind in ('r', 'p')`, so the seven materialised views are outside this gate in
+ * both directions. Their shape is asserted against the mirrors by `packages/db/src/reporting.itest.ts`,
+ * which reads `pg_attribute` — a materialised view is not a table, and pretending otherwise here would
+ * report all seven as declared-but-missing.
  */
 // Read by NAME from `apps/web/src/payload.itest.ts` and `apps/worker/src/worker.itest.ts`, which assert
 // that `payload` and `pgboss` are not in it. Rename this constant and both of them fail by name; they
 // used to match a shape instead and went quietly red for eleven migrations when the shape changed.
-const OWNED_SCHEMAS = ['public', 'clinical', 'analytics']
+const OWNED_SCHEMAS = ['public', 'clinical', 'analytics', 'reporting']
 const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intentionally not mirrored
 
 // --- what Drizzle declares -------------------------------------------------------------------

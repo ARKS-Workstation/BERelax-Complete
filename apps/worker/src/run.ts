@@ -19,6 +19,7 @@ import {
   setObligationNoticeRuntime,
 } from './jobs/obligation-reminders.ts'
 import { setReceiptSources } from './jobs/reconcile-dlr.ts'
+import { setReportingRefreshSql } from './jobs/reporting-refresh.ts'
 import { setRetentionPurgeSql } from './jobs/retention-purge.ts'
 import {
   SEND_SCHEDULED_STEP_JOB,
@@ -110,6 +111,11 @@ async function main(): Promise<void> {
   // burning a retry on nothing. Both passes are DDL against the analytics schema and neither reads the
   // clock itself — the instant comes from the job context, which is what lets the suite drive them frozen.
   setAnalyticsMaintenanceSql(sql)
+  // R-REP-01's nightly reporting refresh, before `startWorkers` for the same reason. It calls
+  // `reporting.refresh_all()`, whose SECURITY DEFINER is what lets the application role refresh a
+  // materialised view it does not own, and it reads no clock: the durations come from the instants the
+  // function recorded inside the transaction that did the work.
+  setReportingRefreshSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first
