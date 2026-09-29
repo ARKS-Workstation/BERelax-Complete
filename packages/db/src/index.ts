@@ -3670,18 +3670,6 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // close", "post the journal entry first", "end the employment first", "recompute the liability" and "record
 // a punch correction instead" are six different answers.
 //
-// 107 is 0107_hr_gratuity.sql: the end-of-service gratuity liability, and the five ways of getting it into
-// the journal wrongly (P-HR-13). The paragraph is restored rather than written: gate case 90a reported 107
-// as undocumented and 106 as documented under its UNIT name instead of its file, which is the loss that case
-// exists for, arriving in the two newest paragraphs at once. ADR 0057 holds the argument; 0107's own header
-// holds the five refusals. What belongs here is the decision the rest of this file has to live with: the
-// primitive is the WHOLE liability owed at a date, computed with one rounding, and a month's accrual is the
-// DIFFERENCE between that and what the books already hold — because twelve independently-rounded twelfths do
-// not sum to a year, the residue is permanent in a journal with no edit (ADR 0017), and nothing ever reports
-// it. `gratuity_rule` holds every figure as a versioned row flagged against `Y9-gratuity`, with no cap
-// column at all, because the SHAPE of a cap is as unknown as its number. `ZY171`-`ZY177` of the
-// `ZY171`-`ZY180` band; `ZY178`-`ZY180` are free.
-//
 // 110 is 0110_reporting_schema.sql: the `reporting` schema (R-REP-01) — four dimensions, three facts, all
 // materialised views over `public`, all keyed on `business_day`. Three things in it are decisions rather
 // than DDL, and ADR 0060 argues them at length.
@@ -3728,14 +3716,72 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // names a different thing to go and do: register the view, index it, spell the name the registry holds,
 // re-run the refresh instead of editing its log, and generate the trading days the facts are keyed on.
 //
+// ---------------------------------------------------------------------------------------------
+// 111 is 0111_migration_staging.sql (H-MIG-01) — the import substrate: a staging ledger, per-row provenance,
+// and the two rules that make an import resumable rather than run twice
+// ---------------------------------------------------------------------------------------------
+// The schema is `import_staging` and NOT `staging`, because `staging` is an APP_ENV value
+// (`packages/config/src/env.ts` lists five and that is one of them) and a schema of that name reads as "the
+// schema the staging deployment uses" to everybody who meets it later. It is not that: it is where imported
+// data sits while it is being judged, in production as much as anywhere.
+//
+// Everything in the file follows from one sentence in H-MIG-01's own summary — **there is no incumbent
+// export.** The source of every figure that arrives here is a spreadsheet a human typed, so there is no
+// foreign primary key to reconcile against, nothing to re-query, and no way to re-derive a row once the file
+// has been edited. The only identity a source row has is (file, line, content hash), and that is exactly
+// what provenance records.
+//
+// `import_provenance` names (target_schema, target_table, target_id) and an `import_row_id`, and carries NO
+// copy of the file, the line or the hash. Those live once each on `import_run` and `import_row`, and
+// `import_staging.entity_provenance` is the single view that joins them. Denormalising would be faster to
+// read and would be wrong in a way nobody would see: a provenance row holding its own copy of the file hash
+// cannot be checked against the run it came from, so a corrected re-import that edited one row would leave
+// provenance claiming a hash the file no longer has — and the claim would still resolve. `target_id` is
+// `text` and not `uuid` because `package_template` is keyed by a code and 0106's chart-of-accounts work will
+// be too; a uuid column would push the one importer with a natural key into keeping its provenance somewhere
+// else, and "somewhere else" is how coverage stops being 100%.
+//
+// **ZY196 is the deliverable.** A DEFERRED constraint trigger refuses, at COMMIT, any `import_row` that
+// reached `applied` with no provenance row naming it — so "a row without provenance cannot be inserted" is a
+// property of the database rather than of whichever importer remembered. Deferred and not immediate because
+// the order of the three statements is the importer's business, and the claim is about what may be
+// COMMITTED. What the database cannot see is an INSERT into an arbitrary target table, so the other
+// direction is MEASURED rather than assumed: `import_staging.unprovenanced_row_ids` reads a target relation
+// for rows nothing names, and the framework's report carries the count per declared target.
+//
+// **ZY198 is the only rule here whose absence loses data while reporting success.** The idempotence check
+// trusts `completed`: a second import skips a row because a completed run already applied it. A run marked
+// completed with rows still pending therefore makes the next import skip rows that were never imported, so
+// the state is refused rather than reported. ZY191 (one open LIVE run per file — a dry run rolls back and is
+// deliberately exempt), ZY192 (a staged row's evidence and its terminal outcome are fixed), ZY193 (nothing
+// staged into a finished run), ZY194 (provenance only for a declared target), ZY195 (provenance is
+// append-only) and ZY197/ZY199 (a checksum over no columns, and a coverage read over a relation provenance
+// cannot address, are refused rather than answered with a constant) complete the band ZY191-ZY199; ZY200 is
+// left FREE and unregistered, because an entry for a code no migration raises is what direction 3 refuses.
+//
+// ZY197 deserves its line. Every acceptance line in this unit is asserted by comparing two checksums, so the
+// checksum is the thing whose being wrong would make the whole unit report success while measuring nothing.
+// `content_checksum` therefore lives in the DATABASE — one implementation for the report and for every
+// suite — an EMPTY relation answers `empty:<relation>` rather than `md5('')`, and an exclusion list that has
+// removed every column raises instead of returning a constant that compares equal for ever.
+//
+// The file also creates ONE target table, the framework's conformance target, so those claims are proved
+// against real constraints, a real deferred trigger and a real checksum instead of a mock —
+// `packages/payments/src/conformance/fixtures` ships deliberately broken adapters for the same reason, and
+// `packages/migration/src/write-path.test.ts` is what stops a real importer naming it. Nothing in this
+// schema has ON DELETE CASCADE and the application role holds no DELETE or TRUNCATE anywhere in it: a run
+// that should not have happened is recorded as having happened, which is what an audit trail is.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
 // them. 100 through 107 have all landed now, each with the unit that held it — W-SYS-13, W-SYS-14, M-VAT-09,
 // M-VAT-12, P-HR-12, Y-PAY-01, Y-PAY-02 and P-HR-13, in that order. 108 and 109 were held by A-FIRST-03 and
 // A-MEAS-01 and RELEASED: both turned out to need no migration at all, so both are permanent gaps rather
-// than numbers anybody is waiting on. 110 has landed with R-REP-01, which held it, so 111 is the first
-// number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// than numbers anybody is waiting on. 110 has landed with R-REP-01 and 111 with H-MIG-01, out of order and
+// before 110 — which is the arrangement this note exists for: the number is a high-water mark and not a
+// count. 112 was held by A-FIRST-04 and released unused, so it is a permanent gap; 113 is held by G-REV-05,
+// still in flight; so 114 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
@@ -3760,4 +3806,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 110 as const
+export const SCHEMA_VERSION = 111 as const

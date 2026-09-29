@@ -1776,6 +1776,79 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_closed_period_labour_adjustment'],
     translators: ['packages/db/src/repositories/gratuity.ts'],
   },
+  // ZY191-ZY199 are H-MIG-01's, of the band ZY191-ZY200; ZY200 is left free and deliberately absent, because
+  // an entry for a code no migration raises is direction 3. Nine and not one because every one of them names
+  // a different thing to go and do — "resume the run that is already open", "correct it with a new import",
+  // "re-open the run", "declare the table you are writing", "a corrected import is a new import", "record
+  // where this row came from", "you have excluded every column", "finish the rows that are still pending" and
+  // "provenance cannot address that relation" — which is 0061's argument for a private code at all. The two
+  // that carry the unit's whole point are ZY196 and ZY198: the first is what makes "a row without provenance
+  // cannot be inserted" a property of the database, and the second is the only rule in that schema whose
+  // being absent LOSES DATA while reporting success, because a completed run with pending rows makes every
+  // later import skip them as already imported.
+  {
+    code: 'ZY191',
+    rule: 'A second live import run of the same importer and source file may not be open while one is still running.',
+    migration: '0111',
+    raisedBy: ['import_staging.assert_one_open_run'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY192',
+    rule: "A staged import row's run, line, hash and payload are fixed, its outcome may be reached only once, and it may not be deleted.",
+    migration: '0111',
+    raisedBy: ['import_staging.refuse_import_row_change'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY193',
+    rule: 'No row may be staged against an import run that has already finished.',
+    migration: '0111',
+    raisedBy: ['import_staging.assert_run_still_open'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY194',
+    rule: 'An import provenance row must name a target table the run declared.',
+    migration: '0111',
+    raisedBy: ['import_staging.assert_target_was_declared'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY195',
+    rule: 'An import provenance row may not be updated or deleted.',
+    migration: '0111',
+    raisedBy: ['import_staging.refuse_provenance_change'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY196',
+    rule: 'A staged import row may not be committed in the applied state without a provenance row naming it.',
+    migration: '0111',
+    raisedBy: ['import_staging.assert_applied_row_has_provenance'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY197',
+    rule: 'A content checksum must cover at least one column of its relation.',
+    migration: '0111',
+    raisedBy: ['import_staging.content_checksum'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY198',
+    rule: 'An import run may not be completed while any of its rows is still pending.',
+    migration: '0111',
+    raisedBy: ['import_staging.assert_run_has_no_pending_rows'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
+  {
+    code: 'ZY199',
+    rule: 'A provenance coverage read must be over a relation with a single-column primary key.',
+    migration: '0111',
+    raisedBy: ['import_staging.unprovenanced_row_ids'],
+    translators: ['packages/migration/src/refusals.ts'],
+  },
   {
     code: 'ZY181',
     rule: 'The reporting registry and the catalogue must declare the same set of materialised views.',

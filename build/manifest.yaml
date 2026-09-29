@@ -19524,7 +19524,7 @@ units:
       hash, importer version), idempotent and resumable runs, a true dry-run mode, and each import inside
       withUnitOfWork so audit and events commit with it.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F04
@@ -19540,11 +19540,83 @@ units:
       100% provenance coverage and that a row without provenance cannot be inserted
     - an import rolled back discards its audit rows and outbox events together with its data, proven by
       test per ADR 0008
+    - 'NOTE: allocations actually used. Migration 0111 (`0111_migration_staging.sql`), SCHEMA_VERSION raised
+      to 111, gate block `// 139a-139z.` (20 cases), ADR 0061, and private SQLSTATEs ZY191-ZY199 of the
+      allocated ZY191-ZY200 band — ZY200 is left FREE and deliberately UNREGISTERED, because an entry for a
+      code no migration raises is what direction 3 of `pnpm sqlstate` refuses. The manifest listed the
+      migration as `00XX-migration-staging.sql` and it landed as `0111_migration_staging.sql` (underscores,
+      per the convention on disk). The allocated test port band `{ start: 16_100, width: 300 }` was NOT used
+      and is NOT declared in `TEST_PORT_BANDS`: this unit starts no server — it has no route, and both
+      integration suites drive the framework and the schema against real PostgreSQL — and a declared-but-unused
+      band fails `apps/web/src/test-ports.test.ts`, so declaring it would have been the defect.'
+    - 'NOTE: the Postgres schema is `import_staging` and not `staging`. `staging` is an APP_ENV value
+      (`packages/config/src/env.ts` lists development, test, preview, staging, production), so a schema of
+      that name reads as "the schema the staging deployment uses" to everybody who meets it after this
+      commit. It is not that: it is where imported data sits while it is being judged, in production as much
+      as anywhere. `scripts/check-schema-drift.mjs`''s `OWNED_SCHEMAS` gained the schema — without that entry
+      a table here could be unmirrored with nothing saying so, which is A-FIRST-01''s recorded failure, and
+      gate case 139m asserts BOTH halves: the unmirrored table is caught with the entry and goes unnoticed
+      without it.'
+    - 'NOTE: two PRE-EXISTING holes in the migration ledger were repaired as collateral, because this unit
+      raises SCHEMA_VERSION and gate case 90 was already red before it. `packages/db/src/index.ts` opened
+      0106''s paragraph as `// 106 is Y-PAY-02:` (naming the unit, not the file) and 0107''s as a banner
+      `// 0107 — end-of-service gratuity …`, and gate 90a reads `// NN is FILE` openings — so the unbroken run
+      did not reach the newest migration and all four of that block''s assertions failed on the baseline.
+      Both openings now name their file; nothing else in either paragraph was touched. Proof of the baseline
+      failure is in the unit report.'
+    - 'NOTE: the allocation note''s next-free sentence in `packages/db/src/index.ts` was deliberately NOT
+      edited. It says "110 is the first number nobody holds", 110 was issued to a unit in a worktree this one
+      cannot see, and a guess about whether it is still held is exactly how two branches come to apply one
+      number to different SQL. A sentence recording that 111 landed out of order was ADDED instead, and
+      `allocation-note.test.ts` refuses a second next-free claim in any wording — so the integrating merge
+      owns that sentence. P-HR-13 recorded the same decision for the same reason.'
+    - 'NOTE: `packages/migration` is NOT in `vitest.config.ts`''s coverage `include` list, for the reason
+      `packages/db` is excluded: every claim the package makes is a claim about PostgreSQL — a deferred
+      constraint trigger firing at COMMIT, a checksum over a real relation, rows appearing in `audit_event`
+      and `outbox_event` — and it is proved by `framework.itest.ts` and `staging-schema.itest.ts` against a
+      real database. Counting it under the unit-test floor would either force a misleading number or invite a
+      mock target, and a mock cannot produce a COMMIT. The pure halves (canonical hashing, the write-path
+      scan) have unit tests regardless.'
+    - 'NOTE: deferred, with what was and was not built. (1) H-MIG-03''s owner SIGN-OFF table is NOT here,
+      although the hash it attests to is: `import_run.source_file_hash` is the sha-256 of the file''s bytes,
+      which is what "stored immutably against the hash of the file it attests to" means. The sign-off row
+      itself belongs to H-MIG-03, because who may sign and what a signature covers are that unit''s decisions
+      and a table shaped here would be something to work around. (2) No rejection VOCABULARY:
+      `import_row.outcome_detail` is free text and H-MIG-02 owns the validator and its named malformed
+      fixtures, because a CHECK here listing the reasons a row may be rejected would be a second list for
+      that unit''s to disagree with. (3) The registry `IMPORTERS` holds only the framework''s conformance
+      importer; H-MIG-02 through H-MIG-11 add theirs. (4) A new open question, `Y9-import-ledger`, is recorded
+      in `docs/OPEN-QUESTIONS.md` section A2: the ledger keeps every imported payload for ever and is
+      append-only with no DELETE grant, so C-CRM-10''s erasure engine cannot reach it — which is harmless
+      today (the only importer''s rows are synthetic) and is H-MIG-04''s to answer before it stages a phone
+      number. The provisional value is the one that needs no migration: stage a minimised payload rather than
+      delete evidence later.'
+    - 'NOTE: "an import killed at a random row" is asserted by failing inside `apply` at a row chosen at
+      random, not by killing the session. `pg_terminate_backend` from a second connection was tried first and
+      cannot be used with postgres.js 3.4.9: killing the backend mid-statement makes it fire a queued
+      `setImmediate(nextWrite)` after setting `socket = null`, and the `TypeError` is thrown from inside that
+      immediate where no `catch` in a suite can reach it — it reproduced on one run in three, with all ten
+      tests passing and `Errors 1 error` beside them. What a session kill would have proved over an aborted
+      transaction is that the framework relies on no post-failure cleanup to leave a resumable state, and that
+      is asserted directly instead: after the failure the run row must still be `running` with `finished_at`
+      null and `resumed_count` 0, and there must be no `migration.import.failed` audit row or outbox event.'
     files:
-    - packages/db/migrations/00XX-migration-staging.sql
+    - packages/db/migrations/0111_migration_staging.sql
+    - packages/db/src/schema/import-staging.ts
+    - packages/migration/package.json
+    - packages/migration/src/index.ts
     - packages/migration/src/framework.ts
     - packages/migration/src/provenance.ts
+    - packages/migration/src/checksum.ts
+    - packages/migration/src/refusals.ts
+    - packages/migration/src/registry.ts
+    - packages/migration/src/conformance/probe-importer.ts
+    - packages/migration/src/framework.itest.ts
+    - packages/migration/src/staging-schema.itest.ts
+    - packages/migration/src/provenance.test.ts
+    - packages/migration/src/write-path.test.ts
     - scripts/migrate-import.mjs
+    - docs/adr/0061-an-import-is-resumable-per-row-and-provenance-is-a-reference.md
   - id: H-MIG-02
     order: 184
     title: Package templates in settings, and the reconstruction workbook validator

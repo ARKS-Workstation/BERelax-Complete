@@ -32,6 +32,14 @@ export * from './google.ts'
 export * from './gratuity.ts'
 export * from './hr.ts'
 export * from './identity.ts'
+/*
+ * The `import_staging` schema, as a NAMESPACE for the reason the `analytics` comment above gives
+ * (H-MIG-01). Its tables are `import_run`, `import_row` and `import_provenance`, and `importRow` flattened
+ * into this namespace would sit beside nothing that says which schema it is in — while `entityProvenance`
+ * and `importProvenance` next to each other would read as two mirrors of one thing rather than a view this
+ * file deliberately does not mirror. `schema.importStaging.importRow` reads the way the SQL does.
+ */
+export * as importStaging from './import-staging.ts'
 export * from './invoice.ts'
 export * from './leave-approval.ts'
 export * from './ledger.ts'

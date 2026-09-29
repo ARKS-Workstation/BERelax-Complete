@@ -398,6 +398,15 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/migration:
+    dependencies:
+      '@berelax/db':
+        specifier: workspace:*
+        version: link:../db
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/payments:
     dependencies:
       '@berelax/config':

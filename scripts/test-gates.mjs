@@ -43464,6 +43464,335 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 139a-139z. (H-MIG-01) The import framework: every property the later importers inherit, shown to be able
+// to fail, and the measuring instrument shown to be able to move.
+//
+// H-MIG-01 is the substrate H-MIG-02 through H-MIG-11 run on, so a defect here is nine units' defect and it
+// arrives as a figure on a balance sheet that nobody can account for. Two things make this block different
+// from a unit's usual one.
+//
+// **Every acceptance line in the unit is asserted by comparing two checksums.** That makes the checksum the
+// thing whose being wrong would make the whole unit report success while measuring nothing — ADR 0002's
+// subject, arriving at the instrument rather than at a rule. So 139b and 139f break the two ways a checksum
+// can stop discriminating: the comparison keyed on the wrong thing, and the exclusion list that decides what
+// the comparison is over.
+//
+// **Three of the guarantees are the DATABASE's**, and their known-bad fixtures therefore break the framework
+// and require a named SQLSTATE's own message. 139c must read `ImportAlreadyRunning` (ZY191), 139d
+// `IncompleteImportRun` (ZY198) and 139e `MissingProvenance` (ZY196). A refusal that arrived as a bare
+// non-zero exit would be satisfied by a syntax error in the file the case edited.
+{
+  const FRAMEWORK = 'packages/migration/src/framework.ts'
+  const CHECKSUM = 'packages/migration/src/checksum.ts'
+  const PROVENANCE = 'packages/migration/src/provenance.ts'
+  const MIGRATION = 'packages/db/migrations/0111_migration_staging.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const MIRROR = 'packages/db/src/schema/import-staging.ts'
+  const DRIFT = 'scripts/check-schema-drift.mjs'
+  const FRAMEWORK_ITEST = 'packages/migration/src/framework.itest.ts'
+  const SCHEMA_ITEST = 'packages/migration/src/staging-schema.itest.ts'
+  const WRITE_PATH = 'packages/migration/src/write-path.test.ts'
+  const FIXTURE = 'packages/migration/src/__gate_fixture__.ts'
+  const itest = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // 139a. The dry run stops forcing the deferred constraints. This is the case worth reading, because the
+  //       line it removes is the one easiest to leave out and its absence makes a REHEARSAL report success
+  //       over exactly the defect it exists to find: every constraint trigger in `import_staging` is
+  //       deferred, so a transaction that never commits never fires one.
+  withEditedFile(
+    FRAMEWORK,
+    (source) =>
+      replaceOnce(source, '      await uow.sql`set constraints all immediate`', '      void uow'),
+    () => {
+      checkRejectedBy(
+        'import framework: a dry run that never fires the deferred checks is caught',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'a rehearsal of a broken importer must refuse, not report success',
+      )
+    },
+  )
+
+  // 139b. Idempotence stops being keyed on the row's CONTENT and becomes "has this importer ever completed a
+  //       run". Nothing fails on a re-import of the same file — that still skips — so the only thing that can
+  //       tell the difference is a DIFFERENT file, which must still import. This is the mutation that would
+  //       otherwise silently refuse to import a corrected spreadsheet.
+  withEditedFile(
+    FRAMEWORK,
+    (source) =>
+      replaceOnce(
+        source,
+        '     where w.row_hash = ${rowHash}',
+        '     where w.row_hash = w.row_hash',
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: idempotence keyed on anything but the row content is caught',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'idempotence is keyed on the row content',
+      )
+    },
+  )
+
+  // 139c. The framework stops resuming and opens a second run instead. The database is what refuses it, and
+  //       the case requires ZY191's own message: an import that starts again rather than resuming is an
+  //       import run twice, and the second run of a package-liability import is a second liability.
+  withEditedFile(
+    FRAMEWORK,
+    (source) =>
+      replaceOnce(
+        source,
+        "    options.mode === 'live' ? await findOpenLiveRun(handle, importer.name, sourceFileHash) : null",
+        '    null',
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: starting a second run instead of resuming is refused by ZY191',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'ImportAlreadyRunning',
+      )
+    },
+  )
+
+  // 139d. A resumed run applies nothing and then tries to complete. ZY198 is the only rule in this schema
+  //       whose absence LOSES DATA while reporting success — a completed run with pending rows makes every
+  //       later import skip them as already imported — so its message is what this case requires.
+  withEditedFile(
+    FRAMEWORK,
+    (source) =>
+      replaceOnce(
+        source,
+        '  if (rejections.length === 0) {',
+        '  if (rejections.length === 0 && existing === null) {',
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: a resume that applies nothing cannot complete the run (ZY198)',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'IncompleteImportRun',
+      )
+    },
+  )
+
+  // 139e. Provenance stops being recorded. The unit's deliverable, and the case requires ZY196 to arrive
+  //       from COMMIT rather than from a reviewer: a figure whose source is not recorded is a figure nobody
+  //       can defend when it disagrees with what the owner believes.
+  withEditedFile(
+    FRAMEWORK,
+    (source) =>
+      replaceOnce(source, '    await recordProvenance(uow, row.id, entity)', '    void entity'),
+    () => {
+      checkRejectedBy(
+        'import framework: an applied row with no provenance cannot commit (ZY196)',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'MissingProvenance',
+      )
+    },
+  )
+
+  // 139f. The exclusion list the resumability comparison is taken over. Drop `id` and the comparison starts
+  //       covering a column a second run CANNOT reproduce, so "identical final state" becomes unprovable —
+  //       the list is load-bearing in the direction nobody checks, and a list that had grown to cover the
+  //       DATA instead would make every comparison pass.
+  withEditedFile(
+    CHECKSUM,
+    (source) =>
+      replaceOnce(
+        source,
+        "Object.freeze([\n  'id',\n  'created_at',",
+        "Object.freeze([\n  'created_at',",
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: a generated column left in the content checksum is caught',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'the resumed import must reach the state the uninterrupted one reached',
+      )
+    },
+  )
+
+  // 139g. Provenance stops resolving to the LINE of the file. It still resolves — to a line — which is the
+  //       shape of this defect: the answer looks right, and the person who opens the spreadsheet at that row
+  //       finds a different figure from the one they are trying to account for.
+  withEditedFile(
+    PROVENANCE,
+    (source) =>
+      replaceOnce(
+        source,
+        '           source_line       as "sourceLine",',
+        '           1                 as "sourceLine",',
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: provenance that resolves to the wrong line is caught',
+        runExpectingFailure('pnpm', itest(FRAMEWORK_ITEST)),
+        'resolves every imported row to its file, line and content hash',
+      )
+    },
+  )
+
+  // 139h. An importer that opens its own transaction. The mistake every one of the nine later units can make
+  //       and that would hold for eight of them: the entity insert lands in one transaction and its
+  //       provenance, audit row, event and state transition in another, which is the half-applied row this
+  //       whole unit exists to make impossible.
+  withFixture(
+    FIXTURE,
+    ["import { withUnitOfWork } from '@berelax/db'", 'export const mine = withUnitOfWork'].join(
+      '\n',
+    ),
+    () => {
+      checkRejectedBy(
+        'import framework: a module in the package that opens its own transaction is caught',
+        runExpectingFailure('pnpm', unit(WRITE_PATH)),
+        'an importer that opens its own transaction',
+      )
+    },
+  )
+
+  // 139i. A real importer naming the conformance target. It would record a domain figure in a table no report
+  //       reads, and it would also break the two suites that prove this unit's claims, which both assume that
+  //       table holds nothing else.
+  withFixture(
+    FIXTURE,
+    ["export const target = 'import_staging.import_probe_entity'"].join('\n'),
+    () => {
+      checkRejectedBy(
+        'import framework: a module naming the conformance target outside the fixture is caught',
+        runExpectingFailure('pnpm', unit(WRITE_PATH)),
+        'conformance target and nothing reads it',
+      )
+    },
+  )
+
+  // 139j. The append-only pair, half removed — you write one trigger, copy it for the other event and forget
+  //       to change the word, and the table then documents a guarantee it only half keeps. `pnpm
+  //       db:conventions` is what refuses it, and it can only refuse it because the table's own comment says
+  //       "UPDATE and DELETE raise".
+  withEditedFile(
+    MIGRATION,
+    (source) =>
+      replaceOnce(
+        source,
+        'create trigger import_provenance_no_delete before delete on import_staging.import_provenance\n' +
+          '  for each row execute function import_staging.refuse_provenance_change();',
+        '',
+      ),
+    () => {
+      checkRejectedBy(
+        'import framework: dropping the provenance no-delete trigger fails the schema conventions',
+        runExpectingFailure('pnpm', ['db:conventions']),
+        'import_provenance',
+      )
+    },
+  )
+
+  // 139k. A refusal code the registry does not name. ADR 0043: a code is identified by all five characters
+  //       and every translator matches on the code ALONE, so a code raised by a migration with no entry
+  //       reaches its caller as a raw postgres error with nothing able to translate it. ZY200 is this unit's
+  //       one deliberately free code, which is what makes it the right thing to raise here.
+  withEditedFile(
+    MIGRATION,
+    (source) =>
+      replaceOnce(source, "      using errcode = 'ZY196';", "      using errcode = 'ZY200';"),
+    () => {
+      checkRejectedBy(
+        'import framework: a SQLSTATE the registry does not name fails the allocator',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY200',
+      )
+    },
+  )
+
+  // 139l. And the other direction, which is what lets the registry SHRINK: an entry naming a code no
+  //       migration raises. Without it the registry accumulates entries describing rules that were removed,
+  //       and an entry that no longer describes anything is permission to re-create what it described.
+  withEditedFile(
+    REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY196',", "    code: 'ZY200',"),
+    () => {
+      checkRejectedBy(
+        'import framework: a registry entry for a code nothing raises fails the allocator',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY200',
+      )
+    },
+  )
+
+  // 139m. A table in the new schema with no Drizzle mirror, and the `OWNED_SCHEMAS` entry that is what makes
+  //       it findable. BOTH halves, because the failure A-FIRST-01 records is the SILENT one: a schema the
+  //       drift gate does not own is a schema whose tables can be unmirrored with nothing saying so. The
+  //       mirror-side direction needs no entry — a Drizzle table the database lacks is reported whatever
+  //       schema it claims — so an entry that had been left out would have cost nothing until the day a
+  //       migration added a column here and no mirror followed it.
+  //
+  //       `replaceAll` and not `replaceOnce`, deliberately: the anchor is one fully-qualified call spelled
+  //       the same way four times, and ALL FOUR have to stop being parsed for the second half to be about
+  //       the schema rather than about one table. `replaceOnce` is the right tool for an ambiguous anchor;
+  //       this one is unambiguous and plural, and `withEditedFile`'s no-op guard still catches it going
+  //       stale.
+  {
+    const hideMirrors = (source) =>
+      source.replaceAll('importStagingSchema.table(', 'importStagingSchema.tableGone(')
+    checkRejectedBy(
+      'import framework: a table in import_staging with no Drizzle mirror is caught',
+      withEditedFile(MIRROR, hideMirrors, () => runExpectingFailure('node', [DRIFT])),
+      'with no Drizzle mirror',
+    )
+    const unowned = withEditedFile(MIRROR, hideMirrors, () =>
+      withEditedFile(
+        DRIFT,
+        (source) =>
+          replaceOnce(
+            source,
+            "const OWNED_SCHEMAS = ['public', 'clinical', 'analytics', 'import_staging']",
+            "const OWNED_SCHEMAS = ['public', 'clinical', 'analytics']",
+          ),
+        () => run('node', [DRIFT]),
+      ),
+    )
+    check(
+      'import framework: without its OWNED_SCHEMAS entry four unmirrored tables go unnoticed',
+      !unowned.failed,
+      'the drift gate still failed with import_staging removed from OWNED_SCHEMAS, so that entry is not ' +
+        `what makes this schema checked and the case above proves less than it says:\n${unowned.output}`,
+    )
+  }
+
+  // 139n-139s. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing a module, or a gate that refused the
+  //            clean tree would all report as a block of passing cases.
+  {
+    const framework = run('pnpm', itest(FRAMEWORK_ITEST))
+    check(
+      `import framework: ${FRAMEWORK_ITEST} passes unedited`,
+      !framework.failed,
+      framework.output,
+    )
+    const schema = run('pnpm', itest(SCHEMA_ITEST))
+    check(`import framework: ${SCHEMA_ITEST} passes unedited`, !schema.failed, schema.output)
+    const scan = run('pnpm', unit(WRITE_PATH))
+    check(`import framework: ${WRITE_PATH} passes unedited`, !scan.failed, scan.output)
+    const conventions = run('pnpm', ['db:conventions'])
+    check(
+      'import framework: the unedited migration satisfies the schema conventions',
+      !conventions.failed,
+      conventions.output,
+    )
+    const sqlstate = run('pnpm', ['sqlstate'])
+    check(
+      'import framework: the unedited registry names every code 0111 raises',
+      !sqlstate.failed,
+      sqlstate.output,
+    )
+    const drift = run('node', [DRIFT])
+    check(
+      'import framework: the import_staging mirror matches the database',
+      !drift.failed,
+      drift.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
