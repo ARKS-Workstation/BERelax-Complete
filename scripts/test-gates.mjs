@@ -38163,6 +38163,523 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 133a-133z. (Y-PAY-01) The payment gateway port and its conformance suite: every rule shown to fail against
+//            a REAL adapter, the suite shown to be unshrinkable, and the amount type shown to reject a float.
+//
+//            The unit's deliverable is a suite, and a suite is the one kind of artefact whose own correctness
+//            nothing else in this repository can check. `packages/payments/src/conformance/suite.test.ts`
+//            already runs it against nineteen deliberately broken FIXTURES and asserts each fails exactly the
+//            rules it breaks, which is ADR 0003 discharged for the fixture. What that cannot prove is the
+//            thing the suite exists for: that a rule fires against a SHIPPED adapter. A saboteur is written
+//            to be caught; a real adapter that stops recording a movement is the accident. 133a-133e are that
+//            direction — each breaks one of the two shipped adapters and requires the suite to go red.
+//
+//            133a is the acceptance line itself. "A deliberately no-op adapter that returns success without
+//            writing a visible outbox or ledger record fails a named conformance case" is asserted twice
+//            over: once by the fixture table in the suite's own test, and once here by removing the
+//            `records.record(...)` call from the **manual till adapter** — the one that is real in every
+//            environment. If only the fixture were checked, the suite could be satisfied by a rule that
+//            happened to key on something about the fixture.
+//
+//            133f and 133g are the suite's own integrity, and they are the cases most worth reading. A
+//            conformance suite can be defeated far more cheaply than by breaking an adapter: delete a rule,
+//            or soften a fixture's expected-failure list, and everything stays green while the contract
+//            shrinks. 133f removes a rule from `RULES` and requires the test to notice — the "declares a
+//            defect for every rule" assertion is what notices, so the suite cannot be shrunk without also
+//            deleting a defect. 133g empties one `SABOTEUR_EXPECTATIONS` entry, which is the edit somebody
+//            makes to "fix" a failing expectation rather than to understand it.
+//
+//            133h-133m are `tsc` cases, and they are the half neither the suite nor vitest can reach: vitest
+//            transpiles, so a green suite says nothing about types (brief rule 28). The acceptance line asks
+//            that "a float amount literal is a compile error", and a type-level test asserting `true` cannot
+//            prove that anything is REJECTED — it can only prove that what compiles resolves the way it was
+//            expected to. So 133h and 133i put a float and a bare number where `Money` is wanted and require
+//            `pnpm typecheck` to fail. 133j-133l are the build failures that keep the declared tables total:
+//            a state or an event added without a transition row, and a member dropped from the gateway's
+//            enumerated member list.
+//
+//            133n and 133o are the two dependency-cruiser rules this unit adds, by rule NAME. They close what
+//            the suite cannot see, because both are about which modules may REACH an adapter rather than how
+//            one behaves: a consumer constructing the fake directly would keep using it in production with
+//            nothing saying so, and a saboteur importable from shipped code is a gateway that takes money and
+//            posts nothing. `scripts/test-boundaries.mjs` holds the same two fixtures; they are here as well
+//            because that script is a separate `pnpm verify` step and a gate block that trusted it would be
+//            trusting a check whose own absence nothing would report.
+//
+//            133p-133t break the pure kernel: the cell that stops captured money being released, the cell
+//            that stops a replayed authorisation un-capturing an intent, the largest-not-sum authorisation
+//            rule, the sort that makes the fold order-independent, and the minor-unit refusal that must not
+//            become a rounding. 133r and 133s are the two whose absence would be invisible in review — a sum
+//            of replayed authorisations and a fold without a sort both look like ordinary code.
+//
+//            133u and 133v are ADR 0005 for payments specifically, from both sides: the registry falling back
+//            to the fake instead of refusing, and `PAYMENT_PROVIDER` dropped from the config refusal list.
+//
+//            Nothing here edits `packages/db/migrations/0105_gateway_tender_type.sql`. The database the suites
+//            run against has already had it applied, so an edit to the file changes nothing a statement can
+//            see and a PASS would be a report about a file nothing read — gate block 114's finding, and block
+//            126's reason for the same omission. The row's agreement with `@berelax/core` is asserted against
+//            a real PostgreSQL by `packages/fixtures/src/payment.itest.ts`, in both directions.
+{
+  const MANUAL = 'packages/payments/src/adapters/manual.ts'
+  const FAKE_CARD = 'packages/payments/src/adapters/fake-card.ts'
+  const SUITE = 'packages/payments/src/conformance/suite.ts'
+  const SABOTEUR = 'packages/payments/src/conformance/fixtures/saboteur.ts'
+  const STATE = 'packages/core/src/payments/state.ts'
+  const PORT = 'packages/core/src/payments/port.ts'
+  const MINOR_UNITS = 'packages/core/src/payments/minor-units.ts'
+  const POSTING = 'packages/core/src/checkout/posting.ts'
+  const REGISTRY = 'packages/payments/src/registry.ts'
+  const ENV = 'packages/config/src/env.ts'
+
+  const SUITE_TEST = 'packages/payments/src/conformance/suite.test.ts'
+  const REGISTRY_TEST = 'packages/payments/src/registry.test.ts'
+  const TRANSITIONS_TEST = 'packages/core/src/payments/state.transitions.test.ts'
+  const PROPERTY_TEST = 'packages/core/src/payments/state.property.test.ts'
+  const UNITS_TEST = 'packages/core/src/payments/minor-units.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const cruise = () => [
+    'exec',
+    'depcruise',
+    '--config',
+    '.dependency-cruiser.cjs',
+    'packages',
+    'apps',
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the command that must fail because of it.
+   *
+   * Named for this block rather than like block 126's `withSwitchEdit`, because two blocks defining a helper
+   * of the same shape is how git found the bodies as shared context and INTERLEAVED two blocks at a merge.
+   */
+  const withPaymentEdit = (path, anchor, replacement, args) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', args),
+    )
+
+  // 133a. The acceptance line, against the adapter that is REAL in every environment. Removing the movement
+  //       write leaves an adapter that authorises, returns a correct snapshot and posts nothing — a system
+  //       wired to it takes cash and the ledger is short by every payment, with no error anywhere.
+  {
+    const broken = withPaymentEdit(
+      MANUAL,
+      `    records.record(
+      Object.freeze({
+        gateway: MANUAL_GATEWAY,`,
+      `    if (String(args.operation) !== 'never') return
+    records.record(
+      Object.freeze({
+        gateway: MANUAL_GATEWAY,`,
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: the conformance suite rejects the real till adapter once it stops recording movements',
+      broken.failed && /records-every-movement/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133b. The same edit to the card gateway. Both adapters, because the suite walks a list and a rule that
+  //       had come to key on something about one of them would still report the other as conforming.
+  {
+    const broken = withPaymentEdit(
+      FAKE_CARD,
+      `    records.record(
+      Object.freeze({
+        gateway: FAKE_CARD_GATEWAY,`,
+      `    if (String(args.operation) !== 'never') return
+    records.record(
+      Object.freeze({
+        gateway: FAKE_CARD_GATEWAY,`,
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: the conformance suite rejects the card gateway once it stops recording movements',
+      broken.failed && /records-every-movement/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133c. A blank summary. The row still exists, the amount is right, and the payments screen shows a line
+  //       that says a thing happened and tells nobody what — ADR 0022's "the same lie in a different font".
+  {
+    const broken = withPaymentEdit(
+      MANUAL,
+      '        summary: args.summary,',
+      "        summary: '',",
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: a blank movement summary on a real adapter is rejected by name',
+      broken.failed && /record-carries-a-human-summary/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133d. The capability/behaviour disagreement, in the direction a capability flag invites: the till claims
+  //       it CAN void while still refusing one. A suite that treated a flag as an exemption would pass this.
+  {
+    const broken = withPaymentEdit(
+      MANUAL,
+      '      supportsVoid: false,',
+      '      supportsVoid: true,',
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: a capability the adapter declares and does not have is rejected by name',
+      broken.failed && /void-matches-the-declared-capability/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133e. The clock. A movement stamped from the machine's own clock cannot be replayed, and with trading
+  //       running 11:00-02:00 a read either side of midnight puts the takings on the wrong business day.
+  {
+    const broken = withPaymentEdit(
+      MANUAL,
+      '        occurredAt: clock.now(),',
+      '        occurredAt: Date.now() as never,',
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: an adapter reading its own clock is rejected by name',
+      broken.failed && /every-instant-comes-from-the-injected-clock/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133f. The suite shrinking. Deleting a rule is far cheaper than breaking an adapter, and everything stays
+  //       green while the contract gets smaller — so the suite's own test asserts a defect exists for every
+  //       declared rule, and that is what has to notice.
+  {
+    const broken = withPaymentEdit(
+      SUITE,
+      "    id: 'refuses-a-blank-reference',",
+      "    id: 'refuses-a-blank-reference-renamed-away',",
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: a rule renamed out of the declared set fails the suite test',
+      broken.failed && /refuses-a-blank-reference/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133g. The other cheap defeat: emptying an expected-failure list, which is the edit somebody makes to
+  //       "fix" a failing expectation rather than to understand it. Set equality is what refuses it.
+  {
+    const broken = withPaymentEdit(
+      SABOTEUR,
+      "    'accepts-a-blank-reference': Object.freeze(['refuses-a-blank-reference']),",
+      "    'accepts-a-blank-reference': Object.freeze([]),",
+      unit(SUITE_TEST),
+    )
+    check(
+      'payments: softening a saboteur expectation to nothing fails the suite test',
+      broken.failed && /accepts-a-blank-reference/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133h. The acceptance line's compile error. A float where `Money` is wanted, in a module the root project
+  //       includes, must fail `pnpm typecheck` — which vitest cannot observe, because it transpiles.
+  {
+    const broken = withFixture(
+      'packages/payments/src/__gate_fixture__.ts',
+      [
+        "import type { AuthoriseRequest } from '@berelax/core'",
+        '// A float amount, which the branded Fils type must refuse.',
+        'export const illegal: AuthoriseRequest = {',
+        "  amount: { fils: 12.5, currency: 'AED' },",
+        "  instrument: 'cash',",
+        "  idempotencyKey: 'k' as AuthoriseRequest['idempotencyKey'],",
+        "  reference: 'INV-1',",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['typecheck']),
+    )
+    check(
+      'payments: a float amount where Money is wanted fails the typechecker',
+      broken.failed && /__gate_fixture__/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133i. A bare number. The version of the same mistake that arrives from a request body reader rather than
+  //       from a literal, and the one a `Money | number` union would have let through.
+  {
+    const broken = withFixture(
+      'packages/payments/src/__gate_fixture__.ts',
+      [
+        "import type { CaptureRequest } from '@berelax/core'",
+        'export const illegal: CaptureRequest = {',
+        "  gatewayIntentId: 'pi' as CaptureRequest['gatewayIntentId'],",
+        '  amount: 35000,',
+        "  idempotencyKey: 'k' as CaptureRequest['idempotencyKey'],",
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', ['typecheck']),
+    )
+    check(
+      'payments: a bare number where Money is wanted fails the typechecker',
+      broken.failed && /__gate_fixture__/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133j. A state added without a transition row. `INTENT_TRANSITIONS` is a total `Record` precisely so this
+  //       is a build failure: a `Partial` would compile with the row missing and resolve every one of its
+  //       pairs to "not allowed" silently, which is the answer for most of them and the wrong way to reach it.
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      "  'failed',\n] as const\n\nexport type PaymentIntentState",
+      "  'failed',\n  'settled_somehow',\n] as const\n\nexport type PaymentIntentState",
+      ['typecheck'],
+    )
+    check(
+      'payments: a lifecycle state with no transition row fails the typechecker',
+      broken.failed && /settled_somehow|INTENT_TRANSITIONS/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133k. An event added without a decision in every row. The same guarantee from the other axis, and the one
+  //       Y-PAY-08 will meet when it adds the dispute events: it cannot add one and leave a row unanswered.
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      "  'voided',\n] as const\n\nexport type PaymentIntentEventType",
+      "  'voided',\n  'disputed',\n] as const\n\nexport type PaymentIntentEventType",
+      ['typecheck'],
+    )
+    check(
+      'payments: a lifecycle event with no cell in every row fails the typechecker',
+      broken.failed &&
+        /disputed|INTENT_TRANSITIONS|INTENT_EVENT_CARRIES_AMOUNT/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133l. The runtime member list going stale. It exists so the conformance suite can assert every member is
+  //       exercised; a list that had drifted would leave a method nothing has ever called on any adapter.
+  {
+    const broken = withPaymentEdit(PORT, "  'eventsSince',\n] as const", '] as const', [
+      'typecheck',
+    ])
+    // Matched on the FILE and the error code, not on the identifier. `tsc` run as a child has no TTY, so
+    // pretty output is off and every diagnostic is `path(line,col): error TSxxxx: …` with no source line and
+    // no name in it — the first version of this case looked for `PAYMENT_GATEWAY_MEMBERS_ARE_EXACT` and
+    // reported FAIL about a type that had refused correctly. Both files are named because the assignment is
+    // made twice: once beside the type and once in the type-level test, and a check that saw only one of them
+    // would keep passing if the other were deleted.
+    check(
+      'payments: dropping a member from the enumerated gateway member list fails the typechecker',
+      broken.failed &&
+        /payments\/port\.ts\(\d+,\d+\): error TS2322/.test(broken.output) &&
+        /port-types\.test\.ts\(\d+,\d+\): error TS2322/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133m. The control on the five tsc cases above: the unedited tree typechecks. Without it, every one of
+  //       them would report PASS on a tree that had been failing `tsc` for an unrelated reason all along.
+  {
+    const clean = run('pnpm', ['typecheck'])
+    check('payments: the unedited repository typechecks', !clean.failed, clean.output)
+  }
+
+  // 133n. A consumer constructing the fake directly. The import a screen author writes the first time they
+  //       want a gateway and have not found the registry — and it keeps using the fake in production with
+  //       nothing saying so, because that call site never asks the config anything.
+  {
+    const broken = withFixture(
+      'packages/payments/src/__gate_fixture__.ts',
+      [
+        "import { createFakeCardGateway } from './adapters/fake-card.ts'",
+        'export const illegal = createFakeCardGateway',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'payments: constructing a gateway outside the registry',
+      broken,
+      'payment-gateway-adapters-only-through-the-registry',
+    )
+  }
+
+  // 133o. A deliberately broken adapter reachable from shipped code. The saboteur is a complete, compiling
+  //       `PaymentGateway` that authorises, captures and refunds; its one defect is that it leaves no record.
+  {
+    const broken = withFixture(
+      'packages/payments/src/__gate_fixture__.ts',
+      [
+        "import { createSaboteurGateway } from './conformance/fixtures/saboteur.ts'",
+        'export const illegal = createSaboteurGateway',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', cruise()),
+    )
+    checkRejectedBy(
+      'payments: a non-conforming fixture reachable from shipped code',
+      broken,
+      'non-conforming-payment-fixtures-stay-in-the-conformance-suite',
+    )
+  }
+
+  // 133p. The cell that stops captured money being released. Allowing `captured` + `voided` would let a void
+  //       release a reservation that no longer exists and leave the capture unaccounted for — and nothing
+  //       about the edit looks wrong: it reads as making the machine more permissive.
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      "    refunded: 'captured',\n    voided: TRANSITION_REFUSED,",
+      "    refunded: 'captured',\n    voided: 'voided',",
+      unit(TRANSITIONS_TEST),
+    )
+    check(
+      'payments: permitting a void on a captured intent makes the lifecycle suite fail',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133q. The replay cell. `authorised` while already `captured` must stay `captured`; moving it back to
+  //       `authorised` un-captures money that has been taken, and the trigger is an ordinary redelivery.
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      "  captured: Object.freeze({\n    action_required: TRANSITION_REFUSED,\n    authorised: 'captured',",
+      "  captured: Object.freeze({\n    action_required: TRANSITION_REFUSED,\n    authorised: 'authorised',",
+      unit(TRANSITIONS_TEST),
+    )
+    check(
+      'payments: a replayed authorisation moving a captured intent backwards makes the suite fail',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133r. Summing replayed authorisations instead of taking the largest. This is the one arithmetic edit here
+  //       that makes an over-capture look legal, and it reads as the obvious way to accumulate.
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      'authorised = amount.fils > authorised.fils ? amount : authorised',
+      'authorised = add(authorised, amount)',
+      unit(TRANSITIONS_TEST),
+    )
+    check(
+      'payments: summing replayed authorisations makes the lifecycle suite fail',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133s. The sort. Without it the fold's answer depends on the order webhooks happened to arrive in, and
+  //       nothing about the code looks wrong — which is why the property test carries its own order-dependent
+  //       control and counts the cases that could disagree (brief rule 22).
+  {
+    const broken = withPaymentEdit(
+      STATE,
+      `    (a, b) =>
+      a.occurredAt - b.occurredAt || (a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0),`,
+      '    () => 0,',
+      unit(PROPERTY_TEST),
+    )
+    check(
+      'payments: removing the sort from the fold makes the order-independence property fail',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133t. The minor-unit refusal becoming a rounding. Rounding AED 262.50 into whole dirhams loses fifty fils
+  //       per transaction, and the loss appears only when somebody reconciles a settlement batch months later.
+  {
+    const broken = withPaymentEdit(
+      MINOR_UNITS,
+      '  if (amount.fils % divisor !== 0) {',
+      '  if (false && amount.fils % divisor !== 0) {',
+      unit(UNITS_TEST),
+    )
+    check(
+      'payments: rounding at the minor-unit edge instead of refusing makes the suite fail',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133u. ADR 0005 for payments, from the registry's side: `real` falling back to the fake. A production
+  //       deploy that looks connected, takes no money, and sends a receipt for it.
+  {
+    const broken = withPaymentEdit(
+      REGISTRY,
+      "      ? notImplemented('card-gateway')",
+      '      ? createFakeCardGateway({ clock, records, failures })',
+      unit(REGISTRY_TEST),
+    )
+    check(
+      'payments: a registry that falls back to the fake for PAYMENT_PROVIDER=real fails its suite',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133v. And from the config's side: `PAYMENT_PROVIDER` dropped from the list of keys the schema refuses
+  //       outside production. The other four keys still refuse, so nothing else in the build notices.
+  {
+    const broken = withPaymentEdit(
+      ENV,
+      "        ['PAYMENT_PROVIDER', cfg.PAYMENT_PROVIDER],\n",
+      '',
+      unit(REGISTRY_TEST),
+    )
+    check(
+      'payments: dropping PAYMENT_PROVIDER from the real-provider refusal fails the registry suite',
+      broken.failed && /PAYMENT_PROVIDER/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 133w. The gateway's clearing account collapsed onto the terminal's. One account holding both streams
+  //       reconciles against neither statement on its own, and the residue after matching one is
+  //       indistinguishable from an error in the other.
+  {
+    const broken = withPaymentEdit(
+      POSTING,
+      '  card_online: ACCOUNTS.gatewayClearing,',
+      '  card_online: ACCOUNTS.cardTerminalClearing,',
+      unit(UNITS_TEST),
+    )
+    check(
+      'payments: pointing the gateway tender at the terminal clearing account fails the suite',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 133x-133z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing a module, or a scanner that refused the
+  //            clean tree would all report as a block of passing cases.
+  {
+    const cruised = run('pnpm', cruise())
+    check(
+      'payments: the unedited repository has no boundary violations',
+      !cruised.failed,
+      cruised.output,
+    )
+
+    for (const suite of [SUITE_TEST, REGISTRY_TEST, TRANSITIONS_TEST, PROPERTY_TEST, UNITS_TEST]) {
+      const green = run('pnpm', unit(suite))
+      check(`payments: ${suite} passes unedited`, !green.failed, green.output)
+    }
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -50,6 +50,11 @@ export default defineConfig({
         'packages/config/src/**/*.ts',
         'packages/messaging/src/**/*.ts',
         'packages/providers/src/**/*.ts',
+        // The payment adapters and their registry. Counted rather than excluded: the exclusions below are
+        // all "needs a database or a browser", and this package needs neither — both adapters are in-memory
+        // and the conformance suite runs with nothing started. Money-handling code with no coverage floor
+        // would be the one unjustified exemption in the list.
+        'packages/payments/src/**/*.ts',
         'packages/google/src/**/*.ts',
         // The clinical boundary was counted by NEITHER floor: the package holding the envelope, the AAD
         // binding and the KEK rotation was absent from this list, so the most sensitive code in the

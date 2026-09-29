@@ -79,14 +79,24 @@ import { isTipLine } from './tip.ts'
  */
 
 /**
- * How the money arrived. Three ways today, each with the account it lands in.
+ * How the money arrived. Four ways, each with the account it lands in.
  *
  * The full registry — every tender type with a declared posting account, over-tender change, and the
  * adapter interface a card gateway will implement — is M-TILL-07's. What is here is the minimum a
  * finalisation cannot do without: a checkout has to debit *something*, and the something has to be
  * chosen by rule rather than by whoever is at the till.
+ *
+ * `card_online` is Y-PAY-01's, and it is the kind M-TILL-07 left room for rather than a new idea:
+ * `tender_type.adapter` was built with the closed set `('manual', 'gateway')` and the note *"All three
+ * are `manual` today, which is the honest answer: the gateway does not exist. This is the column Y-PAY's
+ * types will differ on."* It is declared HERE, in the one enumeration the posting rule reads, because the
+ * alternative — a second instrument vocabulary on the gateway port — would be a second answer to where
+ * card money goes, and the first symptom of a disagreement between two such answers is a bank
+ * reconciliation that is out by every gateway batch. A `card_online` tender is NOT takeable at the till:
+ * `finaliseCheckout` has no path to a gateway, and the checkout's own refusals are what stop one being
+ * keyed in as though the money were in hand.
  */
-export const TENDER_KINDS = ['cash', 'card_in_salon', 'bank_transfer'] as const
+export const TENDER_KINDS = ['cash', 'card_in_salon', 'bank_transfer', 'card_online'] as const
 export type TenderKind = (typeof TENDER_KINDS)[number]
 
 /**
@@ -97,11 +107,18 @@ export type TenderKind = (typeof TENDER_KINDS)[number]
  * debited `1020` would make the bank reconciliation permanently out by every unsettled batch and by
  * every processing fee. `bank_transfer` does debit `1020`, because a transfer that has landed is in the
  * account.
+ *
+ * `card_online` goes to **1030 Payment gateway clearing**, which 0018 seeded and nothing has used until
+ * now, for the same reason as 1040 and one more: a gateway payout arrives days later, net of processor
+ * fees, and Y-PAY-09 reconciles that payout against this clearing account to the fils. It is deliberately
+ * NOT 1040 — one clearing account holding both the terminal's batches and the gateway's payouts could be
+ * reconciled against neither statement on its own.
  */
 export const TENDER_ACCOUNT: Readonly<Record<TenderKind, AccountCode>> = Object.freeze({
   cash: ACCOUNTS.cashInDrawer,
   card_in_salon: ACCOUNTS.cardTerminalClearing,
   bank_transfer: ACCOUNTS.bankCurrent,
+  card_online: ACCOUNTS.gatewayClearing,
 })
 
 /** Where the output VAT on a checkout is credited. */
