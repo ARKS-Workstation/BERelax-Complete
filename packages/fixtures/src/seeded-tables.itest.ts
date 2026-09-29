@@ -50,6 +50,26 @@ beforeAll(async () => {
   // budget is brief rule 21, and it has cost four files a false failure.
 }, 60_000)
 
+/**
+ * The package templates exist before either repair probe runs.
+ *
+ * ESTABLISHED and not inherited, and established OUTSIDE the probe's transaction — both halves cost a red
+ * run to learn. Six suites truncate this family in their `afterAll` and nothing puts it back until the run's
+ * own teardown re-seeds, so whether the templates are standing when this file runs depends on vitest's file
+ * ordering (brief rule 12), and the premise control inside the probe went red the first time this file ran
+ * after them. Establishing it INSIDE the transaction then failed differently and more obscurely:
+ * `cannot TRUNCATE "package_template_version" because it has pending trigger events` — PostgreSQL refuses a
+ * TRUNCATE on a table with deferred trigger events queued by an earlier statement of the same transaction,
+ * so a probe cannot insert its own premise and then truncate it.
+ *
+ * Committed, and that is safe in a way nothing else here is: this is the SEED writing its own rows, which is
+ * exactly what `pnpm seed` and the run's own teardown do. It leaves the database closer to seeded, never
+ * further from it.
+ */
+beforeAll(async () => {
+  await seedPackageTemplates(sql)
+}, 60_000)
+
 afterAll(async () => {
   await sql?.end({ timeout: 5 })
 })
@@ -161,11 +181,6 @@ describe('the seed repairs a table it partly emptied', () => {
           versions: await count('package_template_version'),
           lines: await count('package_template_line'),
         })
-        // The premise, ESTABLISHED and not inherited. Six suites truncate this family in their `afterAll`
-        // and nothing puts it back until the run's own teardown re-seeds, so whether the templates are
-        // standing when this file runs depends on vitest's file ordering — which is brief rule 12 exactly,
-        // and which turned the premise control below red the first time this file ran after them.
-        await seedPackageTemplates(nestable(scoped))
         const before = await shape()
 
         // The six declared owners' own statement, in their own order — PostgreSQL refuses a truncate while
@@ -232,8 +247,6 @@ describe('the seed repairs a table it partly emptied', () => {
           `
           return Number(row?.n ?? '0')
         }
-        // The premise, established for the reason the case above states.
-        await seedPackageTemplates(nestable(scoped))
         const before = await versions()
         // The versions and the lines, and NOT the templates — which is the state under test. `cascade` for
         // the reason the case above states.
