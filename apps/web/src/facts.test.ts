@@ -1,9 +1,10 @@
 import type { PremisesFacts } from '@berelax/db'
+import { AI_CRAWLER_USER_AGENTS } from '@berelax/shared'
 import { collapseHours } from '@berelax/ui/patterns'
 import { describe, expect, it } from 'vitest'
 import { buildFacts, factsEtag } from './facts/build.ts'
 import { buildLlmsTxt, lintableProse, lintLlmsTxt, publishLlmsTxt } from './facts/llms.ts'
-import { AI_CRAWLER_USER_AGENTS, buildRobotsTxt } from './facts/robots.ts'
+import { buildRobotsTxt } from './facts/robots.ts'
 import { routeByPath } from './routes/registry.ts'
 
 /**
@@ -441,17 +442,16 @@ describe('the visible hours block collapses days without merging sessions', () =
 describe('robots.txt is a crawl policy and repeats itself on purpose', () => {
   const body = buildRobotsTxt({ origin: 'https://example.test', sitemapPath: null })
 
-  it('allows every AI crawler docs/09 names, each in its own group', () => {
+  it('allows every AI crawler the shared policy table names, each in its own group', () => {
     for (const agent of AI_CRAWLER_USER_AGENTS) {
       expect(body, agent).toContain(`User-agent: ${agent}`)
     }
-    expect([...AI_CRAWLER_USER_AGENTS]).toEqual([
-      'GPTBot',
-      'ClaudeBot',
-      'PerplexityBot',
-      'Google-Extended',
-      'CCBot',
-    ])
+    // The tokens are not spelled out here. They were, as a second copy of the list, and the copy is the
+    // drift A-FIRST-04 removed: `AI_CRAWLER_USER_AGENTS` is derived from the one table in
+    // `@berelax/shared`, `apps/web/src/crawler-policy.test.ts` pins that table and holds it equal to this
+    // rendered file AND to the classifier, and a scan in that file refuses any of these names appearing in
+    // a third place. A floor instead, so a table that emptied could not satisfy this loop vacuously.
+    expect(AI_CRAWLER_USER_AGENTS.length).toBeGreaterThanOrEqual(5)
   })
 
   it('gives every group the whole policy, because a named group replaces the wildcard', () => {

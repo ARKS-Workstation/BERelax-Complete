@@ -59,6 +59,18 @@ export {
   REBUILD_OBLIGATION_NOTICES_JOB,
 } from './compliance-notices.ts'
 export {
+  AI_CRAWLER_BOT_KINDS,
+  AI_CRAWLER_FETCHERS,
+  AI_CRAWLER_USER_AGENTS,
+  AI_CRAWLERS,
+  type AiCrawlerBotKind,
+  type AiCrawlerFetcher,
+  type AiCrawlerPolicyEntry,
+  type AiCrawlerToken,
+  type AiCrawlerUsageToken,
+  CRAWLER_POLICY_OPEN_QUESTIONS,
+} from './crawlers.ts'
+export {
   CREDENTIAL_EXPIRING_SOON_SETTING_KEY,
   credentialExpiringSoonDaysSchema,
   PROVISIONAL_EXPIRING_SOON_DAYS,

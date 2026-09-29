@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**145 / 211 units complete.**
+**146 / 211 units complete.**
 
 ## Next up
 
@@ -125,7 +125,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 104 | `A-FIRST-01` | Analytics schema, monthly partitions, 90-day raw retention | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 105 | `A-FIRST-02` | Event taxonomy and the funnel contract, pure | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F05`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [x] | 106 | `A-FIRST-03` | Origination resolver and click-id persistence, pure | `A-FIRST-02` | — | — |
-| [ ] | 107 | `A-FIRST-04` | Bot and AI-crawler classification with one shared source of truth | `A-FIRST-02` | — | — |
+| [x] | 107 | `A-FIRST-04` | Bot and AI-crawler classification with one shared source of truth | `A-FIRST-02` | — | — |
 | [ ] | 108 | `A-FIRST-05` | /api/collect ingest, session stitching and pre-consent staging | `A-FIRST-01`, `A-FIRST-02`, `A-FIRST-03`, `A-FIRST-04` | — | Y5-analytics-basis |
 | [ ] | 109 | `A-FIRST-06` | Typed browser collector and declarative interaction tracking | `A-FIRST-05`, `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05` | — | — |
 | [ ] | 110 | `A-FIRST-07` | WhatsApp reference-code loop, end to end | `A-FIRST-05`, `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03` | — | Y12-ref-loop, Y1-nap |
