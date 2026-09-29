@@ -46,9 +46,6 @@ import { createFakeLlm } from './llm/fake-llm.ts'
 import { createFakeDeepSeek, createFakeMiniMax } from './llm/named-fakes.ts'
 import type { LlmProvider } from './llm/port.ts'
 import { notImplemented } from './not-implemented.ts'
-import { createFakeCardGateway } from './payments/fake-gateway.ts'
-import { createManualPaymentProvider } from './payments/manual.ts'
-import type { PaymentProvider } from './payments/port.ts'
 import { createFakeSmsala } from './sms/fake-smsala.ts'
 import type { SmsProvider } from './sms/port.ts'
 
@@ -68,10 +65,6 @@ export interface Providers {
    * different prerequisite from the Business Profile one.
    */
   readonly places: PlacesProvider
-  /** Cash and terminal. Always the real till adapter; there is no external service to fake. */
-  readonly till: PaymentProvider
-  /** Online cards. Absent until a gateway is chosen — see docs/01 decision on card payments. */
-  readonly cards: PaymentProvider
   /** The default adapter, from `LLM_PROVIDER`. What a caller with no setting to consult uses. */
   readonly llm: LlmProvider
   /**
@@ -129,13 +122,6 @@ export function createProviders(options: ProviderRegistryOptions): Providers {
       config.GOOGLE_PROVIDER === 'real'
         ? notImplemented('google-places')
         : createFakePlaces(shared),
-    // The till adapter is real in every environment: cash taken at the desk is recorded, not sent
-    // anywhere, so there is nothing a fake would add and a fake would make the ledger fictional.
-    till: createManualPaymentProvider({ log, now }),
-    cards:
-      config.PAYMENT_PROVIDER === 'real'
-        ? notImplemented('card-gateway')
-        : createFakeCardGateway(shared),
     llm: config.LLM_PROVIDER === 'real' ? notImplemented('llm') : createFakeLlm({ log, failures }),
     llmFor(setting: unknown): LlmProvider {
       const name = llmProviderName(setting)

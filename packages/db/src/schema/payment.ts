@@ -20,6 +20,14 @@ import { packageSale } from './package.ts'
  * Every way the business takes money, with the account each one is debited to. Mirrors
  * `0068_payment_tender.sql`.
  *
+ * **Its plural sibling `./payments.ts` is a different subject and the filenames are one letter apart.**
+ * This file is the TILL side: what was tendered against an issued invoice by somebody holding the money, so
+ * a `payment` row always names a document and always means the money is in hand. `payments.ts` mirrors 0106
+ * and is the GATEWAY side — `payment_intent` and its append-only transactions — where an authorisation is a
+ * reservation, a declined one is money that never moved, and there may be no document yet. The two share
+ * {@link tenderType} deliberately (0105's decision) so that one map from instrument to posting account
+ * serves both.
+ *
  * This is the registry M-TILL-06 deferred to M-TILL-07: `payment.tender_kind` was a CHECK over three
  * literals and is now a foreign key into this table. The constraint keeps its NAME,
  * `payment_tender_kind_known`, because the name is the contract a caller recognises "that is not a

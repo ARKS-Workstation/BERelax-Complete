@@ -253,6 +253,31 @@ export const ROUTES = [
       'the request body — and exempt from the proxy, because a 301 turns its POST into a GET.',
   },
   {
+    id: 'payments-intent',
+    path: '/api/v1/payments/intent',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'Y-PAY-02s payment intent endpoint: where an authorisation is asked for, and where a browser coming ' +
+      'back from the gateway is told that its word moves nothing. Two actions on one URL because they are ' +
+      'one conversation about one intent, and the callback issues no UPDATE at all - it looks for a stored ' +
+      'gateway movement, writes an audit row either way, and returns the state unchanged (ADR 0056, and ' +
+      '0106s ZY162 is what makes that structural rather than a property of the handler). Under /api for ' +
+      'the three reasons the endpoints above record - the proxy exemption turns a mistyped trailing slash ' +
+      'into a 308 rather than a 301 that would downgrade this POST to a GET with the body dropped, a ' +
+      'payment is not a document so a locale would give one endpoint two URLs, and an endpoint under /api ' +
+      'is somewhere a curl naturally goes, which is what makes the refusals assertions about the endpoint ' +
+      'rather than about a screen. Dynamic by necessity: it claims an idempotency key, calls a gateway and ' +
+      'writes rows on every request. Not indexable, and covered by the proxy exemption rather than by a ' +
+      'header, exactly like the four endpoints above. Nothing is read from the query string - not the ' +
+      'actor, not the intent id - because a payment instruction in a URL is in every access log, every ' +
+      'Referer and every browser history, and a link is forwardable in a way a POST body is not.',
+  },
+  {
     id: 'preferences',
     path: '/api/v1/preferences',
     kind: 'handler',

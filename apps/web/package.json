@@ -18,6 +18,7 @@
     "@berelax/google": "workspace:*",
     "@berelax/media": "workspace:*",
     "@berelax/messaging": "workspace:*",
+    "@berelax/payments": "workspace:*",
     "@berelax/providers": "workspace:*",
     "@berelax/shared": "workspace:*",
     "@berelax/ui": "workspace:*",

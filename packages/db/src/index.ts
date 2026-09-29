@@ -915,6 +915,46 @@ export {
   verifyOtpCode,
 } from './repositories/otp.ts'
 /*
+  Y-PAY-02's payment intents (0106). Rows only, for the payroll block's reason one paragraph down: the
+  lifecycle table, the amount fold and the projection from events to transaction rows are all
+  `packages/core/src/payments/`, this package may not import it, and `packages/payments/src/intent.ts` is
+  where the halves meet.
+
+  `claimPaymentIntent` inserts the row — and so claims the idempotency key — BEFORE anything calls the
+  gateway, and reports which of the two happened. That ordering is the acceptance line "a repeated
+  idempotency key returns the original intent and the adapter records zero additional calls": deduplicating
+  on the gateway's answer instead would still return the first snapshot, because the adapter is idempotent
+  too, and would still reach it — so the replay would appear in the operator-visible call log as a second
+  authorisation.
+
+  `deriveFiguresFromTransactions` is a SECOND derivation of the figures `@berelax/core` already computes, and
+  the duplication is deliberate: the acceptance line is a claim about two independent derivations agreeing,
+  and one of them has to be over the stored rows.
+
+  There is no delete anywhere and no update beyond `applyPaymentIntentMovement` and `recordGatewayIntentId`.
+  A transaction row is append-only for every role (ZY161), which makes the intent it references undeletable
+  too, so a suite over these tables asserts a DELTA and never a total (brief rule 9).
+*/
+export {
+  applyPaymentIntentMovement,
+  claimPaymentIntent,
+  type DerivedIntentFigures,
+  deriveFiguresFromTransactions,
+  isPaymentIntentRule,
+  PAYMENT_INTENT_SQLSTATE,
+  type PaymentIntentClaim,
+  type PaymentIntentClaimResult,
+  type PaymentIntentMovement,
+  type PaymentIntentRow,
+  type PaymentIntentRule,
+  type PaymentIntentTransactionRow,
+  paymentIntentError,
+  readPaymentIntent,
+  readPaymentIntentByKey,
+  readPaymentIntentTransactions,
+  recordGatewayIntentId,
+} from './repositories/payment-intent.ts'
+/*
   P-HR-12's payroll side (0104). Reads and writes only: the arithmetic is
   `packages/core/src/hr/payroll.ts`'s and the WPS layout is `packages/core/src/hr/wps-sif.ts`'s, this
   package may not import either, and `packages/hr` is where the halves meet.
@@ -3503,6 +3543,61 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // run first", "record an attendance correction" and "name a liability account" are four different things to
 // go and do, which is 0061's argument for a private code at all.
 //
+// 106 is Y-PAY-02: `payment_intent`, its append-only `payment_intent_transaction`, and five refusals. The
+// two tables are ordinary and the refusals are the unit. ZY162 is the one worth reading — an intent's state
+// or any of its three figures may change only by advancing `last_transaction_id` to a NEW transaction row
+// belonging to that intent — because it is where "the gateway, never the client, is the only thing that can
+// move an intent" stops being a sentence in a route handler. ADR 0056 records the decision and the division
+// of labour with `@berelax/core`: WHICH state an event reaches is the lifecycle table's and has one home,
+// and WHETHER anything may move at all is the database's. Restating the (state, event) table in plpgsql was
+// the obvious alternative and is the two-homes-for-one-fact defect ADR 0043 is itself about.
+//
+// There is one transaction row per gateway EVENT and not one per movement, and the reason is that ZY162 has
+// to be total. `action_required` and `authorisation_failed` move the state while moving no money, so a
+// movements-only table left those two transitions with no row to name — and the exemption that would have
+// fixed it would itself have been a second copy, in plpgsql, of which events move money. Three of the six
+// kinds carry zero fils by CHECK, which is `INTENT_EVENT_CARRIES_AMOUNT` in `@berelax/core` as schema, in
+// both directions: a zero-fils capture reads as a settled movement for nothing, and a figure on a `voided`
+// row reads as a partial release, which does not exist.
+//
+// ZY163 recomputes the header from the rows at COMMIT — MAX over the `authorised` rows, SUM over `captured`
+// and `refunded`. The maximum is not a typo and it is the one arithmetic mistake here that makes an
+// over-capture look legal: a gateway increasing a reservation reports the new TOTAL rather than the
+// increment, so summing authorisation rows doubles the ceiling every capture is checked against. `reduceIntent`
+// in `@berelax/core` takes the largest authorisation it has seen for the same reason, and 0106's check is a
+// deliberately INDEPENDENT second derivation of the same figures, which is what makes the acceptance line
+// "the intent's derived balance equals the sum of its append-only transaction rows" a claim about two
+// answers agreeing rather than about one answer being reread.
+//
+// Deferred rather than immediate for 0018's reason: the row and the header are separate statements, so an
+// intent is transiently out of step with its rows by construction and an IMMEDIATE trigger would reject
+// every legal write. And a consequence that surprised this unit's own probe — the header-lies case is
+// normally caught by ZY162 first, because a figure changing with no new row is already a refusal; reaching
+// ZY163 needs a genuine new row AND a header that disagrees with it, which is what
+// `payment-intent.itest.ts` drives.
+//
+// **Neither table can be emptied by anybody, and that is the design.** ZY161 refuses DELETE on a
+// transaction row for every role including the owner, and `payment_intent_transaction.payment_intent_id`
+// references the intent, so the intent is undeletable too. That is the intended reading of P-HR-07's
+// mechanical test: the child cannot be deleted to release the pin, and pinning the parent is the POINT
+// rather than a cost, because an intent that touched money is evidence and not a draft. So the suites here
+// assert a DELTA and never a total (brief rule 9), nothing is declared in
+// `packages/db/src/suite-table-declarations.ts`, and W-SYS-13's scan has nothing to say about them.
+//
+// `reference` is text and not a foreign key into `invoice`, unlike `payment.invoice_id` which is one. The
+// difference is definitional rather than convenient: a tender is BY DEFINITION against an issued document,
+// and an intent is authorised before there is one — a deposit on a booking — so the key would have to be
+// nullable, and a nullable reference to a document that does not exist yet is not the fact the column
+// records.
+//
+// Five private SQLSTATEs, `ZY161`-`ZY165`, from the band `ZY161`-`ZY170` issued to this unit and allocated
+// through `packages/db/src/sqlstate-registry.ts` (ADR 0043). Five and not one because each has a different
+// runbook answer: "write a new row", "find the gateway movement that justifies this", "your figures
+// disagree with your rows", "this is a redelivery, answer 200" and "that tender is taken at the desk" are
+// five different things to go and do. `ZY166`-`ZY170` are unused and deliberately NOT registered — an entry
+// for a code no migration raises is what direction 3 of the gate refuses, and that is the direction which
+// lets the registry shrink.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
@@ -3532,4 +3627,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 105 as const
+export const SCHEMA_VERSION = 106 as const

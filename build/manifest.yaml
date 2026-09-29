@@ -19818,16 +19818,22 @@ units:
       this chain and has no consumer outside that package — Providers.till and Providers.cards are unused. It
       is left in place rather than removed, because removing it edits H02''s deliverable and its own
       conformance test. Y-PAY-02, which owns the intent surface, should retire Providers.till and
-      Providers.cards rather than choose between the two by accident. What IS shared is deliberate and
+      Providers.cards rather than choose between the two by accident. DONE by Y-PAY-02: both fields and the
+      PaymentProvider re-exports are gone, payments/manual.ts is deleted, and fake-gateway.ts is kept for
+      REFERENCE_MARKERS with a header saying it is superseded — see that unit''s NOTE for the two defects the
+      removal found in H02''s own conformance test. What IS shared is deliberate and
       imported by subpath (the providers barrel is banned outside a transport): REFERENCE_MARKERS via the new
       @berelax/providers/payments entry point, FailureScript via /failure, notImplemented via the new
       /not-implemented.'
-    - 'NOTE: deferred to Y-PAY-02 — packages/core/src/payments/state.test.ts is deliberately left
+    - 'NOTE: deferred to Y-PAY-02 (DEFERRAL SATISFIED) — packages/core/src/payments/state.test.ts was deliberately left
       unwritten and its filename free. This unit declares INTENT_TRANSITIONS as a total
       Record<state, Record<event, state | refused>> so that Y-PAY-02''s exhaustive test can assert it total
       over the enum product, and ships nextIntentState''s named IntentTransitionRefused for every pair
       outside it; the exhaustiveness assertion itself is Y-PAY-02''s acceptance line. This unit''s own
-      lifecycle tests are in state.transitions.test.ts and state.property.test.ts.'
+      lifecycle tests are in state.transitions.test.ts and state.property.test.ts. Y-PAY-02 wrote
+      state.test.ts: the 6x6 table stated independently in the test and compared cell by cell, all 36 cells
+      perturbed one at a time as the control, and every refused pair asserted to throw IntentTransitionRefused
+      by class, name, message and details.eventId. Gate cases 134a-134d are its known-bad fixtures.'
     - 'NOTE: deferred to Y-PAY-04 — webhook signature verification, the timestamp tolerance window and
       exactly-once-per-handler delivery. The port declares no verify() method: this unit provides the event
       SHAPE (PaymentIntentEvent, GatewayEventDelivery, an opaque GatewayEventCursor) and eventsSince(cursor)
@@ -19868,7 +19874,7 @@ units:
       keys on the public surface, and an exhaustively specified state machine. The gateway, never the client,
       is the only thing that can move an intent.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F06
@@ -19885,11 +19891,83 @@ units:
       test
     - a client-supplied success callback with no matching gateway transaction leaves the intent in its prior
       state and writes an audit_event, asserted by test
+    - 'NOTE: the transaction table is `payment_intent_transaction`, not `payment_transaction`. `payment`
+      (0063) already means ONE TENDER against an issued invoice, keyed in at the till, so
+      `payment_transaction` beside it reads as "a transaction against a payment" — which these rows are not.
+      They are movements against a gateway INTENT, which may have no invoice yet and may never acquire one.'
+    - 'NOTE: there is one transaction row per gateway EVENT and not one per movement, and three of the six
+      kinds carry zero fils. That is what makes ZY162 total: `action_required` and `authorisation_failed` move
+      an intent''s state while moving no money, so a movements-only table left those two transitions with no
+      row to name — and the exemption that would have fixed it would itself have been a second copy, in
+      plpgsql, of which events move money. ADR 0056 records it.'
+    - 'NOTE: `unique (gateway, gateway_intent_id)` was written, applied and REMOVED, and what it protected is
+      now partly Y-PAY-05''s. A gateway intent id is unique within a MERCHANT ACCOUNT; `gateway` holds an
+      adapter name, and no provider or account is chosen (OPEN-QUESTIONS `Y7-mcc`), so the qualifying column
+      cannot be added without inventing a merchant account id — which brief rule 15 refuses. The over-claim
+      failed on day one rather than on the day a second account is opened: the H02 fake numbers its intents
+      from 1 per process, so the SECOND run of `payment-intent.itest.ts` against one database collided on ids
+      the first run had stored, and because nothing here can be deleted no teardown could free them.
+      Double-counting WITHIN one intent is still shut by `unique (payment_intent_id, gateway_event_id)`; two
+      local intents against one remote intent is deferred to Y-PAY-05, whose acceptance line already
+      quarantines an intent the gateway does not recognise.'
+    - 'NOTE: the route is `apps/web/app/api/v1/payments/intent/` and not the `apps/web/app/api/payments/intent/`
+      this entry listed. Every other endpoint in the app is under `/api/v1`, and each one''s registry entry
+      argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
+      surface half-versioned. `handler.ts` beside `route.ts` is the split `app/api/v1/otp` uses, so the
+      integration suite drives the same code with a frozen clock and the fake gateway.'
+    - 'NOTE: deferred to Y-PAY-03 — authentication on the endpoint. The intent route''s audit actor is
+      `system` with the label `payments intent endpoint`, because nothing on this path is authenticated yet:
+      the checkout is Y-PAY-03''s and inventing a staff identity would put a plausible actor on an audit row
+      nobody stood behind (brief rule 15). The response also deliberately withholds `gatewayIntentId` and any
+      customer-action URL — an opaque token a browser may hold is Y-PAY-03''s to define, and returning one
+      today would make it a contract before anybody decided what it may contain.'
+    - 'NOTE: deferred to Y-PAY-04 — the webhook endpoint itself, signature verification and the timestamp
+      window. The STORAGE half of exactly-once is here: `unique (payment_intent_id, gateway_event_id)` plus
+      ZY164 as a NAMED refusal, so a handler can answer 200 to a redelivery instead of 500 — a bare 23505
+      cannot be told from the intent''s own idempotency-key violation, which means the opposite thing.
+      `applyGatewayEvents` folds new deliveries together with the stored rows, so out-of-order and repeated
+      deliveries converge by construction.'
+    - 'NOTE: no test port band was used. The band `17_000` allocated to this unit is unused and unclaimed,
+      which `apps/web/src/test-ports.test.ts` requires of a band nobody declares. Nothing here starts a
+      server: `payments-intent-route.itest.ts` calls the handler directly, which is `otp-route.itest.ts`''s
+      arrangement — no assertion in this unit is about a response header, a redirect or a rendered page, so a
+      `next start` would add a build, a port and a server to prove nothing extra.'
+    - 'NOTE: ZY166-ZY170 of the allocated band are unused and are NOT registered — an entry for a code no
+      migration raises is what direction 3 of ADR 0043''s gate refuses, and that is the direction which lets
+      the registry shrink. Gate case 134l is the known-bad fixture for it.'
+    - 'NOTE: retired H02''s superseded payment port, which Y-PAY-01 asked this unit to do rather than let a
+      later unit choose between the two by accident. `Providers.till` and `Providers.cards` are gone from
+      `packages/providers/src/registry.ts`, along with the `PaymentProvider` type re-exports from that
+      package''s barrel, so the superseded port is no longer reachable from any registry;
+      `packages/providers/src/payments/manual.ts` is DELETED because `createManualGateway` in
+      `@berelax/payments` replaces it outright. `fake-gateway.ts` stays, with a header saying it is superseded:
+      `REFERENCE_MARKERS` is the shared steering vocabulary Y-PAY-01''s adapter imports rather than restates (a
+      second spelling of `-3DS` would be a screenshot harness that silently stopped exercising the challenge
+      path), and its behaviours are the only written record of what Y-PAY-03 and Y-PAY-08 must reproduce. Two
+      defects in H02''s own conformance test were found and fixed by the removal: its EXERCISES table was
+      indexed POSITIONALLY, so dropping two entries silently re-pointed `EXERCISES[7]` to undefined and
+      `await undefined?.call(...)` would have passed as a no-op — now looked up by key; and `INJECTABLE`
+      filtered out the `till` key, which after the removal could match nothing, so a filter that had stopped
+      filtering is removed rather than left. Its `PAYMENT_PROVIDER: ''real''` refusal assertion moved to
+      `SMS_PROVIDER`, because that registry no longer reads the payments key at all — the payments half is
+      `packages/payments/src/registry.test.ts`, which gate case 133v already holds in place.'
     files:
-    - packages/db/migrations/00XX-payment-intent.sql
+    - packages/db/migrations/0106_payment_intent.sql
     - packages/db/src/schema/payments.ts
+    - packages/db/src/repositories/payment-intent.ts
+    - packages/core/src/payments/transactions.ts
     - packages/core/src/payments/state.test.ts
-    - apps/web/app/api/payments/intent/route.ts
+    - packages/core/src/payments/transactions.property.test.ts
+    - packages/payments/src/intent.ts
+    - apps/web/app/api/v1/payments/intent/route.ts
+    - apps/web/app/api/v1/payments/intent/handler.ts
+    - apps/web/src/payments-intent-route.itest.ts
+    - packages/fixtures/src/payment-intent.itest.ts
+    - docs/adr/0056-only-a-gateway-transaction-row-may-move-a-payment-intent.md
+    - scripts/test-gates.mjs
+    - packages/providers/src/registry.ts
+    - packages/providers/src/conformance.test.ts
+    - packages/providers/src/behaviour.test.ts
   - id: Y-PAY-03
     order: 195
     title: SAQ-A hosted-fields checkout and the PAN-never-touched gate

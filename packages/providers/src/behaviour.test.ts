@@ -1,9 +1,8 @@
 import { parseConfig } from '@berelax/config'
-import { aed, smsSegmentPrice } from '@berelax/core'
+import { smsSegmentPrice } from '@berelax/core'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { BOUNCE_MARKER, COMPLAINT_MARKER } from './email/fake-resend.ts'
 import { REVIEW_FIXTURES } from './google/fake-google.ts'
-import { REFERENCE_MARKERS } from './payments/fake-gateway.ts'
 import { createProviders, type Providers } from './registry.ts'
 import { UNDELIVERABLE_SUFFIX } from './sms/fake-smsala.ts'
 
@@ -313,129 +312,6 @@ describe('Search Console — the rare-query gap, which no report should silently
   it('honours rowLimit, as the real API does', async () => {
     const rows = await providers.searchConsole.queryAnalytics({ ...range, rowLimit: 2 })
     expect(rows).toHaveLength(2)
-  })
-})
-
-describe('the card gateway — the paths a checkout actually has to handle', () => {
-  const create = (reference: string, key: string) =>
-    providers.cards.createIntent({
-      amount: aed(350),
-      method: 'card_online',
-      idempotencyKey: key,
-      reference,
-    })
-
-  it('returns requires_action for a 3DS challenge, settling nothing', async () => {
-    const intent = await create(`BK-1${REFERENCE_MARKERS.requiresAction}`, 'a1')
-    expect(intent.status).toBe('requires_action')
-    expect(intent.actionUrl).toBeDefined()
-    expect(intent.settledAtIso).toBeUndefined()
-  })
-
-  it('fails outright on a decline, and emits the event', async () => {
-    const intent = await create(`BK-2${REFERENCE_MARKERS.declined}`, 'd1')
-    expect(intent.status).toBe('failed')
-    const events = await providers.cards.drainEvents()
-    expect(events.some((event) => event.type === 'payment.failed')).toBe(true)
-    await expect(providers.cards.confirmIntent(intent.intentId)).rejects.toThrow()
-  })
-
-  it('replays every event, because every real gateway does', async () => {
-    const intent = await create('BK-3', 'r1')
-    await providers.cards.confirmIntent(intent.intentId)
-    const events = await providers.cards.drainEvents()
-    const ids = events.map((event) => event.eventId)
-    // A system that only ever sees one copy of an event has an idempotency bug it has not met yet.
-    expect(ids.length).toBeGreaterThan(new Set(ids).size)
-  })
-
-  it('opens a dispute against a settled intent nobody is watching', async () => {
-    const intent = await create(`BK-4${REFERENCE_MARKERS.disputed}`, 'x1')
-    await providers.cards.confirmIntent(intent.intentId)
-    const events = await providers.cards.drainEvents()
-    expect(events.some((event) => event.type === 'dispute.opened')).toBe(true)
-  })
-
-  it('refunds partially, and accumulates', async () => {
-    const intent = await create('BK-5', 'p1')
-    await providers.cards.confirmIntent(intent.intentId)
-    await providers.cards.refund({
-      intentId: intent.intentId,
-      amount: aed(100),
-      reason: 'one treatment cancelled',
-    })
-    await providers.cards.refund({
-      intentId: intent.intentId,
-      amount: aed(200),
-      reason: 'second treatment cancelled',
-    })
-    await expect(
-      providers.cards.refund({ intentId: intent.intentId, amount: aed(100), reason: 'too much' }),
-    ).rejects.toThrow()
-  })
-
-  it('refuses to refund an intent that never settled', async () => {
-    const intent = await create(`BK-6${REFERENCE_MARKERS.requiresAction}`, 'u1')
-    await expect(
-      providers.cards.refund({ intentId: intent.intentId, amount: aed(10), reason: 'no' }),
-    ).rejects.toThrow(/has not settled/)
-  })
-
-  it('refuses cash, which belongs to the till adapter', async () => {
-    await expect(
-      providers.cards.createIntent({
-        amount: aed(350),
-        method: 'cash',
-        idempotencyKey: 'cash-1',
-        reference: 'BK-7',
-      }),
-    ).rejects.toThrow(/card gateway takes/)
-  })
-})
-
-describe('the till adapter — real, and deliberately narrow', () => {
-  it('settles immediately, because money at the desk has no pending state', async () => {
-    const intent = await providers.till.createIntent({
-      amount: aed(350),
-      method: 'cash',
-      idempotencyKey: 't1',
-      reference: 'BK-8',
-    })
-    expect(intent.status).toBe('succeeded')
-    expect(intent.settledAtIso).toBe(CLOCK)
-  })
-
-  it('emits no asynchronous events, because cash does not settle later', async () => {
-    await providers.till.createIntent({
-      amount: aed(350),
-      method: 'cash',
-      idempotencyKey: 't2',
-      reference: 'BK-9',
-    })
-    expect(await providers.till.drainEvents()).toHaveLength(0)
-  })
-
-  it('refuses an online card, which belongs to a gateway', async () => {
-    await expect(
-      providers.till.createIntent({
-        amount: aed(350),
-        method: 'card_online',
-        idempotencyKey: 't3',
-        reference: 'BK-10',
-      }),
-    ).rejects.toThrow(/manual till adapter takes/)
-  })
-
-  it('refuses to refund more than was taken', async () => {
-    const intent = await providers.till.createIntent({
-      amount: aed(350),
-      method: 'cash',
-      idempotencyKey: 't4',
-      reference: 'BK-11',
-    })
-    await expect(
-      providers.till.refund({ intentId: intent.intentId, amount: aed(400), reason: 'oops' }),
-    ).rejects.toThrow(/exceeds/)
   })
 })
 
