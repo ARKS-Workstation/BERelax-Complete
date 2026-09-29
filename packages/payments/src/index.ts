@@ -26,6 +26,32 @@
  * `registry.till.name`, which cannot name a gateway this configuration did not build.
  */
 export type { FakeCardGateway, FakeCardGatewayOptions } from './adapters/fake-card.ts'
+/**
+ * The intent service: where the pure lifecycle in `@berelax/core` and the durable rows in `@berelax/db` meet.
+ *
+ * Exported from the package root, unlike the conformance suite, because this IS the surface a consumer uses:
+ * `apps/web/app/api/v1/payments/intent` calls `createPaymentIntent` and nothing else. It constructs no
+ * adapter — every function takes a `PaymentGateway` the registry built — so
+ * `payment-gateway-adapters-only-through-the-registry` is satisfied rather than exempted.
+ */
+export {
+  applyGatewayEvents,
+  type ClientCallbackClaim,
+  type ClientCallbackOutcome,
+  type ClientCallbackResult,
+  type CreatePaymentIntentRequest,
+  createPaymentIntent,
+  capturePaymentIntent,
+  type IntentOutcome,
+  type MovePaymentIntentRequest,
+  type PaymentIntentResult,
+  type RefundPaymentIntentRequest,
+  refundPaymentIntent,
+  voidPaymentIntent,
+  nextStateForStoredIntent,
+  recordClientCallback,
+  STORED_INITIAL_STATE,
+} from './intent.ts'
 export { createRecordSink } from './record-sink.ts'
 export {
   createPaymentGateways,

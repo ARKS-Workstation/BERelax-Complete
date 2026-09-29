@@ -1682,6 +1682,46 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_completed_payroll_run_matches_its_payslips'],
     translators: ['packages/db/src/repositories/payroll.ts'],
   },
+  // ZY161-ZY165 are Y-PAY-02's, five of the band ZY161-ZY170. Five and not one because each has a different
+  // runbook answer: "write a new row", "find the gateway movement that justifies this", "your figures
+  // disagree with your rows", "this is a redelivery, answer 200" and "that tender is taken at the desk" are
+  // five different things to go and do, which is 0061's argument for a private code at all. ZY166-ZY170 are
+  // unused and deliberately absent: an entry for a code no migration raises is direction 3.
+  {
+    code: 'ZY161',
+    rule: 'A payment intent transaction row may not be updated or deleted.',
+    migration: '0106',
+    raisedBy: ['refuse_payment_intent_transaction_change'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  {
+    code: 'ZY162',
+    rule: "A payment intent's state or figures may change only by naming a new transaction row of its own.",
+    migration: '0106',
+    raisedBy: ['assert_payment_intent_moves_with_a_transaction'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  {
+    code: 'ZY163',
+    rule: "A payment intent's three figures must equal the sum of its append-only transaction rows.",
+    migration: '0106',
+    raisedBy: ['assert_payment_intent_matches_its_transactions'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  {
+    code: 'ZY164',
+    rule: 'One gateway event may be recorded against one payment intent only once.',
+    migration: '0106',
+    raisedBy: ['refuse_duplicate_payment_intent_event'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  {
+    code: 'ZY165',
+    rule: "A payment intent's instrument must be a tender kind whose adapter is the gateway.",
+    migration: '0106',
+    raisedBy: ['assert_payment_intent_instrument_is_a_gateway_kind'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
