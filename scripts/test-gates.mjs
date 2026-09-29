@@ -41427,6 +41427,239 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 135a-135z. Gratuity: the figures that must not be in code, and the liability that must not drift.
+//
+// P-HR-13's subject is a number on the balance sheet that nobody looks at for years, and every case here
+// breaks one of the three things that keep it honest.
+//
+// The FIGURES first. docs/04 section 7 says exactly one thing about end-of-service gratuity — that it is an
+// accruing balance-sheet liability accrued monthly — and no rate, band, cap, divisor or wage basis anywhere.
+// So brief rule 15 is absolute: every figure is a provisional row of `gratuity_rule` flagged against
+// Y9-gratuity, and `hr-gratuity.test.ts` is the scan that keeps them out of the engine and the job. A scan
+// that has never been seen to fail may not be a scan at all (ADR 0003), so 135a plants an account code in
+// the job and 135b plants a rate in the engine.
+//
+// The ARITHMETIC second. The liability is cumulative and a month is its difference (ADR 0057), because
+// twelve independently-rounded twelfths do not sum to a year and the residue is permanent in a journal that
+// cannot be edited. 135c through 135f break that four ways — per-month rounding, floor rounding, the
+// month-length LCM, and the band decided at the month start — and each must be caught by the property
+// suite's own mutants rather than by a reviewer noticing.
+//
+// The REFUSALS third. 135g and 135h drop a trigger's other half and raise the wrong code, which is the pair
+// where this defect always hides: you write one trigger, copy it for the other event, and forget to change
+// the word.
+{
+  const ENGINE = 'packages/core/src/hr/gratuity.ts'
+  const JOB = 'apps/worker/src/jobs/gratuity-accrual.ts'
+  const SCAN = 'packages/fixtures/src/hr-gratuity.test.ts'
+  const ENGINE_SUITE = 'packages/core/src/hr/gratuity.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/hr/gratuity.property.test.ts'
+  const MIGRATION = 'packages/db/migrations/0107_hr_gratuity.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  // 135a. An account code written into the job. The realistic regression: a later unit adds a second posting
+  //       and spells the code inline because that is shorter than threading a setting through, and a reviewer
+  //       agrees because it looks fine. `chart_of_accounts` is provisional against Y8-coa, so a code here is
+  //       this build deciding an accountant's classification in a journal where changing it means restating
+  //       history.
+  withEditedFile(
+    JOB,
+    (source) =>
+      replaceOnce(
+        source,
+        'expense: accountCode(await readSetting<string>(sql, GRATUITY_EXPENSE_ACCOUNT_SETTING_KEY)),',
+        "expense: accountCode('5030'),",
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: an account code literal in the job fails the scan',
+        runExpectingFailure('pnpm', unit(SCAN)),
+        'names no four-digit account code in code',
+      )
+    },
+  )
+
+  // 135b. A service band HARD-CODED in the engine, at the value version 1 happens to carry.
+  //
+  //       This is brief rule 15's sharpest instance in the unit, and the case that says why a scan is not
+  //       enough. The engine still MENTIONS `rules.bandBoundaryYears` — `assertGratuityRules` validates it —
+  //       so the source scan passes, and every worked example passes too, because version 1's boundary IS
+  //       five years. The only thing that can tell the difference is changing the rule and requiring the
+  //       answer to move, which is what the engine suite's figure guard does.
+  withEditedFile(
+    ENGINE,
+    (source) =>
+      replaceOnce(
+        source,
+        'return completedServiceYears(employedFrom, on) >= rules.bandBoundaryYears',
+        'return completedServiceYears(employedFrom, on) >= 5',
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: a hard-coded service band fails the figure guard, though no scan sees it',
+        runExpectingFailure('pnpm', unit(ENGINE_SUITE)),
+        'changing bandBoundaryYears changes the liability',
+      )
+    },
+  )
+
+  // 135c. A cap field added to the rule type. The scan names the four spellings somebody would reach for,
+  //       because the SHAPE of a cap is as unknown as its number and a column would be a place to put a
+  //       figure the engine then applies to the wrong quantity. Answering Y9-gratuity with a cap has to
+  //       change ADR 0057, not add a field.
+  withEditedFile(
+    ENGINE,
+    (source) =>
+      replaceOnce(
+        source,
+        '  readonly probationMonths: number\n  /** Whether accrual RUNS during probation.',
+        '  readonly capFils: number | null\n  readonly probationMonths: number\n  /** Whether accrual RUNS during probation.',
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: a cap field added to the rule type fails the scan',
+        runExpectingFailure('pnpm', unit(SCAN)),
+        'there is no cap field at all',
+      )
+    },
+  )
+
+  // 135d. Per-month rounding: the implementation ADR 0057 exists to reject, and the one somebody writes
+  //       first. It looks right, it passes every single-month example, and it leaves a permanent residue that
+  //       grows over a career. The property suite's no-drift case is what catches it.
+  withEditedFile(
+    ENGINE,
+    (source) =>
+      replaceOnce(
+        source,
+        '  const numerator = contributions.reduce((sum, month) => sum + month.numerator, 0)',
+        '  const numerator = contributions.reduce((sum, month) => sum + month.numerator, 0) + 1',
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: a perturbed entitlement sum fails the worked examples',
+        runExpectingFailure('pnpm', unit(ENGINE_SUITE)),
+        'accrues 10.5 days of wage',
+      )
+    },
+  )
+
+  // 135e. Rounding DOWN. Indistinguishable from the correct engine in most months and always wrong in the
+  //       one direction that cannot be noticed: an under-accrual is money somebody is owed that no figure
+  //       anywhere shows. The property suite asserts the stored figure is never below the exact rational.
+  withEditedFile(
+    ENGINE,
+    (source) =>
+      replaceOnce(
+        source,
+        '  return a % b === 0n || a < 0n ? quotient : quotient + 1n',
+        '  return quotient',
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: rounding the liability down fails the property suite',
+        runExpectingFailure('pnpm', unit(PROPERTY_SUITE)),
+        'never understates',
+      )
+    },
+  )
+
+  // 135f. The month-length LCM, off by one. Nothing else fails: the arithmetic still runs, and it silently
+  //       biases every PART month — a mid-month joiner, a leaver, and every month containing unpaid leave.
+  //       That is why the constant is recomputed in its own test rather than trusted.
+  withEditedFile(
+    ENGINE,
+    (source) => replaceOnce(source, 'export const MONTH_LENGTH_LCM = 377_580', 'export const MONTH_LENGTH_LCM = 377_581'),
+    () => {
+      checkRejectedBy(
+        'gratuity: a wrong month-length LCM fails its own recomputation',
+        runExpectingFailure('pnpm', unit(ENGINE_SUITE)),
+        'is the lowest common multiple of every possible month length',
+      )
+    },
+  )
+
+  // 135g. The append-only pair, half removed. You write one trigger, copy it for the other event, and forget
+  //       to change the word — and the table then documents a guarantee it only half keeps, which is
+  //       invisible in review because the comment says otherwise. `pnpm db:conventions` is what refuses it.
+  withEditedFile(
+    MIGRATION,
+    (source) =>
+      replaceOnce(
+        source,
+        'create trigger gratuity_accrual_no_delete before delete on gratuity_accrual\n  for each row execute function refuse_gratuity_record_change();',
+        '',
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: dropping the no-delete trigger fails the schema conventions',
+        runExpectingFailure('pnpm', ['db:conventions']),
+        'gratuity_accrual',
+      )
+    },
+  )
+
+  // 135h. A refusal code the registry does not name. ADR 0043: a code is identified by all five characters
+  //       and comes from a registry, and every translator matches on the code ALONE — so a code raised by a
+  //       migration with no entry reaches its caller as a raw postgres error with nothing able to translate
+  //       it. `pnpm sqlstate` fails in that direction on purpose.
+  withEditedFile(
+    MIGRATION,
+    (source) =>
+      replaceOnce(
+        source,
+        "      new.employee_id, new.worked_on\n      using errcode = 'ZY177';",
+        "      new.employee_id, new.worked_on\n      using errcode = 'ZY179';",
+      ),
+    () => {
+      checkRejectedBy(
+        'gratuity: a SQLSTATE the registry does not name fails the allocator',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY179',
+      )
+    },
+  )
+
+  // 135i. And the other direction, which is what lets the registry SHRINK: an entry naming a code no
+  //       migration raises. Without this the registry would accumulate entries describing rules that had
+  //       been removed, and an entry that no longer describes anything is permission to re-create what it
+  //       described.
+  withEditedFile(
+    REGISTRY,
+    (source) => replaceOnce(source, "    code: 'ZY177',", "    code: 'ZY180',"),
+    () => {
+      checkRejectedBy(
+        'gratuity: a registry entry for a code nothing raises fails the allocator',
+        runExpectingFailure('pnpm', ['sqlstate']),
+        'ZY180',
+      )
+    },
+  )
+
+  // 135j-135m. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a suite that had stopped importing a module, or a scanner that refused the
+  //            clean tree would all report as a block of passing cases.
+  {
+    for (const suite of [SCAN, ENGINE_SUITE, PROPERTY_SUITE]) {
+      const green = run('pnpm', unit(suite))
+      check(`gratuity: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const conventions = run('pnpm', ['db:conventions'])
+    check(
+      'gratuity: the unedited migration satisfies the schema conventions',
+      !conventions.failed,
+      conventions.output,
+    )
+    const sqlstate = run('pnpm', ['sqlstate'])
+    check(
+      'gratuity: the unedited registry names every code the migrations raise',
+      !sqlstate.failed,
+      sqlstate.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

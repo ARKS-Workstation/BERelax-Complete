@@ -14,6 +14,7 @@ import {
   correctGratuityOverAccrual,
   employedDaysInMonth,
   GRATUITY_ACCRUAL_SOURCE,
+  GRATUITY_WAGE_BASES,
   type GratuityAccounts,
   type GratuityRules,
   gratuityAccrualEntry,
@@ -524,6 +525,60 @@ describe('assertGratuityRules', () => {
     expect(() => assertGratuityRules({ ...PROVISIONAL_V1, wageBasis: 'total' as never })).toThrow(
       UnusableGratuityRules,
     )
+  })
+})
+
+describe('every figure comes from the RULE and not from this module', () => {
+  /*
+   * The structural guard on brief rule 15, and the one that catches a hard-coded figure.
+   *
+   * A scan can prove the engine does not SPELL a rate. It cannot prove the engine READS one: an engine that
+   * compared against a literal `5` while still mentioning `rules.bandBoundaryYears` elsewhere would pass every
+   * scan and every worked example, because version 1's boundary IS five years. The only thing that can tell
+   * the difference is changing the rule and requiring the answer to move.
+   *
+   * So each case below perturbs ONE field and asserts the liability changes. That is brief rule 3 applied to a
+   * policy row — pair each assertion with a control that must fail — and gate case 135b plants exactly this
+   * hard-coding to prove these cases fire.
+   */
+  const SERVICE = { employedFrom: localDate('2019-01-01') }
+  const at = (rules: GratuityRules, asOf = '2026-12-31'): number =>
+    gratuityLiabilityAt({ rules, service: SERVICE, asOf: localDate(asOf), wageFils: WAGE }).fils
+
+  const baseline = () => at(PROVISIONAL_V1)
+
+  it.each([
+    ['daysPerYearFirstBand', { daysPerYearFirstBand: 22 }],
+    ['daysPerYearAfterBand', { daysPerYearAfterBand: 31 }],
+    ['bandBoundaryYears', { bandBoundaryYears: 3 }],
+    ['dailyWageDaysDivisor', { dailyWageDaysDivisor: 26 }],
+    ['probationMonths', { probationMonths: 12 }],
+    ['accruesDuringProbation', { accruesDuringProbation: true }],
+  ])('changing %s changes the liability', (_field, patch) => {
+    expect(at({ ...PROVISIONAL_V1, ...patch })).not.toBe(baseline())
+  })
+
+  it('changing the unpaid-leave exclusion changes the liability when there ARE unpaid days', () => {
+    // Separate from the table above, because this field can only move the answer for a service history that
+    // HAS unpaid leave — asserting it against a clean history would be a case that could never fail, which is
+    // the shape brief rule 22 is about.
+    const service = {
+      employedFrom: localDate('2019-01-01'),
+      unpaidLeaveDaysByMonth: new Map([['2020-03-01', 10]]),
+    }
+    const measure = (rules: GratuityRules): number =>
+      gratuityLiabilityAt({ rules, service, asOf: localDate('2026-12-31'), wageFils: WAGE }).fils
+    expect(measure({ ...PROVISIONAL_V1, unpaidLeaveDaysExcluded: false })).toBeGreaterThan(
+      measure({ ...PROVISIONAL_V1, unpaidLeaveDaysExcluded: true }),
+    )
+  })
+
+  it('the wage basis is carried through rather than chosen here', () => {
+    // The engine takes a WAGE, and which column that wage came from is the caller's reading of
+    // `rules.wageBasis`. So the claim here is the narrow true one: the basis travels on the rule and on every
+    // accrual row, and nothing in this module inspects a wage column.
+    expect(PROVISIONAL_V1.wageBasis).toBe('basic')
+    expect(GRATUITY_WAGE_BASES).toEqual(['basic', 'gross'])
   })
 })
 

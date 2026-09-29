@@ -255,7 +255,8 @@ create table gratuity_accrual (
 );
 
 comment on table gratuity_accrual is
-  'One month''s movement in one employee''s end-of-service gratuity liability, append-only (ZY171) and tied '
+  'One month''s movement in one employee''s end-of-service gratuity liability. Append-only: UPDATE and '
+  'DELETE raise (ZY171). Tied '
   'to the journal entry that carries it (ZY173). The month''s figure is the DIFFERENCE between the whole '
   'liability owed at the month end and what is already on the books, which is why cumulative_fils is stored '
   'beside accrued_fils — see ADR 0057. A correction is a dated reversal plus a replacement row naming this '
@@ -303,7 +304,8 @@ create table gratuity_settlement (
 );
 
 comment on table gratuity_settlement is
-  'A leaver''s accrued gratuity discharged, append-only (ZY171). settled_fils must equal the employee''s '
+  'A leaver''s accrued gratuity discharged. Append-only: UPDATE and DELETE raise (ZY171). settled_fils '
+  'must equal the employee''s '
   'LIVE accrued liability exactly (ZY175), so "the liability nets to zero fils" is enforced rather than '
   'hoped for, and the employment must have ended (ZY176). It credits a PAYABLE and never cash: the money '
   'leaves through the payroll run, which this migration does not touch.';
@@ -358,7 +360,8 @@ create table closed_period_labour_adjustment (
 
 comment on table closed_period_labour_adjustment is
   'Work done on a date in a CLOSED accounting period with no punch ever recorded, paid as a ledger-side '
-  'accrual, append-only (ZY171). Answers the gap Y9-attendance has carried since 0086: '
+  'accrual. Append-only: UPDATE and DELETE raise (ZY171). Answers the gap Y9-attendance has carried '
+  'since 0086: '
   'attendance_correction.corrects_event_id is NOT NULL, so a correction cannot invent a record. The AMOUNT '
   'is stated by the authoriser and never derived — deriving it means deciding what a day of a monthly '
   'salary is worth, which Y9-deductions records as unanswered, and a derived figure would be '

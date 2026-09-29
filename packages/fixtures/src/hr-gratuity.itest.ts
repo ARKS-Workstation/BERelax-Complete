@@ -1604,7 +1604,13 @@ describe('closed_period_labour_adjustment — P-HR-07’s gap, re-pointed here b
 
   it('leaves no lock behind', async () => {
     const locks = await sql<{ period_id: string }[]>`
-      select period_id from period_lock where period_id like ${'PHR13%'}
+      -- Prefixed PHR13- and not PHR13, deliberately. The pass suite in apps/worker owns PHR13JOB- locks and
+      -- one of them is PERMANENT: an accrual names it, so the foreign key refuses to let it go (ADR 0026 made
+      -- structural). The looser prefix matched it and this case failed about another suite's fixture, which is
+      -- brief rule 12 exactly and was found only by running the two files together. No backtick appears in
+      -- this comment: it lives inside a JS template literal and one would end it early, which is how the
+      -- first version of it broke the whole file's parse.
+      select period_id from period_lock where period_id like ${'PHR13-%'}
     `
     expect(locks).toEqual([])
   })

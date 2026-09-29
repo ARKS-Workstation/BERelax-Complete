@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { getDefinition } from '@berelax/config'
 import { ACCOUNTS, accountFor, STANDARD_SPA_CHART } from '@berelax/core'
 import {
   ACCOUNT_CODE_PATTERN,
@@ -10,7 +11,6 @@ import {
   GRATUITY_LIABILITY_ACCOUNT_SETTING_KEY,
   GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT_SETTING_KEY,
 } from '@berelax/shared'
-import { getDefinition } from '@berelax/config'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -52,16 +52,20 @@ const JOB = 'apps/worker/src/jobs/gratuity-accrual.ts'
 const sourceOf = (file: string): string => readFileSync(join(ROOT, file), 'utf8')
 
 /**
- * Everything that is not code, blanked: both kinds of comment and every string literal.
+ * Both kinds of comment, blanked. Strings are NOT blanked — and that is the whole correction.
  *
- * A character walk rather than three `replace` calls, which is `scripts/check-schema-conventions.mjs`'s own
- * recorded reason: its two-`replace` version missed a case and refused a migration for a floating-point type
- * that was inside a comment. Here the direction that matters is the opposite one — a code mentioned in a
- * DOC COMMENT ("defaults to 2070") must not fail the scan, because the comments are where this file's own
- * reasoning is written and a scan that forbade explaining itself would be deleted by the first person it
- * annoyed.
+ * The first version of this scan blanked string literals as well, reasoning that a code mentioned in prose
+ * should not fail. It was blind to exactly what it exists to find: an account code in this codebase is
+ * ALWAYS a quoted string, because `accountCode('2070')` is how one is written. Gate case 135a planted
+ * `accountCode('5030')` in the job and this file reported PASS — a scan that could never have fired, which
+ * is ADR 0002's failure in the form ADR 0003 exists to catch.
+ *
+ * So comments alone are blanked, because the comments are where this unit's reasoning is written and a scan
+ * that forbade explaining itself would be deleted by the first person it annoyed. A character walk rather
+ * than three `replace` calls, which is `scripts/check-schema-conventions.mjs`'s own recorded reason for the
+ * same shape.
  */
-function codeOnly(source: string): string {
+function withoutComments(source: string): string {
   let out = ''
   let i = 0
   while (i < source.length) {
@@ -76,16 +80,27 @@ function codeOnly(source: string): string {
       i += 2
       continue
     }
-    const ch = source[i] as string
+    out += source[i] as string
+    i += 1
+  }
+  return out
+}
+
+/** Comments AND every string literal blanked, for the bare-numeric pass. */
+function codeOnly(source: string): string {
+  const withoutCommentsText = withoutComments(source)
+  let out = ''
+  let i = 0
+  while (i < withoutCommentsText.length) {
+    const ch = withoutCommentsText[i] as string
     if (ch === "'" || ch === '"' || ch === '`') {
       const quote = ch
       i += 1
-      while (i < source.length && source[i] !== quote) {
-        if (source[i] === '\\') i += 1
+      while (i < withoutCommentsText.length && withoutCommentsText[i] !== quote) {
+        if (withoutCommentsText[i] === '\\') i += 1
         i += 1
       }
       i += 1
-      // A blank of the same shape, so line and column numbers in a failure still point somewhere useful.
       out += '""'
       continue
     }
@@ -96,17 +111,34 @@ function codeOnly(source: string): string {
 }
 
 /**
- * Four consecutive digits that are not part of a longer number and carry no numeric separator.
+ * A four-digit STRING literal, which is the shape every account code in this codebase takes.
  *
- * Bounded both sides so `17_300`, `2678400` and `12` cannot match, and so a year in a date string cannot —
- * strings are blanked before this runs anyway. An account code in this chart is exactly four digits
- * (`account.code`'s own CHECK in 0018), which is what makes the shape recognisable at all.
+ * Exactly four digits between the quotes and nothing else, so a date (`'2025-07-01'`), a month key
+ * (`'2025-07'`) and an entry id (`'PHR13-…'`) cannot match. `account.code`'s own CHECK in 0018 is
+ * `^[0-9]{4}$`, which is what makes the shape recognisable at all.
  */
-const ACCOUNT_CODE_LITERAL = /(?<![\d_.])\d{4}(?![\d_])/g
+const QUOTED_ACCOUNT_CODE = /(['"])(\d{4})\1/g
 
-const literalsIn = (file: string): readonly string[] => [
-  ...codeOnly(sourceOf(file)).matchAll(ACCOUNT_CODE_LITERAL),
-].map((match) => match[0])
+/**
+ * A bare four-digit numeric literal, bounded both sides.
+ *
+ * The second way a code could arrive, and the bound is what stops `17_300`, `2_678_400` and `377_580`
+ * matching — a numeric separator on either side disqualifies it, as does a longer run of digits.
+ */
+const BARE_ACCOUNT_CODE = /(?<![\d_.])\d{4}(?![\d_])/g
+
+const literalsInSource = (source: string): readonly string[] => [
+  ...[...withoutComments(source).matchAll(QUOTED_ACCOUNT_CODE)].map((m) => m[2] as string),
+  ...[...codeOnly(source).matchAll(BARE_ACCOUNT_CODE)].map((m) => m[0]),
+]
+
+const literalsIn = (file: string): readonly string[] => {
+  const source = sourceOf(file)
+  return [
+    ...[...withoutComments(source).matchAll(QUOTED_ACCOUNT_CODE)].map((m) => m[2] as string),
+    ...[...codeOnly(source).matchAll(BARE_ACCOUNT_CODE)].map((m) => m[0]),
+  ]
+}
 
 describe('the three account-code settings are the chart’s accounts', () => {
   it.each([
@@ -192,27 +224,41 @@ describe('no account code literal reaches the posting rule or the job', () => {
     expect(literalsIn(file)).toEqual([])
   })
 
-  it('the scan can see a code, so an empty result means something', () => {
-    // The control, in memory. ADR 0003 wants a known-bad FIXTURE and gate block 135 plants one in the real
-    // job; this is the cheaper half, and it is here because the expensive half cannot run in a unit test.
-    // Without it, a `codeOnly` that returned the empty string would make both cases above pass for ever.
-    const planted = codeOnly("const liability = accountCode('2070')\n")
-    expect([...planted.matchAll(ACCOUNT_CODE_LITERAL)]).toHaveLength(0)
+  it('sees a QUOTED code, which is the form every account code in this codebase takes', () => {
+    /*
+     * The control that the first version of this file did not have, and its absence made both cases above
+     * vacuous: `accountCode('2070')` puts the code inside a STRING, and a scan that blanked strings could
+     * never fire. Gate case 135a plants exactly that in the job and asserts this file fails.
+     */
+    const planted = withoutComments("const liability = accountCode('2070')\n")
+    expect([...planted.matchAll(QUOTED_ACCOUNT_CODE)].map((m) => m[2])).toEqual(['2070'])
+  })
+
+  it('sees a BARE numeric code too', () => {
     const inCode = codeOnly('const liability = 2070\n')
-    expect([...inCode.matchAll(ACCOUNT_CODE_LITERAL)].map((m) => m[0])).toEqual(['2070'])
+    expect([...inCode.matchAll(BARE_ACCOUNT_CODE)].map((m) => m[0])).toEqual(['2070'])
   })
 
   it('a code in a COMMENT is allowed, because the reasoning is written in the comments', () => {
-    const commented = codeOnly('// defaults to 2070 Gratuity liability\nconst x = 1\n')
-    expect([...commented.matchAll(ACCOUNT_CODE_LITERAL)]).toHaveLength(0)
+    const commented = '// defaults to 2070 Gratuity liability\nconst x = 1\n'
+    expect(literalsInSource(commented)).toEqual([])
     // And the control for THAT: the same digits outside a comment are still caught, so the exemption is
     // about comments and not about the digits.
-    expect([...codeOnly('const x = 2070\n').matchAll(ACCOUNT_CODE_LITERAL)]).toHaveLength(1)
+    expect(literalsInSource('const x = 2070\n')).toEqual(['2070'])
   })
 
-  it('does not mistake a separated numeric or a longer run of digits for an account code', () => {
-    for (const source of ['const n = 17_300', 'const n = 2678400', 'const n = 377_580', 'const n = 12']) {
-      expect([...codeOnly(`${source}\n`).matchAll(ACCOUNT_CODE_LITERAL)]).toHaveLength(0)
+  it('does not mistake a date, a month key, an id or a separated numeric for an account code', () => {
+    for (const source of [
+      "const d = '2025-07-01'",
+      "const m = '2025-07'",
+      "const id = 'PHR13-LONG-2083-04-01'",
+      'const n = 17_300',
+      'const n = 2_678_400',
+      'const n = 377_580',
+      'const n = 12',
+      'const n = 366',
+    ]) {
+      expect(literalsInSource(`${source}\n`), source).toEqual([])
     }
   })
 
