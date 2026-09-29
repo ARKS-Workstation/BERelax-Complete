@@ -58,12 +58,13 @@ if (!url)
  *     number on every run;
  *   - the keys carry a per-run nonce, so a run that crashed half way cannot make the next one look
  *     already-finalised;
- *   - `afterAll` truncates the invoice family as the OWNER before deleting the customer, which is
- *     `tax-document.itest.ts`'s reason and decision: `invoice.customer_id` is ON DELETE RESTRICT and
- *     `customer-identity.itest.ts` used to clear the table with a bare `delete from customer`, so a
- *     document left pointing at this file's customer would fail THAT suite's statement. It scopes its
- *     cleanup now, and the reason to truncate here is unchanged: a document nobody removes fails whoever
- *     touches the row next. The journal entries are
+ *   - `afterAll` truncates the invoice family as the OWNER before deleting the customer. `invoice`
+ *     refuses DELETE for every role (ZI003), so truncate is the only legal removal, and
+ *     `invoice.customer_id` is ON DELETE RESTRICT — so a document left pointing at this file's customer
+ *     makes that row undeletable by whoever touches it next, in a suite that runs sequentially against one
+ *     database in an order no file controls (brief rule 12). The statement is declared in
+ *     `packages/db/src/suite-table-ownership.ts`, which is where that ownership is recorded. The journal
+ *     entries are
  *     left: they are append-only, and every suite that reads the journal reads a delta.
  */
 

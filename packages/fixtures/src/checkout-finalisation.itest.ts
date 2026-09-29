@@ -48,11 +48,10 @@ if (!url)
  * The trading date `2099-11-23` is used by no other suite; the customer, room, service, variant, booking
  * and appointments are this file's own and carry {@link MARKER}; every read narrows to those ids. The
  * invoice family is truncated as the OWNER in `afterAll` before the customer is deleted — `invoice`
- * refuses DELETE for every role (ZI003) and `invoice.customer_id` is ON DELETE RESTRICT, so a document
- * left pointing at this file's customer would fail the bare `delete from customer` that
- * `customer-identity.itest.ts` used to run. That is `tax-document.itest.ts`'s decision, for its reason,
- * and it still holds: that suite scopes its cleanup now, but a document outliving this file fails whoever
- * touches the row next.
+ * refuses DELETE for every role (ZI003), so truncate is the only legal removal, and
+ * `invoice.customer_id` is ON DELETE RESTRICT, so a document outliving this file makes its customer
+ * undeletable by whoever touches the row next (brief rule 12). The statement is declared in
+ * `packages/db/src/suite-table-ownership.ts`, which is where that ownership is recorded.
  */
 
 const MARKER = 'mtill06 checkout finalisation itest'

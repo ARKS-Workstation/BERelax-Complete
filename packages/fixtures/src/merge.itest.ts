@@ -84,8 +84,8 @@ import { syntheticPerson } from './synthetic.ts'
  * The probe customers are keyed on FIXED synthetic numbers on the unallocated `+971 59` prefix, outside
  * every band already in use (`generateSalon`'s 1–140, the CRM suites' 4411 upward, the consent loader's
  * 9101–9104, `consent.itest.ts`'s 9111–9112, the suppression loader's 9201–9203 and the bands at 9301 and
- * 9401), and they are re-ensured in `beforeAll` because `customer-identity.itest.ts` clears the whole
- * `customer` table between its cases.
+ * 9401), and they are re-ensured in `beforeAll` because nothing guarantees a contact an earlier run
+ * created is still there.
  *
  * Nothing here is a name: a record with no display name is labelled `Customer 0042` (ADR 0020).
  */
@@ -271,8 +271,8 @@ async function planned(tx: Sql): Promise<CustomerMergePlanInput> {
 
 beforeAll(async () => {
   sql = createConnection({ url, max: 4 })
-  // Re-ensured rather than assumed: `customer-identity.itest.ts` clears the whole customer table, so a
-  // file that trusted an earlier fixture would pass or fail on vitest's file ordering (brief rule 12).
+  // Re-ensured rather than assumed: a file that trusted a fixture an earlier one created would pass or
+  // fail on vitest's file ordering (brief rule 12).
   // The survivor is created FIRST, so it is the earlier record and `planCustomerMerge` picks it.
   const ensure = async (
     person: { phone: string; label: string },

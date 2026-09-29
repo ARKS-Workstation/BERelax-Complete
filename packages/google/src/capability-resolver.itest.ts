@@ -76,9 +76,9 @@ beforeEach(async () => {
    * calls below name their connection, which narrows the resolution; the bare `withGoogle` call in the
    * end-to-end test deliberately does not, because that is how a consumer calls it.
    *
-   * Disconnecting rather than deleting, for the reason `with-google.itest.ts` records:
-   * `google_reviews.connection_id` is `ON DELETE RESTRICT`, so a `delete from google_connections` fails the
-   * moment a review-queue suite has left a review behind — a different false failure, not a fix.
+   * Disconnecting rather than deleting: `google_reviews.connection_id` is `ON DELETE RESTRICT`, so a
+   * `delete from google_connections` fails the moment any suite has left a review behind — a different
+   * false failure, not a fix. Narrowing what the code under test can SEE is the isolation that holds.
    */
   await sql`update google_connections set status = 'disconnected' where google_sub <> ${SUB}`
   await sql`delete from google_connections where google_sub = ${SUB}`

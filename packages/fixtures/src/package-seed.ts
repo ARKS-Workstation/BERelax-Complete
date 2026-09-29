@@ -178,15 +178,15 @@ export function assertFixturePackageNamesAreMarked(names: readonly string[]): vo
 /**
  * ## Why the templates are seeded and the drawdown states are not
  *
- * This file used to seed both, and that broke nine cases in `apps/web/src/otp-route.itest.ts` — a file this
- * unit never touched and had no business touching.
+ * This file used to seed both, and that broke nine cases in an OTP suite — a file this unit never touched
+ * and had no business touching.
  *
  * The schema is the whole argument. `package_sale.customer_id` is `not null references customer (id) on delete
  * restrict` (0078), and `package_sale` refuses DELETE for every role because a sale is a contract. So a
  * package sale PERMANENTLY pins its customer: the sale cannot be deleted, therefore the customer cannot be
- * either, for the life of the database. `otp-route.itest.ts` clears the table with a bare `delete from
- * customer` in `beforeEach` and again in `afterAll`, and that statement can never succeed again once any
- * package has been sold to any customer that is still there.
+ * either, for the life of the database. Any suite that tries to remove that customer fails on the foreign
+ * key, and no amount of scoping helps: the row is pinned by a contract, so the only safe seed is one that
+ * sells nothing.
  *
  * That is why the five existing package suites all end with
  * `truncate ... package_template_version, package_template`: `truncate` is the one statement that removes an
@@ -227,13 +227,40 @@ const NO_STATES: SeededDrawdownStates = Object.freeze({ sales: 0, balances: 0, r
 /**
  * Seeds the four fixture templates and their first version. Nothing else.
  *
- * Idempotent per table, like every other loader: a database that already holds a `package_template` row is
- * left alone. `savePackageTemplateVersion` is an EDIT — it inserts version+1 — so calling it on a template
- * that already exists would leave a trail of undeletable versions rather than the one this fixture means.
+ * Idempotent per TEMPLATE KEY, and that is W-SYS-13's correction to this loader. It used to short-circuit on
+ * `count(*) from package_template > 0`, which is idempotent per TABLE, and per-table idempotence is exactly
+ * the defect ADR 0050 is about:
+ *
+ *  - a PARTLY emptied family looks seeded. Truncate `package_template_version` and `package_template_line`
+ *    and leave `package_template` standing, and this loader returned "nothing to do" for ever after — four
+ *    templates with no version, which every reader treats as four templates that do not exist.
+ *  - a loader that cannot repair what it created cannot be a `restoredBy`. Six suites truncate this family
+ *    as its declared owner (see `packages/db/src/suite-table-ownership.ts`) and the integration run's own
+ *    invariant re-runs the loaders and then checks the seeded rows are back. With the table-level guard the
+ *    templates came back only on a database where the family happened to be completely empty.
+ *
+ * `savePackageTemplateVersion` is still called only for a key with NO version, because it is an EDIT — it
+ * inserts version+1 — so calling it on a template that already has one would leave a trail of undeletable
+ * versions rather than the single version this fixture means.
  */
 export async function seedPackageTemplates(sql: Sql): Promise<SeededPackageTemplates> {
-  const [existing] = await sql<{ n: string }[]>`select count(*)::text as n from package_template`
-  if (existing !== undefined && Number(existing.n) > 0) return NO_TEMPLATES
+  const keys = FIXTURE_PACKAGE_SHAPES.map((shape) => shape.templateKey)
+  // Issued in EVERY state, and not redundant with `savePackageTemplateVersion`'s own identical ensure.
+  // `seeded-tables.ts` derives the seeded tables from what the loaders reach for, because an idempotent
+  // loader's row diff is zero on a database that has already been seeded — so a loader that writes nothing
+  // on a healthy database is a loader whose tables the run invariant cannot protect. This statement is this
+  // loader saying, in every state, which table it owns.
+  await sql`
+    insert into package_template (template_key)
+    select unnest(${keys}::text[])
+    on conflict (template_key) do nothing
+  `
+  const versioned = await sql<{ template_key: string }[]>`
+    select t.template_key
+      from package_template t
+      join package_template_version v on v.template_id = t.id
+  `
+  const present = new Set(versioned.map((row) => row.template_key))
 
   const [variant] = await sql<{ id: string; gross_price_fils: string }[]>`
     select v.id, v.gross_price_fils
@@ -252,7 +279,11 @@ export async function seedPackageTemplates(sql: Sql): Promise<SeededPackageTempl
 
   for (const shape of FIXTURE_PACKAGE_SHAPES) {
     const name = fixturePackageName(shape)
+    // Pushed before the skip, so the marker assertion below covers all four names on every run and not just
+    // the ones this call happened to write. A check that examines fewer rows the second time is a check
+    // whose coverage depends on the state it ran against (ADR 0002).
     names.push(name)
+    if (present.has(shape.templateKey)) continue
     // The undiscounted sum of the catalogue prices of the sessions. No figure is invented; see the note.
     const priceFils = unitGrossFils * shape.sessions
 
@@ -289,9 +320,9 @@ export async function seedPackageTemplates(sql: Sql): Promise<SeededPackageTempl
  * own output: a database that already holds a sale for a fixture template is left alone.
  *
  * **The CALLER supplies the customers, and that is deliberate.** This used to read the four the consent loader
- * seeds, which cannot be relied on: `apps/web/src/otp-route.itest.ts` clears the table with a bare
- * `delete from customer`, so after one integration run the fixture salon has no customers at all and never
- * gets them back — `pnpm seed` is not re-run between suites. A caller that owns its customer row, creates it
+ * seeds, which cannot be relied on: any suite that emptied `customer` would leave the fixture salon with no
+ * customers at all and no way back, because `pnpm seed` is not re-run between suites. ADR 0050 now refuses
+ * that statement outright; a caller that owns its row does not have to depend on the refusal holding. A caller that owns its customer row, creates it
  * and deletes it again is the only arrangement that holds whatever order the files run in (brief rule 12).
  * Sales are spread round the list, so one id gives one holder four packages and four ids give one each.
  *

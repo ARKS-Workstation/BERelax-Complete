@@ -46,8 +46,8 @@ import { syntheticPerson } from './synthetic.ts'
  *   - every enrolment count is narrowed to this file's own flow id and counted in SQL.
  *
  * The four hundred contacts are removed in `afterAll`. They are on the unallocated +971 59 prefix in a band
- * no other suite uses, and `customer-identity.itest.ts` clears the whole `customer` table — which is
- * exactly why `flow_enrolment.customer_id` cascades rather than restricts (0070's comment).
+ * no other suite uses, and they are this file's own to remove — which is exactly why
+ * `flow_enrolment.customer_id` cascades rather than restricts (0070's comment).
  */
 const url = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL']
 if (!url) {

@@ -188,11 +188,10 @@ beforeAll(async () => {
 
   /*
     This file's OWN customer, inserted rather than read.
-    It used to read one of the four the consent loader seeds. That cannot be relied on:
-    `apps/web/src/otp-route.itest.ts` clears the table with a bare `delete from customer`, so after one
-    integration run there are no seeded customers left and `pnpm seed` is not run again between suites — the
-    read returned undefined and the probe booking failed on a null customer_id, in a file that had passed in
-    isolation. Inserted here and deleted in `afterAll`, which is what eighteen other suites do; it is safe to
+    It used to read one of the four the consent loader seeds. That cannot be relied on: a suite was emptying
+    the table, so after one integration run there were no seeded customers left and `pnpm seed` is not run
+    again between suites — the read returned undefined and the probe booking failed on a null customer_id, in
+    a file that had passed in isolation. Inserted here and deleted in `afterAll`, which is what eighteen other suites do; it is safe to
     delete only because the package family is truncated first, releasing 0078's `on delete restrict` pin.
   */
   const [customer] = await sql<{ id: string }[]>`
@@ -207,8 +206,8 @@ beforeAll(async () => {
    * The four drawdown states are built HERE, and this file owns them.
    *
    * They are not in `pnpm seed`, and the reason is in `package-seed.ts`: a `package_sale` pins its customer
-   * through an `on delete restrict` foreign key and can never be deleted, so a seeded sale makes
-   * `otp-route.itest.ts`'s bare `delete from customer` fail for the rest of the database's life. This suite
+   * through an `on delete restrict` foreign key and can never be deleted, so a seeded sale makes that
+   * customer undeletable for the rest of the database's life. This suite
    * is the one that DISPLAYS the four states, so it is the one that creates them and truncates them away in
    * `afterAll` — the same discipline the other five package suites keep.
    *
@@ -362,8 +361,10 @@ afterAll(async () => {
     And the package family, for a harder reason than tidiness. Every `package_sale` this file writes — the
     four seeded drawdown states and the one part 3 buys through the browser — pins its `customer_id` through
     an `on delete restrict` foreign key, and 0078 refuses DELETE on the sale, so the customer becomes
-    undeletable for the life of the database. `apps/web/src/otp-route.itest.ts` clears the table with a bare
-    `delete from customer`, and nine of its cases fail on the foreign key if anything here survives.
+    undeletable for the life of the database, and nine cases elsewhere failed on that foreign key when a
+    suite tried to remove one. The package TEMPLATES this truncate removes are restored by the `packages`
+    loader, which is what the `restoredBy` on `truncatePackageFamily`'s declaration in
+    `packages/db/src/suite-table-declarations.ts` claims and what the run's own invariant checks.
     `truncate` is the only statement that removes an append-only row, which is why all five of the other
     package suites end with this same list. `payment` is named because it references `package_sale` and
     PostgreSQL refuses a truncate while a referencing table is left out.

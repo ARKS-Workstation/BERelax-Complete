@@ -3592,7 +3592,7 @@ units:
       every later run, which skipped all 21 cases of a file it had never heard of. Sort the legitimate
       owners from the harmful ones, scope the rest, and extend the guard from one table to the seeded set.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on: []
     blocked_on_owner: []
@@ -3619,8 +3619,14 @@ units:
       `customer` line with an EMPTY allowlist, and that allowlist may only stay empty'
     files:
     - packages/db/src/seeded-row-deletes.test.ts
+    - packages/db/src/suite-table-ownership.ts
+    - packages/db/src/suite-table-declarations.ts
+    - packages/fixtures/src/seeded-tables.ts
+    - packages/fixtures/src/seeded-tables.itest.ts
+    - packages/fixtures/src/seeded-rows-global-setup.ts
+    - vitest.integration.config.ts
     - scripts/test-gates.mjs
-    - docs/adr/00xx-a-suite-may-delete-only-what-it-created.md
+    - docs/adr/0050-a-suite-may-delete-only-what-it-created.md
     - 'NOTE: this unit was ADDED by the integrator and the manifest went from 209 units to 210. It is not
       new scope. It was found by fixing the failure it describes: `customer-identity.itest.ts` and
       `otp-route.itest.ts` both held `delete from customer` with no predicate, which removed the four
@@ -3639,6 +3645,86 @@ units:
       survived by accident. Six files ordered their own cleanup around that hazard and described it in
       comments. Fixing the leak let the delete succeed. Expect the same shape here: a site that looks
       harmless may be harmless only because something else is broken.'
+    - 'NOTE: three mechanisms, because each acceptance line needs a different power. The SCAN
+      (packages/db/src/suite-table-ownership.ts, run by seeded-row-deletes.test.ts) derives every unqualified
+      delete/truncate by reading the suites - 91 sites in 56 files, measured, up from the two the old guard
+      named - and refuses one that is neither scoped nor declared. The DERIVATION
+      (packages/fixtures/src/seeded-tables.ts) answers which tables the seed writes by running the loaders
+      against a real database inside a rolled-back transaction, attributed per loader. The RUN INVARIANT
+      (seeded-rows-global-setup.ts, wired as the integration suite globalSetup) reads the seeded rows before
+      the run and again after it with the loaders re-run in between, and fails the run that lost one -
+      measured: vitest exits 1 while reporting every test passed.'
+    - 'NOTE: the loader repair this unit owed. `seedPackageTemplates` short-circuited on
+      `count(*) from package_template > 0`, which is idempotent per TABLE - so a family whose versions and
+      lines were truncated while the templates stood was never repaired, and the loader was INVISIBLE to the
+      derivation because it reached for nothing. It is now idempotent per template key and ensures its
+      template rows in every state. `seedCatalogue` and `seedConsent` were checked and are already per-row
+      idempotent; no other loader has a table-level guard.'
+    - 'NOTE: what the derivation cannot see, and what covers it instead. `package_template_version` and
+      `package_template_line` are written only when a repair is needed, so on a healthy database the loader
+      does not reach for them and they are absent from the derived set. They are covered by the repair
+      property in seeded-tables.itest.ts, which empties the family and watches the loader put all three
+      tables back, and by the teardown re-seed that actually restores them. Stated rather than hidden: the
+      row-count derivation that would see them is impossible here, because every loader is idempotent (a
+      second seed writes nothing) and a fully truncated database cannot be seeded at all - `seedCatalogue`
+      refuses to invent the `service` rows migration 0017 creates.'
+    - 'NOTE: one residual hazard, NOT fixed here, and it is about VALUES rather than rows.
+      `packages/db/src/settings-store.itest.ts` empties `app_setting` and re-seeds the registry DEFAULTS,
+      which is not the same as the three values the `settings` loader updates
+      (booking.turnaround_minutes_standard = 15 and two others). Between that file and the end of the run,
+      a suite reading those keys sees the default rather than the fixture value. The row COUNT is unharmed,
+      so the run invariant is silent by design. It cannot be fixed inside that file - `packages/db` may not
+      import `packages/fixtures`, so the loader is out of reach - and fixing it properly means either moving
+      the three values into `packages/db` or converting the file to a transaction per case. Declared with the
+      reason in full in suite-table-declarations.ts. Owner: unassigned; it wants its own unit.'
+    - 'NOTE: declined, with the integrator informed rather than silently dropped. The integrator offered a
+      second subject during this unit: 158 test files each restate
+      `process.env[TEST_DATABASE_URL] ?? process.env[DATABASE_URL]`, `??` treats a BLANK variable as set, and
+      twelve of the 158 carry no refusal at all so the value reaches postgres.js unchecked (packages/fixtures/src/agents.itest.ts:29,
+      packages/google/src/seo/seo-agent-cage.itest.ts:59, packages/db/src/services/opening-balances.itest.ts:26,
+      apps/web/src/marketing-kill-switch.itest.ts:73, apps/web/src/route-spine.itest.ts:169,
+      apps/web/src/template-editor.itest.ts:72, apps/web/src/breakpoint-preview.itest.ts:286,
+      apps/web/src/payload.itest.ts:33, apps/web/src/seo/structured-data.itest.ts:65,
+      apps/web/src/media-slots.itest.ts:24, apps/worker/src/jobs/agent-watchdog.itest.ts:21,
+      apps/worker/src/worker.itest.ts:28). Real, and not this unit: "which database a suite may touch" is a
+      different question from "what a suite may remove", and migrating 158 files that other worktrees are
+      editing would conflict across the whole batch while none of the six acceptance lines here needs it.
+      Owner: unassigned; it wants its own unit, shaped as one exported resolver plus a scan rule with a
+      known-bad control.'
+    - 'NOTE: nine files carried the workaround comments, not six, and all nine are rewritten to state their
+      own local reason: checkout-finalise.itest.ts, checkout-finalisation.itest.ts, consent.itest.ts,
+      duplicate-queue.ts, flow-versioning.itest.ts, merge-preview.itest.ts, merge.itest.ts, package-seed.ts,
+      rights.itest.ts, suppression.itest.ts, tax-document.itest.ts, till-receipt.itest.ts, load.ts,
+      till.itest.ts, duplicates.itest.ts, capability-resolver.itest.ts, interpreter.itest.ts and
+      retention-purge.itest.ts - 20 sentences in 18 files, derived by the scan rather than found by reading.
+      The check that holds it is derived too: a comment may name another test file as removing rows only
+      while that file really does, so the sentence fails at the moment the other file is fixed.'
+    - 'NOTE: allocations. Migration 0100 is UNUSED and released - the unit adds no table, column, constraint
+      or trigger, and the ledger paragraph in packages/db/src/index.ts says why a database-level answer is
+      the wrong shape. SCHEMA_VERSION stays 99 because no migration landed. Private SQLSTATEs ZY101-ZY110 are
+      UNUSED: nothing here raises from PL/pgSQL. Test port band 15_200 is UNUSED: no suite here starts a
+      server. Gate block 128a-128o. ADR 0050.'
+    - 'NOTE: the merge hazard this unit predicted, and the remedy it took. `@berelax/fixtures` now exports
+      `truncateInvoiceFamily` and `truncatePackageFamily`, which moved sixteen suites'' table lists into one
+      module - the right fix, and it moved the STATEMENT out of a `*.itest.ts`. The scan walked test files by
+      filename, so 98 declarations went stale in one merge and the shared statement they described became
+      unguarded. `TEST_SUPPORT_MODULES` in suite-table-ownership.ts now names that module, and ONE declaration
+      for it replaced nineteen. The hand-patch of the nine package-family truncate statements this unit made
+      before the helpers existed was discarded in favour of them, with the six `commission_line` declarations
+      that went with it.'
+    - 'NOTE: and the hole the merge exposed, which was this unit''s own. `truncate ${LIST.join('', '')}` has no
+      table names in its text, so adding the helper module to the scanned set found NOTHING in it - a scan
+      silently covering less than it claims, which is the failure ADR 0002 is about and which any suite could
+      have used to evade this rule. The scan now RESOLVES a table list written as a frozen array of string
+      literals in the same module, and a list it cannot resolve is a finding
+      (`a-statement-whose-scope-cannot-be-read-is-declared`) rather than silence. Five such statements exist and
+      are declared: a per-run test schema in numbering.itest.ts, a partition name read from `tableoid` in
+      analytics.itest.ts, and a loop over three table names in vat-return-signoff.itest.ts.'
+    - 'NOTE: brief rule 27''s own check answered UNSAFE about itself here, twice over - `grep -qa test-gates.mjs`
+      matches the checking shell''s own argv, and `git -C ""` from an unreadable cwd resolves against the
+      caller and reports every process as live in your worktree. Both are hardened in
+      docs/CONTRIBUTING-AGENT-BRIEF.md as a third trap, because a guard that cries wolf is a guard people stop
+      reading - and this unit committed a captured `__boundary_fixture__` while that guard was mis-answering.'
   - id: W-SYS-14
     order: 41.8
     title: 'Private document storage: the signed URL, and the audited download'

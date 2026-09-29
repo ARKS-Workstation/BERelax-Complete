@@ -56,8 +56,8 @@ import { ADMIN_SESSION_COOKIE } from './session-cookie.ts'
  * that case mints its OWN pair per run — a fresh number in a band nothing else uses — merges it, and deletes
  * the two customer rows afterwards. What necessarily stays is the `merge_record` row and its per-table
  * reports, pointing at two ids that no longer exist. That is an ordinary state for this table (it has
- * deliberately no foreign key to `customer`, 0069 says why) and it is the same state
- * `customer-identity.itest.ts` leaves behind every time it clears the customer table.
+ * deliberately no foreign key to `customer`, 0069 says why) and it is the state any suite leaves behind
+ * when it removes a customer it created after scoring it.
  *
  * Nothing here is a name: every label is `Customer NNNN` (ADR 0020).
  */

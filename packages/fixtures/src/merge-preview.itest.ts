@@ -69,8 +69,8 @@ import {
  *
  * The integration suite runs sequentially against ONE database and earlier files leave rows behind (brief
  * rule 12), so every queue assertion narrows through `customerIds` — the same instrument `/compliance` uses
- * with `?key=`. The fixture pairs are ensured rather than assumed, because `customer-identity.itest.ts`
- * clears the whole `customer` table between its cases.
+ * with `?key=`. The fixture pairs are ensured rather than assumed, because nothing guarantees that a row
+ * an earlier file created is still there when this one runs.
  *
  * **Nothing here commits a merge.** A merge is not repeatable: `merge_record_one_merge_per_loser` makes the
  * second attempt `already_merged` and the copied consent rows cannot be removed, so a file that committed

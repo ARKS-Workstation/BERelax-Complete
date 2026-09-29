@@ -33,5 +33,17 @@ export default defineConfig({
     clearMocks: true,
     fileParallelism: false,
     testTimeout: 30_000,
+    /**
+     * The seeded rows are read before the run and again after it, and the run that lost one fails.
+     *
+     * Wrapped round the whole suite rather than written as a test, because the defect is not in any one
+     * file: these suites share ONE database in an order no file controls, `pnpm db:apply` refuses a
+     * populated database so a lost row cannot be migrated back, and a PARTLY emptied database looks seeded
+     * because a fixture loader leaves a table that already holds rows alone. It has bitten three times — a
+     * bare `delete from customer` that skipped 21 cases in a file it had never heard of, 140 tables where
+     * 153 were expected, and a salon answering about a rota it no longer had — and every time the symptom
+     * surfaced in a suite that had done nothing wrong. W-SYS-13 and ADR 0050.
+     */
+    globalSetup: ['packages/fixtures/src/seeded-rows-global-setup.ts'],
   },
 })
