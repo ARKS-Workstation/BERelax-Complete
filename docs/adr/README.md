@@ -50,6 +50,7 @@ a decision the table does not list.
 | [0048](0048-the-marketing-kill-switch-cannot-reach-transactional-traffic.md) | The kill switch is read in a function whose parameter cannot be a transactional message; its state has one row; the non-production default is computed, not stored | — |
 | [0047](0047-commission-is-reproducible-by-pinning-its-version-and-its-as-of.md) | A commission run pins the rule version that judged it and the instant it read the books at; nothing is seeded, because no structure is configured | — |
 | [0049](0049-places-aggregate-only-while-the-caching-terms-are-unverified.md) | Places reads are aggregate only; review content is never cached while the terms are unverified | — |
+| [0052](0052-no-autofile-is-structural.md) | The absence of a filing capability is enforced by checks that fail when it appears — a boundary rule for the import, a scan for the global, the name and the credential; the Zoho export is one-way bytes for a signed return | — |
 
 ## Writing one
 

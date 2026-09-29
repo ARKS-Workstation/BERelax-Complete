@@ -410,6 +410,47 @@ module.exports = {
       },
     },
     {
+      name: 'tax-and-filing-must-not-reach-the-network',
+      comment:
+        'The tax modules and the return export path may not reach an HTTP client, a socket, a name ' +
+        'resolver or an outward-facing package. ADR 0017 and docs/01 decision 13 say the codebase has NO ' +
+        'CAPABILITY TO FILE A RETURN — "absent, not disabled, because a future maintainer will eventually ' +
+        'switch a flag on" — and ADR 0052 is what turns that sentence into something a build can refuse. ' +
+        'A prohibition nothing enforces is a comment, and the comment in this case is about the one ' +
+        'artefact whose liability sits with the taxable person rather than with this software. ' +
+        'WHY IT IS A SEPARATE RULE FROM core-must-be-pure. That rule covers packages/core and forbids ' +
+        'http, https and net — three of the eight builtins that reach a network, and none of the seven ' +
+        'client libraries. It also cannot reach packages/db at all, where the snapshot, the filing door ' +
+        'and the export live, and db legitimately does I/O, so there is no purity rule to extend. The ' +
+        'estate here is therefore named: packages/core/src/tax, the working papers, the sealed return, ' +
+        'and the Zoho export. scripts/test-no-autofile.mjs holds the same list and fails if this rule ' +
+        'stops covering any of it, so the two cannot drift apart. ' +
+        'WHAT THIS RULE CANNOT SEE, stated rather than left to be discovered: `fetch` is a global, so a ' +
+        'module graph is blind to it, exactly as the payments rule above records. The other half is ' +
+        'scripts/test-no-autofile.mjs, which scans the same files for the network-capable globals and ' +
+        'for the identifiers a filing path would be named after. Neither half is the claim on its own. ' +
+        'THE TEST FILES ARE EXEMPT, for the payments rule’s reason and the same way round: ' +
+        'zoho-export.itest.ts imports node:http and node:https in order to REPLACE their `request` with ' +
+        'a throwing stub, which is how it proves the export completes with no network and no credentials ' +
+        'at all. A rule that condemned that file would leave the claim unprovable.',
+      severity: 'error',
+      from: {
+        path:
+          '^packages/core/src/tax/|' +
+          '^packages/db/src/queries/vat201-working-papers\\.ts$|' +
+          '^packages/db/src/services/vat-return-signoff\\.ts$|' +
+          '^packages/db/src/services/zoho-export\\.ts$',
+        pathNot: '\\.(test|itest)\\.ts$',
+      },
+      to: {
+        path:
+          '^(node:)?(http|https|net|tls|dgram|dns|http2)$|' +
+          '(^|/)node_modules/(undici|axios|node-fetch|got|superagent|ky|request|form-data)/|' +
+          '^(undici|axios|node-fetch|got|superagent|ky|request|form-data)(/|$)|' +
+          '^packages/(google|messaging|providers)/',
+      },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',

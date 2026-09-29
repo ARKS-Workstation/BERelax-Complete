@@ -1,0 +1,31 @@
+section,return
+key,value
+export_format_version,berelax.vat201.zoho.v1
+nothing_here_has_been_filed,this system has no capability to file a return (ADR 0017)
+working_paper_format_version,vat201-wp1
+return_id,0199a3c8-0000-7000-8000-000000000001
+period_id,FIXTURE-2126-Q3
+starts_on,2126-07-01
+ends_on,2126-09-30
+return_version,1
+snapshot_content_hash,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+engine_signature,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+finalised_at,2126-10-05T08:00:00.000Z
+amount_unit,fils
+
+section,boxes
+box_no,label,side,net_supplies_fils,tax_fils,line_count,is_provisional,open_question_id
+1,Standard-rated supplies,output,20000,1000,2,true,Y11-vat201-boxes
+10,Recoverable input VAT,input,8000,400,1,true,Y11-vat201-boxes
+
+section,totals
+key,value
+output_net_supplies_fils,20000
+output_tax_fils,1000
+input_net_supplies_fils,8000
+input_tax_fils,400
+net_tax_due_fils,600
+
+section,not_fileable
+reason,open_question_id,detail
+box_numbering_unconfirmed,Y11-vat201-boxes,every box carries is_provisional while the VAT201 numbering is unconfirmed
