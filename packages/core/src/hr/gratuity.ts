@@ -1,15 +1,21 @@
 import { AppError } from '@berelax/shared'
 import type { AccountCode } from '../ledger/account.ts'
-import { credit, debit, type EntryDraft, type EntryId, type EntryLineDraft } from '../ledger/entry.ts'
-import type { Fils, Money } from '../money.ts'
-import { filsFrom } from '../money.ts'
+import {
+  credit,
+  debit,
+  type EntryDraft,
+  type EntryId,
+  type EntryLineDraft,
+} from '../ledger/entry.ts'
 // `addMonths` is M-VAT-04's and `monthEnd`/`monthStart`/`daysInMonthOf` are P-HR-08's, reused rather
 // than rewritten. A second `addMonths` in this file would be a second opinion about what 31 January
 // plus one month is, and the two would disagree about exactly the dates a service anniversary lands on.
 import { addMonths } from '../money/recurring-schedule.ts'
-import { daysInMonthOf, monthEnd, monthStart } from './leave-accrual.ts'
+import type { Fils, Money } from '../money.ts'
+import { filsFrom } from '../money.ts'
 import type { LocalDate } from '../time.ts'
 import { localDate } from '../time.ts'
+import { daysInMonthOf, monthEnd, monthStart } from './leave-accrual.ts'
 
 /**
  * End-of-service gratuity as an ACCRUING BALANCE-SHEET LIABILITY. Pure.
@@ -214,10 +220,7 @@ export function assertGratuityRules(rules: GratuityRules): void {
  * The same selection `leaveRulesFor` and `attendanceGraceFor` make, and made the same way for the same
  * reason: a month recomputed after a policy change must be judged against the policy that applied then.
  */
-export function gratuityRulesFor(
-  versions: readonly GratuityRules[],
-  on: LocalDate,
-): GratuityRules {
+export function gratuityRulesFor(versions: readonly GratuityRules[], on: LocalDate): GratuityRules {
   const applicable = versions
     .filter((version) => version.effectiveFrom <= on)
     .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1))
@@ -225,7 +228,12 @@ export function gratuityRulesFor(
   if (governing === undefined) {
     throw new UnusableGratuityRules(
       `No gratuity_rule version takes effect at or before ${on}. The earliest version is ` +
-        `${versions.map((v) => v.effectiveFrom).sort().at(0) ?? '(none at all)'}, so this date is ` +
+        `${
+          versions
+            .map((v) => v.effectiveFrom)
+            .sort()
+            .at(0) ?? '(none at all)'
+        }, so this date is ` +
         'before the policy exists and accruing against it would be inventing one.',
       { on, versions: versions.length },
     )
@@ -235,10 +243,7 @@ export function gratuityRulesFor(
 }
 
 /** The first date the employee is out of probation, clamped to the month end the way 0066 clamps it. */
-export function gratuityProbationEndsOn(
-  rules: GratuityRules,
-  employedFrom: LocalDate,
-): LocalDate {
+export function gratuityProbationEndsOn(rules: GratuityRules, employedFrom: LocalDate): LocalDate {
   assertGratuityRules(rules)
   return addMonths(employedFrom, rules.probationMonths)
 }
@@ -586,7 +591,10 @@ export function gratuityAccrualEntry(args: {
   readonly lockedPeriodId?: string | null
 }): EntryDraft {
   const month = monthStart(args.accrualMonth)
-  const amount = positive(args.amountFils, `A gratuity accrual for ${args.staffReference} in ${month}`)
+  const amount = positive(
+    args.amountFils,
+    `A gratuity accrual for ${args.staffReference} in ${month}`,
+  )
   const lines: readonly EntryLineDraft[] = [
     debit(args.accounts.expense, amount, `Gratuity accrued for ${args.staffReference}`),
     credit(args.accounts.liability, amount, `Gratuity owed to ${args.staffReference}`),
@@ -754,9 +762,7 @@ export interface ClosedPeriodLabourAdjustment {
   readonly reason: string
 }
 
-export function closedPeriodLabourAdjustmentEntry(
-  args: ClosedPeriodLabourAdjustment,
-): EntryDraft {
+export function closedPeriodLabourAdjustmentEntry(args: ClosedPeriodLabourAdjustment): EntryDraft {
   if (args.reason.trim().length === 0) {
     throw new UnusableGratuityRules(
       `A closed-period labour adjustment for ${args.staffReference} on ${args.workedOn} carries no ` +
@@ -789,7 +795,11 @@ export function closedPeriodLabourAdjustmentEntry(
     source: 'adjustment',
     lines: [
       debit(args.wagesExpenseAccount, amount, `Unrecorded work, ${args.staffReference}`),
-      credit(args.wagesPayableAccount, amount, `Owed to ${args.staffReference} for ${args.workedOn}`),
+      credit(
+        args.wagesPayableAccount,
+        amount,
+        `Owed to ${args.staffReference} for ${args.workedOn}`,
+      ),
     ],
   }
 }

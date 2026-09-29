@@ -378,6 +378,25 @@ export async function unconfirmedAssumptionRows(
       select 'commission_rule', 'commission effective ' || effective_from::text,
              open_question_id, provisional_note
         from commission_rule where is_provisional
+      -- The gratuity policy (0107). Here for working_hours_rule's reason, and this is the row whose figure
+      -- is largest per person by a wide margin: gratuity is what somebody LEAVES with, it is measured in
+      -- days of wage per year of service, and docs/04 section 7 states only that it is an accruing
+      -- balance-sheet liability accrued monthly - no rate, no band, no cap, no divisor, no wage basis. So
+      -- every figure on the row is this build's reading, none is confirmed, and the row says so. Per
+      -- VERSION and not per figure, because the two band rates, the boundary, the divisor, the wage basis,
+      -- the probation length and the unpaid-leave exclusion are one decision somebody makes in one
+      -- sitting. Answering Y9-gratuity publishes a NEW version whose confirmation clears this row. No
+      -- backtick appears in this comment, for the reason the pipeline paragraph above states: it lives
+      -- inside a JS template literal and one would end it early. Two things worth knowing while reading the
+      -- note. There is NO CAP and no column for one, because the shape of a cap is as unknown as its
+      -- number, so an uncapped liability is the prudent reading rather than a gap somebody forgot. And the
+      -- daily-wage divisor is a SEPARATE figure from labour_cost_rule's, which is flagged against
+      -- Y9-overtime: that one is a forecast's divisor and this one is a statutory entitlement basis, and
+      -- one flag covering both would clear the panel for an answer nobody gave.
+      union all
+      select 'gratuity_rule', 'gratuity effective ' || effective_from::text,
+             open_question_id, provisional_note
+        from gratuity_rule where is_provisional
       union all
       select 'vat201_box', box_no::text, open_question_id, provisional_note
         from vat201_box where is_provisional

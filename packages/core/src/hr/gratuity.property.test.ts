@@ -1,5 +1,6 @@
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
+import { addMonths } from '../money/recurring-schedule.ts'
 import { localDate } from '../time.ts'
 import {
   accrueGratuityMonth,
@@ -10,7 +11,6 @@ import {
   MONTH_LENGTH_LCM,
 } from './gratuity.ts'
 import { daysInMonthOf, monthEnd, monthStart } from './leave-accrual.ts'
-import { addMonths } from '../money/recurring-schedule.ts'
 
 /**
  * The gratuity engine's invariants, over randomised policies, wages and service histories.
@@ -96,9 +96,7 @@ const employedFromArb = fc
     fc.integer({ min: 2, max: 28 }),
   )
   .map(([year, month, day]) =>
-    localDate(
-      `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-    ),
+    localDate(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
   )
 
 const caseArb: fc.Arbitrary<Case> = fc
@@ -154,94 +152,83 @@ const withUnpaid = (c: Case): GratuityServiceHistory => ({
 const liabilityOf = (c: Case, service: GratuityServiceHistory, asOf: string): number =>
   gratuityLiabilityAt({ rules: c.rules, service, asOf: localDate(asOf), wageFils: c.wageFils }).fils
 
-const lastMonthEnd = (c: Case): string => monthEnd(localDate(monthsOf(c).at(-1) as string)) as string
+const lastMonthEnd = (c: Case): string =>
+  monthEnd(localDate(monthsOf(c).at(-1) as string)) as string
 
 // --- the correct engine's own claims -------------------------------------------------------------
 
 describe('the gratuity engine, over randomised policies and service histories', () => {
-  it(
-    'never drifts: the monthly movements sum exactly to the liability at the end of the run',
-    () => {
-      let roundedCases = 0
-      for (const c of CORPUS) {
-        const service = withUnpaid(c)
-        let already = 0
-        for (const month of monthsOf(c)) {
-          const accrual = accrueGratuityMonth({
-            rules: c.rules,
-            service,
-            accrualMonth: localDate(month),
-            wageFils: c.wageFils,
-            alreadyAccruedFils: already,
-          })
-          // Over-accrual cannot arise here: the wage is constant across the run, so the cumulative figure
-          // is non-decreasing and every movement is at or above zero. A negative one would mean the
-          // cumulative had gone backwards on a fixed wage, which is a defect and not a case to tolerate.
-          expect(accrual.overAccrued).toBe(false)
-          already += accrual.movementFils
-        }
-        const whole = liabilityOf(c, service, lastMonthEnd(c))
-        expect(already).toBe(whole)
-
-        // Count the cases where the rounding actually bites. A corpus of exactly-divisible wages would
-        // satisfy this property under `mutantPerMonthRounding` too, so the count is what says the property
-        // can discriminate at all (brief rule 22).
-        const exact = exactEntitlementFils(c, service, lastMonthEnd(c))
-        if (!Number.isInteger(exact)) roundedCases += 1
+  it('never drifts: the monthly movements sum exactly to the liability at the end of the run', () => {
+    let roundedCases = 0
+    for (const c of CORPUS) {
+      const service = withUnpaid(c)
+      let already = 0
+      for (const month of monthsOf(c)) {
+        const accrual = accrueGratuityMonth({
+          rules: c.rules,
+          service,
+          accrualMonth: localDate(month),
+          wageFils: c.wageFils,
+          alreadyAccruedFils: already,
+        })
+        // Over-accrual cannot arise here: the wage is constant across the run, so the cumulative figure
+        // is non-decreasing and every movement is at or above zero. A negative one would mean the
+        // cumulative had gone backwards on a fixed wage, which is a defect and not a case to tolerate.
+        expect(accrual.overAccrued).toBe(false)
+        already += accrual.movementFils
       }
-      // Exact, not a floor: the corpus is a fixed-seed sample, so this is a reproducible fact about a
-      // known set of cases rather than a threshold that can drift into a flake.
-      expect(roundedCases).toBe(EXPECTED_ROUNDED_CASES)
-    },
-    30_000,
-  )
+      const whole = liabilityOf(c, service, lastMonthEnd(c))
+      expect(already).toBe(whole)
 
-  it(
-    'never understates, and never overstates by more than a fil',
-    () => {
-      for (const c of CORPUS) {
-        const service = withUnpaid(c)
-        const asOf = lastMonthEnd(c)
-        const stored = liabilityOf(c, service, asOf)
-        const exact = exactEntitlementFils(c, service, asOf)
-        expect(stored).toBeGreaterThanOrEqual(exact)
-        expect(stored - exact).toBeLessThan(1)
+      // Count the cases where the rounding actually bites. A corpus of exactly-divisible wages would
+      // satisfy this property under `mutantPerMonthRounding` too, so the count is what says the property
+      // can discriminate at all (brief rule 22).
+      const exact = exactEntitlementFils(c, service, lastMonthEnd(c))
+      if (!Number.isInteger(exact)) roundedCases += 1
+    }
+    // Exact, not a floor: the corpus is a fixed-seed sample, so this is a reproducible fact about a
+    // known set of cases rather than a threshold that can drift into a flake.
+    expect(roundedCases).toBe(EXPECTED_ROUNDED_CASES)
+  }, 30_000)
+
+  it('never understates, and never overstates by more than a fil', () => {
+    for (const c of CORPUS) {
+      const service = withUnpaid(c)
+      const asOf = lastMonthEnd(c)
+      const stored = liabilityOf(c, service, asOf)
+      const exact = exactEntitlementFils(c, service, asOf)
+      expect(stored).toBeGreaterThanOrEqual(exact)
+      expect(stored - exact).toBeLessThan(1)
+    }
+  }, 30_000)
+
+  it('is monotone in service length, in wage, and in unpaid leave', () => {
+    let unpaidDiscriminating = 0
+    for (const c of CORPUS) {
+      const asOf = lastMonthEnd(c)
+      const bare: GratuityServiceHistory = { ...c.service }
+
+      // Longer service never earns less. The comparison is against the PREVIOUS month end, so it is a
+      // claim about adding one month rather than about two unrelated dates.
+      const months = monthsOf(c)
+      if (months.length >= 2) {
+        const earlier = monthEnd(localDate(months.at(-2) as string)) as string
+        expect(liabilityOf(c, bare, asOf)).toBeGreaterThanOrEqual(liabilityOf(c, bare, earlier))
       }
-    },
-    30_000,
-  )
 
-  it(
-    'is monotone in service length, in wage, and in unpaid leave',
-    () => {
-      let unpaidDiscriminating = 0
-      for (const c of CORPUS) {
-        const asOf = lastMonthEnd(c)
-        const bare: GratuityServiceHistory = { ...c.service }
+      // A higher wage never earns less.
+      const dearer = { ...c, wageFils: c.wageFils * 2 }
+      expect(liabilityOf(dearer, bare, asOf)).toBeGreaterThanOrEqual(liabilityOf(c, bare, asOf))
 
-        // Longer service never earns less. The comparison is against the PREVIOUS month end, so it is a
-        // claim about adding one month rather than about two unrelated dates.
-        const months = monthsOf(c)
-        if (months.length >= 2) {
-          const earlier = monthEnd(localDate(months.at(-2) as string)) as string
-          expect(liabilityOf(c, bare, asOf)).toBeGreaterThanOrEqual(liabilityOf(c, bare, earlier))
-        }
-
-        // A higher wage never earns less.
-        const dearer = { ...c, wageFils: c.wageFils * 2 }
-        expect(liabilityOf(dearer, bare, asOf)).toBeGreaterThanOrEqual(liabilityOf(c, bare, asOf))
-
-        // An unpaid day never earns more, and where it earns strictly less the case can tell
-        // `mutantIgnoresUnpaidLeave` apart from the real engine.
-        const withDays = liabilityOf(c, withUnpaid(c), asOf)
-        const withoutDays = liabilityOf(c, bare, asOf)
-        expect(withDays).toBeLessThanOrEqual(withoutDays)
-        if (withDays < withoutDays) unpaidDiscriminating += 1
-      }
-      expect(unpaidDiscriminating).toBe(EXPECTED_UNPAID_DISCRIMINATING)
-    },
-    30_000,
-  )
+      // An unpaid day never earns more, and where it earns strictly less the case can tell
+      // `mutantIgnoresUnpaidLeave` apart from the real engine.
+      const withDays = liabilityOf(c, withUnpaid(c), asOf)
+      const withoutDays = liabilityOf(c, bare, asOf)
+      expect(withDays).toBeLessThanOrEqual(withoutDays)
+      if (withDays < withoutDays) unpaidDiscriminating += 1
+    }
+    expect(unpaidDiscriminating).toBe(EXPECTED_UNPAID_DISCRIMINATING)
+  }, 30_000)
 
   it('picks the same rule version whatever order the list arrives in', () => {
     // Order-independence over PERMUTATIONS of a list that can disagree. Brief rule 22's lesson from
@@ -272,7 +259,11 @@ describe('the gratuity engine, over randomised policies and service histories', 
           discriminating += 1
           const forward = gratuityRulesFor(versions, date)
           const backward = gratuityRulesFor([...versions].reverse(), date)
-          const shuffled = gratuityRulesFor([versions[1]!, versions[2]!, versions[0]!], date)
+          // A third order, rotated rather than reversed, so the property is about ORDER and not about
+          // one implementation detail of `reverse`. Built by rotation so no element access can be
+          // undefined, which a non-null assertion would only be hiding.
+          const rotated = [...versions.slice(1), ...versions.slice(0, 1)]
+          const shuffled = gratuityRulesFor(rotated, date)
           return (
             forward.effectiveFrom === backward.effectiveFrom &&
             forward.effectiveFrom === shuffled.effectiveFrom
@@ -297,11 +288,7 @@ describe('the gratuity engine, over randomised policies and service histories', 
  * routes to one figure, which is what makes the comparison an oracle rather than a restatement. The
  * double is exact enough for the corpus's magnitudes and the assertion allows a fil either way.
  */
-function exactEntitlementFils(
-  c: Case,
-  service: GratuityServiceHistory,
-  asOf: string,
-): number {
+function exactEntitlementFils(c: Case, service: GratuityServiceHistory, asOf: string): number {
   const contributions = gratuityLiabilityAt({
     rules: c.rules,
     service,
@@ -350,95 +337,83 @@ function mutantFloorRounding(c: Case, service: GratuityServiceHistory, asOf: str
 }
 
 describe('the checker is proved able to fail', () => {
-  it(
-    'catches an engine that rounds each month separately',
-    () => {
-      let caught = 0
-      for (const c of CORPUS) {
-        const service = withUnpaid(c)
-        const asOf = lastMonthEnd(c)
-        if (mutantPerMonthRounding(c, service, asOf) !== liabilityOf(c, service, asOf)) caught += 1
-      }
-      // Every case in which the rounding bites must be caught, and there must be many of them.
-      expect(caught).toBe(EXPECTED_PER_MONTH_CAUGHT)
-      expect(caught).toBeGreaterThan(CORPUS.length / 2)
-    },
-    30_000,
-  )
+  it('catches an engine that rounds each month separately', () => {
+    let caught = 0
+    for (const c of CORPUS) {
+      const service = withUnpaid(c)
+      const asOf = lastMonthEnd(c)
+      if (mutantPerMonthRounding(c, service, asOf) !== liabilityOf(c, service, asOf)) caught += 1
+    }
+    // Every case in which the rounding bites must be caught, and there must be many of them.
+    expect(caught).toBe(EXPECTED_PER_MONTH_CAUGHT)
+    expect(caught).toBeGreaterThan(CORPUS.length / 2)
+  }, 30_000)
 
-  it(
-    'catches an engine that rounds the cumulative figure down',
-    () => {
-      let caught = 0
-      for (const c of CORPUS) {
-        const service = withUnpaid(c)
-        const asOf = lastMonthEnd(c)
-        const floored = mutantFloorRounding(c, service, asOf)
-        const stored = liabilityOf(c, service, asOf)
-        if (floored !== stored) {
-          caught += 1
-          // And it is caught in the DIRECTION the property claims: the mutant understates.
-          expect(floored).toBeLessThan(stored)
-        }
+  it('catches an engine that rounds the cumulative figure down', () => {
+    let caught = 0
+    for (const c of CORPUS) {
+      const service = withUnpaid(c)
+      const asOf = lastMonthEnd(c)
+      const floored = mutantFloorRounding(c, service, asOf)
+      const stored = liabilityOf(c, service, asOf)
+      if (floored !== stored) {
+        caught += 1
+        // And it is caught in the DIRECTION the property claims: the mutant understates.
+        expect(floored).toBeLessThan(stored)
       }
-      expect(caught).toBe(EXPECTED_FLOOR_CAUGHT)
-    },
-    30_000,
-  )
+    }
+    expect(caught).toBe(EXPECTED_FLOOR_CAUGHT)
+  }, 30_000)
 
-  it(
-    'catches an engine that ignores the unpaid-leave exclusion',
-    () => {
-      // The mutant IS "earn on employed days": running the real engine with the flag off produces exactly
-      // that answer, so no separate implementation is needed and none can drift from the real one.
-      let caught = 0
-      for (const c of CORPUS) {
-        const asOf = lastMonthEnd(c)
-        const honours = liabilityOf(c, withUnpaid(c), asOf)
-        const ignores = liabilityOf(
-          { ...c, rules: { ...c.rules, unpaidLeaveDaysExcluded: false } },
-          withUnpaid(c),
-          asOf,
+  it('catches an engine that ignores the unpaid-leave exclusion', () => {
+    // The mutant IS "earn on employed days": running the real engine with the flag off produces exactly
+    // that answer, so no separate implementation is needed and none can drift from the real one.
+    let caught = 0
+    for (const c of CORPUS) {
+      const asOf = lastMonthEnd(c)
+      const honours = liabilityOf(c, withUnpaid(c), asOf)
+      const ignores = liabilityOf(
+        { ...c, rules: { ...c.rules, unpaidLeaveDaysExcluded: false } },
+        withUnpaid(c),
+        asOf,
+      )
+      if (honours !== ignores) caught += 1
+    }
+    expect(caught).toBe(EXPECTED_UNPAID_DISCRIMINATING)
+  }, 30_000)
+
+  it('catches an engine that decides the band at the month START', () => {
+    // Shifting the decision to the month start changes the answer only for a month containing an
+    // anniversary that is not the 1st — which is why `employedFromArb` never draws day 1, and why this
+    // count is asserted: a generator change that started drawing first-of-month dates would make this
+    // mutant uncatchable and the count would say so.
+    let caught = 0
+    for (const c of CORPUS) {
+      const service = withUnpaid(c)
+      const asOf = lastMonthEnd(c)
+      const real = gratuityLiabilityAt({
+        rules: c.rules,
+        service,
+        asOf: localDate(asOf),
+        wageFils: c.wageFils,
+      })
+      // Rebuild the numerator deciding the band at the month start instead of its end.
+      let mutantNumerator = 0
+      for (const month of real.contributions) {
+        if (month.withinProbation) continue
+        const atStart = bandAt(
+          c.rules,
+          c.service.employedFrom as string,
+          month.accrualMonth as string,
         )
-        if (honours !== ignores) caught += 1
+        mutantNumerator +=
+          atStart * month.paidDays * (MONTH_LENGTH_LCM / daysInMonthOf(month.accrualMonth))
       }
-      expect(caught).toBe(EXPECTED_UNPAID_DISCRIMINATING)
-    },
-    30_000,
-  )
-
-  it(
-    'catches an engine that decides the band at the month START',
-    () => {
-      // Shifting the decision to the month start changes the answer only for a month containing an
-      // anniversary that is not the 1st — which is why `employedFromArb` never draws day 1, and why this
-      // count is asserted: a generator change that started drawing first-of-month dates would make this
-      // mutant uncatchable and the count would say so.
-      let caught = 0
-      for (const c of CORPUS) {
-        const service = withUnpaid(c)
-        const asOf = lastMonthEnd(c)
-        const real = gratuityLiabilityAt({
-          rules: c.rules,
-          service,
-          asOf: localDate(asOf),
-          wageFils: c.wageFils,
-        })
-        // Rebuild the numerator deciding the band at the month start instead of its end.
-        let mutantNumerator = 0
-        for (const month of real.contributions) {
-          if (month.withinProbation) continue
-          const atStart = bandAt(c.rules, c.service.employedFrom as string, month.accrualMonth as string)
-          mutantNumerator +=
-            atStart * month.paidDays * (MONTH_LENGTH_LCM / daysInMonthOf(month.accrualMonth))
-        }
-        if (mutantNumerator !== real.numerator) caught += 1
-      }
-      expect(caught).toBe(EXPECTED_BAND_CAUGHT)
-      expect(caught).toBeGreaterThan(0)
-    },
-    30_000,
-  )
+      if (mutantNumerator !== real.numerator) caught += 1
+    }
+    expect(caught).toBe(EXPECTED_BAND_CAUGHT)
+    expect(caught).toBeGreaterThan(0)
+  }, 30_000)
 })
 
 /** The band rate at a date, computed independently of the engine so the mutant is a real alternative. */

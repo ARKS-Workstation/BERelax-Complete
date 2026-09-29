@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { accountCode } from '../ledger/account.ts'
+import { STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
 import { entryId, imbalanceFils, postEntry } from '../ledger/entry.ts'
 import { reverseEntry } from '../ledger/reverse.ts'
-import { STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
 import { localDate } from '../time.ts'
 import {
   accrualMonthFromKey,
@@ -15,13 +15,13 @@ import {
   employedDaysInMonth,
   GRATUITY_ACCRUAL_SOURCE,
   type GratuityAccounts,
+  type GratuityRules,
   gratuityAccrualEntry,
   gratuityDaysPerYearOn,
   gratuityLiabilityAt,
   gratuityMonthContributions,
   gratuityRulesFor,
   gratuitySettlementEntry,
-  type GratuityRules,
   MONTH_LENGTH_LCM,
   monthAfter,
   UnusableGratuityRules,
@@ -90,7 +90,12 @@ const liability = (args: {
     rules: args.rules ?? PROVISIONAL_V1,
     service: {
       employedFrom: localDate(args.employedFrom),
-      employedUntil: args.employedUntil === undefined ? null : args.employedUntil === null ? null : localDate(args.employedUntil),
+      employedUntil:
+        args.employedUntil === undefined
+          ? null
+          : args.employedUntil === null
+            ? null
+            : localDate(args.employedUntil),
       ...(args.unpaid === undefined ? {} : { unpaidLeaveDaysByMonth: args.unpaid }),
     },
     asOf: localDate(args.asOf),
@@ -177,7 +182,7 @@ describe('worked example: UNDER ONE YEAR of service', () => {
     // probation is not zero. Without it, a bug that returned zero for everything would pass.
     expect(
       liability({ rules: NO_PROBATION, employedFrom: '2025-01-01', asOf: '2025-06-30' }).fils,
-    ).toBe(6 / 12 * 21 * DAY)
+    ).toBe((6 / 12) * 21 * DAY)
   })
 
   it('earns the month probation ends in, because a boundary mid-month must not cost a whole month', () => {
@@ -208,7 +213,8 @@ describe('worked example: ONE TO FIVE YEARS of service', () => {
     // Every month earned at the FIRST band rate. The control on the band: if any month had tipped into the
     // second band this count would drop, and the total alone would not say which month did it.
     expect(
-      result.contributions.filter((m) => m.daysPerYear === PROVISIONAL_V1.daysPerYearFirstBand).length,
+      result.contributions.filter((m) => m.daysPerYear === PROVISIONAL_V1.daysPerYearFirstBand)
+        .length,
     ).toBe(60)
   })
 })
@@ -259,7 +265,11 @@ describe('a part month and the unpaid-leave exclusion', () => {
         employedFrom: localDate('2025-07-15'),
       }),
     ).toBe(17)
-    const result = liability({ rules: NO_PROBATION, employedFrom: '2025-07-15', asOf: '2025-07-31' })
+    const result = liability({
+      rules: NO_PROBATION,
+      employedFrom: '2025-07-15',
+      asOf: '2025-07-31',
+    })
     // 21/12 days of wage, scaled by 17/31 of the month, rounded up to the fil.
     expect(result.fils).toBe(Math.ceil((WAGE * 21 * 17) / (12 * 30 * 31)))
     expect(result.fils).toBe(9_597)
@@ -314,7 +324,11 @@ describe('a part month and the unpaid-leave exclusion', () => {
   it('truncates a mid-month question rather than awarding the whole month', () => {
     // A liability read on the 10th must not include the 11th to the 31st, or every month-to-date figure
     // on a screen would be a month-end one.
-    const midMonth = liability({ rules: NO_PROBATION, employedFrom: '2025-07-01', asOf: '2025-07-10' })
+    const midMonth = liability({
+      rules: NO_PROBATION,
+      employedFrom: '2025-07-01',
+      asOf: '2025-07-10',
+    })
     expect(midMonth.contributions.at(-1)?.employedDays).toBe(10)
   })
 })
@@ -400,7 +414,11 @@ describe('accrueGratuityMonth', () => {
     // The property that matters for P-HR-12's immutable run: a wage change lands as one movement and no
     // earlier entry needs rewriting.
     const service = { employedFrom: localDate('2025-01-01') }
-    const atOldWage = liability({ rules: NO_PROBATION, employedFrom: '2025-01-01', asOf: '2025-05-31' })
+    const atOldWage = liability({
+      rules: NO_PROBATION,
+      employedFrom: '2025-01-01',
+      asOf: '2025-05-31',
+    })
     const june = accrueGratuityMonth({
       rules: NO_PROBATION,
       service,
@@ -434,22 +452,37 @@ describe('accrueGratuityMonth', () => {
   it('refuses a fractional or negative wage', () => {
     for (const wageFils of [1.5, -1]) {
       expect(() =>
-        liability({ rules: NO_PROBATION, employedFrom: '2025-01-01', asOf: '2025-01-31', wageFils }),
+        liability({
+          rules: NO_PROBATION,
+          employedFrom: '2025-01-01',
+          asOf: '2025-01-31',
+          wageFils,
+        }),
       ).toThrow(UnusableGratuityRules)
     }
   })
 })
 
 describe('the rule version in force', () => {
-  const v2: GratuityRules = { ...PROVISIONAL_V1, effectiveFrom: localDate('2026-01-01'), daysPerYearFirstBand: 25 }
+  const v2: GratuityRules = {
+    ...PROVISIONAL_V1,
+    effectiveFrom: localDate('2026-01-01'),
+    daysPerYearFirstBand: 25,
+  }
 
   it('picks the latest version taking effect at or before the date', () => {
-    expect(gratuityRulesFor([PROVISIONAL_V1, v2], localDate('2025-12-31')).daysPerYearFirstBand).toBe(21)
-    expect(gratuityRulesFor([PROVISIONAL_V1, v2], localDate('2026-01-01')).daysPerYearFirstBand).toBe(25)
+    expect(
+      gratuityRulesFor([PROVISIONAL_V1, v2], localDate('2025-12-31')).daysPerYearFirstBand,
+    ).toBe(21)
+    expect(
+      gratuityRulesFor([PROVISIONAL_V1, v2], localDate('2026-01-01')).daysPerYearFirstBand,
+    ).toBe(25)
   })
 
   it('is order-independent, because a policy list arrives in whatever order a query returned it', () => {
-    expect(gratuityRulesFor([v2, PROVISIONAL_V1], localDate('2025-12-31')).daysPerYearFirstBand).toBe(21)
+    expect(
+      gratuityRulesFor([v2, PROVISIONAL_V1], localDate('2025-12-31')).daysPerYearFirstBand,
+    ).toBe(21)
   })
 
   it('refuses a date no version governs rather than accruing against no policy', () => {
@@ -482,13 +515,15 @@ describe('assertGratuityRules', () => {
     ['dailyWageDaysDivisor', { dailyWageDaysDivisor: 32 }],
     ['probationMonths', { probationMonths: 61 }],
   ])('refuses %s outside its bounds', (_field, patch) => {
-    expect(() => assertGratuityRules({ ...PROVISIONAL_V1, ...patch })).toThrow(UnusableGratuityRules)
+    expect(() => assertGratuityRules({ ...PROVISIONAL_V1, ...patch })).toThrow(
+      UnusableGratuityRules,
+    )
   })
 
   it('refuses a wage basis outside the closed set', () => {
-    expect(() =>
-      assertGratuityRules({ ...PROVISIONAL_V1, wageBasis: 'total' as never }),
-    ).toThrow(UnusableGratuityRules)
+    expect(() => assertGratuityRules({ ...PROVISIONAL_V1, wageBasis: 'total' as never })).toThrow(
+      UnusableGratuityRules,
+    )
   })
 })
 
@@ -589,10 +624,14 @@ describe('correcting an over-accrual', () => {
     const replacement = postEntry(correction.replacement as never, STANDARD_SPA_CHART)
     expect(imbalanceFils(replacement.lines)).toBe(0)
     expect(replacement.lines[0]?.debitFils).toBe(90_000)
-    // The three entries together leave exactly the corrected figure on the liability account.
-    const net =
-      original.lines[1]!.creditFils - reversal.lines[1]!.debitFils + replacement.lines[1]!.creditFils
-    expect(net).toBe(90_000)
+    // The three entries together leave exactly the corrected figure on the liability account. Netted by
+    // ACCOUNT rather than by line index, so the assertion survives a posting rule that reorders its lines
+    // — and so it is asserting about the liability rather than about whatever line happened to be second.
+    const netOnLiability = [original, reversal, replacement]
+      .flatMap((entry) => entry.lines)
+      .filter((line) => line.account === ACCOUNTS.liability)
+      .reduce((net, line) => net + line.creditFils - line.debitFils, 0)
+    expect(netOnLiability).toBe(90_000)
   })
 
   it('has no replacement when the corrected figure is zero — the reversal is the whole correction', () => {
@@ -664,7 +703,10 @@ describe('a leaver’s settlement', () => {
       }),
       STANDARD_SPA_CHART,
     )
-    expect(accrued.fils - entry.lines[0]!.debitFils).toBe(0)
+    const debitedToLiability = entry.lines
+      .filter((line) => line.account === ACCOUNTS.liability)
+      .reduce((total, line) => total + line.debitFils, 0)
+    expect(accrued.fils - debitedToLiability).toBe(0)
   })
 })
 

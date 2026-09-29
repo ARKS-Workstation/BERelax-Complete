@@ -42,6 +42,7 @@ import {
   gscUrlInspectionHandler,
   SEO_URL_INSPECTION_AGENT,
 } from './jobs/gsc-url-inspection-rotation.ts'
+import { GRATUITY_ACCRUAL_AGENT, runGratuityAccrual } from './jobs/gratuity-accrual.ts'
 import { LEAVE_ACCRUAL_AGENT, runLeaveAccrual } from './jobs/leave-accrual.ts'
 import {
   COMPLIANCE_CALENDAR_JOB,
@@ -295,6 +296,40 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
     // reclaiming it cannot double-accrue because the unique index refuses the second row.
     expireInSeconds: 600,
     handler: leaveAccrualHandler,
+  },
+  {
+    name: 'hr.gratuity-accrual',
+    purpose:
+      'Monthly: posts one balanced journal entry per employee for the DIFFERENCE between the ' +
+      'end-of-service gratuity liability owed at the month end and what is already accrued (expense ' +
+      'debit, liability credit). The only thing in this system that grows that liability. Idempotent per ' +
+      '(employee, accrual_month) by a partial unique index, so a second pass posts no journal line and no ' +
+      'accrual row. An accrual for a month whose accounting period has since been LOCKED still accrues ' +
+      'and lands in the next open period naming the locked one, because ADR 0026 will not reopen a filed ' +
+      'period. An unpriced employee, and one whose employment record is still provisional, are counted ' +
+      'and NAMED rather than accrued at zero (P-HR-13, docs/04 SS7).',
+    // 05:15 Asia/Dubai on the 1st. After trading closes at 02:00, after the four nightly passes at 03:00,
+    // 03:45, 04:15 and 04:45, and fifteen minutes after the leave accrual at 05:00 — deliberately not at
+    // the same minute as that pass, because both read the whole roster and both write into append-only
+    // tables, and two passes contending for the same rows is a lock wait that presents as a slow job.
+    //
+    // Deliberately NOT inside 00:00-02:00: the session in force then opened the previous day, which for
+    // the 1st of a month means the month being accrued has not finished. `latestCompletedAccrualMonth`
+    // gets that right and would accrue the month before — correct, and a month late. Running after close
+    // removes the question.
+    //
+    // The day-of-month field is 1 and the pass is a CATCH-UP sweep, which is what makes one firing a month
+    // safe: a missed month has no accrual row, so the next run posts it.
+    cron: '15 5 1 * *',
+    agent: GRATUITY_ACCRUAL_AGENT,
+    retryLimit: 3,
+    retryDelaySeconds: 300,
+    retryBackoff: true,
+    // Five reads over the roster and one insert per employee-month. Ten minutes is generous for nineteen
+    // employees and two years of catch-up; a pass still running past it is blocked on a lock rather than
+    // slow, and reclaiming it cannot double-accrue because the partial unique index refuses the second row.
+    expireInSeconds: 600,
+    handler: gratuityAccrualHandler,
   },
   {
     name: 'package.expiry-sweep',
@@ -615,6 +650,44 @@ async function leaveAccrualHandler(_data: never, context: JobContext): Promise<v
   console.log(
     `hr.leave-accrual through ${result.throughMonth}: ${result.considered} employee(s) considered, ` +
       `${result.written.length} accrual(s) written, ${result.accruedHundredths} day-hundredths added`,
+  )
+}
+
+/**
+ * The monthly gratuity accrual pass.
+ *
+ * Thin, like the sweeps around it: `runGratuityAccrual` resolves the trading session and the month from the
+ * instant this passes it, so the integration suite can drive it at a frozen clock and ask the one question a
+ * job reading `new Date()` cannot be asked — whether a second run of the same month posts anything.
+ *
+ * **The log line reports the EXCLUSIONS, and that is the half that matters.** A roster where every employee
+ * is unpriced or still provisional accrues nothing, which is the correct answer and is indistinguishable
+ * from a pass that has stopped — and the figure it is hiding is a balance-sheet liability rather than a
+ * report nobody reads. So the counts are printed even when the accrual count is zero, which is docs/10 §6's
+ * reasoning and the reason `agent_heartbeat` exists. The over-accrual list is printed for the same reason
+ * one step along: those employees need a human to decide which figure was wrong, and a pass that noticed
+ * silently would leave the liability overstated indefinitely.
+ */
+async function gratuityAccrualHandler(_data: never, context: JobContext): Promise<void> {
+  const sql = maintenanceSql
+  if (sql === undefined) {
+    throw new AppError(
+      'invariant_violated',
+      'The gratuity accrual pass ran before setMaintenanceSql() supplied a connection. run.ts calls it ' +
+        'before startWorkers().',
+    )
+  }
+  const result = await runGratuityAccrual(sql, context.now())
+  const excluded = result.excluded.length
+  const unpriced = result.excluded.filter((e) => e.reason === 'unpriced').length
+  console.log(
+    `hr.gratuity-accrual through ${result.throughMonth}: ${result.considered} employee(s) considered, ` +
+      `${result.written.length} accrual(s) posted, ${result.accruedFils} fils added, ` +
+      `${excluded} excluded (${unpriced} unpriced, ${excluded - unpriced} provisional employment ` +
+      `record), ${result.rebasedMonths.length} month(s) rebased past a locked period` +
+      (result.overAccrued.length === 0
+        ? ''
+        : `; OVER-ACCRUED and needing a correction: ${result.overAccrued.join(', ')}`),
   )
 }
 
