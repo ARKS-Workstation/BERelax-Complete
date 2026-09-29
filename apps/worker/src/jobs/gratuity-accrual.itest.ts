@@ -243,20 +243,40 @@ describe('the pass', () => {
     })
   }, 120_000)
 
-  it('accrues the catch-up window and no further back than it', async () => {
+  it('writes at most CATCH_UP_MONTHS rows, and the oldest carries everything earned before it', async () => {
+    /*
+     * The bound is on ROWS and not on the liability, and this case exists to say so — because the first
+     * version of it asserted the opposite, copied from `leave-accrual.itest.ts` where it is true.
+     *
+     * Leave accrues independently per month, so bounding the months bounds the total. Gratuity accrues as a
+     * DIFFERENCE against the whole liability owed (ADR 0057), so the oldest month in the window absorbs all
+     * prior service as one catch-up movement. That is correct for a liability — the employee earned it, and
+     * omitting it would understate what is owed — and it is a different shape from leave, so it is asserted
+     * rather than assumed.
+     */
     const rows = await readGratuityAccruals(sql, {
       employeeIds: [of('STEADY')],
       fromMonth: `${YEAR - 5}-01-01`,
       toMonth: `${YEAR}-06-30`,
     })
     expect(rows.length).toBeGreaterThan(0)
-    // Bounded by CATCH_UP_MONTHS. Without the bound a first run against a roster engaged years ago would
-    // derive a decade of liability the business has no record of agreeing.
     expect(rows.length).toBeLessThanOrEqual(CATCH_UP_MONTHS)
-    // And the oldest month is inside the window rather than at the employment date, which is the claim the
-    // bound actually makes. STEADY was engaged three years before the window.
-    const oldest = rows[0]?.accrualMonth as string
-    expect(oldest > `${YEAR - 3}-01-01`).toBe(true)
+    // The oldest row is inside the window rather than at the employment date: STEADY was engaged three years
+    // before it, so some months have no row at all.
+    const oldest = rows[0] as { accrualMonth: string; accruedFils: number; cumulativeFils: number }
+    expect(oldest.accrualMonth > `${YEAR - 3}-01-01`).toBe(true)
+
+    // And the liability is NOT truncated with the rows. The oldest row's movement equals its cumulative
+    // figure — it starts from nothing — and that figure is larger than an ordinary month's, because it
+    // carries the pre-window service.
+    expect(oldest.accruedFils).toBe(oldest.cumulativeFils)
+    const ordinary = rows[1] as { accruedFils: number }
+    expect(oldest.accruedFils).toBeGreaterThan(ordinary.accruedFils)
+    // Every later month is the same ordinary movement, which is what makes the first one visibly a catch-up
+    // rather than just the largest of a varying set.
+    for (const row of rows.slice(1)) {
+      expect(row.accruedFils).toBe(ordinary.accruedFils)
+    }
   })
 
   it('posts a balanced two-line entry per accrual, each summing to zero fils', async () => {

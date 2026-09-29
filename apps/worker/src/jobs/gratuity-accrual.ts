@@ -123,11 +123,27 @@ export const GRATUITY_ACCRUED_EVENT = 'gratuity.accrued'
 /**
  * How far back a pass will reach for a month with no accrual row.
  *
- * Twenty-four months, matching `leave-accrual.ts` and for the same trade-off: long enough that a pass
- * silenced for a year repairs itself, short enough that a first run against a long-standing roster does not
- * derive years of liability nobody agreed. A constant rather than a setting, because what it trades off is a
- * choice about THIS pass and not a policy about gratuity — and the provisional-employment refusal above is
- * what actually stops a decade of service being priced.
+ * Twenty-four months, matching `leave-accrual.ts`. **It bounds the number of ROWS and not the liability, and
+ * that difference is the whole point of writing it down**: an earlier version of this comment claimed the
+ * bound stopped a first run deriving years of liability nobody agreed, copied from `leave-accrual.ts` where
+ * it is true, and it is false here.
+ *
+ * Leave accrues INDEPENDENTLY per month, so bounding the months bounds the total. Gratuity accrues as a
+ * DIFFERENCE against the whole liability owed (ADR 0057), so the oldest month inside the window carries
+ * everything earned before it as one catch-up movement. A first run against somebody with three years of
+ * service writes twenty-four rows and the first of them is thirteen months' worth.
+ *
+ * That is CORRECT for a liability and it is why it was left as it is rather than bounded harder: the employee
+ * earned the entitlement, and a liability that omitted the first eighteen months would understate what is
+ * owed — the one error that leaves no trace. What the bound buys is a bounded number of journal entries and a
+ * bounded amount of work per pass, which is worth having on its own.
+ *
+ * What actually stops a decade of service being priced for the seeded roster is the
+ * `provisional_employment_record` refusal, not this number: all nineteen carry the epoch placeholder
+ * `1970-01-01`, and refusing them is what keeps fifty-six years of gratuity off the balance sheet.
+ *
+ * A constant rather than a setting, because what it trades off is a choice about THIS pass and not a policy
+ * about gratuity.
  */
 export const CATCH_UP_MONTHS = 24
 
