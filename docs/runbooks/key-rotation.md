@@ -284,6 +284,48 @@ under it into a row nothing will ever match, which presents as a promotional mes
 who opted out — the exact failure this area exists to prevent, arriving months after the change that
 caused it, with nothing to point at.
 
+## Rotating the document URL signing secret
+
+`DOCUMENT_URL_SIGNING_SECRET` is the HMAC key behind every private-document link (W-SYS-14). It is not a
+KEK: nothing is encrypted with it and losing it makes no document unreadable. What it does is make a
+`/documents/{id}?…&sig=…` link genuine, and what holding it buys an attacker is the ability to MINT one —
+which is still not the document, because that route refuses a request with no live staff session and
+re-checks the authorisation matrix. The signature authorises a **fetch**, never a principal.
+
+Links live **fifteen minutes** (`DOCUMENT_SIGNATURE_TTL_SECONDS` in `@berelax/core`). That figure is what
+makes this rotation cheap, and the retired slot is what makes it seamless.
+
+1. Generate a new key and keep the old one:
+   `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`.
+2. Move the current values into `DOCUMENT_URL_SIGNING_SECRET_PREVIOUS` and
+   `DOCUMENT_URL_SIGNING_SECRET_PREVIOUS_VERSION`, set the new ones in `DOCUMENT_URL_SIGNING_SECRET` and
+   `DOCUMENT_URL_SIGNING_SECRET_VERSION` (bump the label — `v2`), and deploy. Verification consults both
+   keys and signing only ever uses the current one, so every link already in somebody's hands keeps
+   working and no new link is made under the old key.
+3. Wait fifteen minutes — one TTL. There is nothing to re-key: a signature is recomputed from the
+   document, not stored, so there is no equivalent of `rekeySuppressionKeys` here and no sweep to watch.
+4. Remove `DOCUMENT_URL_SIGNING_SECRET_PREVIOUS` and its version label.
+
+Unlike the suppression pepper's, this retired slot is **not** retained indefinitely, and the difference is
+worth knowing: a suppression row keyed under a dropped pepper becomes a row nothing will ever match, and
+a link signed under a dropped key becomes a link that does not open — which the holder fixes by asking
+for the document again. There is no state that survives step 4 to be damaged by it.
+
+### If you must invalidate every outstanding link NOW
+
+Skip step 2's `…_PREVIOUS` and deploy with the retired slot **empty**. Every outstanding link then reports
+`signature_unknown_key` — "signed by us, under a key we no longer hold" — rather than
+`signature_invalid`, so the access log distinguishes the people holding the links you just killed from
+anybody probing. That is the whole reason the version label is inside the signature.
+
+What this cannot do is withdraw ONE link while leaving the others. A signature is valid until it expires
+and there is nothing to delete; the answers are to wait out the fifteen minutes, or to do the above and
+accept that everybody re-opens their documents. A single-use document does not have this problem at all:
+its link is dead the moment somebody follows it (`ZY111`), which is recorded in `private_document_fetch`
+with who followed it and when.
+
+---
+
 ---
 
 ## What rotation does not cover

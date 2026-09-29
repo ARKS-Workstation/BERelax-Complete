@@ -129,6 +129,39 @@ const schema = z
     SUPPRESSION_PEPPER_PREVIOUS: z.string().optional(),
     SUPPRESSION_PEPPER_PREVIOUS_VERSION: z.string().optional(),
 
+    /**
+     * The HMAC key behind every private-document link, and the label of the key each link was signed under.
+     *
+     * W-SYS-14. A signed URL is the only way a private document can be fetched, and it has to be verifiable
+     * WITHOUT the provider: a presigned Spaces URL is checked by Spaces, so "this link expired" and
+     * "somebody is guessing" would arrive as one third-party 403 — and there is no real Spaces adapter at
+     * all (W-SYS-05's `[no-real-media-storage-adapter]`). So the signature is detached and this key is the
+     * thing that verifies it. Holding it plus a document id is the ability to mint a link to that document;
+     * it still authorises nothing without an authenticated session, because the signature authorises a
+     * FETCH and never a principal.
+     *
+     * A fourth secret, and M-VAT-11's header argues against exactly that — "adding an eighth entry for a
+     * link that lives fifteen minutes is a poor trade" — which is why ADR 0051 takes the other side
+     * explicitly rather than quietly. The short form: the replay defence has to be a database row either
+     * way, so a stored grant was buying revocability for a fifteen-minute link at the price of a WRITE on
+     * the path that merely OFFERS a download.
+     *
+     * `…_PREVIOUS` is the retired key, consulted on VERIFICATION only and never used to sign. It is what
+     * makes a rotation seamless for the links already in flight, and it is also what makes the refusals
+     * mean anything: the version label is IN the signature and in the URL, so a link signed under a key
+     * this deployment has rotated away from is `signature_unknown_key` — "signed by us, under a key we no
+     * longer hold" — rather than indistinguishable from a forgery.
+     *
+     * Optional here for the reason the three KEKs and the pepper are: declaring the names is what this
+     * schema is for, and the runtime reader (`documentSigningKeyRing` in `apps/web/src/media/storage.ts`)
+     * refuses loudly and by name when it is absent — `[document-signing-not-configured]`, which serves no
+     * document rather than serving one unsigned.
+     */
+    DOCUMENT_URL_SIGNING_SECRET: z.string().optional(),
+    DOCUMENT_URL_SIGNING_SECRET_VERSION: z.string().optional(),
+    DOCUMENT_URL_SIGNING_SECRET_PREVIOUS: z.string().optional(),
+    DOCUMENT_URL_SIGNING_SECRET_PREVIOUS_VERSION: z.string().optional(),
+
     SENTRY_DSN: z.string().optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   })

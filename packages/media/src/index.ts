@@ -107,6 +107,7 @@ export {
   PUT_LOG,
 } from './storage/fake.ts'
 export {
+  assertSignable,
   derivativeHeaders,
   IMMUTABLE_CACHE_CONTROL,
   MEDIA_BUCKETS,
@@ -116,8 +117,26 @@ export {
   type PutRequest,
   publicKeyFor,
   type ServedHeaders,
+  type SignedObjectQuery,
+  type SignRequest,
   type StoredObject,
 } from './storage/port.ts'
+export {
+  createDocumentUrlSigner,
+  DOCUMENT_SIGNATURE_PARAMS,
+  DOCUMENT_SIGNATURE_REFUSALS,
+  DOCUMENT_SIGNING_FIELD_SEPARATOR,
+  DOCUMENT_SIGNING_SCHEME,
+  type DocumentSignatureRefusal,
+  type DocumentSignatureSubject,
+  type DocumentSigningKey,
+  type DocumentSigningKeyRing,
+  type DocumentUrlSigner,
+  documentSigningPayload,
+  mintDocumentNonce,
+  type SignedDocumentQuery,
+  type VerifiedDocumentSignature,
+} from './storage/signing.ts'
 export {
   assertContentHash,
   assertCroppedSlot,

@@ -943,6 +943,17 @@ export {
   type RenderedWording,
   readPreferenceSubject,
 } from './repositories/preference-centre.ts'
+export {
+  authoriseDocumentFetch,
+  type DocumentFetchArgs,
+  type DocumentFetchRefusal,
+  type PrivateDocumentRecord,
+  type RegisteredPrivateDocument,
+  type RegisterPrivateDocumentArgs,
+  readPrivateDocument,
+  recordDocumentFetch,
+  registerPrivateDocument,
+} from './repositories/private-document.ts'
 /*
   W-SITE-10's publication control plane. The only module in the build that writes `publication_lint_pass`,
   `publication_approval` and `publication_record`: 0093 makes all three append-only for every role, so a
@@ -3265,6 +3276,44 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // one because each has a different runbook answer, which is 0061's argument for a private code at all; the
 // CLASS identifies nothing any more, which is 0091's paragraph above and W-SYS-12's subject.
 //
+// 101 is 0101_private_document.sql: the register of every private document, and the fetch that cannot be
+// replayed or lost (W-SYS-14). Two tables. `private_document` is one row per object in the private bucket —
+// the class that decides who may read it, the storage key, the content hash that says which bytes it is, and
+// the `use_policy` derived from the class. `private_document_fetch` is one row per authorised fetch, written
+// in the SAME transaction as the authorisation, which is what makes "a download the trail is missing"
+// unrepresentable rather than unlikely. The hole it closes is not abstract: `writeTaxDocumentPdf()` in
+// `@berelax/pdf` took a `path` and called `writeFileSync`, so a filed tax invoice — issuer TRN, customer,
+// every line and every figure — was readable by anybody who learned the path, and private storage had been
+// DEFERRED by M-TILL-12 to M-TILL-13 and M-VAT-11, both of which went `done` without ever owning it.
+//
+// A REGISTER rather than a `storage_key` column on each producer's row, and that is the whole design
+// decision. Five producers each with a private path is five routes, five permission checks and five chances
+// that the sixth producer has none — which is what the deferral chain looks like after three units. One
+// register means one route, one permission check read out of the authorisation matrix rather than copied, one
+// audit action, and an answer to "what private documents does this business hold" that is a SELECT rather
+// than a survey. There is deliberately NO `bucket` column: every row is in the private bucket by definition,
+// and a column able to say `public` is a column somebody sets to `public`.
+//
+// Three private SQLSTATEs, `ZY111`-`ZY113`, from the range this unit was allocated (`ZY111`-`ZY120`);
+// `ZY114`-`ZY120` are unused. `ZY111` a single-use link fetched twice — a payslip and a clinical extract are
+// `single_use`, and the trigger takes `for update` on the register row before it looks, because a
+// read-then-insert in TypeScript is two statements and two concurrent fetches of one forwarded link both
+// pass the read. That lock is the reason the check is here and not in the repository, and it is 0023's
+// row-locked counter used as a mutex rather than as a sequence. `ZY112` an UPDATE or DELETE on either table:
+// the register is what an audited download NAMES, so a repointable storage key would make a recorded
+// download name bytes that were never served, and the fetch log is the record that a copy left the business.
+// `ZY113` a document class outside `PRIVATE_DOCUMENT_CLASSES` in `@berelax/core` — deny-by-default fails in
+// the WRONG DIRECTION without it, because an unclassified document has no permission mapped to it and is
+// therefore one nobody can fetch and nobody can notice is unfetchable. That closed set is the one figure in
+// the file that exists in two places, held equal behaviourally by gate case 129j rather than trusted, which
+// is 0098's arrangement for `settings:write`. Codes are allocated by
+// `packages/db/src/sqlstate-registry.ts` and not by reading the migrations a worktree can see (ADR 0043).
+//
+// The fetch log is deliberately not `audit_event`, and it writes one anyway. `audit_event` is partitioned
+// with a JSON `after`, so "has this nonce been burned" would be a JSON containment query on the hot path of
+// every download and the uniqueness the replay defence needs could not be a constraint at all. This table is
+// the CONSTRAINT; the audit row is the narrative.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed. 85 and 89 through 99 arrived out of order, each with the unit that held it, 94 (G-REV-02) last of
@@ -3294,4 +3343,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 99 as const
+export const SCHEMA_VERSION = 101 as const
