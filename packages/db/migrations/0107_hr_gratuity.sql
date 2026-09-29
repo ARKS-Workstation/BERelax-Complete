@@ -657,10 +657,18 @@ end $$;
 comment on function assert_gratuity_settlement_is_for_a_leaver() is
   'Raises ZY176. A settlement needs employee.employed_until set, and its own snapshot must equal it.';
 
-create trigger gratuity_settlement_is_for_a_leaver before insert on gratuity_settlement
+-- PostgreSQL fires BEFORE triggers on one table in **trigger-name order**, not in creation order, so the
+-- names carry the sequence. The first version of this block relied on creation order and carried a comment
+-- claiming the leaver check ran first; it did not, because `gratuity_settlement_clears_the_liability` sorts
+-- before `gratuity_settlement_is_for_a_leaver`. The integration suite found it by asking for ZY176 and being
+-- handed ZY175.
+--
+-- The order matters because the two refusals send somebody to different places. "The amount does not match
+-- the liability" for an employee who has not left sends them to recompute a figure, when the figure is fine
+-- and the employment record is what is missing. The more fundamental fact goes first.
+create trigger gratuity_settlement_check_1_is_for_a_leaver before insert on gratuity_settlement
   for each row execute function assert_gratuity_settlement_is_for_a_leaver();
--- After the leaver check, so the more basic refusal is the one a caller sees first.
-create trigger gratuity_settlement_clears_the_liability before insert on gratuity_settlement
+create trigger gratuity_settlement_check_2_clears_the_liability before insert on gratuity_settlement
   for each row execute function assert_gratuity_settlement_clears_the_liability();
 
 -- ---------------------------------------------------------------------------------------------

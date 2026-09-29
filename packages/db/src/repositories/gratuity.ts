@@ -230,7 +230,7 @@ export async function readGratuityEmployees(
     )
   }
   const ids = args.employeeIds ?? null
-  return sql<GratuityEmployeeRow[]>`
+  const rows = await sql<Record<string, string | boolean | null>[]>`
     select e.id                       as "employeeId",
            e.staff_reference           as "staffReference",
            e.employed_from::text       as "employedFrom",
@@ -245,6 +245,16 @@ export async function readGratuityEmployees(
        and (${ids}::uuid[] is null or e.id = any (${ids}::uuid[]))
      order by e.staff_reference
   `
+  return rows.map((row) => ({
+    employeeId: row['employeeId'] as string,
+    staffReference: row['staffReference'] as string,
+    employedFrom: row['employedFrom'] as string,
+    employedUntil: (row['employedUntil'] as string | null) ?? null,
+    // `null` stays null and never becomes 0: an unpriced employee is NAMED by the pass, and `Number(null)`
+    // is 0, which would silently price them at nothing — the failure this column exists to avoid.
+    wageFils: row['wageFils'] === null ? null : Number(row['wageFils']),
+    isProvisional: row['isProvisional'] === true,
+  }))
 }
 
 export interface GratuityAccrualRow {
@@ -255,6 +265,8 @@ export interface GratuityAccrualRow {
   readonly accruedFils: number
   readonly cumulativeFils: number
   readonly wageFils: number
+  /** The basis the wage was read under, pinned. A later version changing it cannot restate this row. */
+  readonly wageBasis: string
   readonly entryId: string
   readonly entryDate: string
   readonly lockedPeriodId: string | null
@@ -284,7 +296,14 @@ export async function readGratuityAccruals(
         'variable looks like.',
     )
   }
-  return sql<GratuityAccrualRow[]>`
+  /*
+   * `bigint` comes back from postgres.js as a STRING, so every money column is mapped through `Number`
+   * rather than declared as one and hoped for. The first version of these functions did the latter, and
+   * the row type said `number` while the value was a string — which compares unequal to every integer and
+   * sums by concatenation. The compiler cannot see it, because a row type is an assertion ABOUT a query
+   * rather than a derivation FROM it, so the integration suite is the only thing that can.
+   */
+  const rows = await sql<Record<string, string | null>[]>`
     select accrual_id::text           as "accrualId",
            employee_id::text          as "employeeId",
            accrual_month::text        as "accrualMonth",
@@ -292,6 +311,7 @@ export async function readGratuityAccruals(
            accrued_fils::bigint       as "accruedFils",
            cumulative_fils::bigint    as "cumulativeFils",
            wage_fils::bigint          as "wageFils",
+           wage_basis                 as "wageBasis",
            entry_id                   as "entryId",
            entry_date::text           as "entryDate",
            locked_period_id           as "lockedPeriodId",
@@ -302,6 +322,21 @@ export async function readGratuityAccruals(
        and accrual_month between ${args.fromMonth}::date and ${args.toMonth}::date
      order by employee_id, accrual_month, created_at
   `
+  return rows.map((row) => ({
+    accrualId: row['accrualId'] as string,
+    employeeId: row['employeeId'] as string,
+    accrualMonth: row['accrualMonth'] as string,
+    accruedTo: row['accruedTo'] as string,
+    accruedFils: Number(row['accruedFils']),
+    cumulativeFils: Number(row['cumulativeFils']),
+    wageFils: Number(row['wageFils']),
+    wageBasis: row['wageBasis'] as string,
+    entryId: row['entryId'] as string,
+    entryDate: row['entryDate'] as string,
+    lockedPeriodId: row['lockedPeriodId'] ?? null,
+    correctsAccrualId: row['correctsAccrualId'] ?? null,
+    ruleEffectiveFrom: row['ruleEffectiveFrom'] as string,
+  }))
 }
 
 export interface GratuityLiabilityRow {
@@ -330,7 +365,7 @@ export async function readGratuityLiabilities(
         'variable looks like.',
     )
   }
-  return sql<GratuityLiabilityRow[]>`
+  const rows = await sql<Record<string, string | number | null>[]>`
     select employee_id::text        as "employeeId",
            accrued_fils::bigint     as "accruedFils",
            latest_accrual_month::text as "latestAccrualMonth",
@@ -339,6 +374,12 @@ export async function readGratuityLiabilities(
      where employee_id = any (${[...employeeIds]}::uuid[])
      order by employee_id
   `
+  return rows.map((row) => ({
+    employeeId: row['employeeId'] as string,
+    accruedFils: Number(row['accruedFils']),
+    latestAccrualMonth: row['latestAccrualMonth'] as string,
+    accrualCount: Number(row['accrualCount']),
+  }))
 }
 
 /**
@@ -360,7 +401,7 @@ export async function readGratuityTotalsByMonth(
   sql: Sql,
   args: { readonly fromEntryDate: string; readonly toEntryDate: string },
 ): Promise<readonly GratuityMonthTotalRow[]> {
-  return sql<GratuityMonthTotalRow[]>`
+  const rows = await sql<Record<string, string | number | null>[]>`
     select accrual_month::text  as "accrualMonth",
            entry_date::text     as "entryDate",
            sum(accrued_fils)::bigint as "accruedFils",
@@ -370,6 +411,12 @@ export async function readGratuityTotalsByMonth(
      group by accrual_month, entry_date
      order by entry_date, accrual_month
   `
+  return rows.map((row) => ({
+    accrualMonth: row['accrualMonth'] as string,
+    entryDate: row['entryDate'] as string,
+    accruedFils: Number(row['accruedFils']),
+    rows: Number(row['rows']),
+  }))
 }
 
 // --- writes --------------------------------------------------------------------------------------
