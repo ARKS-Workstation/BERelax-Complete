@@ -101,6 +101,12 @@ export {
  */
 export const TEST_SUPPORT_MODULES: readonly string[] = Object.freeze([
   'packages/fixtures/src/invoice-family.ts',
+  // H-MIG-01's conformance target teardown, here for the same reason and at one table rather than six: both
+  // of that unit's integration files need to start from an empty conformance target, and the statement lives
+  // once in `clearProbeEntities`. It is predicate-scoped, so it needs no declaration —
+  // but it would be invisible to this scan if the module were not named here, which is the hazard the
+  // paragraph above is about.
+  'packages/migration/src/conformance/probe-importer.ts',
 ])
 
 /** Every file the rule applies to: the test files, plus the support modules they delegate cleanup to. */

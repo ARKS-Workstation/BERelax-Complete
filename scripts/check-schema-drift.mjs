@@ -44,7 +44,7 @@ const MIRROR_DIRS = ['packages/db/src/schema', 'packages/clinical/src/schema']
  * repository's to mirror. Stated as the schemas that ARE checked rather than as the ones that are not, so
  * a schema added by a migration and never mirrored is a failure here rather than an omission nobody sees.
  */
-const OWNED_SCHEMAS = ['public', 'clinical', 'analytics']
+const OWNED_SCHEMAS = ['public', 'clinical', 'analytics', 'import_staging']
 const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intentionally not mirrored
 
 // --- what Drizzle declares -------------------------------------------------------------------
