@@ -39581,6 +39581,452 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 131a-131z. (M-VAT-12) The closed-month reconciliation: every identity shown to be able to FAIL, and every
+//            figure shown to come from the one function that owns it.
+//
+//            This unit's defects are all one shape, and it is the shape a reconciliation report invites: a
+//            report that reconciles for the wrong reason. Two zeros agree perfectly; a figure derived twice
+//            agrees with itself; a month with nothing in it has no variance at all. So every case below
+//            mutates ONE decision and names the ONE suite that has to notice — and the three cases that
+//            matter most (131a, 131c, 131m) are mutations back to a defect this unit actually shipped and
+//            its own suite caught.
+//
+//            **The rows suite builds its own closed month, and that is not a convenience.** `pnpm seed`
+//            writes zero `appointment` rows, zero `invoice` rows and no `period_lock`, so the "seeded closed
+//            month" the acceptance line names does not exist: a report over August 2026 reconciles seven
+//            empty figures against seven empty figures. Every case here therefore runs
+//            `packages/db/src/queries/month-reconciliation.itest.ts`, which posts a month through the real
+//            services and asserts `examinedRows` at a hand-counted figure.
+//
+//            **The window is searched for, not fixed.** `journal_entry` refuses DELETE for every role
+//            including the owner, so each run of that suite consumes three months out of a reserved span of
+//            six hundred (2200-01 .. 2249-12). This block runs it roughly a dozen times, so one
+//            `pnpm gates:only --only '// 131a'` spends about three years of it — which is why the span is
+//            fifty years and not five.
+//
+//            **The migration is absent on purpose and there is no case about one.** This unit adds no
+//            migration and raises no private SQLSTATE: the artefact is bytes plus an `audit_event`, both of
+//            which exist, and a second append-only table holding the same bytes is the duplication 0095's
+//            header argues against. There is therefore nothing here for a schema scan to mutate.
+{
+  const MODULE = 'packages/db/src/queries/month-reconciliation.ts'
+  const WORKED = 'packages/fixtures/src/month-reconciliation.ts'
+  const RENDER = 'apps/web/app/(admin)/accounts/reconciliation/render.ts'
+  const ROUTE = 'apps/web/app/(admin)/accounts/reconciliation/route.ts'
+
+  const ROWS_SUITE = 'packages/db/src/queries/month-reconciliation.itest.ts'
+  const WORKED_SUITE = 'packages/fixtures/src/month-reconciliation.test.ts'
+  const RENDER_SUITE = 'apps/web/src/month-reconciliation-render.test.ts'
+
+  const reconUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const reconRows = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block and not `reconciliationMutant`, deliberately: blocks 106, 107, 113 and 125 all
+   * record what a shared helper NAME cost them — git found two identically shaped bodies as shared context
+   * and interleaved the blocks, and the merge had to rebuild both from whole sides.
+   */
+  const brokenReconSource = (path, anchor, replacement, suite, runner = reconRows) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  /**
+   * TWO anchored edits, for a mutation that has to stay internally consistent to be interesting.
+   *
+   * 131a needs one: moving a source between two classes with only ONE edit leaves it claimed by no class at
+   * all, and `assertEverySourceIsClassified` then throws while the report is being built — every test skips,
+   * and the case proves the classifier fires rather than that the identity does. 131x is the case about the
+   * classifier, and it is anchored on the refusal's own sentence for exactly that reason.
+   */
+  const brokenReconPair = (path, edits, suite, runner = reconRows) =>
+    withEditedFile(
+      path,
+      (text) =>
+        edits.reduce((acc, [anchor, replacement]) => replaceOnce(acc, anchor, replacement), text),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 131a. The credit note's entry read under the `refund` source instead of `reversal`. This is the defect
+  //       this file shipped: a credit note posts `source = 'reversal'` and debits revenue and output VAT,
+  //       while `refund` moves MONEY and touches no revenue account — so the revenue identity compares
+  //       credit-note gross against nothing and is out by every credit note in the month.
+  checkRejectedBy(
+    'month reconciliation: the credit-note entry classified as a refund rather than a reversal is caught',
+    brokenReconPair(
+      MODULE,
+      [
+        // SWAPPED rather than replaced, so every source is still claimed by exactly one class and what
+        // fails is the identity rather than the classifier.
+        ["  document_sale: ['sale', 'reversal'],", "  document_sale: ['sale', 'refund'],"],
+        ["  receipt: ['payment', 'refund'],", "  receipt: ['payment', 'reversal'],"],
+      ],
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131b. The refund ADDED to what was tendered instead of subtracted. Money handed back read as money
+  //       received, which is a figure that looks exactly like a busier month.
+  checkRejectedBy(
+    'month reconciliation: a refund added to the tenders rather than subtracted is caught',
+    brokenReconSource(
+      MODULE,
+      'documents.paymentAppliedFils - documents.refundFils,',
+      'documents.paymentAppliedFils + documents.refundFils,',
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131c. The VAT box looked up by the SUPPLIES tag instead of the tax tag — the second defect this file
+  //       shipped. `standard_rated_supplies` with measure `tax` matches no mapping row, so the box side of
+  //       the last step in the chain is silently zero and the report reconciles the tax against nothing.
+  checkRejectedBy(
+    'month reconciliation: the output-tax box looked up by the supplies tag is caught',
+    brokenReconSource(
+      MODULE,
+      "vat201BoxForGrouping(sql, 'output_tax', 'tax'),",
+      "vat201BoxForGrouping(sql, 'standard_rated_supplies', 'tax'),",
+      ROWS_SUITE,
+    ),
+    'carries the chain to the VAT box',
+  )
+
+  // 131d. An excluded population read as an EQUALITY. One no-show in the month then reads as a variance,
+  //       which is the defect that turns "these are not revenue" into "the month does not reconcile" — and
+  //       after a fortnight of a report that always has three variances nobody reads the variances.
+  checkRejectedBy(
+    'month reconciliation: an excluded population read as an equality is caught',
+    brokenReconSource(
+      MODULE,
+      "  return input.kind === 'excluded' ? right : left - right",
+      '  return left - right',
+      ROWS_SUITE,
+    ),
+    // The no-show line's own FIGURES are unchanged by this mutation — one no-show, none of them billed — so
+    // what notices is the report's variance LIST, not the assertions about the figures. Anchored on the test
+    // that reads that list, which is the mistake this anchor started as.
+    'reports no unexplained variance line at all',
+  )
+
+  // 131e. The journal half of the as-of census dropped. The count then misses exactly the rows a reopened
+  //       period would have added to the LEDGER, which is the only half that restates a filed figure.
+  checkRejectedBy(
+    'month reconciliation: the as-of census blind to journal entries is caught',
+    brokenReconSource(
+      MODULE,
+      // Anchored on the fragment that carries no interpolation, and multiplied out rather than deleted:
+      // the clause's own text holds three `${}` placeholders, and a gate anchor containing one reads to
+      // Biome as a template literal somebody forgot to make a template literal.
+      '+ (select count(*) from journal_entry',
+      '+ (select 0 * count(*) from journal_entry',
+      ROWS_SUITE,
+    ),
+    'counts the rows written after the instant it read at',
+  )
+
+  // 131f. The trial-balance movement read over an empty range. The tie-back line then compares a census of
+  //       sixteen journal lines against a movement of none — which is the whole reason the refinement this
+  //       report makes is held to `trialBalanceMovement` by a LINE rather than by a comment.
+  checkRejectedBy(
+    'month reconciliation: the census tied to a trial balance over the wrong range is caught',
+    brokenReconSource(
+      MODULE,
+      'trialBalanceMovement(sql, dayBefore(period.startsOn), period.endsOn),',
+      'trialBalanceMovement(sql, period.endsOn, period.endsOn),',
+      ROWS_SUITE,
+    ),
+    'ties its own per-source refinement back to the trial balance',
+  )
+
+  // 131g. Two lines transposed in the report. Identical figures, different bytes — so the acceptance line
+  //       about regenerating byte-identically is exactly what a reordering breaks, and the declared id list
+  //       is what refuses it before any caller can see the difference.
+  checkRejectedBy(
+    'month reconciliation: the lines built in a different order from the declared list is caught',
+    brokenReconSource(
+      MODULE,
+      "      id: 'no_shows_excluded_from_revenue',",
+      "      id: 'cancellations_excluded_from_revenue',",
+      ROWS_SUITE,
+    ),
+    // The declared-list check throws while the report is being built, so every test SKIPS and no test name
+    // reaches the output. The anchor is the refusal's own sentence, which exists nowhere else in the tree.
+    'the order is part of the contract',
+  )
+
+  // 131h. The package liability read at the wrong end of the period. Both sides of that line come from ONE
+  //       function, so the identity still holds for the wrong month — the figure is what has to be asserted,
+  //       and this case is what proves the suite asserts it rather than only the variance.
+  checkRejectedBy(
+    'month reconciliation: the package liability read at the start of the period is caught',
+    brokenReconSource(
+      MODULE,
+      'readPackageLiability(sql, period.endsOn),',
+      'readPackageLiability(sql, dayBefore(period.startsOn)),',
+      ROWS_SUITE,
+    ),
+    'holds the four named identities',
+  )
+
+  // 131i. The refund's own source class dropped from the tender identity. The money out is then in the
+  //       documents and not in the ledger side, so a month with a refund in it never reconciles — and the
+  //       figure it is out by is the refund, which reads like a missing payment.
+  checkRejectedBy(
+    'month reconciliation: the receipt source class dropped from the tender identity is caught',
+    brokenReconSource(MODULE, "    ...inClass(tenders, 'receipt'),\n", '', ROWS_SUITE),
+    'holds the four named identities',
+  )
+
+  // 131j. The export's soundness guard removed. A reconciliation with an unexplained variance is then
+  //       handed to an FTA-registered agent, whose paper says on its own face that it does not add up.
+  checkRejectedBy(
+    'month reconciliation: exporting a report that does not reconcile is caught',
+    brokenReconSource(
+      MODULE,
+      '  if (report.notExportableReasons.length > 0) {\n' +
+        '    throw new MonthReconciliationNotExportable(report.period, report.notExportableReasons)\n' +
+        '  }',
+      '',
+      ROWS_SUITE,
+    ),
+    'refuses to export the defective month',
+  )
+
+  // 131k. The audit row dropped from the export. "Every export writes an audit_event" is the acceptance
+  //       line, and the failure is silent by construction: the bytes still leave the building.
+  checkRejectedBy(
+    'month reconciliation: an export that writes no audit_event is caught',
+    brokenReconSource(
+      MODULE,
+      "  await uow.audit.record({\n    action: 'money.month_reconciliation.export',",
+      "  await Promise.resolve({\n    action: 'money.month_reconciliation.export',",
+      ROWS_SUITE,
+    ),
+    'writes one audit_event',
+  )
+
+  // 131l. A SECOND canonicaliser planted in place of M-VAT-07's. It serialises every bigint as a JSON
+  //       NUMBER, which rounds silently above 2^53 in whatever reads the artefact years later — and two
+  //       runs of an equally wrong serialiser agree perfectly, so the byte-identity case alone would pass.
+  checkRejectedBy(
+    'month reconciliation: a second serialiser writing bigints as JSON numbers is caught',
+    brokenReconSource(
+      MODULE,
+      '  return canonicaliseVat201WorkingPapers(report)',
+      '  return JSON.stringify(report, (_key, value) =>\n' +
+        "    typeof value === 'bigint' ? Number(value) : value,\n  )",
+      ROWS_SUITE,
+    ),
+    'writes every non-zero figure into the bytes as a quoted decimal string',
+  )
+
+  // 131m. The redemption's VAT dropped from the worked example's output-tax figure — the third defect this
+  //       unit shipped, and the one a committed worked example exists to catch. A redemption recognises
+  //       output tax with no invoice behind it, so the box is a thousand fils above the documents.
+  checkRejectedBy(
+    'month reconciliation: the worked example omitting the redemption VAT is caught',
+    brokenReconSource(
+      WORKED,
+      '    WORKED_TREATMENT_VAT * 2 + WORKED_TREATMENT_VAT - WORKED_TREATMENT_VAT + WORKED_TREATMENT_VAT,',
+      '    WORKED_TREATMENT_VAT * 2 + WORKED_TREATMENT_VAT - WORKED_TREATMENT_VAT,',
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'derives every identity from the documents it lists',
+  )
+
+  // 131n. The one line that makes no claim relabelled as one that does. A figure nothing checks would then
+  //       be counted among the checks, which is the arithmetic by which a report comes to look thorough.
+  checkRejectedBy(
+    'month reconciliation: a stated figure counted as a checked one is caught',
+    brokenReconSource(
+      WORKED,
+      "  treasury_movements_excluded_from_receipts: {\n    kind: 'stated',",
+      "  treasury_movements_excluded_from_receipts: {\n    kind: 'excluded',",
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'distinguishes the kinds',
+  )
+
+  // 131o. The worked example's package liability summed instead of subtracted. Sold plus redeemed is
+  //       84,000 against a liability that moved by 42,000 — double, which is M-TILL-10's recorded defect (7)
+  //       arriving in a committed figure instead of in a test.
+  checkRejectedBy(
+    'month reconciliation: the worked liability stated as sold PLUS redeemed is caught',
+    brokenReconSource(
+      WORKED,
+      '  packageLiabilityFils: WORKED_TREATMENT_GROSS * 3 - WORKED_TREATMENT_GROSS,',
+      '  packageLiabilityFils: WORKED_TREATMENT_GROSS * 3 + WORKED_TREATMENT_GROSS,',
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'derives every identity from the documents it lists',
+  )
+
+  // 131p. A gap in the worked example left with no owner. A list of uncovered cases naming nobody reads as
+  //       a list of things that are fine, which is how a gap becomes a guarantee.
+  checkRejectedBy(
+    'month reconciliation: an uncovered case with no owning unit or question is caught',
+    brokenReconSource(
+      WORKED,
+      "  'A reverse charge. It posts to 2035, which maps to its own VAT201 box and is on the purchase side, ' +\n" +
+        "    'and M-VAT-03 owns the working paper that reconciles it.',",
+      "  'A reverse charge. It posts to its own box on the purchase side.',",
+      WORKED_SUITE,
+      reconUnit,
+    ),
+    'names the unit or question that owns each gap',
+  )
+
+  // 131q. A variance rendered as a tick. The page then says the month reconciles while showing the figure
+  //       it is out by, and the reader who trusts the verdict column files it.
+  checkRejectedBy(
+    'month reconciliation: the screen showing a variance as a holding line is caught',
+    brokenReconSource(
+      RENDER,
+      "  if (line.variance === '0') {",
+      '  if (true) {',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'shows a variance AS a variance',
+  )
+
+  // 131r. `formatFils` reimplemented through `Number`. Above 2^53 the page prints a figure one fil below
+  //       the ledger's, which is the rounding every figure in this unit is a string to avoid.
+  checkRejectedBy(
+    'month reconciliation: a fils figure rendered through Number is caught',
+    brokenReconSource(
+      RENDER,
+      "  const negative = fils.startsWith('-')",
+      // Concatenation and not a template literal, for 131e's reason: `${` inside a plain string is a
+      // Biome diagnostic, and `pnpm lint` treats one as an error.
+      "  return 'AED ' + (Number(fils) / 100).toFixed(2)\n  const negative = fils.startsWith('-')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'renders a figure above 2^53 exactly',
+  )
+
+  // 131s. The `stated` verdict collapsed into the holding one, so a figure nothing claimed is shown with
+  //       the same tick as a figure that was checked — 131n's defect, one layer out, on the screen.
+  checkRejectedBy(
+    'month reconciliation: the screen ticking a line that claims nothing is caught',
+    brokenReconSource(
+      RENDER,
+      "  if (line.kind === 'stated') {",
+      '  if (false) {',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'shows a `stated` line as claiming nothing',
+  )
+
+  // 131t. The unconfirmed-box caveats folded away. The page then shows a month that reconciles exactly and
+  //       says nothing about the box numbers being placeholders, which is the one thing a tax agent is being
+  //       handed the paper to confirm.
+  checkRejectedBy(
+    'month reconciliation: the screen hiding what is unconfirmed is caught',
+    brokenReconSource(
+      RENDER,
+      "    view.caveats.length === 0\n      ? ''",
+      "    true\n      ? ''",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'separates what is unconfirmed from what does not add up',
+  )
+
+  // 131u. The export moved into the GET. An export is an `audit_event` with an actor on it, and a GET has no
+  //       actor to name — so the row would carry a fabricated one into an append-only trail, or none at all.
+  checkRejectedBy(
+    'month reconciliation: the route exporting from a GET is caught',
+    brokenReconSource(
+      ROUTE,
+      '      const report = await monthReconciliation(sql, period, nowIso)',
+      '      const report = await monthReconciliation(sql, period, nowIso)\n' +
+        "      if (false) await exportMonthReconciliation(null as never, report, '')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'mutates nothing',
+  )
+
+  // 131v. The route given a default month. A page that answers for "last month" answers a different
+  //       question every month, so the link a reviewer cites stops meaning what it meant — and nothing about
+  //       the page would look wrong on the day it changed.
+  checkRejectedBy(
+    'month reconciliation: the route defaulting to a month rather than refusing is caught',
+    brokenReconSource(
+      ROUTE,
+      '    const period = requested === null ? null : periodFrom(requested)',
+      "    const period = periodFrom(requested ?? '2026-08')",
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    // A default supplied to `periodFrom` makes the 400 branch dead code while leaving `status: 400` in the
+    // file, so a scan for the status could not see it — and the first version of this case reported PASS
+    // about a route that had just acquired a default month. The scan now states the SHAPE: a missing
+    // parameter yields no period, and no fallback operator may reach `periodFrom`.
+    'answers 400 rather than defaulting to a month',
+  )
+
+  // 131w. The route summing something of its own. The page is the report; a route that computed a figure
+  //       would be the second derivation this unit is arranged around not making, and it would be the copy a
+  //       screen reads while the hash still verifies the other.
+  checkRejectedBy(
+    'month reconciliation: the route deriving a figure of its own is caught',
+    brokenReconSource(
+      ROUTE,
+      '      const lines: ReconciliationLineView[] = report.lines.map((line) => ({',
+      '      const total = report.lines.reduce((sum, row) => sum + row.variance, 0n)\n' +
+        '      void total\n' +
+        '      const lines: ReconciliationLineView[] = report.lines.map((line) => ({',
+      RENDER_SUITE,
+      reconUnit,
+    ),
+    'computes no figure of its own',
+  )
+
+  // 131x. The classification's schema check made one-directional. A source the schema permits and no class
+  //       claims then makes every identity silently ignore whatever it posted, and the report goes on saying
+  //       zero variance about a month it has stopped examining.
+  checkRejectedBy(
+    'month reconciliation: an unclassified journal source going unnoticed is caught',
+    brokenReconSource(MODULE, "    'payroll',\n", '', ROWS_SUITE),
+    // Throws while the report is being built, so the anchor is the refusal's own remedy sentence rather
+    // than a test name that never runs.
+    'Add each to JOURNAL_SOURCE_CLASSES',
+  )
+
+  // 131y. The consumer enumeration allowed to go stale. M-VAT-08's arrangement, restated: an export added
+  //       and not classified is a door nobody has decided the rules for.
+  checkRejectedBy(
+    'month reconciliation: a consumer missing from the declared enumeration is caught',
+    brokenReconSource(MODULE, "  'classifyJournalSources',\n", '', ROWS_SUITE),
+    'enumerates its consumers against its own real export list',
+  )
+
+  // 131z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing a module, or a scanner that refused the clean tree
+  //       would all report as twenty-five passing cases.
+  {
+    for (const suite of [WORKED_SUITE, RENDER_SUITE]) {
+      const green = run('pnpm', reconUnit(suite))
+      check(`month reconciliation: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const rows = run('pnpm', reconRows(ROWS_SUITE))
+    check(`month reconciliation: ${ROWS_SUITE} passes unedited`, !rows.failed, rows.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

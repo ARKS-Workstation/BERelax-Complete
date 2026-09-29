@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**135 / 211 units complete.**
+**136 / 211 units complete.**
 
 ## Next up
 
 1. **W-SYS-13 — Test isolation: a suite may delete only what it created**
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **M-VAT-12 — Closed test month reconciliation report**  — **needs owner input:** Y11-tax-agent
+1. **M-VAT-13 — Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures**
 
 ## All units
 
@@ -85,7 +85,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 64 | `M-VAT-09` | Absence of auto-file, proven, and the Zoho Books export | `M-VAT-08` | — | — |
 | [x] | 65 | `M-VAT-10` | Compliance calendar engine and blocking obligations | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F09` | — | — |
 | [x] | 66 | `M-VAT-11` | Compliance calendar reminders, escalation, evidence and the unverified dashboard | `H02`, `M-VAT-10` | — | — |
-| [ ] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
+| [x] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
 | [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
 | [x] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
 | [x] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |

@@ -52,6 +52,7 @@ a decision the table does not list.
 | [0049](0049-places-aggregate-only-while-the-caching-terms-are-unverified.md) | Places reads are aggregate only; review content is never cached while the terms are unverified | — |
 | [0052](0052-no-autofile-is-structural.md) | The absence of a filing capability is enforced by checks that fail when it appears — a boundary rule for the import, a scan for the global, the name and the credential; the Zoho export is one-way bytes for a signed return | — |
 | [0051](0051-a-private-document-is-fetched-through-one-route-against-a-detached-signature.md) | A private document is fetched through one route against a detached HMAC over the document, verified without the provider; a valid signature authorises a fetch and never a principal, and a clinical or salary document is single-use in the database | — |
+| [0053](0053-a-report-over-a-closed-period-proves-it-read-as-of-the-lock-rather-than-filtering-silently.md) | A report over a closed period records the lock's own instant and carries a line counting the rows written after it, rather than filtering its reads on `created_at` — which would hide a reopened period behind figures that still look as filed | — |
 
 ## Writing one
 
