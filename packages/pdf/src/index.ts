@@ -9,6 +9,13 @@ export type { BidiCase } from './documents/bidi-specimen.ts'
 export { BIDI_CASES, renderBidiSpecimenHtml } from './documents/bidi-specimen.ts'
 export type { InvoiceLine, InvoiceParty, TaxInvoice } from './documents/invoice.ts'
 export { INVOICE_LABELS, renderInvoiceHtml } from './documents/invoice.ts'
+export type { PayslipLocale, PayslipRowLike, PayslipView } from './documents/payslip.ts'
+export {
+  PAYSLIP_LABELS,
+  PAYSLIP_LOCALES,
+  payslipView,
+  renderPayslipHtml,
+} from './documents/payslip.ts'
 export type { DocumentLocale } from './documents/tax-document.ts'
 export {
   DOCUMENT_LABELS,

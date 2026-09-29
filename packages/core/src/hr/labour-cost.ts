@@ -161,15 +161,30 @@ export function assertLabourCostRules(rules: LabourCostRules): void {
 }
 
 /**
- * The fils one line costs: the single division, rounded up, with the numerator checked to be exact.
+ * The fils some basis-point-minutes cost at a monthly wage: the single division, rounded up, with the
+ * numerator checked to be exact.
  *
  * `Number.isSafeInteger` on the product rather than a comment promising it cannot overflow. The realistic
  * numbers are far below the limit — a 5,000 AED monthly wage against a 12-hour public-holiday day is about
  * 5.4 × 10^13 against a ceiling of 9.0 × 10^15 — but a forecast over a YEAR of a hand-built rota is the
  * shape that gets there, and beyond it the arithmetic silently stops being integer. That is the ADR 0007
  * failure exactly: not a wrong answer, a plausible one.
+ *
+ * ## Exported, with TWO callers, and that is the point
+ *
+ * `forecastLabourCost` below prices a ROSTER and must never be paid; `priceOvertimeUplift` in `payroll.ts`
+ * prices the uplift on ATTENDANCE and is paid. They are different claims about different facts — which is
+ * why they are different functions in different modules — but "what is a minute of a monthly salary worth"
+ * is ONE formula, and a second spelling of it is the defect ADR 0007 is about: the forecast and the payslip
+ * would round differently, and the difference would be read as the variance between rostered and attended
+ * rather than as two implementations disagreeing. P-HR-05's own comment already warns that the two figures
+ * are compared every month.
+ *
+ * So: this is the only place in the build where a monthly wage becomes money, and neither caller contains
+ * a division. `packages/core/src/hr/payroll.property.test.ts` holds the pair equal on the inputs where
+ * rounding could part them.
  */
-function lineFils(args: {
+export function filsForWeightedMinuteBp(args: {
   readonly basicWageFils: number
   readonly weightedMinuteBp: number
   readonly rules: LabourCostRules
@@ -260,7 +275,11 @@ export function forecastLabourCost(args: {
       })
       continue
     }
-    const fils = lineFils({ basicWageFils, weightedMinuteBp: day.weightedMinuteBp, rules })
+    const fils = filsForWeightedMinuteBp({
+      basicWageFils,
+      weightedMinuteBp: day.weightedMinuteBp,
+      rules,
+    })
     priced.add(day.employeeId)
     totalFils += fils
     lines.push({

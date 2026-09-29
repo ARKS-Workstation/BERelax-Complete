@@ -3421,7 +3421,14 @@ units:
       employee.salary, payroll:read or canReadFieldGroup. session.itest.ts therefore asserts the true and
       weaker claim — no admin response carries a wage marker to a receptionist, over every guarded screen —
       and names itself a REGRESSION GUARD rather than a refusal. The measured refusal is deferred to P-HR-12
-      (verified `todo`), which is the first unit to serve a salary and so the first able to have one refused.
+      — DEFERRAL SATISFIED. It was `todo` when this was written, and it is the first unit to serve a salary
+      and so the first able to have one refused. It does: /hr/payroll serves payslip figures, and the
+      refusal is measured twice — readPayslipFor throws forbidden for a colleague''s payslip in
+      packages/fixtures/src/hr-payroll.itest.ts against real rows, with the accountant served the same row
+      as the control, and mayReadPayslip is asserted over the whole role matrix in
+      packages/core/src/hr/payroll.test.ts. It refuses through the payroll:read permission rather than
+      through the field-group projection this NOTE anticipated, which is the same claim by the route the
+      matrix already had: a therapist and a floor manager read their own and not a colleague''s.
       (2) The NOTE-level clinical refusal (data-scope="note") is not asserted through a served response: that
       panel renders only once markers are DERIVED, deriving one needs a clinical.intake_submission row and
       CLINICAL_KEK, and the seeded database holds zero rows in public.customer_contraindication_flags — so
@@ -11669,8 +11676,11 @@ units:
       one. (2) ATTENDANCE FOR A DAY IN A CLOSED ACCOUNTING PERIOD WITH NO PUNCH AT ALL cannot be entered:
       attendance_correction.corrects_event_id is NOT NULL because a correction amends a record and cannot
       invent one, and a pair of punches written after the month closed would be exactly the un-auditable write
-      these tables exist to refuse. That gap is a ledger-side adjustment rather than a punch and is deferred to
-      P-HR-12 (payroll run over approved timesheets, still todo). (3) THE PUBLIC-HOLIDAY FLAG, which P-HR-05
+      these tables exist to refuse. That gap is a ledger-side adjustment rather than a punch. P-HR-12 was
+      its first owner and did not build it — that unit''s payroll_deduction only ever REDUCES pay, and
+      unrecorded work in a closed month needs an UPWARD adjustment, which nothing in the payroll schema can
+      express — so the gap is deferred to P-HR-13 (monthly gratuity accrual posted to the append-only
+      ledger, still todo), which is the HR unit that posts to the ledger. (3) THE PUBLIC-HOLIDAY FLAG, which P-HR-05
       and P-HR-06 both deferred to Y9-overtime: premises_closure is a floor and not a calendar, so the flag
       reaches summariseTimesheet as an argument and both callers leave it unset. P-HR-10 builds the calendar.
       (4) PAYING ANYBODY. weighted_minute_bp is whole basis-point-minutes and deliberately not money: what an
@@ -12215,7 +12225,7 @@ units:
       a bilingual EN/AR payslip PDF through the F10 renderer; and a WPS SIF export with a validator carrying
       known-bad fixtures and deliberately no submission path.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - F10
@@ -12245,13 +12255,85 @@ units:
       exports are alerted as the insider-threat control
     - a locked period refuses a new payroll run, and running payroll over a period with an INCOMPLETE attendance
       row is refused naming the row
+    - 'NOTE: the manifest listed apps/web/app/(admin)/hr/payroll/page.tsx and it shipped as route.ts plus
+      render.ts — the same correction P-HR-02, P-HR-06, P-HR-07 and P-HR-11 each recorded. routes/registry.ts
+      is in exact bijection with the filesystem and requires every DOCUMENT to be served in both locales, so
+      a page.tsx here would need an Arabic admin document nobody has built. The bilingual artefact of this
+      unit is the PAYSLIP, which is a PDF and is rendered in both locales with committed fixtures.'
+    - 'NOTE: Y9-tips was NOT new. The manifest said Y8-wps and Y9-tips are new and must be added; Y9-tips
+      already existed in OPEN-QUESTIONS section A2 with the provisional answer "cash only, individual,
+      recorded but not banked". It is EXTENDED with what payroll does with a tip rather than duplicated —
+      a second row for a question somebody had already written down is the drift this build keeps paying
+      for. Y8-wps is genuinely new and was added to section D. A THIRD question had to be opened:
+      Y9-deductions, because a payslip subtracts something and which deductions are lawful, what cap
+      applies and who may authorise one is answered nowhere in the handover.'
+    - 'NOTE: the manifest''s provisional said tips are "paid in the run". That is what shipped, and the
+      reading is reconciled with Y9-tips'' "recorded but not banked" rather than overriding it: a cash tip
+      taken AT THE TILL is the salon''s cash and therefore the salon''s debt, so the run discharges it. A
+      tip handed straight to a therapist has no row at all — the business cannot record money it never saw
+      — so the figures are a floor and not a total, and that is stated on the question.'
+    - 'NOTE: an employee with a monthly wage and NO approved timesheet is named and not paid, because
+      payslip.timesheet_approval_id is NOT NULL and a run is "over approved timesheets". The case somebody
+      will meet is an employee on leave for a whole month: they have a wage, no attendance, and this build
+      declines to pay them automatically rather than inventing the rule. Deferred to P-HR-10, which builds
+      the holiday calendar, and to whichever unit reconciles leave with pay; recorded on Y9-deductions as
+      part of what answering it must state.'
+    - 'NOTE: the payslip PDF is produced as BYTES and not stored. W-SYS-14 (private document storage, the
+      signed URL and the audited download) is todo and is not in this tree, so this unit writes to the
+      interface it needs — renderPayslipHtml returns a document per PERSON rather than per run, which is
+      what makes a per-person signed URL possible at all — and stores nothing. W-SYS-14 owns the storage,
+      the URL and the download audit.'
+    - 'NOTE: the WPS detail record carries a contact number and there is NO phone column on employee at all
+      (0030 and 0050 give an employment period, a gender, wages and sealed bank details). The field is
+      therefore null and refused by name (wps_phone_not_e164), which is the honest state: a plausible
+      number would be indistinguishable from a recorded one. Recorded on Y8-wps and Y8-staff. A real SIF
+      also carries the name on the work PERMIT, which this build does not hold — staff_reference is what
+      it has (ADR 0020, Y12-names).'
+    - 'NOTE: the fk_child erasure probe (C-CRM-10, ADR 0034) reaches NONE of this migration''s columns, so
+      no column needs an inherits_parent classification. Checked against the live schema rather than
+      assumed: none of the five tables'' foreign-key parents — employee, account, cash_session,
+      labour_cost_rule, payroll_run, commission_run, timesheet_approval — carries a customer or contact
+      reference, so none of them is a subject table. Payroll is about employees. Unlike
+      commission_line.invoice_id, which points at invoice and did need one.'
+    - 'NOTE: test port band 16_400 was allocated and is UNUSED. This unit starts no server: the RBAC refusal
+      lives on readPayslipFor in @berelax/hr rather than on a ?employee= parameter (admin-guard.test.ts
+      refuses one across apps/web), and the audit-on-read claim is a property of the repository function,
+      so both are asserted in packages/fixtures/src/hr-payroll.itest.ts against real PostgreSQL. The route
+      is covered by the existing route-spine and registry suites, which own their own bands.'
     files:
-    - packages/db/migrations/*_hr_payroll.sql
+    - packages/db/migrations/0104_hr_payroll.sql
+    - packages/db/src/schema/payroll.ts
+    - packages/db/src/repositories/payroll.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
     - packages/core/src/hr/payroll.ts
     - packages/core/src/hr/payroll.test.ts
+    - packages/core/src/hr/payroll.property.test.ts
     - packages/core/src/hr/wps-sif.ts
-    - apps/web/app/(admin)/hr/payroll/page.tsx
+    - packages/core/src/hr/wps-sif.test.ts
+    - packages/core/src/hr/labour-cost.ts
+    - packages/core/src/index.ts
+    - packages/shared/src/wps.ts
+    - packages/config/src/settings/registry.ts
+    - packages/hr/src/payroll-run.ts
+    - packages/hr/src/index.ts
+    - packages/pdf/src/documents/payslip.ts
+    - packages/pdf/src/documents/payslip.itest.ts
+    - packages/pdf/src/testing/payslips.ts
+    - packages/pdf/fixtures/payslip-en.pdf
+    - packages/pdf/fixtures/payslip-ar.pdf
+    - packages/pdf/fixtures/payslip-golden.json
+    - packages/fixtures/src/hr-payroll.test.ts
+    - packages/fixtures/src/hr-payroll.itest.ts
+    - packages/fixtures/src/wps-no-submission.test.ts
+    - apps/web/app/(admin)/hr/payroll/route.ts
+    - apps/web/app/(admin)/hr/payroll/render.ts
+    - apps/web/src/hr-payroll-render.test.ts
+    - apps/web/src/routes/registry.ts
+    - docs/OPEN-QUESTIONS.md
+    - docs/adr/0054-a-payslip-pins-every-figure-it-prints.md
     - scripts/test-gates.mjs
+    - scripts/render-pdf-fixtures.mjs
   - id: P-HR-13
     order: 102
     title: Monthly gratuity accrual posted to the append-only ledger

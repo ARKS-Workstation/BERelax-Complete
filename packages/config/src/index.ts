@@ -29,4 +29,6 @@ export {
   type SettingKey,
   type SettingTier,
   validateSetting,
+  WPS_AGENT_ID_SETTING_KEY,
+  WPS_EMPLOYER_ID_SETTING_KEY,
 } from './settings/registry.ts'
