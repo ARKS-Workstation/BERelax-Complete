@@ -37,12 +37,12 @@ import {
   googleLivenessHandler,
 } from './jobs/google-connection-health.ts'
 import { GOOGLE_REVOKE_RETRY_JOB } from './jobs/google-revoke-retry.ts'
+import { GRATUITY_ACCRUAL_AGENT, runGratuityAccrual } from './jobs/gratuity-accrual.ts'
 import { gscNightlySnapshotHandler, SEO_GSC_SNAPSHOT_AGENT } from './jobs/gsc-nightly-snapshot.ts'
 import {
   gscUrlInspectionHandler,
   SEO_URL_INSPECTION_AGENT,
 } from './jobs/gsc-url-inspection-rotation.ts'
-import { GRATUITY_ACCRUAL_AGENT, runGratuityAccrual } from './jobs/gratuity-accrual.ts'
 import { LEAVE_ACCRUAL_AGENT, runLeaveAccrual } from './jobs/leave-accrual.ts'
 import {
   COMPLIANCE_CALENDAR_JOB,

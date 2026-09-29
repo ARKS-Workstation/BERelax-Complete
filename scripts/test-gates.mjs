@@ -42047,7 +42047,12 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   //       That is why the constant is recomputed in its own test rather than trusted.
   withEditedFile(
     ENGINE,
-    (source) => replaceOnce(source, 'export const MONTH_LENGTH_LCM = 377_580', 'export const MONTH_LENGTH_LCM = 377_581'),
+    (source) =>
+      replaceOnce(
+        source,
+        'export const MONTH_LENGTH_LCM = 377_580',
+        'export const MONTH_LENGTH_LCM = 377_581',
+      ),
     () => {
       checkRejectedBy(
         'gratuity: a wrong month-length LCM fails its own recomputation',
