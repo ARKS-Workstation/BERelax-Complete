@@ -41427,6 +41427,483 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 134a-134z. (Y-PAY-02) payment_intent, the exhaustive lifecycle table, and the rule that only a gateway
+//            movement may move an intent: every one of the four shown to fail by name.
+//
+//            The unit's deliverables are an assertion, a schema and a refusal, and each of the three needs a
+//            different kind of known-bad fixture. 134a-134g break the SHIPPED code the assertions are about.
+//            134h is the assertion's own vacuity floor. 134i-134n are the static gates — `db:conventions`,
+//            `sqlstate`, `db:drift`, `purity` and the migration ledger — where the mutant is a file a
+//            scanner reads. 134o-134s are the durable half, driven through the two integration suites,
+//            because "the client cannot move an intent" is not a claim any source scan can make.
+//
+//            134a and 134b are the acceptance line — *"the declared (state, event) table is asserted total
+//            over the enum product, and every pair outside it is refused with a named error"* — and they are
+//            a PAIR on purpose, in opposite directions. `state.test.ts` compares the shipped table against a
+//            36-cell copy written out independently in the test, so the assertion only means something if
+//            BOTH sides are load-bearing: 134a flips a cell in `state.ts` and 134b flips the same cell in
+//            the test's own expected table. A single-direction case would pass for a comparison that had
+//            quietly become a table read against itself, which is what the file's own perturbation control
+//            is for and what these two prove from outside.
+//
+//            The cell chosen is `voided` from `captured`. It is the one whose being wrong is most expensive
+//            and least visible: a void on a captured intent releases a reservation that no longer exists and
+//            leaves the capture unaccounted for, and nothing about the code would look odd.
+//
+//            134e is the arithmetic mistake this unit is most afraid of, and it is worth reading. Summing
+//            authorisation rows instead of taking the largest doubles the ceiling every capture is checked
+//            against, so an over-capture becomes legal — and a sum of amounts looks exactly like every other
+//            sum in the file. `transactions.property.test.ts` carries a deliberately-summing implementation
+//            as its own control and counts the cases that could catch it; this is the same claim made from
+//            outside, against the shipped function.
+//
+//            Nothing here edits `packages/db/migrations/0106_payment_intent.sql` in order to test a
+//            DATABASE rule, and the omission is deliberate for gate block 133's reason: the database the
+//            suites run against has already had the migration applied, so an edit to the file changes
+//            nothing a statement can see and a PASS would be a report about a file nothing read. The five
+//            triggers are proved against a real PostgreSQL by
+//            `packages/fixtures/src/payment-intent.itest.ts`, which probes each of ZY161-ZY165 and asserts
+//            the row survived. What the migration file IS edited for is 134i, where the checker genuinely
+//            reads the text: `pnpm db:conventions` scans the SQL for the append-only trigger pair.
+//
+//            One direction this block cannot cover, stated rather than left as a gap: removing the phrase
+//            "UPDATE and DELETE raise" from `payment_intent_transaction`'s table comment makes
+//            `append-only-table-must-refuse-update-and-delete` silent about the table rather than failing,
+//            because the rule is scoped by what the table CLAIMS. That is the rule's design — it judges a
+//            declaration — and the check that catches the deletion instead is the itest, which asserts both
+//            triggers fire. A gate case for it would have to assert that a scanner reported nothing, which
+//            is ADR 0002's whole subject in reverse.
+{
+  const STATE = 'packages/core/src/payments/state.ts'
+  const TRANSACTIONS = 'packages/core/src/payments/transactions.ts'
+  const MIGRATION = 'packages/db/migrations/0106_payment_intent.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const MIRROR = 'packages/db/src/schema/payments.ts'
+  const LEDGER = 'packages/db/src/index.ts'
+  const ROUTE_REGISTRY = 'apps/web/src/routes/registry.ts'
+  const INTENT_SERVICE = 'packages/payments/src/intent.ts'
+  const HANDLER = 'apps/web/app/api/v1/payments/intent/handler.ts'
+
+  const STATE_TEST = 'packages/core/src/payments/state.test.ts'
+  const PROPERTY_TEST = 'packages/core/src/payments/transactions.property.test.ts'
+  const LEDGER_TEST = 'packages/db/src/allocation-note.test.ts'
+  const ROUTE_REGISTRY_TEST = 'apps/web/src/routes/registry.test.ts'
+  const PAIR_ITEST = 'packages/fixtures/src/payment-intent.itest.ts'
+  const ROUTE_ITEST = 'apps/web/src/payments-intent-route.itest.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const integration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the command that must fail because of it.
+   *
+   * Named for this block rather than reusing block 133's `withPaymentEdit`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge, which is the note block 133 carries about its own
+   * helper. `replaceOnce` rather than `String.replace` for rule 20's reason — three cases have now edited
+   * the wrong construct silently and reported PASS about a file that still contained what they meant to
+   * remove.
+   */
+  const withIntentEdit = (path, anchor, replacement, args) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', args),
+    )
+
+  // 134a. The acceptance line, against the SHIPPED table. `voided` from `captured` is declared refused; made
+  //       to reach `voided` it would release a reservation that no longer exists and leave a capture
+  //       unaccounted for, with nothing about the code looking wrong.
+  {
+    const broken = withIntentEdit(
+      STATE,
+      `    captured: 'captured',
+    refunded: 'captured',
+    voided: TRANSITION_REFUSED,`,
+      `    captured: 'captured',
+    refunded: 'captured',
+    voided: 'voided',`,
+      unit(STATE_TEST),
+    )
+    check(
+      'payments: a changed lifecycle cell fails the exhaustive transition test by naming the pair',
+      broken.failed && /captured \+ voided/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134b. The other direction, and the case that makes 134a mean something: the same cell flipped in the
+  //       TEST's independently written table. A comparison that had become a table read against itself
+  //       would pass 134a and fail nothing, so both sides are shown to be load-bearing.
+  {
+    const broken = withIntentEdit(
+      STATE_TEST,
+      `    // Money that has been taken is refunded, not voided. A void here would release a reservation that no
+    // longer exists and leave the capture unaccounted for.
+    voided: R,`,
+      `    voided: 'voided',`,
+      unit(STATE_TEST),
+    )
+    check(
+      "payments: a changed cell in the test's own expected table fails it too, so the comparison is two-sided",
+      broken.failed && /captured \+ voided/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134c. "Every pair outside the table is refused with a named ERROR" — the second half of the acceptance
+  //       line. A `nextIntentState` that returned the refusal marker instead of throwing would let a webhook
+  //       handler write `refused` into the state column, which `payment_intent_state_known` would then
+  //       refuse with a message about a CHECK constraint rather than about a lifecycle.
+  {
+    const broken = withIntentEdit(
+      STATE,
+      '  if (target === TRANSITION_REFUSED) throw new IntentTransitionRefused(from, event, eventId)',
+      '  if (target === TRANSITION_REFUSED) return from',
+      unit(STATE_TEST),
+    )
+    check(
+      'payments: a refused transition that does not throw fails the exhaustive test',
+      broken.failed && /IntentTransitionRefused|did not throw/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134d. The refusal's NAME. `instanceof` alone survives a rename, and a caller that branches on
+  //       `error.name` — which is what a webhook handler reading a log does — would stop recognising it.
+  {
+    const broken = withIntentEdit(
+      STATE,
+      "    this.name = 'IntentTransitionRefused'",
+      "    this.name = 'AppError'",
+      unit(STATE_TEST),
+    )
+    check(
+      'payments: renaming the transition refusal fails the exhaustive test',
+      broken.failed && /IntentTransitionRefused/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134e. THE arithmetic mistake: authorisation rows summed instead of maximised. A gateway increasing a
+  //       reservation reports the new TOTAL, so a sum doubles the ceiling every capture is checked against
+  //       and an over-capture becomes legal. Invisible in review, which is why the property suite carries a
+  //       summing implementation as its own control and this case asserts the same thing from outside.
+  {
+    const broken = withIntentEdit(
+      TRANSACTIONS,
+      '        authorised = row.amount.fils > authorised.fils ? row.amount : authorised',
+      '        authorised = add(authorised, row.amount)',
+      unit(PROPERTY_TEST),
+    )
+    check(
+      'payments: summing authorisation rows instead of maximising them fails the property suite',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 134f. The dedupe. `intentTransactions` projects from `reduceIntent(...).applied` — sorted and
+  //       deduplicated — and not from the raw deliveries. A gateway stream is at-least-once and the H02 fake
+  //       redelivers every event deliberately, so rows built from the raw input hold both copies of every
+  //       one: not a rounding error but double the money, in the table the intent's figures are checked
+  //       against.
+  {
+    const broken = withIntentEdit(
+      TRANSACTIONS,
+      '  for (const event of reduceIntent(events).applied) {',
+      '  for (const event of events) {',
+      unit(PROPERTY_TEST),
+    )
+    check(
+      'payments: projecting rows from the raw deliveries rather than the folded set fails the property suite',
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 134g. The three-way amount rule, derived from `INTENT_EVENT_CARRIES_AMOUNT` rather than restated. Made
+  //       permissive, a `voided` row could carry a figure — which reads as a partial release, and there is
+  //       no such thing — and a `captured` row could carry zero, which reads as a settled movement for
+  //       nothing.
+  {
+    const broken = withIntentEdit(
+      TRANSACTIONS,
+      '  return INTENT_EVENT_CARRIES_AMOUNT[eventType] ? fils > 0 : fils === 0',
+      '  return fils >= 0',
+      unit(STATE_TEST),
+    )
+    check(
+      "payments: a permissive transaction-amount rule fails the event table's pairing test",
+      broken.failed,
+      broken.output,
+    )
+  }
+
+  // 134h. The property suite's own vacuity floor, which is the case brief rule 22 is about. With the
+  //       over-capture never drawn, "captured never exceeds authorised" is asserted over inputs that could
+  //       not have broken it — every case passes and the assertion has never been near the ceiling. The
+  //       measured floor is what must notice.
+  {
+    const broken = withIntentEdit(
+      PROPERTY_TEST,
+      '  overCapture: fc.integer({ min: 0, max: 4 }).map((n) => n === 0),',
+      '  overCapture: fc.constant(false),',
+      unit(PROPERTY_TEST),
+    )
+    check(
+      'payments: a generator that never draws an over-capture fails its own measured floor',
+      broken.failed && /over-capture was drawn/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134i. The append-only declaration and its triggers, which `pnpm db:conventions` reads as TEXT — so this
+  //       is the one case where editing the migration file is meaningful. Without the DELETE trigger the
+  //       table's own comment claims a refusal the schema does not make.
+  {
+    const broken = withIntentEdit(
+      MIGRATION,
+      `create trigger payment_intent_transaction_no_delete before delete on payment_intent_transaction
+  for each row execute function refuse_payment_intent_transaction_change();`,
+      '',
+      ['db:conventions'],
+    )
+    check(
+      'payments: an append-only transaction table with no DELETE trigger is rejected by rule name',
+      broken.failed &&
+        /append-only-table-must-refuse-update-and-delete/.test(broken.output) &&
+        /payment_intent_transaction/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134j-134l. The SQLSTATE registry, in three of ADR 0043's five directions. A code standing for two rules,
+  //            or an entry describing nothing, breaks a translator silently: every translator matches on the
+  //            five characters ALONE, so one file's refusal is reported as another's with a plausible message
+  //            and the wrong cause. Thirteen codes were shared when W-SYS-12 started and every one was green.
+  {
+    const broken = withIntentEdit(
+      REGISTRY,
+      `  {
+    code: 'ZY161',
+    rule: 'A payment intent transaction row may not be updated or deleted.',
+    migration: '0106',
+    raisedBy: ['refuse_payment_intent_transaction_change'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+`,
+      '',
+      ['sqlstate'],
+    )
+    check(
+      'payments: a raised code with no registry entry is rejected by rule name',
+      broken.failed && /sqlstate-registry-covers-every-raised-code|ZY161/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  {
+    const broken = withIntentEdit(
+      REGISTRY,
+      "    raisedBy: ['assert_payment_intent_moves_with_a_transaction'],",
+      "    raisedBy: ['assert_payment_intent_moves_with_a_transaction_renamed'],",
+      ['sqlstate'],
+    )
+    check(
+      'payments: a registry entry naming a function the migration does not define is rejected',
+      broken.failed && /ZY162/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  {
+    // The direction that lets the registry SHRINK: an entry for one of the five codes this unit's band
+    // reserves and does not raise. An entry that no longer describes anything is permission to re-create
+    // what it described.
+    const broken = withIntentEdit(
+      REGISTRY,
+      `  {
+    code: 'ZZ001',`,
+      `  {
+    code: 'ZY166',
+    rule: 'A code this unit reserved and never raised.',
+    migration: '0106',
+    raisedBy: ['refuse_payment_intent_transaction_change'],
+    translators: [],
+  },
+  {
+    code: 'ZZ001',`,
+      ['sqlstate'],
+    )
+    check(
+      'payments: registering an unused code from the reserved band is rejected by rule name',
+      broken.failed &&
+        /sqlstate-registry-entry-still-describes-a-refusal|ZY166/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134m. The Drizzle mirror against the database, both ways (ADR 0006). A column dropped from the mirror is
+  //       a column `pnpm db:drift` must report, and it is the check that stops the mirror becoming
+  //       decoration nobody reads.
+  {
+    const broken = withIntentEdit(
+      MIRROR,
+      "    refundedFils: bigint('refunded_fils', { mode: 'bigint' }).notNull(),",
+      '',
+      ['db:drift'],
+    )
+    check(
+      'payments: a column missing from the payments mirror is reported as drift',
+      broken.failed && /refunded_fils/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134n. `SCHEMA_VERSION` against the migrations on disk. On a merge, taking the LOWER side is the one way
+  //       this constant goes backwards, and the branch that had not seen the newer migration is the one that
+  //       wins a naive resolution.
+  {
+    const broken = withIntentEdit(
+      LEDGER,
+      'export const SCHEMA_VERSION = 106 as const',
+      'export const SCHEMA_VERSION = 105 as const',
+      unit(LEDGER_TEST),
+    )
+    check(
+      'payments: a SCHEMA_VERSION behind the newest migration fails the ledger test',
+      broken.failed && /SCHEMA_VERSION/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134o. The route registry. A route on disk with no entry is absent from the sitemap, carries no hreflang
+  //       and is never screenshotted, and none of those three is a build error on its own.
+  {
+    // The PATH and not the id. The first version of this case renamed the id and reported FAIL: the entry
+    // still declared the path, so the bijection still held and the suite was right to pass. A registry is
+    // keyed on what it SERVES.
+    const broken = withIntentEdit(
+      ROUTE_REGISTRY,
+      "    path: '/api/v1/payments/intent',",
+      "    path: '/api/v1/payments/intent-moved',",
+      unit(ROUTE_REGISTRY_TEST),
+    )
+    check(
+      'payments: the intent endpoint without a registry entry is rejected by rule name',
+      broken.failed &&
+        /route-without-registry-entry|registry-entry-without-route/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134p. `packages/core` is pure, and `check-core-purity.mjs` additionally forbids `Date` under the
+  //       payments directory. Every instant this module reasons about arrives on an event a caller read from
+  //       a gateway; a second opinion about when something happened would move a capture between trading
+  //       days, because trading runs 11:00-02:00.
+  {
+    const broken = withIntentEdit(
+      TRANSACTIONS,
+      '  const rows: PaymentIntentTransaction[] = []',
+      '  const rows: PaymentIntentTransaction[] = []\n  void Date.now()',
+      ['purity'],
+    )
+    check(
+      'payments: reading the clock in the transaction projection is rejected by the purity gate',
+      broken.failed && /transactions\.ts/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134q. The acceptance line *"a repeated idempotency key returns the original intent and the adapter
+  //       records zero additional calls"*, against a real database and the fake's real call log. Removing
+  //       the replay's early return does NOT break the answer — the adapter is idempotent too, so the first
+  //       snapshot still comes back — which is exactly why the assertion is about the CALL LOG. A replay
+  //       that reaches the adapter writes a suppressed-duplicate movement, and the payments screen then
+  //       shows two rows for one authorisation.
+  {
+    const broken = withIntentEdit(
+      INTENT_SERVICE,
+      '  if (!claim.claimed) {',
+      '  if (false as boolean) {',
+      integration(PAIR_ITEST),
+    )
+    check(
+      'payments: a replay that reaches the adapter fails the zero-additional-calls assertion',
+      broken.failed && /adapter/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134r. ADR 0056, driven through real rows, and the mutant is the edit somebody actually makes: report the
+  //       claim as confirmed. The STATE does not change even then — ZY162 is what makes that true rather than
+  //       this function — so a case keyed on the state would pass, and the assertion that has to notice is
+  //       the OUTCOME. The first version of this mutant disabled the unmatched branch entirely and produced a
+  //       `TypeError` on an undefined row: the suite failed, which is the right direction for the wrong
+  //       reason, and a case that passes on a crash is not evidence about the rule.
+  {
+    const broken = withIntentEdit(
+      INTENT_SERVICE,
+      "      outcome: 'no_matching_gateway_transaction',",
+      "      outcome: 'confirmed_by_a_stored_movement',",
+      integration(PAIR_ITEST),
+    )
+    check(
+      'payments: a client callback answered as confirmed with no stored movement fails the pair suite',
+      broken.failed &&
+        /confirmed_by_a_stored_movement|no_matching_gateway_transaction/.test(broken.output),
+      broken.output,
+    )
+  }
+
+  // 134s. No module under `apps/web` takes a principal, a role or a permission from the query string, and
+  //       this endpoint reads NOTHING from the URL — a payment instruction in a link is in every access log,
+  //       every `Referer` and every browser history, and a link is forwardable in a way a POST body is not.
+  //
+  //       The mutant is the CALLBACK's intent id and not the action, and the difference is what the first
+  //       version of this case got wrong. A gateway's return URL is built by the gateway, so
+  //       `?paymentIntentId=…` is exactly what a browser comes back holding, and threading it in looks like
+  //       plumbing rather than a decision. An `action` fallback alone changed nothing the suite could see:
+  //       every other field still came from the body, so the request still answered 400 and the case
+  //       reported FAIL about a handler that was behaving correctly.
+  {
+    const broken = withIntentEdit(
+      HANDLER,
+      "    if (action === 'client_callback') return await callback(deps, body)",
+      `    if (action === 'client_callback') {
+      const fromUrl = new URL(request.url).searchParams.get('paymentIntentId')
+      return await callback(deps, fromUrl === null ? body : { ...body, paymentIntentId: fromUrl })
+    }`,
+      integration(ROUTE_ITEST),
+    )
+    check(
+      'payments: taking the callback intent id from the query string fails the route suite',
+      broken.failed && /paymentIntentId|query string/.test(broken.output),
+      broken.output,
+    )
+  }
+  for (const suite of [STATE_TEST, PROPERTY_TEST, LEDGER_TEST, ROUTE_REGISTRY_TEST]) {
+    const green = run('pnpm', unit(suite))
+    check(`payments: ${suite} passes unedited`, !green.failed, green.output)
+  }
+  for (const suite of [PAIR_ITEST, ROUTE_ITEST]) {
+    const green = run('pnpm', integration(suite))
+    check(`payments: ${suite} passes unedited`, !green.failed, green.output)
+  }
+  for (const gate of ['db:conventions', 'sqlstate', 'db:drift', 'purity']) {
+    const green = run('pnpm', [gate])
+    check(`payments: pnpm ${gate} passes unedited`, !green.failed, green.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

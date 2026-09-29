@@ -220,10 +220,7 @@ export async function readPaymentIntentByKey(
   return row ?? null
 }
 
-export async function readPaymentIntent(
-  sql: Sql,
-  id: string,
-): Promise<PaymentIntentRow | null> {
+export async function readPaymentIntent(sql: Sql, id: string): Promise<PaymentIntentRow | null> {
   const [row] = await sql<PaymentIntentRow[]>`
     select ${intentColumns(sql)} from payment_intent where id = ${id}::uuid
   `

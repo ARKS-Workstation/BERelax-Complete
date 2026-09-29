@@ -40,17 +40,17 @@ export {
   type ClientCallbackOutcome,
   type ClientCallbackResult,
   type CreatePaymentIntentRequest,
-  createPaymentIntent,
   capturePaymentIntent,
+  createPaymentIntent,
   type IntentOutcome,
   type MovePaymentIntentRequest,
+  nextStateForStoredIntent,
   type PaymentIntentResult,
   type RefundPaymentIntentRequest,
-  refundPaymentIntent,
-  voidPaymentIntent,
-  nextStateForStoredIntent,
   recordClientCallback,
+  refundPaymentIntent,
   STORED_INITIAL_STATE,
+  voidPaymentIntent,
 } from './intent.ts'
 export { createRecordSink } from './record-sink.ts'
 export {

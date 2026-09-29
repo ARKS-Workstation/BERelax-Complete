@@ -936,9 +936,9 @@ export {
   too, so a suite over these tables asserts a DELTA and never a total (brief rule 9).
 */
 export {
-  type DerivedIntentFigures,
   applyPaymentIntentMovement,
   claimPaymentIntent,
+  type DerivedIntentFigures,
   deriveFiguresFromTransactions,
   isPaymentIntentRule,
   PAYMENT_INTENT_SQLSTATE,

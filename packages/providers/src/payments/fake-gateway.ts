@@ -1,5 +1,25 @@
 /**
- * The card gateway fake.
+ * The card gateway fake — H02's, and SUPERSEDED. Only `FAKE_GATEWAY` and `REFERENCE_MARKERS` are live.
+ *
+ * Y-PAY-02 retired `Providers.till` and `Providers.cards`, so nothing constructs `createFakeCardGateway`
+ * below any more: payments go through `@berelax/payments`, whose registry is the only place a gateway adapter
+ * is built and the only place `PAYMENT_PROVIDER` is read (ADR 0055). Y-PAY-01's `FakeCardGateway` is the same
+ * modelling re-expressed on the `@berelax/core` port, and it is the one a conformance suite accepts.
+ * `createManualPaymentProvider` was in a sibling module and is deleted rather than left, because
+ * `createManualGateway` in `@berelax/payments` replaces it outright and a second till adapter is the "choose
+ * between the two by accident" Y-PAY-01 asked to be prevented.
+ *
+ * This module stays, and the constructor stays with it, for two reasons that are worth stating because dead
+ * code that looks live is the hazard being guarded against. First, `REFERENCE_MARKERS` is the shared steering
+ * vocabulary — `-3DS`, the declined and disputed suffixes — and Y-PAY-01's adapter imports it from here
+ * DELIBERATELY rather than restating it, because a second spelling of `-3DS` would be a screenshot harness
+ * that silently stopped exercising the challenge path. Second, the behaviours below are the only written
+ * record of what the fake must do for a customer abandoning a challenge (Y-PAY-03) and for a dispute arriving
+ * weeks later (Y-PAY-08), neither of which the new port models yet. Neither export is reachable from
+ * `@berelax/providers` or `@berelax/providers/payments` except the two constants, so nothing can wire the
+ * superseded provider by mistake.
+ *
+ * What it models:
  *
  * Cards are "at a later point" in the brief, so no gateway is chosen yet. That is precisely why this
  * exists: the checkout flow, the settlement reconciliation and the refund path are all built and

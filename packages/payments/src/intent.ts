@@ -470,7 +470,9 @@ function eventFromRow(row: {
  * `eventsSince(null)` returns the whole queue, so the last delivery's cursor is the bookmark to resume after.
  * A gateway with nothing in it yet has no cursor, and `null` is the right answer for that.
  */
-async function latestCursor(gateway: PaymentGateway): Promise<Parameters<PaymentGateway['eventsSince']>[0]> {
+async function latestCursor(
+  gateway: PaymentGateway,
+): Promise<Parameters<PaymentGateway['eventsSince']>[0]> {
   const all = await gateway.eventsSince(null)
   return all.length === 0 ? null : (all[all.length - 1]?.cursor ?? null)
 }
@@ -494,7 +496,6 @@ async function eventsFor(
     .map((delivery) => delivery.event)
 }
 
+export type { Sql }
 /** Re-exported so a caller can branch on a redelivery without importing `@berelax/db` for one predicate. */
 export { isPaymentIntentRule }
-
-export type { Sql }

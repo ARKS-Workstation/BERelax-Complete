@@ -1,5 +1,4 @@
 import { parseConfig } from '@berelax/config'
-import { aed } from '@berelax/core'
 import { isAppError } from '@berelax/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { FAILURE_MODES, type FailureMode, failureModeOf } from './failure.ts'
@@ -109,28 +108,6 @@ const EXERCISES: readonly Exercise[] = [
       }),
   },
   {
-    key: 'till',
-    provider: 'manual',
-    call: (p) =>
-      p.till.createIntent({
-        amount: aed(350),
-        method: 'cash',
-        idempotencyKey: `till-${Math.random()}`,
-        reference: 'BK-1',
-      }),
-  },
-  {
-    key: 'cards',
-    provider: 'fake-card-gateway',
-    call: (p) =>
-      p.cards.createIntent({
-        amount: aed(350),
-        method: 'card_online',
-        idempotencyKey: `card-${Math.random()}`,
-        reference: 'BK-2',
-      }),
-  },
-  {
     key: 'llm',
     provider: 'fake-llm',
     call: (p) =>
@@ -225,8 +202,19 @@ describe('rule 1 — no fake returns success without writing to the visible call
 })
 
 describe('rule 2 — every fake can be made to fail on demand', () => {
-  /** The till adapter has no external service, so it has no provider failures to inject. */
-  const INJECTABLE = EXERCISES.filter((exercise) => exercise.key !== 'till')
+  /**
+   * Every exercise, because every provider left here HAS an external service that can fail.
+   *
+   * This was `EXERCISES.filter((e) => e.key !== 'till')` while H02's manual till provider was in the
+   * registry: cash at the desk has nothing to call, so it had no provider failure to inject. Y-PAY-02 retired
+   * `Providers.till` and `Providers.cards` (the `@berelax/payments` registry owns payments now), and the
+   * filter is removed rather than left excluding a key nothing declares — a predicate that can no longer
+   * match anything is a filter that has quietly stopped filtering, which is the shape of check this suite
+   * exists to refuse. The till adapter that IS real is `createManualGateway` in `@berelax/payments`, and its
+   * `hasExternalService: false` is held to a REFUSAL by that package's conformance suite rather than to an
+   * exemption (ADR 0055).
+   */
+  const INJECTABLE = EXERCISES
 
   for (const exercise of INJECTABLE) {
     for (const mode of FAILURE_MODES) {
@@ -325,12 +313,22 @@ describe('rule 3 — provider selection is configuration, not code', () => {
   })
 
   it('names the unit and the prerequisite in the refusal, so the message is actionable', () => {
+    // Driven through SMS_PROVIDER since Y-PAY-02 retired `Providers.cards`: this registry no longer reads
+    // `PAYMENT_PROVIDER` at all, so posing the question with that key would have asserted something about
+    // whichever OTHER provider happened to refuse first. The payments half of the same claim is
+    // `packages/payments/src/registry.test.ts`, which asserts it for `PAYMENT_PROVIDER` specifically — and
+    // gate case 133v is the known-bad fixture that keeps it there. What is asserted here is that the
+    // mechanism names a unit and a prerequisite at all, which is a property of `notImplemented`.
+    //
+    // GOOGLE_PROVIDER was tried first and threw `validation` rather than `provider_unavailable`: real Google
+    // needs credentials this configuration does not carry, so it is refused before the registry names a
+    // pending integration. SMS is the key whose real adapter is genuinely just unbuilt.
     try {
       createProviders({
         config: parseConfig({
           APP_ENV: 'production',
           DATABASE_URL: 'postgres://localhost/berelax',
-          PAYMENT_PROVIDER: 'real',
+          SMS_PROVIDER: 'real',
         }),
         now: () => CLOCK,
       })
@@ -339,21 +337,24 @@ describe('rule 3 — provider selection is configuration, not code', () => {
       expect(isAppError(error)).toBe(true)
       if (isAppError(error)) {
         expect(error.kind).toBe('provider_unavailable')
-        expect(error.details['unit']).toBe('Y-PAY')
-        expect(String(error.details['needs'])).toMatch(/merchant account/i)
+        expect(String(error.details['unit'])).not.toBe('')
+        expect(String(error.details['needs'])).not.toBe('')
       }
     }
   })
 
-  it('keeps the till adapter real in every environment', async () => {
-    // Cash taken at the desk is recorded, not sent anywhere. A fake would make the ledger fictional.
-    expect(providers.till.name).toBe('manual')
-    expect(providers.till.supports).toContain('cash')
-  })
-
   it('shares one call log across every provider, so the admin has one inbox', async () => {
-    await EXERCISES[0]?.call(providers)
-    await EXERCISES[7]?.call(providers)
+    // BY KEY and not by index. This read `EXERCISES[0]` and `EXERCISES[7]`, and when Y-PAY-02 retired the
+    // two payment exercises `[7]` silently became undefined — `await undefined?.call(...)` is a no-op, so the
+    // set would have held ONE provider and the case would have failed naming the wrong thing. An index into
+    // a table other units append to is a reference that moves without being edited.
+    const byKey = (key: string) => EXERCISES.find((exercise) => exercise.key === key)
+    const first = byKey('sms')
+    const second = byKey('llm')
+    expect(first, 'the sms exercise is gone').toBeDefined()
+    expect(second, 'the llm exercise is gone').toBeDefined()
+    await first?.call(providers)
+    await second?.call(providers)
     const providerNames = new Set(providers.calls.all().map((call) => call.provider))
     expect(providerNames.size).toBe(2)
   })

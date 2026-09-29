@@ -108,8 +108,29 @@ create table payment_intent (
                          constraint payment_intent_gateway_nonempty check (btrim(gateway) <> ''),
   -- The gateway's own id for this intent. NULL until it answers, which is a real state and not a gap: the
   -- row is written first so the key is claimed, and an intent that never got an answer is exactly the one
-  -- Y-PAY-05's reconciliation has to find. UNIQUE per gateway, because two of our intents pointing at one
-  -- of theirs would double-count every event it emits.
+  -- Y-PAY-05's reconciliation has to find.
+  --
+  -- Deliberately NOT unique per gateway, and this is the one place in the file where the obvious constraint
+  -- was written, applied and then REMOVED. `unique (gateway, gateway_intent_id)` says "one of our intents
+  -- per one of theirs", which is what you want — but `gateway` holds an adapter NAME and a gateway intent id
+  -- is unique only within a MERCHANT ACCOUNT. No provider and no merchant account has been chosen
+  -- (OPEN-QUESTIONS `Y7-mcc`), so the column that would qualify the uniqueness does not exist and inventing
+  -- one is what brief rule 15 refuses: a plausible merchant account id is indistinguishable from a
+  -- configured one. A constraint that is right for one account and silently wrong for two is worse than an
+  -- index, because the day a second account is added it refuses legitimate authorisations and the message
+  -- names a uniqueness nobody meant to claim.
+  --
+  -- It was removed because it FAILED, which is the useful part: the H02 fake numbers its intents from 1 per
+  -- process, so the second run of `payment-intent.itest.ts` against one database met
+  -- `duplicate key value violates unique constraint` on ids the first run had stored — and since nothing
+  -- here can ever be deleted, no teardown could free them. A fake is less unique than a real acquirer, which
+  -- made the over-claim visible on day one instead of on the day a second merchant account is opened.
+  --
+  -- What the constraint was reaching for is only PARTLY replaced. Double-counting WITHIN one intent is shut
+  -- by `payment_intent_transaction_one_row_per_event`. Two intents sharing one gateway intent id, each
+  -- recording the same events, is not detected here and is Y-PAY-05's: its acceptance line already
+  -- quarantines an intent the gateway does not recognise, and two locals for one remote is the same
+  -- reconciliation reading the same diff.
   gateway_intent_id    text
                          constraint payment_intent_gateway_id_nonempty
                          check (gateway_intent_id is null or btrim(gateway_intent_id) <> ''),
@@ -148,7 +169,6 @@ create table payment_intent (
     check (captured_fils <= authorised_fils),
   constraint payment_intent_refunded_within_captured
     check (refunded_fils <= captured_fils),
-  constraint payment_intent_one_row_per_gateway_intent unique (gateway, gateway_intent_id),
   -- An intent that has moved names the row that moved it, and one that has not has no row to name. Stated
   -- as a constraint rather than left to ZY162 because it is the ONE case the trigger cannot see: a row
   -- INSERTed straight into a non-initial state fires no UPDATE.
@@ -166,7 +186,9 @@ comment on column payment_intent.gateway_intent_id is
   'The gateway''s own id, NULL until it answers. A real state rather than a gap: an intent whose key was '
   'claimed and whose authorisation never returned is precisely what Y-PAY-05 reconciles, and a NOT NULL '
   'here would have forced the gateway call to happen before the key was claimed - which is the ordering '
-  'that lets two concurrent callers both authorise.';
+  'that lets two concurrent callers both authorise. NOT unique per gateway, deliberately: a gateway intent '
+  'id is unique within a MERCHANT ACCOUNT and this table has no column for one, because no provider or '
+  'account has been chosen (Y7-mcc). See the column''s note in the migration.';
 comment on column payment_intent.requested_fils is
   'What was asked, not what was reserved. A declined authorisation has authorised_fils 0 and this figure '
   'is the only record that anything was attempted at all.';
@@ -176,6 +198,9 @@ comment on column payment_intent.last_transaction_id is
   'an intent" becomes a property of the database rather than a check in a route handler somebody may skip.';
 
 create index payment_intent_reference_idx on payment_intent (reference);
+-- The lookup the constraint above would have provided anyway: Y-PAY-04's webhook handler arrives holding a
+-- gateway intent id and nothing else, and Y-PAY-05 diffs local against remote by it.
+create index payment_intent_gateway_intent_idx on payment_intent (gateway, gateway_intent_id);
 -- Y-PAY-05 pulls every intent that is not settled, so the partial index is over exactly those states.
 create index payment_intent_open_idx on payment_intent (state, created_at)
   where state in ('requires_authorisation', 'requires_customer_action', 'authorised');

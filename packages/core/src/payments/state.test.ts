@@ -49,7 +49,9 @@ import { transactionAmountIsLegal } from './transactions.ts'
 const R = TRANSITION_REFUSED
 
 type Cell = PaymentIntentState | typeof TRANSITION_REFUSED
-type ExpectedTable = Readonly<Record<PaymentIntentState, Readonly<Record<PaymentIntentEventType, Cell>>>>
+type ExpectedTable = Readonly<
+  Record<PaymentIntentState, Readonly<Record<PaymentIntentEventType, Cell>>>
+>
 
 /**
  * The lifecycle, written out independently of `state.ts`.
@@ -132,9 +134,7 @@ const EXPECTED: ExpectedTable = Object.freeze({
 
 /** Every (state, event) pair, as a flat list. The enum PRODUCT, which is what "total" is about. */
 const PAIRS: readonly { state: PaymentIntentState; event: PaymentIntentEventType }[] =
-  PAYMENT_INTENT_STATES.flatMap((state) =>
-    PAYMENT_INTENT_EVENTS.map((event) => ({ state, event })),
-  )
+  PAYMENT_INTENT_STATES.flatMap((state) => PAYMENT_INTENT_EVENTS.map((event) => ({ state, event })))
 
 const expectedCell = (state: PaymentIntentState, event: PaymentIntentEventType): Cell =>
   EXPECTED[state][event]
@@ -169,9 +169,10 @@ describe('acceptance — the transition table is total over the enum product', (
   it('has a cell for all 36 pairs and no pair the product does not name', () => {
     // The vacuity floor for every case below: 6 states x 6 events. A literal, not a product of the two
     // lengths, because computing it from the enums would make a shrunken enum satisfy it.
-    expect(PAIRS.length, 'the enum product is not 36 pairs; every count below is measured against it').toBe(
-      36,
-    )
+    expect(
+      PAIRS.length,
+      'the enum product is not 36 pairs; every count below is measured against it',
+    ).toBe(36)
     expect(new Set(PAIRS.map(({ state, event }) => `${state}+${event}`)).size).toBe(36)
 
     // Both directions over the KEYS, so a row or a column that exists in one table and not the other is a
@@ -279,7 +280,9 @@ describe('acceptance — every pair outside the table is refused with a named er
       expect(nextIntentState(state, event, 'evt_probe'), `${state} + ${event}`).toBe(cell)
       moves += 1
     }
-    expect(moves, 'no allowed pair was exercised, so the refusal case above proves nothing').toBe(16)
+    expect(moves, 'no allowed pair was exercised, so the refusal case above proves nothing').toBe(
+      16,
+    )
   })
 
   it('the predicate and the thrower agree on all 36, against the hand-written table', () => {
@@ -304,14 +307,16 @@ describe('acceptance — every pair outside the table is refused with a named er
 
 describe('the two amount tables stay in step with the event enum', () => {
   it('declares whether every event carries an amount, and exactly three do', () => {
-    expect(Object.keys(INTENT_EVENT_CARRIES_AMOUNT).sort()).toEqual([...PAYMENT_INTENT_EVENTS].sort())
+    expect(Object.keys(INTENT_EVENT_CARRIES_AMOUNT).sort()).toEqual(
+      [...PAYMENT_INTENT_EVENTS].sort(),
+    )
     // The three, named. A count alone would pass for any three, and which three it is decides whether a
     // capture can be folded at all.
     const carrying = PAYMENT_INTENT_EVENTS.filter((event) => INTENT_EVENT_CARRIES_AMOUNT[event])
     expect([...carrying].sort()).toEqual(['authorised', 'captured', 'refunded'])
   })
 
-  it("lets a transaction row carry fils for exactly the events that carry an amount", () => {
+  it('lets a transaction row carry fils for exactly the events that carry an amount', () => {
     // 0106 stores one row per event and its CHECK is three-way: strictly positive for the three money
     // events, exactly zero for the other three. `transactionAmountIsLegal` derives that from
     // INTENT_EVENT_CARRIES_AMOUNT rather than from its own list, and this is what holds the derivation to

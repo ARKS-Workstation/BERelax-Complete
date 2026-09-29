@@ -99,6 +99,9 @@ importers:
       '@berelax/messaging':
         specifier: workspace:*
         version: link:../../packages/messaging
+      '@berelax/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@berelax/providers':
         specifier: workspace:*
         version: link:../../packages/providers

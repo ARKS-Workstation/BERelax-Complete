@@ -57,6 +57,12 @@ export const paymentIntent = pgTable(
      * A real state and not a gap: an intent whose key was claimed and whose authorisation never returned is
      * exactly what Y-PAY-05 reconciles. A NOT NULL here would have forced the gateway call to happen before
      * the key was claimed, which is the ordering that lets two concurrent callers both authorise.
+     *
+     * Not unique per gateway. `unique (gateway, gateway_intent_id)` was written, applied and removed: a
+     * gateway intent id is unique within a MERCHANT ACCOUNT, no account has been chosen (`Y7-mcc`), and the
+     * H02 fake numbers its intents from 1 per process — so the second run of `payment-intent.itest.ts`
+     * against one database collided on ids the first run had stored and nothing could delete. The
+     * migration's column note has the whole argument and what it means Y-PAY-05 now owns.
      */
     gatewayIntentId: text('gateway_intent_id'),
     /** One of `PAYMENT_INTENT_STATES` in `@berelax/core`; the CHECK mirrors that enum. */
@@ -107,7 +113,6 @@ export const paymentIntent = pgTable(
   },
   (table) => [
     unique('payment_intent_one_intent_per_key').on(table.idempotencyKey),
-    unique('payment_intent_one_row_per_gateway_intent').on(table.gateway, table.gatewayIntentId),
     check(
       'payment_intent_captured_within_authorised',
       sql`${table.capturedFils} <= ${table.authorisedFils}`,
@@ -123,6 +128,7 @@ export const paymentIntent = pgTable(
       sql`(${table.state} = 'requires_authorisation') = (${table.lastTransactionId} is null)`,
     ),
     index('payment_intent_reference_idx').on(table.reference),
+    index('payment_intent_gateway_intent_idx').on(table.gateway, table.gatewayIntentId),
   ],
 )
 

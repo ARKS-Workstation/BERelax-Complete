@@ -93,10 +93,7 @@ export class TransactionAmountWrongForEvent extends AppError {
  * refusal, and 0106's `payment_intent_transaction_amount_matches_kind` CHECK — and two of the three sharing
  * a predicate is one fewer place for it to be written differently.
  */
-export function transactionAmountIsLegal(
-  eventType: PaymentIntentEventType,
-  fils: number,
-): boolean {
+export function transactionAmountIsLegal(eventType: PaymentIntentEventType, fils: number): boolean {
   return INTENT_EVENT_CARRIES_AMOUNT[eventType] ? fils > 0 : fils === 0
 }
 
@@ -200,9 +197,7 @@ export interface StoredIntentFigures {
 }
 
 /** The header figures for a set of rows. What the repository writes and what ZY163 recomputes. */
-export function storedFiguresOf(
-  rows: readonly PaymentIntentTransaction[],
-): StoredIntentFigures {
+export function storedFiguresOf(rows: readonly PaymentIntentTransaction[]): StoredIntentFigures {
   const amounts = sumIntentTransactions(rows)
   return Object.freeze({
     authorisedFils: amounts.authorised.fils,
