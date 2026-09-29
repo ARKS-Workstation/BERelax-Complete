@@ -1,4 +1,5 @@
 import { CMS_ROUTE_PREFIXES } from '@berelax/cms'
+import { AI_CRAWLER_USER_AGENTS } from '@berelax/shared'
 
 /**
  * `robots.txt` — the crawl policy, and only the crawl policy.
@@ -31,26 +32,17 @@ import { CMS_ROUTE_PREFIXES } from '@berelax/cms'
  * docs/09 §"LLM SEO" makes this an explicit decision rather than a default: *"This is a strategic
  * trade-off: blocking protects content but forfeits citation. **Recommendation: allow.** A local service
  * business that wants to be recommended by an assistant has far more to gain from citation than from
- * protecting treatment descriptions."* So the five tokens are named and allowed, which is a decision that
+ * protecting treatment descriptions."* So the tokens are named and allowed, which is a decision that
  * has to be written down to have been made — a crawler not mentioned in `robots.txt` is allowed by
  * default, and a reader cannot tell that from an omission.
- */
-
-/**
- * The AI crawler tokens docs/09 §"LLM SEO" requires an explicit decision about.
  *
- * `Google-Extended` is the odd one and is here deliberately: it is **not** a crawler and never fetches
- * anything. It is a token that controls whether content already crawled by Googlebot may be used by
- * Gemini and Vertex, and `Allow` is the only way to say yes to that in this file. Omitting it because "it
- * is not a crawler" would leave the decision unmade.
+ * The names themselves are NOT here. `AI_CRAWLER_USER_AGENTS` comes from `@berelax/shared`'s
+ * `crawlers.ts`, which is the one table this file and `packages/core/src/analytics/bots.ts` both read:
+ * allowing a crawler and being able to recognise its traffic are two halves of one decision, and a
+ * crawler allowed here but unclassified there inflates every figure on the analytics page without
+ * breaking anything (docs/03 §6, ADR 0062). `apps/web/src/crawler-policy.test.ts` holds the file this
+ * function renders equal to that table in both directions.
  */
-export const AI_CRAWLER_USER_AGENTS: readonly string[] = [
-  'GPTBot',
-  'ClaudeBot',
-  'PerplexityBot',
-  'Google-Extended',
-  'CCBot',
-]
 
 /** The application's own API namespace, and the one endpoint inside it that is public (docs/09 §4). */
 const API_PREFIX = '/api/'

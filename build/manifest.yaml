@@ -12917,7 +12917,7 @@ units:
       exported constant that both the classifier and the robots.txt policy read, so allowing a crawler and
       detecting it cannot drift apart.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - A-FIRST-02
@@ -12931,11 +12931,97 @@ units:
       events, identical inter-event timings — without reading the user agent
     - 'property test: classification is deterministic and never throws on arbitrary, empty or absent user-agent
       strings'
+    - 'NOTE: what was built beyond the four files this entry listed, and why each edit was needed. (1) The AI
+      crawler list MOVED out of apps/web/src/facts/robots.ts, which held it, into packages/shared/src/crawlers.ts
+      — shared and not core because packages/db may reach shared and must never import core (ADR 0001), and this
+      is a policy a query may one day read. robots.ts, packages/core/src/analytics/bots.ts and the two suites that
+      assert the rendered file all read that one table now. (2) apps/web/src/facts.test.ts and
+      apps/web/src/facts.itest.ts each held a second copy of the five tokens. Both derive from the table now and
+      keep the assertions that were about ORDER, which is what those cases were for. (3)
+      apps/web/src/crawler-policy.test.ts is new and is the drift check: it pins the six tokens ONCE, parses the
+      rendered robots.txt back out of buildRobotsTxt and holds it equal to the table in both directions, requires
+      every allowed fetcher to classify as its own distinct kind, and scans every .ts and .tsx under packages/ and
+      apps/ for a third statement of any of these names. It is in apps/web because that is the only place the
+      rendered policy, the classifier and the table are all reachable, and packages/core may not import an app in
+      the other direction. (4) .dependency-cruiser.cjs''s analytics-taxonomy-must-be-pure now covers
+      packages/shared/src/crawlers.ts as well: packages/core is pure and imports that table, so a node:fs in it
+      would make core impure through an edge no gate could see, and scripts/check-core-purity.mjs walks
+      DIRECTORIES and cannot take a single file as a root. (5) scripts/test-gates.mjs block 140a-140z, 30 checks.
+      (6) docs/adr/0062, linked in docs/adr/README.md, and Y5-ai-crawler-allow-list in docs/OPEN-QUESTIONS.md
+      section D2.'
+    - 'NOTE: allocations. ADR 0062 and the gate block `// 140a-140z.` were taken. Migration 0112 was NOT needed and
+      is free: analytics.session.bot and .bot_kind already exist from migration 0096, bot_kind is text with no
+      CHECK deliberately (a list in SQL and a union in TypeScript is two lists, which is ADR 0046''s reason for
+      the event names), and this unit adds no table, column, constraint or trigger. The private SQLSTATE band
+      ZY201-ZY210 is therefore entirely free, all ten codes: nothing here raises from the database, and a registry
+      entry for a code no migration raises is refused. The port band { start: 16_400, width: 300 } was NOT taken
+      and is free: nothing here starts a server, and apps/web/src/test-ports.test.ts fails a band that is declared
+      and not used, so declaring it would have been a red check rather than a reservation. SCHEMA_VERSION is
+      unchanged at 107.'
+    - 'NOTE: the committed fixture is packages/core/test/fixtures/user-agents.json, not the
+      packages/core/src/analytics/__fixtures__/user-agents.json this entry first listed. This repository already
+      holds exactly this kind of file twice — packages/core/test/fixtures/encoding-cases.json and
+      duplicate-pairs.json, both imported with `with { type: ''json'' }` — and packages/core/src holds shipped
+      modules only, so a third convention for one file is the sort of second statement this unit is about. Its
+      shape (a `note`, then rows carrying `id`, `why` and the expected answer) is copied from encoding-cases.json
+      so a reviewer reads the two the same way. 56 rows: 44 agents and 12 people, against an acceptance line
+      asking for at least 40.'
+    - 'NOTE: the allowed list is SIX tokens where docs/09 §"LLM SEO" names five. Bytespider is the sixth, as this
+      entry''s summary asks, and the reasoning is ADR 0062''s. The short form: the classification half is
+      load-bearing whatever the policy half says — on a small site it is among the highest-volume crawlers there
+      is, and an unclassified crawler''s page views are counted as people, which moves every conversion rate and
+      fails nothing. Once the name is in the table it is in the file, because every group in robots.txt carries
+      the identical policy (a named group REPLACES the wildcard rather than extending it), so "classify it but do
+      not mention it" is not available without a second list. Whether the business wants to be in that corpus is
+      an owner decision, recorded as Y5-ai-crawler-allow-list, and answering it "block" is a per-entry rule in the
+      table plus a second branch in ruleLines() — no change to the classifier and no migration. This changes the
+      bytes robots.txt serves, which is why apps/web/src/facts.itest.ts''s line-by-line acceptance case was edited
+      rather than left alone.'
+    - 'NOTE: scoped — five of the six allowed agents have a distinct botKind and Google-Extended has none, because
+      it is not a crawler and never fetches anything: it is the token that controls whether content Googlebot
+      already has may be used by Gemini and Vertex. There is no real user-agent string for it and there never will
+      be, so inventing one would have put a fabricated string into a fixture whose whole value is that every row
+      is real (brief rule 15). The type makes the pairing the only representable one — a non-fetching entry''s
+      botKind is null by declaration, not by convention — and both suites assert the absence, so it reads as a
+      decision rather than a gap.'
+    - 'NOTE: deferred — nothing consumes the classifier yet, because none of its consumers exist. The ingest that
+      must set analytics.session.bot and bot_kind from classifyBot is deferred to A-FIRST-05; excluding
+      bot-flagged sessions from the funnel is deferred to A-FIRST-09; the bot-filtered share on the analytics page
+      is deferred to A-FIRST-10, and the same figure on the operations dashboard is deferred to R-REP-07. Each
+      must call classifyBot and store its verdict rather than re-deriving a flag — BOT_KINDS and
+      AI_CRAWLER_BOT_KINDS are exported from @berelax/core and @berelax/shared for exactly that — and the scan in
+      apps/web/src/crawler-policy.test.ts refuses a crawler name written at any of those call sites. Two shapes
+      they will need and this unit deliberately did not invent: RequestSignals.interEventGapsMs is gaps and not
+      instants because packages/core reads no clock, so the caller differences its own arrival times; and no
+      verdict from this module may refuse, gate or authorise anything, which ADR 0062 states as a rule because the
+      alternative is an access-control decision resting on a header.'
+    - 'NOTE: three defects in this unit''s own work, each named with what found it. (1) The set-equality check
+      between the rendered robots.txt and the table asserted the GROUP COUNT first, so gate cases 140a and 140b —
+      one group missing, one group too many — both failed on "expected 7 to be 6" and never reached the sentence
+      naming which side was wrong. Found by the gate block''s first run, which is the whole argument for ADR 0003:
+      both cases exited non-zero, and a bare non-zero exit would have reported them as passing. The two
+      differences now come before the count. (2) declaresItselfAnAgent was first written taking both the
+      lowercased and the original user agent, and the lowercased copy was never read — a parameter the next reader
+      would reasonably assume something depended on, and a `return x ? false : false` left behind to use it. Found
+      by reading the file back before running anything. (3) One fixture row''s `why` was 25 characters against the
+      floor of 30 the suite sets, found by that assertion, which exists because a fixture row nobody can read is a
+      row nobody maintains.'
     files:
-    - packages/core/src/analytics/bots.ts
     - packages/shared/src/crawlers.ts
+    - packages/shared/src/index.ts
+    - packages/core/src/analytics/bots.ts
     - packages/core/src/analytics/bots.test.ts
-    - packages/core/src/analytics/__fixtures__/user-agents.json
+    - packages/core/src/analytics/index.ts
+    - packages/core/test/fixtures/user-agents.json
+    - apps/web/src/crawler-policy.test.ts
+    - apps/web/src/facts/robots.ts
+    - apps/web/src/facts.test.ts
+    - apps/web/src/facts.itest.ts
+    - .dependency-cruiser.cjs
+    - scripts/test-gates.mjs
+    - docs/adr/0062-the-ai-crawler-policy-is-one-table-and-a-user-agent-is-a-claim.md
+    - docs/adr/README.md
+    - docs/OPEN-QUESTIONS.md
   - id: A-FIRST-05
     order: 108
     title: /api/collect ingest, session stitching and pre-consent staging

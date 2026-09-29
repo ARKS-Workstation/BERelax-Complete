@@ -43077,6 +43077,520 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 140a-140z. (A-FIRST-04) Bot and AI-crawler classification: the two lists shown to be one, the general
+//            rule shown not to filter a real phone out of the funnel, and every signal rule shown to be
+//            able to fail.
+//
+//            The unit's whole claim is that allowing a crawler and being able to recognise it are ONE
+//            decision with one statement. That claim cannot be tested by asserting the two agree — they
+//            agree by construction, because both read `packages/shared/src/crawlers.ts`. It can only be
+//            tested by BREAKING the construction: 140a to 140f each put one of the three readers back on
+//            a list of its own and require the check that holds them equal to fail by name.
+//
+//            140h is the one that is about a person rather than a crawler. `CUBOT` is an Android phone
+//            brand, so the obvious implementation of "does the user agent look like a bot" — a `/bot/i`
+//            search — filters those visitors out of the funnel, and nobody would ever see it. The fixture
+//            carries a real CUBOT string and this case removes the carve-out that saves it.
+//
+//            140k to 140o are the signal heuristic. Every one of them is a mutation, because every claim
+//            there is about an answer a different rule could give and still look right: "absent viewport
+//            means headless" is satisfied by a heuristic that flags every bounce, and a bounce is most of
+//            the genuine traffic on a brochure site. ADR 0062.
+{
+  const CRAWLERS = 'packages/shared/src/crawlers.ts'
+  const BOTS = 'packages/core/src/analytics/bots.ts'
+  const BOTS_SUITE = 'packages/core/src/analytics/bots.test.ts'
+  const ROBOTS = 'apps/web/src/facts/robots.ts'
+  const POLICY_SUITE = 'apps/web/src/crawler-policy.test.ts'
+  const FACTS_SUITE = 'apps/web/src/facts.test.ts'
+  const CORE_FIXTURE = 'packages/core/src/analytics/__gate_fixture__.ts'
+
+  // Named for this block: `unit`, `tsc` and `mutate` already exist in several others, and two helpers with
+  // one name in one generated slice is a redeclaration that fails before any case runs.
+  const af4Args = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const af4Fail = (file) => runExpectingFailure('pnpm', af4Args(file))
+  const af4Pass = (file) => run('pnpm', af4Args(file))
+  const af4Tsc = () => runExpectingFailure('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const af4TscClean = () => run('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'])
+  const af4CruiseArgs = [
+    'exec',
+    'depcruise',
+    '--config',
+    '.dependency-cruiser.cjs',
+    'packages',
+    'apps',
+  ]
+  const af4Purity = ['scripts/check-core-purity.mjs']
+
+  /** Break one file one way and run one suite against the result. */
+  const af4Mutate = (path, find, into, suite) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, find, into),
+      () => af4Fail(suite),
+    )
+
+  // --- the rendered policy and the table are one list -------------------------------------------
+  //
+  // 140a. Render one group fewer than the table holds. This is what a crawler allowed in a merge and
+  //       dropped from the file looks like, and the consequence is the opposite of harmless: the
+  //       classifier goes on recognising an agent the policy no longer allows.
+  {
+    const result = af4Mutate(
+      ROBOTS,
+      'for (const agent of AI_CRAWLER_USER_AGENTS) {',
+      'for (const agent of AI_CRAWLER_USER_AGENTS.slice(1)) {',
+      POLICY_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a robots.txt missing one of the table’s agents is caught',
+      result,
+      'the shared table holds an agent robots.txt does not name',
+    )
+  }
+
+  // 140b. The other direction, which is the expensive one: a group in the file that the table does not
+  //       hold is a crawler this business allowed and cannot recognise, so its traffic is counted as
+  //       people and every figure on the analytics page moves with nothing failing.
+  {
+    const result = af4Mutate(
+      ROBOTS,
+      'for (const agent of AI_CRAWLER_USER_AGENTS) {',
+      "for (const agent of [...AI_CRAWLER_USER_AGENTS, 'UnlistedAgent']) {",
+      POLICY_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a robots.txt group the table does not hold is caught',
+      result,
+      'robots.txt names an agent the shared table does not hold',
+    )
+  }
+
+  // 140c. The copy itself, refused whether or not it currently agrees. This is the defect the unit is
+  //       named for — `robots.ts` held this exact list until A-FIRST-04 — and the scan is what catches it
+  //       on the day it is written rather than on the day it drifts.
+  {
+    const result = af4Mutate(
+      ROBOTS,
+      'for (const agent of AI_CRAWLER_USER_AGENTS) {',
+      "for (const agent of ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended', 'CCBot']) {",
+      POLICY_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a second copy of the agent list in the robots policy is caught',
+      result,
+      'names GPTBot in code',
+    )
+  }
+
+  // 140d. Add a crawler to the table alone. Nothing in the policy or the classifier needs editing — both
+  //       derive — so the only thing that can notice is the fixture, and it must: an agent with no real
+  //       user agent committed against it is an agent nobody has checked the classifier on.
+  {
+    const result = af4Mutate(
+      CRAWLERS,
+      '] as const satisfies readonly AiCrawlerPolicyEntry[]',
+      [
+        '  {',
+        "    token: 'GateFixtureBot',",
+        "    botKind: 'gate_fixture_bot',",
+        '    fetches: true,',
+        "    why: 'A gate fixture, which is why it has no user agent committed against it anywhere.',",
+        '  },',
+        '] as const satisfies readonly AiCrawlerPolicyEntry[]',
+      ].join('\n'),
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a crawler added to the table with no real user agent in the fixture is caught',
+      result,
+      'has no user agent in the fixture',
+    )
+  }
+
+  // 140e. The same edit against the pin, which is the other half of "a deliberate committed diff": the six
+  //       tokens are spelled out in exactly one place, so adding a seventh is reviewed as the policy change
+  //       it is rather than arriving inside a refactor.
+  {
+    const result = af4Mutate(
+      CRAWLERS,
+      '] as const satisfies readonly AiCrawlerPolicyEntry[]',
+      [
+        '  {',
+        "    token: 'GateFixtureBot',",
+        "    botKind: 'gate_fixture_bot',",
+        '    fetches: true,',
+        "    why: 'A gate fixture, which is why it has no user agent committed against it anywhere.',",
+        '  },',
+        '] as const satisfies readonly AiCrawlerPolicyEntry[]',
+      ].join('\n'),
+      POLICY_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a seventh agent with no change to the pin is caught',
+      result,
+      'is these six tokens, in this order',
+    )
+  }
+
+  // 140f. Take the classifier off the table — one crawler dropped from the rules it derives. The policy
+  //       still allows it, the pin still passes, and its traffic is now indistinguishable from a visitor's.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'const AI_CRAWLER_RULES: readonly AgentRule[] = AI_CRAWLER_FETCHERS.map((entry) => ({',
+      'const AI_CRAWLER_RULES: readonly AgentRule[] = AI_CRAWLER_FETCHERS.slice(1).map((entry) => ({',
+      POLICY_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a classifier that does not recognise every allowed crawler is caught',
+      result,
+      'classifies every allowed fetcher as its own distinct kind',
+    )
+  }
+
+  // 140g. Two crawlers sharing one kind. `bot_kind` is the column a report reads, so this is the edit that
+  //       makes "is ChatGPT reading us" unanswerable — and it is a plausible one, because a shared
+  //       `ai_crawler` looks tidier than five names.
+  {
+    const result = af4Mutate(CRAWLERS, "botKind: 'claudebot',", "botKind: 'gptbot',", BOTS_SUITE)
+    checkRejectedBy(
+      'afirst04 gate: two AI crawlers sharing one bot_kind is caught',
+      result,
+      'gives each AI crawler a distinct kind',
+    )
+  }
+
+  // --- the general rule, and the person it must not catch ---------------------------------------
+  //
+  // 140h. Remove the all-capitals carve-out. `CUBOT` is a real Android phone brand, so this is the edit
+  //       that filters every visitor holding one out of the funnel as a bot — invisible in every figure,
+  //       because a missing visitor leaves nothing behind.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'if (product === product.toUpperCase()) continue',
+      'if (product.length === 0) continue',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a self-declaration rule that reads a phone model as a bot is caught',
+      result,
+      'human-android-chrome-cubot',
+    )
+  }
+
+  // 140i. The control on 140h from the other side: a rule that never fires at all would pass every human
+  //       row in the fixture while missing every crawler nobody has named. Two real ones are committed
+  //       against it.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'if (DECLARED_AGENT_SUFFIXES.some((suffix) => lowerProduct.endsWith(suffix))) return true',
+      'if (DECLARED_AGENT_SUFFIXES.length === 0) return true',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a self-declaration rule that recognises nothing is caught',
+      result,
+      'unnamed-sogou-spider',
+    )
+  }
+
+  // 140j. Reverse the match order. `LinkedInBot`'s own user agent names Apache's HTTP client, so the answer
+  //       depends on which rule is consulted first — and an ordering that reads more tidily would silently
+  //       reclassify every link somebody pasted into LinkedIn as a script.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'const AGENT_RULES: readonly AgentRule[] = [...AI_CRAWLER_RULES, ...OTHER_AGENT_RULES]',
+      'const AGENT_RULES: readonly AgentRule[] = [...AI_CRAWLER_RULES, ...[...OTHER_AGENT_RULES].reverse()]',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a reordered rule table that reclassifies a link previewer is caught',
+      result,
+      'social-linkedinbot',
+    )
+  }
+
+  // --- the signal heuristic -----------------------------------------------------------------------
+  //
+  // 140k. Believe a single corroborating rule. This is the edit that flags every bounce — a visitor who
+  //       reads one page and leaves interacts with nothing — and it would remove genuine people from the
+  //       denominator the whole filter exists to protect.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'export const HEADLESS_CORROBORATION = 2',
+      'export const HEADLESS_CORROBORATION = 1',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a one-signal headless verdict is caught',
+      result,
+      'viewport=true interaction=false timing=false',
+    )
+  }
+
+  // 140l. Promote the weakest rule to sufficient on its own, which is the same defect arriving through the
+  //       table rather than through the threshold.
+  {
+    const result = af4Mutate(
+      BOTS,
+      [
+        'fires: (signals: RequestSignals) => signals.interactionCount === 0,',
+        '    alone: false,',
+      ].join('\n'),
+      [
+        'fires: (signals: RequestSignals) => signals.interactionCount === 0,',
+        '    alone: true,',
+      ].join('\n'),
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a zero-interaction session flagged on that alone is caught',
+      result,
+      'viewport=false interaction=true timing=false',
+    )
+  }
+
+  // 140m. Give the timing rule a tolerance. A millisecond of slack is the change that looks like
+  //       robustness and is not: exact equality of consecutive gaps is the only thing a person cannot
+  //       produce, and it is why that rule is allowed to fire alone.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'return gaps.every((gap) => gap === first)',
+      'return gaps.every((gap) => Math.abs(gap - first) <= 1)',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a timing rule with a tolerance nobody measured is caught',
+      result,
+      'needs two gaps before identical timings mean anything',
+    )
+  }
+
+  // 140n. Demote the only rule that is sufficient alone. A scripted driver that sets a viewport and clicks
+  //       trips nothing else, so this is the edit that makes the heuristic unable to see the case it was
+  //       written for.
+  {
+    const result = af4Mutate(
+      BOTS,
+      ['return gaps.every((gap) => gap === first)', '    },', '    alone: true,'].join('\n'),
+      ['return gaps.every((gap) => gap === first)', '    },', '    alone: false,'].join('\n'),
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a uniform-timing rule that needs corroboration is caught',
+      result,
+      'viewport=false interaction=false timing=true',
+    )
+  }
+
+  // 140o. Consult the signals before the claim. Every crawler reports no viewport and interacts with
+  //       nothing, so this edit relabels all 44 of them `suspected_headless` and loses the citation figure
+  //       docs/09 asks to be measured — while the bot flag itself stays correct, which is why no other
+  //       assertion would notice.
+  {
+    const result = af4Mutate(
+      BOTS,
+      'const claimed = claimedBotKind(input.userAgent)',
+      'const claimed = input.signals !== null && classifyHeadlessSignals(input.signals).suspected ? null : claimedBotKind(input.userAgent)',
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a classifier that lets a suspicion overwrite a declared crawler is caught',
+      result,
+      'lets a declared agent keep its own kind when the signals also fire',
+    )
+  }
+
+  // 140p. Mislabel the basis. The whole honesty of the module is that a user agent is a CLAIM: a verdict
+  //       from a header reported as `request_signals` would tell a reader the answer came from behaviour,
+  //       which is the one thing it did not.
+  {
+    const result = af4Mutate(
+      BOTS,
+      "if (claimed !== null) return { bot: true, botKind: claimed, basis: 'user_agent_claim' }",
+      "if (claimed !== null) return { bot: true, botKind: claimed, basis: 'request_signals' }",
+      BOTS_SUITE,
+    )
+    checkRejectedBy(
+      'afirst04 gate: a claim reported as an inference is caught',
+      result,
+      'ai-gptbot',
+    )
+  }
+
+  // --- the scan, the boundary and the types -----------------------------------------------------
+  //
+  // 140q. A third statement of the list, in a file nobody would think to look in. The scan is what makes
+  //       "one source of truth" a property of the repository rather than of the two files that happen to
+  //       agree today.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      ["export const second: readonly string[] = ['GPTBot', 'ClaudeBot']"].join('\n'),
+      () => af4Fail(POLICY_SUITE),
+    )
+    checkRejectedBy(
+      'afirst04 gate: a crawler list written into a third file is caught',
+      result,
+      '__gate_fixture__.ts:1 names GPTBot in code',
+    )
+  }
+
+  // 140r. The table must stay as pure as the classifier that reads it. `packages/core` is pure and imports
+  //       this file, so a `node:fs` here makes core impure through an edge `scripts/check-core-purity.mjs`
+  //       cannot see — it walks directories and cannot take a single file as a root. ADR 0002's trap
+  //       exactly: a rule configured, green and dead.
+  {
+    const result = withEditedFile(
+      CRAWLERS,
+      (text) =>
+        replaceOnce(
+          text,
+          'interface AiCrawlerCommon {',
+          "import { readFileSync } from 'node:fs'\nvoid readFileSync\n\ninterface AiCrawlerCommon {",
+        ),
+      () => runExpectingFailure('pnpm', af4CruiseArgs),
+    )
+    checkRejectedBy(
+      'afirst04 gate: I/O reachable from the crawler policy table fails the boundary gate',
+      result,
+      'analytics-taxonomy-must-be-pure',
+    )
+  }
+
+  // 140s. And the classifier's own purity, which is what makes the answer reproducible: a verdict that
+  //       depended on the clock could not be replayed against a stored session.
+  {
+    const result = withEditedFile(
+      BOTS,
+      (text) =>
+        replaceOnce(
+          text,
+          'export function classifyBot(input: BotInput): BotClassification {',
+          'export function classifyBot(input: BotInput): BotClassification {\n  void Date.now()',
+        ),
+      () => runExpectingFailure('node', af4Purity),
+    )
+    checkRejectedBy(
+      'afirst04 gate: a clock read in the classifier fails the purity gate',
+      result,
+      'reading the clock',
+    )
+  }
+
+  // 140t. A `bot_kind` outside the union must not compile. The alternative failure is a string in
+  //       `analytics.session.bot_kind` that no report knows to look for, found months later as a category
+  //       missing from a total.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { BotKind } from '@berelax/core'",
+        "export const kind: BotKind = 'gptbot_2'",
+      ].join('\n'),
+      () => af4Tsc(),
+    )
+    checkRejectedBy(
+      'afirst04 gate: a bot_kind outside the union fails to compile',
+      result,
+      'gptbot_2',
+    )
+  }
+
+  // 140u. The control on 140t, and it is load-bearing: a `BotKind` of `never` would reject the fixture
+  //       above while rejecting every real kind too.
+  {
+    const result = withFixture(
+      CORE_FIXTURE,
+      [
+        "import type { BotKind } from '@berelax/core'",
+        "export const kind: BotKind = 'gptbot'",
+      ].join('\n'),
+      () => af4TscClean(),
+    )
+    check(
+      'afirst04 gate: and a declared bot_kind compiles, so 140t is about the spelling',
+      !result.failed,
+      `tsc rejected a declared bot_kind, so 140t proves nothing:\n${result.output}`,
+    )
+  }
+
+  // 140v. A fourth signal rule with no entry in the table must not compile. `HEADLESS_RULES` is a `Record`
+  //       over the tuple with no default branch, so a signal somebody adds and forgets to define is a
+  //       build error rather than a rule that silently never fires.
+  {
+    const result = withEditedFile(
+      BOTS,
+      (text) =>
+        replaceOnce(
+          text,
+          ["  'uniform_event_timing',", '] as const'].join('\n'),
+          ["  'uniform_event_timing',", "  '__gate_rule__',", '] as const'].join('\n'),
+        ),
+      () => af4Tsc(),
+    )
+    checkRejectedBy(
+      'afirst04 gate: a signal rule with no definition fails to compile',
+      result,
+      '__gate_rule__',
+    )
+  }
+
+  // 140w. The question this policy stands on is a row in `docs/OPEN-QUESTIONS.md`. Whether ByteDance's
+  //       crawler belongs on the allowed list is the owner's decision and not this unit's, so the mechanism
+  //       was built and the answer was recorded rather than invented — and an id that names nothing is worse
+  //       than no id, because it reads as a question somebody is tracking (brief rule 15).
+  {
+    const tableText = readFileSync(CRAWLERS, 'utf8')
+    const declaration = tableText.slice(tableText.indexOf('CRAWLER_POLICY_OPEN_QUESTIONS = {'))
+    const declared = [...declaration.matchAll(/'(Y\d+-[a-z-]+)'/g)].map((match) => match[1])
+    const questions = readFileSync('docs/OPEN-QUESTIONS.md', 'utf8')
+    const missing = declared.filter((id) => !questions.includes(`| ${id} |`))
+    check(
+      'afirst04 gate: every open question the crawler policy declares is in OPEN-QUESTIONS.md',
+      declared.length >= 1 && missing.length === 0,
+      declared.length < 1
+        ? `no id was read out of ${CRAWLERS}, so this case examined nothing`
+        : `${missing.join(', ')} is declared by the crawler policy and absent from docs/OPEN-QUESTIONS.md`,
+    )
+    check(
+      'afirst04 gate: and the OPEN-QUESTIONS scan would not find an id nobody wrote',
+      !questions.includes('| Y5-ai-crawler-allow-list-that-nobody-wrote |'),
+      'the scan matches an id nobody wrote, so it would pass for any claim at all',
+    )
+  }
+
+  // 140x-140z. The controls, and they are not a formality: every file edited above, UNEDITED, passes. A
+  //            stale anchor, a suite that had stopped importing the table, or a scanner that refused the
+  //            clean tree would otherwise all read as a block of passing cases.
+  {
+    const policy = af4Pass(POLICY_SUITE)
+    check(`afirst04 gate: ${POLICY_SUITE} passes unedited`, !policy.failed, policy.output)
+
+    const bots = af4Pass(BOTS_SUITE)
+    check(`afirst04 gate: ${BOTS_SUITE} passes unedited`, !bots.failed, bots.output)
+
+    // The suite that held the old copy of the list, which is the one a revert would show up in.
+    const facts = af4Pass(FACTS_SUITE)
+    check(`afirst04 gate: ${FACTS_SUITE} passes unedited`, !facts.failed, facts.output)
+
+    const cruise = run('pnpm', af4CruiseArgs)
+    check('afirst04 gate: the crawler policy passes pnpm boundaries', !cruise.failed, cruise.output)
+
+    const pure = run('node', af4Purity)
+    check('afirst04 gate: the classifier passes pnpm purity', !pure.failed, pure.output)
+
+    const types = af4TscClean()
+    check('afirst04 gate: the tree typechecks unedited', !types.failed, types.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

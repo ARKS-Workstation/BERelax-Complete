@@ -23,7 +23,7 @@ import {
   WHATSAPP_CANDIDATES,
   WHATSAPP_PENDING,
 } from '@berelax/db'
-import { type Facts, factsSchema } from '@berelax/shared'
+import { AI_CRAWLER_USER_AGENTS, type Facts, factsSchema } from '@berelax/shared'
 import { NapBlock } from '@berelax/ui/patterns'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -550,13 +550,15 @@ describe('acceptance — robots.txt, line by line', () => {
     // checks, and `Allow: /api/facts` sitting in a different group from `Disallow: /api/` would satisfy
     // every membership test while granting nothing.
     const directives = lines.filter((line) => /^(User-agent|Allow|Disallow|Sitemap):/.test(line))
+    // The agents come from the shared policy table rather than being spelled out again here. They were
+    // spelled out, and that copy was the second statement A-FIRST-04 removed — `apps/web/src/
+    // crawler-policy.test.ts` pins the table itself and holds it equal to the classifier. The SEQUENCE is
+    // still what is asserted, which is this case's own point: `Allow: /api/facts` sitting in a different
+    // group from `Disallow: /api/` would satisfy every membership test while granting nothing.
+    expect(AI_CRAWLER_USER_AGENTS.length).toBeGreaterThanOrEqual(5)
     expect(directives).toEqual([
       ...group('*'),
-      ...group('GPTBot'),
-      ...group('ClaudeBot'),
-      ...group('PerplexityBot'),
-      ...group('Google-Extended'),
-      ...group('CCBot'),
+      ...AI_CRAWLER_USER_AGENTS.flatMap((agent) => group(agent)),
     ])
     // The two machine surfaces, named as comments rather than as directives, because neither is one.
     expect(lines).toContain(`# ${origin}/api/facts`)

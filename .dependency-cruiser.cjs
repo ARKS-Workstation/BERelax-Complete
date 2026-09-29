@@ -95,9 +95,14 @@ module.exports = {
         'no-lucide-outside-the-icon-wrapper configured, green and dead: a Node builtin and an ' +
         'UNINSTALLED package both resolve to their bare name, while an installed one resolves into ' +
         'node_modules. The known-bad fixture is in scripts/test-gates.mjs block 124 and asserts this rule ' +
-        'fires BY NAME, with a control that imports zod alone and must pass.',
+        'fires BY NAME, with a control that imports zod alone and must pass. ' +
+        'A-FIRST-04 widened the `from` to cover packages/shared/src/crawlers.ts, which is the AI crawler ' +
+        'policy table that packages/core/src/analytics/bots.ts is built from. Same argument, one step ' +
+        'removed: core is pure, core reads that table, and a `node:fs` inside it would make core impure ' +
+        'through an edge no gate could see — check-core-purity.mjs walks DIRECTORIES and cannot take a ' +
+        'single file as a root. The known-bad fixture is in scripts/test-gates.mjs block 140.',
       severity: 'error',
-      from: { path: '^packages/shared/src/analytics/' },
+      from: { path: '^packages/shared/src/(analytics/|crawlers\\.ts$)' },
       to: {
         path:
           '^(node:)?(fs|path|os|http|https|net|tls|dns|crypto|child_process|worker_threads)$|' +

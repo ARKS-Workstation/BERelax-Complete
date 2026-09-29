@@ -1,0 +1,397 @@
+{
+  "note": "A-FIRST-04's committed user-agent fixture: 56 real strings with the verdict each one must produce, hand authored row by row. Every string is one an agent or a browser actually sends — nothing here is composed to make a rule fire, because a fixture of invented strings proves only that the rule matches itself. The expectations are committed and nothing regenerates this file: changing an answer is allowed and sometimes right, changing one without noticing is not. `botKind` is null exactly where `bot` is false, which is the pairing analytics.session.bot_kind's CHECK constraint permits (migration 0096). No name of a person appears in any string, and no string was taken from this business's own logs — every one is a published, documented agent string or a stock browser string for a device model (ADR 0020, brief rule 15). The human rows carry no viewport or timing signals: they are here to prove that the CLAIM half answers not-bot on them, and packages/core/src/analytics/bots.test.ts runs the same twelve strings against headless signals separately.",
+  "agents": [
+    {
+      "id": "ai-gptbot",
+      "why": "OpenAI's crawler, and the first token docs/09 names. Allowed in robots.txt, so it must be recognised here or every figure it produces is counted as a person.",
+      "userAgent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.1; +https://openai.com/gptbot",
+      "bot": true,
+      "botKind": "gptbot"
+    },
+    {
+      "id": "ai-claudebot",
+      "why": "Anthropic's crawler. Its string is almost all `compatible`, which is why the token and not the shape decides.",
+      "userAgent": "Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+      "bot": true,
+      "botKind": "claudebot"
+    },
+    {
+      "id": "ai-perplexitybot",
+      "why": "Perplexity's crawler, whose string is a complete macOS Chrome with the token appended — the case that would classify as a human desktop visitor if the table were consulted after any shape heuristic.",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot",
+      "bot": true,
+      "botKind": "perplexitybot"
+    },
+    {
+      "id": "ai-ccbot",
+      "why": "Common Crawl, whose archive is an input to most other models. Its string carries no Mozilla prefix at all, which is the opposite extreme from the Perplexity row.",
+      "userAgent": "CCBot/2.0 (https://commoncrawl.org/faq/)",
+      "bot": true,
+      "botKind": "ccbot"
+    },
+    {
+      "id": "ai-bytespider",
+      "why": "ByteDance's crawler, whose string is an Android Mobile Safari with the token in a trailing comment — and it also contains the word `spider` twice in the feedback address, so it is the row that proves the named table is consulted before the general self-declaration rule.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; Bytespider; spider-feedback@bytedance.com)",
+      "bot": true,
+      "botKind": "bytespider"
+    },
+    {
+      "id": "search-googlebot-desktop",
+      "why": "Googlebot's desktop fetcher. Search crawlers share one kind: the question a report asks is whether search indexed us, and this store keeps no user agent to disambiguate by later.",
+      "userAgent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-googlebot-smartphone",
+      "why": "Googlebot's smartphone fetcher, which is the one that actually crawls a mobile-first site. A complete Android Chrome string with the token in a trailing comment.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.109 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-googlebot-image",
+      "why": "Googlebot-Image, which fetches the treatment photography and nothing else. Two tokens, one product, one kind.",
+      "userAgent": "Googlebot-Image/1.0",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-bingbot",
+      "why": "Bing's crawler, and the one Bing Places verification arrives behind. Lowercase product name, which the all-capitals carve-out must not exclude.",
+      "userAgent": "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-duckduckbot",
+      "why": "DuckDuckGo's own crawler. Its string opens with the product and a stray semicolon, so the tokeniser has to survive punctuation where a version is expected.",
+      "userAgent": "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-yandexbot",
+      "why": "Yandex. In the fixture because Dubai has a large Russian-speaking visitor market and this crawler is a real share of traffic here.",
+      "userAgent": "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-applebot",
+      "why": "Apple's crawler, for Siri and Spotlight. Its string is a complete, current macOS Safari — indistinguishable from a person's on every axis except the token, which is the whole argument for a named table.",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-baiduspider",
+      "why": "Baidu. Its product name ends in `spider` rather than `bot`, so it is also a check that the general suffix list is not just `bot`.",
+      "userAgent": "Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "search-yahoo-slurp",
+      "why": "Yahoo's crawler, whose product name contains a space and ends in none of the three suffixes — the general rule cannot see it at all, so it has to be named.",
+      "userAgent": "Mozilla/5.0 (compatible; Yahoo! Slurp; http://help.yahoo.com/help/us/ysearch/slurp)",
+      "bot": true,
+      "botKind": "search_crawler"
+    },
+    {
+      "id": "social-facebookexternalhit",
+      "why": "Meta's link previewer, for Facebook and Instagram both. Ends in none of the three suffixes, so it too has to be named.",
+      "userAgent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-twitterbot",
+      "why": "X/Twitter's card previewer. The shortest string in the fixture, which is a reminder that a user agent has no required shape.",
+      "userAgent": "Twitterbot/1.0",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-linkedinbot",
+      "why": "LinkedIn's previewer, and the row that proves match order is a decision: its own string also names Apache's HTTP client, which has a rule of its own, and the answer must be the previewer because what happened is that somebody pasted a link into LinkedIn.",
+      "userAgent": "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-slackbot",
+      "why": "Slack unfurling a pasted link. The product name is hyphenated onto a suffix, so a rule anchored to the end of the token would miss it and a substring must be used.",
+      "userAgent": "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-whatsapp",
+      "why": "WhatsApp fetching a preview for a shared link. The share path this business actually uses, so counting one as a visit would credit B-UI-04's ref loop with a conversion nobody made.",
+      "userAgent": "WhatsApp/2.23.20.0 A",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-telegrambot",
+      "why": "Telegram unfurling a link. Names two previewers in one string and resolves to the same kind either way, which is why this row cannot be the check on ordering and the LinkedIn row is.",
+      "userAgent": "TelegramBot (like TwitterBot)",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "social-discordbot",
+      "why": "Discord unfurling a pasted link, which is the same fetch-on-share shape as the four rows above it.",
+      "userAgent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+      "bot": true,
+      "botKind": "social_preview"
+    },
+    {
+      "id": "seo-ahrefsbot",
+      "why": "Ahrefs' backlink crawler. Not disallowed in robots.txt and not a policy question this unit answers, but on a low-traffic site it is a visible share of the traffic.",
+      "userAgent": "Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)",
+      "bot": true,
+      "botKind": "seo_crawler"
+    },
+    {
+      "id": "seo-semrushbot",
+      "why": "Semrush. Its version carries a tilde, so the tokeniser must not assume a version is digits and dots.",
+      "userAgent": "Mozilla/5.0 (compatible; SemrushBot/7~bl; +http://www.semrush.com/bot.html)",
+      "bot": true,
+      "botKind": "seo_crawler"
+    },
+    {
+      "id": "seo-mj12bot",
+      "why": "Majestic. Digits in the middle of the product name, and the suffix is lowercase where the prefix is not.",
+      "userAgent": "Mozilla/5.0 (compatible; MJ12bot/v1.4.8; http://mj12bot.com/)",
+      "bot": true,
+      "botKind": "seo_crawler"
+    },
+    {
+      "id": "seo-dotbot",
+      "why": "Moz's crawler. A three-letter prefix on `bot`, which is as close to a false-positive shape as a real crawler gets.",
+      "userAgent": "Mozilla/5.0 (compatible; DotBot/1.2; +https://opensiteexplorer.org/dotbot; help@moz.com)",
+      "bot": true,
+      "botKind": "seo_crawler"
+    },
+    {
+      "id": "seo-screaming-frog",
+      "why": "Screaming Frog SEO Spider — most often this business auditing its own site, which is exactly the share a data-quality strip needs to be able to subtract.",
+      "userAgent": "Screaming Frog SEO Spider/19.2",
+      "bot": true,
+      "botKind": "seo_crawler"
+    },
+    {
+      "id": "monitor-uptimerobot",
+      "why": "UptimeRobot. A monitor polls one path on a fixed interval, so an unclassified one is a page view a minute for ever.",
+      "userAgent": "Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)",
+      "bot": true,
+      "botKind": "uptime_monitor"
+    },
+    {
+      "id": "monitor-pingdom",
+      "why": "Pingdom, whose string is underscore-separated with no spaces at all — the row that proves the tokeniser is not relying on whitespace to find a product name.",
+      "userAgent": "Pingdom.com_bot_version_1.4_(http://www.pingdom.com/)",
+      "bot": true,
+      "botKind": "uptime_monitor"
+    },
+    {
+      "id": "client-curl",
+      "why": "curl. A script, not a browser, and it ends in none of the three suffixes — as none of the clients below do, which is why they are all named.",
+      "userAgent": "curl/8.5.0",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-wget",
+      "why": "wget, which is how a site gets mirrored.",
+      "userAgent": "Wget/1.21.4",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-python-requests",
+      "why": "Python's requests library, the commonest way a scraper is written.",
+      "userAgent": "python-requests/2.31.0",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-python-urllib",
+      "why": "Python's standard library client, which is the same traffic from a script with no dependencies.",
+      "userAgent": "Python-urllib/3.11",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-go-http",
+      "why": "Go's standard library client, which is most infrastructure tooling and most vulnerability scanners.",
+      "userAgent": "Go-http-client/2.0",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-okhttp",
+      "why": "OkHttp, which is nearly all Android and Kotlin HTTP traffic — including from an application a person is holding, which is why this kind is `http_client` and not `declared_headless`.",
+      "userAgent": "okhttp/4.12.0",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-postman",
+      "why": "Postman. Usually somebody exploring the API by hand, which is automated traffic all the same.",
+      "userAgent": "PostmanRuntime/7.36.0",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-axios",
+      "why": "axios from Node. Its browser build sends the browser's own string, so this token can only be the server-side one.",
+      "userAgent": "axios/1.6.7",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-node-fetch",
+      "why": "node-fetch, whose string names a repository rather than a vendor.",
+      "userAgent": "node-fetch/1.0 (+https://github.com/bitinn/node-fetch)",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-apache-httpclient",
+      "why": "Apache's Java client, naming the JDK in the same string. Two rules match and both say `http_client`, so the row is about the rules agreeing rather than about which one won.",
+      "userAgent": "Apache-HttpClient/4.5.14 (Java/17.0.9)",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "client-java",
+      "why": "The JDK's own client with nothing else in the string, which is why its rule carries the trailing slash: an unqualified `java` appears in strings that are not it.",
+      "userAgent": "Java/17.0.9",
+      "bot": true,
+      "botKind": "http_client"
+    },
+    {
+      "id": "headless-chrome",
+      "why": "Chrome in headless mode, which is Puppeteer and Playwright unless they were told to hide. Declared, so it is a fact about the string rather than the suspicion `suspected_headless` names.",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.6099.109 Safari/537.36",
+      "bot": true,
+      "botKind": "declared_headless"
+    },
+    {
+      "id": "headless-phantomjs",
+      "why": "PhantomJS. Old, still seen, and its string says `Unknown` where a platform belongs.",
+      "userAgent": "Mozilla/5.0 (Unknown; Linux x86_64) AppleWebKit/538.1 (KHTML, like Gecko) PhantomJS/2.1.1 Safari/538.1",
+      "bot": true,
+      "botKind": "declared_headless"
+    },
+    {
+      "id": "headless-lighthouse",
+      "why": "Lighthouse and PageSpeed Insights, which is headless Chrome auditing a page — frequently ours, from this build's own budget checks, which is a share that must not land in the funnel.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Chrome-Lighthouse",
+      "bot": true,
+      "botKind": "declared_headless"
+    },
+    {
+      "id": "unnamed-sogou-spider",
+      "why": "Sogou's crawler, which no table here names. The general rule catches it from its product token ending in `spider`, and `declared_unnamed` is the honest answer: something said it was a crawler and we do not know which one.",
+      "userAgent": "Sogou web spider/4.0(+http://www.sogou.com/docs/help/webmasters.htm#07)",
+      "bot": true,
+      "botKind": "declared_unnamed"
+    },
+    {
+      "id": "unnamed-seznambot",
+      "why": "Seznam's crawler, a real search engine this build has taken no position on. Mixed case with a `bot` suffix, so the general rule sees it and the all-capitals carve-out does not.",
+      "userAgent": "Mozilla/5.0 (compatible; SeznamBot/4.0; +http://napoveda.seznam.cz/seznambot-intro/)",
+      "bot": true,
+      "botKind": "declared_unnamed"
+    },
+    {
+      "id": "human-ios-safari-iphone",
+      "why": "iOS Safari on an iPhone. The single most likely visitor to this site, and the acceptance line names it.",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-ios-safari-ipad",
+      "why": "iOS Safari on an iPad, which differs from the iPhone string only in the platform token.",
+      "userAgent": "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-ios-chrome",
+      "why": "Chrome on iOS, which is WebKit underneath and says so — `CriOS` is the only thing that distinguishes it from Safari.",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-android-chrome-pixel",
+      "why": "Android Chrome on a Pixel. The acceptance line names Android Chrome, and this is the reference shape for it.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-android-chrome-samsung",
+      "why": "Android Chrome on a Samsung flagship, whose model token is all capitals with digits and a hyphen — the shape the self-declaration rule must skip.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.6045.163 Mobile Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-samsung-internet",
+      "why": "Samsung Internet, which is the default browser on a large share of Android handsets in this market and is not Chrome.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-android-chrome-cubot",
+      "why": "THE CONTROL for the whole self-declaration rule: CUBOT is a real Android phone brand, so a /bot/i search over the user agent would filter every visitor holding one out of the funnel as a bot. This row must classify as a person, and it is why the general rule is about a product token with an all-capitals carve-out rather than a substring.",
+      "userAgent": "Mozilla/5.0 (Linux; Android 11; CUBOT NOTE 20) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.5938.153 Mobile Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-macos-safari",
+      "why": "macOS Safari, which the acceptance line names — and the string Applebot's differs from by one trailing comment.",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-macos-chrome",
+      "why": "macOS Chrome, the string PerplexityBot's is built on top of.",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-windows-chrome",
+      "why": "Windows Chrome, which is most of the desktop traffic to a site like this one.",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-windows-edge",
+      "why": "Windows Edge, which is Chrome's string with one token added — so a rule keyed on `Chrome` alone would already be wrong about both.",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91",
+      "bot": false,
+      "botKind": null
+    },
+    {
+      "id": "human-windows-firefox",
+      "why": "Windows Firefox, the one human string in the fixture with no AppleWebKit token at all.",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+      "bot": false,
+      "botKind": null
+    }
+  ]
+}
