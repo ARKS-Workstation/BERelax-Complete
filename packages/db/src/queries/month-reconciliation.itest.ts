@@ -644,6 +644,42 @@ beforeAll(async () => {
     on conflict (style, treatment_key) do update set turnaround_minutes = excluded.turnaround_minutes
     returning id
   `
+  /*
+    The compatibility row, and it is not decoration.
+
+    This service is PERMANENT residue — the teardown below says why it cannot go — and a service with no
+    `service_room_type_compat` row is one `seedCatalogue`'s publication lint refuses outright
+    (`service_publish_without_compat_row`, 0029). So the row left behind poisoned every later suite that
+    re-seeds the catalogue: six files failed with a sentence naming a treatment key they had never heard of,
+    and `catalogue.itest.ts`'s whole-table orphan check named it as a finding, correctly.
+
+    Keyed on `(service_style, service_treatment_key, room_type)` and NOT on `rooms`, so the probe room this
+    file deletes in its teardown takes nothing with it.
+  */
+  await sql`
+    insert into service_room_type_compat (service_style, service_treatment_key, room_type)
+    values ('asian', ${PROBE}, 'standard')
+    on conflict do nothing
+  `
+  /*
+    And the resource shape, which is the SECOND thing publication requires: `service_publish_without_
+    resource_shape` refuses a service that does not state how many therapists or rooms one delivery needs.
+    Both lints exist for the same reason — availability over a service with neither would be empty on every
+    date rather than refused at publication — and a fixture that satisfied one and not the other moved the
+    failure from one sentence to the next.
+
+    `is_provisional` is FALSE, unlike the seeded rows, and deliberately: these figures are this fixture's own
+    and nobody is waiting on them, while `unconfirmedAssumptionRows()` reads this table for the operator's
+    Unconfirmed Assumptions panel. A flagged fixture row would put "a reconciliation probe needs 1 therapist"
+    in front of the owner as a question to answer.
+  */
+  await sql`
+    insert into service_resource_shape
+      (service_style, service_treatment_key, shape, therapists_required, rooms_required,
+       min_room_capacity, therapist_buffer_minutes, is_provisional)
+    values ('asian', ${PROBE}, 'solo', 1, 1, 1, 10, false)
+    on conflict do nothing
+  `
   const [variant] = await sql<{ id: string }[]>`
     insert into service_variant (service_id, duration_minutes, gross_price_fils, provisional_note)
     values (${service?.id as string}, 60, ${TREATMENT_GROSS}, ${MARKER})
@@ -726,8 +762,11 @@ afterAll(async () => {
         because a truncate here would take every other suite's documents with it;
       * the customer, pinned by `invoice.customer_id` being ON DELETE RESTRICT against a row nothing can
         delete. One per run, upserted on a phone number no other suite uses;
-      * the service, its variant and the package template version, pinned by `package_template_line` and
-        `package_balance` against package rows that are equally undeletable.
+      * the service, its variant, its compatibility and resource-shape rows and the package template
+        version, pinned by
+        `package_template_line` and `package_balance` against package rows that are equally undeletable.
+        The compatibility row is what makes that residue harmless rather than poisonous: without it the
+        service cannot be published, and `seedCatalogue` refuses the whole catalogue rather than this row.
 
     All of it is dated in 2200 or keyed to this file's own marker, so no suite reading "recent" or "today"
     can see any of it.

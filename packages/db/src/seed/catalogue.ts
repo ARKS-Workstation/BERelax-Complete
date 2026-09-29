@@ -168,20 +168,46 @@ export async function seedCatalogue(
     variantsWritten += written.length
   }
 
-  // Lint every public name before publishing any of them. All eight, not the first failure's worth: an
-  // owner told about one name fixes that one and runs the seed again.
+  /*
+    Lint and publish the services THIS SEED WRITES, and not every unpublished row in the table.
+
+    Both statements used to be unscoped, and that is a seed acting on rows it did not create. Two suites
+    keep a `service` row of their own — one removes it in its teardown, the other cannot (its own header
+    says why) — and the consequences went in both directions:
+
+      * while the probe had no `service_room_type_compat` row it could not be published, so
+        `service_publish_without_compat_row` refused the whole catalogue and SIX unrelated suites failed on
+        a treatment key they had never heard of;
+      * and once the probe was well-formed the unscoped publish PUBLISHED it, so the enumerated catalogue
+        the egress guard and the analytics taxonomy project onto went from eight services to nine.
+
+    A fixture's service is allowed to exist and is not part of the menu. `cells` is docs/13 §4, which is the
+    menu, so it is also the scope — and the lint keeps its own argument: all eight, not the first failure's
+    worth, because an owner told about one name fixes that one and runs the seed again.
+  */
+  const seededKeys = [...new Set(cells.map((cell) => `${cell.style}/${cell.treatmentKey}`))]
   const names = await sql<ServiceNameRow[]>`
     select id, style::text as style, treatment_key, public_display_name
       from service
      where archived_at is null
+       and style::text || '/' || treatment_key = any(${seededKeys})
      order by display_order, id
   `
+  if (names.length !== seededKeys.length) {
+    // The floor, and not a nicety: a scoping expression that matched nothing would lint nothing, publish
+    // nothing and report success, which is the seed quietly leaving the menu unpublished (ADR 0002).
+    throw new Error(
+      `docs/13 §4 names ${seededKeys.length} services and ${names.length} of them have a service row. ` +
+        'Apply 0017_catalogue.sql before seeding the catalogue.',
+    )
+  }
   for (const row of names) assertPublicDisplayNameLinted(row.public_display_name, options.lint)
 
   const published = await sql`
     update service set published_at = now()
      where published_at is null
        and archived_at is null
+       and style::text || '/' || treatment_key = any(${seededKeys})
     returning id
   `
 

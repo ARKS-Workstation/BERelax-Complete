@@ -75,6 +75,14 @@ let leaveRequestId = ''
 let restoreAdminBrowser: (() => void) | undefined
 /** One admin session per role this file asserts about, by role name. */
 const cookies = new Map<Role, string>()
+/**
+ * The principals themselves, so `afterAll` can remove them.
+ *
+ * Four employee rows, four credentials and four sessions per run, and `employee.itest.ts` counts the
+ * provisional employees the panel lists — a suite that mints principals and leaves them is a suite that
+ * changes another's answer.
+ */
+const principals: { cleanup: () => Promise<void> }[] = []
 
 /** The request init that presents `role`'s session. Throws rather than silently fetching as nobody. */
 function as(role: Role): RequestInit {
@@ -153,6 +161,7 @@ beforeAll(async () => {
   */
   for (const role of ['marketer', 'manager', 'owner', 'therapist'] as const) {
     const principal = await createFixturePrincipal(sql, { role })
+    principals.push(principal)
     cookies.set(role, `${ADMIN_SESSION_COOKIE}=${principal.sessionToken ?? ''}`)
   }
   const managerToken = (cookies.get('manager') ?? '').split('=')[1] ?? ''
@@ -169,6 +178,7 @@ afterAll(async () => {
   await server?.stop()
   // Restored before the database work, so a failure there still leaves `chromium.launch` as it was found.
   restoreAdminBrowser?.()
+  for (const principal of principals) await principal.cleanup()
   if (employeeId !== '') {
     await sql`delete from employee_skill where employee_id = ${employeeId}::uuid`
   }

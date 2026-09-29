@@ -1,3 +1,4 @@
+import { FIXTURE_PROBE_TREATMENT_KEY_PREFIXES, isFixtureProbeTreatmentKey } from '@berelax/fixtures'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createConnection, type Sql } from '../connection.ts'
 
@@ -92,10 +93,30 @@ describe('acceptance — style is the enum B-CAT-02 created, and (style, treatme
   })
 
   it('holds exactly the 8 catalogue services', async () => {
-    const [row] = await sql<{ n: string }[]>`
-      select count(*)::text as n from service where treatment_key not like ${`${PROBE}%`}
-    `
-    expect(row?.n).toBe('8')
+    /*
+      Every DECLARED fixture probe is excluded, not just this file's own.
+
+      The exclusion was `treatment_key not like 'bcat03_probe%'`, so the claim the count actually made was
+      "no other suite has a service row". Two do — `till.itest.ts` removes its probe in `afterAll` and
+      `month-reconciliation.itest.ts` deliberately cannot — and the count read 9, then 10, naming a
+      treatment key this file had never heard of. The seeded catalogue carries no column saying the seed
+      wrote it, so the discriminator has to come from the other side: the one list of fixture probe keys,
+      in `packages/fixtures/src/probe-services.ts`.
+
+      The orphan check below stays WHOLE-TABLE deliberately: a probe is allowed to exist, and is not
+      allowed to be unpublishable.
+    */
+    const keys = await sql<{ treatment_key: string }[]>`select treatment_key from service`
+    const catalogue = keys
+      .map((row) => row.treatment_key)
+      .filter((key) => !isFixtureProbeTreatmentKey(key))
+    expect(catalogue).toHaveLength(8)
+    // The floor: a filter that removed everything would satisfy nothing above, and a filter that removed
+    // nothing would have to see exactly eight rows in a database where three suites write a ninth.
+    expect(
+      FIXTURE_PROBE_TREATMENT_KEY_PREFIXES.length,
+      'no fixture probe prefixes are declared, so the filter above excluded nothing',
+    ).toBeGreaterThan(3)
   })
 
   it('refuses a ninth service that duplicates a (style, treatment_key) pair', async () => {

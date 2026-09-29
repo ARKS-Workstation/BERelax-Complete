@@ -320,15 +320,50 @@ afterAll(async () => {
   await adminPrincipal?.cleanup()
   // Every row this file created, removed — and then the pages it touched regenerated, so the ISR cache on
   // disk does not carry them into the next run. Both halves matter; see `republish`.
+  /*
+    Collected and then THROWN, where all four of these used to be swallowed.
+
+    `.catch(() => undefined)` on the republish is what let this file poison the run. The ISR cache lives in
+    `apps/web/.next/cache`, which is the BUILD's and therefore shared by every suite's `next start` — the
+    harness isolates `TMPDIR` for Next's module cache and nothing isolates this one. So a failed republish
+    leaves `/faq` cached with this file's three fixture questions, this file still reports green, and
+    `structured-data.itest.ts` then fails comparing the served block against a builder reading the live
+    rows: the served page carried questions the database no longer had. The cause has to be visible in the
+    file that caused it.
+
+    A delete that fails is collected rather than ignored for the same reason, and the two are reported
+    together so one failure does not hide the other. The server is stopped first either way — a suite that
+    left `next start` listening is worse than a stale cache.
+  */
+  const problems: string[] = []
   for (const doc of created) {
-    await payload.delete({ collection: doc.collection as never, id: doc.id }).catch(() => undefined)
+    await payload
+      .delete({ collection: doc.collection as never, id: doc.id })
+      .catch((error: unknown) => {
+        problems.push(`${doc.collection}/${doc.id}: ${String(error)}`)
+      })
   }
   if (server?.alive() === true) {
-    await republish('faq', FAQ_PATHS).catch(() => undefined)
-    await republish('journal', JOURNAL_PATHS).catch(() => undefined)
+    await republish('faq', FAQ_PATHS).catch((error: unknown) => {
+      problems.push(`republish faq: ${String(error)}`)
+    })
+    await republish('journal', JOURNAL_PATHS).catch((error: unknown) => {
+      problems.push(`republish journal: ${String(error)}`)
+    })
+  } else {
+    problems.push(
+      'the server was not alive at teardown, so the pages this file rewrote could not be regenerated',
+    )
   }
   await server?.stop()
   await sql?.end({ timeout: 5 })
+  if (problems.length > 0) {
+    throw new Error(
+      'content.itest.ts could not undo what it did, and the on-disk ISR cache is shared with every later ' +
+        'suite that serves these pages:\n  - ' +
+        problems.join('\n  - '),
+    )
+  }
 })
 
 /** The five routes this unit added. */

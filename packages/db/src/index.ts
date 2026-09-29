@@ -3567,7 +3567,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // run first", "record an attendance correction" and "name a liability account" are four different things to
 // go and do, which is 0061's argument for a private code at all.
 //
-// 106 is Y-PAY-02: `payment_intent`, its append-only `payment_intent_transaction`, and five refusals. The
+// 106 is 0106_payment_intent.sql: `payment_intent`, its append-only `payment_intent_transaction`, and
+// five refusals (Y-PAY-02). The
 // two tables are ordinary and the refusals are the unit. ZY162 is the one worth reading — an intent's state
 // or any of its three figures may change only by advancing `last_transaction_id` to a NEW transaction row
 // belonging to that intent — because it is where "the gateway, never the client, is the only thing that can
@@ -3621,9 +3622,8 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // five different things to go and do. `ZY166`-`ZY170` are unused and deliberately NOT registered — an entry
 // for a code no migration raises is what direction 3 of the gate refuses, and that is the direction which
 // lets the registry shrink.
-// ---------------------------------------------------------------------------------------------
-// 0107 — end-of-service gratuity: the liability that grows every month (P-HR-13)
-// ---------------------------------------------------------------------------------------------
+// 107 is 0107_hr_gratuity.sql: end-of-service gratuity, the liability that grows every month (P-HR-13).
+//
 // Four tables. `gratuity_rule` holds the FIGURES as a versioned provisional row, because docs/04 section 7
 // says exactly one thing about this subject — that gratuity is an accruing balance-sheet liability accrued
 // monthly — and no rate, band, cap, divisor or wage basis anywhere. That section also says where the HR

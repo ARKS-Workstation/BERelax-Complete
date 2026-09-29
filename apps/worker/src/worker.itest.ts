@@ -366,8 +366,22 @@ describe('acceptance — pgboss stays out of the drift checker', () => {
     // fails the build looking like a forgotten migration. Asserting the list here means widening it is
     // a deliberate act with a failing test to explain itself, rather than a surprise on someone else's
     // branch.
+    /*
+      Read from the NAMED constant, not from a shape.
+
+      This matched `/schema:\s*'([a-z_]+)'/` and found nothing from A-FIRST-01 onwards: that unit rewrote
+      the drift checker's mapping from a directory-per-schema pairing to one `OWNED_SCHEMAS` array, and the
+      old shape stopped existing. Two suites carried the same regex and both had been red ever since, which
+      is only visible in a run where nothing else is failing. The floor below is what caught it rather than
+      letting `not.toContain` pass over an empty list (ADR 0002).
+    */
     const source = readFileSync('scripts/check-schema-drift.mjs', 'utf8')
-    const listed = [...source.matchAll(/schema:\s*'([a-z_]+)'/g)].map((match) => match[1])
+    const declaration = /const OWNED_SCHEMAS = \[([^\]]*)\]/.exec(source)
+    expect(
+      declaration,
+      'scripts/check-schema-drift.mjs no longer declares OWNED_SCHEMAS in the shape this case reads',
+    ).not.toBeNull()
+    const listed = [...(declaration?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
     expect(listed.length).toBeGreaterThan(0)
     expect(listed).not.toContain(PGBOSS_SCHEMA)
     // And the control: the schemas it does compare are the ones with mirrors.

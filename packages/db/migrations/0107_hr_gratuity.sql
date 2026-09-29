@@ -792,4 +792,13 @@ values (
   2678400
 );
 
+-- And its heartbeat row, which is not optional. `agentsWithHeartbeat` INNER JOINs the two tables, so an
+-- agent with a definition and no heartbeat simply does not appear — and an agent that does not appear is one
+-- the watchdog silently never checks. 0021 seeded a heartbeat for every agent it created and 0031 records
+-- the rule a new agent inherits: it has to bring its own. Without this line
+-- `agents.itest.ts` counts one definition with no heartbeat and `agent-watchdog.itest.ts` reports this cron
+-- as having no definition at all, because the join is the only thing it can see through.
+insert into agent_heartbeat (agent_key) values ('gratuity_accrual')
+on conflict (agent_key) do nothing;
+
 commit;

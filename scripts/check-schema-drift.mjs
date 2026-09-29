@@ -44,6 +44,9 @@ const MIRROR_DIRS = ['packages/db/src/schema', 'packages/clinical/src/schema']
  * repository's to mirror. Stated as the schemas that ARE checked rather than as the ones that are not, so
  * a schema added by a migration and never mirrored is a failure here rather than an omission nobody sees.
  */
+// Read by NAME from `apps/web/src/payload.itest.ts` and `apps/worker/src/worker.itest.ts`, which assert
+// that `payload` and `pgboss` are not in it. Rename this constant and both of them fail by name; they
+// used to match a shape instead and went quietly red for eleven migrations when the shape changed.
 const OWNED_SCHEMAS = ['public', 'clinical', 'analytics']
 const IGNORED_TABLES = new Set(['regulatory_profile_current']) // a view, intentionally not mirrored
 

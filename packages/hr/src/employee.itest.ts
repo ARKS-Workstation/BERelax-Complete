@@ -228,13 +228,35 @@ describe('the migration is expand-only over the therapist rows the seed creates'
 
   it('lists the unnamed-therapist assumption in the Unconfirmed Assumptions query', async () => {
     const rows = await unconfirmedAssumptionRows(sql)
-    const employees = rows.filter((row) => row.source === 'employee')
+    /*
+      Scoped to the SEEDED references, which is what this case is about.
+
+      It counted every provisional employee in the table and read 20 the moment P-HR-13 landed: that unit's
+      accrual suite needs an employee whose employment record is still flagged, to prove the pass REFUSES
+      one, and it cannot remove the row afterwards because each accrual names a `journal_entry` and
+      `journal_entry` refuses DELETE for every role including the owner (ZL001). So a second provisional
+      employee is legitimate, and a whole-table count was never the claim — the claim is that the panel
+      lists the nineteen the SEED could not name, once each, against Y8-staff.
+
+      The floor below is what stops the filter passing over nothing.
+    */
+    const seeded = new Set(
+      Array.from({ length: 19 }, (_, index) => therapistStaffReference(index + 1)),
+    )
+    const employees = rows.filter((row) => row.source === 'employee' && seeded.has(row.reference))
     expect(employees).toHaveLength(19)
+    expect(seeded.size, 'the seeded reference set is empty, so the filter measured nothing').toBe(
+      19,
+    )
     expect(employees.map((row) => row.reference)).toContain(therapistStaffReference(1))
     expect(new Set(employees.map((row) => row.openQuestionId))).toEqual(new Set(['Y8-staff']))
     expect(employees[0]?.note).toMatch(/no names/)
-    // The skills are a SEPARATE source: an admin may confirm the person and not yet the skills.
-    expect(rows.filter((row) => row.source === 'employee_skill')).toHaveLength(19)
+    // The skills are a SEPARATE source: an admin may confirm the person and not yet the skills. Its
+    // reference is `<staff_reference> -> <skill>`, so the same scoping reads the prefix.
+    const skills = rows.filter(
+      (row) => row.source === 'employee_skill' && seeded.has(row.reference.split(' -> ')[0] ?? ''),
+    )
+    expect(skills).toHaveLength(19)
   })
 })
 
