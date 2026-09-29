@@ -60,6 +60,30 @@ const isScanItself = (file: string): boolean => file.endsWith('wps-no-submission
  */
 const isGateSuite = (file: string): boolean => file.endsWith(join('scripts', 'test-gates.mjs'))
 
+/**
+ * The OTHER checks, exempt from rule 1 alone and for the same reason the gate suite is.
+ *
+ * Two checks fired on each other's text at the batch merge, which is the sharpest instance of this rule's own
+ * subject that has appeared. `scripts/test-no-autofile.mjs` (M-VAT-09) forbids a filing capability and carries
+ * `/\bfetch\s*\(/` and `/\bXMLHttpRequest\b/` as the patterns it searches FOR; it then had to name
+ * `wps-sif.ts` in an allowance, because this unit's own header quotes the sentence that scan enforces. At that
+ * moment it became "a module that knows about WPS and reaches the network" — with no network call in it at
+ * all, only two regular expressions and a reason.
+ *
+ * The alternative was to reword the allowance so it does not say WPS, and that is appeasing a check by editing
+ * prose until the regexp is satisfied: the sentence explaining WHY a wage file is a string would be the thing
+ * sacrificed to a pattern. A file whose declared job is to search for these strings is exempt by NAME, not by
+ * shape, and `the-exemptions-are-used` below asserts each one still matches a file that exists — so an
+ * exemption kept for a check somebody deleted fails here rather than widening this scan silently.
+ */
+const OTHER_CHECKS: readonly string[] = [
+  join('scripts', 'test-no-autofile.mjs'),
+  join('scripts', 'check-send-chokepoint.mjs'),
+  join('scripts', 'check-private-documents.mjs'),
+]
+
+const isOtherCheck = (file: string): boolean => OTHER_CHECKS.some((name) => file.endsWith(name))
+
 function sources(): readonly string[] {
   const found: string[] = []
   const walk = (dir: string): void => {
@@ -140,10 +164,22 @@ describe('there is no WPS or bank submission path in this repository', () => {
     expect(sources().length).toBeGreaterThan(500)
   })
 
+  it('the-exemptions-are-used: every exempt check still exists', () => {
+    // Without this, an exemption outlives the check it was written for and quietly widens the scan above —
+    // the same failure mode as a stale allowance in the scan that caused this exemption to exist.
+    const all = sources()
+    for (const name of OTHER_CHECKS) {
+      expect(
+        all.some((file) => file.endsWith(name)),
+        `${name} is exempt from rule 1 and no longer exists`,
+      ).toBe(true)
+    }
+  })
+
   it('finds no module that knows about WPS and also reaches the network', () => {
     const offenders: string[] = []
     for (const file of sources()) {
-      if (isScanItself(file) || isGateSuite(file)) continue
+      if (isScanItself(file) || isGateSuite(file) || isOtherCheck(file)) continue
       const text = codeOnly(readFileSync(file, 'utf8'))
       if (!ABOUT_WPS.test(text)) continue
       const reached = NETWORK.filter((pattern) => pattern.test(text))
