@@ -55,6 +55,16 @@ import {
   STRICT_GENDER_MATCHING,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
 } from '@berelax/shared'
+import {
+  ACCOUNT_CODE_PATTERN,
+  DEFAULT_GRATUITY_EXPENSE_ACCOUNT,
+  DEFAULT_GRATUITY_LIABILITY_ACCOUNT,
+  DEFAULT_GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT,
+  GRATUITY_ACCOUNTS_OPEN_QUESTION_ID,
+  GRATUITY_EXPENSE_ACCOUNT_SETTING_KEY,
+  GRATUITY_LIABILITY_ACCOUNT_SETTING_KEY,
+  GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT_SETTING_KEY,
+} from '@berelax/shared'
 import { z } from 'zod'
 
 /**
@@ -563,6 +573,70 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y9-package-policy',
       note: 'Balance retained, not forfeited. Forfeiting is the aggressive reading, and if the real policy turns out to be retention a forfeited balance has already been written off against a customer who was entitled to it. Retention also posts NOTHING at expiry, so the conservative answer is the one with no journal entry to reverse.',
+    },
+  }),
+  /**
+   * The three chart-of-accounts codes the gratuity posting rule resolves (P-HR-13).
+   *
+   * Settings and not constants, because `chart_of_accounts` is itself PROVISIONAL against Y8-coa: 0018
+   * makes the chart a row rather than a constant precisely so an accountant can map an existing chart, and
+   * a code written into a posting rule would be this build deciding that classification — in a journal that
+   * cannot be edited (ADR 0017), where changing it later means restating history. The acceptance criterion
+   * says so directly: "debit and credit accounts are resolved from the chart of accounts through settings,
+   * with a grep test asserting no account code literal in the job".
+   *
+   * `compliance_locked` and `OWNER_ACCOUNTANT`, for the reason the package-balance setting above records:
+   * which account a liability lands in is a revenue-recognition decision that reaches a filed return, so it
+   * is the accountant's and the owner's and never the manager's.
+   *
+   * The schema checks only the SHAPE — four digits, the same pattern `account.code`'s own CHECK uses. Whether
+   * the code exists is answered by the foreign key on `journal_line.account_code`, which refuses a posting
+   * naming an account the chart does not contain; a chart lookup here would be a second answer to that, and
+   * the settings layer cannot see the chart anyway (this package may not import `@berelax/core`).
+   */
+  define({
+    key: GRATUITY_EXPENSE_ACCOUNT_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().regex(ACCOUNT_CODE_PATTERN, 'An account code is exactly four digits'),
+    defaultValue: DEFAULT_GRATUITY_EXPENSE_ACCOUNT,
+    label: 'Gratuity expense account',
+    help: "The expense account a month's end-of-service gratuity accrual is debited to. Four digits, from the chart of accounts.",
+    editableBy: OWNER_ACCOUNTANT,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: GRATUITY_ACCOUNTS_OPEN_QUESTION_ID,
+      note: "The standard spa chart's 5030 End-of-service gratuity expense. Y8-coa is open: the business has an existing chart nobody has supplied, so this is a mapping waiting to happen rather than an agreed classification.",
+    },
+  }),
+  define({
+    key: GRATUITY_LIABILITY_ACCOUNT_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().regex(ACCOUNT_CODE_PATTERN, 'An account code is exactly four digits'),
+    defaultValue: DEFAULT_GRATUITY_LIABILITY_ACCOUNT,
+    label: 'Gratuity liability account',
+    help: 'The balance-sheet liability account the accrual is credited to, and which a leaver\u2019s settlement discharges. Four digits, from the chart of accounts.',
+    editableBy: OWNER_ACCOUNTANT,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: GRATUITY_ACCOUNTS_OPEN_QUESTION_ID,
+      note: "The standard spa chart's 2070 End-of-service gratuity liability. Y8-coa is open. The migration refuses an accrual whose credit does not land on an account of TYPE liability (ZY173), so a code pointed at a revenue account fails at the posting rather than misstating the balance sheet.",
+    },
+  }),
+  define({
+    key: GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().regex(ACCOUNT_CODE_PATTERN, 'An account code is exactly four digits'),
+    defaultValue: DEFAULT_GRATUITY_SETTLEMENT_PAYABLE_ACCOUNT,
+    label: 'Gratuity settlement payable account',
+    help: 'The payable a leaver\u2019s settled gratuity is credited to. A payable and never cash: the money leaves through the payroll run, so crediting cash here would pay it twice.',
+    editableBy: OWNER_ACCOUNTANT,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: GRATUITY_ACCOUNTS_OPEN_QUESTION_ID,
+      note: "The standard spa chart's 2060 Wages payable. Y8-coa is open, and whether a settled gratuity sits with ordinary wages or in a separate payable is part of what answering it decides.",
     },
   }),
   define({
