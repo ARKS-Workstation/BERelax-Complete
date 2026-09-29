@@ -56,6 +56,7 @@ a decision the table does not list.
 | [0055](0055-a-payment-adapter-is-what-the-conformance-suite-accepts.md) | A payment adapter is what the conformance suite accepts; every declared inability is a refusal the suite demands, never a case it skips | — |
 | [0054](0054-a-payslip-pins-every-figure-it-prints.md) | A payslip stores no figure it could recompute: it names the commission run, the timesheet approval and the rule versions that produced each line, and a completed run is corrected by a new dated run. The WPS file's employer identifier is a placeholder that fails validation, and there is no code that could send the bytes | — |
 | [0050](0050-a-suite-may-delete-only-what-it-created.md) | A suite may remove rows it created; anything wider is declared, with the loader that restores a seeded table named, and the run itself checks that the seeded rows survived | — |
+| [0058](0058-origination-precedence-is-strict-and-a-click-id-outlives-the-tuple.md) | Origination is resolved in strict precedence — UTM, then click id, then referrer, then direct — and a click id is persisted verbatim whatever won, because the tuple and the ad-platform join key are different facts; an own-host referrer is no new origination rather than direct, and the registrable domain comes from a declared bounded suffix table whose worst case is a referral grouped one label too broadly | — |
 
 ## Writing one
 
