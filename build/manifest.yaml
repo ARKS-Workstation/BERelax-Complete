@@ -3642,7 +3642,7 @@ units:
       adapter behind it, a route that refuses an unsigned or expired request by name, and an audit row per
       download.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - W-SYS-05
@@ -3686,6 +3686,54 @@ units:
       chooses, so a statutory document is readable by anyone who learns the path.'
     - 'NOTE: order 41.8, after W-SYS-12 and W-SYS-13, for the same reason they sit there - it depends only on
       `done` units, so any order is topologically valid, and the documents it protects already exist.'
+    - 'NOTE: what this unit BUILT, because the acceptance list is about refusals and the shape is worth
+      stating. `private_document` (migration 0101) is the REGISTER: one row per object in the private bucket,
+      with the class that decides who may read it, the content hash that says which bytes it is, and the
+      use policy derived from the class. `private_document_fetch` is the record that a copy left the
+      business. `MediaStorage.sign()` mints a DETACHED HMAC over the document — id, class, expiry, nonce,
+      key version — verified in this process rather than by the provider, which is what keeps "this link
+      expired" and "somebody is guessing" apart (a presigned Spaces URL is checked by Spaces and every
+      refusal arrives as one third-party 403). `/documents/{id}` applies three gates in order: the staff
+      session, the signature, then the authorisation matrix. ADR 0051 is the argument, including why
+      M-VAT-11''s stored grant was right for its problem and is not rewritten here.'
+    - 'NOTE: the screen that OFFERS a download is DEFERRED and has an owner rather than an implication.
+      Nothing in the product mints a link yet: there is no document list for a customer or an employee, and
+      inventing a mint ENDPOINT would be inventing an unauthenticated one that hands a link to anybody who
+      asks — which is the whole of what the 403 exists to prevent (M-VAT-11 makes the same argument for why
+      its mint is a function). The capability is complete and proven: `apps/web/src/documents.itest.ts`
+      mints links through `MediaStorage.sign` the way that screen will. Owner: W-SYS-01, which owns the
+      admin shell and the estate the list belongs in; it calls `MediaStorage.sign` and needs no new
+      capability.'
+    - 'NOTE: `payslip` and `clinical_extract` are declared in `PRIVATE_DOCUMENT_CLASSES` with NO producer.
+      Nothing in the build renders either today — P-HR-07 and P-HR-11 compute the figures and render no
+      per-employee document, and C-CRM-10''s erasure writes no export file. They are declared anyway because
+      the class that must be SINGLE-USE is the one to get right early, and a class added by the unit that
+      first needs one would be a class added under deadline. Both are exercised end to end against
+      registered fixtures, so they are tested rather than merely listed. The unit that renders a payslip
+      registers it with `registerPrivateDocument` and stores it with `storeTaxDocumentPdf`''s pattern;
+      `pnpm private-documents` refuses any other path.'
+    - 'NOTE: `obligation_evidence`''s own route (M-VAT-11) is deliberately NOT rewritten onto this scheme.
+      Its stored grant, its mint function and its 403 work and are tested, and converting them would be a
+      diff across a `done` unit to reach a scheme whose only advantage there is uniformity. What this unit
+      does instead is register `compliance_evidence` as a document class so the register is complete and a
+      second evidence producer has one place to go. The cost — two link schemes in one codebase — is stated
+      in ADR 0051 rather than discovered. Owner of any future convergence: whichever unit next touches the
+      compliance evidence estate.'
+    - 'NOTE: added beyond the list — `pnpm private-documents`
+      (scripts/check-private-documents.mjs), five rules with seven known-bad fixtures and six controls in
+      scripts/test-gates.mjs block 129. Rule four (`private-document-signature-verified-in-one-place`) was
+      DEAD when it was written: its pattern required a character before `sign`, so it matched
+      `documentSigner.verify(` and missed `signer.verify(` — the spelling the route uses. It was found by
+      probing every rule against a deliberate violation before writing the gate cases, which is ADR 0003
+      arriving from inside the unit rather than after it.'
+    - 'NOTE: found while working and NOT fixed here, because it is another unit''s code and outside this
+      scope: `apps/web/app/(admin)/packages/route.ts` never calls `guardAdminRoute`, so
+      `apps/web/src/admin-guard.test.ts` fails three cases on this batch base before any of this unit''s
+      changes (verified by stashing them). The route serves `/packages`, which `requiresAdminSession`
+      claims, and it exports two handlers with zero guard calls. A third pre-existing failure in the same
+      file reports a module under apps/web choosing a principal, a role or a permission from the query
+      string. These are W-SYS-11''s check firing on M-TILL-13''s route and belong to whoever owns that
+      pair; they will fail the integrating `pnpm verify` whoever runs it.'
   - id: B-M1
     order: 42
     title: 'M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop'
@@ -5372,7 +5420,15 @@ units:
       tax invoice.'' in both languages. It has no table of its own either — a receipt acknowledges a
       payment and the till sale and tender rows are M-TILL-05 to M-TILL-11 — so today it renders from
       the same stored document shape with its tax statement suppressed. RECEIPT_SOURCE records that.'
-    - 'NOTE: deferred to W-SYS-14 — private storage and the signed URL. (It read M-TILL-13 and M-VAT-11 until both went `done` without ever owning storage; W-SYS-14 was added for it.) Nothing in the
+    - 'NOTE: DEFERRAL SATISFIED by W-SYS-14. `MediaStorage` now has a signing verb, `private_document` and
+      `private_document_fetch` (migration 0101) are the register and the audited fetch log, and
+      `/documents/{id}` refuses an unsigned, expired, forged, replayed or unpermitted request with 403 by
+      name. ADR 0051 records the scheme. What this unit''s own `writeTaxDocumentPdf()` still is — a
+      caller-chosen path — survives for the golden-comparison suite and is confined to scripts and tests by
+      `pnpm private-documents`; production code takes `storeTaxDocumentPdf`. The original NOTE follows, kept
+      because it is the record of what was true when it was written. Deferred to W-SYS-14 — private storage
+      and the signed URL. (It read M-TILL-13 and M-VAT-11 until both went `done` without ever owning
+      storage; W-SYS-14 was added for it.) Nothing in the
       repository can sign a URL: MediaStorage (packages/media/src/storage/port.ts) exposes put, head,
       get and list and no signing, there is no DigitalOcean Spaces adapter at all (W-SYS-05''s
       [no-real-media-storage-adapter]), and there is no document route to return 403 from. The unsigned

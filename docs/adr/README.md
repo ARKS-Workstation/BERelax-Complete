@@ -49,6 +49,7 @@ a decision the table does not list.
 | [0044](0044-a-filed-vat-return-is-a-snapshot-not-a-query.md) | A filed VAT return is a snapshot of bytes with a hash over exactly those bytes, signed by two different people; a correction is a new version | — |
 | [0048](0048-the-marketing-kill-switch-cannot-reach-transactional-traffic.md) | The kill switch is read in a function whose parameter cannot be a transactional message; its state has one row; the non-production default is computed, not stored | — |
 | [0047](0047-commission-is-reproducible-by-pinning-its-version-and-its-as-of.md) | A commission run pins the rule version that judged it and the instant it read the books at; nothing is seeded, because no structure is configured | — |
+| [0051](0051-a-private-document-is-fetched-through-one-route-against-a-detached-signature.md) | A private document is fetched through one route against a detached HMAC over the document, verified without the provider; a valid signature authorises a fetch and never a principal, and a clinical or salary document is single-use in the database | — |
 
 ## Writing one
 

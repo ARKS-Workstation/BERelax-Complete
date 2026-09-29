@@ -529,6 +529,28 @@ export const ROUTES = [
       'beside it arrive excluded rather than being indexed until somebody reads Search Console.',
   },
   {
+    id: 'private-document',
+    path: '/documents/[id]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'W-SYS-14s private document download: the ONE route every private document this build writes is ' +
+      'fetched through — filed tax invoices and credit notes, VAT return snapshots, payslips, clinical ' +
+      'extracts, compliance evidence. Before it, writeTaxDocumentPdf() wrote a tax invoice to a path a ' +
+      'caller chose, so a statutory document was readable by anybody who learned the path and nothing ' +
+      'recorded a read. A handler rather than a document for the reason the evidence route gives: it ' +
+      'returns a STATUS CODE and a byte stream, and "403 without a signature" is a status code. Every ' +
+      'refusal is 403 and never 404, deliberately: a 404 for an id that does not exist and a 403 for one ' +
+      'that does would answer "does this business hold a payslip for employee X" to anybody who can guess ' +
+      'a uuid. Three gates in order — the session, then the signature, then the authorisation matrix — ' +
+      'because a valid signature authorises a FETCH and never a principal. Covered by the ADMIN_GROUP_' +
+      'PREFIXES noindex, and the response repeats the directive itself so a direct hit cannot lose it.',
+  },
+  {
     id: 'faq',
     path: '/faq',
     kind: 'document',
@@ -1298,6 +1320,12 @@ export type RouteId = Route['id']
  * a person's clinical file. The second route under a prefix arrives noindex on the commit that creates it
  * rather than on the commit that remembers to, and for that one the difference is a health record.
  *
+ * `/documents` is W-SYS-14's, and it holds one route today: the signed private-document download, which
+ * serves the bytes of a filed tax invoice, a VAT return snapshot, a payslip or a clinical extract. A prefix
+ * rather than an entry because the screen that OFFERS a download is what goes beside it, and a screen
+ * listing which documents exist for one customer or one employee is the index of the filing cabinet — worse
+ * to leak than any single document, because it is the map.
+ *
  * `/crm` is C-AUTO-08's, and it holds one route today: the pipeline board. A prefix rather than an entry
  * because C-CRM-01's NOTE already allocates the estate there ("C-AUTO-08 already owns
  * apps/web/app/(admin)/crm/"), and what goes beside a board is the flow editor (C-AUTO-09) and whatever
@@ -1310,6 +1338,11 @@ export const ADMIN_GROUP_PREFIXES: readonly string[] = [
   '/clients',
   '/compliance',
   '/crm',
+  // W-SYS-14. `/documents` holds one route today — the signed private-document download — and it is a
+  // prefix rather than an entry because what goes beside it is the screen that OFFERS the download, and a
+  // screen listing which documents exist for a customer or an employee is the index of the filing cabinet.
+  // The second route under a prefix arrives noindex on the commit that creates it.
+  '/documents',
   '/hr',
   '/messaging',
   // M-TILL-13. `/packages` and `/till` both cover a whole group: the cash-up screen sits under `/till` and

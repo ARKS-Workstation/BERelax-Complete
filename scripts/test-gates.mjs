@@ -38163,6 +38163,469 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 129a-129z. (W-SYS-14) The private document: every refusal shown to fire, and the one place they all go
+//            through shown to be the only one.
+//
+//            The unit exists because nothing failed when it was ignored. `writeTaxDocumentPdf()` took a
+//            `path` and called `writeFileSync`, so a filed tax invoice — issuer TRN, customer, every line
+//            and every figure — was readable by anybody who learned the path with nothing recording a read;
+//            and private storage had been DEFERRED by M-TILL-12 to M-TILL-13 and M-VAT-11, both of which
+//            went `done` without ever owning it. Three units, no owner, no failing check.
+//
+//            So `pnpm private-documents` holds five rules and each has a fixture here. 129a and 129b are the
+//            two INSERT rules: a second writer of either table is a document with no audit row or a fetch
+//            nobody recorded, and both look exactly like working code. 129c is the rule that closes the hole
+//            the unit was added for — a production caller of `writeTaxDocumentPdf`. 129d is the second
+//            verifier, and it is the case worth reading twice: the rule it proves was DEAD when it was
+//            written. Its pattern opened with `[A-Za-z_$][\w$]*`, which forces a character before `sign`, so
+//            it matched `documentSigner.verify(` and missed `signer.verify(` — the spelling the route
+//            actually uses. Nothing in the build would have said so; it was found by probing each rule
+//            against a deliberate violation, which is what this block is. 129e is the class catalogue
+//            disagreeing with migration 0101, in both directions, plus the vacuity guard for the parse
+//            itself.
+//
+//            129j through 129n drive migration 0101 as statements, because the three refusals are the
+//            database's and a TypeScript test cannot make them fire. 129m is the one a per-statement guard
+//            would miss: two fetch rows for one nonce in ONE multi-row insert, which is the shape a batch
+//            recorder would produce.
+//
+//            129p and 129q are the two halves of the SIGNATURE that a served response proves and a unit test
+//            cannot: the refusal an unsigned request gets is the ROUTE's 403 and not a storage error, and the
+//            permission is the matrix's rather than a second copy. They are asserted by driving the suite
+//            that drives the server, so a route that stopped calling the guard or the matrix fails here.
+{
+  const GATE = 'scripts/check-private-documents.mjs'
+  const REGISTRY_ROUTE = 'apps/web/src/routes/registry.ts'
+  const CATALOGUE = 'packages/core/src/documents/private-document.ts'
+  const MIGRATION_0101 = 'packages/db/migrations/0101_private_document.sql'
+  /** A file that is under the scan and is nobody's permitted writer, verifier or document producer. */
+  const INNOCENT = 'apps/web/src/media/publish-gate.ts'
+  const SIGNING_SUITE = 'packages/media/src/storage/signing.test.ts'
+  const CATALOGUE_SUITE = 'packages/core/src/documents/private-document.test.ts'
+  const FAKE_SUITE = 'packages/media/src/storage/fake.test.ts'
+  const PORT_SUITE = 'packages/media/src/storage/port.test.ts'
+
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const documents = () => runExpectingFailure('pnpm', ['private-documents'])
+
+  /** Appends a line to a file that must survive, so the anchor is the file's own end. */
+  const appending = (line) => (text) => `${text}\n${line}\n`
+
+  // 129a. A second writer of the register. The audit row is written by `registerPrivateDocument` in the same
+  //       transaction as the row, so a second INSERT is a private document nobody can account for — and it
+  //       typechecks, passes every test, and reads as ordinary data access.
+  checkRejectedBy(
+    'private documents: a second writer of the register is refused',
+    withEditedFile(
+      INNOCENT,
+      appending('const __gateRegister = () => `insert into private_document (bytes) values (1)`'),
+      documents,
+    ),
+    'private-document-register-is-the-one-writer',
+  )
+
+  // 129b. And of the fetch log. The triggers are on the TABLE so a second inserter still cannot replay a
+  //       single-use link — what it can do is take a copy of a statutory document with no audit row, which
+  //       is the half the triggers do not cover.
+  checkRejectedBy(
+    'private documents: a second recorder of a fetch is refused',
+    withEditedFile(
+      INNOCENT,
+      appending(
+        'const __gateFetch = () => `insert into private_document_fetch (bytes) values (1)`',
+      ),
+      documents,
+    ),
+    'private-document-fetch-is-recorded-in-one-place',
+  )
+
+  // 129c. THE hole. A production caller of `writeTaxDocumentPdf` writes a statutory document to a path the
+  //       caller chooses — readable by anybody who learns it, with no audit row for a read — and that is
+  //       exactly the line of code this unit was added to make impossible.
+  checkRejectedBy(
+    'private documents: a production caller of the caller-chosen path is refused',
+    withEditedFile(INNOCENT, appending('const __gateWrite = () => writeTaxDocumentPdf'), documents),
+    'private-document-must-not-be-written-to-a-caller-path',
+  )
+
+  // 129d. A second verifier. The rule this proves was dead when it was written — see the block header — so
+  //       this case is the only reason it is not still dead. The receiver is named `signer`, which is the
+  //       spelling the first pattern could not see.
+  checkRejectedBy(
+    'private documents: a second verifier of a signature is refused',
+    withEditedFile(
+      INNOCENT,
+      appending(
+        'const __gateVerify = (signer: { verify: (n: number) => void }) => signer.verify(1)',
+      ),
+      documents,
+    ),
+    'private-document-signature-verified-in-one-place',
+  )
+
+  // 129e. The catalogue and the migration disagreeing, from the TypeScript side: a class `@berelax/core`
+  //       declares and `private_document_class_is_known()` does not is a document nobody can store, and
+  //       nothing else in the build would say so.
+  checkRejectedBy(
+    'private documents: a class in the catalogue and not in the migration is refused',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  'compliance_evidence',\n] as const",
+          "  'compliance_evidence',\n  'bank_statement',\n] as const",
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129f. And from the SQL side, which is the direction that produces a document nobody can READ: the row
+  //       stores, the route resolves no permission for it, and deny-by-default hides it for ever.
+  checkRejectedBy(
+    'private documents: a class in the migration and not in the catalogue is refused',
+    withEditedFile(
+      MIGRATION_0101,
+      (text) =>
+        replaceOnce(
+          text,
+          "             'compliance_evidence'\n           )",
+          "             'compliance_evidence',\n             'bank_statement'\n           )",
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129g. The vacuity guard on the comparison itself. Break the shape the gate reads the catalogue out of
+  //       and it must FAIL rather than report agreement it never measured (ADR 0002). Without this case a
+  //       rename of the constant would silently turn rule five off.
+  checkRejectedBy(
+    'private documents: a class list the gate cannot parse is a failure, not a pass',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const PRIVATE_DOCUMENT_CLASSES = [',
+          'export const PRIVATE_DOCUMENT_CLASS_NAMES = [',
+        ),
+      documents,
+    ),
+    'private-document-classes-agree',
+  )
+
+  // 129h. The route must stay DECLARED. The registry is what the sitemap, the `hreflang` set, the screenshot
+  //       matrix and the `x-robots-tag` policy all read, so a route served and not declared is a private
+  //       document outside every one of them at once — and none of those omissions is a build error on its
+  //       own.
+  //
+  //       The first version of this case removed `'/documents'` from `ADMIN_GROUP_PREFIXES` instead and
+  //       asserted that `registry.test.ts` failed. It did not: that suite's noindex property covers
+  //       DOCUMENTS, and this route is a handler, so the case reported FAIL about a rule that was simply not
+  //       the one being broken. The prefix is still load-bearing — `isAdminPath` and the proxy read it — and
+  //       the check that fires on its absence lives in `admin-guard.test.ts`, which is where it belongs.
+  checkRejectedBy(
+    'private documents: the document route dropped from the route registry is refused',
+    withEditedFile(
+      REGISTRY_ROUTE,
+      // The PATH and not the id: the bijection is over paths, so renaming the id would leave it intact and
+      // the case would report FAIL about a rule nothing had broken — which is the mistake the first version
+      // of 129h already made once in this block.
+      (text) =>
+        replaceOnce(text, "    path: '/documents/[id]',", "    path: '/documents/[docId]',"),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/routes/registry.test.ts')),
+    ),
+    'registry-entry-without-route',
+  )
+
+  // 129i. And the noindex PREFIX, whose absence `admin-guard.test.ts` is the check for: without `/documents`
+  //       in `ADMIN_GROUP_PREFIXES`, `isAdminPath` stops claiming the route, so the proxy stops refusing an
+  //       admin path with no cookie and the `x-robots-tag` policy stops covering it.
+  //
+  //       Stated plainly because it affects how to read this case: `admin-guard.test.ts` ALREADY fails three
+  //       cases on this batch base, for a defect in another unit's route (`app/(admin)/packages/route.ts`
+  //       never calls the guard). So `runExpectingFailure` is satisfied here whatever this edit does, and the
+  //       whole weight is on the rule string — a sentence that names THIS route and appears only when the
+  //       prefix is gone. That is what `checkRejectedBy` is for, and it is why asserting on a bare non-zero
+  //       exit is never enough (ADR 0003).
+  checkRejectedBy(
+    'private documents: the document route dropped from the noindex prefixes is refused',
+    withEditedFile(
+      REGISTRY_ROUTE,
+      (text) => replaceOnce(text, "  '/documents',\n", ''),
+      () => runExpectingFailure('pnpm', unit('apps/web/src/admin-guard.test.ts')),
+    ),
+    'serves /documents/[id], which isAdminPath does not claim',
+  )
+
+  // 129j-129n. Migration 0101 driven as statements.
+  //
+  //       Every probe runs inside begin/rollback, so one that is wrongly ACCEPTED leaves nothing behind —
+  //       which matters more here than usual, because both tables refuse DELETE for every role including the
+  //       owner, so a leaked fixture row could not be cleaned up afterwards.
+  //
+  //       `VERBOSITY=verbose` is what makes the assertion possible at all: psql's default verbosity prints
+  //       the message and NOT the SQLSTATE, so a probe would bounce off the right trigger and be reported as
+  //       "did not report ZY111". That is 114h's finding, restated because this block repeats its shape.
+  //
+  //       `withTriggersOff` is the second layer. The triggers are BEFORE INSERT so they always win, which
+  //       means the CHECK constraints beside them are never exercised by an ordinary probe — and the CHECKs
+  //       are the layer that matters most, because they are the ones that hold under
+  //       `session_replication_role = 'replica'`, which is how a restore from a dump runs.
+  {
+    const dbUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+    const psql = (statements, withTriggersOff = false) =>
+      run('psql', [
+        '--no-psqlrc',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-v',
+        'VERBOSITY=verbose',
+        '-q',
+        dbUrl ?? '',
+        '-c',
+        `begin; ${withTriggersOff ? "set local session_replication_role = 'replica'; " : ''}` +
+          `${statements} rollback;`,
+      ])
+
+    /** A fixed uuid per probe, so a statement can reference the row it just inserted. */
+    const ID = '00000000-0000-4000-8000-00000000f14e'
+    const register = (documentClass, usePolicy, key = 'documents/gate/probe.pdf') =>
+      `insert into private_document (id, document_class, storage_key, content_sha256, bytes, ` +
+      `content_type, use_policy, subject_kind, subject_id, registered_by) values ('${ID}', ` +
+      `'${documentClass}', '${key}', repeat('a', 64), 10, 'application/pdf', '${usePolicy}', ` +
+      `'gate', 'probe', 'gate case 129');`
+    const fetched = (nonce) =>
+      `insert into private_document_fetch (private_document_id, signature_nonce, ` +
+      `signature_key_version, fetched_by_role, fetched_by, bytes) values ('${ID}', '${nonce}', ` +
+      `'v1', 'owner', 'gate', 10);`
+
+    // 129j. A document class the catalogue does not declare, refused by the trigger with the sentence, and by
+    //       the CHECK under a restore. Deny-by-default fails in the WRONG DIRECTION without it: an
+    //       unclassified document has no permission mapped to it, so it is one nobody can ever fetch and
+    //       nobody can ever notice is unfetchable.
+    checkRejectedBy(
+      'private documents: the database refuses an unknown document class',
+      psql(register('bank_statement', 'replayable')),
+      'ZY113',
+    )
+    checkRejectedBy(
+      'private documents: the CHECK refuses an unknown class with triggers off, as a restore runs',
+      psql(register('bank_statement', 'replayable'), true),
+      'private_document_class_is_known',
+    )
+
+    // 129k. The use policy disagreeing with the class. A row claiming a payslip is replayable is the one row
+    //       that would turn the replay defence off for the documents it exists for, and it is a CHECK rather
+    //       than a trigger because it must hold under a restore too.
+    checkRejectedBy(
+      'private documents: the CHECK refuses a payslip declared replayable',
+      psql(register('payslip', 'replayable'), true),
+      'private_document_use_policy_matches_class',
+    )
+
+    // 129l. The replay. A second fetch of one nonce against a single_use document.
+    checkRejectedBy(
+      'private documents: the database refuses a second fetch of a single-use link',
+      psql(
+        `${register('payslip', 'single_use')} ${fetched('gate-nonce-aaaaaa')} ` +
+          `${fetched('gate-nonce-aaaaaa')}`,
+      ),
+      'ZY111',
+    )
+
+    // 129m. The same thing as ONE multi-row insert, which is the shape a batch recorder produces and the one
+    //       a read-then-insert guard would miss: a BEFORE ROW trigger's query sees the rows its own statement
+    //       has already inserted, and this is what proves it.
+    checkRejectedBy(
+      'private documents: the database refuses a replayed nonce inside ONE insert statement',
+      psql(
+        `${register('payslip', 'single_use')} insert into private_document_fetch ` +
+          `(private_document_id, signature_nonce, signature_key_version, fetched_by_role, ` +
+          `fetched_by, bytes) values ('${ID}', 'gate-nonce-bbbbbb', 'v1', 'owner', 'gate', 10), ` +
+          `('${ID}', 'gate-nonce-bbbbbb', 'v1', 'owner', 'gate', 10);`,
+      ),
+      'ZY111',
+    )
+
+    // 129n. Both tables are append-only. The register is what an audited download NAMES, so a repointable
+    //       storage key would make a recorded download name bytes that were never served.
+    for (const [what, statements] of [
+      [
+        'an UPDATE of a register row',
+        `${register('tax_invoice', 'replayable')} update private_document set storage_key = ` +
+          `'documents/gate/other.pdf' where id = '${ID}';`,
+      ],
+      [
+        'a DELETE of a register row',
+        `${register('tax_invoice', 'replayable')} delete from private_document where id = '${ID}';`,
+      ],
+      [
+        'an UPDATE of a fetch row',
+        `${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-cccccc')} ` +
+          `update private_document_fetch set bytes = 1 where private_document_id = '${ID}';`,
+      ],
+      [
+        'a DELETE of a fetch row',
+        `${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-dddddd')} ` +
+          `delete from private_document_fetch where private_document_id = '${ID}';`,
+      ],
+    ]) {
+      checkRejectedBy(`private documents: the database refuses ${what}`, psql(statements), 'ZY112')
+    }
+
+    // The control, and it is not a formality: a trigger pair that refused every INSERT would satisfy every
+    // case above while making the whole capability unusable — which is the version of this rule somebody
+    // deletes. A replayable document fetched TWICE with one link must be accepted.
+    const permitted = run('psql', [
+      '--no-psqlrc',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      `begin; ${register('tax_invoice', 'replayable')} ${fetched('gate-nonce-eeeeee')} ` +
+        `${fetched('gate-nonce-eeeeee')} rollback;`,
+    ])
+    check(
+      'private documents: the database accepts two fetches of one REPLAYABLE link',
+      !permitted.failed,
+      permitted.output,
+    )
+
+    // And the pair the two places "which classes exist" is written down have to agree on, driven with the
+    // migration's own function rather than with a list this case composed. SQL cannot read the catalogue, so
+    // this is held equal behaviourally or not at all — 0098's arrangement for `settings:write`.
+    const classes = run('psql', [
+      '--no-psqlrc',
+      '-t',
+      '-A',
+      '-q',
+      dbUrl ?? '',
+      '-c',
+      "select string_agg(c, ',' order by c) from (values ('tax_invoice'),('tax_credit_note')," +
+        "('vat_return_snapshot'),('payslip'),('clinical_extract'),('compliance_evidence')," +
+        "('bank_statement')) as t(c) where private_document_class_is_known(c)",
+    ])
+    check(
+      'private documents: the database knows exactly the catalogue classes and not one more',
+      !classes.failed &&
+        classes.output.trim() ===
+          'clinical_extract,compliance_evidence,payslip,tax_credit_note,tax_invoice,vat_return_snapshot',
+      `private_document_class_is_known() answered ${JSON.stringify(classes.output.trim())} and must ` +
+        'answer exactly the six classes PRIVATE_DOCUMENT_CLASSES declares — `bank_statement` is in the ' +
+        'probe precisely so a function answering `true` for everything fails here rather than passing.',
+    )
+  }
+
+  // 129p. The signature verifier with the MAC and the expiry checks SWAPPED. It is the mutation the unit's
+  //       third acceptance line exists against, and it is invisible in review: every link still works, every
+  //       expired link is still refused, and the only thing that changes is that a FORGED signature with a
+  //       back-dated expiry is reported as a stale link — so the log stops distinguishing "somebody kept an
+  //       old email" from "somebody is guessing".
+  checkRejectedBy(
+    'private documents: expiry judged before the MAC is caught by the signing suite',
+    withEditedFile(
+      'packages/media/src/storage/signing.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '      const secret = byVersion.get(keyVersion)',
+          '      if (expiresAtEpochSeconds <= nowEpochSeconds) {\n' +
+            "        return { kind: 'refused', reason: 'signature_expired' }\n" +
+            '      }\n' +
+            '      const secret = byVersion.get(keyVersion)',
+        ),
+      () => runExpectingFailure('pnpm', unit(SIGNING_SUITE)),
+    ),
+    'signature_invalid',
+  )
+
+  // 129q. The document id dropped from the signed payload — a signature over the wrong thing. Every link
+  //       then opens every document, and the ONLY case in the build that notices is the swapped-path one,
+  //       which is why the id is in the path alone and never as its own parameter.
+  checkRejectedBy(
+    'private documents: a signature that does not cover the document is caught',
+    withEditedFile(
+      'packages/media/src/storage/signing.ts',
+      (text) =>
+        replaceOnce(
+          text,
+          '    DOCUMENT_SIGNING_SCHEME,\n    subject.documentId,\n    subject.documentClass,',
+          '    DOCUMENT_SIGNING_SCHEME,\n    subject.documentClass,',
+        ),
+      () => runExpectingFailure('pnpm', unit(SIGNING_SUITE)),
+    ),
+    'swapped path',
+  )
+
+  // 129r. The matrix check removed from the route. A valid signature would then BE permission, which is the
+  //       one sentence this unit is built on — and a receptionist's link to a payslip would serve the wage.
+  checkRejectedBy(
+    'private documents: the route without the matrix check is caught by the catalogue suite',
+    withEditedFile(
+      CATALOGUE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (!can(role, definition.permission)) return 'permission_denied'",
+          "  if (false) return 'permission_denied'",
+        ),
+      () => runExpectingFailure('pnpm', unit(CATALOGUE_SUITE)),
+    ),
+    'permission_denied',
+  )
+
+  // 129s. The fake adapter's armed refusal made permanent. `refuseToSign: 2` must recover on the third call,
+  //       or the "declared failure can be armed" half of ADR 0022 is a dead end dressed as a script.
+  checkRejectedBy(
+    'private documents: an armed signing failure that never recovers is caught',
+    withEditedFile(
+      'packages/media/src/storage/fake.ts',
+      (text) => replaceOnce(text, '        armedSigningFailures -= 1\n', ''),
+      () => runExpectingFailure('pnpm', unit(FAKE_SUITE)),
+    ),
+    'document-signing-refused',
+  )
+
+  // 129t. And the port's own refusal: signing a PUBLIC object. Remove it and the derivative origin becomes a
+  //       thing somebody can mint an authorisation for, which is one step from a signature check on every
+  //       image on the site.
+  checkRejectedBy(
+    'private documents: signing a public object must stay refused',
+    withEditedFile(
+      'packages/media/src/storage/port.ts',
+      (text) => replaceOnce(text, "  if (request.bucket !== 'private') {", '  if (false) {'),
+      () => runExpectingFailure('pnpm', unit(PORT_SUITE)),
+    ),
+    'signing-a-public-object',
+  )
+
+  // 129z. The control, and it is not a formality: every file edited above, UNEDITED, passes. Without it a
+  //       stale anchor, a suite that had stopped importing the module, or a scanner that refused the clean
+  //       tree would all report as a block of passing cases.
+  {
+    const clean = run('pnpm', ['private-documents'])
+    check(
+      'private documents: the unedited repository passes the scanner',
+      !clean.failed,
+      clean.output,
+    )
+    for (const suite of [SIGNING_SUITE, CATALOGUE_SUITE, FAKE_SUITE, PORT_SUITE]) {
+      const green = run('pnpm', unit(suite))
+      check(`private documents: ${suite} passes unedited`, !green.failed, green.output)
+    }
+    const gateSelf = run('node', [GATE])
+    check(
+      'private documents: the gate script runs clean on the committed tree',
+      !gateSelf.failed,
+      gateSelf.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
@@ -39008,6 +39471,10 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'pnpm cms',
     'pnpm chokepoint',
     'pnpm send-chokepoint',
+    // W-SYS-14's private document choke point. Registered here for the reason the four supply-chain gates
+    // above give: the completeness property reads THIS array, so a CI step nobody registered fails the build
+    // rather than sitting outside the protection while looking like it is inside it.
+    'pnpm private-documents',
     'pnpm layout',
     'pnpm jobs',
     'pnpm adr',
