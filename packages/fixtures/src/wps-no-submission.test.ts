@@ -44,6 +44,22 @@ const SCANNED = ['packages', 'apps', 'scripts']
 /** This file names every forbidden pattern, so it is not evidence of one. */
 const isScanItself = (file: string): boolean => file.endsWith('wps-no-submission.test.ts')
 
+/**
+ * The gate suite, exempt from RULE 1 ALONE, and the exemption is narrow on purpose.
+ *
+ * `scripts/test-gates.mjs` is the file whose job is to contain the patterns every other file must not: it
+ * plants deliberately broken fixtures and asserts that the checks catch them, which is ADR 0003. Block 132
+ * names `packages/core/src/hr/wps-sif.ts` as a path — so the word is in its code whatever it is called —
+ * and an unrelated block has carried a `fetch(` fixture since long before this unit. Rule 1 therefore
+ * reported the gate file, for its own fixtures, and the suite failed for nothing in the build.
+ *
+ * Exempt from rule 1 only. Rule 2 still covers it, which is why block 132 assembles its fixture URL from
+ * parts rather than writing the host out — a literal submission URL has no business in the repository even
+ * in a gate. And `scripts/` stays in scope for every other file: a submit path could perfectly well live in
+ * a script, which is the scope this exemption is careful not to give up.
+ */
+const isGateSuite = (file: string): boolean => file.endsWith(join('scripts', 'test-gates.mjs'))
+
 function sources(): readonly string[] {
   const found: string[] = []
   const walk = (dir: string): void => {
@@ -127,7 +143,7 @@ describe('there is no WPS or bank submission path in this repository', () => {
   it('finds no module that knows about WPS and also reaches the network', () => {
     const offenders: string[] = []
     for (const file of sources()) {
-      if (isScanItself(file)) continue
+      if (isScanItself(file) || isGateSuite(file)) continue
       const text = codeOnly(readFileSync(file, 'utf8'))
       if (!ABOUT_WPS.test(text)) continue
       const reached = NETWORK.filter((pattern) => pattern.test(text))
@@ -226,5 +242,8 @@ describe('there is no WPS or bank submission path in this repository', () => {
     ).toBe(false)
     expect(SUBMISSION_URL.test("const u = 'https://wps.example-bank.ae/upload'")).toBe(true)
     expect(SUBMISSION_URL.test("const u = 'https://example.com/docs'")).toBe(false)
+    // And the exemption is exactly one file, not a directory: every other script stays in rule 1's reach.
+    expect(isGateSuite(join('scripts', 'test-gates.mjs'))).toBe(true)
+    expect(isGateSuite(join('scripts', 'seed.mjs'))).toBe(false)
   })
 })

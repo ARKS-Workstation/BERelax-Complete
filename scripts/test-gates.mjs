@@ -38163,6 +38163,459 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 132a-132z. (P-HR-12) Payroll: every figure shown to come from the thing that decided it, and the wage
+//            file shown to be unproducible until somebody confirms who the employer is.
+//
+//            This unit's defects are the same shape as P-HR-11's and one step worse, because the artefact is
+//            the document somebody is handed: a figure that is WRONG but ordinary. An ordinary multiplier
+//            read as a literal, a commission recomputed at payslip time, a tip folded into wages, an
+//            employer id that looks like a registration number — every one produces a plausible payslip, and
+//            none of them makes anything look broken. So each case mutates ONE decision and names the ONE
+//            suite that has to notice.
+//
+//            **The overtime cases are the ones that can double-pay somebody.** `weighted_minute_bp` is the
+//            weighted total over EVERY minute, ordinary ones included, and the monthly basic already pays
+//            the ordinary month — so pricing the whole total instead of the uplift pays the month twice.
+//            132d is that mutation, and it is caught by a worked example rather than by a property, because
+//            the wrong answer is still internally consistent.
+//
+//            **The WPS cases are brief rule 15 with a gate behind it.** 132i splices a plausible
+//            establishment number into the migration and 132j into the settings default; both are caught by
+//            the SCAN suite, which is the only layer that can see a number that has not yet been used.
+//
+//            **Most of the migration cases are caught by the SCAN suite rather than behaviourally**, and
+//            that is P-HR-11's recorded reason: the gate runs against an already-migrated database, so
+//            editing `0104_hr_payroll.sql` changes no refusal anybody could observe.
+//
+//            **132m and 132n run the integration suite and need a database.** They are the two claims no
+//            pure suite can make — that a generated net cannot be written wrong, and that a tip cannot name
+//            a revenue account — and both are about the write path. They mutate nothing the built web
+//            application serves, so 104's warning about browser suites does not apply.
+{
+  const PAYROLL_CORE = 'packages/core/src/hr/payroll.ts'
+  const PAYROLL_WPS = 'packages/core/src/hr/wps-sif.ts'
+  const PAYROLL_ORCHESTRATOR = 'packages/hr/src/payroll-run.ts'
+  const PAYROLL_MIGRATION = 'packages/db/migrations/0104_hr_payroll.sql'
+  const PAYROLL_REGISTRY = 'packages/config/src/settings/registry.ts'
+  const PAYROLL_DOCUMENT = 'packages/pdf/src/documents/payslip.ts'
+
+  const PAYROLL_PURE_SUITE = 'packages/core/src/hr/payroll.test.ts'
+  const PAYROLL_PROPERTY_SUITE = 'packages/core/src/hr/payroll.property.test.ts'
+  const PAYROLL_WPS_SUITE = 'packages/core/src/hr/wps-sif.test.ts'
+  const PAYROLL_SCAN_SUITE = 'packages/fixtures/src/hr-payroll.test.ts'
+  const PAYROLL_ROWS_SUITE = 'packages/fixtures/src/hr-payroll.itest.ts'
+  const PAYROLL_RENDER_SUITE = 'apps/web/src/hr-payroll-render.test.ts'
+  const PAYROLL_DOCUMENT_SUITE = 'packages/pdf/src/documents/payslip.itest.ts'
+  const PAYROLL_NO_SUBMIT_SUITE = 'packages/fixtures/src/wps-no-submission.test.ts'
+
+  const payrollUnitRun = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const payrollRowsRun = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /**
+   * One anchored edit to a shipped file, then the suite that must fail because of it.
+   *
+   * Named for this block and not `payrollMutant`, deliberately: blocks 106, 107, 113 and 125 all record what
+   * a shared helper NAME cost them — git found two identically shaped bodies as shared context and
+   * interleaved the blocks, and the merge had to rebuild both from whole sides. A distinct name is the fix.
+   */
+  const brokenPayrollSource = (path, anchor, replacement, suite, runner = payrollUnitRun) =>
+    withEditedFile(
+      path,
+      (text) => replaceOnce(text, anchor, replacement),
+      () => runExpectingFailure('pnpm', runner(suite)),
+    )
+
+  // 132a. The ordinary multiplier read as a LITERAL rather than off the version the approval snapshotted.
+  //       It is 10,000 today, so every figure stays correct and the claim that dies is the one the versioning
+  //       exists for: the day somebody publishes a version with a different ordinary multiplier, every
+  //       payslip silently overpays and the page still reconciles.
+  checkRejectedBy(
+    'payroll gate: the ordinary multiplier hard-coded rather than read off the version is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      'const uplift = weightedMinuteBp - payableMinutes * ordinaryMultiplierBp',
+      'const uplift = weightedMinuteBp - payableMinutes * 10_000',
+      PAYROLL_SCAN_SUITE,
+    ),
+    'reads the ordinary multiplier as an argument',
+  )
+
+  // 132b. The uplift CLAMPED to zero instead of refusing. A weighted total below the ordinary-rate total is
+  //       impossible through any approval this build can write, so the clamp looks harmless — and what it
+  //       does is pay the monthly wage and drop real overtime without saying so.
+  checkRejectedBy(
+    'payroll gate: clamping a negative uplift to zero rather than refusing is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '  if (uplift < 0) {',
+      '  if (uplift < 0) return 0\n  if (false) {',
+      PAYROLL_PURE_SUITE,
+    ),
+    'is not clamped to zero',
+  )
+
+  // 132c. A payslip produced for an employee with NO wage on file, paying zero. All nineteen seeded employees
+  //       are in that state (Y8-staff), so this turns a run into nineteen payslips of 0.00 AED — and every
+  //       figure on the screen reconciles, because zero plus zero is zero.
+  checkRejectedBy(
+    'payroll gate: paying an employee with no wage on file as zero is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '  if (input.basicWageFils === null) {',
+      '  if (input.basicWageFils === null) return computePayslip({ ...input, basicWageFils: 0 })\n  if (false) {',
+      PAYROLL_PURE_SUITE,
+    ),
+    'no basic wage on file',
+  )
+
+  // 132d. THE double-payment. Pricing the whole weighted total instead of the uplift pays the ordinary month
+  //       twice — the monthly basic already covers it — and the result is a large, plausible, internally
+  //       consistent payslip. Caught by the worked example, because the wrong answer reconciles.
+  checkRejectedBy(
+    'payroll gate: pricing the whole weighted total rather than the uplift is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '    weightedMinuteBp: args.upliftMinuteBp,',
+      '    weightedMinuteBp: args.upliftMinuteBp + args.basicWageFils,',
+      PAYROLL_PURE_SUITE,
+    ),
+    'prices only the excess',
+  )
+
+  // 132e. The commission pin dropped: a non-zero figure accepted with no run behind it. The payslip still
+  //       prints the right number, and "why is this the figure" stops having an answer the day somebody asks.
+  checkRejectedBy(
+    'payroll gate: a commission figure accepted with no run behind it is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '  if (commission.runId === null || commission.ruleVersion === null) {',
+      '  if (false) {',
+      PAYROLL_PURE_SUITE,
+    ),
+    'names no run',
+  )
+
+  // 132f. A zero commission allowed to name a run. "A run produced nothing for this employee" and "the module
+  //       is disabled" are the same zero and different facts, and the second must never be reported as the
+  //       first — which is why `commission_run.module_enabled` exists at all.
+  checkRejectedBy(
+    'payroll gate: a zero commission naming a run is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '    if (commission.runId !== null || commission.ruleVersion !== null) {',
+      '    if (false) {',
+      PAYROLL_PURE_SUITE,
+    ),
+    'zero commission names a run',
+  )
+
+  // 132g. The run's total checked and the per-payslip identity not. Two payslips whose errors CANCEL then
+  //       pass — a figure moved from one employee's line to another's is exactly that shape, and it is the
+  //       reading an operator is least likely to question because the total is right.
+  checkRejectedBy(
+    'payroll gate: checking only the run total and not each payslip is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '    if (gross !== payslip.grossFils) {',
+      '    if (false) {',
+      PAYROLL_PURE_SUITE,
+    ),
+    'components sum to',
+  )
+
+  // 132h. The tips term dropped from the gross. Every payslip is then short by the tips, the identity still
+  //       holds for everybody who received none, and the property's census is what sees it.
+  checkRejectedBy(
+    'payroll gate: dropping the tips term from the gross is caught',
+    brokenPayrollSource(
+      PAYROLL_CORE,
+      '    input.commission.fils +\n    input.tipsFils',
+      '    input.commission.fils',
+      PAYROLL_PROPERTY_SUITE,
+    ),
+    'payslip identity holds',
+  )
+
+  // 132i. A plausible establishment number spliced into the MIGRATION. Brief rule 15's sharpest instance:
+  //       the file that results passes every check, looks exactly like a configured one, and pays nineteen
+  //       people against somebody else's registration. Only a scan can see a number that is not yet used.
+  checkRejectedBy(
+    'payroll gate: an invented WPS employer id in the migration is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      '  format        text        not null\n                  constraint wps_export_format_known',
+      "  employer_id   text        not null default '204561230001',\n  format        text        not null\n                  constraint wps_export_format_known",
+      PAYROLL_SCAN_SUITE,
+    ),
+    'something shaped like a registration number',
+  )
+
+  // 132j. The same number as a settings DEFAULT, which is the likelier place for somebody to put one: it
+  //       looks like configuration rather than like a literal, and the export would stop refusing.
+  checkRejectedBy(
+    'payroll gate: an invented WPS employer id as a settings default is caught',
+    brokenPayrollSource(
+      PAYROLL_REGISTRY,
+      '    defaultValue: PLACEHOLDER_WPS_EMPLOYER_ID,',
+      "    defaultValue: '204561230001',",
+      PAYROLL_SCAN_SUITE,
+    ),
+    'something shaped like a registration number',
+  )
+
+  // 132k. The IBAN check digits skipped, leaving only the structure test. A transposed pair of digits then
+  //       passes — which is precisely what mod-97 exists to catch, and precisely the typo a human makes
+  //       copying an account number off a form.
+  checkRejectedBy(
+    'payroll gate: accepting an IBAN without its mod-97 check digits is caught',
+    brokenPayrollSource(
+      PAYROLL_WPS,
+      '  return remainder === 1',
+      '  return remainder >= 0',
+      PAYROLL_WPS_SUITE,
+    ),
+    'malformed IBAN',
+  )
+
+  // 132l. The employer-id refusal removed, so the file is produced with the placeholder in it. Nothing else
+  //       in the build would notice: the bytes are well-formed and the run is real.
+  checkRejectedBy(
+    'payroll gate: producing a WPS file with an unconfigured employer id is caught',
+    brokenPayrollSource(
+      PAYROLL_WPS,
+      '  if (notConfigured(header.employerId)) {',
+      '  if (false) {',
+      PAYROLL_WPS_SUITE,
+    ),
+    'wps_employer_id_not_configured',
+  )
+
+  // 132m. The commission ENGINE spliced into the payroll path. A payslip that recomputed would resolve the
+  //       rule in force and restate a filed month at today's rates — ADR 0047's whole subject, arriving one
+  //       layer up, where the artefact is a document somebody has already been paid against.
+  checkRejectedBy(
+    'payroll gate: recomputing commission at payslip time is caught',
+    brokenPayrollSource(
+      PAYROLL_ORCHESTRATOR,
+      '            await readCommissionDerivation(sql, {',
+      '            await computeCommission(sql) ?? await readCommissionDerivation(sql, {',
+      PAYROLL_SCAN_SUITE,
+    ),
+    'is reachable from the payroll run',
+  )
+
+  // 132n. The submission scan's network patterns emptied. The scan then reports success over a repository
+  //       that could grow a submit path tomorrow, which is ADR 0002's failure mode applied to an absence —
+  //       and an absence is the one thing no other check in the build can see.
+  checkRejectedBy(
+    'payroll gate: a no-submission scan whose patterns match nothing is caught',
+    brokenPayrollSource(
+      PAYROLL_NO_SUBMIT_SUITE,
+      '  /\\bfetch\\s*\\(/,',
+      '',
+      PAYROLL_NO_SUBMIT_SUITE,
+    ),
+    'patterns can FAIL',
+  )
+
+  /*
+    132o's fixture strings, assembled from parts so THIS FILE does not trip the scan it is testing.
+
+    `scripts/` is inside the scan's scope deliberately — a submit path could perfectly well live in a
+    script — so a gate case carrying the literal `fetch(` beside the literal host would make
+    `scripts/test-gates.mjs` an offender under both rule 1 and rule 2, and the suite would fail for the
+    gate's own fixture rather than for anything in the build. Found by running the case: the scan named
+    this file.
+
+    Exempting the gate file was the other option and is worse: it would take `scripts/` half out of the
+    scan's reach for every future unit, to fix a problem that costs two `join` calls here.
+  */
+  const PAYROLL_SUBMIT_CALL = ['fet', 'ch'].join('')
+  const PAYROLL_SUBMIT_URL = ['https://w', 'ps', '.example-bank.ae/upload'].join('')
+
+  // 132o. A real submission path, planted as a fixture. The scan has to find a module that knows about the
+  //       wage file and reaches the network — which is the regression this unit actually expects: not
+  //       somebody adding an endpoint on purpose, but a later unit wiring "upload the file" into a screen.
+  check(
+    'payroll gate: a planted WPS submission path is found by the scan',
+    withFixture(
+      'packages/fixtures/src/__gate_fixture__wps-submit.ts',
+      [
+        '/** A gate fixture: a WPS submission path, which must not survive the scan. */',
+        'export async function submitWpsFile(bytes: string): Promise<void> {',
+        `  await ${PAYROLL_SUBMIT_CALL}('${PAYROLL_SUBMIT_URL}', { method: 'POST', body: bytes })`,
+        '}',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', payrollUnitRun(PAYROLL_NO_SUBMIT_SUITE)),
+    ).failed,
+    'the no-submission scan passed over a planted submit path',
+  )
+
+  // 132p. The tip folded into the basic wage rather than kept as its own line. The net is unchanged and the
+  //       payslip still adds up; what is lost is that a tip is somebody else's money passing through, which
+  //       is the acceptance line and the only thing that makes it not revenue.
+  checkRejectedBy(
+    'payroll gate: folding the tip into another payslip line is caught',
+    brokenPayrollSource(
+      PAYROLL_DOCUMENT,
+      "    figureRow(PAYSLIP_LABELS.tips, locale, payslip.tips, 'tips'),",
+      '',
+      PAYROLL_DOCUMENT_SUITE,
+      payrollRowsRun,
+    ),
+    'tip is a line of its own',
+  )
+
+  // 132q. The Arabic weight moved to 500. CSS weight matching resolves it DOWNWARDS to 400 because 400 and
+  //       600 are the cuts embedded, so the declaration does nothing — it has already happened once in this
+  //       repository and a PDF has no second paint in which anybody notices.
+  checkRejectedBy(
+    'payroll gate: an Arabic weight the PDF does not embed is caught',
+    withEditedFile(
+      PAYROLL_DOCUMENT,
+      (text) => replaceOnce(text, '  font-weight: 400;\n}', '  font-weight: 500;\n}'),
+      () => runExpectingFailure('pnpm', ['documents']),
+    ),
+    'arabic-font-weight-must-be-a-shipped-cut',
+  )
+
+  // 132r. The generated net replaced by a column a caller writes. A CHECK still lets a wrong pair be
+  //       offered; GENERATED makes it unstorable, and the difference is the whole reason the column is not
+  //       something `recordPayslip` passes.
+  checkRejectedBy(
+    'payroll gate: a net a caller can write rather than one the database generates is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      '  net_fils              bigint      not null generated always as',
+      '  net_fils              bigint      not null default 0, -- written by the caller',
+      PAYROLL_SCAN_SUITE,
+    ),
+    'generates the gross and the net',
+  )
+
+  // 132s. The tip's liability rule narrowed to "not revenue". A tip credited to an EXPENSE account then
+  //       passes — equally wrong, and it reconciles to nothing at the till.
+  checkRejectedBy(
+    'payroll gate: a tip rule that refuses revenue only rather than requiring a liability is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      "  if v_type <> 'liability' then",
+      "  if v_type = 'revenue' then",
+      PAYROLL_SCAN_SUITE,
+    ),
+    'refuses a tip against any account whose type is not a liability',
+  )
+
+  // 132t. The period-lock reader duplicated: the migration reading `period_lock` directly rather than calling
+  //       `raise_if_period_locked()`. Two readers of the lock eventually disagree, and the run permitted by
+  //       one and refused by the other is the defect 0086 and 0097 each recorded avoiding.
+  checkRejectedBy(
+    'payroll gate: a second reader of the period lock is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      '  perform raise_if_period_locked(',
+      '  perform 1 from period_lock where starts_on <= new.period_ends_on;\n  perform raise_if_period_locked(',
+      PAYROLL_SCAN_SUITE,
+    ),
+    'calls the ONE period-lock reader',
+  )
+
+  // 132u. The attendance guard re-deriving INCOMPLETE from the punches instead of reading P-HR-07's stored
+  //       count. A second implementation of the plausibility ceiling, which disagrees with the approval the
+  //       first time that figure is versioned — and disagrees about somebody's pay.
+  checkRejectedBy(
+    'payroll gate: re-deriving incomplete attendance in SQL is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      '    from timesheet_approval\n    where incomplete_presence_count > 0',
+      "    from attendance_event\n    where kind = 'clock_in'",
+      PAYROLL_SCAN_SUITE,
+    ),
+    'reads P-HR-07 stored incomplete count',
+  )
+
+  // 132v. A seeded payroll row in the migration. Every figure in this estate is somebody's pay, so a seeded
+  //       one is a wage, a tip or a deduction the build invented — and it would arrive looking exactly like
+  //       a recorded one.
+  checkRejectedBy(
+    'payroll gate: a seeded payroll row in the migration is caught',
+    brokenPayrollSource(
+      PAYROLL_MIGRATION,
+      'commit;',
+      'insert into payroll_deduction (employee_id, trading_date, amount_fils, reason, authorised_by,\n' +
+        "  recorded_by) select id, date '2026-01-01', 5000, 'Uniform', 'Owner', 'Owner' from employee limit 1;\n" +
+        'commit;',
+      PAYROLL_SCAN_SUITE,
+    ),
+    'seeds a payroll row',
+  )
+
+  // 132w. The screen printing nothing when the WPS identifiers are unset. An empty export panel is
+  //       indistinguishable from a screen nobody has used, and the two are a question to answer and an
+  //       ordinary Tuesday — which is the commission screen's recorded argument, applied to a wage file.
+  checkRejectedBy(
+    'payroll gate: a payroll screen that hides why no WPS file can be produced is caught',
+    brokenPayrollSource(
+      'apps/web/app/(admin)/hr/payroll/render.ts',
+      '`<p class="blocked"><strong>No WPS file can be produced yet.</strong> The `',
+      '\'<p class="blocked">\'',
+      PAYROLL_RENDER_SUITE,
+    ),
+    'No WPS file can be produced yet',
+  )
+
+  // 132x. The audit row on a payslip read made conditional on the read returning something. Enumeration —
+  //       one request per employee id until one answers — is then the single access pattern that leaves no
+  //       trace, which is the opposite of what an insider-threat control is for.
+  checkRejectedBy(
+    'payroll gate: auditing only non-empty payslip reads is caught',
+    brokenPayrollSource(
+      'packages/db/src/repositories/payroll.ts',
+      "  await uow.audit.record({\n    action: 'payroll.payslips_read',",
+      "  if (rows.length > 0) await uow.audit.record({\n    action: 'payroll.payslips_read',",
+      PAYROLL_ROWS_SUITE,
+      payrollRowsRun,
+    ),
+    'read that found NOTHING is audited',
+  )
+
+  // 132y. `recordExport` swapped for the generic `record`. The row still exists and says the right thing —
+  //       and it is absent from `audit_event_export_idx` (0005), which is the one index anybody reviewing
+  //       insider access actually reads. An export nobody can find is an export nobody reviews.
+  checkRejectedBy(
+    'payroll gate: a WPS export audited outside the insider-threat index is caught',
+    brokenPayrollSource(
+      'packages/db/src/repositories/payroll.ts',
+      "  await uow.audit.recordExport('wps_export', input.recordCount, 'payroll.wps_file_exported')",
+      "  await uow.audit.record({ action: 'payroll.wps_file_exported', entityType: 'wps_export', operation: 'create' })",
+      PAYROLL_ROWS_SUITE,
+      payrollRowsRun,
+    ),
+    'INDEXED export audit row',
+  )
+
+  // 132z. The unedited suites pass. Without this the twenty-five cases above could all be reporting a
+  //       failure the fixture did not cause — a suite that was already red would satisfy every one of them.
+  for (const suite of [
+    PAYROLL_PURE_SUITE,
+    PAYROLL_PROPERTY_SUITE,
+    PAYROLL_WPS_SUITE,
+    PAYROLL_SCAN_SUITE,
+    PAYROLL_RENDER_SUITE,
+    PAYROLL_NO_SUBMIT_SUITE,
+  ]) {
+    const green = run('pnpm', payrollUnitRun(suite))
+    check(`payroll gate: ${suite} passes unedited`, !green.failed, green.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
