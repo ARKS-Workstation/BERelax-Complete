@@ -1776,6 +1776,46 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_closed_period_labour_adjustment'],
     translators: ['packages/db/src/repositories/gratuity.ts'],
   },
+  // ZY181-ZY185 are R-REP-01's, of the band ZY181-ZY190; ZY186-ZY190 are free and deliberately absent, for
+  // the reason direction 3 of `pnpm sqlstate` gives. They were placed AFTER H-MIG-01's ZY191 block by a
+  // merge that had nothing to conflict over — 0110's block and 0111's were added in one batch, in different
+  // regions of this file — and `sqlstate-registry.test.ts` reads the file as a sequence, so the whole
+  // registry was out of order on one silent auto-merge. Moved, never renumbered.
+  {
+    code: 'ZY181',
+    rule: 'The reporting registry and the catalogue must declare the same set of materialised views.',
+    migration: '0110',
+    raisedBy: ['reporting.assert_views_are_refreshable'],
+    translators: [],
+  },
+  {
+    code: 'ZY182',
+    rule: 'Every materialised view in the reporting schema must carry a unique index over plain columns, so a refresh can be concurrent.',
+    migration: '0110',
+    raisedBy: ['reporting.assert_views_are_refreshable'],
+    translators: [],
+  },
+  {
+    code: 'ZY183',
+    rule: 'A reporting refresh may only name a view the registry declares.',
+    migration: '0110',
+    raisedBy: ['reporting.registered_or_refuse'],
+    translators: [],
+  },
+  {
+    code: 'ZY184',
+    rule: 'A reporting refresh run is append-only.',
+    migration: '0110',
+    raisedBy: ['reporting.refuse_refresh_run_change'],
+    translators: [],
+  },
+  {
+    code: 'ZY185',
+    rule: 'Every row of a reporting fact must be keyed on a trading date the business_day calendar holds.',
+    migration: '0110',
+    raisedBy: ['reporting.assert_business_day_keys'],
+    translators: [],
+  },
   // ZY191-ZY199 are H-MIG-01's, of the band ZY191-ZY200; ZY200 is left free and deliberately absent, because
   // an entry for a code no migration raises is direction 3. Nine and not one because every one of them names
   // a different thing to go and do — "resume the run that is already open", "correct it with a new import",
@@ -1848,41 +1888,6 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     migration: '0111',
     raisedBy: ['import_staging.unprovenanced_row_ids'],
     translators: ['packages/migration/src/refusals.ts'],
-  },
-  {
-    code: 'ZY181',
-    rule: 'The reporting registry and the catalogue must declare the same set of materialised views.',
-    migration: '0110',
-    raisedBy: ['reporting.assert_views_are_refreshable'],
-    translators: [],
-  },
-  {
-    code: 'ZY182',
-    rule: 'Every materialised view in the reporting schema must carry a unique index over plain columns, so a refresh can be concurrent.',
-    migration: '0110',
-    raisedBy: ['reporting.assert_views_are_refreshable'],
-    translators: [],
-  },
-  {
-    code: 'ZY183',
-    rule: 'A reporting refresh may only name a view the registry declares.',
-    migration: '0110',
-    raisedBy: ['reporting.registered_or_refuse'],
-    translators: [],
-  },
-  {
-    code: 'ZY184',
-    rule: 'A reporting refresh run is append-only.',
-    migration: '0110',
-    raisedBy: ['reporting.refuse_refresh_run_change'],
-    translators: [],
-  },
-  {
-    code: 'ZY185',
-    rule: 'Every row of a reporting fact must be keyed on a trading date the business_day calendar holds.',
-    migration: '0110',
-    raisedBy: ['reporting.assert_business_day_keys'],
-    translators: [],
   },
   {
     code: 'ZZ001',
