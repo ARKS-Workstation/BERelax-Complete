@@ -370,3 +370,8 @@ export {
   WHATSAPP_REF_OPEN_QUESTION,
   whatsappRefCodeSchema,
 } from './whatsapp-ref.ts'
+export {
+  PLACEHOLDER_WPS_AGENT_ID,
+  PLACEHOLDER_WPS_EMPLOYER_ID,
+  WPS_OPEN_QUESTION_ID,
+} from './wps.ts'

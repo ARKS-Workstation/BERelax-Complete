@@ -44,6 +44,29 @@ export {
   type EmployeeRepository,
   type StaffAccess,
 } from './employee-repository.ts'
+/*
+  P-HR-12's payroll run and WPS export. Here for `commission-run.ts`'s reason: a run needs both halves at
+  once, and `packages/db` may not import `packages/core`.
+
+  `executePayrollRun` takes the commission run as an ARGUMENT rather than resolving one. Which commission run
+  a payroll pays is a decision — a month may have been recomputed three times and the one that was paid is
+  not necessarily the newest — so it is the caller's to state and the payslip's to record.
+
+  `exportWpsFile` returns a string and records that it did. There is no submit path in it or anywhere else:
+  absent, not disabled, which is docs/04 SS4's rule for VAT201 applied where the consequence is larger.
+*/
+export {
+  type CommissionRunPin,
+  type ExecutePayrollRunArgs,
+  type ExportWpsFileArgs,
+  executePayrollRun,
+  exportWpsFile,
+  type PayrollRunResult,
+  readPayslipFor,
+  validateWpsFile,
+  type WpsContactSource,
+  type WpsExportResult,
+} from './payroll-run.ts'
 export {
   type BankDetail,
   openBankDetail,

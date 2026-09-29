@@ -28,6 +28,8 @@ import {
   MINIMUM_REVIEW_COOLING_OFF_HOURS,
   OBLIGATION_ESCALATION_OFFSETS_SETTING_KEY,
   OBLIGATION_REMINDER_OFFSETS_SETTING_KEY,
+  PLACEHOLDER_WPS_AGENT_ID,
+  PLACEHOLDER_WPS_EMPLOYER_ID,
   PROVISIONAL_EXPIRING_SOON_DAYS,
   PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
   PROVISIONAL_LINT_QUESTION_COPY,
@@ -181,6 +183,16 @@ export const PACKAGE_POLICY_SETTING_KEYS = [
  * readers, and a second spelling is a reader that silently falls back to the declared default.
  */
 export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
+
+/**
+ * The two identifiers a WPS salary file names, and the one question behind both (`Y8-wps`).
+ *
+ * Spelled once here because three readers want them: the payroll screen, `exportWpsFile` in `@berelax/hr`,
+ * and the Unconfirmed Assumptions panel. A second spelling is a reader that silently falls back to the
+ * declared default — which for these two is a placeholder, so the fallback would be invisible.
+ */
+export const WPS_EMPLOYER_ID_SETTING_KEY = 'hr.wps_employer_id'
+export const WPS_AGENT_ID_SETTING_KEY = 'hr.wps_agent_id'
 
 // --- the registry ------------------------------------------------------------------------------
 // Provisional values are the STRICTEST safe option, so an uncorrected assumption leaves the system
@@ -912,6 +924,63 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y9-commission',
       note: 'No commission structure is configured and none is guessed. docs/OPEN-QUESTIONS.md Y9-commission asks whether the structure is flat, tiered or service-dependent and nothing in the handover answers it, so the strictest safe option is OFF: a rate this build invented would be indistinguishable from a configured one on the payslip that resulted. The engine is complete and is tested against a fixture rule set; answering this is one audited change here plus one published commission_rule version.',
+    },
+  }),
+  define({
+    /**
+     * The employer identifier a WPS salary file names. **A placeholder, and it fails validation.**
+     *
+     * docs/04 §7's entire statement about the Wage Protection System is *"salary file, in the format the
+     * bank requires"*: no bank is named, no agent code, no establishment id, no layout and no field spec.
+     * This is the establishment or MOL number registered to this business, and the build has never seen it.
+     *
+     * The default is `PLACEHOLDER_WPS_EMPLOYER_ID`, which is chosen to fail `validateWpsFile` twice over —
+     * it says what it is in words, and it is not a run of digits — for exactly `PLACEHOLDER_TRN`'s reason.
+     * This is brief rule 15 at its sharpest in the build: a plausible thirteen digits would produce a file
+     * that passes every check, looks exactly like a configured one, and pays nineteen people against
+     * somebody else's registration. A blank field is visibly unanswered.
+     *
+     * `compliance_locked` and OWNER_ONLY, beside the TRN and the supervisory authority: it is a
+     * registration number, not a preference, and nobody on the floor should be able to change who a wage
+     * file says it is from. `invalidates: []` because nothing is prerendered from it — the payroll screen
+     * is `dynamic` and reads it per request — and `rerunJobs` is absent for a sharper reason: setting this
+     * must NOT re-export anything. A file is produced by a person deciding to produce one.
+     */
+    key: WPS_EMPLOYER_ID_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().min(1).max(64),
+    defaultValue: PLACEHOLDER_WPS_EMPLOYER_ID,
+    label: 'WPS employer identifier',
+    help: 'The establishment or MOL number registered to this business, as it must appear in the salary file. It is a placeholder until somebody enters the real one, and while it is a placeholder no WPS file can be produced at all — the export is refused by name. A plausible-looking number here would produce a file that passes every check and pays staff against another employer\u2019s registration, which is why the default fails rather than being blank.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y8-wps',
+      note: 'docs/04 \u00a77 says only "salary file, in the format the bank requires". No bank, no agent code, no establishment id and no layout have been supplied, so the identifier is a placeholder that fails validation rather than a number this build invented. Answering Y8-wps is one audited settings change here, one for the agent, and the bank\u2019s own format specification for the layout.',
+    },
+  }),
+  define({
+    /**
+     * The agent identifier — the bank or exchange house carrying the file. Same placeholder, same reason.
+     *
+     * A separate setting from the employer id and not one combined "WPS configuration" value, because the
+     * two are issued by different people and will be answered at different times: the establishment id is
+     * MOHRE's and the agent id is the bank's. One value would mean confirming one of them required
+     * inventing the other.
+     */
+    key: WPS_AGENT_ID_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.string().min(1).max(64),
+    defaultValue: PLACEHOLDER_WPS_AGENT_ID,
+    label: 'WPS agent identifier',
+    help: 'The bank or exchange house that carries the salary file, identified as they require. Issued to them, never chosen. A placeholder until somebody enters the real one, and while it is a placeholder the export is refused by name.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y8-wps',
+      note: 'Which bank or exchange house carries the file, and under which code, has not been supplied. A separate setting from the employer id because the two are issued by different people and will be answered at different times.',
     },
   }),
   define({

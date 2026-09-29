@@ -887,6 +887,53 @@ export {
   verifyOtpCode,
 } from './repositories/otp.ts'
 /*
+  P-HR-12's payroll side (0104). Reads and writes only: the arithmetic is
+  `packages/core/src/hr/payroll.ts`'s and the WPS layout is `packages/core/src/hr/wps-sif.ts`'s, this
+  package may not import either, and `packages/hr` is where the halves meet.
+
+  There is deliberately NO reader here for `timesheet_approval`, `working_hours_rule` or
+  `labour_cost_rule`: `readTimesheetApprovals`, `readWorkingHoursRules` and `readLabourCostRules` already
+  exist and the orchestrator calls those. A second reader of a versioned rule table is the defect the
+  versioning exists to prevent — two readers eventually disagree about which version governs a date, and the
+  one that disagrees is discovered on a payslip.
+
+  `readPayslips` takes a `UnitOfWork` and not an `Sql`, so the audit row and the read share a transaction and
+  there is no shape of the call that does not write one — `readEmployeeBankDetail`'s arrangement, for the
+  reason docs/04 SS7 gives about salary and bank details together. `recordWpsExport` uses `recordExport`, the
+  INDEXED insider-threat signal (0005), on every call and not only a large one.
+
+  There is no update and no delete beyond `completePayrollRun`, which issues the ONE UPDATE the schema
+  permits (ZY142): a completed run is immutable (ZY141) and a run that is wrong is a NEW run naming it.
+*/
+export {
+  type CompletePayrollRunInput,
+  completePayrollRun,
+  type EmployeeWageRow,
+  type OpenPayrollRunInput,
+  openPayrollRun,
+  PAYROLL_SQLSTATE,
+  type PayrollPeriod,
+  type PayrollRunRow,
+  type PayslipRow,
+  type PayslipToRecord,
+  type PeriodTotalRow,
+  payrollError,
+  type RecordDeductionInput,
+  type RecordTipInput,
+  type RecordWpsExportInput,
+  readDeductionTotals,
+  readEmployeeWages,
+  readPayrollRuns,
+  readPayslips,
+  readTipTotals,
+  readWpsExports,
+  recordDeduction,
+  recordPayslip,
+  recordTip,
+  recordWpsExport,
+  type WpsExportRow,
+} from './repositories/payroll.ts'
+/*
   C-AUTO-08's pipeline board. `PIPELINE_ENROLMENT_PATH` is exported for one assertion and it is an
   acceptance criterion: a stage entry enrols through `enrolOnLiveVersion`, the writer C-AUTO-06 published,
   and the test compares the reference rather than the behaviour.
@@ -3128,6 +3175,72 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // one because each has a different runbook answer, which is 0061's argument for a private code at all; the
 // CLASS identifies nothing any more, which is 0091's paragraph above and W-SYS-12's subject.
 //
+// 104 is 0104_hr_payroll.sql: the run that cannot be edited after it has paid somebody, and the tip that
+// cannot be revenue (P-HR-12). Five tables. `payroll_run` is a DRAFT until `completed_at` is set and
+// immutable after (ZY141); the only UPDATE a draft accepts is the one that completes it, which is also the
+// only statement that may state its header figures (ZY142) — they are the sum of payslips that arrive over
+// several transactions, so they are not knowable when the run is opened, and ZY150 holds them to the
+// payslips on that same statement. A run that is wrong is corrected by a NEW dated run naming the one it
+// corrects (ZY143, plus `payroll_run_one_original_per_period`), which is 0018's journal rule applied to
+// wages and the shape 0086 gave attendance and 0097 gave commission.
+//
+// `payslip` PINS every figure it prints rather than recomputing one. The commission comes off a
+// `commission_run` with its rule version snapshotted beside it (ZY147) — P-HR-11 built a whole migration to
+// make a run reproducible, and a payslip that called the engine again would resolve "the rule in force" and
+// restate March at June's rates. The overtime comes off a `timesheet_approval` and is priced at the
+// `labour_cost_rule` version the RUN pins, never at today's divisor. `gross_fils` and `net_fils` are
+// GENERATED for `employee.total_wage_fils`'s reason, sharpened: the payslip, the screen and the WPS file must
+// not be able to compute the net differently, and generated makes a wrong net unstorable rather than merely
+// detectable. The oracle the acceptance criterion asks for is therefore a THIRD computation —
+// `summarisePayroll` in `@berelax/core`, these columns, and a table of worked examples in
+// `payroll.test.ts` — which is what makes "reconciles" a claim rather than a tautology.
+//
+// **The overtime line is the UPLIFT only, and that is the one modelling decision in the unit.**
+// `employee.basic_wage_fils` is a MONTHLY figure paid in full whatever was attended, and P-HR-05's
+// `weighted_minute_bp` is `sum(minutes × multiplier)` over EVERY minute — so pricing it whole and adding it
+// to the monthly basic pays the ordinary month twice. `payslip.overtime_uplift_minute_bp` is
+// `weighted_minute_bp` less `payable_minutes` at the ordinary multiplier READ FROM the `working_hours_rule`
+// version the approval snapshotted, which is why there is no literal 10000 in `payroll.ts` to reach for. The
+// other reading — every attended minute priced at its bucket rate, the monthly figure only a budget — is a
+// different payslip for somebody who worked three days of a month, and which one is right is part of
+// Y9-overtime rather than something a comment can settle.
+//
+// Two tables hold what a payslip subtracts and adds, and neither invents a policy. `employee_tip` is an
+// individually attributed pass-through LIABILITY: the row names the account the salon owes it against and
+// ZY146 refuses any account whose type is not `liability`, so "a tip never lands in a revenue account" is a
+// property of the schema and not a habit of a function — and it refuses an EXPENSE or ASSET account too,
+// which a revenue-only check would pass. It defaults to 2040 `Tips payable to therapists`, which 0018
+// already seeded; this migration invents no account. `payroll_deduction` carries an authorised actor, a
+// recorder who is deliberately a different column, a reason somebody wrote, and NO `kind` vocabulary —
+// which deductions are lawful and what proportion of pay they may reach is Y9-deductions and nobody has
+// answered it, so a closed set would read as the list of deductions this business makes.
+//
+// **Nothing here holds a WPS employer id, agent id, establishment id or MOL number, and there is no column
+// that could.** docs/04 §7's entire statement about the Wage Protection System is "salary file, in the
+// format the bank requires": no bank named, no agent code, no layout, no field spec. Y8-wps is the question.
+// The identifiers are settings whose defaults SAY they are pending and fail `validateWpsFile` twice over,
+// `PLACEHOLDER_TRN`'s technique for `PLACEHOLDER_TRN`'s reason — brief rule 15 at its sharpest in this
+// build, because plausible digits would produce a file that passes every check and pays nineteen people
+// against somebody else's registration. `wps_export` records which run, which layout, how many records, what
+// total and the sha256 of the bytes, and ZY149 refuses an export of a run nobody completed: the bytes carry
+// no draft flag a bank would read. There is no submit path anywhere in the repository — absent, not
+// disabled, which is docs/04 §4's rule for VAT201 applied where the consequence is larger, and
+// `packages/fixtures/src/wps-no-submission.test.ts` is the scan that keeps it absent.
+//
+// "A locked period refuses a new payroll run" costs no private code: `payroll_run_period_guard` CALLS
+// `raise_if_period_locked()` (0018, redefined by 0073), which already names the locked period and the
+// earliest OPEN date. 0086 and 0097 both took that decision and this is the third — the lock has one reader
+// and this file does not add a second. ZY145 is the refusal that IS this unit's: a run over a period whose
+// approved timesheets count an INCOMPLETE presence, read from P-HR-07's stored count rather than by pairing
+// the punches again, because whether a clock-in was ever closed is decided once and against the grace
+// version the approval snapshotted.
+//
+// Ten private SQLSTATEs, `ZY141`-`ZY150`, the whole of this unit's band, allocated through
+// `packages/db/src/sqlstate-registry.ts` and not by reading the migrations a worktree can see (ADR 0043).
+// Ten and not one because each has a different runbook answer — "correct it with a new run", "complete the
+// run first", "record an attendance correction" and "name a liability account" are four different things to
+// go and do, which is 0061's argument for a private code at all.
+//
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
 // existed, and less 94, which G-REV-02 holds in another worktree. 85, 89, 91, 92, 93, 95, 96, 97, 98 and 99
@@ -3156,4 +3269,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 99 as const
+export const SCHEMA_VERSION = 104 as const

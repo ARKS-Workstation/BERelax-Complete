@@ -21,6 +21,11 @@ export {
 export type { Measurement } from './measure.ts'
 export { measureTextWidths, unjoin, ZWNJ } from './measure.ts'
 export {
+  COMMITTED_PAYSLIP,
+  CORRECTION_PAYSLIP,
+  UNCONFIGURED_COMMISSION_PAYSLIP,
+} from './payslips.ts'
+export {
   arabicFallbacksFor,
   COMMITTED_DOCUMENTS,
   ELEVEN_FILS_DOCUMENT,

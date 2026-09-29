@@ -1587,6 +1587,80 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_messaging_control_delete'],
     translators: [],
   },
+  // ZY141-ZY150 are P-HR-12's, all ten of the band. Ten codes and not one because each has a different
+  // runbook answer — "correct it with a new run", "complete the run first", "record an attendance
+  // correction" and "name a liability account" are four different things to go and do, which is 0061's
+  // argument for a private code at all.
+  {
+    code: 'ZY141',
+    rule: 'A completed payroll run may not be updated, and no payroll run may be deleted.',
+    migration: '0104',
+    raisedBy: ['refuse_completed_payroll_run_change'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY142',
+    rule: 'A draft payroll run may only be completed, never otherwise edited.',
+    migration: '0104',
+    raisedBy: ['refuse_payroll_run_draft_edit'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY143',
+    rule: 'A second payroll run over a period must name the completed run it corrects, over that same period.',
+    migration: '0104',
+    raisedBy: ['assert_payroll_correction_names_its_original'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY144',
+    rule: 'A payslip, tip, deduction or WPS export row may not be updated or deleted.',
+    migration: '0104',
+    raisedBy: ['refuse_payroll_record_change'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY145',
+    rule: 'A payroll run may not cover a period whose approved timesheets count an INCOMPLETE presence.',
+    migration: '0104',
+    raisedBy: ['assert_payroll_run_over_closed_attendance'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY146',
+    rule: 'A tip must be owed against an account whose type is liability, never revenue.',
+    migration: '0104',
+    raisedBy: ['assert_tip_is_owed_as_a_liability'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY147',
+    rule: "A payslip's commission figure must name the run and rule version that produced it.",
+    migration: '0104',
+    raisedBy: ['assert_payslip_commission_is_pinned'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY148',
+    rule: 'A payslip may not be added to a payroll run that has already been completed.',
+    migration: '0104',
+    raisedBy: ['assert_payslip_run_is_open'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY149',
+    rule: "A WPS export must name a completed run and declare that run's own count and total.",
+    migration: '0104',
+    raisedBy: ['assert_wps_export_names_a_completed_run'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
+  {
+    code: 'ZY150',
+    rule: "A completed payroll run's payslip count and net total must equal its payslips.",
+    migration: '0104',
+    raisedBy: ['assert_completed_payroll_run_matches_its_payslips'],
+    translators: ['packages/db/src/repositories/payroll.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
