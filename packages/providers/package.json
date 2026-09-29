@@ -8,7 +8,9 @@
     "./google": "./src/google/index.ts",
     "./llm": "./src/llm/index.ts",
     "./failure": "./src/failure.ts",
-    "./call-log": "./src/call-log.ts"
+    "./call-log": "./src/call-log.ts",
+    "./payments": "./src/payments/index.ts",
+    "./not-implemented": "./src/not-implemented.ts"
   },
   "dependencies": {
     "@berelax/config": "workspace:*",

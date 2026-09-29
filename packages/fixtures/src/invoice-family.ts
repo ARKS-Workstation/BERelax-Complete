@@ -23,6 +23,19 @@ import type { Sql } from '@berelax/db'
  * from `pg_constraint` and fails when the two disagree, so the ELEVENTH table is named in a check about the
  * list rather than in whichever suite happened to run last.
  *
+ * ## Every table in both lists is append-only, and TRUNCATE is deliberately the only removal
+ *
+ * Y-PAY-01 raised this at merge and it is worth answering here rather than in nine teardowns: `TRUNCATE` does
+ * not fire row-level BEFORE DELETE triggers, so emptying `commission_line` this way does not go through
+ * `commission_line_no_delete` (ZY072) — and the same is true of `invoice` (ZI003), `payment` and `refund`,
+ * which these statements have emptied since long before commission existed. It is not a bypass smuggled in
+ * with a new table: it is the reason a truncate is here at all. A filed document refuses DELETE for every
+ * role INCLUDING the owner, so a suite that writes one cannot tidy up row by row, and `TRUNCATE` — a
+ * table-level privilege the application role does not hold — is the only legal removal. What the triggers
+ * guarantee is that nothing reaches those rows through the application, and revoking the privilege is what
+ * holds for a `psql` session; neither is weakened by a fixture emptying the whole table between runs. Stating
+ * it once, here, is the point of having one statement of the list.
+ *
  * The list is still WRITTEN rather than derived at runtime, deliberately: a teardown that discovered its own
  * scope would quietly widen when a future migration pointed something unexpected at `invoice`, and a test
  * fixture that truncates whatever it finds is how a suite comes to empty a table it does not own.

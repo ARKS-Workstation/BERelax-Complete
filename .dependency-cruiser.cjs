@@ -451,6 +451,58 @@ module.exports = {
       },
     },
     {
+      name: 'payment-gateway-adapters-only-through-the-registry',
+      comment:
+        'Only packages/payments/src/registry.ts may construct a payment gateway adapter. Everything else ' +
+        'takes one from the registry, which is the only place PAYMENT_PROVIDER is read — and that is what ' +
+        'makes choosing a real gateway a configuration change rather than an edit at every call site ' +
+        '(ADR 0022 rule 3, ADR 0055). A consumer that imported createFakeCardGateway directly would keep ' +
+        'using the fake in production with nothing saying so: `parseConfig` would still refuse ' +
+        'PAYMENT_PROVIDER=real outside production, the boot-time refusal for `real` would still fire, and ' +
+        'the money would still go through a fake, because that call site never asked the config anything. ' +
+        'The registry also owns the shared movement sink and the shared failure script, so a directly ' +
+        'constructed adapter writes to a log the payments screen does not read. ' +
+        'THE BARREL IS THE LOOPHOLE, and it is closed the way ' +
+        'messaging-providers-only-inside-a-transport closes its own: packages/payments/src/index.ts does ' +
+        'NOT re-export anything from adapters/, because a re-export makes a module-matching rule match ' +
+        'nothing. The gateway names a consumer might want are reachable as `registry.till.name`. ' +
+        'Tests are exempt: registry.test.ts and the conformance suite have to build adapters to test them, ' +
+        'and the conformance suite building every adapter is the point rather than a hole.',
+      severity: 'error',
+      from: {
+        pathNot: [
+          '^packages/payments/src/registry\\.ts$',
+          '^packages/payments/src/conformance/',
+          '^packages/payments/src/.*\\.(test|itest)\\.ts$',
+        ],
+      },
+      to: {
+        path: '^packages/payments/src/adapters/',
+        // A type constructs nothing, and `google-tokens-only-in-with-google` exempts `SealedToken` for the
+        // same reason: without this, the barrel could not re-export `FakeCardGateway` — the type carrying
+        // the fake's 3DS hook — and the rule would have been relaxed to nothing instead.
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
+      name: 'non-conforming-payment-fixtures-stay-in-the-conformance-suite',
+      comment:
+        'packages/payments/src/conformance/fixtures holds adapters that are DELIBERATELY broken — one ' +
+        'returns success and writes no movement at all, which is the acceptance line Y-PAY-01 exists to ' +
+        'prove the suite catches. They exist so that the conformance suite has been seen to fail ' +
+        '(ADR 0003), and they must be unreachable from anything that could register one. ' +
+        'This is not a hypothetical tidiness rule. The fixture is a complete, compiling PaymentGateway ' +
+        'that looks entirely plausible at a call site: it authorises, it captures, it refunds, it returns ' +
+        'snapshots with the right shape. The one thing it does not do is leave a record, and a system ' +
+        'wired to it would take money and post nothing — which presents as a reconciliation that is short ' +
+        'by every transaction, with no error anywhere. ' +
+        'Scoped to the fixtures directory rather than to a filename, so a second saboteur added beside the ' +
+        'first is covered without anyone remembering.',
+      severity: 'error',
+      from: { pathNot: '^packages/payments/src/conformance/' },
+      to: { path: '^packages/payments/src/conformance/fixtures/' },
+    },
+    {
       name: 'no-circular',
       comment: 'Circular dependencies make build order and reasoning undecidable.',
       severity: 'error',

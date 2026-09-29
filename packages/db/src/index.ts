@@ -3341,6 +3341,36 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // with a JSON `after`, so "has this nonce been burned" would be a JSON containment query on the hot path of
 // every download and the uniqueness the replay defence needs could not be a constraint at all. This table is
 // the CONSTRAINT; the audit row is the narrative.
+// 105 is 0105_gateway_tender_type.sql: one row, and the decision it stands for (Y-PAY-01). The file creates
+// no table, column, constraint, function or refusal code. It inserts `card_online` into `tender_type` —
+// posting to `1030 Payment gateway clearing`, `adapter = 'gateway'`, requiring a reference, settling later —
+// and that is the entire schema change this unit needs.
+//
+// 0068 designed the row and said so: its `adapter` column carries the closed set `('manual', 'gateway')`
+// under the note "All three are `manual` today, which is the honest answer: the gateway does not exist. This
+// is the column Y-PAY's types will differ on." 0018 seeded account 1030 in the same anticipatory spirit and
+// nothing had debited it until now.
+//
+// What the row decides is whether the gateway port reuses the tender vocabulary or brings its own. The
+// cheaper option was its own — a `PaymentMethod` enum on the port, which the H02 provider fakes already
+// carry, and no migration at all. It is a second answer to "where does card money go", with a second
+// posting-account map beside it, and a disagreement between the two does not present as a type error: it
+// presents as a bank reconciliation out by every gateway batch, weeks later, with two plausible sources. So
+// the port's instrument type IS `TenderKind`, there is one map from instrument to account, and this row is
+// what makes `packages/fixtures/src/payment.itest.ts` keep holding the registry equal to `TENDER_ACCOUNT` in
+// both directions once core declares the kind.
+//
+// 1030 and not 1040, though both clear card money that has not arrived: the terminal settles in batches
+// against a merchant statement and the gateway pays out on its own schedule net of processor fees against a
+// payout file. One account holding both streams reconciles against neither statement on its own, and the
+// residue after matching one is indistinguishable from an error in the other.
+//
+// The row enables nothing on its own, which is deliberate. `finaliseCheckout` has no gateway call in it and
+// no path to one; the adapters live in `@berelax/payments` and are constructed only by that package's
+// registry; `PAYMENT_PROVIDER=real` is refused outside production by `parseConfig` (ADR 0005), so the only
+// gateway any environment can reach is the H02 fake. The band `ZY151`-`ZY160` issued to this unit is left
+// wholly unused: there is no new rule here to raise one, and ADR 0043's gate refuses an entry no migration
+// raises.
 //
 // Every number allocated through 99 has now landed: the run on disk is 1..99 less the permanent gaps above,
 // less 88, which M-TILL-13 released as a permanent gap because every table its screens touch already
@@ -3371,4 +3401,4 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // the last thing before SCHEMA_VERSION, and a merge that wants to add another edits this one instead:
 // `allocation-note.test.ts` is what refuses a second copy, and a second next-free claim in any wording, now
 // that saying so here has failed five times.
-export const SCHEMA_VERSION = 101 as const
+export const SCHEMA_VERSION = 105 as const

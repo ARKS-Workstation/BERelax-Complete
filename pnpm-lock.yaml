@@ -286,6 +286,9 @@ importers:
       '@berelax/messaging':
         specifier: workspace:*
         version: link:../messaging
+      '@berelax/payments':
+        specifier: workspace:*
+        version: link:../payments
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
@@ -374,6 +377,21 @@ importers:
         version: 1.56.1
 
   packages/messaging:
+    dependencies:
+      '@berelax/config':
+        specifier: workspace:*
+        version: link:../config
+      '@berelax/core':
+        specifier: workspace:*
+        version: link:../core
+      '@berelax/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@berelax/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/payments:
     dependencies:
       '@berelax/config':
         specifier: workspace:*

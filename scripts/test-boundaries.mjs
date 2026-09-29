@@ -278,6 +278,45 @@ const CASES = [
     file: 'packages/core/src/tax/__boundary_fixture__.ts',
     source: ["import axios from 'axios'", 'export const illegal = axios', ''].join('\n'),
   },
+  // Y-PAY-01 asks dependency-cruiser to prove two things the conformance suite cannot see, because both are
+  // about which modules may REACH an adapter rather than about how an adapter behaves. Each is a fixture in
+  // the place the mistake would actually be made: a consumer reaching for the fake directly, and shipped code
+  // reaching for a deliberately broken one.
+  {
+    rule: 'payment-gateway-adapters-only-through-the-registry',
+    // Not a contrived module: this is the import a screen author writes the first time they want a gateway
+    // and have not found the registry. It would keep using the fake in production with nothing saying so,
+    // because that call site never asks the config anything.
+    file: 'packages/payments/src/__boundary_fixture__.ts',
+    source: [
+      "import { createFakeCardGateway } from './adapters/fake-card.ts'",
+      'export const illegal = createFakeCardGateway',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'payment-gateway-adapters-only-through-the-registry',
+    // The till adapter as well as the gateway, because the rule's `to` is one path prefix and a fixture for
+    // only one of the two directories would still pass if the prefix had drifted onto the other.
+    file: 'packages/payments/src/__boundary_fixture__.ts',
+    source: [
+      "import { createManualGateway } from './adapters/manual.ts'",
+      'export const illegal = createManualGateway',
+      '',
+    ].join('\n'),
+  },
+  {
+    rule: 'non-conforming-payment-fixtures-stay-in-the-conformance-suite',
+    // The saboteur is a complete, compiling PaymentGateway that authorises, captures and refunds, and its one
+    // defect is that it leaves no record. A system wired to it would take money and post nothing, which
+    // presents as a reconciliation short by every transaction with no error anywhere.
+    file: 'packages/payments/src/__boundary_fixture__.ts',
+    source: [
+      "import { createSaboteurGateway } from './conformance/fixtures/saboteur.ts'",
+      'export const illegal = createSaboteurGateway',
+      '',
+    ].join('\n'),
+  },
 ]
 
 let failures = 0

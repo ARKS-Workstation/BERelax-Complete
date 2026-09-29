@@ -19463,7 +19463,7 @@ units:
       and the H02 fake card gateway behind one registry. One conformance suite runs against every adapter
       so the real integration is a config change, not a rewrite.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F03
@@ -19493,12 +19493,84 @@ units:
       0005
     - every port method takes and returns integer-fils Money with explicit currency; a float amount literal
       is a compile error, asserted by a type-level test
+    - 'NOTE: the conformance suite is a RUNNER, runPaymentGatewayConformance, returning a per-rule report,
+      not a describe block. A describe block can assert that an adapter conforms and cannot assert that one
+      FAILS a named rule, which is the direction ADR 0003 is about: a conformance suite nothing has ever
+      failed is a suite that conforms to nothing. Nineteen rules; the saboteur fixture in
+      packages/payments/src/conformance/fixtures/saboteur.ts carries nineteen defects plus a conforming
+      control, and suite.test.ts asserts each defect fails EXACTLY its expected rule set and that the set
+      contains the rule the defect exists to break.'
+    - 'NOTE: every capability an adapter declares false is a refusal the suite DEMANDS, never a case it
+      skips. supportsVoid:false means a void must be refused; emitsEvents:false means the stream must be
+      empty after a capture; hasExternalService:false means an armed failure must change nothing. The manual
+      till adapter declares three of the five false, so four inverse branches are exercised by a real
+      shipped adapter on every run. This is why the report carries one result per rule for every candidate
+      and suite.test.ts asserts that count.'
+    - 'NOTE: migration 0105 adds the fourth tender kind, card_online, posting to 1030 Payment gateway
+      clearing with adapter=gateway. That is what makes the port''s instrument type TenderKind rather than a
+      second vocabulary — M-TILL-07 left the room for it (tender_type.adapter is the closed set
+      (manual, gateway) under the note "This is the column Y-PAY''s types will differ on") and 0018 had
+      seeded 1030 with nothing debiting it. 1030 and not 1040 because the terminal reconciles against a
+      merchant statement and the gateway against a payout file, and one account holding both reconciles
+      against neither.'
+    - 'NOTE: the private SQLSTATE band ZY151-ZY160 allocated to this unit is WHOLLY UNUSED. 0105 adds no rule
+      that can be broken, and ADR 0043''s gate refuses a registry entry no migration raises. The refusals
+      this unit is about are TypeScript''s, the conformance suite''s, and two new dependency-cruiser rules:
+      payment-gateway-adapters-only-through-the-registry and
+      non-conforming-payment-fixtures-stay-in-the-conformance-suite, each with fixtures in
+      scripts/test-boundaries.mjs and in gate block 133.'
+    - 'NOTE: the fake card gateway reports THOUSANDTHS, not fils, and converts at its edge. No gateway is
+      chosen and the MCC is unanswered (OPEN-QUESTIONS Y7-mcc), so the real convention is unknown and
+      nothing here guesses it; what is certain is that a build where every adapter spoke fils would ship
+      ADR 0007''s edge-conversion requirement untested, with the conversion functions having no caller and
+      the round-trip rule passing vacuously. suite.test.ts asserts that at least one adapter declares a
+      foreign convention, so this cannot quietly become fils. It is a property of a fake, not a claim about
+      any acquirer.'
+    - 'NOTE: two payment ports now exist. H02''s PaymentProvider in packages/providers/src/payments predates
+      this chain and has no consumer outside that package — Providers.till and Providers.cards are unused. It
+      is left in place rather than removed, because removing it edits H02''s deliverable and its own
+      conformance test. Y-PAY-02, which owns the intent surface, should retire Providers.till and
+      Providers.cards rather than choose between the two by accident. What IS shared is deliberate and
+      imported by subpath (the providers barrel is banned outside a transport): REFERENCE_MARKERS via the new
+      @berelax/providers/payments entry point, FailureScript via /failure, notImplemented via the new
+      /not-implemented.'
+    - 'NOTE: deferred to Y-PAY-02 — packages/core/src/payments/state.test.ts is deliberately left
+      unwritten and its filename free. This unit declares INTENT_TRANSITIONS as a total
+      Record<state, Record<event, state | refused>> so that Y-PAY-02''s exhaustive test can assert it total
+      over the enum product, and ships nextIntentState''s named IntentTransitionRefused for every pair
+      outside it; the exhaustiveness assertion itself is Y-PAY-02''s acceptance line. This unit''s own
+      lifecycle tests are in state.transitions.test.ts and state.property.test.ts.'
+    - 'NOTE: deferred to Y-PAY-04 — webhook signature verification, the timestamp tolerance window and
+      exactly-once-per-handler delivery. The port declares no verify() method: this unit provides the event
+      SHAPE (PaymentIntentEvent, GatewayEventDelivery, an opaque GatewayEventCursor) and eventsSince(cursor)
+      with a conformance rule that a cursor must advance. Order-independent convergence is already
+      discharged here rather than deferred — reduceIntent sorts by the gateway''s occurredAt before folding,
+      so a shuffled delivery converges by construction and Y-PAY-04 needs no buffer.'
+    - 'NOTE: deferred to Y-PAY-08 — the dispute/chargeback events. PAYMENT_INTENT_EVENTS deliberately stops
+      at six and carries no disputed event, and the H02 fake''s -DISPUTE reference marker therefore steers
+      nothing in this adapter. Adding the event is a tsc failure until every row of INTENT_TRANSITIONS and
+      every entry of INTENT_EVENT_CARRIES_AMOUNT answers for it, which is gate case 133k.'
+    - 'NOTE: deferred to Y-PAY-03 — the 3DS demo path. The fake exposes completeCustomerAction as its
+      stand-in for a customer returning from a challenge, and it is NOT on the port, so the conformance suite
+      cannot reach it. packages/payments/src/index.ts re-exports the FakeCardGateway TYPE (a type-only edge,
+      exempted by the registry-chokepoint rule the way SealedToken is exempted) so that unit can narrow
+      registry.cards to it.'
+    - 'NOTE: no test port band was used. Nothing here starts a server: the port is pure and both adapters are
+      in-memory, so every suite in this unit is a unit suite. The band 16_700 allocated to this unit is
+      unused and unclaimed, which apps/web/src/test-ports.test.ts requires of a band nobody declares.'
     files:
     - packages/core/src/payments/port.ts
     - packages/core/src/payments/state.ts
+    - packages/core/src/payments/guards.ts
+    - packages/core/src/payments/minor-units.ts
     - packages/payments/src/registry.ts
     - packages/payments/src/adapters/manual.ts
+    - packages/payments/src/adapters/fake-card.ts
+    - packages/payments/src/conformance/suite.ts
     - packages/payments/src/conformance/suite.test.ts
+    - packages/payments/src/conformance/fixtures/saboteur.ts
+    - packages/db/migrations/0105_gateway_tender_type.sql
+    - docs/adr/0055-a-payment-adapter-is-what-the-conformance-suite-accepts.md
     - packages/config/src/env.ts
     - scripts/test-gates.mjs
   - id: Y-PAY-02

@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**136 / 211 units complete.**
+**137 / 211 units complete.**
 
 ## Next up
 
@@ -211,7 +211,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 190 | `H-MIG-08` | The reconciliation report generator | `H-MIG-03`, `H-MIG-04`, `H-MIG-05`, `H-MIG-06`, `H-MIG-07` | — | — |
 | [ ] | 191 | `H-MIG-09` | Three dry runs, gated on zero unexplained variance | `H-HARD-04`, `H-MIG-08` | — | — |
 | [ ] | 192 | `H-MIG-10` | Parallel run, staff pilot instrumentation and front-desk speed | `B-UI-01`, `B-UI-02`, `B-UI-03`, `B-UI-04`, `B-UI-05`, `H-MIG-09`, `R-REP-01`, `R-REP-02`, `R-REP-03`, `R-REP-04`, `R-REP-05`, `R-REP-06`, `R-REP-07`, `R-REP-08` | — | Y12-pilot, Y14-devices |
-| [ ] | 193 | `Y-PAY-01` | Payment gateway port, adapter conformance suite and provider registry | `F03`, `H02`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
+| [x] | 193 | `Y-PAY-01` | Payment gateway port, adapter conformance suite and provider registry | `F03`, `H02`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13` | — | — |
 | [ ] | 194 | `Y-PAY-02` | payment_intent, idempotency and the capture/refund state machine | `F06`, `Y-PAY-01` | — | — |
 | [ ] | 195 | `Y-PAY-03` | SAQ-A hosted-fields checkout and the PAN-never-touched gate | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `Y-PAY-02` | — | — |
 | [ ] | 196 | `Y-PAY-04` | Webhook ingest: signature verification, replay protection, idempotent handlers | `F06`, `Y-PAY-02` | — | — |

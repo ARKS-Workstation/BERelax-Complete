@@ -131,6 +131,26 @@ export const TENDER_TYPES: Readonly<Record<TenderKind, TenderTypeSpec>> = Object
     adapter: 'manual',
     sortOrder: 3,
   }),
+  /**
+   * The gateway's kind, and the first entry whose adapter is not `manual` (Y-PAY-01, migration 0105).
+   *
+   * `requiresReference` is true and it is the strongest of the four: the reference is the gateway's own
+   * intent id, and a `card_online` payment without one cannot be tied to a payout line, a webhook or a
+   * dispute — which are the only three ways this money is ever heard about again. `settlesImmediately` is
+   * false because a gateway payout lands days later net of fees, so 1030 clears rather than the bank.
+   * `givesChange` is false for `card_in_salon`'s reason exactly: a gateway authorises an amount, and a
+   * surplus is a mis-keyed figure rather than a twenty-dirham note.
+   */
+  card_online: Object.freeze({
+    code: 'card_online',
+    label: 'Card — online',
+    account: TENDER_ACCOUNT.card_online,
+    givesChange: false,
+    requiresReference: true,
+    settlesImmediately: false,
+    adapter: 'gateway',
+    sortOrder: 4,
+  }),
 })
 
 /** The registry in the order a till offers it, which is `sortOrder` and not insertion order. */
