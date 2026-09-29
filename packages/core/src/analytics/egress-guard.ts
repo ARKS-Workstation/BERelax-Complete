@@ -284,10 +284,17 @@ export function serialiseEgressPayload(payload: EgressPayload): string {
  * `stem` matches at the start of a word, because `pregnancies` is the same disclosure as `pregnancy` and a
  * lexicon of exact words is defeated by a plural. `word` matches a whole word or its plural, for a term
  * short enough that a prefix would hit ordinary English — `pain` as a stem flags `painting`, which the
- * negative control in `egress-guard.test.ts` caught on the first run and which is exactly the
- * `efile`/`readFileSync` hazard M-VAT-09 records (ADR 0052): a gate that fires on legitimate content is a
- * gate somebody switches off rather than fixes. `phrase` is for a term that is two words, which a
- * word-by-word scan cannot see at all.
+ * negative control in `egress-guard.test.ts` caught on the first run. It is the substring-versus-segment
+ * hazard M-VAT-09 records (ADR 0052), where an unaligned match on a five-letter term hits `readFileSync`
+ * and `writeFileSync` about forty times: a gate that fires on legitimate content is a gate somebody
+ * switches off rather than fixes. `phrase` is for a term that is two words, which a word-by-word scan
+ * cannot see at all.
+ *
+ * The forbidden term itself is deliberately NOT quoted here. `pnpm no-autofile` scans every raw line in the
+ * repository, comments included, and it is right to: a shipped module has no business carrying the name of
+ * a filing capability even as a citation, and the alternative — adding this file to that gate's
+ * IDENTIFIER_ALLOWED — would excuse `packages/core` from the one check that says the build cannot file a
+ * return. The scan caught this comment on its first run against this unit.
  */
 export type HealthTermMatch = 'stem' | 'word' | 'phrase'
 

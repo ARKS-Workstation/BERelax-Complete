@@ -12998,7 +12998,7 @@ units:
       an opaque allowlisted category code, and building every external payload through a field allowlist,
       so no service name, health term or free text can ever leave the building.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - A-FIRST-02
@@ -13021,11 +13021,73 @@ units:
       asserted by a test that adds one'
     - the guard is in packages/core and passes pnpm purity; an arch test asserts the GA4 and Meta adapters
       accept only the guard's branded output type, so no call site can bypass it
+    - 'NOTE: the closed set is enumerated from ONE source and asserted in both directions in two places,
+      because neither alone is the acceptance line. packages/core/src/analytics/egress-guard.test.ts holds
+      enumerateCatalogueRefs() (8 services x 4 durations, 3 price-on-request footprints, 1 bundle category =
+      44) against the literal CATEGORY_CODE_BY_REF table — total by compilation over a template-literal
+      union, so a fifth duration is a tsc error — and packages/fixtures/src/egress-catalogue.itest.ts holds
+      the same enumeration against the seeded service, service_variant, price_on_request and
+      package_template rows. Without the second, the first iterates a list this build wrote about itself
+      (ADR 0002). The table is written out rather than derived from a counter for the reason
+      contraindicationFlagSetSchema is: a generated table cannot disagree with the generator, so totality,
+      injectivity and shape would all hold by construction and every assertion about them would be vacuous.'
+    - 'NOTE: opacity turned out to be a property of the whole PAYLOAD rather than of the code, and that is
+      the decision ADR 0059 records. The 32 prices of docs/13 are public, so a price_viewed event carrying
+      an opaque code beside its figure hands over one row of the mapping and a few hundred hand over the
+      menu. buildEgressPayload therefore carries valueFils and currency only for FUNNEL_TERMINAL_STAGE, read
+      from the tuple rather than spelled, and refuses it elsewhere as a counted drop. The suite asserts the
+      strong form — nothing appears in a serialised payload except a closed permitted vocabulary — rather
+      than the weak form that no health term does, which also holds for a payload that leaked a service name
+      instead.'
+    - 'NOTE: three defects in this unit''s own work, each found by a control rather than by review. (1) The
+      shape control listed MASSAGE_01 as something ^[A-Z]+_[0-9]{2,}$ should refuse; it satisfies it
+      perfectly, which is why the opacity assertion is a second mechanism and not a restatement. (2) The
+      health lexicon matched stems at a word start, so ''pain'' flagged ''painting'' — the readFileSync
+      hazard of M-VAT-09 (ADR 0052) — and entries now declare stem, word or phrase matching. (3)
+      check-egress-guard.mjs assembled the GA4 host by joining on a dot, spelling google.analytics.com when
+      the real host is google-analytics.com, so the destination rule could not see a planted
+      /mp/collect endpoint; no control inside the scanner could catch that, because a pattern and any sample
+      built from the same array agree whatever the array says, so gate case 137m plants a real endpoint. A
+      fourth was found by the scanner''s own used-check: rule 3 searched for a code in single quotes only,
+      and the one place a code legitimately appears is inside a JSON string in double quotes.'
+    - 'NOTE: DEFERRED to A-MEAS-03 — the arch test asserting the GA4 and Meta adapters accept only the
+      guard''s branded output type. packages/analytics does not exist yet, so an assertion about an adapter
+      signature would pass over nothing (ADR 0002). What ships instead is live today and is what makes that
+      test possible rather than merely true: EgressPayload is branded with a phantom unique symbol, so no
+      object literal satisfies it; egress-brand-minted-outside-the-guard refuses the cast that would forge
+      one anywhere in the repository, tests included; and analytics-destination-outside-the-declared-adapters
+      refuses any module naming an analytics destination host unless it is in DECLARED_ADAPTERS, which is
+      empty. A-MEAS-03 adds its adapters to that map and asserts the signature.'
+    - 'NOTE: DEFERRED, owner unassigned — "every add-on" in the acceptance line. This build has no add-on
+      concept at all: no table, no migration, no schema enum, and no other unit in build/manifest.yaml
+      mentions one (the only two occurrences of the word are in this unit''s own summary and acceptance
+      list). A service is (style x treatment) with duration as the only pricing axis (ADR 0021), and an
+      add-on would be a third axis that 0017 and 0025 both refused. So there was nothing to map, and no
+      mapping was invented for a row shape nobody has decided on (brief rule 15). Whichever unit introduces
+      add-ons adds a CatalogueRef member and a code block; the Record over CatalogueRefKey makes that a tsc
+      error rather than an omission.'
+    - 'NOTE: DEFERRED to A-MEAS-03 — the shared event_id is not a payload field here. It is A-MEAS-03''s
+      acceptance line (one event_id used by both the client tag and the server push, stable across retries),
+      and adding a field to EGRESS_PAYLOAD_FIELDS for it now would put an identifier in the allowlist with no
+      producer. A field added to the candidate without being added to that tuple is dropped and counted, so
+      the failure direction when A-MEAS-03 wires it is a visible drop rather than a silent carry.'
+    - 'NOTE: allocations — migration 0109 UNUSED (this unit is pure code in packages/core plus one scan; it
+      adds no table, column or constraint). No private SQLSTATE raised, so none of ZY191-ZY200 is registered
+      (an entry no migration raises fails pnpm sqlstate). Test port band 17_900 UNUSED — no suite here starts
+      a server, and a declared-and-unused band fails test-ports.test.ts. Gate block // 137a-137z. inserted
+      after block 133 and before the harness blocks 79/88/89/90. ADR 0059 written. pnpm egress is the 43rd
+      verify step and is registered in gate case 29''s array, without which pnpm gate-registry fails.'
     files:
     - packages/core/src/analytics/egress-guard.ts
     - packages/core/src/analytics/egress-guard.test.ts
     - packages/core/src/analytics/category-codes.ts
+    - packages/core/src/analytics/index.ts
+    - packages/fixtures/src/egress-catalogue.itest.ts
+    - scripts/check-egress-guard.mjs
     - scripts/test-gates.mjs
+    - docs/adr/0059-an-opaque-category-code-is-a-property-of-the-whole-payload.md
+    - package.json
+    - .github/workflows/ci.yml
   - id: A-MEAS-02
     order: 115
     title: 'Analytics consent: Consent Mode v2 gating client tags and server pushes'

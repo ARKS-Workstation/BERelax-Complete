@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -59,6 +59,36 @@ const isScanItself = (file: string): boolean => file.endsWith('wps-no-submission
  * a script, which is the scope this exemption is careful not to give up.
  */
 const isGateSuite = (file: string): boolean => file.endsWith(join('scripts', 'test-gates.mjs'))
+
+/**
+ * Sibling CHECKS that carry the network patterns as the patterns THEY search for, exempt from rule 1.
+ *
+ * Same class as {@link isGateSuite} and a different mechanism, so it is a separate list rather than a wider
+ * predicate. A check about egress holds `/\bfetch\s*\(/` and `/\bXMLHttpRequest\b/` as data, and if it
+ * also names this file — which a sibling that exempts THIS check by path necessarily does, because the path
+ * contains the word — then `ABOUT_WPS` and `NETWORK` both match a file with no network call in it at all.
+ * That is what happened: `scripts/check-egress-guard.mjs` (A-MEAS-01) exempts this suite by name from its own
+ * destination-host rule, and rule 1 then reported it.
+ *
+ * Exempt from rule 1 ONLY. Rule 2 still covers these files, so a real submission URL in one is still caught,
+ * and every other script stays in rule 1's reach — the scope this exemption is careful not to give up.
+ *
+ * The control is EXISTENCE rather than use: these files are expected to match nothing once exempted, so
+ * "the entry was needed" cannot be asserted, but "the entry still points at a file" can. A renamed sibling
+ * would otherwise leave the exemption pointed at nothing and the next file to take that path would inherit
+ * it. Rewording this suite's prose until the regexp was satisfied was the other option, and that is
+ * appeasing a check rather than fixing it.
+ */
+const SIBLING_CHECKS_CARRYING_NETWORK_PATTERNS = new Map([
+  [
+    join('scripts', 'check-egress-guard.mjs'),
+    'the egress guard scan (A-MEAS-01): holds the network globals it forbids inside the guard, and names ' +
+      'this file in the sibling-exemption set of its own destination-host rule',
+  ],
+])
+
+const isSiblingCheck = (file: string): boolean =>
+  [...SIBLING_CHECKS_CARRYING_NETWORK_PATTERNS.keys()].some((suffix) => file.endsWith(suffix))
 
 function sources(): readonly string[] {
   const found: string[] = []
@@ -143,7 +173,7 @@ describe('there is no WPS or bank submission path in this repository', () => {
   it('finds no module that knows about WPS and also reaches the network', () => {
     const offenders: string[] = []
     for (const file of sources()) {
-      if (isScanItself(file) || isGateSuite(file)) continue
+      if (isScanItself(file) || isGateSuite(file) || isSiblingCheck(file)) continue
       const text = codeOnly(readFileSync(file, 'utf8'))
       if (!ABOUT_WPS.test(text)) continue
       const reached = NETWORK.filter((pattern) => pattern.test(text))
@@ -159,6 +189,21 @@ describe('there is no WPS or bank submission path in this repository', () => {
         'disabled" is docs/04 §4’s rule for exactly this. `exportWpsFile` returns a string; a ' +
         'human gives it to their bank.',
     ).toEqual([])
+  })
+
+  it('every rule-1 sibling exemption still points at a file that exists', () => {
+    // The control that keeps the exemption above honest. These entries are allowed to match nothing — that is
+    // the point of exempting them — so the thing that must hold is that each still resolves to a real file.
+    for (const [suffix, reason] of SIBLING_CHECKS_CARRYING_NETWORK_PATTERNS) {
+      expect(
+        existsSync(join(ROOT, suffix)),
+        `${suffix} is exempt from rule 1 ("${reason}") and does not exist. The sibling check was renamed ` +
+          'or removed, and an exemption pointed at nothing is how an allowance outlives the thing it was ' +
+          'written for.',
+      ).toBe(true)
+    }
+    // And it must be a real exemption rather than an empty list quietly satisfying the loop.
+    expect(SIBLING_CHECKS_CARRYING_NETWORK_PATTERNS.size).toBeGreaterThan(0)
   })
 
   it('finds no URL naming a wage-file or bank-submission host', () => {
