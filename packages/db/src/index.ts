@@ -1907,6 +1907,14 @@ export {
   readPackageDefaultTerms,
 } from './settings/package.ts'
 export {
+  type PackageReconstructionPolicy,
+  type PackageTemplateKeyRow,
+  readPackageReconstructionPolicy,
+  readPackageTemplateKeys,
+  readWorkbookPackageTemplates,
+  type WorkbookPackageTemplate,
+} from './settings/package-templates.ts'
+export {
   REMINDER_OFFSETS_SETTING_KEY,
   readReminderOffsets,
 } from './settings/reminders.ts'

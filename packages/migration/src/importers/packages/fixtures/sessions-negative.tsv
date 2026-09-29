@@ -1,0 +1,3 @@
+# Deliberately malformed: a negative count, which a spreadsheet formula produces and nobody reads.
+holder_phone_e164	template_key	purchase_date	price_paid_fils	sessions_total	sessions_used	sessions_remaining	expires_on	evidence_kind	evidence_reference	owner_signed_off	notes
++971590000101	fixture_template_a	2025-03-11	100000	5	-1	5	2025-09-11	receipt	receipt 4417, front-desk folder	yes	
