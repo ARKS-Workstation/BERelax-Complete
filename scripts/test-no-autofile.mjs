@@ -92,6 +92,23 @@ const IDENTIFIER_ALLOWED = new Map([
     'scripts/test-gates.mjs',
     'holds the known-bad fixtures for this gate, which must contain the strings it rejects',
   ],
+  // P-HR-12's two, and they are the same case as 0052 below rather than a new one: both QUOTE docs/04 §4's
+  // sentence — "the codebase contains no auto-file capability, absent, not disabled" — in a comment
+  // explaining why a wage file is written to a string and never posted anywhere. The scan reads tokens and
+  // cannot tell a capability from a sentence about its absence, and file-level allowances with a stated
+  // reason are the mechanism this gate chose for that over blanking comments. Both are load-bearing prose: a
+  // WPS file filed against an establishment id this build invented would be an offence rather than a bug,
+  // and the paragraph is where that is said.
+  [
+    'packages/core/src/hr/wps-sif.ts',
+    'explains in a comment why the wage file is a STRING with no endpoint, quoting the auto-file sentence ' +
+      'this gate enforces',
+  ],
+  [
+    'packages/fixtures/src/wps-no-submission.test.ts',
+    'the suite asserting that no WPS submission path exists; it quotes the auto-file sentence and holds the ' +
+      'patterns its own three rules reject',
+  ],
   [
     'packages/db/migrations/0052_obligation.sql',
     'states in a comment that the system "contains no auto-file capability" — the sentence this gate ' +
