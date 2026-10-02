@@ -2044,6 +2044,33 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_imported_contact_outcome'],
     translators: ['packages/db/src/services/import-contacts.ts'],
   },
+  // ZY341-ZY342 are G-REV-06's, of the band ZY341-ZY350; ZY343 through ZY350 are left free and
+  // deliberately absent, because an entry for a code no migration raises is direction 3.
+  //
+  // ZY341 is the one that carries the unit. There is no Business Profile API access in this build (ADR
+  // 0005), so nothing in it has ever SEEN a reply on the listing: `posted_manually_at` records that a
+  // person said they pasted one into Google. A claim with no claimant is not evidence of anything, and the
+  // claimant is not a second column — it is the `audit_event` row, which this code refuses to let the
+  // delivery commit without. ZZ004's shape, for ZZ004's reason.
+  //
+  // ZY342 is what G-REV-05 deferred here by name: the stored digest exists to be COMPARED, and a hash that
+  // can be rewritten to match edited text is evidence of nothing. It bites only once a delivery timestamp
+  // is set, because before that an owner may re-approve an edited reply and the append-only trail keeps
+  // every hash they approved.
+  {
+    code: 'ZY341',
+    rule: 'A manual posting of a reply must be attributed to a named staff actor by an audit_event in the same transaction.',
+    migration: '0128',
+    raisedBy: ['assert_manual_post_is_a_claim'],
+    translators: ['packages/db/src/repositories/reviews.ts'],
+  },
+  {
+    code: 'ZY342',
+    rule: "A delivered reply's lint stamp and its delivery instant may not change.",
+    migration: '0128',
+    raisedBy: ['refuse_delivered_reply_change'],
+    translators: ['packages/db/src/repositories/reviews.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

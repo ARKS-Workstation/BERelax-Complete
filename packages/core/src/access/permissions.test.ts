@@ -117,6 +117,23 @@ describe('the receptionist boundary — the case route-level checks cannot expre
     expect(can('auditor', 'review:record')).toBe(false)
   })
 
+  it('CANNOT approve a reply, which G-REV-06 made a permission of its own', () => {
+    // The sentence the catalogue entry for `review:record` has carried since G-REV-02 — "folding the two
+    // together would mean the role that types in a one-star review could also publish the answer to it" —
+    // becomes a real assertion here now that the second permission exists. Owner-only, like `content:publish`.
+    expect(can('receptionist', 'review:reply_approve')).toBe(false)
+    expect(can('manager', 'review:reply_approve')).toBe(false)
+    expect(can('marketer', 'review:reply_approve')).toBe(false)
+    expect(can('therapist', 'review:reply_approve')).toBe(false)
+    expect(can('auditor', 'review:reply_approve')).toBe(false)
+    // The system role is refused too, which is the one that matters: an agent approving its own draft is
+    // the mandatory-approval requirement deleted, and docs/07 SS4 is explicit that a human does it.
+    expect(can('system', 'review:reply_approve')).toBe(false)
+    // The control, without which every assertion above would pass for a permission nobody declared —
+    // `can()` denies an unknown string by default (the deny-by-default case at the top of this file).
+    expect(can('owner', 'review:reply_approve')).toBe(true)
+  })
+
   it('CANNOT export the client list — the insider-threat path', () => {
     expect(can('receptionist', 'customer:export')).toBe(false)
   })

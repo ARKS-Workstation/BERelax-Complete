@@ -282,7 +282,10 @@ export {
 } from './oauth/revoke.ts'
 export { createPostgresConnectionStore } from './postgres-store.ts'
 export {
+  approveReply,
   deliverApprovedReply,
+  markReplyPostedManually,
+  type ReplyApproved,
   type ReplyDelivered,
   type ReplyDeliveryDeps,
   type ReplyDeliveryInput,

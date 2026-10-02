@@ -1322,12 +1322,14 @@ export {
   getReview,
   type IngestedReview,
   ingestApiReview,
+  isDeliveredReplyFrozenRefusal,
   listReviewQueue,
   listStaffDisplayNames,
   listUndraftedReviews,
   type ManualReviewInput,
   type QuarantineWriteOutcome,
   type QueuedReview,
+  REPLY_DELIVERY_SQLSTATE,
   type ReconciliationInput,
   type ReconciliationOutcome,
   type ReplyDraftInput,
@@ -1337,11 +1339,13 @@ export {
   reconcileApiReviewId,
   recordDraftQuarantine,
   recordManualReview,
+  recordReplyApproved,
   recordReplyConfirmedByGoogle,
   recordReplyDraft,
   recordReplyPostedManually,
   recordReplySubmittedToApi,
   recordRoutingVerdict,
+  replyDeliveryRefusal,
 } from './repositories/reviews.ts'
 export {
   assertRecipesMatchRules,
@@ -4229,4 +4233,65 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // refuses an entry for a code no migration raises — and nothing here can be refused by the database,
 // since nothing here writes.
 //
-export const SCHEMA_VERSION = 122 as const
+// 128 is 0128_reply_posting_claim.sql (G-REV-06) — the approval queue's two refusals: a manual posting is
+// a NAMED HUMAN'S CLAIM, and a delivered reply's record is frozen. No table and no column, so there is no
+// Drizzle mirror to extend.
+//
+// The first is the unit. There is no Business Profile API access in this build (docs/10 §4, OPEN-QUESTIONS Y3-gbp-api), which is the
+// whole reason an approval queue exists at all — so at the moment `posted_manually_at` is written,
+// **nothing in this system has seen the reply on the listing.** A person pressed a button to say they had
+// pasted it into Google. A row recording only *the reply was posted at 14:02* is a fact nobody is
+// answerable for, and the first question asked of it — who said so? — has no answer.
+//
+// The claimant is deliberately NOT a second column. `audit_event` already carries `actor_kind`, `actor_id`
+// and `occurred_at` for every write in this build, and a copy of the actor on `google_reviews` would be
+// the brief's "a second statement of a fact drifts" with the drifting copy on the row an auditor reads.
+// What was missing was any guarantee the trail is THERE, so ZY341 is a deferrable constraint trigger
+// refusing the delivery at COMMIT unless an `audit_event` in the same transaction attributes it to a staff
+// actor with a non-null `actor_id` — ZZ004's shape (0093), for ZZ004's reason: an audit row written in a
+// later transaction is not the same promise, because the delivery can commit and the audit can fail.
+// `actor_kind = 'staff'` is not enough on its own, since a row whose label names a SURFACE satisfies it,
+// and that is what the diary, the pipeline board and the quick-book screen correctly record for
+// themselves — they have no session to read. This screen does (W-SYS-11).
+//
+// It fires on the UPDATE only, and the hole is stated rather than hidden: an INSERT arriving with the
+// timestamp already set slips past. That is because rows like that exist and are correct —
+// `packages/db/src/schema/reviews.itest.ts` inserts one to prove 0020's decision that the two modes'
+// timestamps coexist and exclude each other per row, which is a claim about a row's SHAPE rather than
+// about a queue action. Demanding an audit row from that probe would make this migration refuse a correct
+// test of a different rule, and the way that gets resolved under pressure is by weakening the rule. No
+// production path inserts a delivered row.
+//
+// ZY342 is what G-REV-05 deferred here by name — "immutability after delivery is a trigger that unit
+// should add". AFTER DELIVERY and not after approval, because this unit's screen has two steps: an owner
+// approves a reply, reads it again, and may edit it before pasting it anywhere. So a re-approval
+// overwrites the stamp and writes a second `google_review.reply_approved` row carrying the new hash, and
+// the append-only trail (ADR 0008) is what keeps every version recoverable.
+//
+// Once a delivery timestamp is set, the lint VERSION, the DIGEST and an already-set delivery instant are
+// frozen — and `reply_approved_text` and `reply_lint_passed_at` deliberately are NOT, which is the sharper
+// half of the design and was arrived at by being wrong first. Freezing the text destroys the detector:
+// `reproduceReplyLint`'s `content_changed` outcome is "the stored text no longer hashes to the stored
+// digest", and it is reachable only because the digest cannot move. Freeze both and an edited row is
+// indistinguishable from an untouched one; freeze neither and whoever edits the text recomputes the hash
+// and nothing notices. Freezing exactly the digest is what makes an edit DETECTABLE, which is the honest
+// limit `deliver.ts` already states: the floor stops the accident, the reproduction catches the
+// fabrication — and `reply-delivery.itest.ts` constructs precisely that row, which is how this was found.
+// `reply_lint_passed_at` is outside it for a plainer reason: nothing compares it, and the one writer that
+// legitimately touches a delivered row sets it to `now()` in the same statement, so a trigger raising
+// there would answer `review-queue.itest.ts`'s assertion about `google_reviews_delivery_fields_match_mode`
+// with this code's name instead.
+//
+// `confirmed_at` is not frozen — it is Google's acknowledgement arriving after an API submission, so it is
+// written on an already-delivered row by construction. Neither does ZY342 fire on a NULL instant becoming
+// non-null on a delivered row: that is the both-modes contradiction, and
+// `google_reviews_delivery_fields_match_mode` (0020) is the rule that names it, asserted by name in
+// `review-queue.itest.ts`. A BEFORE trigger raising first would answer that assertion with this unit's
+// code instead, which is how a correct test of one rule comes to be about another.
+//
+// Both are triggers rather than CHECK constraints because neither claim is about one row's columns: ZY341
+// reads `audit_event`, which no CHECK may do, and ZY342 compares NEW to OLD, which a CHECK cannot see.
+// ZY341-ZY342 of the band ZY341-ZY350 are used; ZY343 through ZY350 are released UNUSED and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 128 as const

@@ -1159,6 +1159,85 @@ export const ROUTES = [
       'its own path, which is what W-SITE-05 made the `indexable` field mean.',
   },
   {
+    id: 'reviews-queue',
+    path: '/reviews',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-06s approval queue: every review this system knows about for ONE listing, where each stands, ' +
+      'and why it is escalated in plain English - the row of the docs/07 SS4 table that decided it and the ' +
+      'escalation categories its text matched, re-derived from the lexicon VERSION the verdict was taken ' +
+      'against rather than from todays. A handler rather than a document for the reason the paste form ' +
+      'beside it, the diary, the pipeline board, the Messages inbox, the template editor, the compliance ' +
+      'calendar, the duplicate queue and the quick-book screen all give: a registry document must be served ' +
+      'in BOTH locales, which needs an Arabic admin document and the W-SYS-01 shell - and ?dir=rtl ' +
+      're-renders this English document mirrored so the direction half of the accessibility matrix is ' +
+      'audited without inventing an Arabic admin surface. READ-ONLY, and authenticated in the GET as well ' +
+      'as the writes next door: the page carries a reviewers words about this business and is refused on ' +
+      'the F07 matrix with `review:reply_approve`, which this unit added and granted to the owner alone. ' +
+      'There is deliberately no ?role= and no ?employee= parameter (W-SYS-11s scan); ?connection= and ' +
+      '?place= choose which LISTING to show and are intersected with the listings this system manages, ' +
+      'because a queue scoped to half a pair would be the other listings reviews. NO sampleParams: it ' +
+      'takes a query and the listings that exist depend on what has been connected. It carries no reply ' +
+      'text and no review text - a queue is read to choose what to open. Dynamic and never cached: every ' +
+      'row on it changes as reviews are pasted in and replies approved. Covered by the /reviews noindex ' +
+      'prefix in ADMIN_GROUP_PREFIXES.',
+  },
+  {
+    id: 'review-detail',
+    path: '/reviews/[id]',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-06s approval screen for one review: the reviewers words, the machine draft, the mandatory ' +
+      'human approval, and - once a human has approved one - Copy reply, the Google deep link and Marked ' +
+      'as posted. It WRITES: the POST is the approval, and it lints the POSTED bytes through G-REV-05s ' +
+      'send-path linter (ADR 0063) and refuses them server-side with every rule named, because the control ' +
+      'being disabled in a client is not a refusal. Copy reply copies `reply_approved_text` - a column ' +
+      'nothing can write without having passed that linter - and never the editable textarea, which is ' +
+      'what stops unlinted bytes reaching a clipboard. The deep link is reconstructed from the STORED ' +
+      'placeId by `placeReviewsDeepLink`, never configured and never stored. A handler rather than a ' +
+      'document for the reason the queue above gives, and ?dir=rtl mirrors it. NO sampleParams, although ' +
+      'the path has a segment, for the reason /hr/leave/[id] gives: a sample id would be one review the ' +
+      'screenshot harness opened on every run, and the page shows a customers words about this business. ' +
+      'Authenticated in BOTH verbs on `review:reply_approve`, and the review is intersected with the ' +
+      'listings this system manages - a reply approved against another connections review is a reply ' +
+      'posted as the wrong business. Dynamic: the lint runs against the regulatory profile and the staff ' +
+      'roster as they are now, both live rows. Covered by the /reviews noindex prefix.',
+  },
+  {
+    id: 'review-mark-posted',
+    path: '/reviews/[id]/mark-posted',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'G-REV-06s Marked as posted: a named human records that they pasted the approved reply into Google. ' +
+      'POST ONLY and deliberately no GET - there is no Business Profile API access (ADR 0005), so this ' +
+      'endpoint stores a CLAIM about the outside world rather than an observation of it, and a GET that ' +
+      'recorded a claim would be recorded by any crawler, prefetch or link preview that touched the URL. ' +
+      'It re-lints before writing, because the row sits editable between approval and this call and the ' +
+      'regulatory profile and the roster are live rows. Migration 0128s ZY341 refuses the write unless an ' +
+      'audit_event in the same transaction attributes it to a staff actor with a real id, which is what ' +
+      'makes who-said-so answerable. Its own route rather than a second button on the approval form, as ' +
+      'the manifest names it: one endpoint taking an action field would be one authorisation check and one ' +
+      'audit action standing for two decisions. A handler with no document at all - it answers 303 back to ' +
+      'the review, which is what stops a reload claiming twice. NO sampleParams, for the reason the detail ' +
+      'route gives. Dynamic, authenticated on `review:reply_approve`, and covered by the /reviews noindex ' +
+      'prefix.',
+  },
+  {
     id: 'reviews-paste',
     path: '/reviews/paste',
     kind: 'handler',

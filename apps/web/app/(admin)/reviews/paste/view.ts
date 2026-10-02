@@ -1,3 +1,5 @@
+import type { ReviewListing } from '../listings.ts'
+
 /**
  * The paste form's vocabulary: the path, the field names, the refusals and the view (G-REV-02).
  *
@@ -46,12 +48,14 @@ export const REVIEWS_PASTE_REFUSALS = [
 ] as const
 export type ReviewsPasteRefusal = (typeof REVIEWS_PASTE_REFUSALS)[number]
 
-/** One listing the form can file a review against. */
-export interface PasteListingOption {
-  readonly connectionId: string
-  readonly placeId: string
-  readonly googleEmail: string
-}
+/**
+ * One listing the form can file a review against.
+ *
+ * An alias of `ReviewListing` since G-REV-06, which needed the same shape on the approval queue and the
+ * detail screen: two declarations of one record is the brief's second statement of a fact, one level down
+ * from the two reads it replaced. The name stays because this form's render and handler read as they did.
+ */
+export type PasteListingOption = ReviewListing
 
 /** One forwarded email waiting for somebody, as the queue shows it. */
 export interface PasteQueueItem {

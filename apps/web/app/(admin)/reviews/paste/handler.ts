@@ -16,13 +16,13 @@ import {
   type Actor,
   getAwaitingPasteItem,
   listAwaitingPaste,
-  listReviewIntakeTargets,
   recordManualReview,
   resolveIntakeWithReview,
   type Sql,
   withUnitOfWork,
 } from '@berelax/db'
 import type { AdminChrome } from '../../../../src/components/admin/google-reauth-banner.ts'
+import { listReviewListings } from '../listings.ts'
 import { renderReviewsPasteHtml } from './render.ts'
 import {
   PASTE_RATINGS,
@@ -225,20 +225,15 @@ async function viewFor(
   }
 }
 
-async function listingsFor(sql: Sql): Promise<readonly PasteListingOption[]> {
-  const targets = await listReviewIntakeTargets(sql)
-  if (targets.length === 0) return []
-  const rows = await sql<{ id: string; google_email: string }[]>`
-    select id::text as id, google_email from google_connections
-    where id = any(${sql.array(targets.map((target) => target.connectionId))}::uuid[])
-  `
-  const emails = new Map(rows.map((row) => [row.id, row.google_email]))
-  return targets.map((target) => ({
-    connectionId: target.connectionId,
-    placeId: target.placeId,
-    googleEmail: emails.get(target.connectionId) ?? 'unknown account',
-  }))
-}
+/**
+ * The listings this form may file against.
+ *
+ * The read itself moved to `../listings.ts` when G-REV-06 needed the same answer on the approval queue and
+ * the detail screen — a second copy of "which listing a review may be filed against or replied to" is the
+ * brief's drifting fact, and the screen working from the stale copy would offer a reply box for a listing
+ * this system no longer serves. This alias is kept so the call sites below read as they did.
+ */
+const listingsFor = (sql: Sql): Promise<readonly PasteListingOption[]> => listReviewListings(sql)
 
 async function queueFor(
   sql: Sql,

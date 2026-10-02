@@ -15,6 +15,7 @@ import {
   type QueuedReview,
   type ReplyLintStamp,
   readCompliancePolicy,
+  recordReplyApproved,
   recordReplyPostedManually,
   recordReplySubmittedToApi,
   type Sql,
@@ -217,6 +218,175 @@ export async function readReplyLintContext(sql: Sql): Promise<ReplyLintContext> 
  * `reply-delivery.itest.ts` drives a known-bad reply through BOTH modes and asserts the same rule name, no
  * timestamp and no transport call.
  */
+/**
+ * The lint, and the stamp it produces. The ONE expression on this path that judges a reply.
+ *
+ * Extracted by G-REV-06, which needed the same judgement at a second moment — *approval*, which docs/10 §6
+ * names as its own step before the owner has pasted anything anywhere — and extracted rather than
+ * re-written for the reason ADR 0063 exists: a second construction of `sendPathReplyLinter` would be a
+ * second place that decides what `origin` to pass and which context to read, and the day they disagreed
+ * the lenient one would be whichever the approval screen called. There is still exactly one `lint(` call
+ * on the send path, and {@link deliverApprovedReply} and {@link approveReply} both go through it.
+ *
+ * It is NOT exported. An exported "lint this reply" function is an injectable linter with extra steps: a
+ * caller could lint, ignore the answer and reach a repository writer with a stamp of its own. Both public
+ * entry points below lint and write in the same call, which is what keeps the chokepoint a chokepoint.
+ */
+async function lintOrRefuse(
+  deps: Pick<ReplyDeliveryDeps, 'sql' | 'signature'>,
+  review: QueuedReview,
+  input: {
+    readonly approvedReply: string
+    readonly language: DetectableReviewLanguage
+    readonly mode: ReplyDeliveryMode
+  },
+): Promise<ReplyLintStamp> {
+  const context = await readReplyLintContext(deps.sql)
+  const linter = sendPathReplyLinter(context)
+  const findings = linter.lint({
+    draft: input.approvedReply,
+    language: input.language,
+    reviewText: review.comment,
+    reviewerDisplayName: review.reviewerDisplayName,
+    signature: deps.signature,
+    // A human approved this and may have edited it, so the house-rendering rule does not apply — every
+    // rule about what the sentence SAYS still does. See `ReplyOrigin`.
+    origin: 'approved_by_a_human',
+  })
+  if (findings.length > 0) {
+    throw new ReplyDeliveryRefused(review.id, input.mode, findings)
+  }
+  const reply = renderFinalReply({ draft: input.approvedReply, signature: deps.signature })
+  return {
+    approvedText: reply,
+    lintVersion: linter.version,
+    contentSha256: replyContentSha256(reply),
+  }
+}
+
+/** What an owner approving a reply needs back: the bytes to copy, and the stamp they were judged under. */
+export interface ReplyApproved {
+  readonly reviewId: string
+  /** The exact bytes stored as `reply_approved_text`, signature included. What *Copy reply* copies. */
+  readonly reply: string
+  readonly lintVersion: string
+  readonly contentSha256: string
+}
+
+/**
+ * A human approves a reply. Nothing becomes public, and nothing can without this having happened.
+ *
+ * docs/10 §6 gives the fallback path as four steps — *the same linter runs → **mandatory human approval**
+ * → owner sees the draft with Copy reply and a deep link → posts → clicks Marked as posted* — and the
+ * reason approval is a write rather than a flag on the next request is the Copy reply control. **Copy reply
+ * is a send path**: the bytes it puts on a clipboard leave this system and are published under the
+ * business's name, so a reply that reached a clipboard unlinted would defeat G-REV-05 entirely while every
+ * assertion about `deliverApprovedReply` went on passing.
+ *
+ * So the lint happens here, through {@link lintOrRefuse} — the same expression, the same context, the same
+ * `origin` — and the linted bytes are stored by `recordReplyApproved` before any screen can offer them.
+ * *Copy reply* then serves `reply_approved_text`, which is a column nothing can write without having
+ * passed through this function: `ReplyLintStamp` is a required argument of every stamp writer and
+ * `packages/db` may not import `packages/core` (ADR 0001), so the write layer holds nothing that could
+ * produce one.
+ *
+ * It takes the approved text as an ARGUMENT rather than reading `reply_draft`, which is G-REV-05's
+ * decision restated: an owner edits the draft before approving it, and the bytes that are judged have to
+ * be the bytes that go out. A hand-edited draft carrying a banned claim is therefore refused HERE, by the
+ * server, with every rule named — not merely disabled in a client.
+ *
+ * No delivery timestamp is written and no `delivery_mode`, so nothing about this says the reply is public.
+ * The mode is read off the row only so that a refusal names the mode the reply would have gone out in.
+ */
+export async function approveReply(
+  deps: Pick<ReplyDeliveryDeps, 'sql' | 'actor' | 'signature'>,
+  input: {
+    readonly reviewId: string
+    readonly approvedReply: string
+    readonly language: DetectableReviewLanguage
+  },
+): Promise<ReplyApproved> {
+  const review = await getReview(deps.sql, input.reviewId)
+  if (review === undefined) {
+    throw new AppError('not_found', `No review ${input.reviewId}`)
+  }
+  const stamp = await lintOrRefuse(deps, review, {
+    approvedReply: input.approvedReply,
+    language: input.language,
+    mode: review.deliveryMode,
+  })
+  await withUnitOfWork(deps.sql, deps.actor, (uow) =>
+    recordReplyApproved(uow, input.reviewId, stamp),
+  )
+  return {
+    reviewId: input.reviewId,
+    reply: stamp.approvedText,
+    lintVersion: stamp.lintVersion,
+    contentSha256: stamp.contentSha256,
+  }
+}
+
+/**
+ * A named human says they have pasted the approved reply into Google (G-REV-06, docs/10 §6).
+ *
+ * The last step of fallback mode, and the one that is **a claim about the outside world rather than an
+ * observation of it**. There is no Business Profile API access (docs/10 §4, OPEN-QUESTIONS Y3-gbp-api), so nothing here has seen the
+ * reply on the listing: `posted_manually_at` records that somebody said they posted it. Migration 0128's
+ * ZY341 refuses the write unless an `audit_event` in the same transaction attributes the claim to a staff
+ * actor with a real id, which is what makes *who said so* answerable.
+ *
+ * It re-lints, and that is not belt and braces. Between approval and this call the row sits with
+ * `reply_approved_text` written and no delivery timestamp — a state 0128 deliberately leaves editable, so
+ * an owner can change their mind — and the regulatory profile or the staff roster may also have moved
+ * (both are live rows, which `SEND_PATH_LINT_VERSION` records that it does not pin). So the bytes that
+ * become a delivery are judged again, by the same expression, at the moment of delivery. A reply that has
+ * stopped being publishable is refused with its rules named rather than posted because it once passed.
+ *
+ * `signature: null`, always, and the reason is {@link reproduceReplyLint}'s: the stored text ALREADY
+ * includes the signature it was approved with, so appending one again would measure and store a reply that
+ * was never approved.
+ *
+ * The language is read back off the stored text rather than taken as an argument, for the same reason: the
+ * caller at this point is a button, not an author, and `detectReviewLanguage` is what the rule compares
+ * against anyway. Text whose language cannot be identified is refused by name rather than guessed at.
+ */
+export async function markReplyPostedManually(
+  deps: Pick<ReplyDeliveryDeps, 'sql' | 'actor'>,
+  reviewId: string,
+): Promise<ReplyDelivered> {
+  const review = await getReview(deps.sql, reviewId)
+  if (review === undefined) throw new AppError('not_found', `No review ${reviewId}`)
+  const approved = review.replyApprovedText
+  if (approved === null) {
+    throw new AppError(
+      'invariant_violated',
+      `Review ${reviewId} has no approved reply, so there is nothing a person could have pasted into ` +
+        'Google. docs/10 §6 makes human approval mandatory and it is the step that produces the bytes ' +
+        '*Copy reply* copies — marking a review posted before one exists would record a claim about a ' +
+        'reply nobody has read.',
+      { userFacing: true },
+    )
+  }
+  const language = detectReviewLanguage(approved)
+  if (language === 'unknown') {
+    // The same conclusion `reproduceReplyLint` reaches, and for the same reason: a reply whose language
+    // cannot be identified is one no declaration could have made pass, so it is refused by the rule's own
+    // name rather than delivered under a guess.
+    throw new ReplyDeliveryRefused(reviewId, 'manual', [
+      {
+        rule: 'language_mismatch',
+        why:
+          'the approved reply is in no language this build can identify, so the rule that a reply must ' +
+          'match the review’s language cannot be applied to it',
+      },
+    ])
+  }
+  return await deliverApprovedReply(
+    { sql: deps.sql, actor: deps.actor, signature: null, submitter: null },
+    { reviewId, approvedReply: approved, language, mode: 'manual' },
+  )
+}
+
 export async function deliverApprovedReply(
   deps: ReplyDeliveryDeps,
   input: ReplyDeliveryInput,
@@ -235,28 +405,12 @@ export async function deliverApprovedReply(
     )
   }
 
-  const context = await readReplyLintContext(deps.sql)
-  const linter = sendPathReplyLinter(context)
-  const findings = linter.lint({
-    draft: input.approvedReply,
+  const stamp = await lintOrRefuse(deps, review, {
+    approvedReply: input.approvedReply,
     language: input.language,
-    reviewText: review.comment,
-    reviewerDisplayName: review.reviewerDisplayName,
-    signature: deps.signature,
-    // A human approved this and may have edited it, so the house-rendering rule does not apply — every
-    // rule about what the sentence SAYS still does. See `ReplyOrigin`.
-    origin: 'approved_by_a_human',
+    mode: input.mode,
   })
-  if (findings.length > 0) {
-    throw new ReplyDeliveryRefused(input.reviewId, input.mode, findings)
-  }
-
-  const reply = renderFinalReply({ draft: input.approvedReply, signature: deps.signature })
-  const stamp: ReplyLintStamp = {
-    approvedText: reply,
-    lintVersion: linter.version,
-    contentSha256: replyContentSha256(reply),
-  }
+  const reply = stamp.approvedText
 
   // Only now, and only in api mode. A refused reply reaches no transport at all, which the itest asserts
   // with a spy at zero calls rather than by reading this line.

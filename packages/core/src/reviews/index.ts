@@ -30,6 +30,7 @@
 export * from './count-phrase.ts'
 export * from './email-parse.ts'
 export * from './escalation-lexicon.ts'
+export * from './escalation-reason.ts'
 export * from './individuals.ts'
 export * from './language.ts'
 export * from './notification-fixtures.ts'
