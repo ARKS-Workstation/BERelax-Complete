@@ -15,6 +15,19 @@
  * static half; the runtime half, that the named agent actually has a row, needs a database and lives in
  * `apps/worker/src/jobs/agent-watchdog.itest.ts`.
  *
+ * **4. `cron-agent-without-a-heartbeat-row`.** Every agent a cron job names has an `agent_heartbeat`
+ * row written by a migration. The watchdog reads that table to answer "when did this last succeed", and
+ * a missing row is not an error anywhere: the agent simply never appears in the answer, so a job that
+ * stopped running looks exactly like a job that is fine. 0031 states the convention — "a new agent has to
+ * bring its own" — and migration 0107 shipped a `gratuity_accrual` agent WITHOUT one, which nothing
+ * caught until an integration suite that needs a database happened to read the table. This is the static
+ * half: the keys come from the registry and the rows are read out of the migration files, so it fails in
+ * the same second as a malformed cron rather than forty minutes later.
+ *
+ * Migration 0021 created both tables and backfilled one heartbeat per definition, so an agent defined at
+ * or before 0021 is covered by that statement rather than by a literal of its own — which this gate has
+ * to know, or every agent older than the convention reads as a violation.
+ *
  * **3. `no-schedule-outside-the-registry`.** `boss.schedule` and `boss.createQueue` appear only in
  * `apps/worker/src/registry.ts`. The registry exists so that "every cron this system runs" is one array
  * a person can read, and so that a job removed from it is unscheduled rather than left firing from an
@@ -32,6 +45,9 @@ import {
 import { stripNonCode } from './lib/strip-non-code.mjs'
 
 const ROOTS = ['apps', 'packages']
+const MIGRATIONS = 'packages/db/migrations'
+/** The migration that created `agent_heartbeat` and backfilled one row per definition. */
+const BACKFILL_MIGRATION = 21
 const SKIP_DIRECTORIES = new Set(['.claude', 'node_modules', 'dist', '.next'])
 /** The one file allowed to talk to pg-boss's scheduling API. */
 const REGISTRY = 'apps/worker/src/registry.ts'
@@ -121,6 +137,59 @@ for (const cron of cronRegistrations(JOB_REGISTRY)) {
   )
 }
 
+/**
+ * Every agent key a migration writes a heartbeat row for, and every key defined early enough to be
+ * covered by 0021's backfill.
+ *
+ * Statement-scoped rather than line-scoped: `0042_seo_gsc_daily.sql` writes the key on the line AFTER
+ * `insert into agent_heartbeat (agent_key)`, and a line-scoped scan would have read that agent as
+ * missing — a gate that fails on correct work teaches people to delete the gate.
+ */
+const heartbeatKeys = new Set()
+const earlyDefinitionKeys = new Set()
+let migrationsRead = 0
+for (const file of readdirSync(MIGRATIONS).sort()) {
+  if (!file.endsWith('.sql')) continue
+  const number = Number.parseInt(file.slice(0, 4), 10)
+  // Comments blanked for the same reason as the source scan above: a migration's prose names agent keys.
+  const sql = readFileSync(join(MIGRATIONS, file), 'utf8').replace(/--[^\n]*/g, '')
+  migrationsRead += 1
+  for (const match of sql.matchAll(/insert\s+into\s+agent_heartbeat\b([\s\S]*?);/gi)) {
+    for (const literal of (match[1] ?? '').matchAll(/'([a-z0-9_]+)'/g)) {
+      heartbeatKeys.add(literal[1])
+    }
+  }
+  if (number > BACKFILL_MIGRATION) continue
+  for (const match of sql.matchAll(/insert\s+into\s+agent_definition\b([\s\S]*?);/gi)) {
+    for (const literal of (match[1] ?? '').matchAll(/'([a-z0-9_]+)'/g)) {
+      earlyDefinitionKeys.add(literal[1])
+    }
+  }
+}
+
+// The floor (ADR 0002). A glob that stops matching, or a pattern that stops matching, produces a clean
+// run over nothing — and "no agent is missing a heartbeat row" over an empty set is exactly the answer
+// this rule exists to refuse.
+if (migrationsRead < 60 || heartbeatKeys.size < 5) {
+  violations.push(
+    `${MIGRATIONS}  [cron-agent-without-a-heartbeat-row] the migration scan read ` +
+      `${migrationsRead} file(s) and found ${heartbeatKeys.size} heartbeat key(s), which is too little ` +
+      'to mean anything. The pattern or the directory is wrong, so the answer below is about nothing.',
+  )
+}
+
+for (const cron of cronRegistrations(JOB_REGISTRY)) {
+  const agent = (cron.agent ?? '').trim()
+  if (agent.length === 0) continue
+  if (heartbeatKeys.has(agent) || earlyDefinitionKeys.has(agent)) continue
+  violations.push(
+    `${REGISTRY}  [cron-agent-without-a-heartbeat-row] '${cron.name}' reports to agent '${agent}' and ` +
+      'no migration writes it an agent_heartbeat row. The watchdog answers "when did this last succeed" ' +
+      'from that table, so the agent is absent from the answer rather than reported as late — a job ' +
+      'that stopped running looks exactly like one that is fine. 0031: a new agent brings its own.',
+  )
+}
+
 if (violations.length > 0) {
   console.error('Job registry violations:\n')
   for (const violation of violations) console.error(`  ${violation}`)
@@ -131,5 +200,6 @@ if (violations.length > 0) {
 const crons = JOB_REGISTRY.filter((job) => job.cron !== undefined).length
 console.log(
   `Job declarations hold across ${scanned} source files: ${JOB_REGISTRY.length} job(s), ` +
-    `${crons} cron(s), every schedule declared in the registry.`,
+    `${crons} cron(s), every schedule declared in the registry, and every cron's agent holding an ` +
+    `agent_heartbeat row across ${migrationsRead} migration(s).`,
 )

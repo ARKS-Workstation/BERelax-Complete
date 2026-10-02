@@ -1063,6 +1063,34 @@ check(
   }
 
   {
+    // A cron whose agent has no `agent_heartbeat` row. The failure this prevents is SILENT in a way the
+    // case above is not: the watchdog answers "when did this last succeed" out of that table, so an agent
+    // with no row is absent from the answer rather than reported as late, and a job that stopped running
+    // looks exactly like one that is fine. Migration 0107 shipped a `gratuity_accrual` agent without a
+    // row and nothing caught it until an integration suite that needs a database read the table.
+    //
+    // The fixture RENAMES the agent rather than deleting a migration's insert, because deleting from a
+    // migration is the one edit that would also change the schema every later gate reads.
+    const registry = 'apps/worker/src/registry.ts'
+    const original = readFileSync(registry, 'utf8')
+    let result
+    try {
+      writeFileSync(
+        registry,
+        original.replace("agent: 'audit_partitions',", "agent: 'gate_fixture_no_heartbeat',"),
+      )
+      result = run('pnpm', JOBS)
+    } finally {
+      writeFileSync(registry, original)
+    }
+    checkRejectedBy(
+      'job gate rejects a cron whose agent has no heartbeat row',
+      result,
+      '[cron-agent-without-a-heartbeat-row]',
+    )
+  }
+
+  {
     // The control. A valid declaration that does not schedule anything must pass, or the cases above
     // are satisfied by a gate that rejects every file it sees.
     const result = withFixture(
