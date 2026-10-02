@@ -50864,6 +50864,299 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 162a-162z. (H-MIG-07) The opening position shown to be unable to stop being closed: every way the
+//            boundary could reopen, and every way H-MIG-03's liability could be counted twice.
+//
+//            This is the one import in the build that cannot be corrected by re-running it, so every
+//            case here is about something that would be WRONG FOR EVER and would still balance. The
+//            second half of that sentence is why the cases exist at all: an opening position that is
+//            double-counted, netted off, or posted behind its own boundary produces a trial balance
+//            that ties perfectly, so nothing downstream reports any of it.
+//
+//            Four groups:
+//
+//              * **the boundary.** 162a removes ZY381's refusal, so an `opening_balance` or a `reversal`
+//                dated behind the boundary is permitted again — which is 0027's exemption left open, and
+//                the defect the whole unit is about. 162b removes ZY383's, so a second opening entry may
+//                be dated ON an attested boundary. Both edit the migration and run the PAIRING suite,
+//                which is legitimate here and nowhere else in this file: the suite drives the importer
+//                inside a transaction it rolls back and the refusals are triggers the database already
+//                has, so what the edit changes is what `pnpm sqlstate` reads — and 162a and 162b are
+//                therefore anchored on the registry's own complaint rather than on a statement's.
+//              * **the double count.** 162c makes the remainder an identity, so the stated figure posts
+//                on top of what H-MIG-03 already attested. 162d lets a stated figure BELOW what is
+//                posted net off instead of refusing, which silently overrides an attestation somebody
+//                has signed. 162e stops the importer reading the existing postings at all. Each is
+//                caught by the reconciliation case, which measures the variance per account.
+//              * **the attestation.** 162f removes ZY382, so the totals stop being held to the entry;
+//                162g removes ZY384, so an UPDATE could change them afterwards with nothing
+//                re-deriving them.
+//              * **the statement's own shape.** 162h stages one row PER ACCOUNT instead of one for the
+//                whole statement, which is the per-account entry 0027 refused reached through the
+//                framework; 162i drops the one-opening-date check; 162j lets a decimal through the fils
+//                reader, which is H-MIG-05's defect in a column where it is a hundredfold error on a
+//                balance sheet.
+//
+//            162k is the chart: `assertAccountsAreInTheChart` made to pass over a code the chart does
+//            not hold, after which `journal_line_account_code_fkey` refuses one line at a time and the
+//            run stops on the first instead of the file being corrected in one pass.
+//
+//            162l is the Drizzle mirror's absence, which is this migration's own shape: 0132 adds no
+//            table and no column, so `pnpm db:drift` has nothing new to compare and the case that
+//            matters is the negative one — a mirror file for a table this migration does not create
+//            would be drift in the other direction. 162m and 162n are the two directions of the SQLSTATE
+//            registry.
+//
+//            162y and 162z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the two pure suites and the pairing suite,
+//            all unedited.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const BOUNDARY_MIGRATION = 'packages/db/migrations/0132_opening_boundary.sql'
+  const BOUNDARY_CORE = 'packages/core/src/ledger/period-lock.ts'
+  const OPENING_IMPORTER = 'packages/migration/src/importers/ledger/opening-balances.ts'
+  const OPENING_WORKBOOK = 'packages/migration/src/importers/ledger/workbook.ts'
+  const OPENING_COA = 'packages/migration/src/importers/ledger/coa.ts'
+  const BOUNDARY_REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const BOUNDARY_CORE_SUITE = 'packages/core/src/ledger/period-lock.test.ts'
+  const OPENING_UNIT_SUITE = 'packages/migration/src/importers/ledger/opening-balances.test.ts'
+  const OPENING_PAIR_SUITE = 'packages/fixtures/src/opening-boundary.itest.ts'
+
+  const openingPureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    BOUNDARY_CORE_SUITE,
+    OPENING_UNIT_SUITE,
+  ]
+  const openingPairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    OPENING_PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite or checker that must fail because of it.
+   *
+   * Named for this block rather than reusing block 160's or 161's helper, and the reason is mechanical:
+   * two blocks defining a helper of the same shape is how git found the bodies as shared context and
+   * INTERLEAVED two blocks at a merge (block 133's note).
+   */
+  const breakOpening = (name, file, find, into, rule, args = openingPureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the boundary ------------------------------------------------------------------------------
+
+  // 162a. ZY381's raise, deleted. This is 0027's exemption left open: an `opening_balance` or a
+  //       `reversal` dated behind the boundary, inside the period the attested totals summarise, and
+  //       the books still balance afterwards.
+  checkRejectedBy(
+    'opening: deleting ZY381 while it stays registered fails pnpm sqlstate',
+    withEditedFile(
+      BOUNDARY_MIGRATION,
+      (source) =>
+        replaceOnce(source, `      using errcode = 'ZY381',`, `      using errcode = 'ZL004',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY381',
+  )
+
+  // 162b. ZY383's, the same way: a second opening entry dated ON an attested boundary makes the totals
+  //       wrong while every balance ties.
+  checkRejectedBy(
+    'opening: deleting ZY383 while it stays registered fails pnpm sqlstate',
+    withEditedFile(
+      BOUNDARY_MIGRATION,
+      (source) =>
+        replaceOnce(source, `      using errcode = 'ZY383',`, `      using errcode = 'ZL004',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY383',
+  )
+
+  // 162c. The pure boundary predicate, stopped refusing anything once attested. It is the second
+  //       statement of the triggers and is what explains a refusal before it is attempted, so a
+  //       predicate that permits everything makes the explanation disagree with the database.
+  breakOpening(
+    'opening: a boundary predicate that permits everything must be caught',
+    BOUNDARY_CORE,
+    `  if (!attested) return { ok: true }`,
+    `  if (true) return { ok: true }`,
+    'refuses an entry dated before the boundary, whatever its source',
+  )
+
+  // ---- the double count --------------------------------------------------------------------------
+
+  // 162d. The remainder made an identity, so the stated figure posts ON TOP of what H-MIG-03 already
+  //       attested. The books balance and the liability is twice the size, which 0027 names as the
+  //       failure nobody detects — the reconciliation case is what measures it.
+  breakOpening(
+    'opening: a remainder that ignores what is already posted must be caught',
+    BOUNDARY_CORE,
+    `  const remainder = statedNet - postedNetFils`,
+    `  const remainder = statedNet`,
+    'is nothing at all when the stated figure is already fully posted',
+  )
+
+  // 162e. A stated figure BELOW what is posted, netted off instead of refused. It balances, it needs no
+  //       refusal, and it silently overrides an attestation somebody has signed — on a customer
+  //       liability. ADR 0071 settled the direction: a named variance, never one absorbed.
+  breakOpening(
+    'opening: netting a stated figure below what is posted must be caught',
+    BOUNDARY_CORE,
+    `  if (beyond) {`,
+    `  if (false && beyond) {`,
+    'refuses a stated figure SMALLER than what is posted, naming both',
+  )
+
+  // 162f. The importer stopped reading the existing postings at all, so every remainder is the whole
+  //       stated figure. The PAIRING suite, because the claim is a sum over PostgreSQL.
+  breakOpening(
+    'opening: an importer that does not read the existing postings must be caught',
+    OPENING_IMPORTER,
+    `      postedNetFils: posted.get(line.accountCode) ?? 0,`,
+    `      postedNetFils: 0,`,
+    'posts the REMAINDER and reconciles to zero variance on every account',
+    openingPairSuite(),
+  )
+
+  // ---- the attestation ---------------------------------------------------------------------------
+
+  // 162g. ZY382's raise, deleted. 0027 left the totals "derived, and asserted against the lines by the
+  //       itest rather than trusted"; without this refusal that is still true, and the row is
+  //       append-only so nothing would ever re-derive them.
+  checkRejectedBy(
+    'opening: deleting ZY382 while it stays registered fails pnpm sqlstate',
+    withEditedFile(
+      BOUNDARY_MIGRATION,
+      (source) =>
+        replaceOnce(source, `    using errcode = 'ZY382',`, `    using errcode = 'ZL004',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY382',
+  )
+
+  // 162h. ZY384's, the same way: 0027 revoked UPDATE from `berelax_app`, which is the privilege and not
+  //       the rule, and ZY382 is deferred and fires on INSERT.
+  checkRejectedBy(
+    'opening: deleting ZY384 while it stays registered fails pnpm sqlstate',
+    withEditedFile(
+      BOUNDARY_MIGRATION,
+      (source) =>
+        replaceOnce(source, `    using errcode = 'ZY384',`, `    using errcode = 'ZL004',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY384',
+  )
+
+  // ---- the statement's own shape ------------------------------------------------------------------
+
+  // 162i. The one-opening-date check, removed, so a file whose lines disagree imports to whichever date
+  //       the first line happened to carry. The boundary is the most consequential value in the file.
+  breakOpening(
+    'opening: a file whose lines disagree about the boundary must be refused',
+    OPENING_IMPORTER,
+    `      if (dates.length > 1) {`,
+    `      if (false && dates.length > 1) {`,
+    'refuses a file whose lines disagree about the opening date',
+  )
+
+  // 162j. The fils reader, loosened to `Number`. `Number('40000.00')` is 40000, an integer — so a cell
+  //       written as dirhams-and-cents imports as a hundredth of itself on a row that passes every
+  //       check, which is H-MIG-05's recorded defect in the column where it lands on a balance sheet.
+  breakOpening(
+    'opening: a decimal amount read with Number() instead of a strict digit run must be caught',
+    OPENING_WORKBOOK,
+    `  return /^\\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN`,
+    `  return Number(trimmed)`,
+    'reads a blank side as zero and refuses a decimal',
+  )
+
+  // 162k. The trial-balance check in `validate`, removed. `assertImportable` would still refuse the
+  //       import, which is the point of the case: the staged ledger would record nothing about WHY,
+  //       and the named reason a test asserts is the one that disappears.
+  breakOpening(
+    'opening: removing the staged trial-balance check must be caught',
+    OPENING_IMPORTER,
+    `  if (debit !== credit) {`,
+    `  if (false && debit !== credit) {`,
+    'opening-trial-balance-must-balance',
+  )
+
+  // ---- the chart ---------------------------------------------------------------------------------
+
+  // 162l. The chart check, made to pass over a code the chart does not hold. After that
+  //       `journal_line_account_code_fkey` refuses one line at a time and the run stops on the first,
+  //       instead of the file naming every bad code at once (ADR 0065).
+  breakOpening(
+    'opening: admitting an account the chart does not hold must be caught',
+    OPENING_COA,
+    `  if (missing.length === 0) return`,
+    `  if (true) return`,
+    'refuses a statement naming an account the chart does not hold, naming every one',
+    openingPairSuite(),
+  )
+
+  // 162m. The VAT201 completeness measurement, made to answer "complete" whatever it is given. It is
+  //       the acceptance line's own claim, and `chartAttributionGaps` reading nothing is how a
+  //       completeness report comes to be a report about its own query (ADR 0002).
+  breakOpening(
+    'opening: a completeness measurement that cannot report a gap must be caught',
+    OPENING_COA,
+    `  const gaps: ChartAttributionGap[] = []`,
+    `  const gaps: ChartAttributionGap[] = []
+  if (attributions.length >= 0) return Object.freeze(gaps)`,
+    'names an account with no attribution at all',
+  )
+
+  // ---- the registry ------------------------------------------------------------------------------
+
+  // 162n. A registered code no migration raises, which is the direction that catches a refusal
+  //       silently becoming a no-op. Pointed at ZY381 because that is the one the unit exists for.
+  checkRejectedBy(
+    'opening: a registry entry for a code 0132 does not raise fails pnpm sqlstate',
+    withEditedFile(
+      BOUNDARY_REGISTRY,
+      (source) => replaceOnce(source, `    code: 'ZY381',`, `    code: 'ZY390',`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY381',
+  )
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 162y. The two pure suites, unedited: the boundary predicate, the remainder, the workbook's shape,
+  //       every named rejection and the chart's completeness measurement.
+  check(
+    "opening: the unit's pure suites pass against the real tree",
+    !run('pnpm', openingPureSuites()).failed,
+  )
+
+  // 162z. The pairing suite, unedited: all four refusals, the remainder against a planted liability,
+  //       the reconciliation to the fils and the chart's completeness against a real PostgreSQL. It
+  //       commits nothing — see the suite's own header for why it must not.
+  check(
+    'opening: the pairing suite passes against the real tree',
+    !run('pnpm', openingPairSuite()).failed,
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

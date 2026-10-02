@@ -10,6 +10,7 @@
     "./framework": "./src/framework.ts",
     "./importers/appointments": "./src/importers/appointments/index.ts",
     "./importers/customers": "./src/importers/customers/index.ts",
+    "./importers/ledger": "./src/importers/ledger/index.ts",
     "./importers/staff": "./src/importers/staff/index.ts",
     "./importers/packages": "./src/importers/packages/index.ts",
     "./provenance": "./src/provenance.ts",

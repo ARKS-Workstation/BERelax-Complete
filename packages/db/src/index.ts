@@ -1777,6 +1777,21 @@ export {
   resolveOrCreateImportedCustomer,
 } from './services/import-contacts.ts'
 export {
+  type AccountPosition,
+  isBehindTheBoundaryRefusal,
+  OPENING_BOUNDARY_SQLSTATE,
+  type OpeningReconciliationRow,
+  openingBalanceIsAttested,
+  openingBoundaryError,
+  readChartAccountCodes,
+  readLegalEntityId,
+  readOpeningBalancePostings,
+  readOpeningBoundary,
+  readVat201Attributions,
+  reconcileOpeningPosition,
+  type Vat201AccountAttribution,
+} from './services/import-opening-balances.ts'
+export {
   CustomerUnknown,
   IMPORT_PACKAGE_SQLSTATE,
   type ImportedPackageLiabilityRow,
@@ -4506,4 +4521,52 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY371-ZY374 of the band ZY371-ZY380 are used; ZY375-ZY380 are released UNUSED and deliberately
 // unregistered. No test port band is used: nothing in H-MIG-06 starts a server.
 //
-export const SCHEMA_VERSION = 131 as const
+// 132 is 0132_opening_boundary.sql (H-MIG-07) — no table and no column, four refusals and three
+// triggers: once an opening balance is attested, nothing may be dated behind its boundary. The Drizzle
+// mirror is therefore unchanged and `pnpm db:drift` has nothing new to compare, which is 0117's shape.
+//
+// **The hole it closes, and why it is not theoretical.** `refuse_entry_before_opening()` (0027) exempts
+// `source in ('opening_balance', 'reversal')` and gives the reason: the opening entry has to be
+// insertable, and it commits BEFORE the import row exists to guard against it. That exemption is correct
+// for exactly one entry and permanent for every other — and H-MIG-03's reconstructed package liability
+// posts on `opening_balance` (ADR 0069), so the opening position in this build is a SET of entries and a
+// second one could be dated anywhere behind the boundary at any time. The books would still balance;
+// they would simply be larger, which 0027's own header names as undetectable afterwards. `ZY381` refuses
+// anything dated before the boundary whatever its source, and `ZY383` refuses a further
+// `opening_balance` entry dated ON it.
+//
+// It follows that **the package liability must be imported BEFORE the opening trial balance**, which is
+// the dependency H-MIG-07's manifest entry already declares: the trial balance is the statement of the
+// whole opening position, so anything belonging in it has to be in the books before it is attested.
+//
+// **The relationship between the two imports, stated here because it is the thing a reader needs.** The
+// trial-balance file states the FULL balance of every account — which is what somebody can check against
+// the books they are copying from — and the importer posts the REMAINDER after reading what
+// `opening_balance` entries already hold at the boundary (`readOpeningBalancePostings`, and
+// `openingRemainder` in `@berelax/core` for the arithmetic). A stated figure BELOW what is posted is
+// refused by name and never netted the other way: ADR 0071 settled that a posting from outside the
+// package path is "a named variance rather than one absorbed", and this is that rule at the opening.
+// `reconcileOpeningPosition` is the per-account read the acceptance line's reconciliation test asserts
+// to the fils.
+//
+// **`ZY382` holds the attested totals to the entry they NAME, and not to every `opening_balance` line at
+// the boundary.** The wider reading was built first and is wrong for a mechanical reason worth recording:
+// `importOpeningBalances` (0027's own writer, in `services/opening-balances.ts`) computes its totals from
+// its own lines, so the moment any other entry shared the boundary that existing and tested writer would
+// have stopped being able to commit at all. 0027 left those totals "derived, and asserted against the
+// lines by the itest rather than trusted"; ZY382 is that assertion moved into the database, which matters
+// because `ZY384` makes the row append-only so nothing would ever re-derive them.
+//
+// **No `period_lock` row and no new table.** `period_lock` is for closing a month that has been reported
+// (0073) and its exclusion constraint is over dated ranges; the pre-boundary period has no start that is
+// not invented, and `raise_if_period_locked` would be a second answer to the question ZL004 and ZY381
+// already answer. The chart of accounts is not seeded, extended or re-tagged either:
+// `account_carries_a_vat201_attribution` (0089) demands an attribution per account, and an attribution is
+// a decision about what feeds a VAT return rather than a column somebody fills in to get an import to
+// run — so `importers/ledger/coa.ts` CHECKS the chart and the importer refuses a file naming an account
+// it does not hold.
+//
+// ZY381-ZY384 of the band ZY381-ZY390 are used; ZY385-ZY390 are released UNUSED and deliberately
+// unregistered. No test port band is used: nothing in H-MIG-07 starts a server.
+//
+export const SCHEMA_VERSION = 132 as const

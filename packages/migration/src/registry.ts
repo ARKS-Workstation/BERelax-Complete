@@ -36,7 +36,14 @@ import { packagesImporter } from './importers/packages/import.ts'
  * carry-over forfeited on the wrong day, months later, in a job nobody is watching. Its door is
  * `scripts/migrate-staff.mjs`.
  *
- * H-MIG-07 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
+ * **H-MIG-07's `opening-balances` importer is absent for the same mechanical reason**, with the sharpest
+ * consequence of the three: it needs `openingRemainder` from `@berelax/core` to subtract what
+ * `opening_balance` entries already hold from what the trial balance states, and an entry built without
+ * it would post the stated figure ON TOP of H-MIG-03's reconstructed package liability — after which the
+ * books balance and are twice the size, which 0027 names as the failure nobody detects. Its door is
+ * `scripts/migrate-opening-balances.mjs`.
+ *
+ * H-MIG-08 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
  * listed rather than hidden: the CLI is what a person runs, and a CLI whose registry is empty cannot be
  * exercised at all — the first real importer would be the first time the command had ever been run. It
  * writes into the framework's conformance target and nothing reads that table, so the worst a mistaken

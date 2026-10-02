@@ -21231,7 +21231,7 @@ units:
       imported, correctable only by dated reversal, and tied to the package liability and cash from the
       earlier units.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-03
@@ -21265,10 +21265,51 @@ units:
       by a reconciliation test
     - the chart of accounts imported carries a vat_box tag on every account that needs one, asserted complete
       against the VAT201 box list
+    notes: 'Built as migration 0132 plus one importer. The migration adds NO table and no column — four
+      refusals and three triggers — so the Drizzle mirror is unchanged and `pnpm db:drift` has nothing new
+      to compare, which is 0117''s shape. What it closes is a hole 0027 left and ADR 0069 made live:
+      `refuse_entry_before_opening()` exempts `source in (''opening_balance'', ''reversal'')` so the
+      opening entry could be inserted at all, and H-MIG-03''s reconstructed package liability posts on
+      that same source — so a second opening entry could be dated anywhere behind the boundary at any
+      time, and the books would still balance. ZY381 and ZY383 close it. NOTE on the ordering this
+      creates: the package liability must be imported BEFORE the trial balance, which is the dependency
+      this entry already declares — the trial balance is the statement of the whole opening position, so
+      anything belonging in it has to be in the books before it is attested. NOTE on ZY382: it holds the
+      attested totals to the entry they NAME and not to every `opening_balance` line at the boundary. The
+      wider reading was built first and is mechanically impossible: `importOpeningBalances` — 0027''s own
+      writer, which predates this unit — computes its totals from its own lines, so the moment any other
+      entry shared the boundary that tested writer could not commit at all. Holding the whole position
+      together is therefore the IMPORTER''s, through `readOpeningBalancePostings` and `openingRemainder`,
+      with the reconciliation asserted per account to the fils — which is this unit''s fourth acceptance
+      line in its own words ("asserted by a reconciliation test"). NOTE: `importers/ledger/coa.ts` CHECKS
+      the chart of accounts and does NOT import one. `account_carries_a_vat201_attribution` (0089, ZY009)
+      demands an attribution per account, and an attribution is a decision about what feeds a VAT return —
+      which box, measured on net supplies or on tax, contributing which way — so it is the owner''s and
+      the accountant''s rather than a column somebody fills in to get an import to run. The chart stays
+      the migrations'', the completeness is MEASURED through a LEFT JOIN so a gap would appear rather than
+      be excluded by the query, and the importer refuses a statement naming an account the chart does not
+      hold. NOTE: `packages/core/src/ledger/period-lock.ts` holds the boundary predicate and the remainder
+      and deliberately NOT a trial-balance adder: `openingImbalanceFils` and `assertImportable` in
+      `packages/db/src/services/opening-balances.ts` already refuse an unbalanced statement before
+      anything is written and name the difference in fils, which is the first acceptance line met by code
+      that predates this unit, and a third adder would be the statement that drifts. The pairing suite
+      commits NOTHING: an attested opening balance locks the whole database behind its boundary and the
+      integration suite runs sequentially against one database, so every case rolls back and drives the
+      importer''s `apply` directly, because `runImport` opens a transaction of its own and cannot be
+      nested.'
     files:
-    - packages/migration/src/importers/ledger/opening-balances.ts
+    - packages/db/migrations/0132_opening_boundary.sql
+    - packages/db/src/services/import-opening-balances.ts
     - packages/core/src/ledger/period-lock.ts
+    - packages/core/src/ledger/period-lock.test.ts
+    - packages/migration/src/importers/ledger/workbook.ts
+    - packages/migration/src/importers/ledger/opening-balances.ts
     - packages/migration/src/importers/ledger/coa.ts
+    - packages/migration/src/importers/ledger/index.ts
+    - packages/migration/src/importers/ledger/opening-balances.test.ts
+    - packages/fixtures/src/opening-boundary.itest.ts
+    - scripts/migrate-opening-balances.mjs
+    - docs/adr/0084-an-opening-position-is-attested-once-and-nothing-is-dated-behind-its-boundary.md
   - id: H-MIG-08
     order: 190
     title: The reconciliation report generator

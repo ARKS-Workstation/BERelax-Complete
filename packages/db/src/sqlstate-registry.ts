@@ -2211,6 +2211,41 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_imported_staff_has_a_gender'],
     translators: ['packages/db/src/services/import-staff.ts'],
   },
+  // ZY381-ZY384 are H-MIG-07's, of the band ZY381-ZY390; ZY385 to ZY390 are left free and deliberately
+  // unregistered. Four and not one because each names a different thing to go and do: ZY381 "correct the
+  // date", ZY383 "post a dated reversal and re-base the import", ZY382 "this importer did not read what
+  // was already posted", ZY384 "an attestation is a fact, not a record that gets revised". The one that
+  // carries the unit's whole point is ZY382: it holds the attested totals to the LEDGER rather than to
+  // each other, which is what makes a double count with H-MIG-03's reconstructed package liability
+  // impossible rather than merely forbidden — both posting on `source = 'opening_balance'`.
+  {
+    code: 'ZY381',
+    rule: 'No entry may be dated before the opening boundary once an opening balance is imported, whatever its source.',
+    migration: '0132',
+    raisedBy: ['refuse_entry_behind_the_boundary'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY382',
+    rule: "An opening balance's attested totals must equal every opening_balance line dated at its boundary.",
+    migration: '0132',
+    raisedBy: ['assert_opening_totals_tie_to_the_ledger'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY383',
+    rule: 'No further opening_balance entry may be dated on a boundary that is already attested.',
+    migration: '0132',
+    raisedBy: ['refuse_entry_behind_the_boundary'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY384',
+    rule: 'An opening-balance import is append-only.',
+    migration: '0132',
+    raisedBy: ['refuse_opening_balance_import_change'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
