@@ -21720,7 +21720,7 @@ units:
       resolved correctly for after-midnight appointments, marked as migrated so they never pollute revenue,
       and quarantined rather than guessed where a therapist or room cannot be resolved.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -21736,10 +21736,34 @@ units:
       the customer's visit history and the retention cohorts, all three asserted
     - an imported appointment whose therapist or room cannot be resolved is quarantined with a reason rather
       than assigned to a placeholder
+    notes: 'Built as migration 0130 plus one importer. The flag is `appointment.migrated` and NOT a tenth
+      `appointment_status`: 0051''s transition and action tables are `Record<AppointmentStatus, …>`, so a
+      tenth label would need fifteen transition answers and an `emitsRevenue` answer for something that is
+      not a state of the machine, and `holds_resources` — generated from the status — would stop seeing a
+      visit that did hold its room, which is the one thing this unit needs it to do. ADR 0082 records the
+      decision and the five alternatives. NOTE: a Four Hands or a couple''s treatment is NOT imported. Those
+      are two `appointment` rows sharing a `delivery_id`, the previous arrangement''s records do not say
+      which rows went together, and reconstructing one means choosing a pairing that
+      `assert_delivery_is_coherent` (ZB004) would then be judging — so the shape is a named quarantine
+      (`shape_is_not_solo`) and the pairing is DEFERRED to H-MIG-11, which is the unit that reconciles the
+      imported estate. NOTE: an imported visit starting at 01:30 resolves to the previous business_day, as
+      the acceptance line asks, and is then quarantined: the shortest treatment in this catalogue plus its
+      room turnaround is 65 minutes and the session closes at 02:00, so nothing can start at 01:30 and
+      finish inside it. Both halves are asserted separately in `visit-import.itest.ts` rather than
+      collapsed. Y8-visits is recorded in docs/OPEN-QUESTIONS.md: what the owner''s historic records
+      actually contain, since the workbook demands a gross figure per visit and refuses a line without one
+      rather than importing it at zero.'
     files:
+    - packages/db/migrations/0130_appointment_migrated.sql
+    - packages/db/src/schema/imported-appointment.ts
+    - packages/db/src/services/import-appointments.ts
+    - packages/migration/src/importers/appointments/workbook.ts
     - packages/migration/src/importers/appointments/import.ts
+    - packages/migration/src/importers/appointments/index.ts
     - packages/migration/src/importers/appointments/import.test.ts
-    - packages/db/migrations/00XX-appointment-migrated-flag.sql
+    - packages/fixtures/src/visit-import.itest.ts
+    - scripts/migrate-visits.mjs
+    - docs/adr/0082-a-reconstructed-visit-is-history-the-live-machine-cannot-touch.md
   - id: H-MIG-06
     order: 188
     title: Staff, credentials and leave opening balances
@@ -21747,7 +21771,7 @@ units:
       credential expiries that gate availability, and leave opening balances that are explicitly flagged
       rather than silently accepted as zero.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-01
@@ -21783,10 +21807,44 @@ units:
       by a field-level policy test
     - the 19 therapist rows import with style skills and remain unpublishable until both a display name
       and a recorded photography consent exist, per decision 23
+    notes: 'Built as migration 0131 plus one importer. NOTE on the fourth acceptance line ("imported bank
+      and identity fields are encrypted at rest and unreadable by the receptionist role"): this importer
+      writes NEITHER, and the absence is the answer rather than a gap. `import_row.payload` is kept for
+      ever and is invisible to every erasure probe (ADR 0072, Y9-import-ledger), so an IBAN in a staff
+      workbook is an IBAN in that ledger permanently — strictly worse than the plaintext column
+      `employee_bank_detail` was built to avoid, because that column does not exist and this one could not
+      be removed afterwards. The field-level policy test in `packages/fixtures/src/staff-import.itest.ts`
+      therefore asserts four things: the sealed tables hold no plaintext column, the schema REFUSES a
+      plaintext identity reference (measured by attempting one), the receptionist''s field groups exclude
+      both, and the import has no cell and no payload key that could carry one. The sealed fields are
+      entered through the HR screens, which seal them under 0102''s envelope scheme — DEFERRED there and
+      not to a later H-MIG unit, because the screens already exist and the gap is data rather than code.
+      NOTE on the dispatch''s framing of the leave basis: the dispatch said an opening balance expressed in
+      CALENDAR days is refused, and that is what ZY371 does — but the refusal is a CONFIRMATION and not a
+      second arithmetic, because migration 0066 settled that the statutory entitlement is counted in
+      calendar days ("a leave day is a calendar day, never a working day") and a migration contradicting a
+      locked decision is not available. This business opens on every date, so the two readings are the same
+      quantity today; ZY371''s own message counts, from `business_day`, how many dates of the covering leave
+      year are not trading days, so a reader can see whether they differ at all. ADR 0083 records the
+      reasoning in full. NOTE: the 19 therapist rows themselves are NOT imported — `pnpm seed` creates the
+      headcount (P-HR-01) and `Y8-staff` is unanswered, so there is no file to import. What is built is the
+      importer, the workbook and every refusal, exercised against synthetic references in a band no fixture
+      uses. `employee.staff_reference` is still not UNIQUE in the database; this importer quarantines a
+      repeat and refuses both lines of an in-file one, and the schema-level question is left where 0030 left
+      it.'
     files:
+    - packages/db/migrations/0131_staff_import.sql
+    - packages/db/src/schema/imported-staff-row.ts
+    - packages/db/src/services/import-staff.ts
+    - packages/migration/src/importers/staff/workbook.ts
     - packages/migration/src/importers/staff/import.ts
     - packages/migration/src/importers/staff/leave-opening.ts
+    - packages/migration/src/importers/staff/index.ts
+    - packages/migration/src/importers/staff/import.test.ts
     - packages/core/src/hr/accrual.worked-examples.test.ts
+    - packages/fixtures/src/staff-import.itest.ts
+    - scripts/migrate-staff.mjs
+    - docs/adr/0083-a-staff-import-writes-the-facts-the-file-carried-and-infers-nothing.md
   - id: H-MIG-07
     order: 189
     title: Accounting opening balances and the period boundary lock
@@ -21794,7 +21852,7 @@ units:
       imported, correctable only by dated reversal, and tied to the package liability and cash from the
       earlier units.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - H-MIG-03
@@ -21828,10 +21886,51 @@ units:
       by a reconciliation test
     - the chart of accounts imported carries a vat_box tag on every account that needs one, asserted complete
       against the VAT201 box list
+    notes: 'Built as migration 0132 plus one importer. The migration adds NO table and no column — four
+      refusals and three triggers — so the Drizzle mirror is unchanged and `pnpm db:drift` has nothing new
+      to compare, which is 0117''s shape. What it closes is a hole 0027 left and ADR 0069 made live:
+      `refuse_entry_before_opening()` exempts `source in (''opening_balance'', ''reversal'')` so the
+      opening entry could be inserted at all, and H-MIG-03''s reconstructed package liability posts on
+      that same source — so a second opening entry could be dated anywhere behind the boundary at any
+      time, and the books would still balance. ZY381 and ZY383 close it. NOTE on the ordering this
+      creates: the package liability must be imported BEFORE the trial balance, which is the dependency
+      this entry already declares — the trial balance is the statement of the whole opening position, so
+      anything belonging in it has to be in the books before it is attested. NOTE on ZY382: it holds the
+      attested totals to the entry they NAME and not to every `opening_balance` line at the boundary. The
+      wider reading was built first and is mechanically impossible: `importOpeningBalances` — 0027''s own
+      writer, which predates this unit — computes its totals from its own lines, so the moment any other
+      entry shared the boundary that tested writer could not commit at all. Holding the whole position
+      together is therefore the IMPORTER''s, through `readOpeningBalancePostings` and `openingRemainder`,
+      with the reconciliation asserted per account to the fils — which is this unit''s fourth acceptance
+      line in its own words ("asserted by a reconciliation test"). NOTE: `importers/ledger/coa.ts` CHECKS
+      the chart of accounts and does NOT import one. `account_carries_a_vat201_attribution` (0089, ZY009)
+      demands an attribution per account, and an attribution is a decision about what feeds a VAT return —
+      which box, measured on net supplies or on tax, contributing which way — so it is the owner''s and
+      the accountant''s rather than a column somebody fills in to get an import to run. The chart stays
+      the migrations'', the completeness is MEASURED through a LEFT JOIN so a gap would appear rather than
+      be excluded by the query, and the importer refuses a statement naming an account the chart does not
+      hold. NOTE: `packages/core/src/ledger/period-lock.ts` holds the boundary predicate and the remainder
+      and deliberately NOT a trial-balance adder: `openingImbalanceFils` and `assertImportable` in
+      `packages/db/src/services/opening-balances.ts` already refuse an unbalanced statement before
+      anything is written and name the difference in fils, which is the first acceptance line met by code
+      that predates this unit, and a third adder would be the statement that drifts. The pairing suite
+      commits NOTHING: an attested opening balance locks the whole database behind its boundary and the
+      integration suite runs sequentially against one database, so every case rolls back and drives the
+      importer''s `apply` directly, because `runImport` opens a transaction of its own and cannot be
+      nested.'
     files:
-    - packages/migration/src/importers/ledger/opening-balances.ts
+    - packages/db/migrations/0132_opening_boundary.sql
+    - packages/db/src/services/import-opening-balances.ts
     - packages/core/src/ledger/period-lock.ts
+    - packages/core/src/ledger/period-lock.test.ts
+    - packages/migration/src/importers/ledger/workbook.ts
+    - packages/migration/src/importers/ledger/opening-balances.ts
     - packages/migration/src/importers/ledger/coa.ts
+    - packages/migration/src/importers/ledger/index.ts
+    - packages/migration/src/importers/ledger/opening-balances.test.ts
+    - packages/fixtures/src/opening-boundary.itest.ts
+    - scripts/migrate-opening-balances.mjs
+    - docs/adr/0084-an-opening-position-is-attested-once-and-nothing-is-dated-behind-its-boundary.md
   - id: H-MIG-08
     order: 190
     title: The reconciliation report generator

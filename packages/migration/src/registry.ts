@@ -22,7 +22,28 @@ import { packagesImporter } from './importers/packages/import.ts'
  * reason H-MIG-02 recorded for leaving its own out. The door is `scripts/migrate-contacts.mjs`, which reads
  * the pepper exactly as the send path does and builds the importer with it.
  *
- * H-MIG-05 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
+ * **H-MIG-05's `appointments` importer is absent for the identical reason**, and that is worth reading
+ * beside the paragraph above rather than discovering twice. It keys the customer cell with the SAME pepper
+ * and the SAME two key kinds the contact importer used, because `imported_appointment.contact_hmac` and
+ * `imported_contact.contact_hmac` only join if it does — so an entry built without the pepper would not
+ * merely stage a plaintext number, it would resolve no customer at all and quarantine every line while
+ * looking like a clean refusal. Its door is `scripts/migrate-visits.mjs`.
+ *
+ * **H-MIG-06's `staff` importer is absent too**, and its missing dependency is a different one worth
+ * naming: `leaveYearStart` from `@berelax/core`, which decides which leave year an imported opening
+ * balance opens. There is no default for it on purpose — anchoring every balance to 1 January would be a
+ * leave year the policy does not use for anybody not engaged on that date, and the symptom is a
+ * carry-over forfeited on the wrong day, months later, in a job nobody is watching. Its door is
+ * `scripts/migrate-staff.mjs`.
+ *
+ * **H-MIG-07's `opening-balances` importer is absent for the same mechanical reason**, with the sharpest
+ * consequence of the three: it needs `openingRemainder` from `@berelax/core` to subtract what
+ * `opening_balance` entries already hold from what the trial balance states, and an entry built without
+ * it would post the stated figure ON TOP of H-MIG-03's reconstructed package liability — after which the
+ * books balance and are twice the size, which 0027 names as the failure nobody detects. Its door is
+ * `scripts/migrate-opening-balances.mjs`.
+ *
+ * H-MIG-08 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
  * listed rather than hidden: the CLI is what a person runs, and a CLI whose registry is empty cannot be
  * exercised at all — the first real importer would be the first time the command had ever been run. It
  * writes into the framework's conformance target and nothing reads that table, so the worst a mistaken

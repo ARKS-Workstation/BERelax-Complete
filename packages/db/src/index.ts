@@ -1775,6 +1775,25 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  APPOINTMENT_IMPORT_SQLSTATE,
+  appointmentImportError,
+  type ImportedAppointmentCounts,
+  type ImportedAppointmentInput,
+  type InsertedMigratedVisit,
+  insertMigratedVisit,
+  isMigratedAppointmentNotLiveRefusal,
+  type MigratedVisitInput,
+  type ResolvedVisitTargets,
+  readImportedAppointmentCounts,
+  recordImportedAppointment,
+  resolveVisitTargets,
+  VISIT_QUARANTINE_REASONS,
+  VISIT_QUARANTINES,
+  type VisitQuarantine,
+  type VisitResolution,
+  type VisitTargetRequest,
+} from './services/import-appointments.ts'
+export {
   IMPORT_CONTACT_AUDIT_ACTIONS,
   IMPORT_CONTACT_KEY_KINDS,
   IMPORT_CONTACT_SQLSTATE,
@@ -1792,6 +1811,21 @@ export {
   recordImportedContact,
   resolveOrCreateImportedCustomer,
 } from './services/import-contacts.ts'
+export {
+  type AccountPosition,
+  isBehindTheBoundaryRefusal,
+  OPENING_BOUNDARY_SQLSTATE,
+  type OpeningReconciliationRow,
+  openingBalanceIsAttested,
+  openingBoundaryError,
+  readChartAccountCodes,
+  readLegalEntityId,
+  readOpeningBalancePostings,
+  readOpeningBoundary,
+  readVat201Attributions,
+  reconcileOpeningPosition,
+  type Vat201AccountAttribution,
+} from './services/import-opening-balances.ts'
 export {
   CustomerUnknown,
   IMPORT_PACKAGE_SQLSTATE,
@@ -1813,6 +1847,27 @@ export {
   resolveHolder,
   TemplateCannotCarryReconstruction,
 } from './services/import-package-liability.ts'
+export {
+  IMPORTED_LEAVE_SOURCE_NOTE,
+  type ImportedStaffCounts,
+  type ImportedStaffInput,
+  type ImportedStaffRowInput,
+  type InsertedImportedStaff,
+  insertImportedStaff,
+  isLeaveBalanceBasisRefusal,
+  readImportableDocumentTypes,
+  readImportedStaffCounts,
+  readLeaveRuleInForce,
+  recordImportedStaffRow,
+  STAFF_IMPORT_SQLSTATE,
+  STAFF_QUARANTINE_REASONS,
+  STAFF_QUARANTINES,
+  type StaffCredential,
+  type StaffQuarantine,
+  staffImportError,
+  staffReferenceIsHeld,
+  ZERO_LEAVE_BALANCE_QUESTION,
+} from './services/import-staff.ts'
 export {
   assertReversalMatches,
   CREDIT_NOTE_SQLSTATE,
@@ -4627,4 +4682,127 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY341-ZY342 of the band ZY341-ZY350 are used; ZY343 through ZY350 are released UNUSED and deliberately
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
 //
-export const SCHEMA_VERSION = 128 as const
+// 130 is 0130_appointment_migrated.sql (H-MIG-05) — one boolean on `appointment`, one append-only record
+// table, six refusals and a fifth value on `booking.source`: a visit reconstructed out of the previous
+// arrangement's records is history the live machine cannot touch.
+//
+// Three decisions in it are worth finding here rather than in the file, because each is the kind a later
+// reader would simplify.
+//
+// **It is a flag on `appointment` and not a `historic_appointment` table.** The imported visits have to
+// appear in the customer's record and in the retention cohorts, and both read `appointment` — the second
+// through `reporting.fact_appointment`, which is a view over it. A parallel table would mean a `union all`
+// in every one of those readers and a shorter history than this business has wherever one was missed, and
+// it would put the rows outside `appointment_therapist_no_overlap` and `assert_room_capacity`, which are
+// exactly what make "no double-booked therapist, no room over capacity" a checkable claim about the
+// imported dataset. A tenth `appointment_status` was the other alternative and fails on totality: 0051's
+// transition and action tables are `Record<AppointmentStatus, …>`, so a tenth label needs fifteen
+// transition answers and an `emitsRevenue` answer for something that is not a state of the machine.
+//
+// **ZY366 — no migrated row may END in the future — is the refusal that does the most work.**
+// `readCommittedAppointments` takes a trading date and `readReassignmentCandidates` takes an instant
+// floor, so a reconstruction that cannot be dated forward is a row no forward-looking read can reach. The
+// alternative was `and not a.migrated` in each of those queries, which is the same claim restated in every
+// reader that grows later. It is a trigger and not a CHECK because `now()` is not immutable, and it judges
+// the UPPER bound so a treatment that ran past midnight two hours ago still imports.
+//
+// **The importer posts NOTHING, so the P&L claim needs no filter.** No invoice, no payment and no journal
+// entry: a statement line is a directed sum over `journal_line` (ADR 0064), so a visit outside the ledger
+// contributes zero to every line of every statement, and `visit-import.itest.ts` asserts it as the census
+// — a count and two sums with no account set in them — rather than as a statement that might net to
+// nought. `vat_rate_bp = 0` and `vat_fils = 0` are a CHECK for ADR 0069's reason: this system posts no
+// output tax on a supply made before its books opened, and there must be no tax figure on the row for
+// anything to add up. The migration therefore touches no money table at all, so
+// `packages/fixtures/src/invoice-family.ts`'s lists are unchanged — `imported_appointment`'s only foreign
+// key is into `appointment`, which no family list names.
+//
+// ZY361-ZY366 of the band ZY361-ZY370 are used; ZY367-ZY370 are released UNUSED and deliberately
+// unregistered. The test port band { start: 19_400, width: 300 } offered to this group is released UNUSED:
+// nothing in H-MIG-05 starts a server.
+//
+// 131 is 0131_staff_import.sql (H-MIG-06) — one column on `leave_movement`, one append-only record table
+// and four refusals: the nineteen employment records, and the four things this import will not infer.
+//
+// Three decisions in it are worth finding here rather than in the file.
+//
+// **`leave_movement.day_basis` is a CONFIRMATION and not an arithmetic.** `0066_leave.sql` settled that
+// the statutory entitlement is counted in calendar days ("a leave day is a calendar day, never a working
+// day") and `hundredths` is in those units throughout this ledger; nothing in 0131 changes that, and a
+// migration that did would contradict a locked decision. What ZY371 asks is the question
+// `0092_leave_approval.sql` already asks of a leave REQUEST from the other end — ZY020 refuses a period
+// bounded by a midnight inside a trading session — applied to the BALANCE every such request will be
+// spent against. This business opens on every date, so the two readings are the same quantity today;
+// which is exactly why nobody would notice the question was never asked, and why the refusal's own
+// message COUNTS, from `business_day`, how many dates of the covering leave year are not trading days.
+//
+// **ZY372 — a zero opening balance must be marked provisional — is a trigger and not a CHECK**, because
+// the message has to carry the remedy and a CHECK violation names the constraint and prints the failing
+// figure, which here is a zero and says nothing about what to do. docs/11 §7 is the authority: the
+// accrual engine needs a real opening balance rather than a zero, and nineteen silent zeros are a
+// business with no leave liability at all — a figure that reaches an end-of-service calculation and
+// nothing that would query it.
+//
+// **There is NO column anywhere in this migration, and no cell in the workbook behind it, for a bank
+// account, an Emirates ID number, a passport number, a visa number or a wage.** That is the unit's main
+// decision and it is an absence, so it is easy to read as an omission. `import_row.payload` is kept for
+// ever and no erasure reaches it (ADR 0072, Y9-import-ledger), so an IBAN in a staff workbook is an IBAN
+// in that ledger permanently — strictly worse than the plaintext column `employee_bank_detail` was built
+// to avoid, because that column does not exist and this one could not be removed afterwards. What the
+// import DOES write about a credential is its type and its expiry, which is the half
+// `readEligibleTherapists` gates availability on; a document number is not in that path at all.
+// `employee.is_publishable` is untouched for the same kind of reason: it is already GENERATED from
+// `display_name` and `photo_consent` (0030, decision 23), so an import cannot publish a therapist
+// whatever it writes, and re-stating the rule here would be the second statement that drifts.
+//
+// ZY371-ZY374 of the band ZY371-ZY380 are used; ZY375-ZY380 are released UNUSED and deliberately
+// unregistered. No test port band is used: nothing in H-MIG-06 starts a server.
+//
+// 132 is 0132_opening_boundary.sql (H-MIG-07) — no table and no column, four refusals and three
+// triggers: once an opening balance is attested, nothing may be dated behind its boundary. The Drizzle
+// mirror is therefore unchanged and `pnpm db:drift` has nothing new to compare, which is 0117's shape.
+//
+// **The hole it closes, and why it is not theoretical.** `refuse_entry_before_opening()` (0027) exempts
+// `source in ('opening_balance', 'reversal')` and gives the reason: the opening entry has to be
+// insertable, and it commits BEFORE the import row exists to guard against it. That exemption is correct
+// for exactly one entry and permanent for every other — and H-MIG-03's reconstructed package liability
+// posts on `opening_balance` (ADR 0069), so the opening position in this build is a SET of entries and a
+// second one could be dated anywhere behind the boundary at any time. The books would still balance;
+// they would simply be larger, which 0027's own header names as undetectable afterwards. `ZY381` refuses
+// anything dated before the boundary whatever its source, and `ZY383` refuses a further
+// `opening_balance` entry dated ON it.
+//
+// It follows that **the package liability must be imported BEFORE the opening trial balance**, which is
+// the dependency H-MIG-07's manifest entry already declares: the trial balance is the statement of the
+// whole opening position, so anything belonging in it has to be in the books before it is attested.
+//
+// **The relationship between the two imports, stated here because it is the thing a reader needs.** The
+// trial-balance file states the FULL balance of every account — which is what somebody can check against
+// the books they are copying from — and the importer posts the REMAINDER after reading what
+// `opening_balance` entries already hold at the boundary (`readOpeningBalancePostings`, and
+// `openingRemainder` in `@berelax/core` for the arithmetic). A stated figure BELOW what is posted is
+// refused by name and never netted the other way: ADR 0071 settled that a posting from outside the
+// package path is "a named variance rather than one absorbed", and this is that rule at the opening.
+// `reconcileOpeningPosition` is the per-account read the acceptance line's reconciliation test asserts
+// to the fils.
+//
+// **`ZY382` holds the attested totals to the entry they NAME, and not to every `opening_balance` line at
+// the boundary.** The wider reading was built first and is wrong for a mechanical reason worth recording:
+// `importOpeningBalances` (0027's own writer, in `services/opening-balances.ts`) computes its totals from
+// its own lines, so the moment any other entry shared the boundary that existing and tested writer would
+// have stopped being able to commit at all. 0027 left those totals "derived, and asserted against the
+// lines by the itest rather than trusted"; ZY382 is that assertion moved into the database, which matters
+// because `ZY384` makes the row append-only so nothing would ever re-derive them.
+//
+// **No `period_lock` row and no new table.** `period_lock` is for closing a month that has been reported
+// (0073) and its exclusion constraint is over dated ranges; the pre-boundary period has no start that is
+// not invented, and `raise_if_period_locked` would be a second answer to the question ZL004 and ZY381
+// already answer. The chart of accounts is not seeded, extended or re-tagged either:
+// `account_carries_a_vat201_attribution` (0089) demands an attribution per account, and an attribution is
+// a decision about what feeds a VAT return rather than a column somebody fills in to get an import to
+// run — so `importers/ledger/coa.ts` CHECKS the chart and the importer refuses a file naming an account
+// it does not hold.
+//
+// ZY381-ZY384 of the band ZY381-ZY390 are used; ZY385-ZY390 are released UNUSED and deliberately
+// unregistered. No test port band is used: nothing in H-MIG-07 starts a server.
+//
+export const SCHEMA_VERSION = 132 as const

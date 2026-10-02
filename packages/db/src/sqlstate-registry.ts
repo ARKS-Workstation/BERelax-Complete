@@ -2189,6 +2189,129 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['refuse_delivered_reply_change'],
     translators: ['packages/db/src/repositories/reviews.ts'],
   },
+  // ZY361-ZY366 are H-MIG-05's, of the band ZY361-ZY370; ZY367 to ZY370 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused. Six and not one because each
+  // names a different thing to go and do: ZY361 "import the corrected file", ZY362 "the question is wrong
+  // — a booking and a reconstruction are not interchangeable", ZY363 and ZY365 "this importer has a
+  // defect", ZY364 "a correction is a new record", ZY366 "look at the date cells". The pair that carries
+  // the unit's whole point is ZY361 and ZY366: together they are what makes "a migrated appointment is not
+  // a booking anybody can change" a property of the schema rather than a convention, and ZY366 is on the
+  // INSERT precisely because every forward-looking reader — the availability solver, the reassignment
+  // sweep — would otherwise need its own `not migrated` and the one that is forgotten is the one that
+  // offers a therapist a slot they worked in June.
+  {
+    code: 'ZY361',
+    rule: "A migrated appointment's status, period, therapist, room, service and price are fixed.",
+    migration: '0130',
+    raisedBy: ['refuse_migrated_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY362',
+    rule: 'The migrated flag may not be set or cleared after the appointment is inserted.',
+    migration: '0130',
+    raisedBy: ['refuse_migrated_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY363',
+    rule: 'A migrated appointment must be attested by an imported-appointment record.',
+    migration: '0130',
+    raisedBy: ['assert_migrated_appointment_attested'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY364',
+    rule: 'An imported-appointment record is append-only.',
+    migration: '0130',
+    raisedBy: ['refuse_imported_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY365',
+    rule: 'An imported-appointment record naming an appointment must name a migrated one.',
+    migration: '0130',
+    raisedBy: ['assert_imported_appointment_outcome'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY366',
+    rule: 'A migrated appointment may not end in the future.',
+    migration: '0130',
+    raisedBy: ['refuse_future_migrated_appointment'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  // ZY371-ZY374 are H-MIG-06's, of the band ZY371-ZY380; ZY375 to ZY380 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused. Four and not one because
+  // each names a different thing to go and do: ZY371 "confirm each day of the balance is a day this
+  // business rosters", ZY372 "supply the real figure or mark the zero provisional", ZY373 "a correction
+  // is a new record", ZY374 "this importer has a defect". The two that carry the unit's whole point are
+  // ZY371 and ZY374: the first is the only thing that asks what a reconstructed leave figure COUNTS,
+  // and the second is what makes "a therapist row without a recorded gender is quarantined" a property
+  // of the schema rather than a convention of one importer.
+  {
+    code: 'ZY371',
+    rule: 'An imported leave opening balance must be stated in days confirmed to be trading sessions.',
+    migration: '0131',
+    raisedBy: ['assert_leave_opening_balance_is_sound'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY372',
+    rule: 'A leave opening balance of zero must be marked provisional and name its open question.',
+    migration: '0131',
+    raisedBy: ['assert_leave_opening_balance_is_sound'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY373',
+    rule: 'An imported-staff record is append-only.',
+    migration: '0131',
+    raisedBy: ['refuse_imported_staff_row_change'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  {
+    code: 'ZY374',
+    rule: 'An imported-staff record must name an employee whose gender is recorded.',
+    migration: '0131',
+    raisedBy: ['assert_imported_staff_has_a_gender'],
+    translators: ['packages/db/src/services/import-staff.ts'],
+  },
+  // ZY381-ZY384 are H-MIG-07's, of the band ZY381-ZY390; ZY385 to ZY390 are left free and deliberately
+  // unregistered. Four and not one because each names a different thing to go and do: ZY381 "correct the
+  // date", ZY383 "post a dated reversal and re-base the import", ZY382 "this importer did not read what
+  // was already posted", ZY384 "an attestation is a fact, not a record that gets revised". The one that
+  // carries the unit's whole point is ZY382: it holds the attested totals to the LEDGER rather than to
+  // each other, which is what makes a double count with H-MIG-03's reconstructed package liability
+  // impossible rather than merely forbidden — both posting on `source = 'opening_balance'`.
+  {
+    code: 'ZY381',
+    rule: 'No entry may be dated before the opening boundary once an opening balance is imported, whatever its source.',
+    migration: '0132',
+    raisedBy: ['refuse_entry_behind_the_boundary'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY382',
+    rule: "An opening balance's attested totals must equal every opening_balance line dated at its boundary.",
+    migration: '0132',
+    raisedBy: ['assert_opening_totals_tie_to_the_ledger'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY383',
+    rule: 'No further opening_balance entry may be dated on a boundary that is already attested.',
+    migration: '0132',
+    raisedBy: ['refuse_entry_behind_the_boundary'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
+  {
+    code: 'ZY384',
+    rule: 'An opening-balance import is append-only.',
+    migration: '0132',
+    raisedBy: ['refuse_opening_balance_import_change'],
+    translators: ['packages/db/src/services/import-opening-balances.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

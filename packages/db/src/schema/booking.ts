@@ -105,7 +105,14 @@ export const booking = pgTable(
     customerId: uuid('customer_id')
       .notNull()
       .references(() => customer.id, { onUpdate: 'cascade', onDelete: 'restrict' }),
-    /** `online` | `front_desk` | `phone` | `walk_in`. A walk-in has given no online consent. */
+    /**
+     * `online` | `front_desk` | `phone` | `walk_in` | `import`. A walk-in has given no online consent.
+     *
+     * `import` is 0130's: a visit reconstructed out of the previous arrangement's records reached this
+     * system through none of the four live channels, and those records do not say which one it originally
+     * came through — so any of the four would be an invented fact about how a real customer booked, on a
+     * row the CRM reads. Same decision as `customer.created_via = 'import'` (0121).
+     */
     source: text('source').notNull(),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
@@ -113,7 +120,10 @@ export const booking = pgTable(
   },
   (t) => [
     index('booking_customer_idx').on(t.customerId, t.createdAt.desc()),
-    check('booking_source_check', sql`${t.source} in ('online', 'front_desk', 'phone', 'walk_in')`),
+    check(
+      'booking_source_check',
+      sql`${t.source} in ('online', 'front_desk', 'phone', 'walk_in', 'import')`,
+    ),
   ],
 )
 
@@ -230,6 +240,24 @@ export const appointment = pgTable(
     lateCancellation: boolean('late_cancellation').notNull(),
     /** The window in force when the flag was set. Whole-or-nothing with it: a flag with no figure. */
     lateCancellationWindowHours: smallint('late_cancellation_window_hours'),
+    /**
+     * True for a visit RECONSTRUCTED out of the previous arrangement's records (0130, H-MIG-05).
+     *
+     * Three things this mirror cannot say, and all three are why the column exists rather than a second
+     * table: ZY361 fixes the row's status, period, therapist, room, service and price so no transition of
+     * the live machine applies to it; ZY362 refuses a change to the flag in either direction; and ZY366
+     * refuses a migrated row that ENDS in the future, which is what keeps reconstruction out of every
+     * forward-looking reader without a second `not migrated` growing in each of them. ZY363 refuses, at
+     * COMMIT, a migrated row that no `imported_appointment` record attests to.
+     *
+     * It is still in the occupancy read and still judged by `appointment_therapist_no_overlap` and
+     * `assert_room_capacity`, deliberately: the visit held its therapist and its room, and that is what
+     * makes "no double-booked therapist, no room over capacity" a checkable claim about the imported
+     * dataset. It contributes nothing to any statement because the importer posts no journal entry at
+     * all — a statement line is a directed sum over `journal_line` (ADR 0064) — and it carries no VAT
+     * figure, because ADR 0069 refused to post output tax on a supply made before these books opened.
+     */
+    migrated: boolean('migrated').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
   },
@@ -292,6 +320,18 @@ export const appointment = pgTable(
     check(
       'appointment_late_cancellation_window_bounded',
       sql`${t.lateCancellationWindowHours} is null or ${t.lateCancellationWindowHours} between 0 and 168`,
+    ),
+    // 0130. The four terminal labels are written out rather than derived from `holdsResources`: that
+    // column is generated from three of them plus `rescheduled`, and the claim here is not "it holds no
+    // resources" — a completed visit does hold its room. `rescheduled` is absent because it means a
+    // successor row exists and a reconstruction has none to point at.
+    check(
+      'appointment_migrated_is_finished',
+      sql`not ${t.migrated} or ${t.status} in ('completed', 'no_show', 'cancelled_by_customer', 'cancelled_by_salon')`,
+    ),
+    check(
+      'appointment_migrated_posts_no_vat',
+      sql`not ${t.migrated} or (${t.vatRateBp} = 0 and ${t.vatFils} = 0)`,
     ),
     // `appointment_therapist_no_overlap` — EXCLUDE USING gist (therapist_id WITH =, period WITH &&)
     // WHERE (holds_resources) — is not expressible in Drizzle. It lives in
