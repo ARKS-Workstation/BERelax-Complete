@@ -88,6 +88,7 @@ export const SQLSTATE_REGISTRY_RULES = {
   staleEntry: 'sqlstate-registry-entry-still-describes-a-refusal',
   entryDisagrees: 'sqlstate-registry-entry-matches-the-migrations',
   twoRules: 'one-private-sqlstate-stands-for-one-rule',
+  outOfOrder: 'sqlstate-registry-is-read-in-ascending-code-order',
 } as const
 
 export const MIGRATIONS_DIR = 'packages/db/migrations'
@@ -288,7 +289,7 @@ export interface RegistryProblem {
 }
 
 /**
- * Every disagreement between the registry and the tree, in the five directions.
+ * Every disagreement between the registry and the tree, in the six directions.
  *
  * Pure, and takes the derived facts as arguments rather than reading them, so the known-bad fixtures can
  * be a corpus rather than an edit to a shipped file — and so a direction that has never been seen to fire
@@ -302,6 +303,29 @@ export function registryProblems(input: {
   const { registry, raises, translators } = input
   const problems: RegistryProblem[] = []
   const rules = SQLSTATE_REGISTRY_RULES
+
+  // The order direction, and the reason it is HERE rather than only in the suite that reads this file.
+  //
+  // This array is read as a SEQUENCE: the next unit to need a band finds it by reading down the codes, so
+  // an entry in the wrong place hides a free band and offers an occupied one. `sqlstate-registry.test.ts`
+  // has always held that claim — and `pnpm sqlstate` did NOT, so the cheap gate in every agent's loop
+  // passed while the expensive one failed. Three merges broke this file in exactly that gap, each from a
+  // keep-both resolution that put an incoming band after the codes it sorts before. Two gates disagreeing
+  // about one file is the defect this registry exists to prevent, one level up.
+  //
+  // It names the PAIR rather than printing a sorted list, because the fix is to move one entry and a
+  // sorted list invites a reformat of the whole file — which is how a merge loses somebody else's band.
+  for (let i = 1; i < registry.length; i += 1) {
+    const previous = registry[i - 1]
+    const current = registry[i]
+    if (previous === undefined || current === undefined) continue
+    if (current.code < previous.code) {
+      problems.push({
+        rule: rules.outOfOrder,
+        detail: `${current.code} is entered after ${previous.code}. This array is read down to find the next free band, so an entry out of place hides a free one and offers an occupied one — move the entry, never renumber the code.`,
+      })
+    }
+  }
 
   const seen = new Set<string>()
   for (const entry of registry) {

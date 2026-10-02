@@ -35701,9 +35701,9 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
 //            `packages/db` matches on the code ALONE, so one file's refusal is reported as the other's and a
 //            probe asserting the code passes on a statement it never touched.
 //
-//            So `pnpm sqlstate` fails in five directions, and each has a fixture here because a direction
-//            nobody has seen fire is not a direction (ADR 0003). Four of the five are edits to the REGISTRY
-//            and one is a fixture MIGRATION, and that asymmetry is the point: the fifth proves the gate reads
+//            So `pnpm sqlstate` fails in six directions, and each has a fixture here because a direction
+//            nobody has seen fire is not a direction (ADR 0003). Five of the six are edits to the REGISTRY
+//            and one is a fixture MIGRATION, and that asymmetry is the point: the migration one proves the gate reads
 //            the migration files, which is the difference between an allocator and a list of codes somebody
 //            keeps up to date.
 //
@@ -35724,6 +35724,15 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     `  {\n    code: 'ZZ005',\n${ZZ005_RULE}    migration: '0093',\n` +
     "    raisedBy: ['assert_publication_within_weight_budget'],\n" +
     "    translators: ['packages/db/src/repositories/publication.ts'],\n  },\n"
+
+  /**
+   * The opening of the registry's FIRST entry, which 121j moves `ZZ005` in front of.
+   *
+   * Spelled as the entry rather than as the array's `export const` line, because a scan two cases down
+   * asserts that exactly one file in the tree DECLARES `PRIVATE_SQLSTATES` — it caught this fixture
+   * holding a copy of that declaration, which is the control working on its author.
+   */
+  const FIRST_ENTRY_OPENING = "  {\n    code: 'ZA001',\n"
 
   /** A migration that raises `code` from a function named `fn`, `create or replace` when asked. */
   const raising = (fn, code, replace = false) =>
@@ -35871,8 +35880,30 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
     'a private SQLSTATE collision',
   )
 
+  // 121j. An entry in the wrong place in the sequence. The sixth direction, and the one the script did not
+  //       have for its first 97 migrations: this array is read DOWN to find the next free band, so an entry
+  //       out of order hides a free band and offers an occupied one. `sqlstate-registry.test.ts` held the
+  //       claim and `pnpm sqlstate` did not, so the gate in every agent's loop passed while the integrating
+  //       verify failed — and this file broke that way three times, each from a keep-both merge that put an
+  //       incoming band after the codes it sorts before. The fixture MOVES one entry rather than editing a
+  //       code, because moving an entry is exactly what a merge does wrong.
+  checkRejectedBy(
+    'sqlstate gate: an entry out of ascending order is refused',
+    withEditedFile(
+      REGISTRY,
+      (text) =>
+        replaceOnce(
+          replaceOnce(text, ZZ005_ENTRY, ''),
+          FIRST_ENTRY_OPENING,
+          `${ZZ005_ENTRY}${FIRST_ENTRY_OPENING}`,
+        ),
+      sqlstate,
+    ),
+    'sqlstate-registry-is-read-in-ascending-code-order',
+  )
+
   // 121i. The control for all of the above: the committed tree passes, and the gate says what it examined.
-  //       Without it the eight failures are satisfied by a script that refuses everything.
+  //       Without it the nine failures are satisfied by a script that refuses everything.
   {
     const clean = run('pnpm', ['sqlstate'])
     check(

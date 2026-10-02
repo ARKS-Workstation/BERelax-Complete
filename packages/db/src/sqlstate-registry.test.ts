@@ -7,7 +7,10 @@ import {
   liveRaisesByCode,
   MIGRATIONS_DIR,
   PRIVATE_SQLSTATES,
+  type PrivateSqlState,
   readMigrationCorpus,
+  registryProblems,
+  SQLSTATE_REGISTRY_RULES,
 } from './sqlstate-registry.ts'
 
 /**
@@ -59,7 +62,25 @@ describe('the private SQLSTATE registry', () => {
     expect(new Set(codes).size, 'a code appears once').toBe(codes.length)
     // Sorted, because the file is read to find the next free subclass of a class. An unsorted registry is
     // one a person allocating from scans by eye and gets wrong.
-    expect(codes).toEqual([...codes].sort())
+    //
+    // Asserted THROUGH `registryProblems` rather than against a sorted copy, so this claim and `pnpm
+    // sqlstate` are one implementation. They were two, and only this one checked order: the cheap gate in
+    // every agent's loop passed while the integrating verify failed, and this file broke that way three
+    // times. The two assertions below are the pair ADR 0003 asks for — the real registry has no such
+    // problem, and a registry that is out of order is refused by the rule's own name.
+    const orderProblems = (registry: readonly PrivateSqlState[]) =>
+      registryProblems({ registry, raises: new Map(), translators: new Map() }).filter(
+        (problem) => problem.rule === SQLSTATE_REGISTRY_RULES.outOfOrder,
+      )
+    expect(orderProblems(PRIVATE_SQLSTATES)).toEqual([])
+    const swapped = [...PRIVATE_SQLSTATES]
+    const [first, second] = [swapped[0], swapped[1]]
+    if (first === undefined || second === undefined)
+      throw new Error('the registry is too small to swap')
+    swapped[0] = second
+    swapped[1] = first
+    expect(orderProblems(swapped).length, 'a swapped pair is refused').toBeGreaterThan(0)
+    expect(orderProblems(swapped)[0]?.detail).toContain(first.code)
   })
 
   it('states one rule per entry, as a sentence, and no two entries state the same rule', () => {
