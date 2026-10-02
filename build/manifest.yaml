@@ -14290,7 +14290,7 @@ units:
       from recurring costs, forward bookings at snapshotted prices and payroll, deterministic under the
       frozen clock.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - R-REP-02
@@ -14310,11 +14310,71 @@ units:
     - a lunar-date holiday reports its impact twice — confirmed and provisional — rather than one blended
       number
     - two runs under the frozen clock produce byte-identical forecast output
+    - 'NOTE: ADR 0073 is the decision. Two things the dispatch left to this unit are settled there and are
+      the shape of everything else: (1) a forecast LINE is a commitment already on file placed in the week
+      its cash moves — the measured ledger cash position, contracted recurring-cost occurrences, bookings
+      at their snapshotted price, payroll settlements — and never an extrapolation of history, because this
+      business has weeks of trading and an index over its own data multiplied into a cash figure leaves no
+      trace in the number it changed; `cash-forecast.ts` therefore cannot import `seasonality.ts` at all
+      and gate case 151j plants the import. (2) No amount in the artefact is a bare number: every figure is
+      `measured`, `committed`, `projected`, `none_by_construction` or `unattributable`, a sum is as weak as
+      its weakest part, an unattributable figure carries no `fils` field, and `publishForecastFigure` — the
+      only route to a printable number — returns the qualifier with it. Exactly ONE figure in the whole
+      artefact is `measured`: week 1''s opening cash.'
+    - 'NOTE: the closing cash of every one of the thirteen weeks answers `unattributable` against this
+      build''s own data, and `packages/fixtures/src/cash-forecast.itest.ts` MEASURES that rather than
+      asserting it. Two independent gaps, both reported because answering one does not answer the other.
+      (1) `Y8-payroll-date`, NEW: `payroll_run` records the period it pays for and no date on which the
+      money leaves the bank, and a 13-week horizon holds three settlements — so a pay date chosen here
+      would move a whole month''s wage bill into or out of the artefact. (2) `Y8-staff`:
+      `employee.basic_wage_fils` is NULL for every employment record. The refusal propagates to every week
+      and not only to the weeks a settlement would have fallen in, because when the pay date is unknown
+      which weeks the wage bill belongs to is exactly what is unknown. The inflow side still reports, so
+      the artefact says what it does know. P-HR-12 owns the payroll run; nothing here is deferred TO it —
+      the gap is recorded, not handed over.'
+    - 'NOTE: every seasonality bucket answers `no_data` over this build''s own history, also measured. An
+      index needs two SEPARATED occurrences of its bucket (`MINIMUM_SEASONALITY_OCCURRENCES`), because a
+      days floor is met by a single Ramadan and one occurrence of a season cannot be told apart from
+      everything else that happened in the same weeks. `reporting.calendar_observance` ships EMPTY
+      (`Y9-holiday-calendar`, R-REP-01''s deliberate choice) and this unit seeds no row into it: the
+      mechanism is built over whatever the table holds and is proved against rows the pairing suite
+      inserts. The seeded ledger also holds no `journal_line` at all, which the suite records as a second
+      measured fact so it is not mistaken for this unit''s doing. `P-HR-10` still owns the operational
+      holiday calendar and takes `dim_date`''s flags with it, exactly as 0110 recorded.'
+    - 'NOTE: `Y9-summer-window` is NEW. docs/06 B6 observes "a genuinely quiet July/August" and nobody has
+      confirmed it against takings, so the WINDOW is a `provisional: true` settings value
+      (`reporting.seasonality_summer_months`) on the Unconfirmed Assumptions panel and a REQUIRED argument
+      to `seasonalityIndex` — nothing in `packages/core` holds a window length (ADR 0070 rule 4). No
+      MAGNITUDE is assumed at all: that is the occurrence floor above and cannot be answered by a settings
+      change.'
+    - 'NOTE: no KPI is registered and no second registry or outcome union exists. The seasonality index is
+      `RevPARH(bucket) ÷ RevPARH(baseline)` through R-REP-03''s already-registered
+      `revenue_per_available_room_hour`, evaluated over two selections of `KpiInput` — so the hours
+      denominator reaches `dim_date.open_minutes` through R-REP-03''s own checked measure and this unit
+      states no hours arithmetic. A KPI of its own was refused for ADR 0068''s stated reason: an
+      expression folds ONE input, and an index is a quotient of two folds over two different subsets of
+      it, so registering one would have needed a new node type, its rendering, its unit rule and a fourth
+      row in the quotient table. The outcome is R-REP-04''s `KpiOutcome`; `ForecastFigure` is a BASIS
+      marking and not a fourth outcome union — `KpiOutcome` answers "can this be computed" and
+      `ForecastFigure` answers "what kind of claim is this number", which neither of the other two can
+      express because both of their value states mean measured.'
+    - 'NOTE: allocations. Migration 0122 is USED and adds no schema — two rows, the `agent_definition` and
+      `agent_heartbeat` behind the weekly cron, because `apps/worker/src/job.ts` requires an agent on any
+      job with one and an agent is a row. `SCHEMA_VERSION` is raised to 122 and a ledger paragraph added.
+      The SQLSTATE band ZY281-ZY290 and the port band { start: 17_000, width: 300 } are RELEASED UNUSED and
+      the codes deliberately left unregistered: nothing here writes, so nothing here can be refused by the
+      database, and no server is started. Gate block 151a-151z and ADR 0073 are used.'
     files:
     - packages/core/src/reporting/seasonality.ts
+    - packages/core/src/reporting/seasonality.test.ts
     - packages/core/src/reporting/cash-forecast.ts
     - packages/core/src/reporting/cash-forecast.test.ts
+    - packages/db/src/reporting/forecast-queries.ts
+    - packages/db/migrations/0122_cash_forecast_agent.sql
+    - packages/fixtures/src/cash-forecast.itest.ts
     - apps/worker/src/jobs/cash-forecast.ts
+    - apps/worker/src/jobs/cash-forecast.itest.ts
+    - docs/adr/0073-a-forecast-line-is-a-commitment-already-on-file-and-a-projection-is-marked.md
   - id: R-REP-07
     order: 127
     title: The data-quality gate that refuses to show an unreconciled number

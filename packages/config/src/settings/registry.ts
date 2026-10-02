@@ -202,6 +202,40 @@ export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
 export const WPS_EMPLOYER_ID_SETTING_KEY = 'hr.wps_employer_id'
 export const WPS_AGENT_ID_SETTING_KEY = 'hr.wps_agent_id'
 
+/**
+ * The two values the 13-week cash forecast and the seasonality report assume (R-REP-06, ADR 0073).
+ *
+ * Spelled once here for the reason the package keys are: `apps/worker/src/jobs/cash-forecast.ts` reads
+ * them and the Unconfirmed Assumptions panel lists them, and a second spelling is a reader that silently
+ * falls back to the declared default — which for the show-up rate would be invisible, because the
+ * fallback is a plausible number.
+ *
+ * The arithmetic in `packages/core` reads NEITHER: both arrive as required arguments, so a figure
+ * computed there always names where its rate came from (ADR 0070's rule 4, inherited).
+ */
+export const FORECAST_SHOW_UP_RATE_BP_SETTING_KEY = 'reporting.forecast_show_up_rate_bp'
+export const SEASONALITY_SUMMER_MONTHS_SETTING_KEY = 'reporting.seasonality_summer_months'
+
+/**
+ * 10,000 basis points is the whole, as the upper bound on the show-up rate.
+ *
+ * A THIRD statement of a figure `packages/core` exports twice — `BASIS_POINTS` as a `number` and
+ * `WHOLE_IN_BASIS_POINTS` as a `bigint` — and unavoidable here, because `@berelax/config` depends on
+ * `@berelax/shared` alone and may not reach `@berelax/core`. It therefore arrives with the check that
+ * holds it equal in the same commit: `packages/fixtures/src/cash-forecast.itest.ts` asserts
+ * `Number(WHOLE_IN_BASIS_POINTS) === SHOW_UP_RATE_WHOLE_BP`, in a package that may import both.
+ */
+export const SHOW_UP_RATE_WHOLE_BP = 10_000
+
+/**
+ * 9,000 basis points — a 10% no-show rate — which is `build/manifest.yaml`'s own provisional value for
+ * R-REP-06 and is owned by `Y9-windows`.
+ */
+export const PROVISIONAL_SHOW_UP_RATE_BP = 9_000
+
+/** July and August, from docs/06 B6. `Y9-summer-window` owns them; see the setting's own comment. */
+export const PROVISIONAL_SUMMER_MONTHS: readonly number[] = Object.freeze([7, 8])
+
 // --- the registry ------------------------------------------------------------------------------
 // Provisional values are the STRICTEST safe option, so an uncorrected assumption leaves the system
 // conservative rather than non-compliant. Each carries its OPEN-QUESTIONS id.
@@ -1293,6 +1327,97 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y1-entity',
       note: 'Mainland, DIFC or ADGM? Each has its own authority and the build has not been told which. Deliberately blank rather than assumed: a response naming an invented supervisory authority is worse than no response, because it looks complete.',
+    },
+  }),
+  define({
+    /**
+     * The share of forward bookings the 13-week cash forecast expects to show up (R-REP-06, ADR 0073).
+     *
+     * **A setting and not a constant, because it is the one assumption the forecast's inflow rests on.**
+     * The forward-booking line is `Σ appointment.gross_price_fils × this rate`, and the rate is the only
+     * place in that line where this build has guessed anything — the gross is a snapshot and the trading
+     * date is the diary's. Putting it in the registry is what makes it appear on the Unconfirmed
+     * Assumptions panel (`provisionalSettings()`), and the forecast ALSO names it on the figure itself,
+     * because a panel is a different screen and a reader of a cash figure has to be told there without
+     * already suspecting it.
+     *
+     * Basis points, not a percentage and not a fraction, for `operational-kpis.ts`' reason: a ratio is an
+     * integer number of basis points throughout this build — `vat_rate_bp`, `rate_bp`,
+     * `promotion.percentage_bp` — and a float rate would put a fraction into an integer-fils figure that
+     * has to articulate to the fil.
+     *
+     * The SHOW-UP rate rather than the no-show rate, although the handover expresses it the other way
+     * round: the figure is multiplied by the booked gross, so stating it as the multiplier removes the
+     * subtraction a reader would otherwise have to do in their head, and a reader who misreads 9,000 as
+     * a no-show rate gets a visibly absurd forecast rather than a plausible one 80% too low.
+     *
+     * 9,000 — a 10% no-show rate — is the manifest's own provisional value and `Y9-windows` owns it. It
+     * is deliberately NOT the strictest safe option in either direction, because there is no safe
+     * direction here: too high overstates cash and too low understates it, and the only honest handling
+     * is to mark it, which is what the flag and the on-figure assumption do.
+     */
+    key: FORECAST_SHOW_UP_RATE_BP_SETTING_KEY,
+    tier: 'operational',
+    schema: z.number().int().min(0).max(SHOW_UP_RATE_WHOLE_BP),
+    defaultValue: PROVISIONAL_SHOW_UP_RATE_BP,
+    label: 'Forecast show-up rate',
+    help: 'The share of already-booked appointments the 13-week cash forecast expects to happen, in basis points — 9,000 is 90%, a 10% no-show rate. It is an assumption, not a measurement: the realised no-show figure is on the operational KPI set, over appointments that have already happened. Every forecast figure it touches is marked as a projection and names this setting.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    // No cache tag and no job: the forecast is computed at read time (ADR 0064's argument for the
+    // statements, inherited), so a change is visible on the next read and there is nothing to rebuild.
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-windows',
+      note:
+        'A 10% no-show rate assumed, so 9,000 basis points show up. No no-show policy has been agreed ' +
+        'and no realised no-show rate has been measured over enough trading to be one. There is no safe ' +
+        'direction: too high overstates cash and too low understates it, so the figure is marked on ' +
+        'every forecast line it reaches rather than chosen conservatively.',
+    },
+  }),
+  define({
+    /**
+     * Which calendar months the summer exodus covers (R-REP-06, ADR 0073).
+     *
+     * docs/06 B6 — "Ramadan and the summer exodus change demand materially ... a genuinely quiet
+     * July/August" — is the source, and that is an observation in the handover rather than a figure
+     * anybody has confirmed against takings. So it is `Y9-summer-window` and it is here rather than in
+     * `packages/core`: nothing in the seasonality arithmetic holds a window length (ADR 0070's rule 4),
+     * `seasonalityIndex` takes the months as a required argument, and this is the row that says what the
+     * build assumed when nobody passed one.
+     *
+     * A list of months and not a start/end pair, because the window has to be able to be two months that
+     * are not adjacent — a quiet August and a quiet Ramadan-shifted July are different sets in different
+     * years — and because a pair invites the "does it wrap round December" question this never has to
+     * answer.
+     *
+     * Answering it moves days between the summer bucket and the baseline and changes no arithmetic. What
+     * it cannot do is produce an index: the index needs two separated occurrences of the bucket and this
+     * business has none, so every bucket reads `no_data` until it has traded through two summers.
+     */
+    key: SEASONALITY_SUMMER_MONTHS_SETTING_KEY,
+    tier: 'operational',
+    schema: z
+      .array(z.number().int().min(1).max(12))
+      .min(1)
+      .max(12)
+      .refine((months) => new Set(months).size === months.length, {
+        message: 'each month may appear once',
+      }),
+    defaultValue: [...PROVISIONAL_SUMMER_MONTHS],
+    label: 'Summer exodus months',
+    help: 'Which calendar months the seasonality report treats as the summer exodus. July and August are assumed from the handover; nobody has confirmed them against takings, and the report cannot confirm them either until the salon has traded through two summers.',
+    editableBy: OWNER_MANAGER,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: 'Y9-summer-window',
+      note:
+        'July and August assumed, from docs/06 B6 ("a genuinely quiet July/August"). That is an ' +
+        'observation in the handover and not a figure measured from takings, and this build cannot ' +
+        'measure it: a seasonality index needs two separated occurrences of the window and there have ' +
+        'been none.',
     },
   }),
 ] as const

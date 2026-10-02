@@ -29,6 +29,7 @@ import {
 } from './jobs/analytics-partitions.ts'
 import { BUILD_DERIVATIVES_JOB } from './jobs/build-derivatives.ts'
 import { BUILD_VIDEO_RENDITIONS_JOB } from './jobs/build-video-renditions.ts'
+import { CASH_FORECAST_JOB_DEFINITION } from './jobs/cash-forecast.ts'
 import { CREDENTIAL_SWEEP_AGENT, runCredentialSweep } from './jobs/credential-sweep.ts'
 import {
   GOOGLE_HEALTH_AGENT,
@@ -512,6 +513,13 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // heartbeat to decide whether a tile may render a number. One agent and one cron: refreshing seven views
   // is one obligation with one snapshot, and splitting it would be seven heartbeats for one pass.
   REPORTING_REFRESH_JOB_DEFINITION,
+  // R-REP-06's weekly 13-week cash forecast at 04:37 on a Sunday, after that refresh because its
+  // seasonality half reads `reporting.dim_date`. WEEKLY and not nightly, because the artefact is a weekly
+  // horizon: thirteen windows that only move on the day the first one does, so a nightly pass would
+  // re-log almost the same thing six times and bury the one that changed. It writes nothing at all (ADR
+  // 0064's argument for the statements, inherited), so what the cron buys is that the figures this build
+  // REFUSES to produce are seen rather than silently rendered as zero (ADR 0073).
+  CASH_FORECAST_JOB_DEFINITION,
 ]
 
 /**
