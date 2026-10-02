@@ -249,6 +249,7 @@ export {
   type PremisesFactsRow,
   type PriceOnRequestRow,
   readPremisesFacts,
+  readWhatsappNumber,
   type TradingHoursRow,
 } from './queries/premises-facts.ts'
 export {
@@ -1545,15 +1546,26 @@ export {
   type TradingDateRange,
 } from './repositories/timesheet.ts'
 /*
-  B-UI-04's WhatsApp ref loop (0079). `issueWhatsappRef` and `mintWhatsappRefCode` are exported although
-  nothing in this build calls them, and that is the deferred-scope contract rather than dead code: they are
-  the interface A-FIRST will generate codes through (docs/12 §1.1), so filling the port later is a call site
-  and not a rewrite. `whatsapp_ref` ships EMPTY, which is why every code the front desk types today is
-  `unknown_code` — the honest state, shown on the screen rather than reported as a zero.
+  The WhatsApp ref loop: B-UI-04's booking side (0079) and A-FIRST-07's lifetime, attribution and rollup
+  (0127).
+
+  0079 exported `issueWhatsappRef` and `mintWhatsappRefCode` with nothing in the build calling them, as the
+  deferred-scope contract of docs/12 §1.1 — the interface A-FIRST would generate codes through, so that
+  filling it later was a call site and not a rewrite. A-FIRST-07 filled it: `/api/whatsapp` mints a code
+  bound to the browser session and composes the `wa.me` link from the premises row.
+
+  `whatsapp_ref` is STILL empty in this build, and the reason has changed from "nothing calls it" to a
+  refusal the unit chose. `premises.phone_whatsapp` holds the Y1-nap placeholder, the route will not mint a
+  code for a message nobody can send, and that is deliberate: a code issued into an unsendable message
+  would inflate the denominator of the capture rate with the absence of a phone number, and 0% would then
+  read as a front-desk failure. Every code the desk types today is still `unknown_code`.
 */
 export {
+  type DailyRefCaptureRow,
   type IssueWhatsappRefInput,
+  isRefClaimAfterExpiry,
   issueWhatsappRef,
+  type MatchedWhatsappRefRow,
   matchWhatsappRef,
   mintWhatsappRefCode,
   REF_CAPTURE_OUTCOME_NAMES,
@@ -1562,10 +1574,14 @@ export {
   type RefCaptureCountsQuery,
   type RefCaptureCountsRead,
   type RefCaptureOutcomeName,
+  readDailyRefCapture,
   readRefCaptureCounts,
   recordRefCapture,
+  rollUpDailyRefCapture,
   WHATSAPP_REF_MINT_ATTEMPTS,
+  WHATSAPP_REF_SQLSTATE,
   type WhatsappRefRow,
+  whatsappRefError,
 } from './repositories/whatsapp-ref.ts'
 export {
   type PublicHolidayClosureRow,
@@ -2000,6 +2016,7 @@ export {
   readFrontDeskMinLeadMinutes,
   readGenderMatching,
   readWhatsappRefExpected,
+  readWhatsappRefTtlDays,
   setGenderMatching,
 } from './settings/availability.ts'
 export {
@@ -4229,4 +4246,89 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // refuses an entry for a code no migration raises — and nothing here can be refused by the database,
 // since nothing here writes.
 //
-export const SCHEMA_VERSION = 122 as const
+// 127 is 0127_whatsapp_ref_lifetime.sql (A-FIRST-07) — the ref loop closed: a code that expires, a handle
+// that cannot carry a person, an attribution that names the session it was proved against, and the
+// day-level counts a capture rate is read off.
+//
+// 0079 built the booking side of this join and left three things to "the unit that owns the conversation".
+// Each of them turned out to be a decision rather than a gap, and the three are worth finding here because
+// each has an obvious alternative that is wrong in a way a reader would have to reconstruct.
+//
+// **The expiry is STORED, and an expired code is never recycled.** `expires_at` is stamped at issue from
+// `booking.whatsapp_ref_ttl_days` (Y12-ref-ttl, provisionally 7 days) rather than recomputed at claim time,
+// because recomputing it would mean that answering the TTL question retroactively moved the recorded
+// outcome of bookings already taken — a booking filed as `ref_expired` in March reading as `matched` in
+// April with no row having changed. And the code is not reissued after it dies, which is the step a TTL
+// invites: the four characters live in the customer's chat history, not in our database, so handing them to
+// a second conversation makes a two-week-old message attribute a booking to a stranger's session. That is
+// the confident wrong join the alphabet's I/O/0/1 exclusions exist to prevent, arriving by another door.
+// The primary key therefore has no expiry in it and `issueWhatsappRef` redraws on a collision, inside the
+// TTL window and outside it alike.
+//
+// **`session_reference` is a uuid, and the type IS the PII decision.** 0079 made it `text` and opaque. Every
+// other column on that row is one step from a person — the code is read off a phone screen and typed back
+// in at a counter — so a text handle is a column a later unit could put a phone number, an email address or
+// a name into with nothing to notice. A blacklist CHECK cannot close it: `session_reference !~ '[0-9]{6}'`
+// refuses most uuids as well, because a hex string is six consecutive decimal digits somewhere about four
+// fifths of the time. The guard is positive instead — the only value the column accepts is a uuid, and a
+// uuid cannot be a contact detail. It is still NOT a foreign key and still not named `session_id`:
+// retention purges a session at 90 days and an attribution has to outlive the session it is about, so
+// neither CASCADE nor RESTRICT is available, and a name that promised a key would be a lie about which of
+// the two rows is allowed to disappear.
+//
+// **An attribution is refused at the database boundary, not only in the rule.** `attributed_session_id` is
+// on `booking_whatsapp_ref_capture` and not on `booking`, for the reason 0079 rejected a `whatsapp_ref`
+// column there. The three CHECK constraints state what one row can state; the two facts that live on
+// ANOTHER row cannot be a CHECK, and they are the two SQLSTATEs this file takes:
+//
+//   * **ZY331** — a `matched` row naming a code whose lifetime had run out. A `conflict` to a caller,
+//     because it would have been accepted an hour earlier and the remedy is a different outcome on the same
+//     booking rather than a failed booking. The ref field never blocks one (0079's acceptance line).
+//   * **ZY332** — a `matched` row naming a session the code was not issued into, or naming no code at all.
+//     An `invariant_violated`, because this code and not the person at the counter constructed it.
+//
+// ZY333 through ZY340 of the allocated band ZY331-ZY340 are left FREE and deliberately UNREGISTERED: an
+// entry for a code no migration raises is what direction 3 of `pnpm sqlstate` refuses.
+//
+// **The capture rate is a rollup table and not a `daily_funnel` row**, which A-FIRST-01 deferred here in so
+// many words ("day-level rather than step-level figures"). `analytics.daily_funnel` is keyed on
+// (trading_date, step, source, medium, campaign) and holds `entered` and `excluded`; a code ISSUE is not
+// one of the eight funnel steps, has no origination tuple of its own, and "claimed" is not an exclusion.
+// Writing it there needs either a ninth enum member no funnel draws or a second meaning for two columns
+// A-FIRST-09 and A-FIRST-10 read. So `analytics.daily_ref_capture` is a fourth rollup beside the three of
+// 0096, on the same keep-indefinitely policy, keyed on `analytics.session`'s own
+// (trading_date, trading_date_basis) pair so a funnel can join the two without a second opinion about what
+// a trading date is. It is RECOMPUTED from both tables on every write rather than incremented — a counter
+// beside the rows is a number that can disagree with them, and the disagreement is invisible because the
+// rollup is the thing everybody reads.
+//
+// Two things this migration deliberately does NOT contain.
+//
+// **No WhatsApp provider, credential or sender id.** The loop needs none, and that is the shape rather than
+// a deferral: the message is composed as a `wa.me` URL and SENT BY THE CUSTOMER'S OWN CLIENT, so there is
+// no outbound call to make. The server-side WhatsApp send stays `unregistered` in
+// `SENDER_IDENTITY_ROUTES` (ADR 0016) and nothing here touches it.
+//
+// **No purge of a dead unclaimed code.** A code a booking is attributed to must survive, which the capture
+// row's ON DELETE RESTRICT already enforces; a code that expired with nothing referencing it has no purpose
+// and should eventually go. That is a nightly pass, and a cron needs an agent row and a job — it is handed
+// to A-FIRST-09, which owns the nightly rollups, with `whatsapp_ref_expires_at_idx` created here as the
+// predicate it will need. `whatsapp_ref` is in `public` rather than `analytics`, so 0096's
+// `retention_policy` does not cover it and its absence from that list is not an omission.
+//
+// **The alphabet loses `U` and `L`**, and the CHECK on `whatsapp_ref.ref_code` is dropped and re-added for
+// it. 0079 excluded I, O, 0 and 1 as the characters a person misreads off a screen; with those gone, a
+// misread of `L` as `1` or `I` produces a value that is not a code at all and resolves to `unknown_code` —
+// a visible warning and an honestly unknown attribution. `U` misread as `V` is the ONLY remaining pair in
+// which the wrong character is itself in the alphabet, so it is the last one that can produce another
+// VALID code and credit a booking to somebody else's conversation. Safe to narrow in this migration and
+// not in a later one: the table is still empty, so no issued code is retrospectively refused by a column
+// that no longer admits it. 30^4 = 810,000 is still orders of magnitude more codes than this business will
+// issue.
+//
+// The allocated test port band { start: 18_500, width: 300 } was NOT used and is NOT declared: this unit's
+// round trip is `apps/web/src/whatsapp-ref-loop.itest.ts`, which drives the real ingest, the real issue
+// route and the real claim as FUNCTIONS against a real PostgreSQL and starts no server — and a
+// declared-but-unused band fails `apps/web/src/test-ports.test.ts`.
+//
+export const SCHEMA_VERSION = 127 as const

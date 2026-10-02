@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
   ASIA_DUBAI,
-  decideRefCapture,
   formatMoney,
   grossMoneyFromFils,
   type Instant,
@@ -22,7 +21,6 @@ import {
   type BookableVariantRow,
   type ExclusionReason,
   MIN_LEAD_SETTING_KEY,
-  matchWhatsappRef,
   queryAvailability,
   readAvailabilityLimits,
   readBookableVariants,
@@ -31,13 +29,10 @@ import {
   readRefCaptureCounts,
   readTherapistLabels,
   readWhatsappRefExpected,
-  recordRefCapture,
   type Sql,
-  withUnitOfWork,
 } from '@berelax/db'
 import {
   FRONT_DESK_MIN_LEAD_SETTING_KEY,
-  normaliseWhatsappRefCode,
   WHATSAPP_REF_CODE_HTML_PATTERN,
   WHATSAPP_REF_CODE_LENGTH,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
@@ -45,6 +40,7 @@ import {
 } from '@berelax/shared'
 import type { AdminChrome } from '../../../src/components/admin/google-reauth-banner.ts'
 import { handleBookingRequest } from '../../api/v1/bookings/handler.ts'
+import { claimRefForBooking, customerIdForPhone, decideRefClaim } from './ref-claim.ts'
 import { renderQuickBookHtml } from './render.ts'
 import {
   QUICK_BOOK_FIELDS,
@@ -515,6 +511,8 @@ async function rateView(sql: Sql): Promise<QuickBookRateView> {
     matched: rate.counts.matched,
     unknownCode: rate.counts.unknownCode,
     notOffered: rate.counts.notOffered,
+    refExpired: rate.counts.refExpired,
+    refConflict: rate.counts.refConflict,
     total: rate.total,
     claim: rate.claim,
     sentence: RATE_SENTENCES[rate.claim],
@@ -868,12 +866,37 @@ export function quickBookIdempotencyKey(args: {
  * Total for the reason {@link RATE_SENTENCES} is: a fourth outcome would otherwise reach the confirmation as
  * another outcome's wording, and the only outcome anybody would notice is `matched`.
  */
+const ATTRIBUTION_SENTENCES: Readonly<Record<RefCaptureOutcome, string>> = {
+  matched: 'Attributed to the WhatsApp conversation the ref code names.',
+  unknown_code: 'Attribution unknown — the ref code matched nothing.',
+  not_offered: 'Attribution unknown — no ref code was recorded.',
+  ref_expired: 'Attribution unknown — the ref code had expired.',
+  ref_conflict: 'Attribution unknown — the ref code was already claimed by another customer.',
+}
+
 const captureLabels: Readonly<Record<RefCaptureOutcome, string>> = {
   matched: 'WhatsApp conversation, matched by ref code',
   // `unknown` printed, never blank: a blank cell reads as a field nobody filled rather than as a fact
   // nobody has. This is Y9-crm-source's argument for `unknown` being the default, on a screen.
   unknown_code: 'Unknown — a code was typed and we hold no such code',
   not_offered: 'Unknown — no ref code was recorded',
+  // Both say WHICH kind of unknown, because the two are different findings: one is about our own TTL
+  // (Y12-ref-ttl) and one is about two people holding one code. A single 'Unknown' for all four would
+  // make the capture rate's four buckets unreadable on the row they are about.
+  ref_expired: 'Unknown — the ref code had expired',
+  ref_conflict: 'Unknown — the ref code was already claimed by another customer',
+}
+
+/**
+ * The notice the screen shows for an outcome, or null when there is nothing to say.
+ *
+ * `not_offered` is the only silent outcome, and it is written as the exclusion rather than as a list of
+ * the four that are not: {@link REF_NOTICES} and {@link RefCaptureOutcome} are then the same set minus one
+ * member, which a sixth outcome makes a `pnpm typecheck` failure here instead of a notice that quietly
+ * stops appearing.
+ */
+function noticeFor(outcome: RefCaptureOutcome): RefNotice | null {
+  return outcome === 'not_offered' ? null : outcome
 }
 
 /**
@@ -925,18 +948,18 @@ async function handleCheck(
   }
 
   const solved = await solveCheck(deps, parsed, resolution.date)
-  const normalisedRef = normaliseWhatsappRefCode(parsed.ref)
-  const matched = normalisedRef === null ? null : await matchWhatsappRef(deps.sql, normalisedRef)
-  const decision = decideRefCapture({
+  // The PREVIEW of the capture, which is a different question from the record of it. The customer may not
+  // exist yet — the booking endpoint creates them — so the conflict test is made against whoever this
+  // phone number already is, and against nobody when it is a new number. That is the strict direction: an
+  // unknown customer against a code somebody has already claimed previews `ref_conflict`, which is the
+  // warning the desk needs, and the confirm path re-decides with the real customer id.
+  const previewCustomerId = await customerIdForPhone(deps.sql, parsed.phoneE164)
+  const decision = await decideRefClaim(deps.sql, {
     entered: parsed.ref,
-    matchedRefCode: matched?.refCode ?? null,
+    at: deps.now() as Instant,
+    customerId: previewCustomerId ?? '',
   })
-  const refNotice: RefNotice | null =
-    decision.outcome === 'matched'
-      ? 'matched'
-      : decision.outcome === 'unknown_code'
-        ? 'unknown_code'
-        : null
+  const refNotice = noticeFor(decision.outcome)
 
   if ('refusal' in solved) {
     return page(
@@ -1148,26 +1171,20 @@ async function handleConfirm(
     )
   }
 
-  // The attribution, decided at the instant of booking rather than at the check. A code A-FIRST issued in
-  // between is a match, and a check-time answer carried in a hidden field would have recorded it as unknown.
-  const normalisedRef = normaliseWhatsappRefCode(parsed.ref)
-  const matched = normalisedRef === null ? null : await matchWhatsappRef(deps.sql, normalisedRef)
-  const decision = decideRefCapture({
+  // The attribution, decided at the instant of booking rather than at the check. A code issued in between
+  // is a match, a code that expired in between is `ref_expired`, and a check-time answer carried in a
+  // hidden field would have recorded either as whatever was true a minute earlier.
+  //
+  // The CUSTOMER comes off the booking that was just created rather than from the form, because that is
+  // the identity the conflict is about: the booking endpoint may have matched an existing record under the
+  // phone-first identity rule (ADR 0014), and deciding the conflict against a different id from the one
+  // the row carries would report the same person as a stranger.
+  const { capture, decision } = await claimRefForBooking(deps.sql, QUICK_BOOK_ACTOR, {
+    bookingId: booked.bookingId,
     entered: parsed.ref,
-    matchedRefCode: matched?.refCode ?? null,
+    at: deps.now() as Instant,
+    requestId: request.requestId,
   })
-  const capture = await withUnitOfWork(
-    deps.sql,
-    QUICK_BOOK_ACTOR,
-    (uow) =>
-      recordRefCapture(uow, {
-        bookingId: booked.bookingId,
-        outcome: decision.outcome,
-        refCode: decision.refCode,
-        enteredCode: decision.enteredCode,
-      }),
-    request.requestId === null ? {} : { requestId: request.requestId },
-  )
 
   const rooms = await roomLabels(deps.sql)
   const therapists = await labelsFor(deps.sql, booked.therapistIds)
@@ -1176,11 +1193,7 @@ async function handleConfirm(
     request,
     shell,
     form,
-    announcement:
-      `Booked at ${clockOf(parsed.startsAt)}. ` +
-      (capture.outcome === 'matched'
-        ? 'Attributed to the WhatsApp conversation the ref code names.'
-        : 'Attribution unknown — no ref code matched.'),
+    announcement: `Booked at ${clockOf(parsed.startsAt)}. ${ATTRIBUTION_SENTENCES[capture.outcome]}`,
     booked: {
       bookingId: booked.bookingId,
       treatmentLabel: variantLabel(parsed.variant),
@@ -1195,7 +1208,7 @@ async function handleConfirm(
       captureOutcome: capture.outcome,
       captureLabel: captureLabels[capture.outcome],
     } satisfies QuickBookBooked,
-    refNotice: decision.warns ? 'unknown_code' : decision.outcome === 'matched' ? 'matched' : null,
+    refNotice: noticeFor(decision.outcome),
   })
   return page(renderQuickBookHtml(view), 201)
 }

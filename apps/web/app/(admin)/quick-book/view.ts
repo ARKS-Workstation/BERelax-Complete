@@ -151,8 +151,15 @@ export function therapistRefusalSentence(reason: TherapistRefusalReason): string
   return THERAPIST_REFUSAL_SENTENCES[reason]
 }
 
-/** What the ref field produced, when it produced something worth saying. */
-export const REF_NOTICES = ['unknown_code', 'matched'] as const
+/**
+ * What the ref field produced, when it produced something worth saying.
+ *
+ * One per outcome that is not `not_offered`, and the set is the OUTCOMES minus that one rather than a
+ * shorter list of its own: the field being blank is not a notice, and everything else the desk typed
+ * deserves a sentence. A-FIRST-07 added the two that arise from a code which DID resolve and still
+ * produced no attribution.
+ */
+export const REF_NOTICES = ['unknown_code', 'matched', 'ref_expired', 'ref_conflict'] as const
 export type RefNotice = (typeof REF_NOTICES)[number]
 
 const REF_NOTICE_SENTENCES: Readonly<Record<RefNotice, string>> = {
@@ -164,6 +171,18 @@ const REF_NOTICE_SENTENCES: Readonly<Record<RefNotice, string>> = {
     'is recorded as unknown rather than guessed, and what was typed is kept so it can be matched if the ' +
     'code is issued later.',
   matched: 'That ref code matches a WhatsApp conversation. The booking will be attributed to it.',
+  // Both of these say the same three things in the same order as `unknown_code`: what happened, what it
+  // means for the record, and that the booking is unaffected. The difference is the second: here we DID
+  // find the code, so "we hold no such code" would send the desk to retype something that is already
+  // right.
+  ref_expired:
+    'That ref code is one we issued, and it has expired. The booking is not affected and can be ' +
+    'confirmed. The attribution is recorded as expired rather than claimed, and the code is kept — how ' +
+    'long a code should stay claimable is an open question (Y12-ref-ttl), not a mistake at the desk.',
+  ref_conflict:
+    'That ref code has already been claimed by another customer’s booking. The booking is not affected ' +
+    'and can be confirmed. The attribution is recorded as a conflict and is NOT moved: a code identifies ' +
+    'one conversation, so either it was shared or this is somebody else’s code.',
 }
 
 export function refNoticeSentence(notice: RefNotice): string {
@@ -254,6 +273,10 @@ export interface QuickBookRateView {
   readonly matched: number
   readonly unknownCode: number
   readonly notOffered: number
+  /** Codes that existed and had run out of lifetime (Y12-ref-ttl). Printed, never folded into `matched`. */
+  readonly refExpired: number
+  /** Codes another customer's booking had already claimed. Printed for the same reason. */
+  readonly refConflict: number
   readonly total: number
   readonly claim: string
   /** The sentence for the claim. A rate is never printed as a bare percentage — see `refCaptureRate`. */

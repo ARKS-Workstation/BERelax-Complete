@@ -14,12 +14,27 @@ import { z } from 'zod'
  * Four because the code is read aloud across a counter or copied off a phone screen, and because it is a
  * booking-side join key rather than a secret: it identifies a conversation the customer is already in, and
  * guessing one attributes a booking to somebody else's conversation rather than disclosing anything. (It
- * does mean the code space is small — 32^4 — which is why `whatsapp_ref.ref_code` is a primary key and a
+ * does mean the code space is small — 30^4 — which is why `whatsapp_ref.ref_code` is a primary key and a
  * code is never reissued: A-FIRST cannot hand the same four characters to two conversations.)
  *
- * The alphabet deliberately omits **I, O, 0 and 1**. Those are the four characters a person reading a code
- * off a screen confuses, and the confusion is not recoverable later: a booking attributed to the wrong
- * conversation is indistinguishable from one attributed to the right one.
+ * The alphabet deliberately omits **I, L, O, U, 0 and 1**, and the six are omitted for two different
+ * reasons that are worth keeping apart.
+ *
+ * **I, O, 0 and 1** are the pairs a person confuses reading a code off a screen, and B-UI-04 excluded them
+ * because the confusion is not recoverable later: a booking attributed to the wrong conversation is
+ * indistinguishable from one attributed to the right one.
+ *
+ * **U went because of that argument taken one step further, and A-FIRST-07 is where it was taken.** With
+ * I, O, 0 and 1 already out, a misread of `L` as `1` or `I` produces a value that is not a code at all, so
+ * it resolves to `unknown_code` — a visible warning and an honestly unknown attribution. `U` misread as
+ * `V` is the only remaining pair where the wrong character is ITSELF in the alphabet, so the misread
+ * produces a different VALID code: the one case left that can still attribute a booking to somebody else's
+ * conversation. `L` goes with it because it is the other half of the same convention (this is Crockford's
+ * base32 exclusion set) and because an attempt wasted on `L`/`1` is an attempt the customer does not get
+ * back, even though it cannot misattribute.
+ *
+ * The cost is the code space: 810,000 rather than 1,048,576. That is orders of magnitude more codes than
+ * this business will issue, and `issueWhatsappRef` redraws on a collision.
  *
  * And {@link normaliseWhatsappRefCode} does **not** fold `0` onto `O` or `1` onto `I`, which is the
  * obvious next step and is wrong. Folding is a guess about what the operator meant, and the thing being
@@ -33,19 +48,19 @@ import { z } from 'zod'
 export const WHATSAPP_REF_CODE_LENGTH = 4
 
 /**
- * The characters a code may contain: A-Z and 2-9, less I, O, 0 and 1.
+ * The characters a code may contain: A-Z and 2-9, less I, L, O, U, 0 and 1.
  *
  * Spelled as a string rather than derived from ranges, so the exclusions are visible to a reader instead
  * of being an arithmetic consequence they have to work out.
  */
-export const WHATSAPP_REF_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+export const WHATSAPP_REF_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
 
 /**
  * The character-class body, shared by the JavaScript pattern, the HTML `pattern` attribute and the SQL
- * CHECK. `A-HJ-NP-Z2-9` is {@link WHATSAPP_REF_ALPHABET} as ranges; `whatsapp-ref.test.ts` asserts the two
+ * CHECK. `A-HJKM-NP-TV-Z2-9` is {@link WHATSAPP_REF_ALPHABET} as ranges; `whatsapp-ref.test.ts` asserts the two
  * describe the same set, which is the only way a hand-written range set stays true to the alphabet.
  */
-export const WHATSAPP_REF_CODE_CLASS = 'A-HJ-NP-Z2-9'
+export const WHATSAPP_REF_CODE_CLASS = 'A-HJKM-NP-TV-Z2-9'
 
 /**
  * The canonical rule as a `RegExp`. Anchored at both ends: a code is the whole value, never a substring.
@@ -72,7 +87,7 @@ export const WHATSAPP_REF_CODE_PATTERN = new RegExp(
  * as a property over the whole class rather than as a pair of examples. Widening it any further would be a
  * field that accepts what the column then refuses.
  */
-export const WHATSAPP_REF_INPUT_CLASS = 'A-HJ-NP-Za-hj-np-z2-9'
+export const WHATSAPP_REF_INPUT_CLASS = 'A-HJKM-NP-TV-Za-hjkm-np-tv-z2-9'
 
 /**
  * The whole pattern for the HTML `pattern` attribute (no delimiters, no anchors — the browser anchors it).
@@ -146,3 +161,59 @@ export const PROVISIONAL_WHATSAPP_REF_EXPECTED = false
 
 /** The OPEN-QUESTIONS row the whole ref loop is tracked under. Cited on the screen and in the panel. */
 export const WHATSAPP_REF_OPEN_QUESTION = 'Y12-ref-loop'
+
+/**
+ * `booking.whatsapp_ref_ttl_days` — how long a code stays claimable.
+ *
+ * **Y12-ref-ttl**, and seven days is the provisional answer. It is a setting and not a constant for the
+ * reason {@link WHATSAPP_REF_EXPECTED_SETTING_KEY} is one: nobody has measured how long a WhatsApp
+ * conversation takes to become a booking, and the answer reaches the code without a deploy in either
+ * direction.
+ *
+ * ## Why seven days rather than "no expiry", which is the simpler option
+ *
+ * A code with no expiry is a join key for ever. The four characters sit in the customer's chat history,
+ * and a year later the desk can still type them in and attribute a booking to a conversation nobody
+ * remembers — against an analytics session that the 90-day retention purge removed months earlier. So the
+ * question is not whether to expire but what the window is, and seven days is the direction that fails
+ * SAFELY: an expiry that is too short records `ref_expired`, which keeps the code, takes the booking and
+ * shows up as a visible count somebody can act on, where an expiry that is too long produces confident
+ * attributions nobody can check.
+ *
+ * The figure is read ONCE, at issue, and stamped on the row as `whatsapp_ref.expires_at`. Answering this
+ * question therefore governs codes issued afterwards and never rewrites the recorded outcome of a booking
+ * already taken — see migration 0127's header.
+ */
+export const WHATSAPP_REF_TTL_SETTING_KEY = 'booking.whatsapp_ref_ttl_days'
+/** Seven days. See {@link WHATSAPP_REF_TTL_SETTING_KEY} for why an expiry exists at all. */
+export const PROVISIONAL_WHATSAPP_REF_TTL_DAYS = 7
+/** The OPEN-QUESTIONS row the lifetime is tracked under, distinct from the loop's own. */
+export const WHATSAPP_REF_TTL_OPEN_QUESTION = 'Y12-ref-ttl'
+
+/**
+ * The first line of the prefilled WhatsApp message: `Ref: <code>`.
+ *
+ * One spelling, in the package all three sides may import, because the loop is a round trip through a
+ * channel this system cannot read: the customer sees this line, pastes or reads out what follows the
+ * colon, and the desk types it into a field validated by {@link WHATSAPP_REF_CODE_PATTERN}. A second
+ * spelling of the prefix on either side would produce a message whose code the desk cannot find.
+ */
+export const WHATSAPP_REF_MESSAGE_PREFIX = 'Ref: '
+
+/**
+ * The prefilled message body, with the ref line first.
+ *
+ * The ref line is FIRST and not last, and that is the only ordering that works: WhatsApp shows the
+ * beginning of a prefilled message in the compose box, a customer who edits before sending edits the end,
+ * and a code below three lines of greeting is a code that gets deleted.
+ *
+ * `body` is optional and empty by default, which is a deliberate refusal rather than an unfinished
+ * feature. Any greeting is customer-facing copy, it would have to exist in both locales (W-SITE owns the
+ * public copy and the Arabic of it), and a prefilled sentence the customer has to delete before typing
+ * their actual question is worse than no sentence. The parameter exists so that adding the copy later is a
+ * call site rather than a change to the composer.
+ */
+export function whatsappRefMessage(refCode: string, body = ''): string {
+  const ref = `${WHATSAPP_REF_MESSAGE_PREFIX}${refCode}`
+  return body.trim() === '' ? ref : `${ref}\n${body.trim()}`
+}

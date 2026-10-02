@@ -41,6 +41,27 @@ export const REAL_BUSINESS_NUMBERS: readonly string[] = Object.freeze([
 /** Deliberately unroutable: RFC 2606 reserves `.invalid` so nothing can ever be delivered. */
 export const SYNTHETIC_EMAIL_DOMAIN = 'fixture.invalid'
 
+/**
+ * The first character of every WhatsApp ref code a FIXTURE issues.
+ *
+ * `whatsapp_ref` ships empty because the application refuses to mint a code while the premises row holds
+ * the Y1-nap placeholder, and more than one suite asserts that emptiness. A suite cannot assert it by
+ * counting the whole table — the integration suite runs sequentially against one database and earlier
+ * files leave rows behind (brief rule 12) — so it has to be able to exclude every OTHER suite's fixture
+ * codes, and this is how.
+ *
+ * It is stated here and not in each suite, because three files now need the same answer
+ * (`packages/fixtures/src/whatsapp-ref.itest.ts`, `packages/fixtures/src/ref-loop.itest.ts` and
+ * `apps/web/src/quick-book.itest.ts`) and a per-file copy is exactly the drift that made the previous
+ * arrangement fail: the exclusion used to be `session_reference not like '%itest%'`, which stopped being
+ * available when A-FIRST-07 made that column a uuid with no room for a marker.
+ *
+ * `Q` because no other suite's codes begin with it, and because it is IN the code alphabet — a prefix
+ * outside it could not be issued at all, so the exclusion would never match anything and the emptiness
+ * assertion would pass vacuously.
+ */
+export const SYNTHETIC_REF_CODE_PREFIX = 'Q'
+
 /** Every clinical note carries this, so a screenshot cannot be mistaken for a record. */
 export const CLINICAL_FIXTURE_PREFIX = 'FIXTURE (not a real record) —'
 

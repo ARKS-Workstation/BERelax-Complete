@@ -413,3 +413,48 @@ export const preConsentLanding = analyticsSchema.table(
     check('pre_consent_landing_counted_at_least_one', sql`${t.landings} >= 1`),
   ],
 )
+
+/**
+ * The ref loop per day (0127, A-FIRST-07): codes issued into conversations, and how many came back.
+ *
+ * A fourth rollup beside `dailyTraffic`, `dailyFunnel` and `dailySourceRevenue`, and NOT rows in
+ * `dailyFunnel`, because a code issue is not one of the eight funnel steps, carries no origination tuple
+ * and "claimed" is not an `excluded` — A-FIRST-01 deferred the shape to the unit that built the loop.
+ *
+ * Two things the mirror cannot say:
+ *
+ *   - **It is RECOMPUTED, never incremented.** `rollUpDailyRefCapture` counts both figures out of
+ *     `whatsapp_ref` and `booking_whatsapp_ref_capture` in one statement and upserts the row, so two runs
+ *     over the same day produce identical rows and the rollup cannot disagree with the tables it is
+ *     derived from. That is the opposite of `preConsentLanding` above, which is a counter with a trigger
+ *     refusing a decrease — because there the raw rows are never written at all and the count is the only
+ *     evidence, while here both sides are still on disk.
+ *   - **`codesClaimed` is paired with the day the CODE was issued**, not the day the booking was taken.
+ *     The other pairing mixes cohorts and can exceed the denominator, which is what the
+ *     `claimed_within_issued` CHECK refuses.
+ */
+export const dailyRefCapture = analyticsSchema.table(
+  'daily_ref_capture',
+  {
+    /** Always a date `public.business_day` holds — `fileUnderTradingDate`'s answer. */
+    tradingDate: date('trading_date').notNull(),
+    /** `analytics.session`'s own column, label for label. In the key (Y5-funnel-gap-bucket). */
+    tradingDateBasis: text('trading_date_basis').notNull(),
+    /** `bigint({ mode: 'bigint' })`: a denominator kept indefinitely must not lose precision. */
+    codesIssued: bigint('codes_issued', { mode: 'bigint' }).notNull(),
+    codesClaimed: bigint('codes_claimed', { mode: 'bigint' }).notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'daily_ref_capture_pkey',
+      columns: [t.tradingDate, t.tradingDateBasis],
+    }),
+    check(
+      'daily_ref_capture_basis_known',
+      sql`${t.tradingDateBasis} in ('trading', 'before_opening', 'after_closing', 'premises_closed')`,
+    ),
+    check('daily_ref_capture_counts_nonneg', sql`${t.codesIssued} >= 0 and ${t.codesClaimed} >= 0`),
+    check('daily_ref_capture_claimed_within_issued', sql`${t.codesClaimed} <= ${t.codesIssued}`),
+  ],
+)

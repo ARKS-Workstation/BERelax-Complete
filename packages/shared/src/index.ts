@@ -380,6 +380,10 @@ export {
   mapLinkFor,
   type PostalAddress,
   telLinkFor,
+  WHATSAPP_NUMBER_OPEN_QUESTION,
+  type WhatsappLink,
+  type WhatsappLinkRefusal,
+  whatsappLinkFor,
 } from './premises-links.ts'
 export {
   addressSchema,
@@ -431,6 +435,7 @@ export {
   normaliseWhatsappRefCode,
   PROVISIONAL_FRONT_DESK_MIN_LEAD_MINUTES,
   PROVISIONAL_WHATSAPP_REF_EXPECTED,
+  PROVISIONAL_WHATSAPP_REF_TTL_DAYS,
   WHATSAPP_REF_ALPHABET,
   WHATSAPP_REF_CODE_CLASS,
   WHATSAPP_REF_CODE_HTML_PATTERN,
@@ -438,8 +443,12 @@ export {
   WHATSAPP_REF_CODE_PATTERN,
   WHATSAPP_REF_EXPECTED_SETTING_KEY,
   WHATSAPP_REF_INPUT_CLASS,
+  WHATSAPP_REF_MESSAGE_PREFIX,
   WHATSAPP_REF_OPEN_QUESTION,
+  WHATSAPP_REF_TTL_OPEN_QUESTION,
+  WHATSAPP_REF_TTL_SETTING_KEY,
   whatsappRefCodeSchema,
+  whatsappRefMessage,
 } from './whatsapp-ref.ts'
 export {
   PLACEHOLDER_WPS_AGENT_ID,

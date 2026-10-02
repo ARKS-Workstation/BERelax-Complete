@@ -13,13 +13,24 @@
  * `packages/core`, and `packages/ui` may not import `packages/db`, so the only package all of them may
  * depend on is this one (`.dependency-cruiser.cjs`: `shared` is the leaf).
  *
- * ## Why there is no WhatsApp link builder
+ * ## The WhatsApp link, which used to be deliberately absent and now deliberately REFUSES
  *
- * There is no canonical WhatsApp number (Y1-nap): docs/13 §3 records two, the prototype's and the live
- * site's, and `premises.phone_whatsapp` holds a placeholder `is_placeholder_text()` refuses. A
- * `wa.me/<number>` builder would exist to be called, and the first caller would pass the placeholder
- * and publish `wa.me/WHATSAPP-PENDING-Y1-NAP` — or, far worse, somebody would "fix" it by picking one of
- * the two candidates. The absence is the design. See `packages/db/src/seed/premises.ts`.
+ * This file carried a paragraph headed "why there is no WhatsApp link builder", and its argument was
+ * sound: there is no canonical WhatsApp number (Y1-nap), `premises.phone_whatsapp` holds a placeholder
+ * `is_placeholder_text()` refuses, and a builder "would exist to be called" — the first caller would
+ * publish `wa.me/WHATSAPP-PENDING-Y1-NAP`, or somebody would "fix" it by picking one of the two
+ * candidates.
+ *
+ * A-FIRST-07 needs the link, because the ref loop IS the link: a four-character code bound to the
+ * browser session, carried as the first line of a prefilled message. So {@link whatsappLinkFor} exists —
+ * and it answers a UNION, not a string. The number is dialable or it is not, the caller gets
+ * `unavailable` with `Y1-nap` on it in the second case, and there is no return value it could
+ * accidentally render. That is strictly stronger than the absence was: the absence stopped a builder from
+ * being written and could not stop a caller from writing `` `https://wa.me/${facts.phoneWhatsapp}` ``
+ * inline, which is the same defect with no name on it. The refusal is checked by the type, and the
+ * inline version is refused by `packages/db/src/seed/premises.test.ts`'s grep and by gate 157.
+ *
+ * See `packages/db/src/seed/premises.ts`.
  */
 
 /**
@@ -161,4 +172,93 @@ export function formatUaePhone(e164: string): string {
   const digits = isMobile ? rest.slice(1) : rest
   if (digits.length !== 7) return e164
   return `+971 ${prefix} ${digits.slice(0, 3)} ${digits.slice(3)}`
+}
+
+/**
+ * What a number has to look like before a `wa.me` link can be built from it.
+ *
+ * E.164: a leading `+`, a non-zero country code and seven to fifteen digits in all. A POSITIVE shape test
+ * and not a placeholder blacklist, which matters because `is_placeholder_text()` lives in
+ * `@berelax/core` and this package may import nothing internal — but also because the positive test is
+ * the better rule. It refuses `WHATSAPP-PENDING-Y1-NAP`, and it refuses every other unusable value as
+ * well: a blank column, a display-formatted number with spaces, a national number with a leading zero,
+ * and a note somebody typed into the field.
+ *
+ * Deliberately NOT shared with {@link formatUaePhone}'s `^\+971(\d)(\d+)$`. That one asks "is this a UAE
+ * number I can group for display"; this one asks "is this dialable at all", and a WhatsApp number need
+ * not be a UAE one — the business could answer on a number in another country and the link would still
+ * work. Two questions, two patterns, and collapsing them would make the link builder refuse a legitimate
+ * foreign number.
+ */
+const DIALABLE_E164 = /^\+[1-9]\d{6,14}$/
+
+/** The host every WhatsApp click-to-chat link goes through. One spelling (docs/03 §6 calls it `wa.me`). */
+const WHATSAPP_CLICK_TO_CHAT = 'https://wa.me/'
+
+/** Why no link could be built. Typed, because "no link" without the reason is unactionable on a page. */
+export type WhatsappLinkRefusal =
+  /**
+   * `premises.phone_whatsapp` is not a dialable number. Today that is the Y1-nap placeholder, and it is
+   * the state this build is actually in.
+   */
+  'whatsapp_number_unanswered'
+
+export type WhatsappLink =
+  | { readonly kind: 'link'; readonly href: string }
+  | {
+      readonly kind: 'unavailable'
+      readonly refusal: WhatsappLinkRefusal
+      /** The OPEN-QUESTIONS id a surface cites instead of showing a broken link. */
+      readonly openQuestionId: string
+    }
+
+/** The OPEN-QUESTIONS row the missing WhatsApp number is tracked under. */
+export const WHATSAPP_NUMBER_OPEN_QUESTION = 'Y1-nap'
+
+/**
+ * The click-to-chat link for the business's WhatsApp number, with an optional prefilled message.
+ *
+ * ## Why it takes the stored value rather than a number it trusts
+ *
+ * `phoneWhatsapp` is `premises.phone_whatsapp` as the row holds it, `string | null` because that is what a
+ * nullable column reads as. Nothing here knows the number, and that is the whole arrangement docs/09 §4
+ * asks for: the row is the single source of truth for NAP, every link is derived from it on every render,
+ * and this function is the one place the derivation happens. There is no literal number in this file and
+ * there must not be one anywhere else — `packages/db/src/seed/premises.test.ts` greps the repository for
+ * the business's own numbers and fails naming the file.
+ *
+ * ## Why the digits are stripped rather than passed through
+ *
+ * `wa.me` takes digits with no `+`, no spaces and no punctuation; a link built with the `+` still
+ * resolves in some clients and 404s in others, which is the worst available failure mode because it works
+ * on the developer's phone. So the `+` is removed and nothing else is: the stored form is already E.164
+ * (ADR 0014), so there is nothing else to remove, and a `replace(/\D/g, '')` would silently "repair" a
+ * malformed value that {@link DIALABLE_E164} has just refused.
+ *
+ * ## Why `text` is encoded with `URLSearchParams` and not interpolated
+ *
+ * The prefilled message contains a newline whenever a caller supplies a body, and a raw newline in a URL
+ * is dropped or truncated depending on the client. `URLSearchParams` percent-encodes it, and it also
+ * encodes the one character the ref alphabet could never produce but a body might: `&`.
+ */
+export function whatsappLinkFor(input: {
+  readonly phoneWhatsapp: string | null
+  /** The prefilled message. Absent or blank means no `?text=` parameter at all, not an empty one. */
+  readonly text?: string
+}): WhatsappLink {
+  const number = (input.phoneWhatsapp ?? '').trim()
+  if (!DIALABLE_E164.test(number)) {
+    return {
+      kind: 'unavailable',
+      refusal: 'whatsapp_number_unanswered',
+      openQuestionId: WHATSAPP_NUMBER_OPEN_QUESTION,
+    }
+  }
+  const digits = number.slice(1)
+  const text = (input.text ?? '').trim()
+  if (text === '') return { kind: 'link', href: `${WHATSAPP_CLICK_TO_CHAT}${digits}` }
+  return {
+    kind: 'link',
+    href: `${WHATSAPP_CLICK_TO_CHAT}${digits}?${new URLSearchParams({ text }).toString()}`,
+  }
 }

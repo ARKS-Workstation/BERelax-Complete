@@ -82,11 +82,16 @@ describe('the character class and the alphabet describe the same set', () => {
         }
       }
     }
-    // Non-vacuity, both ways: 32 canonical characters plus 24 lower-case letters is 56 admissible characters,
-    // so 56 x 56 = 3,136 of the 9,025 pairs are admitted. Stated exactly, because a class that quietly lost
-    // its lower-case half would still satisfy every assertion in the loop.
-    expect(admitted).toBe(3_136)
-    expect(rejected).toBe(9_025 - 3_136)
+    // Non-vacuity, both ways: 30 canonical characters plus 22 lower-case letters is 52 admissible
+    // characters, so 52 x 52 = 2,704 of the 9,025 pairs are admitted. Stated exactly, because a class that
+    // quietly lost its lower-case half would still satisfy every assertion in the loop.
+    //
+    // It was 56 and 3,136 until A-FIRST-07 narrowed the alphabet by `L` and `U` (migration 0127). That this
+    // number had to be changed by hand is the point of stating it: a hand-written range class and the
+    // alphabet it is supposed to mirror are two spellings of one set, and the arithmetic is what proves they
+    // still agree after somebody edits one of them.
+    expect(admitted).toBe(2_704)
+    expect(rejected).toBe(9_025 - 2_704)
   })
 
   it('is exactly WHATSAPP_REF_CODE_LENGTH characters', () => {
