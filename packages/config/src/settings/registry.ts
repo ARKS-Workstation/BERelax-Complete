@@ -193,6 +193,35 @@ export const PACKAGE_POLICY_SETTING_KEYS = [
 export const COMMISSION_ENABLED_SETTING_KEY = 'hr.commission_enabled'
 
 /**
+ * The deposit policy: whether a deposit may be taken at all, and what share of the gross one is
+ * (Y-PAY-06, `Y9-deposits`).
+ *
+ * Spelled once here for the reason the package keys are: `packages/db/src/settings/payments.ts` reads
+ * them, the checkout's apply step reads the first of them, and the Unconfirmed Assumptions panel lists
+ * both — and a second spelling is a reader that silently falls back to the declared default, which for
+ * the percentage would be invisible because the fallback is a number.
+ */
+export const DEPOSIT_ENABLED_SETTING_KEY = 'payments.deposit_enabled'
+export const DEPOSIT_PERCENT_BP_SETTING_KEY = 'payments.deposit_percent_bp'
+
+/** Both, for a panel or a test that has to prove neither was forgotten. */
+export const DEPOSIT_POLICY_SETTING_KEYS = [
+  DEPOSIT_ENABLED_SETTING_KEY,
+  DEPOSIT_PERCENT_BP_SETTING_KEY,
+] as const
+
+/** The open question both deposit settings stand in for. */
+export const DEPOSIT_POLICY_OPEN_QUESTION_ID = 'Y9-deposits'
+
+/**
+ * Zero basis points, which is `build/manifest.yaml`'s own provisional value for Y-PAY-06 — "no services
+ * enrolled, 0% of gross" — and not a rate this build chose.
+ *
+ * 10,000bp is the whole, as `SHOW_UP_RATE_WHOLE_BP` below also states for its own quantity.
+ */
+export const PROVISIONAL_DEPOSIT_PERCENT_BP = 0
+
+/**
  * The two identifiers a WPS salary file names, and the one question behind both (`Y8-wps`).
  *
  * Spelled once here because three readers want them: the payroll screen, `exportWpsFile` in `@berelax/hr`,
@@ -605,6 +634,78 @@ export const SETTINGS = [
     provisional: {
       openQuestionId: 'Y9-package-policy',
       note: 'Balance retained, not forfeited. Forfeiting is the aggressive reading, and if the real policy turns out to be retention a forfeited balance has already been written off against a customer who was entitled to it. Retention also posts NOTHING at expiry, so the conservative answer is the one with no journal entry to reverse.',
+    },
+  }),
+  define({
+    /**
+     * Whether a deposit may be taken at all. **Off**, and no service requires one (Y-PAY-06).
+     *
+     * `Y9-deposits` asks *"which services require a deposit, what percentage, and whether first-time
+     * clients prepay"* and nothing in the handover answers any of the three. So the strictest safe option
+     * is OFF: a deposit taken under a policy this build invented is the customer's money held against a
+     * rule nobody agreed, and `payments.deposit_percent_bp` below would make the figure look configured.
+     *
+     * The mechanism is complete behind it — migration 0124, the six refusals, the liability account, the
+     * release at checkout and the refund on cancellation are all built and tested — so answering this is
+     * ONE audited settings change plus a figure, with no migration and no code change. The engine
+     * REFUSES rather than quietly computing zero: `DepositsAreDisabled` in `@berelax/core` names this key
+     * and this question, because "no deposit because the module is off" and "no deposit is due" are
+     * different facts and Y9-commission records what conflating them costs.
+     *
+     * `OWNER_ONLY` and `operational`: it is a pricing-and-cash policy, not a floor preference, and it
+     * decides whether the business asks a customer for money before a treatment. `invalidates: []`
+     * because nothing is prerendered from it — the booking and checkout screens are `dynamic` and read it
+     * per request — and `rerunJobs` is absent for a sharper reason: turning it on must NOT go back and
+     * ask for deposits on bookings already taken. A deposit is asked for when a booking is made.
+     */
+    key: DEPOSIT_ENABLED_SETTING_KEY,
+    tier: 'operational',
+    schema: z.boolean(),
+    defaultValue: false,
+    label: 'Deposits enabled',
+    help: 'Off until somebody says which services require a deposit and how much. While it is off no deposit can be taken at all and the request is refused by name rather than answered with zero. A deposit is a part-payment against ONE booking: it cannot move to another appointment and it cannot become a package.',
+    editableBy: OWNER_ONLY,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: DEPOSIT_POLICY_OPEN_QUESTION_ID,
+      note: 'Deposits DISABLED and no service requires one, which is the provisional answer already on file in docs/OPEN-QUESTIONS.md. Y9-deposits asks which services require a deposit, what percentage, and whether first-time clients prepay; none of the three is answered anywhere in the handover, and a percentage this build chose would be indistinguishable from a configured one on the money a customer was asked for (brief rule 15). The mechanism is built and tested behind this flag, so answering it is one audited change here plus a figure.',
+    },
+  }),
+  define({
+    /**
+     * What share of a booking's gross a deposit is, in basis points. **Zero.**
+     *
+     * Zero is not a guess and it is not a disabled sentinel: it is `build/manifest.yaml`'s own
+     * provisional value for Y-PAY-06 — *"no services enrolled, 0% of gross"* — which means "no deposit on
+     * anything", the same policy the flag above states from the other end. Both are carried because they
+     * fail in different directions: the flag off makes a request refuse by name, and zero makes the
+     * figure nothing even if somebody turns the flag on before deciding the rate.
+     *
+     * **There is no per-service enrolment table and that is deliberate.** The SHAPE of the answer is
+     * unknown as well as the figure — a deposit could be a percentage of the service, a flat fee per
+     * booking, a first-time-customer rule or a per-service enrolment — and a column for one of those is
+     * an invented policy the engine would then apply to the wrong quantity. That is ADR 0057's argument
+     * for having no `cap_fils` column on the gratuity rule, and ADR 0066's for leaving a carry-over
+     * policy unexpressible: answering this may need a unit rather than a value, and a shape nobody
+     * chose is worse than a blank.
+     *
+     * `compliance_locked` and `OWNER_ACCOUNTANT`, beside the unredeemed-package-balance setting above and
+     * for its stated reason: money taken before a supply is a revenue-recognition question with a VAT
+     * consequence (`Y11-vat-deposit`), so it is the accountant's and the owner's and never the floor's.
+     */
+    key: DEPOSIT_PERCENT_BP_SETTING_KEY,
+    tier: 'compliance_locked',
+    schema: z.number().int().min(0).max(10_000),
+    defaultValue: PROVISIONAL_DEPOSIT_PERCENT_BP,
+    label: 'Deposit percentage (basis points)',
+    help: 'What share of a booking\u2019s gross a deposit is, in basis points \u2014 10,000 is the whole. Zero means no deposit on anything, which is the policy on file. Money taken before a treatment is held as a liability and recognised as revenue only when the invoice is issued; whether receiving it is itself a date of supply is a question for the tax agent (Y11-vat-deposit).',
+    editableBy: OWNER_ACCOUNTANT,
+    audited: true,
+    invalidates: [],
+    provisional: {
+      openQuestionId: DEPOSIT_POLICY_OPEN_QUESTION_ID,
+      note: 'Zero percent, which is this unit\u2019s own provisional value in build/manifest.yaml and not a rate chosen here. Y9-deposits asks what percentage and names no figure, and there is deliberately no per-service enrolment table: the shape of the answer is unknown as well as the figure, and a column for the wrong shape is a policy the engine would apply to the wrong quantity (ADR 0057\u2019s argument for having no cap column).',
     },
   }),
   /**

@@ -116,6 +116,7 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     file: 'packages/fixtures/src/invoice-family.ts',
     tables: [
       'refund',
+      'deposit_movement',
       'checkout_finalisation',
       'payment',
       'commission_line',

@@ -79,7 +79,8 @@ import { isTipLine } from './tip.ts'
  */
 
 /**
- * How the money arrived. Four ways, each with the account it lands in.
+ * How the money arrived. Five ways, each with the account it lands in — and one of them is money that
+ * arrived before today.
  *
  * The full registry — every tender type with a declared posting account, over-tender change, and the
  * adapter interface a card gateway will implement — is M-TILL-07's. What is here is the minimum a
@@ -95,8 +96,24 @@ import { isTipLine } from './tip.ts'
  * reconciliation that is out by every gateway batch. A `card_online` tender is NOT takeable at the till:
  * `finaliseCheckout` has no path to a gateway, and the checkout's own refusals are what stop one being
  * keyed in as though the money were in hand.
+ *
+ * `deposit_on_account` is Y-PAY-06's, and it is the one kind that takes no money. The money arrived
+ * EARLIER — as cash, a transfer or a `card_online` authorisation — and was credited to
+ * `2045 Customer deposits held`; applying it at checkout debits that liability and settles the document
+ * with it. It is a tender kind rather than a mechanism of its own because `payment` is "one settlement
+ * against an issued document": the ZT001 overpayment ceiling, the `invoice_payable_fils` outstanding
+ * figure and `TenderPostingDisagrees` all read tender rows, and a deposit released outside that
+ * vocabulary would be a SECOND answer to how much of a document is paid — with the first answer saying
+ * the invoice is still owed in full. `gives_change` is false, which is what keeps it out of the drawer:
+ * `cash_session` selects the cash tenders by `tender_type.gives_change` and never by the literal 'cash'.
  */
-export const TENDER_KINDS = ['cash', 'card_in_salon', 'bank_transfer', 'card_online'] as const
+export const TENDER_KINDS = [
+  'cash',
+  'card_in_salon',
+  'bank_transfer',
+  'card_online',
+  'deposit_on_account',
+] as const
 export type TenderKind = (typeof TENDER_KINDS)[number]
 
 /**
@@ -113,12 +130,20 @@ export type TenderKind = (typeof TENDER_KINDS)[number]
  * fees, and Y-PAY-09 reconciles that payout against this clearing account to the fils. It is deliberately
  * NOT 1040 — one clearing account holding both the terminal's batches and the gateway's payouts could be
  * reconciled against neither statement on its own.
+ *
+ * `deposit_on_account` goes to **2045 Customer deposits held**, and it is the only entry here that is not
+ * an asset. That is the point rather than an oddity: every other kind DEBITS an asset because money is
+ * arriving, and this one debits a LIABILITY because a liability the business already recorded is being
+ * discharged. The arithmetic is identical — `checkoutPosting` debits whatever account the kind names —
+ * and the accounting is the one an auditor expects: the deposit was credited to 2045 when it was taken,
+ * and the document it was taken for is what releases it.
  */
 export const TENDER_ACCOUNT: Readonly<Record<TenderKind, AccountCode>> = Object.freeze({
   cash: ACCOUNTS.cashInDrawer,
   card_in_salon: ACCOUNTS.cardTerminalClearing,
   bank_transfer: ACCOUNTS.bankCurrent,
   card_online: ACCOUNTS.gatewayClearing,
+  deposit_on_account: ACCOUNTS.customerDepositsHeld,
 })
 
 /** Where the output VAT on a checkout is credited. */

@@ -48273,6 +48273,417 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 154a-154z. (Y-PAY-06) The deposit: every way money received before a supply could come to look like
+//            revenue, shown to be caught, and both halves of "appointment-scoped" shown to be able to
+//            stop refusing.
+//
+//            The unit is one subtraction, one `min` and six database refusals, so almost nothing here is
+//            about arithmetic either. What it is about is that **a deposit is the easiest money in this
+//            business to recognise twice.** The customer hands over cash, so something looks earned; the
+//            obvious entry credits revenue and 2030; and the result is a document whose net is recognised
+//            on the day the deposit arrived and again on the day the treatment was delivered, on a VAT
+//            return that balances perfectly. Nothing downstream reports it.
+//
+//            So the cases come in four groups and each fails in a way the others cannot see:
+//
+//              * **the liability.** 154a to 154d break the account the receipt credits, the account the
+//                release debits, the posting's own source and the `min` that caps an application. Every
+//                one of them either recognises revenue early or puts a customer's money into a figure
+//                another unit reconciles to a workbook.
+//              * **appointment-scoped.** 154e and 154f remove each half of `assertDepositRedeemable`.
+//                These are the acceptance line "redeeming a deposit against a different appointment, or
+//                converting it to a package, is refused with a named error, asserted for both", and they
+//                are a pair on purpose: a single case would pass for a function that refused everything,
+//                which is what 154g's control is for.
+//              * **the refusal that must not become a zero.** 154h and 154i: a disabled module answering
+//                zero instead of refusing is Y9-commission's recorded mistake — "no lines because the
+//                module is off" reported as "nothing is due" — and the rounding direction is the figure
+//                a customer is actually asked for.
+//              * **the gates this unit had to stay inside.** 154j: `packages/db` may not import
+//                `packages/core`, which is why the pairing suite is in `packages/fixtures`. 154k is a scan
+//                of its own with a planted literal: no account code may be written in the deposit
+//                repository or its settings reader. 154l is `pnpm db:conventions` on the append-only
+//                claim, 154m and 154n are the two directions of the SQLSTATE registry, and 154o is the
+//                Drizzle mirror.
+//
+//            154p is the property suite's own vacuity floor: narrowing the generator so no deposit ever
+//            exceeds a document makes the floor fail BY NAME rather than making 500 cases pass over one
+//            shape. 154q is the shared teardown, which is the defect that arrives in somebody else's
+//            afterAll three weeks later.
+//
+//            154y and 154z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the three pure suites and the pairing suite,
+//            all unedited.
+//
+//            Nothing here edits `packages/db/migrations/0124_deposit.sql` in order to test a DATABASE
+//            rule, for gate block 134's reason: the database the suites run against has already had the
+//            migration applied, so an edit to the file changes nothing a statement can see and a PASS
+//            would be a report about a file nothing read. ZY301-ZY306 are proved against a real PostgreSQL
+//            by `packages/fixtures/src/deposit.itest.ts`, which probes each one and asserts the row
+//            survived. What the migration file IS edited for is 154l, where the checker genuinely reads
+//            the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const DEPOSIT = 'packages/core/src/payments/deposit.ts'
+  const POSTING = 'packages/core/src/checkout/posting.ts'
+  const REPOSITORY = 'packages/db/src/repositories/deposit.ts'
+  const SETTINGS_READER = 'packages/db/src/settings/payments.ts'
+  const MIGRATION = 'packages/db/migrations/0124_deposit.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const MIRROR = 'packages/db/src/schema/payments.ts'
+  const FAMILY = 'packages/fixtures/src/invoice-family.ts'
+
+  const UNIT_SUITE = 'packages/core/src/payments/deposit.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/payments/deposit.property.test.ts'
+  const WEB_SUITE = 'apps/web/src/apply-deposit.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/deposit.itest.ts'
+  const FAMILY_SUITE = 'packages/fixtures/src/invoice-family.itest.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    UNIT_SUITE,
+    PROPERTY_SUITE,
+    WEB_SUITE,
+  ]
+  const pairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+  const familySuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    FAMILY_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 151's `breakAndExpect`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge, which is the note block 133 carries about its
+   * own helper.
+   */
+  const breakDeposit = (name, file, find, into, rule, args = pureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the liability ---------------------------------------------------------------------------
+
+  // 154a. The receipt's credit, moved to revenue. This IS the mistake the unit is about: the money came
+  //       in, so something looks earned, and every figure in the entry stays plausible.
+  breakDeposit(
+    'deposit: a receipt crediting revenue instead of the liability fails by name',
+    DEPOSIT,
+    `        credit(
+          DEPOSIT_LIABILITY_ACCOUNT,`,
+    `        credit(
+          ACCOUNTS.treatmentRevenue,`,
+    // The PAIR suite and not the pure one, deliberately: its case walks EVERY revenue account the chart
+    // contains against the rows PostgreSQL actually holds, which is the acceptance line's own wording,
+    // and the pure suite's name would be the same name 154c asserts back.
+    'leaves every revenue account and 2030 untouched',
+    pairSuite(),
+  )
+
+  // 154b. The account the RELEASE debits, moved to the package liability — the near-enough code docs/01
+  //       decision 19b forbids. It balances, and the outstanding package liability R-REP-05 reports is
+  //       then wrong by every deposit ever taken.
+  breakDeposit(
+    'deposit: a release debiting the package liability instead of 2045 fails by name',
+    POSTING,
+    '  deposit_on_account: ACCOUNTS.customerDepositsHeld,',
+    '  deposit_on_account: ACCOUNTS.packageDeferredRevenue,',
+    'debits the liability and nothing that holds cash',
+  )
+
+  // 154c. The receipt filed as a sale. `journal_entry.source` exists because "a refund and a cancelled
+  //       sale produce identical lines and are answered differently when a customer asks" (0018), and a
+  //       deposit filed as a sale is a sale nobody made.
+  breakDeposit(
+    'deposit: a receipt recorded as a sale rather than a payment fails by name',
+    DEPOSIT,
+    `      source: 'payment',
+      narrative: \`Deposit received for appointment \${input.appointmentId}\`,`,
+    `      source: 'sale',
+      narrative: \`Deposit received for appointment \${input.appointmentId}\`,`,
+    'credits 2045 by the whole amount and debits where the money landed',
+  )
+
+  // 154d. The cap on an application removed, so a deposit larger than the document releases all of it.
+  //       The entry still balances — the tenders would simply exceed the basket — and the liability goes
+  //       to zero on money the customer is still owed.
+  breakDeposit(
+    'deposit: an application uncapped at the document fails by name',
+    DEPOSIT,
+    '  const applied = heldFils < invoiceGrossFils ? heldFils : invoiceGrossFils',
+    '  const applied = heldFils',
+    'caps the application at the document and leaves the excess held',
+  )
+
+  // ---- appointment-scoped ----------------------------------------------------------------------
+
+  // 154e. The package refusal removed. This is the half that would undo decision 19b outright: a second
+  //       deferred-revenue path on the same money, under a second answer to Y11-vat-package.
+  breakDeposit(
+    'deposit: a conversion to a package no longer refused fails by name',
+    DEPOSIT,
+    '    throw new DepositIsNotAPrepaidProduct(appointmentId, target.packageSaleId)',
+    '    return',
+    'refuses a conversion to a package',
+  )
+
+  // 154f. And the other half: the appointment check. A deposit that could settle any document is the
+  //       "payment on account" this unit deliberately is not, and the refund and cancellation questions
+  //       become unanswerable rather than wrong.
+  breakDeposit(
+    'deposit: a release against another appointment’s document no longer refused fails by name',
+    DEPOSIT,
+    '  if (!target.billedAppointmentIds.includes(appointmentId)) {',
+    '  if (false) {',
+    'refuses a document that does not bill this appointment',
+  )
+
+  // 154g. The control for 154e and 154f, in the direction a pair of refusals cannot state: made to refuse
+  //       EVERYTHING, the suite goes red on the case that asserts a legitimate release is accepted. Without
+  //       this, both cases above are satisfied by `assertDepositRedeemable` throwing unconditionally.
+  breakDeposit(
+    'deposit: a redemption check that refuses everything fails on the legitimate release',
+    DEPOSIT,
+    '  if (!target.billedAppointmentIds.includes(appointmentId)) {',
+    '  if (true) {',
+    'the control: the document that DOES bill the appointment is accepted',
+    ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', WEB_SUITE],
+  )
+
+  // ---- the refusal that must not become a zero -------------------------------------------------
+
+  // 154h. A disabled module answering zero instead of refusing. Y9-commission records what this costs in
+  //       so many words: a run that produced no lines was reported as no commission being due.
+  breakDeposit(
+    'deposit: a disabled module answering zero instead of refusing fails by name',
+    DEPOSIT,
+    `  if (!input.policy.enabled) {
+    throw new DepositsAreDisabled(input.appointmentId)
+  }`,
+    `  if (!input.policy.enabled) {
+    return filsFrom(0)
+  }`,
+    'refuses rather than answering zero',
+  )
+
+  // 154i. The rounding direction. Half-up asks the customer for a fil the policy did not, which is the one
+  //       of the two available errors that is not the business's to make.
+  breakDeposit(
+    'deposit: a percentage rounded half-up instead of down fails by name',
+    DEPOSIT,
+    `  const product =
+    (BigInt(input.grossFils) * BigInt(input.policy.percentBp)) / BigInt(DEPOSIT_PERCENT_WHOLE_BP)
+  return filsFrom(Number(product))`,
+    `  return filsFrom(
+    roundHalfUp((input.grossFils * input.policy.percentBp) / DEPOSIT_PERCENT_WHOLE_BP),
+  )`,
+    'rounds DOWN, so the business never asks for more than the policy says',
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 154j. `packages/db` may not import `packages/core` (brief rule 4), which is the whole reason the
+  //       arithmetic and the rows are two modules and the pairing suite is in `packages/fixtures`. A
+  //       planted import, because the rule is about the module graph and nothing in the tree breaks it.
+  checkRejectedBy(
+    'deposit: the deposit repository importing @berelax/core is refused by the boundary rule',
+    withEditedFile(
+      REPOSITORY,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          [
+            "import { AppError } from '@berelax/shared'",
+            "import { DEPOSIT_MOVEMENT_KINDS } from '@berelax/core'",
+            'export const GATE_FIXTURE_KINDS = DEPOSIT_MOVEMENT_KINDS',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'db-must-not-import-core',
+  )
+
+  // 154k. No account code is written in the deposit repository or its settings reader, and this is the
+  //       scan that keeps it out.
+  //
+  //       148n's and 151n's rule, inherited for the reason they give: the chart is `ACCOUNTS` in
+  //       `packages/core`, which this package may not import, so a literal `'2045'` here would be a second
+  //       statement of a code whose first statement is somewhere unreachable. The SQL side states it once,
+  //       in `customer_deposit_account_code()`, and `deposit.itest.ts` holds that function equal to
+  //       `ACCOUNTS.customerDepositsHeld`.
+  {
+    const accountCodeLiterals = (path) => {
+      // Strings only, and four digits exactly: `${id}::uuid` is not an account code and a bare 2026 in a
+      // comment is a year.
+      const matches = readFileSync(path, 'utf8').match(/'[0-9]{4}'/g) ?? []
+      return [...new Set(matches)]
+    }
+    const clean = [REPOSITORY, SETTINGS_READER].flatMap((path) =>
+      accountCodeLiterals(path).map((code) => `${path}: ${code}`),
+    )
+    check(
+      'deposit: the repository and its settings reader state no account code of their own',
+      clean.length === 0,
+      `${clean.join(', ')}. The chart lives in packages/core, which this package may not import, so an ` +
+        'account code here is a second statement of it — the SQL states it once in ' +
+        'customer_deposit_account_code() and the pairing suite holds the two equal.',
+    )
+    const planted = withEditedFile(
+      REPOSITORY,
+      (source) =>
+        replaceOnce(
+          source,
+          "const UNIQUE_VIOLATION = '23505'",
+          "const GATE_FIXTURE_ACCOUNT = '2045'\n\nconst UNIQUE_VIOLATION = '23505'",
+        ),
+      () => accountCodeLiterals(REPOSITORY),
+    )
+    check(
+      'deposit: the account-code scan sees a planted account code',
+      planted.includes("'2045'"),
+      `the scan found ${planted.length} literal(s) in a file that had one planted in it, so it would ` +
+        'pass over the defect it exists to refuse',
+    )
+  }
+
+  // 154l. `deposit_movement` CLAIMS to raise on UPDATE and DELETE in its own table comment, and
+  //       `pnpm db:conventions` is what holds a claim to a trigger. Removing the DELETE trigger leaves a
+  //       table documented as append-only that a fixture could empty a row at a time.
+  breakDeposit(
+    'deposit: an append-only claim with no DELETE trigger is refused by name',
+    MIGRATION,
+    `create trigger deposit_movement_no_delete before delete on deposit_movement
+  for each row execute function refuse_deposit_movement_change();`,
+    '-- the DELETE trigger, removed by a gate fixture',
+    'append-only-table-must-refuse-update-and-delete',
+    ['db:conventions'],
+  )
+
+  // 154m. Direction 2 of the SQLSTATE registry: a code a migration raises with no entry. ADR 0043 — a
+  //       translator matching on the code alone would report another unit's refusal as this one's.
+  breakDeposit(
+    'deposit: an unregistered private SQLSTATE is refused by the allocator',
+    REGISTRY,
+    `  {
+    code: 'ZY305',`,
+    `  {
+    code: 'ZY999',`,
+    'ZY305',
+    ['sqlstate'],
+  )
+
+  // 154n. And direction 3, the one that lets the registry SHRINK: an entry for a code no migration raises.
+  //       ZY307 to ZY310 of this unit's band are deliberately absent for exactly this reason.
+  breakDeposit(
+    'deposit: an entry for an unused code of the band is refused by the allocator',
+    REGISTRY,
+    `  {
+    code: 'ZY306',`,
+    `  {
+    code: 'ZY307',
+    rule: 'A code no migration raises.',
+    migration: '0124',
+    raisedBy: ['deposit_is_not_a_prepaid_product'],
+    translators: [],
+  },
+  {
+    code: 'ZY306',`,
+    'ZY307',
+    ['sqlstate'],
+  )
+
+  // 154o. The Drizzle mirror against the database, both ways (ADR 0006). A column dropped from the mirror
+  //       is a column `pnpm db:drift` has to report, and it is the half of the schema a reader of
+  //       TypeScript sees.
+  breakDeposit(
+    'deposit: a column missing from the Drizzle mirror is reported as drift',
+    MIRROR,
+    "    heldBeforeFils: bigint('held_before_fils', { mode: 'bigint' }).notNull(),",
+    '',
+    'held_before_fils',
+    ['db:drift'],
+  )
+
+  // ---- the vacuity floors and the shared teardown ----------------------------------------------
+
+  // 154p. The property suite's own floor. Narrowing the generator so no deposit ever exceeds a document
+  //       leaves 500 cases exercising one shape, and the floor is what says so instead of passing.
+  breakDeposit(
+    'deposit: a generator that never exceeds the document fails the measured floor by name',
+    PROPERTY_SUITE,
+    '    { arbitrary: fc.integer({ min: 10_001, max: 20_000 }), weight: 3 },',
+    '    { arbitrary: fc.integer({ min: 9_000, max: 9_999 }), weight: 3 },',
+    'cases where the deposit exceeded the document',
+    ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PROPERTY_SUITE],
+  )
+
+  // 154q. The shared teardown. `deposit_movement` references `invoice`, so a family list without it makes
+  //       `truncate` refuse the WHOLE statement — in somebody else's `afterAll`, after their assertions
+  //       had passed, with a sentence about PostgreSQL and not about the thing under test. That is the
+  //       defect `invoice-family.itest.ts` exists to find, and this is it being found.
+  breakDeposit(
+    'deposit: the deposit table missing from the shared family list is refused by the derivation',
+    FAMILY,
+    "  // it would remove the entries every other suite's documents are explained by.\n  'deposit_movement',\n",
+    '',
+    'deposit_movement',
+    familySuite(),
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 154y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the arithmetic, the 500-case property and the checkout's own decision module.
+  {
+    const unit = run('pnpm', pureSuites())
+    check(
+      'deposit: the deposit arithmetic, the 500-case property and the checkout decision pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+  }
+
+  // 154z. And the pairing suite. The three claims a pure test cannot reach are proved there: that all six
+  //       of ZY301-ZY306 fire against a real PostgreSQL with the row surviving, that a deposit released as
+  //       a tender leaves the document SETTLED according to `payment` rather than according to this
+  //       unit's own arithmetic, and that `customer_deposit_account_code()` and
+  //       `ACCOUNTS.customerDepositsHeld` are one account.
+  {
+    const pair = run('pnpm', pairSuite())
+    check(
+      'deposit: the six refusals, the settled document and the SQL/TypeScript account pair pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

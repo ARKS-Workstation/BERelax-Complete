@@ -21196,14 +21196,21 @@ units:
       argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
       surface half-versioned. `handler.ts` beside `route.ts` is the split `app/api/v1/otp` uses, so the
       integration suite drives the same code with a frozen clock and the fake gateway.'
-    - 'NOTE: deferred to Y-PAY-06 (RE-POINTED by Y-PAY-03) — authentication on the endpoint. The intent
-      route''s audit actor is still `system` with the label `payments intent endpoint`. Y-PAY-03 discharged the
+    - 'NOTE: deferred to Y-PAY-08 (RE-POINTED by Y-PAY-03, then by Y-PAY-06) — authentication on the endpoint.
+      The intent route''s audit actor is still `system` with the label `payments intent endpoint`. Y-PAY-03
+      discharged the
       half it owns: the CHECKOUT path is authenticated, both of its transports are behind guardAdminRoute, and
       every audit row they write names the signed-in staff member''s employee id with their staff_reference as
       the label. It deliberately did NOT put the guard on this endpoint, because doing so edits this unit''s
       route, its handler''s actor and two of its suites for something no acceptance line in Y-PAY-03 asks for,
-      and the brief forbids repairing another unit''s file beyond what the current one needs. Re-pointed at
-      Y-PAY-06, which owns the refund screen and will already be holding a session. What Y-PAY-03 DID change
+      and the brief forbids repairing another unit''s file beyond what the current one needs. Y-PAY-03
+      re-pointed it at Y-PAY-06 "which owns the refund screen and will already be holding a session", and
+      Y-PAY-06 owns NO screen and mints no session: its refund path is a service and a suite, and the suite
+      drives `withUnitOfWork` directly, which is this unit''s own arrangement. RE-POINTED to Y-PAY-08
+      (refunds, partial refunds and chargebacks), which is the unit the refund screen actually belongs to.
+      The honest statement is that this deferral has now landed twice on a unit chosen for its SUBJECT rather
+      than for owning a route, so Y-PAY-08 should discharge it only if it does build a session-bearing
+      surface, and otherwise re-point it at the unit that does. What Y-PAY-03 DID change
       here is the card-data refusal at the top of the handler — its own SAQ-A gate demanded it, because this
       endpoint takes two caller-chosen free-text fields and wrote both to a row and an audit payload with
       nothing refusing a card number. The opaque token half of this NOTE is SATISFIED: it is
@@ -21384,14 +21391,17 @@ units:
       refuses a payments module that writes to a sink and names no redactor), so a breadcrumb sink added later
       is covered on the commit that adds it rather than needing this sweep rewritten. The sinks that DO exist -
       audit_event, outbox_event, the message outbox and the served response - are swept full-text.'
-    - 'NOTE: NOT discharged, and re-deferred to Y-PAY-06: the audit actor on /api/v1/payments/intent is still
+    - 'NOTE: NOT discharged, and re-deferred — now to Y-PAY-08, re-pointed by Y-PAY-06: the audit actor on
+      /api/v1/payments/intent is still
       `system` with the label "payments intent endpoint". Y-PAY-02 deferred authentication on that endpoint to
       this unit; what this unit owns is the CHECKOUT path, and both of its transports are behind guardAdminRoute
       with the signed-in staff member as the actor. Putting the guard on Y-PAY-02''s endpoint as well would edit
       that unit''s route, its handler''s actor and two of its suites for something no acceptance line here asks
       for, and the brief forbids repairing another unit''s file beyond what this one needs. What this unit DID
-      have to change there is the card-data refusal, which its own gate demanded. Y-PAY-06 owns the refund screen
-      and will hold a session already.'
+      have to change there is the card-data refusal, which its own gate demanded. This NOTE read "Y-PAY-06 owns
+      the refund screen and will hold a session already", and that turned out to be wrong: Y-PAY-06 built the
+      deposit''s liability, its refusals and the checkout''s DECISION module, and no route and no session
+      anywhere. Y-PAY-08 (refunds, partial refunds and chargebacks) is the unit the refund screen belongs to.'
     - 'NOTE: SCHEMA_VERSION is raised to 117 because 0117 is the highest migration on disk. 0117 adds no table,
       no column and no index, so the Drizzle mirror is unchanged and pnpm db:drift has nothing new to compare -
       the file is a function and a refusal and nothing else. ZY232-ZY240 of the allocated band ZY231-ZY240 are
@@ -21594,7 +21604,7 @@ units:
       inside the cancellation window. Deliberately not a prepaid product: it cannot move between appointments
       or become a package, so decision 19b still holds that packages are the only prepaid product.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-01
@@ -21627,11 +21637,121 @@ units:
       a named error, asserted for both
     - the deposit policy is a provisional:true setting returned by the Unconfirmed Assumptions query, and
       enabling it writes an audit_event
+    - 'NOTE: migration 0124 is used, and `0124_deposit.sql` replaces the placeholder `00XX-deposit.sql` this
+      entry listed. SCHEMA_VERSION is raised to 124 because 0124 is the highest migration on disk in this
+      worktree. ADR 0077 is used and records the five decisions worth re-litigating. ZY301-ZY306 of the band
+      ZY301-ZY310 are used; ZY307-ZY310 are UNUSED and are NOT registered, which is what direction 3 of ADR
+      0043''s gate refuses. Gate block 154a-154z is used (twenty cases, 154a-154q plus the two controls
+      154y-154z); 154r-154x are free. The test port band `{ start: 17_600, width: 300 }` is RELEASED UNUSED
+      and unclaimed, which `apps/web/src/test-ports.test.ts` requires of a band nobody declares: nothing here
+      starts a server, and no assertion in this unit is about a response header, a redirect or a rendered
+      page.'
+    - 'NOTE: a NEW open question, `Y11-vat-deposit`, was opened by this unit and is in
+      `docs/OPEN-QUESTIONS.md`. Whether receiving a deposit is itself a date of supply is a tax-agent
+      question that `Y11-vat-package` answers for a prepaid PACKAGE and does not reach: a deposit has no
+      balance, no expiry and no redemption schedule, and ADR 0057 records why one column may not serve two
+      questions. NO RATE IS APPLIED TO A DEPOSIT ANYWHERE. The provisional answer takes Y11-vat-package''s
+      SHAPE and not its words - the gross is held UNSPLIT on `2045` and the invoice carries the whole
+      net/VAT split on delivery - and ZY303 is that reading as a refusal. Holding it unsplit is what makes
+      the other answer a new entry rather than a restatement: there is no net and no VAT figure on a deposit
+      row to have been wrong. `vat201_box_mapping` carries 2045 as `out_of_scope`, which is NOT the same
+      claim: the question decides which ENTRY is posted, not whether an account holding money owed feeds a
+      box (0078 records the identical separation for ZG005).'
+    - 'NOTE: a NEW chart-of-accounts account, `2045 Customer deposits held`, is seeded by 0124 and mirrored
+      in `STANDARD_SPA_CHART`. It is NOT `2050 Deferred revenue - packages`, which is the near-enough code:
+      the outstanding package liability is a figure R-REP-05 reports and H-MIG-03 reconciles to a
+      reconstruction workbook, and nothing on a `journal_line` row says which kind of money it was - so one
+      account for both makes neither figure checkable, permanently, in a journal with no edit. The
+      classification is this build''s, like every other row in the chart, which carries `Y8-coa` as its own
+      provisional marker. ADR 0064''s partition rule made this a change to `statements.ts` as well:
+      `customer_deposits` on the balance sheet and `movement_in_customer_deposits` in operating cash flow,
+      each its OWN line rather than folded into the deferred-revenue line, for the reason the account is
+      separate. `statements.test.ts` refusing to load is what found it.'
+    - 'NOTE: applying a deposit is a FIFTH `tender_type`, `deposit_on_account`, debiting 2045 - not a
+      mechanism of its own. 0105''s rule for this decision is "reuse a word when it means the same thing",
+      and `payment` means one SETTLEMENT against an issued document: ZT001''s overpayment ceiling,
+      `invoice_payable_fils` and `TenderPostingDisagrees` all read those rows and nothing else, so a release
+      outside that vocabulary would be a second answer to how much of a document is paid - with the first
+      answer saying the invoice was owed in full for ever. This WIDENED a shared type, so every literal of it
+      moved in the same commit (brief convention 4): `TENDER_KINDS` and `TENDER_ACCOUNT` in
+      `packages/core/src/checkout/posting.ts`, `TENDER_TYPES` in `packages/core/src/money/tender.ts`, the
+      `tender_type` row in 0124, and `SERVES` in `packages/payments/src/adapters/manual.ts`. Three of those
+      four were found by another unit''s check rather than by review - `gateway-tender.itest.ts` holds the
+      till adapter equal to `tender_type.adapter = ''manual''` in both directions, `tender.test.ts` asserted
+      that every tender account is an ASSET (true of four collections, and not a rule anybody decided), and
+      `registry.test.ts` names the accountant-editable compliance-locked settings one by one.'
+    - 'NOTE: deferred to the unit that builds the TILL screen - the write that uses
+      `apps/web/app/(admin)/checkout/apply-deposit.ts`. Nothing in this build finalises a checkout through a
+      route: `finaliseCheckout` is driven from `packages/fixtures`, the `/checkout` screen is Y-PAY-03''s
+      hosted-fields AUTHORISATION surface rather than the till, and M-TILL-07''s NOTE records that a partial
+      tender at checkout is still refused. So what this unit ships there is the DECISION - what is still due,
+      what tender the release must be presented as, and which targets are refused - with the scope checked
+      BEFORE any figure is produced, because a refusal that arrived after the arithmetic would have shown the
+      operator an amount due and allocated a statutory invoice number against it. The end-to-end write IS
+      proved, through `finaliseCheckout` in `packages/fixtures/src/deposit.itest.ts`, which settles a real
+      document with a deposit release as one of its two tenders.'
+    - 'NOTE: the deposit''s checkout wiring also did NOT discharge Y-PAY-02''s and Y-PAY-03''s re-pointed
+      NOTE about authentication on `/api/v1/payments/intent`. Both of those re-pointed it here on the
+      reasoning that "Y-PAY-06 owns the refund screen and will already be holding a session" - and this unit
+      owns no screen and mints no session. Its refund path is a service and a suite, the suite drives
+      `withUnitOfWork` directly (which is `otp-route.itest.ts`''s arrangement and Y-PAY-02''s own), and
+      putting `guardAdminRoute` on that endpoint would edit another unit''s route, its handler''s actor and
+      two of its suites for something no acceptance line here asks for. RE-POINTED to the unit that builds
+      the till or the refund SCREEN - the first unit in this workstream that has a session to present. The
+      honest statement is that the chain of re-pointings has now twice landed on a unit with no route, so the
+      deferral needs a unit chosen for the route rather than for the subject.'
+    - 'NOTE: three figures this unit chose and the argument for each, so none of them is an artefact. (1) The
+      ROUNDING DIRECTION on a deposit percentage is DOWN: of the two available errors only one is the
+      business''s to make - a fil too little costs the salon a fil, and a fil too much is money taken from a
+      customer that no agreed policy asked for. Nothing turns on it while the percentage is zero. (2) The
+      refund on a cancellation is `heldFils - cancellationCharge()`, which is B-LIFE-03''s existing seam and
+      answers ZERO for every input (Y9-windows: "24h window; no fee charged, flagged only") - so a deposit is
+      refunded IN FULL on either side of the window, and the subtraction is real arithmetic over a figure
+      that is currently zero rather than a branch returning the balance. It is CAPPED at the balance, because
+      an uncapped subtraction returns a negative refund the day a fee exceeds a deposit, which posts as money
+      arriving from a cancellation. (3) `payments.deposit_percent_bp` is 0, which is this entry''s own
+      `provisional` value ("no services enrolled, 0% of gross") and not a rate chosen here. There is NO
+      per-service enrolment table: the SHAPE of Y9-deposits'' answer is unknown as well as its figure, and a
+      column for the wrong shape is a policy the engine would apply to the wrong quantity (ADR 0057''s
+      argument for having no `cap_fils` column).'
+    - 'NOTE: `deposit_movement` carries NO foreign key to `appointment`, which is
+      `invoice_appointment.appointment_id`''s decision (0063) for its stated reason: PostgreSQL refuses
+      `truncate appointment` while a referencing table is absent from the statement and four suites truncate
+      it by list, so a key here would break all four in teardown AFTER their assertions had passed. It DOES
+      reference `invoice`, so it was added to the ONE statement of the shared teardown -
+      `INVOICE_FAMILY_TABLES` and `DOCUMENT_FAMILY_TABLES` in `packages/fixtures/src/invoice-family.ts` and
+      the declaration in `packages/db/src/suite-table-declarations.ts`. `invoice-family.itest.ts` found the
+      second of those three by deriving the closure from `pg_constraint`, which is the check that stops the
+      list drifting.'
     files:
     - packages/core/src/payments/deposit.ts
-    - packages/db/migrations/00XX-deposit.sql
+    - packages/core/src/payments/deposit.test.ts
+    - packages/core/src/payments/deposit.property.test.ts
+    - packages/core/src/payments/index.ts
+    - packages/core/src/ledger/chart-of-accounts.ts
+    - packages/core/src/checkout/posting.ts
+    - packages/core/src/money/tender.ts
+    - packages/core/src/money/tender.test.ts
+    - packages/core/src/reporting/statements.ts
+    - packages/db/migrations/0124_deposit.sql
+    - packages/db/src/schema/payments.ts
+    - packages/db/src/repositories/deposit.ts
     - packages/db/src/settings/payments.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/suite-table-declarations.ts
+    - packages/db/src/index.ts
+    - packages/config/src/settings/registry.ts
+    - packages/config/src/settings/registry.test.ts
+    - packages/config/src/index.ts
+    - packages/payments/src/adapters/manual.ts
+    - packages/fixtures/src/deposit.itest.ts
+    - packages/fixtures/src/invoice-family.ts
+    - packages/fixtures/src/gateway-tender.itest.ts
     - apps/web/app/(admin)/checkout/apply-deposit.ts
+    - apps/web/src/apply-deposit.test.ts
+    - docs/adr/0077-a-deposit-is-appointment-scoped-and-is-a-liability-until-the-treatment-is-delivered.md
+    - docs/OPEN-QUESTIONS.md
+    - scripts/test-gates.mjs
   - id: Y-PAY-07
     order: 202
     title: Card-on-file mandates and the no-show / late-cancellation fee path

@@ -105,7 +105,11 @@ describe('the gateway tender kind exists in both registries and agrees', () => {
         .filter((row) => row.adapter === 'manual')
         .map((row) => row.code)
         .sort(),
-    ).toEqual(['bank_transfer', 'card_in_salon', 'cash'])
+      // `deposit_on_account` is Y-PAY-06's fifth kind (0124) and is `manual` for the reason the other
+      // three are: a person at the till applies it. It is named here rather than the filter being
+      // loosened, because what this case is for is that adding a kind must not have MOVED any of the
+      // others — a count or a `not.toContain` would stop saying that.
+    ).toEqual(['bank_transfer', 'card_in_salon', 'cash', 'deposit_on_account'])
   })
 })
 

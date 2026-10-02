@@ -334,6 +334,25 @@ const BALANCE_SHEET_LINES: readonly StatementLineSpec[] = [
     'natural',
     [ACCOUNTS.packageDeferredRevenue, ACCOUNTS.voucherDeferredRevenue],
   ),
+  /*
+   * Customer deposits, on a line of their OWN and deliberately not folded into the one above.
+   *
+   * 2045 and 2050 are both customer money held before a supply, so one line for the three accounts is the
+   * obvious reading. docs/01 decision 19b is why it is wrong: a deposit "is not a prepaid product", and
+   * the whole reason 2045 exists rather than reusing 2050 is that the outstanding PACKAGE liability is a
+   * figure R-REP-05 reports and H-MIG-03 reconciles to a reconstruction workbook. A reader of the balance
+   * sheet who cannot see the two apart cannot check either against its own source, which is the drift the
+   * account was created to prevent arriving one layer up.
+   */
+  line(
+    'balance_sheet',
+    'liabilities',
+    'customer_deposits',
+    'Customer deposits held',
+    'credit_less_debit',
+    'natural',
+    [ACCOUNTS.customerDepositsHeld],
+  ),
   line(
     'balance_sheet',
     'liabilities',
@@ -702,6 +721,18 @@ const CASH_FLOW_LINES: readonly StatementLineSpec[] = [
     'credit_less_debit',
     'natural',
     [ACCOUNTS.packageDeferredRevenue, ACCOUNTS.voucherDeferredRevenue],
+  ),
+  // Operating, and its own line for the balance sheet's reason. A deposit taken is cash in before a
+  // treatment and a deposit refunded is cash out after a cancellation, and neither is an investing or a
+  // financing movement: it is working capital in the most literal sense the business has.
+  line(
+    'cash_flow',
+    'operating',
+    'movement_in_customer_deposits',
+    'Movement in customer deposits held',
+    'credit_less_debit',
+    'natural',
+    [ACCOUNTS.customerDepositsHeld],
   ),
   line(
     'cash_flow',

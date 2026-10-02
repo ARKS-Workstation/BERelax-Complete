@@ -8,6 +8,7 @@
  * opinion about when something happened would move a capture between trading days.
  */
 
+export * from './deposit.ts'
 export * from './guards.ts'
 export * from './minor-units.ts'
 export * from './port.ts'

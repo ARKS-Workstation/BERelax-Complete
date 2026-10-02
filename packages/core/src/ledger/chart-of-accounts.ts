@@ -60,6 +60,7 @@ export const ACCOUNTS = {
   outputVatPayable: accountCode('2030'),
   reverseChargeVatPayable: accountCode('2035'),
   tipsPayable: accountCode('2040'),
+  customerDepositsHeld: accountCode('2045'),
   packageDeferredRevenue: accountCode('2050'),
   voucherDeferredRevenue: accountCode('2055'),
   wagesPayable: accountCode('2060'),
@@ -290,6 +291,34 @@ const STANDARD_SPA_ACCOUNTS: readonly Account[] = [
     type: 'liability',
     normalBalance: 'credit',
     contra: false,
+    vatBox: null,
+    inputVatRecoverable: false,
+  }),
+  defineAccount({
+    // A deposit is money received before a supply is made, so it is a liability from the moment it is
+    // taken and never revenue (docs/03 §7: "A deposit is a liability").
+    //
+    // It is its OWN account and deliberately NOT `2050 Deferred revenue — packages`, which is the
+    // near-enough code. docs/01 decision 19b: a deposit is *not* a prepaid product, and "one prepaid
+    // product means one deferred-revenue path, one liability account, one migration artefact and one
+    // VAT date-of-supply question". Posting a deposit to 2050 would merge it into the outstanding
+    // package liability R-REP-05 reports and H-MIG-03 reconciles to a workbook — one figure answering
+    // two questions, and neither answer checkable afterwards.
+    //
+    // 2045 and not a code after 2090: a liability for customer money sits beside 2040 tips, 2050
+    // packages and 2055 vouchers, which is where an accountant reading the chart will look for it.
+    // [UNVERIFIED] The classification is this build's, like every other row here: the chart carries
+    // `Y8-coa` as its own provisional marker (0018).
+    code: ACCOUNTS.customerDepositsHeld,
+    name: 'Customer deposits held',
+    type: 'liability',
+    normalBalance: 'credit',
+    contra: false,
+    // Null is a DECISION here and not a gap. Whether receiving a deposit is itself a date of supply is
+    // `Y11-vat-deposit`, open, and the provisional answer is the one `Y11-vat-package` gives one
+    // subject along: the supply is the treatment, so no output VAT arises until the invoice is issued
+    // and this account feeds no VAT201 grouping. A box here would be a claim about an unanswered
+    // question (brief rule 15).
     vatBox: null,
     inputVatRecoverable: false,
   }),

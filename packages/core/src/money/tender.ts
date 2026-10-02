@@ -151,6 +151,34 @@ export const TENDER_TYPES: Readonly<Record<TenderKind, TenderTypeSpec>> = Object
     adapter: 'gateway',
     sortOrder: 4,
   }),
+  /**
+   * The appointment's own deposit, released against the document that bills it (Y-PAY-06, 0124).
+   *
+   * The only entry whose account is a LIABILITY: the money arrived earlier, in one of the four forms
+   * above, and was credited to `2045 Customer deposits held`. Applying it debits that liability.
+   *
+   * `givesChange` is false and that is load-bearing rather than tidy — `cash_session` selects the cash
+   * tenders by this column and never by the literal `'cash'`, so a true here would put a deposit
+   * release into the expected drawer count and leave every cash-up short by it. `requiresReference` is
+   * true for `card_online`'s reason: the reference is the deposit movement the release discharges, and a
+   * release naming nothing could not be tied back to the appointment whose money it was.
+   * `settlesImmediately` is true because the money IS in hand; nothing reads the column but the two
+   * registry-equality suites, and false would be the claim that it is still to arrive.
+   *
+   * `adapter` is `manual`: a person at the till applies it. No gateway is involved — ZY165 refuses a
+   * `payment_intent` whose instrument is not a `gateway` kind, which is what stops a deposit RELEASE
+   * being presented to a gateway as a second authorisation of money already taken.
+   */
+  deposit_on_account: Object.freeze({
+    code: 'deposit_on_account',
+    label: 'Deposit already paid',
+    account: TENDER_ACCOUNT.deposit_on_account,
+    givesChange: false,
+    requiresReference: true,
+    settlesImmediately: true,
+    adapter: 'manual',
+    sortOrder: 5,
+  }),
 })
 
 /** The registry in the order a till offers it, which is `sortOrder` and not insertion order. */
