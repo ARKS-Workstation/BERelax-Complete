@@ -30,6 +30,7 @@ export * from './flow-run.ts'
 export * from './frequency-ledger.ts'
 export * from './google.ts'
 export * from './gratuity.ts'
+export * from './holiday-calendar.ts'
 export * from './hr.ts'
 export * from './identity.ts'
 /*

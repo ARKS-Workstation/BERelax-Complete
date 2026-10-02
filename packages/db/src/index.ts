@@ -876,6 +876,33 @@ export {
   type WrittenGratuityAccrual,
 } from './repositories/gratuity.ts'
 export {
+  type ConfirmedObservance,
+  confirmHolidayObservance,
+  HOLIDAY_CALENDAR_SQLSTATE,
+  type HolidayConfirmationInput,
+  type HolidayConfirmationRow,
+  type HolidayImpactAppointmentRow,
+  type HolidayImpactLeaveDayRow,
+  type HolidayImpactRows,
+  type HolidayImpactShiftAssignmentRow,
+  type HolidayObservanceInput,
+  type HolidayObservanceRow,
+  type HoursOverrideInput,
+  type HoursOverrideSaveResult,
+  holidayCalendarError,
+  isHolidayOverrideStrandingRefusal,
+  isLunarNotAnnouncedRefusal,
+  type PremisesHoursOverrideRow,
+  readHolidayConfirmation,
+  readHolidayImpactRows,
+  readHolidayObservances,
+  readPremisesHoursOverrides,
+  readStrandedAppointmentsForOverride,
+  recordHolidayObservance,
+  type StrandedAppointmentRow,
+  saveHoursOverride,
+} from './repositories/holiday-calendar.ts'
+export {
   type CustomerSnapshotInput,
   INVOICE_DOCUMENT_KINDS,
   INVOICE_SQLSTATE,
@@ -4257,6 +4284,67 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // unit are released UNUSED and the codes are deliberately left unregistered, because `pnpm sqlstate`
 // refuses an entry for a code no migration raises — and nothing here can be refused by the database,
 // since nothing here writes.
+//
+//
+// 123 is 0123_hr_holiday_calendar.sql (P-HR-10) — the operational holiday calendar, the announcement a
+// confirmed lunar date rests on, and the refusal that stops a Ramadan hours override stranding a booking.
+//
+// Two tables, `holiday_observance` and `holiday_confirmation`, and no third: `premises_hours_override`
+// already exists (0011) and what this file adds to it is a refusal. Still EMPTY on a fresh database, and
+// that is the unit's largest decision rather than an omission — every date is `Y9-holiday-calendar`, and a
+// plausible lunar date is indistinguishable from a confirmed one in the one place the rota, the payslip
+// and three reports all key on (brief rule 15). A date seeded here would be invented in a REPLAYED
+// migration, so every tree would carry it and nothing would say where it came from. There is deliberately
+// no "seed the UAE public holidays" helper anywhere in `packages/db` either.
+//
+// **The confirmation STATE is a column**, `holiday_observance.confirmation_state`, in {provisional,
+// confirmed} — not a boolean, because the two states are two positive claims about where a date came from
+// rather than the presence and absence of a flag. `holiday_observance_provisional_names_a_question` holds
+// it to the OPEN-QUESTIONS id that owns it, which is 0110's convention and 0026's before it.
+//
+// **ZY291 is the successor to 0110's `calendar_observance_lunar_is_provisional`**, and 0110 asked for it in
+// so many words: that CHECK refuses a lunar-dated observance that is not provisional and its own comment
+// says it "is safe to assert NOW because nothing in this build can record an announcement". Something can
+// now, so the flat refusal became a refusal of the correct answer. Its successor is the same rule with the
+// escape it was always missing — a lunar-dated observance may be `confirmed` only where a
+// `holiday_confirmation` row names the announcement — which keeps the claim 0110 was making (a lunar date
+// presented as settled with nothing on file is refused) and admits the one it could not express.
+//
+// `reporting.calendar_observance` is NOT dropped and `reporting.dim_date` is NOT re-pointed, which is the
+// one thing 0110's deferral asked for that this file does not do. The reason is measured and is recorded as
+// a NOTE on P-HR-10's manifest entry: thirteen files read that table, `cash-forecast.itest.ts` asserts the
+// constraint BY NAME, gate block 151 rests on that assertion and two ADRs describe it. Removing it is an
+// integrating change across three units' committed work, not a unit's.
+//
+// **ZY294 and the one statement of "stranded".** `holiday_override_stranded_appointments(...)` is a SQL
+// function, and both the refusal and `readStrandedAppointmentsForOverride` call it — so the report a screen
+// renders and the refusal the database makes cannot name different appointments. The alternative drifts in
+// the dangerous direction: an empty report beside a failing write. It compares the ROOM period, treatment
+// plus that appointment's own turnaround, because a treatment finishing at 01:55 with a 20-minute
+// turnaround needs the premises open until 02:15 and comparing the treatment alone accepts an override
+// that sends the last customer out through a locked door. `packages/core/src/availability/hours-override.ts`
+// states the same rule in TypeScript because `packages/core` is pure and SQL cannot read it, so the check
+// that holds the two equal ships in the same commit — `holiday-hours-agreement.itest.ts`, driving one
+// probe set through both, which is 0117's `is_card_shaped`/`cardShapedRuns` arrangement.
+//
+// Three constraint triggers are DEFERRABLE INITIALLY DEFERRED and each one has to be. ZY291 and ZY293 fire
+// at COMMIT so the repository may confirm the observance and record the announcement in either order;
+// immediate would have forced one order and made the natural one impossible. ZY294 is deferred so a
+// transaction can move the affected appointments AND narrow the hours — immediate makes each impossible
+// without the other, which is a refusal with no way to comply.
+//
+// An observance does NOT close the premises and changes no trading hour. `premises_closure` carries
+// `kind = 'public_holiday'` and looks like the calendar; 0110's header records the direction of the error,
+// and Y9-overtime states that a public holiday the salon trades through has no closure row at all. So a row
+// here is a PAY and ROTA fact — which bucket a worked minute is paid in, and what the rota screen shows —
+// and "a provisional holiday changes no availability" is true by construction rather than by a flag
+// somebody remembered to check.
+//
+// SQLSTATEs ZY291-ZY294 of the allocated band ZY291-ZY300; ZY295-ZY300 are left FREE and deliberately
+// UNREGISTERED, because an entry for a code no migration raises is what direction 3 of `pnpm sqlstate`
+// refuses. The test port band { start: 17_300, width: 300 } is RELEASED UNUSED: this unit starts no server,
+// the calendar is rendered by P-HR-06's existing rota handler and the pure render is asserted in
+// `apps/web/src/hr-rota-render.test.ts`.
 //
 // 124 is 0124_deposit.sql (Y-PAY-06) — one account, one tender type, one append-only table and six
 // refusals: a deposit is money received against ONE appointment, held as a liability until the treatment

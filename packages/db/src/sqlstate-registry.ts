@@ -2044,6 +2044,34 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_imported_contact_outcome'],
     translators: ['packages/db/src/services/import-contacts.ts'],
   },
+  {
+    code: 'ZY291',
+    rule: 'A lunar-dated holiday observance may be confirmed only where a recorded announcement names it.',
+    migration: '0123',
+    raisedBy: ['assert_lunar_observance_is_announced'],
+    translators: ['packages/db/src/repositories/holiday-calendar.ts'],
+  },
+  {
+    code: 'ZY292',
+    rule: 'A holiday confirmation may not be updated or deleted.',
+    migration: '0123',
+    raisedBy: ['refuse_holiday_confirmation_change'],
+    translators: ['packages/db/src/repositories/holiday-calendar.ts'],
+  },
+  {
+    code: 'ZY293',
+    rule: "A holiday confirmation must name an observance that is confirmed and holds exactly the confirmation's dates.",
+    migration: '0123',
+    raisedBy: ['assert_holiday_confirmation_matches_its_observance'],
+    translators: ['packages/db/src/repositories/holiday-calendar.ts'],
+  },
+  {
+    code: 'ZY294',
+    rule: 'A dated premises-hours override may not leave an already-booked appointment outside trading hours.',
+    migration: '0123',
+    raisedBy: ['assert_hours_override_strands_no_appointment'],
+    translators: ['packages/db/src/repositories/holiday-calendar.ts'],
+  },
   // ZY301-ZY306 are Y-PAY-06's, of the band ZY301-ZY310; ZY307 to ZY310 are left free and deliberately
   // absent, because an entry for a code no migration raises is direction 3. Six and not one because each
   // names a different thing to go and do — "a figure that is wrong is a NEW movement", "the entry and the

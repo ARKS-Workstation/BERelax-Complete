@@ -2,6 +2,8 @@ import { loadConfig } from '@berelax/config'
 import {
   describeRotaViolation,
   forecastLabourCost,
+  type HolidayObservance,
+  holidayPayCalendar,
   instantFromIso,
   type LabourCostRules,
   labourCostRulesFor,
@@ -17,11 +19,13 @@ import {
 } from '@berelax/core'
 import {
   createConnection,
+  type HolidayObservanceRow,
   type LabourCostRuleRow,
   type RotaCoverageRuleRow,
   readCredentialPolicy,
   readCurrentRotaVersion,
   readEmployeeCredentials,
+  readHolidayObservances,
   readLabourCostRules,
   readRosteredShifts,
   readRotaCoverageRules,
@@ -39,7 +43,12 @@ import {
 import { isAppError } from '@berelax/shared'
 import { adminChromeFor } from '../../../../src/components/admin/google-reauth-source.ts'
 import { guardAdminRoute } from '../../../../src/session.ts'
-import { type RotaPageView, type RotaShortfallView, renderRotaHtml } from './render.ts'
+import {
+  type RotaObservanceView,
+  type RotaPageView,
+  type RotaShortfallView,
+  renderRotaHtml,
+} from './render.ts'
 
 /**
  * The rota screen (P-HR-06): what is published for a period, what the draft would refuse, what it costs.
@@ -100,6 +109,25 @@ const asLabourCostRules = (row: LabourCostRuleRow): LabourCostRules => ({
   paidMinutesPerDay: row.paidMinutesPerDay,
 })
 
+/**
+ * A `holiday_observance` row in the shape the pure calendar takes.
+ *
+ * The widening casts are the package boundary, not laziness: `packages/db` may not import
+ * `packages/core`, so its row type carries `kind`, `date_basis` and `confirmation_state` as the `text`
+ * columns they are, and the database's CHECK constraints are what make the narrowing sound. The same
+ * mapping `asCoverageRules` and `asWorkingHoursRules` above do, one column shape further.
+ */
+const asHolidayObservance = (row: HolidayObservanceRow): HolidayObservance => ({
+  id: row.id,
+  kind: row.kind as HolidayObservance['kind'],
+  name: row.name,
+  dateBasis: row.dateBasis as HolidayObservance['dateBasis'],
+  confirmationState: row.confirmationState as HolidayObservance['confirmationState'],
+  startsOn: localDate(row.startsOn),
+  endsOn: localDate(row.endsOn),
+  openQuestionId: row.openQuestionId,
+})
+
 const asWorkingHoursRules = (row: WorkingHoursRuleRow): WorkingHoursRules => ({
   effectiveFrom: localDate(row.effectiveFrom),
   ordinaryMinutesPerDay: row.ordinaryMinutesPerDay,
@@ -149,6 +177,7 @@ export async function GET(request: Request): Promise<Response> {
         policy,
         shiftRows,
         currentVersion,
+        observanceRows,
       ] = await Promise.all([
         readTradingDayWindows(sql, range),
         readRotaTherapists(sql, range),
@@ -161,7 +190,13 @@ export async function GET(request: Request): Promise<Response> {
         readCredentialPolicy(sql),
         readRosteredShifts(sql, range),
         readCurrentRotaVersion(sql, range),
+        readHolidayObservances(sql, range),
       ])
+      // P-HR-10's calendar, which is what the holiday flag below used to lack. Read once and used twice:
+      // the pay calendar decides which trading dates the validator judges as public holidays, and the
+      // rows go to the screen so a PROVISIONAL date is rendered as provisional rather than as a date.
+      const observances = observanceRows.map(asHolidayObservance)
+      const payCalendar = holidayPayCalendar(observances)
 
       const rostered = new Set(shiftRows.map((row) => row.employeeId))
       // `readRotaTherapists` returns only employees holding a therapist skill, because coverage counts
@@ -201,10 +236,17 @@ export async function GET(request: Request): Promise<Response> {
                 endsAt: wet.endsAt,
               }) as RotaTradingDay['wetRoomBookableDuring'][number],
           ),
-        // The holiday flag is an ARGUMENT (P-HR-05's NOTE): `premises_closure` is a floor and not a
-        // calendar, so this screen states it rather than deriving a set it knows is incomplete. A holiday
-        // the premises trades through has no closure row, and Y9-overtime is what fills the gap.
-        isPublicHoliday: false,
+        // The holiday flag is an ARGUMENT (P-HR-05's NOTE) and this is now the calendar that answers it.
+        // It used to be a hard `false` with a comment saying `premises_closure` is a floor and not a
+        // calendar — which was true, and remains the reason the answer is NOT derived from closures: a
+        // public holiday the premises trades through has no closure row at all (Y9-overtime), so a
+        // closure-derived set is false on exactly the days the flag exists for.
+        //
+        // A PROVISIONAL observance is included, which is the strict direction: of the two possible
+        // errors, paying an uplift for a day that turns out not to be a holiday is visible and
+        // recoverable, and not paying one is a shortfall on a payslip nobody re-reads. The screen is
+        // where the two are told apart.
+        isPublicHoliday: payCalendar.dates.has(localDate(window.tradingDate)),
       }))
       const known = new Set(tradingDays.map((day) => String(day.tradingDate)))
       const assignments: RosteredShift[] = shiftRows
@@ -343,6 +385,17 @@ export async function GET(request: Request): Promise<Response> {
         },
         wageDivisorEffectiveFrom: String(wageRow.effectiveFrom),
         wageDivisorOpenQuestionId: wageProvenance?.openQuestionId ?? null,
+        observances: observanceRows.map(
+          (row): RotaObservanceView => ({
+            name: row.name,
+            kind: row.kind,
+            dateBasis: row.dateBasis,
+            confirmationState: row.confirmationState,
+            startsOn: row.startsOn,
+            endsOn: row.endsOn,
+            openQuestionId: row.openQuestionId,
+          }),
+        ),
       }
       return page
     })

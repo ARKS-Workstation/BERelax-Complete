@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type RotaObservanceView,
   type RotaPageView,
   type RotaShortfallView,
   type RotaViolationView,
@@ -30,6 +31,33 @@ const VIOLATIONS: readonly RotaViolationView[] = [
     detail: '2026-07-06 00:30-01:00: 1 therapist(s) on the floor, 2 required',
   },
   { rule: 'credential_not_current', detail: '2026-07-06: labour_card EXPIRED' },
+]
+
+/**
+ * Two observances over the period, one announced and one not (P-HR-10).
+ *
+ * The dates are inside the view's own week and are NOT a claim about when any lunar observance falls —
+ * brief rule 15 is about the database, and the real dates are `Y9-holiday-calendar`.
+ */
+const OBSERVANCES: readonly RotaObservanceView[] = [
+  {
+    name: 'Fixture settled holiday',
+    kind: 'public_holiday',
+    dateBasis: 'gregorian',
+    confirmationState: 'confirmed',
+    startsOn: '2026-07-07',
+    endsOn: '2026-07-07',
+    openQuestionId: null,
+  },
+  {
+    name: 'Fixture announced-at-short-notice holiday',
+    kind: 'public_holiday',
+    dateBasis: 'lunar',
+    confirmationState: 'provisional',
+    startsOn: '2026-07-09',
+    endsOn: '2026-07-10',
+    openQuestionId: 'Y9-holiday-calendar',
+  },
 ]
 
 const SHORTFALLS: readonly RotaShortfallView[] = [
@@ -79,6 +107,7 @@ function view(overrides: Partial<RotaPageView> = {}): RotaPageView {
     },
     wageDivisorEffectiveFrom: '1900-01-01',
     wageDivisorOpenQuestionId: 'Y9-overtime',
+    observances: OBSERVANCES,
     ...overrides,
   }
 }
@@ -202,6 +231,52 @@ describe('the rota document', () => {
       '2 rostered employee(s) hold no therapist skill',
     )
     expect(renderRotaHtml(view())).not.toContain('hold no therapist skill')
+  })
+
+  it('renders a provisional holiday AS provisional, and an announced one as confirmed', () => {
+    // P-HR-10's first acceptance line on this surface. The two rows are in one document on purpose: what
+    // matters is that a reader can tell them APART, and a renderer that printed "PROVISIONAL" on every
+    // row would satisfy a one-row assertion.
+    const html = renderRotaHtml(view())
+    expect(html).toContain('<h2>Holiday calendar</h2>')
+    const provisional = html.slice(
+      html.indexOf('Fixture announced-at-short-notice holiday') - 200,
+      html.indexOf('Fixture announced-at-short-notice holiday'),
+    )
+    expect(provisional).toContain('<strong>PROVISIONAL</strong>')
+    expect(provisional).toContain('Y9-holiday-calendar')
+    const settled = html.slice(
+      html.indexOf('Fixture settled holiday') - 200,
+      html.indexOf('Fixture settled holiday'),
+    )
+    expect(settled).not.toContain('PROVISIONAL')
+    expect(settled).toContain('confirmed')
+    // The two-day range is printed as a range and the one-day one is not, so a reader of the provisional
+    // row knows how much of the week is in question.
+    expect(html).toContain('2026-07-09 to 2026-07-10')
+    expect(html).toContain(', 2026-07-07, <code>public_holiday</code>')
+    expect(html).not.toContain('2026-07-07 to 2026-07-07')
+  })
+
+  it('says what an EMPTY calendar means, rather than letting it read as "no holidays"', () => {
+    // The control for the case above and the state of every fresh database: `holiday_observance` ships
+    // empty because the dates are unanswered, and a blank section would report the opposite.
+    const html = renderRotaHtml(view({ observances: [] }))
+    expect(html).toContain('No holiday observance is recorded over this period')
+    expect(html).toContain('Y9-holiday-calendar')
+    expect(html).not.toContain('PROVISIONAL')
+    // And it says a holiday does not close the premises, because a full rota under a holiday is correct.
+    expect(html).toMatch(/does not close the premises/)
+  })
+
+  it('escapes an observance name, so the calendar cannot inject markup', () => {
+    const html = renderRotaHtml(
+      view({
+        observances: [{ ...(OBSERVANCES[0] as RotaObservanceView), name: '<script>x</script>' }],
+      }),
+    )
+    expect(html).not.toContain('<script>x</script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 
   it('escapes what it prints, so a published_by value cannot inject markup', () => {
