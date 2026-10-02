@@ -2123,6 +2123,58 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['deposit_is_not_a_prepaid_product'],
     translators: ['packages/db/src/repositories/deposit.ts'],
   },
+  // ZY361-ZY366 are H-MIG-05's, of the band ZY361-ZY370; ZY367 to ZY370 are left free and deliberately
+  // unregistered, because an entry for a code no migration raises is refused. Six and not one because each
+  // names a different thing to go and do: ZY361 "import the corrected file", ZY362 "the question is wrong
+  // — a booking and a reconstruction are not interchangeable", ZY363 and ZY365 "this importer has a
+  // defect", ZY364 "a correction is a new record", ZY366 "look at the date cells". The pair that carries
+  // the unit's whole point is ZY361 and ZY366: together they are what makes "a migrated appointment is not
+  // a booking anybody can change" a property of the schema rather than a convention, and ZY366 is on the
+  // INSERT precisely because every forward-looking reader — the availability solver, the reassignment
+  // sweep — would otherwise need its own `not migrated` and the one that is forgotten is the one that
+  // offers a therapist a slot they worked in June.
+  {
+    code: 'ZY361',
+    rule: "A migrated appointment's status, period, therapist, room, service and price are fixed.",
+    migration: '0130',
+    raisedBy: ['refuse_migrated_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY362',
+    rule: 'The migrated flag may not be set or cleared after the appointment is inserted.',
+    migration: '0130',
+    raisedBy: ['refuse_migrated_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY363',
+    rule: 'A migrated appointment must be attested by an imported-appointment record.',
+    migration: '0130',
+    raisedBy: ['assert_migrated_appointment_attested'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY364',
+    rule: 'An imported-appointment record is append-only.',
+    migration: '0130',
+    raisedBy: ['refuse_imported_appointment_change'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY365',
+    rule: 'An imported-appointment record naming an appointment must name a migrated one.',
+    migration: '0130',
+    raisedBy: ['assert_imported_appointment_outcome'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+  {
+    code: 'ZY366',
+    rule: 'A migrated appointment may not end in the future.',
+    migration: '0130',
+    raisedBy: ['refuse_future_migrated_appointment'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

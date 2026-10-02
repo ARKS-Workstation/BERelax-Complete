@@ -22,7 +22,14 @@ import { packagesImporter } from './importers/packages/import.ts'
  * reason H-MIG-02 recorded for leaving its own out. The door is `scripts/migrate-contacts.mjs`, which reads
  * the pepper exactly as the send path does and builds the importer with it.
  *
- * H-MIG-05 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
+ * **H-MIG-05's `appointments` importer is absent for the identical reason**, and that is worth reading
+ * beside the paragraph above rather than discovering twice. It keys the customer cell with the SAME pepper
+ * and the SAME two key kinds the contact importer used, because `imported_appointment.contact_hmac` and
+ * `imported_contact.contact_hmac` only join if it does — so an entry built without the pepper would not
+ * merely stage a plaintext number, it would resolve no customer at all and quarantine every line while
+ * looking like a clean refusal. Its door is `scripts/migrate-visits.mjs`.
+ *
+ * H-MIG-06 through H-MIG-11 add theirs here. `probe` is the framework's conformance importer, deliberately
  * listed rather than hidden: the CLI is what a person runs, and a CLI whose registry is empty cannot be
  * exercised at all — the first real importer would be the first time the command had ever been run. It
  * writes into the framework's conformance target and nothing reads that table, so the worst a mistaken

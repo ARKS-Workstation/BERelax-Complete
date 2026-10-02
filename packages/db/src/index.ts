@@ -1740,6 +1740,25 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  APPOINTMENT_IMPORT_SQLSTATE,
+  appointmentImportError,
+  type ImportedAppointmentCounts,
+  type ImportedAppointmentInput,
+  type InsertedMigratedVisit,
+  insertMigratedVisit,
+  isMigratedAppointmentNotLiveRefusal,
+  type MigratedVisitInput,
+  type ResolvedVisitTargets,
+  readImportedAppointmentCounts,
+  recordImportedAppointment,
+  resolveVisitTargets,
+  VISIT_QUARANTINE_REASONS,
+  VISIT_QUARANTINES,
+  type VisitQuarantine,
+  type VisitResolution,
+  type VisitTargetRequest,
+} from './services/import-appointments.ts'
+export {
   IMPORT_CONTACT_AUDIT_ACTIONS,
   IMPORT_CONTACT_KEY_KINDS,
   IMPORT_CONTACT_SQLSTATE,
@@ -4391,4 +4410,42 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. The test port band
 // { start: 17_600, width: 300 } allocated to this unit is released UNUSED: nothing here starts a server.
 //
-export const SCHEMA_VERSION = 124 as const
+// 130 is 0130_appointment_migrated.sql (H-MIG-05) — one boolean on `appointment`, one append-only record
+// table, six refusals and a fifth value on `booking.source`: a visit reconstructed out of the previous
+// arrangement's records is history the live machine cannot touch.
+//
+// Three decisions in it are worth finding here rather than in the file, because each is the kind a later
+// reader would simplify.
+//
+// **It is a flag on `appointment` and not a `historic_appointment` table.** The imported visits have to
+// appear in the customer's record and in the retention cohorts, and both read `appointment` — the second
+// through `reporting.fact_appointment`, which is a view over it. A parallel table would mean a `union all`
+// in every one of those readers and a shorter history than this business has wherever one was missed, and
+// it would put the rows outside `appointment_therapist_no_overlap` and `assert_room_capacity`, which are
+// exactly what make "no double-booked therapist, no room over capacity" a checkable claim about the
+// imported dataset. A tenth `appointment_status` was the other alternative and fails on totality: 0051's
+// transition and action tables are `Record<AppointmentStatus, …>`, so a tenth label needs fifteen
+// transition answers and an `emitsRevenue` answer for something that is not a state of the machine.
+//
+// **ZY366 — no migrated row may END in the future — is the refusal that does the most work.**
+// `readCommittedAppointments` takes a trading date and `readReassignmentCandidates` takes an instant
+// floor, so a reconstruction that cannot be dated forward is a row no forward-looking read can reach. The
+// alternative was `and not a.migrated` in each of those queries, which is the same claim restated in every
+// reader that grows later. It is a trigger and not a CHECK because `now()` is not immutable, and it judges
+// the UPPER bound so a treatment that ran past midnight two hours ago still imports.
+//
+// **The importer posts NOTHING, so the P&L claim needs no filter.** No invoice, no payment and no journal
+// entry: a statement line is a directed sum over `journal_line` (ADR 0064), so a visit outside the ledger
+// contributes zero to every line of every statement, and `visit-import.itest.ts` asserts it as the census
+// — a count and two sums with no account set in them — rather than as a statement that might net to
+// nought. `vat_rate_bp = 0` and `vat_fils = 0` are a CHECK for ADR 0069's reason: this system posts no
+// output tax on a supply made before its books opened, and there must be no tax figure on the row for
+// anything to add up. The migration therefore touches no money table at all, so
+// `packages/fixtures/src/invoice-family.ts`'s lists are unchanged — `imported_appointment`'s only foreign
+// key is into `appointment`, which no family list names.
+//
+// ZY361-ZY366 of the band ZY361-ZY370 are used; ZY367-ZY370 are released UNUSED and deliberately
+// unregistered. The test port band { start: 19_400, width: 300 } offered to this group is released UNUSED:
+// nothing in H-MIG-05 starts a server.
+//
+export const SCHEMA_VERSION = 130 as const

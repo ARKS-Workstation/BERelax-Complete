@@ -50180,6 +50180,333 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 160a-160z. (H-MIG-05) A reconstructed visit shown to be unable to stop being history: every refusal
+//            that keeps it out of the live machine, and every guess the importer must not make.
+//
+//            Almost nothing here is about arithmetic. What the unit is about is that **a reconstructed
+//            visit looks exactly like a booking.** It has a customer, a therapist, a room, a period and a
+//            price; it is in the same table as every live appointment; and every plausible simplification
+//            of it — a status instead of a flag, a filter instead of a refusal, a placeholder therapist
+//            instead of a quarantine — produces a database that still reads correctly. So the cases are
+//            arranged by WHICH of those simplifications each one re-introduces.
+//
+//              * **the flag's enforcement.** 160a to 160d break each half of `validateStagedVisit`'s own
+//                claims — the minimised payload, the keyed digest, the instant's offset and the duration
+//                cross-check — and the pure suite names each one back. 160c is the one worth reading:
+//                removing the offset requirement makes `Date.parse` read a cell as LOCAL time, so the
+//                trading date a file imports to would depend on `TZ`.
+//              * **the figure that must not be invented.** 160e removes `wholeOrNaN` from the price cell
+//                and restores `Number(…)`, which is the defect this unit found in itself:
+//                `Number('250.00')` is 250, an integer, so a cell written as dirhams-and-cents imported
+//                as 250 fils — two dirhams fifty — on a row that passed every check. 160f does the same
+//                to the duration cell, where the consequence is a period nobody can cross-check.
+//              * **the guess the importer must not make.** 160g turns the `customer_not_imported`
+//                quarantine into a customer creation, which is the second door into `customer` that
+//                would bypass the consent floor; 160h turns the unresolved-therapist quarantine into a
+//                fallback. Both are the acceptance line "quarantined with a reason rather than assigned
+//                to a placeholder", and both are caught by the PAIRING suite rather than the pure one,
+//                because what they break is a statement against a real database.
+//              * **the close, which no constraint judges.** 160i removes the turnaround from the
+//                past-close check, so a treatment whose room changeover runs past 02:00 imports. Nothing
+//                in PostgreSQL refuses this — the exclusion constraint and the capacity trigger judge
+//                overlap, not the session's end — so the importer is the only thing standing in front
+//                of it, which is why it gets a case of its own.
+//              * **the file's own half of the overlap rule.** 160j makes `therapistClashes` compare
+//                padded periods instead of bare ones, which refuses files the database would accept, and
+//                160k removes the pass entirely.
+//              * **the gates this unit had to stay inside.** 160l is the Drizzle mirror, 160m and 160n
+//                are the two directions of the SQLSTATE registry, and 160o is `pnpm db:conventions` on
+//                the append-only claim `imported_appointment` makes.
+//
+//            160y and 160z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the pure suite and the pairing suite, both
+//            unedited.
+//
+//            Nothing here edits `packages/db/migrations/0130_appointment_migrated.sql` in order to test a
+//            DATABASE rule, for gate block 134's reason: the database the suites run against has already
+//            had the migration applied, so an edit to the file changes nothing a statement can see and a
+//            PASS would be a report about a file nothing read. ZY361-ZY366 are proved against a real
+//            PostgreSQL by `packages/fixtures/src/visit-import.itest.ts`, which probes each one and
+//            asserts the row survived.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const IMPORTER = 'packages/migration/src/importers/appointments/import.ts'
+  const SERVICE = 'packages/db/src/services/import-appointments.ts'
+  const MIRROR = 'packages/db/src/schema/imported-appointment.ts'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+  const MIGRATION = 'packages/db/migrations/0130_appointment_migrated.sql'
+
+  const PURE_SUITE = 'packages/migration/src/importers/appointments/import.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/visit-import.itest.ts'
+
+  const pureSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PURE_SUITE]
+  const pairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 154's `breakDeposit`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge, which is the note block 133 carries.
+   */
+  const breakVisitImport = (name, file, find, into, rule, args = pureSuite()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the payload's own claims ------------------------------------------------------------------
+
+  // 160a. The minimised-payload rule, removed. This is the structural half of ADR 0072 for this
+  //       importer: the staging ledger keeps every payload for ever and no erasure reaches it.
+  breakVisitImport(
+    'visits: a payload carrying a key beyond the minimised set must be refused by name',
+    IMPORTER,
+    `    if (!MINIMISED.has(key)) return { ok: false, reason: VISIT_REJECTIONS.payloadNotMinimised }`,
+    `    if (!MINIMISED.has(key)) continue`,
+    'staged-payload-must-carry-only-the-minimised-keys',
+  )
+
+  // 160b. The digest shape, widened to anything. A staged digest that is not an HMAC is a cell staged
+  //       in clear, which is the one thing the ledger may not hold.
+  breakVisitImport(
+    'visits: a staged digest that is not a keyed HMAC must be refused by name',
+    IMPORTER,
+    `const HMAC = /^[a-f0-9]{64}$/`,
+    `const HMAC = /^.*$/`,
+    'staged-visit-digest-must-be-a-keyed-hmac',
+  )
+
+  // 160c. The offset requirement, removed. `Date.parse('2026-06-02T22:30:00')` is LOCAL time, so the
+  //       trading date a file imports to would depend on the process's `TZ` — and the two machines
+  //       would disagree silently.
+  breakVisitImport(
+    'visits: an instant with no offset must be refused by name',
+    IMPORTER,
+    `(Z|[+-]\\d{2}:\\d{2})$/`,
+    `(Z|[+-]\\d{2}:\\d{2})?$/`,
+    'started-at-must-be-an-iso-instant-with-an-offset',
+  )
+
+  // 160d. ADR 0065's self-contradiction rule, removed. Both instants come off one diary line, so this
+  //       is the only cross-check there is on either of them.
+  breakVisitImport(
+    'visits: a duration that disagrees with the period must be refused by name',
+    IMPORTER,
+    `  if ((finishedAt - startedAt) / 60_000 !== duration) {`,
+    `  if (false && (finishedAt - startedAt) / 60_000 !== duration) {`,
+    'duration-minutes-must-equal-finished-at-minus-started-at',
+  )
+
+  // ---- the figures that must not be invented ------------------------------------------------------
+
+  // 160e. The fils-scale defect, re-introduced. `Number('250.00')` is 250 and an integer, so a cell
+  //       written as dirhams-and-cents imports as two dirhams fifty on a row that passes every check.
+  //       It is 160e and not a comment because the unit found it this way: the rejection vocabulary's
+  //       own completeness test could not reach `grossNotIntegerFils`.
+  breakVisitImport(
+    'visits: a price cell read with Number() instead of a strict digit run must be caught',
+    IMPORTER,
+    `      grossChargedFils: wholeOrNaN(cell.grossChargedFils),`,
+    `      grossChargedFils: Number(cell.grossChargedFils),`,
+    'gross-charged-must-be-whole-fils',
+  )
+
+  // 160f. The same on the duration cell, where the consequence is a period the cross-check cannot see.
+  breakVisitImport(
+    'visits: a duration cell read with Number() instead of a strict digit run must be caught',
+    IMPORTER,
+    `      durationMinutes: wholeOrNaN(cell.durationMinutes),`,
+    `      durationMinutes: Number(cell.durationMinutes),`,
+    'duration-minutes-must-be-a-positive-whole-number',
+  )
+
+  // ---- the guesses the importer must not make -----------------------------------------------------
+
+  // 160g. The quarantine for a number this database does not hold, turned into a creation. That is a
+  //       second door into `customer` with no consent floor, no `created_via` and no contact record for
+  //       ZY273 to hold to the facts. The PAIRING suite, because the claim is a row count in PostgreSQL.
+  //
+  //       The replacement is assembled from single-quoted strings rather than written as a template
+  //       literal, which is not style: a `${...}` inside the template would be interpolated HERE, by
+  //       this file, and the first spelling of this case wrote `ReferenceError: request is not defined`
+  //       into the edited module and reported the gate as failing to reject anything.
+  breakVisitImport(
+    'visits: creating a customer instead of quarantining an unimported number must be caught',
+    SERVICE,
+    `  const customerId = customer[0]?.id
+  if (customerId === undefined) return unresolved(VISIT_QUARANTINES.customerNotImported)`,
+    [
+      '  let customerId = customer[0]?.id',
+      '  if (customerId === undefined) {',
+      '    const made = await sql`insert into customer (phone_e164, created_via) ' +
+        "values (${request.phoneE164}, 'import') on conflict (phone_e164) do nothing returning id`",
+      '    customerId = made[0]?.id',
+      '  }',
+      '  if (customerId === undefined) return unresolved(VISIT_QUARANTINES.customerNotImported)',
+    ].join('\n'),
+    'creates no customer',
+    pairSuite(),
+  )
+
+  // 160h. The unresolved-therapist quarantine, turned into a fallback onto whoever is first by staff
+  //       reference. A placeholder therapist puts a treatment somebody else performed into a named
+  //       person's commission base, their utilisation and the figure their performance is read off.
+  breakVisitImport(
+    'visits: falling back to a placeholder therapist instead of quarantining must be caught',
+    SERVICE,
+    `  const therapist = employee[0]
+  if (therapist === undefined) return unresolved(VISIT_QUARANTINES.therapistReferenceUnknown)`,
+    [
+      '  const fallback = await sql`select id, true as "employedThen" from employee ' +
+        'order by staff_reference limit 1`',
+      '  const therapist = employee[0] ?? fallback[0]',
+      '  if (therapist === undefined) {',
+      '    return unresolved(VISIT_QUARANTINES.therapistReferenceUnknown)',
+      '  }',
+    ].join('\n'),
+    'therapist_reference_unknown',
+    pairSuite(),
+  )
+
+  // ---- the close, which no constraint judges ------------------------------------------------------
+
+  // 160i. The turnaround, removed from the past-close check. Nothing in PostgreSQL refuses this: the
+  //       exclusion constraint and the capacity trigger judge overlap, not the session's end. So the
+  //       acceptance line "nothing past close once turnaround is counted" rests entirely on this
+  //       expression, which is the definition of a line that needs its own case.
+  breakVisitImport(
+    'visits: dropping the turnaround from the close check must be caught',
+    SERVICE,
+    `    new Date(request.finishedAt).getTime() + Number(service.turnaroundMinutes) * 60_000,`,
+    `    new Date(request.finishedAt).getTime(),`,
+    // The pairing suite's case is the one whose TREATMENT fits and whose changeover does not — the 01:30
+    // case is satisfied by either reading, because a 45-minute treatment starting half an hour before
+    // close already ends past it.
+    'whose room changeover does not',
+    pairSuite(),
+  )
+
+  // ---- the file's own half of the overlap rule ----------------------------------------------------
+
+  // 160j. The clash pass, made to compare PADDED periods. It then refuses files the database would
+  //       accept, which is the asymmetry the plan must not introduce — and the symptom is a correct
+  //       history that cannot be imported.
+  breakVisitImport(
+    'visits: a clash pass stricter than the constraint it mirrors must be caught',
+    IMPORTER,
+    `      if (held.from < to && from < held.to) {`,
+    `      if (held.from <= to && from <= held.to) {`,
+    'leaves adjacent periods alone',
+  )
+
+  // 160k. The clash pass, removed. Without it the exclusion constraint fires on the second insert and
+  //       the run stops with one conflict named, instead of the report naming every clash at once.
+  breakVisitImport(
+    'visits: removing the in-file therapist overlap pass must be caught',
+    IMPORTER,
+    `        clashing.add(held.lineNumber)
+        clashing.add(cell.lineNumber)`,
+    `        void held`,
+    'therapist-is-already-on-another-line-at-that-time',
+  )
+
+  // ---- the gates this unit had to stay inside -----------------------------------------------------
+
+  // 160l. The Drizzle mirror. SQL-first (ADR 0006), and `pnpm db:drift` is what holds the two equal.
+  checkRejectedBy(
+    'visits: a Drizzle mirror missing a column of imported_appointment fails db:drift',
+    withEditedFile(
+      MIRROR,
+      (source) => replaceOnce(source, `    quarantineReason: text('quarantine_reason'),`, ''),
+      () => runExpectingFailure('pnpm', ['db:drift']),
+    ),
+    'quarantine_reason',
+  )
+
+  // 160m. Direction one of the registry: a code a migration raises and the registry does not name.
+  checkRejectedBy(
+    'visits: an unregistered SQLSTATE raised by 0130 fails pnpm sqlstate',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY366',
+    rule: 'A migrated appointment may not end in the future.',
+    migration: '0130',
+    raisedBy: ['refuse_future_migrated_appointment'],
+    translators: ['packages/db/src/services/import-appointments.ts'],
+  },
+`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY366',
+  )
+
+  // 160n. Direction two: a registered code no migration raises. An entry for a code nothing raises is
+  //       an entry nobody can test, and it is how a band comes to look used.
+  checkRejectedBy(
+    'visits: a registered SQLSTATE no migration raises fails pnpm sqlstate',
+    withEditedFile(
+      MIGRATION,
+      (source) => replaceOnce(source, `errcode = 'ZY366'`, `errcode = 'ZY361'`),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY366',
+  )
+
+  // 160o. `imported_appointment` claims to be append-only, and `pnpm db:conventions` is what reads the
+  //       claim rather than trusting it.
+  checkRejectedBy(
+    'visits: an append-only imported_appointment without its DELETE guard fails db:conventions',
+    withEditedFile(
+      MIGRATION,
+      (source) =>
+        replaceOnce(
+          source,
+          `create trigger imported_appointment_no_delete
+  before delete on imported_appointment
+  for each row execute function refuse_imported_appointment_change();`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'imported_appointment',
+  )
+
+  // ---- the controls ------------------------------------------------------------------------------
+
+  // 160y. The pure suite, unedited. Without it every case above would be satisfied by a tree in which
+  //       the suite had simply stopped running.
+  check(
+    "visits: the importer's pure suite passes against the real tree",
+    !run('pnpm', pureSuite()).failed,
+  )
+
+  // 160z. The pairing suite, unedited: the trading date read from `business_day`, the three domain
+  //       invariants, the ledger census, the quarantines and all six refusals, against a real
+  //       PostgreSQL.
+  check('visits: the pairing suite passes against the real tree', !run('pnpm', pairSuite()).failed)
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

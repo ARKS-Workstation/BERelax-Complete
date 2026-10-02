@@ -21099,7 +21099,7 @@ units:
       resolved correctly for after-midnight appointments, marked as migrated so they never pollute revenue,
       and quarantined rather than guessed where a therapist or room cannot be resolved.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -21115,10 +21115,34 @@ units:
       the customer's visit history and the retention cohorts, all three asserted
     - an imported appointment whose therapist or room cannot be resolved is quarantined with a reason rather
       than assigned to a placeholder
+    notes: 'Built as migration 0130 plus one importer. The flag is `appointment.migrated` and NOT a tenth
+      `appointment_status`: 0051''s transition and action tables are `Record<AppointmentStatus, …>`, so a
+      tenth label would need fifteen transition answers and an `emitsRevenue` answer for something that is
+      not a state of the machine, and `holds_resources` — generated from the status — would stop seeing a
+      visit that did hold its room, which is the one thing this unit needs it to do. ADR 0082 records the
+      decision and the five alternatives. NOTE: a Four Hands or a couple''s treatment is NOT imported. Those
+      are two `appointment` rows sharing a `delivery_id`, the previous arrangement''s records do not say
+      which rows went together, and reconstructing one means choosing a pairing that
+      `assert_delivery_is_coherent` (ZB004) would then be judging — so the shape is a named quarantine
+      (`shape_is_not_solo`) and the pairing is DEFERRED to H-MIG-11, which is the unit that reconciles the
+      imported estate. NOTE: an imported visit starting at 01:30 resolves to the previous business_day, as
+      the acceptance line asks, and is then quarantined: the shortest treatment in this catalogue plus its
+      room turnaround is 65 minutes and the session closes at 02:00, so nothing can start at 01:30 and
+      finish inside it. Both halves are asserted separately in `visit-import.itest.ts` rather than
+      collapsed. Y8-visits is recorded in docs/OPEN-QUESTIONS.md: what the owner''s historic records
+      actually contain, since the workbook demands a gross figure per visit and refuses a line without one
+      rather than importing it at zero.'
     files:
+    - packages/db/migrations/0130_appointment_migrated.sql
+    - packages/db/src/schema/imported-appointment.ts
+    - packages/db/src/services/import-appointments.ts
+    - packages/migration/src/importers/appointments/workbook.ts
     - packages/migration/src/importers/appointments/import.ts
+    - packages/migration/src/importers/appointments/index.ts
     - packages/migration/src/importers/appointments/import.test.ts
-    - packages/db/migrations/00XX-appointment-migrated-flag.sql
+    - packages/fixtures/src/visit-import.itest.ts
+    - scripts/migrate-visits.mjs
+    - docs/adr/0082-a-reconstructed-visit-is-history-the-live-machine-cannot-touch.md
   - id: H-MIG-06
     order: 188
     title: Staff, credentials and leave opening balances
