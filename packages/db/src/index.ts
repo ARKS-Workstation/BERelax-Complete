@@ -1616,6 +1616,27 @@ export {
   TenderPostingDisagrees,
 } from './services/checkout-finalise.ts'
 export {
+  CustomerUnknown,
+  IMPORT_PACKAGE_SQLSTATE,
+  type ImportedPackageLiabilityRow,
+  type ImportedReconstructedPackage,
+  type ImportReconstructedPackageInput,
+  importPackageError,
+  importReconstructedPackage,
+  OPENING_EQUITY_ACCOUNT_CODE,
+  type PackageSignOff,
+  type ReconstructionTemplate,
+  type RecordSignOffInput,
+  readCustomerPackageAttestation,
+  readImportedPackageLiability,
+  readPackageDeferredRevenueFils,
+  readPackageSignOff,
+  readReconstructionTemplate,
+  recordPackageSignOff,
+  resolveHolder,
+  TemplateCannotCarryReconstruction,
+} from './services/import-package-liability.ts'
+export {
   assertReversalMatches,
   CREDIT_NOTE_SQLSTATE,
   type CreditNoteLineInput,
@@ -3968,4 +3989,53 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // direction the drift would take is the dangerous one: a database still accepting what the request boundary
 // had started refusing, so a test asserting the refusal would be satisfied by the wrong layer.
 //
-export const SCHEMA_VERSION = 117 as const
+//
+// 119 is 0119_migration_signoff.sql (H-MIG-03) — the owner sign-off, and the shape a RECONSTRUCTED package
+// liability has. `import_staging.import_sign_off` is the table H-MIG-01 deliberately did not create ("a
+// table with no unit deciding who may sign and what a signature covers would be a shape for somebody else
+// to work around"); it attests to `import_run.source_file_hash`, which was already there, and carries the
+// cash figure and the opening date the owner is accepting along with it. `imported_package_sale` is what the
+// reconstruction workbook said about one package, kept beside the `package_sale` it produced.
+//
+// The decision in the file, and the reason this unit is the migration's highest-risk artefact: **a
+// reconstructed `package_sale` records what is still OUTSTANDING, not the package as it was sold.** The
+// sessions a workbook row says were taken were delivered under the previous arrangement against no
+// appointment in this database, and 0083's ZG009 is right that a drawdown here must have a
+// `package_redemption` behind it — because a redemption posts the release through `4020` and `2030` (ZG008),
+// which would be output VAT on a supply made before this system traded. So the entitlement that arrives is
+// the one that remains, the attested figures live on the reconstruction record, and a FULLY DRAWN package
+// imports with no sale at all: nothing is outstanding, so there is no liability, no balance and no posting,
+// and the row is kept because the cash was received and because the history is what the holder will ask
+// about.
+//
+// Three things it changes, and only one of them is another unit's rule. `package_sale.expires_on` stops
+// being GENERATED, because a reconstruction's expiry is the date the holder's own copy carries and H-MIG-02
+// asks for it as a column precisely because the validity was an assumption when the package was sold; a
+// BEFORE INSERT trigger derives the same date for every sale the till makes, so that path supplies nothing
+// and gets what it always got, and ZY253 refuses a caller that states a different one rather than silently
+// overwriting it. ZY254 then makes the column immutable, which 0078 could leave to the generated expression
+// and 0119 cannot — and it is a code of its own rather than a widening of ZG001's comparison because ZG001
+// is also raised by `package_row_is_immutable` in 0078, and `pnpm sqlstate` refuses a code whose live raise
+// sites span two migrations. ZG002 is EXEMPTED for a reconstruction and replaced by ZY257, which holds the
+// sale's liability, session count and expiry equal to the workbook row instead of to the template version —
+// through `package_release_through_fils`, 0083's own release formula, so the imported liability is the
+// figure a redemption would compute. Everything else is untouched: ZG005 still refuses a posting that is
+// not pure deferred revenue, which is how "no output VAT at import" is a property of the database rather
+// than of an importer.
+//
+// The posting is `Dr 3030 Retained earnings / Cr 2050 Deferred revenue — packages` at what is still owed,
+// dated on the opening date, `source = 'opening_balance'` — load-bearing, because ZL004 (0027) refuses any
+// entry dated before the books open except an opening balance and a reversal. The counterpart is equity and
+// NOT cash: the money was received in a period these books do not contain, and the cash is H-MIG-07's
+// opening asset. Debiting it here would double it the moment that unit imports the opening trial balance,
+// which is the one error in an opening position that is undetectable afterwards, because the books still
+// balance. `artifacts/migration/package-liability.json` is the figure handed over.
+//
+// SQLSTATEs ZY251-ZY258 of the allocated band ZY251-ZY260; ZY259 and ZY260 are left FREE and deliberately
+// UNREGISTERED, because an entry for a code no migration raises is what direction 3 of `pnpm sqlstate`
+// refuses. Two views carry the acceptance lines that are about being able to SEE this:
+// `imported_package_liability` is the liability report and `customer_package_attestation` is the
+// honour-once-on-evidence flag on the customer record, a view rather than a column on `customer` for the
+// reason 0084's `customer_contraindication_flags` is one.
+//
+export const SCHEMA_VERSION = 119 as const

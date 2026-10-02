@@ -79,6 +79,11 @@ export async function truncateInvoiceFamily(sql: Sql): Promise<void> {
 export const PACKAGE_FAMILY_TABLES: readonly string[] = Object.freeze([
   'commission_line',
   'package_redemption',
+  // 0119's reconstruction record, which references `package_sale` — so whichever suite empties the family
+  // has to take it, or TRUNCATE refuses the whole statement. `import_staging.import_sign_off` is its
+  // PARENT and is deliberately absent: the staging ledger is append-only and holds no DELETE grant (0111),
+  // and a signature is evidence that an import happened, which is not a suite's to remove.
+  'imported_package_sale',
   'payment',
   'package_balance',
   'package_sale',

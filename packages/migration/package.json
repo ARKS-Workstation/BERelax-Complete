@@ -8,6 +8,7 @@
     "./checksum": "./src/checksum.ts",
     "./conformance": "./src/conformance/probe-importer.ts",
     "./framework": "./src/framework.ts",
+    "./importers/packages": "./src/importers/packages/index.ts",
     "./provenance": "./src/provenance.ts",
     "./registry": "./src/registry.ts"
   },

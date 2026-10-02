@@ -309,6 +309,9 @@ importers:
       '@berelax/media':
         specifier: workspace:*
         version: link:../media
+      '@berelax/migration':
+        specifier: workspace:*
+        version: link:../migration
       '@berelax/pdf':
         specifier: workspace:*
         version: link:../pdf

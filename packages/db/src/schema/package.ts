@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { serviceVariant } from './catalogue.ts'
 import { customer } from './customer.ts'
+import { importSignOff } from './import-staging.ts'
 import { journalEntry } from './ledger.ts'
 import { businessDay } from './trading.ts'
 
@@ -192,7 +193,16 @@ export const packageSale = pgTable(
     validityMonths: smallint('validity_months').notNull(),
     transferable: boolean('transferable').notNull(),
     unredeemedBalancePolicy: text('unredeemed_balance_policy').notNull(),
-    /** Generated in SQL. The one statement of when the customer's money runs out. */
+    /**
+     * When the customer's money runs out. The one statement of it, and no longer a generated column.
+     *
+     * 0078 generated it as `trading_date + validity_months`; 0119 dropped the expression, because a
+     * RECONSTRUCTED sale's expiry is the date the holder's own copy carries and nothing in this database
+     * can derive that. The derivation survives for every other sale as a BEFORE INSERT trigger, so a
+     * caller supplying nothing gets exactly what it always got — and a caller supplying a date that is
+     * not the terms' is refused (ZY253) rather than overwritten. The column is immutable afterwards
+     * (ZY254), which 0078 could leave to the generated expression and 0119 cannot.
+     */
     expiresOn: date('expires_on').notNull(),
     /** Mandatory and a real foreign key: money taken with no entry behind it is unexplainable. */
     journalEntryId: text('journal_entry_id')
@@ -200,6 +210,16 @@ export const packageSale = pgTable(
       .references(() => journalEntry.entryId),
     soldAt: timestamp('sold_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    /**
+     * True for an outstanding liability imported out of H-MIG-02's reconstruction workbook (0119).
+     *
+     * It is what ZG002 branches on: a reconstruction's price is what the customer handed over and its
+     * session count is what REMAINS of the package, neither of which the template version it names holds,
+     * so the sale is held to `imported_package_sale` by ZY257 instead. ZY258 refuses, at COMMIT, a sale
+     * carrying the mark with no reconstruction record attesting to it — otherwise the flag would be a way
+     * to switch another unit's constraint off and be held to nothing in its place.
+     */
+    reconstructed: boolean('reconstructed').notNull().default(false),
   },
   (t) => [
     index('package_sale_customer_idx').on(t.customerId, t.tradingDate),
@@ -259,6 +279,91 @@ export const packageBalance = pgTable(
     // leave an entitlement nobody can count.
     check('package_balance_cannot_overdraw', sql`${t.sessionsRedeemed} <= ${t.sessionsTotal}`),
     check('package_balance_cannot_overrelease', sql`${t.releasedFils} <= ${t.valueFils}`),
+  ],
+)
+
+/**
+ * What H-MIG-02's reconstruction workbook said about one imported package, mirroring `0119` (H-MIG-03).
+ *
+ * ## Append-only, and every figure is a cell a human filled in
+ *
+ * UPDATE and DELETE raise `ZY255`, and the application role holds neither privilege. There is no incumbent
+ * export, so this row is the copy of the spreadsheet line a liability was imported from — the evidence a
+ * figure on the balance sheet rests on — and a correction is a new file with a new hash, a new signature
+ * and a new import. Nothing here is derived from anything else in the database.
+ *
+ * ## `packageSaleId` is NULLABLE, and that is the fully drawn package
+ *
+ * A reconstructed `package_sale` records what is still OUTSTANDING, not the package as it was sold (0119's
+ * header says why: the sessions already taken were delivered against no appointment here, and 0083's ZG009
+ * is right that a drawdown needs a redemption behind it). A package with nothing left owes nothing, so it
+ * gets no sale, no balance and no posting — and `package_balance_value_positive` would refuse a balance of
+ * nothing in any case. The row is still here because the cash was received, so it belongs in the
+ * reconciliation, and because the history is what the holder will ask about. ZY257 holds the two cases
+ * apart: `sessionsRemaining` is zero exactly when this column is null.
+ *
+ * ## Three things the mirror cannot say
+ *
+ *   1. **`sessionsRemaining` and `admittedOnAttestation` are GENERATED in SQL** — `total - used`, and
+ *      `evidence_kind = 'owner_attestation'`. The flag is generated rather than stored so it cannot
+ *      disagree with the kind; a boolean beside it would be two statements of one fact whose failure mode
+ *      is the quiet one, a liability resting on a recollection that every report counts as documented.
+ *   2. **`evidenceKind` has no CHECK and is not an enum.** H-MIG-02 owns the vocabulary (`EVIDENCE_KINDS`
+ *      in `packages/migration/src/importers/packages/workbook.ts`) and a list in the schema would be a
+ *      second one for it to disagree with — `import_row.outcome_detail`'s reason, one unit along.
+ *   3. **`imported_package_liability` and `customer_package_attestation` are VIEWS and are deliberately
+ *      not mirrored**, `entityProvenance`'s reason: `pnpm db:drift` compares base tables. The first is
+ *      H-MIG-03's liability report and the second is the honour-once-on-evidence flag as the customer
+ *      record sees it.
+ */
+export const importedPackageSale = pgTable(
+  'imported_package_sale',
+  {
+    id: uuid('id').primaryKey().default(sql`uuid_generate_v7()`),
+    /** The owner's attestation for the file this row came from. `ZY256` holds it to that file's hash. */
+    signOffId: uuid('sign_off_id')
+      .notNull()
+      .references(() => importSignOff.id, { onDelete: 'restrict' }),
+    /** Null for a fully drawn package: see the note above. */
+    packageSaleId: uuid('package_sale_id')
+      .unique()
+      .references(() => packageSale.id, { onDelete: 'restrict' }),
+    holderPhoneE164: text('holder_phone_e164').notNull(),
+    templateKey: text('template_key').notNull(),
+    /** The day the customer paid. NOT the sale's `tradingDate`, which is the day the books took it on. */
+    purchaseDate: date('purchase_date').notNull(),
+    pricePaidFils: bigint('price_paid_fils', { mode: 'bigint' }).notNull(),
+    sessionsTotalAttested: smallint('sessions_total_attested').notNull(),
+    sessionsUsedAttested: smallint('sessions_used_attested').notNull(),
+    /** Generated in SQL as `total - used`. */
+    sessionsRemaining: smallint('sessions_remaining').notNull(),
+    statedExpiresOn: date('stated_expires_on').notNull(),
+    evidenceKind: text('evidence_kind').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    /** Generated in SQL from `evidenceKind`. Y9-package-thin's flag. */
+    admittedOnAttestation: boolean('admitted_on_attestation').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique('imported_package_sale_one_per_holder_template_purchase').on(
+      t.holderPhoneE164,
+      t.templateKey,
+      t.purchaseDate,
+    ),
+    index('imported_package_sale_sign_off').on(t.signOffId),
+    check(
+      'imported_package_sale_holder_is_e164',
+      sql`${t.holderPhoneE164} ~ '^\+[1-9][0-9]{7,14}$'`,
+    ),
+    check(
+      'imported_package_sale_expiry_after_purchase',
+      sql`${t.statedExpiresOn} >= ${t.purchaseDate}`,
+    ),
+    check(
+      'imported_package_sale_used_within_total',
+      sql`${t.sessionsUsedAttested} <= ${t.sessionsTotalAttested}`,
+    ),
   ],
 )
 

@@ -19,6 +19,7 @@
     "@berelax/clinical": "workspace:*",
     "@berelax/hr": "workspace:*",
     "@berelax/media": "workspace:*",
+    "@berelax/migration": "workspace:*",
     "@berelax/pdf": "workspace:*"
   }
 }

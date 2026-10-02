@@ -630,8 +630,8 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
   },
   {
     code: 'ZG002',
-    rule: "A package sale's snapshotted terms must match the template version it names.",
-    migration: '0078',
+    rule: "A package sale's snapshotted terms must match the template version it names, unless it is a reconstruction held to its workbook row instead (0119).",
+    migration: '0119',
     raisedBy: ['package_sale_terms_match_version'],
     translators: ['packages/db/src/services/sell-package.ts'],
   },
@@ -1889,13 +1889,6 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['import_staging.unprovenanced_row_ids'],
     translators: ['packages/migration/src/refusals.ts'],
   },
-  {
-    code: 'ZY231',
-    rule: 'A payments column may not hold text shaped like a card number.',
-    migration: '0117',
-    raisedBy: ['refuse_card_shaped_payment_text'],
-    translators: ['packages/db/src/repositories/payment-intent.ts'],
-  },
   // ZY221 and ZY222 are A-FIRST-05's, of the band ZY221-ZY230; the other eight are left free and
   // deliberately absent, because an entry for a code no migration raises is direction 3. Two and not one
   // because each names a different thing to go and do: the first is "that count is the only evidence a
@@ -1916,6 +1909,80 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     migration: '0116',
     raisedBy: ['analytics.assert_session_trading_basis'],
     translators: ['packages/db/src/repositories/analytics.ts'],
+  },
+  {
+    code: 'ZY231',
+    rule: 'A payments column may not hold text shaped like a card number.',
+    migration: '0117',
+    raisedBy: ['refuse_card_shaped_payment_text'],
+    translators: ['packages/db/src/repositories/payment-intent.ts'],
+  },
+  // ZY251-ZY258 are H-MIG-03's, of the band ZY251-ZY260; ZY259 and ZY260 are left free and deliberately
+  // absent, because an entry for a code no migration raises is direction 3. Eight and not one because each
+  // names a different thing to go and do — "a correction is a new file, a new hash and a new signature",
+  // "state the expiry the holder's own copy carries", "that is not what this sale's terms say", "the remedy
+  // is a reversing entry and a new sale", "import again against the file that was signed for", "the sale
+  // does not say what the workbook says" and "this sale is held to nothing at all". The two that carry the
+  // unit's whole point are ZY256 and ZY258: the first is the acceptance line "the sign-off is stored
+  // immutably against the hash of the file it attests to", read from the row's own provenance because
+  // `apply` is handed no run and no hash and could only guess; the second is what makes it impossible to
+  // mark a sale `reconstructed` — which exempts it from 0078's ZG002 — and then be held to nothing in its
+  // place, which is the one hole exempting another unit's constraint could leave.
+  {
+    code: 'ZY251',
+    rule: 'An owner import sign-off may not be updated or deleted.',
+    migration: '0119',
+    raisedBy: ['import_staging.refuse_sign_off_change'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY252',
+    rule: "A reconstructed package sale must state the expiry its holder's own copy carries.",
+    migration: '0119',
+    raisedBy: ['package_sale_expiry_is_derived_or_stated'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY253',
+    rule: "A package sale that is not a reconstruction may not state an expiry other than its terms'.",
+    migration: '0119',
+    raisedBy: ['package_sale_expiry_is_derived_or_stated'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY254',
+    rule: "A package sale's expiry may not be changed after the fact.",
+    migration: '0119',
+    raisedBy: ['package_sale_expiry_is_immutable'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY255',
+    rule: 'A package reconstruction record may not be updated or deleted.',
+    migration: '0119',
+    raisedBy: ['refuse_imported_package_change'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY256',
+    rule: "A package reconstruction's sign-off must attest to the hash of the file its own provenance names.",
+    migration: '0119',
+    raisedBy: ['imported_package_sign_off_attests_to_its_file'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY257',
+    rule: "A reconstructed package sale's liability, session count and expiry must be the figures the reconstruction attests to.",
+    migration: '0119',
+    raisedBy: ['imported_package_matches_its_sale'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
+  },
+  {
+    code: 'ZY258',
+    rule: "A package sale marked as a reconstruction must carry the reconstruction record that attests to it, and an opening drawdown must be the release formula's figure.",
+    migration: '0119',
+    raisedBy: ['package_sale_reconstruction_is_attested'],
+    translators: ['packages/db/src/services/import-package-liability.ts'],
   },
   {
     code: 'ZZ001',
