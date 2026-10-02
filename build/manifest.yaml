@@ -7792,7 +7792,7 @@ units:
       fixture proving the gate itself fires, plus coverage thresholds on the core money modules and a recorded
       proof that a failing money invariant turns CI red.
     owner: claude
-    status: todo
+    status: done
     size: S
     depends_on:
     - H05
@@ -7809,12 +7809,73 @@ units:
       invariant is shown once to turn the workflow red, with the run recorded in the ADR
     - PROGRESS.md is regenerated from the manifest by script and every M-TILL and M-VAT unit is marked done
       only from CI status, never by assertion
+    - 'NOTE: the shape, and the CENSUS that was built first and rejected on three MEASUREMENTS. The money invariant
+      suite is a REGISTRY of the existing tests — `MONEY_INVARIANTS` in `vitest.integration.config.ts`, naming for
+      each of the seven claims the acceptance line''s own words, the ONE statement the rule rests on, and the
+      tests that state it — plus `scripts/money-invariants.mjs`, a `pnpm verify` and CI step registered in gate
+      case 29. A census re-adding every money identity in SQL over every row the database holds was written first
+      and is NOT in this commit. (1) It is a second statement of every rule it checks, which is
+      0026_invoice.sql''s own argument against a generated vat_total one layer out. (2) A census over the TEST
+      database measures the SUITES and not the books: run against a database migrated, seeded and driven through
+      41 money integration files it reported `NumberingGap: bill series SUPP-BILL has a run of 44 starting at 5`
+      and `733,337 fils in 2050 with 0 fils unreleased on the balances`, both TRUE of that database and neither a
+      defect in any code — a suite can remove its own package_balance and bill rows and cannot remove the entries
+      it posted. (3) Where the estate IS consistent it is EMPTY: a migrated and seeded database holds zero
+      journal_entry, zero invoice, zero package_balance and zero cash_session rows, because every money suite
+      plants inside a transaction it rolls back. A gate that fails on every run, or examines nothing, is not a
+      gate (ADR 0002). ADR 0074 records all three.'
+    - 'NOTE: the examined count comes from the RUNNER''s JSON report and never from the source, and that is the
+      whole of the second acceptance line. `describe.skip`, `it.todo`, `it.skipIf` and a `beforeAll` that returns
+      early all leave the marker clause in the file and the exit code at zero; the first version of this check was
+      a grep for the clause and passed over every one of them. Measured: a `--reporter=json` run with the round-
+      trip property skipped reports `status: "skipped"` for `splitGross — properties net + vat === gross, …`, so
+      the count reads `assertionResults[].status === ''''passed''''` and a skipped claim is `[money-invariant-
+      examined-nothing]`. Gate case 152k is that fixture, so it is re-measured on every verify rather than quoted.'
+    - 'NOTE: TWO CLAUSES ARE NOT BUILT and neither is approximated. (1) "a deliberately failing money invariant is
+      shown once to turn the workflow red, with the run recorded in the ADR" — a unit agent may not push, so no
+      GitHub Actions run exists and a run id in the ADR would be a plausible figure nothing stands behind (brief
+      rule 15). What is recorded instead is the local measurement of the IDENTICAL step the workflow runs, as gate
+      cases 152k and 152l, which fail the build if either refusal stops firing. (2) "every M-TILL and M-VAT unit
+      is marked done only from CI status, never by assertion" — the first half was already true before this unit
+      (`scripts/progress.py` regenerates docs/PROGRESS.md from this manifest and `pnpm progress:check` holds the
+      two equal on every verify); the second half needs a CI status feed, a workflow conclusion recorded against a
+      unit id, and NO unit in this manifest owns one — F02, H05 and H-HARD-02 are the CI units and all three are
+      finished. A NEW unit is needed for it, so the clause is recorded as unbuilt rather than handed to a unit
+      that cannot take it.'
+    - 'NOTE: the four coverage groups in `vitest.config.ts` are SEPARATE from the existing `packages/core/src/**`
+      group because an aggregate hides a small module inside a large one: ledger, money and tax are about 900
+      statements of a 6,500-statement package, so all four could fall to 70% without moving the package figure
+      past its floor. Only `lines: 95` and `branches: 90` are declared — the figures the acceptance line names —
+      and statements and functions are deliberately left to the existing group, which still counts these files
+      because vitest computes each glob group independently and the global thresholds over everything. A 95%
+      FUNCTION floor here would have been tighter than the acceptance line asks on a dimension it does not
+      mention, and `money.ts` measures 95.45% on it today: one more uncovered function would fail a threshold
+      nobody asked for. Measured when written: ledger 100.00% lines / 97.24% branches, money.ts 98.18/100.00,
+      money/ 98.99/96.92, tax 98.23/93.90. `packages/core/src/money.ts` is listed BESIDE `money/**` because
+      `splitGross` is in the FILE and the per-line derivation is in the DIRECTORY, and the file is the one that
+      defines what "exact at the fils" means.'
+    - 'NOTE: NO MIGRATION, no private SQLSTATE band and no port band, and ADR 0074 is the only allocation used.
+      `SCHEMA_VERSION` is untouched, NO paragraph was added to the migration ledger in `packages/db/src/index.ts`
+      — there is no migration for one to describe — `packages/db/src/sqlstate-registry.ts` is untouched because
+      nothing here raises, and `packages/harness/src/ports.ts` is untouched because no suite here starts a server.
+      The gate block is `// 152a-152z`, inserted after `// 151a` and before `// 79a-79k` so the file stays ordered
+      by CATEGORY rather than by number.'
+    - 'NOTE: case 152o is the one fixture in the block that is not a file edit, and the reason is worth keeping.
+      "no UPDATE or DELETE on journal_line" is `refuse_journal_change()` plus a revoke, applied to the database by
+      migration 0018, so there is no source line whose breaking would show it. The fixture therefore DISABLES
+      `journal_line_no_update` in the test database, runs journal.itest.ts, requires its named test back, and re-
+      enables the trigger in a `finally` — which is also why a check that merely asked whether the trigger EXISTS
+      would pass, since `tgenabled` goes to ''''D'''' and the trigger stays in the catalogue. If a gate run is
+      killed between those two statements the recovery is `alter table journal_line enable trigger
+      journal_line_no_update`, stated in the case because brief rule 13 is about exactly that hazard.'
     files:
     - scripts/test-gates.mjs
+    - scripts/money-invariants.mjs
     - vitest.integration.config.ts
+    - vitest.config.ts
     - .github/workflows/ci.yml
     - package.json
-    - docs/adr/00xx-money-gates-must-fire.md
+    - docs/adr/0074-the-money-invariants-are-a-named-set.md
   - id: C-AUTO-01
     order: 69
     title: 'Template model: per-channel variants, immutable message_class, approval state, two sender identities'

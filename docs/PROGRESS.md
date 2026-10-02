@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**156 / 211 units complete.**
+**157 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **M-VAT-13 — Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures**
 1. **C-AUTO-09 — Node-graph journey builder, with misrouting made impossible**
+1. **C-AUTO-10 — Segments, campaigns, spend caps and window-aware scheduling**  — **needs owner input:** Y6-sender-ids
 
 ## All units
 
@@ -86,7 +86,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 65 | `M-VAT-10` | Compliance calendar engine and blocking obligations | `B-AVAIL-01`, `B-AVAIL-02`, `B-AVAIL-03`, `B-AVAIL-04`, `B-AVAIL-05`, `B-AVAIL-06`, `B-AVAIL-07`, `F06`, `F09` | — | — |
 | [x] | 66 | `M-VAT-11` | Compliance calendar reminders, escalation, evidence and the unverified dashboard | `H02`, `M-VAT-10` | — | — |
 | [x] | 67 | `M-VAT-12` | Closed test month reconciliation report | `H03`, `M-TILL-13`, `M-VAT-07` | — | Y11-tax-agent |
-| [ ] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
+| [x] | 68 | `M-VAT-13` | Money invariant suite wired into pnpm verify and CI, with gate-fires fixtures | `H05`, `M-VAT-12` | — | — |
 | [x] | 69 | `C-AUTO-01` | Template model: per-channel variants, immutable message_class, approval state, two sender identities | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `F09` | — | Y6-sender-ids |
 | [x] | 70 | `C-AUTO-02` | GSM-7 vs UCS-2 detection, segmentation and cost preview at authoring time | `C-AUTO-01`, `F05` | — | Y6-sender-ids |
 | [x] | 71 | `C-CRM-01` | Client record: preferences, tags, lifecycle, source, VIP and a blocklist that actually blocks | `B-LIFE-01`, `B-LIFE-02`, `B-LIFE-03`, `F09` | — | — |

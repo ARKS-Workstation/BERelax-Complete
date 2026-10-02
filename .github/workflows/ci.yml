@@ -276,6 +276,21 @@ jobs:
       - name: Integration tests (real PostgreSQL)
         run: pnpm test:integration
 
+      # The seven money invariants, run as a NAMED SET rather than reached through a glob. The claims
+      # are `MONEY_INVARIANTS` in `vitest.integration.config.ts` and the step refuses three things: a
+      # registered test that is no longer on disk or no longer carries its marker clause, a runner that
+      # exits non-zero, and — the one neither of those can catch — an invariant for which zero PASSED
+      # tests matched, which is what a skipped claim looks like. Without it, deleting or skipping one of
+      # the seven made the run one test shorter out of about 7,600 and nothing said which claim had
+      # gone. ADR 0074.
+      #
+      # It runs AFTER `pnpm db:apply` and `pnpm seed`, and that order is load-bearing: six of the nine
+      # registered files are integration tests, which do not skip when the database is absent — they
+      # fail, and that failure reads as a money invariant that is false. `scripts/test-gates.mjs` case
+      # 152v asserts the order and 152w is its control.
+      - name: The seven money invariants are examined and hold
+        run: pnpm money-invariants
+
       - name: Migration dry run
         run: pnpm db:migrate:dry
 
