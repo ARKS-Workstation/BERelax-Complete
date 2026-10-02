@@ -448,6 +448,20 @@ export {
   type TradingDateFiling,
 } from './repositories/analytics.ts'
 export {
+  ANALYTICS_CONSENT_SQLSTATE,
+  ANALYTICS_CONSENT_STORE_REFUSALS,
+  type AnalyticsConsentCapture,
+  type AnalyticsConsentStoreRefusal,
+  analyticsConsentCounts,
+  analyticsConsentStoreRefusalOf,
+  type DispatchEnqueueResult,
+  enqueueAnalyticsDispatch,
+  recordAnalyticsConsent,
+  sessionConsentRow,
+  type WithdrawalResult,
+  withdrawAnalyticsConsent,
+} from './repositories/analytics-consent.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,
@@ -4151,4 +4165,58 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // refuses an entry for a code no migration raises — and nothing here can be refused by the database,
 // since nothing here writes.
 //
-export const SCHEMA_VERSION = 122 as const
+// 125 is 0125_analytics_consent.sql (A-MEAS-02) — the analytics consent record, the four Consent Mode v2
+// signals a session carries, and the dispatch queue the gate governs.
+//
+// One paragraph for the decision that shapes the whole file, because the obvious alternative is what every
+// reader will reach for first: `analytics.consent_record` holds NO identifier and names no visitor. ADR
+// 0066 and A-FIRST-05 create `analytics.visitor` AT consent, inside `ingestCollectBatch`, which is "the
+// ONE place the server decides who owns an identifier" — so at the instant the banner is answered there is
+// no visitor row yet, and minting one here would be a second identifier-minting site. A nullable
+// `visitor_id` was the alternative and is worse: NULL for the common case, so mostly empty and mostly
+// useless, while costing a foreign key into a table the retention pass purges every 90 days — the
+// contradiction 0024 and 0056 both refuse, since the parent's DELETE either fails or rewrites history. The
+// price is stated out loud in 0125's header: nothing says WHICH visitor made which decision, and the
+// operative state the gate reads is four boolean columns on `analytics.session` instead.
+//
+// Those four columns are `not null default false`, and the default is the most important value in the
+// migration. A gate that defaults to granted is a gate that opens by accident: with `false`, a writer that
+// forgets them suppresses every outbound dispatch and writes a visible `suppressed` row, and the omission
+// is in the one place somebody would look rather than in an ad account.
+//
+// The gate is stated THREE times and that is deliberate, with two checks holding them together.
+// `CONSENT_GATED_TARGETS` in `packages/core/src/analytics/consent-gate.ts` is the pure one.
+// `analytics_dispatch_destination` is the database's, four booleans named one for one against the session's
+// four columns, and `packages/fixtures/src/analytics-consent.itest.ts` holds those two equal in BOTH
+// directions — it is the only package that may import core and db together (ADR 0001 is why the writer
+// here cannot ask the pure gate at all). The COMPARISON, which is the part that could silently invert, is
+// stated ONCE: `dispatch_consent_gap(session, destination)` is called both by the ZY312 trigger and by
+// `enqueueAnalyticsDispatch`, so the state the writer chooses and the state the trigger permits cannot
+// disagree.
+//
+// ZY311 makes `analytics.consent_record` append-only for every role, `berelax_retention` included —
+// that role holds UPDATE and DELETE here through the schema's default privileges while the policy row says
+// `keep_indefinitely`, so a write from it would be a bug and an exemption would make it a silent one.
+// ZY312 refuses a dispatch reaching `queued` or `sent` while a required signal is missing, on INSERT and
+// on UPDATE; the UPDATE half is what makes a withdrawal airtight, because the withdrawal clears the
+// session's columns and a cancelled row therefore cannot be reinstated and transmitted. ZY313 through
+// ZY320 are RELEASED unused and deliberately left unregistered, since `pnpm sqlstate` refuses an entry for
+// a code no migration raises.
+//
+// Version 1 of the banner's words is inserted HERE rather than by the seed, unlike C-CRM-03's four drafts,
+// and the difference is what each is for: those are drafts of a statement a human reads off a form, while
+// this is text a public page renders to every visitor and no consent record can be written without a
+// wording row to reference. The same bytes are also `ANALYTICS_CONSENT_WORDING` in `@berelax/shared`,
+// because `/` and `/ar` are prerendered and a build-time database read would either fail the build on a
+// machine with no database or bake whatever that machine held. So the words are written twice and the
+// check that holds them equal is STRUCTURAL: `recordAnalyticsConsent` resolves the row BY THE HASH of the
+// constant's bytes, so a tree whose copy was edited without a new version being published cannot find a
+// wording row and every write is refused by name.
+//
+// The queue is `public.analytics_dispatch` and not `analytics.dispatch`. It behaves like `outbox_event`,
+// A-MEAS-03's own title calls it `analytics_dispatch`, and keeping it out of that schema keeps one claim
+// honest: a base table there needs a `retention_policy` row, and these rows leave with the session they
+// are about by `on delete cascade`, so `keep_indefinitely` would be false and `raw_row_purge` would
+// declare a purge the cascade has already done.
+//
+export const SCHEMA_VERSION = 125 as const

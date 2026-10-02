@@ -48273,6 +48273,520 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 155a-155z. The consent gate (A-MEAS-02), whose whole subject is a thing that must not open by accident.
+//
+// Every case here breaks the gate in a way that is SILENT. There is no error, no refusal and no log line:
+// the tag loads, the push goes out, and the only evidence is in somebody else's ad account. That is the
+// argument for a known-bad fixture per rule rather than a review — a reviewer reads `if (granted)` and
+// agrees with it, and the four ways this gate can fail open all look like the code doing its job.
+//
+// Three of them are one character wide. `=== true` relaxed to a truthiness test reads the string `'f'` —
+// which is what a boolean column comes back as under one of the query shapes in this stack — as consent.
+// `cardinality(missing) = 0` written as `array_length(missing, 1) > 0` is NULL for the permitted case, and
+// a `case` whose condition is NULL falls to the `else`, which in the writer is the permitted branch.
+// `default false` written `default true` on a session column applies cleanly, passes every integration
+// case in the unit, and permits a push for every session a writer that had not heard of consent created.
+{
+  const GATE = 'packages/core/src/analytics/consent-gate.ts'
+  const GATE_SUITE = 'packages/core/src/analytics/consent-gate.test.ts'
+  const ARCH_SUITE = 'packages/fixtures/src/consent-gate-arch.test.ts'
+  const BOOTSTRAP = 'apps/web/app/(public)/_components/consent-banner.tsx'
+  const BOOTSTRAP_SUITE = 'apps/web/src/consent-bootstrap.test.ts'
+  const HANDLER = 'apps/web/app/api/v1/consent/analytics/handler.ts'
+  const MIGRATION = 'packages/db/migrations/0125_analytics_consent.sql'
+  const MIGRATION_SUITE = 'packages/db/src/analytics-consent.test.ts'
+  const REPOSITORY = 'packages/db/src/repositories/analytics-consent.ts'
+  const WIRE_SUITE = 'packages/shared/src/analytics/analytics-consent.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/analytics-consent.itest.ts'
+
+  const unit = (...files) =>
+    run('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const unitFails = (...files) =>
+    runExpectingFailure('pnpm', ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', ...files])
+  const pairFails = () =>
+    runExpectingFailure('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      PAIR_SUITE,
+    ])
+
+  // 155a. A session row the resolver cannot read, resolved as a GRANT. This is the known-bad fixture the
+  //       whole unit is about: an absent or unparseable consent record read as consent.
+  checkRejectedBy(
+    'consent gate: an unreadable session row resolved as a grant is caught',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if (row === null || typeof row !== 'object') return state",
+          "  if (row === null || typeof row !== 'object') {\n" +
+            '    for (const signal of CONSENT_MODE_SIGNALS) state.add(signal)\n' +
+            '    return state\n' +
+            '  }',
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'grants nothing for an absent, empty or unreadable record',
+  )
+
+  // 155b. The one-character version of the same defect, and the one a reviewer agrees with: a truthiness
+  //       test instead of `=== true`. `'f'` is a non-empty string.
+  checkRejectedBy(
+    'consent gate: a truthy boolean column read as consent is caught',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          'if (record[SESSION_CONSENT_COLUMNS[signal]] === true) state.add(signal)',
+          'if (record[SESSION_CONSENT_COLUMNS[signal]]) state.add(signal)',
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'reads ONLY the boolean true from a session row',
+  )
+
+  // 155c. A target the table does not name, permitted because it had nothing to require. A typo is how a
+  //       new destination arrives, so this is the fail-open an id typo reaches.
+  checkRejectedBy(
+    'consent gate: an unknown target permitted by default is caught',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if (target === undefined) {\n    return {\n      target: input.target,\n      permitted: false,',
+          '  if (target === undefined) {\n    return {\n      target: input.target,\n      permitted: true,',
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'refuses a target the table does not name',
+  )
+
+  // 155d. The defect this gate SHIPPED with for an hour, restored: an unknown target reporting no missing
+  //       signals. `missing.length === 0` is the branch a caller writes instead of reading `permitted`.
+  checkRejectedBy(
+    'consent gate: an unknown target reporting nothing missing is caught',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          "      missing: [...CONSENT_MODE_SIGNALS].toSorted(),\n      reason: 'consent_denied',\n    }\n  }\n  const missing = target.requires",
+          "      missing: [],\n      reason: 'consent_denied',\n    }\n  }\n  const missing = target.requires",
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'keeps `missing` empty exactly when permitted',
+  )
+
+  // 155e. The vacuity control brief rule 22 asks for: a generator whose two states are IDENTICAL.
+  //       Nothing can then disagree, the monotonicity property holds for any gate at all, and the case
+  //       reports a pass over nothing — which is how `resolveConsent`'s order-independence property held
+  //       for a completely order-dependent resolver about one run in eight.
+  //
+  //       The first version of this fixture emptied `before` instead, and the suite PASSED: a target that
+  //       needs one signal still flips when that signal is the one added, so about an eighth of the pairs
+  //       disagreed and the floor was comfortably met. A fixture that leaves the property able to examine
+  //       something is not a vacuity fixture, which is what running it showed.
+  checkRejectedBy(
+    'consent gate: a property generator whose two states cannot differ is caught',
+    withEditedFile(
+      GATE_SUITE,
+      (text) =>
+        replaceOnce(
+          text,
+          'const after = new Set([...before, added])',
+          'const after = new Set(before)',
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'no generated pair ever changed the answer',
+  )
+
+  // 155e(ii). And the FLOOR itself, which is the half a both-outcomes check cannot cover: raise it above
+  //           anything the generator reaches and it must fire. The committed floor is RUNS/24 against a
+  //           measured 17.8%-21.0%, and a floor that is load-bearing is a floor that CAN fail — the same
+  //           shape gate case 89e uses on the p95 budget.
+  checkRejectedBy(
+    'consent gate: the measured vacuity floor is load-bearing and can fail',
+    withEditedFile(
+      GATE_SUITE,
+      (text) => replaceOnce(text, '      RUNS / 24,\n', '      RUNS * 2,\n'),
+      () => unitFails(GATE_SUITE),
+    ),
+    'too few generated pairs could disagree for this to be a test',
+  )
+
+  // 155f. And the direction the property exists for: a comparison that permits when a required signal is
+  //       MISSING. Every fixed-input case would still pass for half the targets.
+  checkRejectedBy(
+    'consent gate: an inverted comparison is caught by the monotonicity property',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          'const missing = target.requires.filter((signal) => !input.state.has(signal)).toSorted()',
+          'const missing = target.requires.filter((signal) => input.state.has(signal)).toSorted()',
+        ),
+      () => unitFails(GATE_SUITE),
+    ),
+    'never refuses more when a signal is ADDED',
+  )
+
+  // 155g. A SETTING reaching the gate. The acceptance line is that the gate is code and not configuration,
+  //       and the arch test enumerates every key the registry holds rather than a list somebody wrote.
+  checkRejectedBy(
+    'consent gate: a setting key inside the gate estate is caught',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          'export const CONSENT_GATE_SURFACES =',
+          "export const GATE_SETTING_KEY = 'messaging.promotional_window'\n\nexport const CONSENT_GATE_SURFACES =",
+        ),
+      () => unitFails(ARCH_SUITE),
+    ),
+    'names no setting key',
+  )
+
+  // 155h. And an environment read, which is the other half: a key this build has not invented yet is
+  //       invisible to the enumeration, so the arch test refuses the READ as well as the names.
+  checkRejectedBy(
+    'consent gate: a process.env read inside the gate estate is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          '  const decidedAtIso = new Date(deps.clock.now()).toISOString()',
+          '  const decidedAtIso = new Date(deps.clock.now()).toISOString()\n' +
+            "  if (process.env['CONSENT_OFF'] === '1') return new Response(null, { status: 204 })",
+        ),
+      () => unitFails(ARCH_SUITE),
+    ),
+    'reads no configuration mechanism at all',
+  )
+
+  // 155i. The control in the OTHER direction, and the reason it exists: the first run of that case
+  //       reported the handler for the sentence in its own header saying it reads no `process.env`. A gate
+  //       that fires on its own documentation is a gate somebody switches off (ADR 0052), so the scan
+  //       blanks comments — and this case proves it still does.
+  {
+    const commented = withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          'export interface ConsentEndpointDeps {',
+          '// A comment naming process.env, current_setting and messaging.promotional_window.\nexport interface ConsentEndpointDeps {',
+        ),
+      () => unit(ARCH_SUITE),
+    )
+    check(
+      'consent gate: the mechanism scan blanks comments, so prose about process.env is not a violation',
+      !commented.failed,
+      commented.output,
+    )
+  }
+
+  // 155j. The two statements of the mapping, pulled apart. Core and the migration are held equal in both
+  //       directions, and the symptom of a drift is not an error: it is a push the pure gate refuses and
+  //       the trigger permits, or the reverse.
+  checkRejectedBy(
+    'consent gate: a destination requiring different signals in core and in the migration is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "  ('advertising_conversion_push', false, true, false, false,",
+          "  ('advertising_conversion_push', false, false, false, true,",
+        ),
+      () => unitFails(ARCH_SUITE),
+    ),
+    'requires a different set in the migration than in core',
+  )
+
+  // 155k. A third dependency on the handler, which is where a flag would arrive first.
+  checkRejectedBy(
+    'consent gate: a third dependency on the consent handler is caught',
+    withEditedFile(
+      HANDLER,
+      (text) =>
+        replaceOnce(
+          text,
+          'export interface ConsentEndpointDeps {\n  readonly sql: Sql',
+          'export interface ConsentEndpointDeps {\n  readonly enabled: boolean\n  readonly sql: Sql',
+        ),
+      () => unitFails(ARCH_SUITE),
+    ),
+    'hands the handler a connection and a clock',
+  )
+
+  // 155l. The inline bootstrap's cookie parse, by PREFIX. `berelax_consent_version` read as the consent
+  //       cookie hides the banner from somebody who has answered nothing — and the script cannot import
+  //       the shared parse, which is why the two are held equal by running the real string.
+  checkRejectedBy(
+    'consent gate: the bootstrap reading the cookie name by prefix is caught',
+    withEditedFile(
+      BOOTSTRAP,
+      (text) =>
+        replaceOnce(
+          text,
+          '`if(p[i].slice(0,j).trim()!==${cookie})continue;` +',
+          '`if(p[i].slice(0,j).trim().indexOf(${cookie})!==0)continue;` +',
+        ),
+      () => unitFails(BOOTSTRAP_SUITE),
+    ),
+    'sets nothing for no cookie, an empty value, or a lookalike name',
+  )
+
+  // 155m. The optimistic attribute: hide the banner before the write has been confirmed. The visitor then
+  //       believes they have answered and nothing was recorded, which is worse than being asked twice.
+  checkRejectedBy(
+    'consent gate: a banner hidden before the record is written is caught',
+    withEditedFile(
+      BOOTSTRAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "'.then(function(r){if(r.ok)show(read())}).catch(function(){});' +",
+          '\'.then(function(){show(granted===""?"none":granted)}).catch(function(){});\' +',
+        ),
+      () => unitFails(BOOTSTRAP_SUITE),
+    ),
+    'leaves the banner up when the write fails',
+  )
+
+  // 155n. A destination host in the script that ships on every public page. `pnpm egress` rule 6 covers
+  //       the source; this covers the string the generator emits, which is not the same text.
+  checkRejectedBy(
+    'consent gate: a destination host inside the bootstrap script is caught',
+    withEditedFile(
+      BOOTSTRAP,
+      (text) =>
+        replaceOnce(
+          text,
+          "    '(function(){' +",
+          // ONE literal, not two concatenated. The first version of this fixture planted
+          // `"https://www.google"+"-analytics.com/mp/collect"` — which is what the browser would
+          // concatenate at RUNTIME, so the string the generator EMITS contains `google"+"-analytics.com`
+          // and the host never appears in it. The case reported "exited zero; nothing was rejected"
+          // about a scan that was working perfectly, which is the fixture being wrong rather than the
+          // rule. `scripts/test-gates.mjs` is exempt from `pnpm egress` rule 6 by name, which is why the
+          // host may be spelled here at all.
+          '    \'(function(){var t="https://www.google-analytics.com/mp/collect";\' +',
+        ),
+      () => unitFails(BOOTSTRAP_SUITE),
+    ),
+    'names no destination host and no vendor',
+  )
+
+  // 155o. **The most dangerous single value in this unit.** `default false` on a session consent column,
+  //       written `default true`. It applies, it passes every integration case — the suites set the
+  //       columns explicitly — and it permits an outbound push for every session a writer that had not
+  //       heard of consent created. Nothing at runtime can catch it, so the text is where it is caught.
+  checkRejectedBy(
+    'consent gate: a session consent column defaulting to TRUE is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          '  add column consent_ad_storage          boolean not null default false,',
+          '  add column consent_ad_storage          boolean not null default true,',
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'must default to FALSE',
+  )
+
+  // 155p. The trigger deleted from the migration. Invisible to a database that already has it, which is
+  //       why the static half of this unit exists at all (gate case 123e's shape, one migration over).
+  checkRejectedBy(
+    'consent gate: the dispatch gate trigger removed from the migration is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          '  before insert or update on analytics_dispatch',
+          '  before insert on analytics_dispatch',
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'fires on INSERT and on UPDATE',
+  )
+
+  // 155q. `cardinality` written as `array_length` in the trigger: NULL for the permitted case.
+  checkRejectedBy(
+    'consent gate: array_length on the gap inside the trigger is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          '  if cardinality(v_missing) = 0 then',
+          '  if array_length(v_missing, 1) is null then',
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'tests the gap with `cardinality` and never with `array_length`',
+  )
+
+  // 155r. And in the writer, where the NULL falls to the `else` — which is the PERMITTED branch.
+  checkRejectedBy(
+    'consent gate: array_length on the gap inside the writer is caught',
+    withEditedFile(
+      REPOSITORY,
+      (text) =>
+        replaceOnce(
+          text,
+          '        case when cardinality(gap.missing) = 0\n',
+          '        case when array_length(gap.missing, 1) is null\n',
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'tests the gap with `cardinality` and never with `array_length`',
+  )
+
+  // 155s. One of the two not-found guards removed. An empty gap means PERMITTED, so a function that
+  //       returned one for a row it could not read would be a gate that opens for exactly the input it
+  //       cannot judge — and the destination guard is the one that actually fires, because a BEFORE
+  //       INSERT trigger runs before the row's foreign keys are checked.
+  //
+  //       Anchored on the sentence that FOLLOWS the first guard, because the two `if not found then`
+  //       lines are byte-identical and `replaceOnce` refuses an anchor that matches twice, which is the
+  //       whole reason it exists. The first version of this fixture appended a character to `end if;`
+  //       instead — invalid PL/pgSQL that the static test has no opinion about, so it reported "exited
+  //       zero; nothing was rejected" about a check that was fine.
+  checkRejectedBy(
+    'consent gate: a missing not-found guard in the gap function is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "  if not found then\n    raise exception\n      'analytics_dispatch names session %",
+          "  if false then\n    raise exception\n      'analytics_dispatch names session %",
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'raises rather than returning an empty gap',
+  )
+
+  // 155t. A visitor id on the record. The decision 0125 is shaped by, and the one a later unit will
+  //       reach for first: the visitor row is created AT consent by the ingest and does not exist yet.
+  checkRejectedBy(
+    'consent gate: a visitor id added to the consent record is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          '  decided_at                 timestamptz not null,',
+          '  visitor_id                 uuid,\n  decided_at                 timestamptz not null,',
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'names no visitor',
+  )
+
+  // 155u. The retention policy row removed, which stops the whole nightly pass with ZY062 rather than
+  //       retaining a new table for ever by omission.
+  checkRejectedBy(
+    'consent gate: the record with no retention policy row is caught',
+    withEditedFile(
+      MIGRATION,
+      (text) =>
+        replaceOnce(
+          text,
+          "  ('consent_record', 'keep_indefinitely', null, null,",
+          "  ('consent_recordx', 'keep_indefinitely', null, null,",
+        ),
+      () => unitFails(MIGRATION_SUITE),
+    ),
+    'puts the record on the retention list',
+  )
+
+  // 155v. The pair suite, which is the only place the pure gate and the DATABASE's own function can be
+  //       held against each other. Change what core requires and the two disagree — the drift whose
+  //       symptom is a push one of them permits.
+  checkRejectedBy(
+    'consent gate: core and the database disagreeing about a destination is caught against a real database',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          "    requires: Object.freeze(['ad_user_data'] as const),",
+          "    requires: Object.freeze(['ad_personalization'] as const),",
+        ),
+      () => pairFails(),
+    ),
+    'requires a different set in the database than in core',
+  )
+
+  // 155w. And the map from a signal to its column. A renamed column makes every lookup `undefined`, so
+  //       every signal reads as denied, every dispatch is suppressed, and every test about suppression
+  //       goes on passing — which is why this one needs the catalogue rather than a source scan.
+  checkRejectedBy(
+    'consent gate: a session consent column the map does not name is caught against a real database',
+    withEditedFile(
+      GATE,
+      (text) =>
+        replaceOnce(
+          text,
+          "  ad_user_data: 'consent_ad_user_data',",
+          "  ad_user_data: 'consent_ad_user_data_v2',",
+        ),
+      () => pairFails(),
+    ),
+    'agree about which column each signal is recorded in',
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 155y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the gate, the wire contract, the arch enumeration, the inline bootstrap and the
+  //       migration's text.
+  {
+    const pure = unit(GATE_SUITE, WIRE_SUITE, ARCH_SUITE, BOOTSTRAP_SUITE, MIGRATION_SUITE)
+    check(
+      'consent gate: the gate, the wire contract, the arch enumeration, the bootstrap and the migration pass over the real tree',
+      !pure.failed,
+      pure.output,
+    )
+  }
+
+  // 155z. And the database suite, where the three claims a pure test cannot reach are proved: that the
+  //       hash of the banner's own bytes is what finds the wording version, that the ZY312 trigger
+  //       refuses a queued dispatch for any caller including a psql session, and that a withdrawal
+  //       cancels what is queued while leaving what was sent exactly as it is.
+  {
+    const pair = run('pnpm', [
+      'exec',
+      'vitest',
+      'run',
+      '-c',
+      'vitest.integration.config.ts',
+      PAIR_SUITE,
+    ])
+    check(
+      'consent gate: the wording hash, the database-side gate and the withdrawal pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -44,6 +44,33 @@ export const CONSENT_PURPOSES = [
 export type ConsentPurpose = (typeof CONSENT_PURPOSES)[number]
 
 /**
+ * The purpose analytics consent is recorded under (A-MEAS-02, migration 0125).
+ *
+ * Deliberately NOT a member of {@link CONSENT_PURPOSES}, and the distinction is load-bearing rather than
+ * tidy. That tuple is the purposes a CONTACT's consent is recorded for, per channel: every one of them
+ * answers "may we send this person this kind of message", `consent.purpose` is keyed on it beside a
+ * `message_channel`, and the fixture salon seeds a granted and a withdrawn contact for every
+ * (channel x purpose) pair. Analytics consent has no channel and no contact — its subject is a web
+ * visitor and `analytics.consent_record` names nobody at all — so adding it to that tuple made the H03
+ * matrix demand a seeded `sms/analytics_measurement` consent row, which is a row that could not mean
+ * anything. That failure is why this constant exists.
+ *
+ * What the two DO share is the `consent_purpose` table and its foreign key, which is
+ * {@link CONSENT_PURPOSE_VOCABULARY}.
+ */
+export const ANALYTICS_CONSENT_PURPOSE = 'analytics_measurement'
+
+/**
+ * Every purpose the `consent_purpose` TABLE holds, which is what its foreign key accepts.
+ *
+ * DERIVED from {@link CONSENT_PURPOSES} rather than written out, so a fifth contact purpose appears here
+ * with no second edit. `packages/fixtures/src/consent.itest.ts` holds this against the rows the migrations
+ * seed; the cases that are about a contact's consent per channel use `CONSENT_PURPOSES` instead, and the
+ * difference between the two is which question each case is asking.
+ */
+export const CONSENT_PURPOSE_VOCABULARY = [...CONSENT_PURPOSES, ANALYTICS_CONSENT_PURPOSE] as const
+
+/**
  * The purposes a **promotional send** may be gated on.
  *
  * `clinical_processing` and `photography` are not messaging permissions at all: one is the lawful

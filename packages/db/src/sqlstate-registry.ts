@@ -1985,6 +1985,20 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     translators: ['packages/db/src/services/import-package-liability.ts'],
   },
   {
+    code: 'ZY311',
+    rule: 'An analytics consent record is append-only: a withdrawal and a correction are each a new row.',
+    migration: '0125',
+    raisedBy: ['analytics.refuse_consent_record_change'],
+    translators: ['packages/db/src/repositories/analytics-consent.ts'],
+  },
+  {
+    code: 'ZY312',
+    rule: 'A dispatch may not be queued or transmitted while the session lacks a Consent Mode v2 signal its destination requires, and a dispatch whose consent state cannot be read is refused rather than permitted.',
+    migration: '0125',
+    raisedBy: ['dispatch_consent_gap', 'assert_dispatch_consent'],
+    translators: ['packages/db/src/repositories/analytics-consent.ts'],
+  },
+  {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',
     migration: '0093',

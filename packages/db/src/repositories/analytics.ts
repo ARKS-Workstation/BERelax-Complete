@@ -2,6 +2,7 @@ import {
   type AnalyticsBreakpoint,
   type AnalyticsEvent,
   AppError,
+  type ConsentModeSignal,
   type DeviceKind,
   type TradingDateBasis,
 } from '@berelax/shared'
@@ -277,6 +278,19 @@ export interface CollectIngestInput {
   readonly bot: boolean
   readonly botKind: string | null
   readonly origination: SessionOrigination | null
+  /**
+   * The Consent Mode v2 signals the request's consent cookie claimed (A-MEAS-02, migration 0125).
+   *
+   * Stored on the session, which is where the dispatch gate reads it: a dispatch is enqueued by a booking
+   * or a payment, server-side, where there is no cookie to read. Written on a NEW session and refreshed on
+   * every advance of a continued one, because the browser's claim is the live state — a visitor who
+   * narrows their choice mid-session must not leave a session row still claiming the wider grant.
+   *
+   * There is no default here and the columns default to FALSE in the database. A caller that omits this
+   * field is a tsc error; a database row that somehow lacks it suppresses every outbound dispatch and
+   * writes a visible suppression row, which is the fail-closed direction.
+   */
+  readonly consentSignals: readonly ConsentModeSignal[]
   /** The validated events, in the order they arrived, each with the client's own instant. */
   readonly events: readonly {
     readonly event: AnalyticsEvent
@@ -374,6 +388,16 @@ export async function ingestCollectBatch(
     const tx = raw as unknown as Sql
 
     /*
+     * The consent claim as a set, read once (A-MEAS-02).
+     *
+     * A `Set` rather than four `includes` calls per statement, and built HERE rather than taken as four
+     * booleans, so the four columns below cannot be filled in the wrong order — which is the one mistake
+     * four same-typed adjacent parameters invite, and which no type could catch. The membership tests are
+     * `has('ad_storage')` and the column is `consent_ad_storage`, so a reviewer reads the pair.
+     */
+    const granted = new Set<ConsentModeSignal>(input.consentSignals)
+
+    /*
      * The visitor, and the ONE place the server decides who owns an identifier.
      *
      * An UPDATE ... RETURNING rather than an upsert on the presented id, deliberately. It answers both
@@ -435,7 +459,9 @@ export async function ingestCollectBatch(
           visitor_id, started_at, last_event_at, trading_date, trading_date_basis,
           landing_path, referrer_url,
           utm_source, utm_medium, utm_campaign, utm_term, utm_content,
-          click_ids, device_kind, breakpoint, bot, bot_kind
+          click_ids, device_kind, breakpoint, bot, bot_kind,
+          consent_ad_storage, consent_ad_user_data, consent_ad_personalization,
+          consent_analytics_storage
         ) values (
           ${resolvedVisitorId}::uuid,
           ${input.receivedAtIso}::timestamptz,
@@ -453,7 +479,11 @@ export async function ingestCollectBatch(
           ${input.deviceKind},
           ${input.breakpoint},
           ${input.bot},
-          ${input.botKind}
+          ${input.botKind},
+          ${granted.has('ad_storage')},
+          ${granted.has('ad_user_data')},
+          ${granted.has('ad_personalization')},
+          ${granted.has('analytics_storage')}
         )
         returning session_id
       `
@@ -493,7 +523,11 @@ export async function ingestCollectBatch(
       // visit that runs past close belongs to the session it began in.
       const [advanced] = await tx<{ trading_date: string; trading_date_basis: string }[]>`
         update analytics.session
-           set last_event_at = greatest(last_event_at, ${input.receivedAtIso}::timestamptz)
+           set last_event_at = greatest(last_event_at, ${input.receivedAtIso}::timestamptz),
+               consent_ad_storage = ${granted.has('ad_storage')},
+               consent_ad_user_data = ${granted.has('ad_user_data')},
+               consent_ad_personalization = ${granted.has('ad_personalization')},
+               consent_analytics_storage = ${granted.has('analytics_storage')}
          where session_id = ${sessionId}::uuid
         returning trading_date::text as trading_date, trading_date_basis
       `
