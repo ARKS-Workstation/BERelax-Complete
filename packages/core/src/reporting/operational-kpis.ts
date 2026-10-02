@@ -667,7 +667,9 @@ export const OPERATIONAL_KPI_IDS = [
 
 export type OperationalKpiId = (typeof OPERATIONAL_KPI_IDS)[number]
 
-export type KpiUnit = 'fils' | 'basis_points' | 'composite'
+export type { KpiUnit } from './kpi-expression.ts'
+
+import type { KpiUnit } from './kpi-expression.ts'
 
 /**
  * Every figure an operational KPI may read, in one place.

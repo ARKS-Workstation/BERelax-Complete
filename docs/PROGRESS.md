@@ -2,7 +2,7 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**151 / 211 units complete.**
+**152 / 211 units complete.**
 
 ## Next up
 
@@ -141,7 +141,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [ ] | 120 | `A-MEAS-07` | Dispatch reconciliation: internal truth versus what was pushed | `A-FIRST-09`, `A-MEAS-05` | — | — |
 | [x] | 121 | `R-REP-01` | Reporting schema: dims, facts, materialised views and refresh | `C-CRM-01`, `C-CRM-02`, `C-CRM-03`, `C-CRM-04`, `C-CRM-05`, `C-CRM-06`, `C-CRM-07`, `C-CRM-08`, `C-CRM-09`, `C-CRM-10`, `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14` | — | Y8-hours |
 | [x] | 122 | `R-REP-02` | P&L, balance sheet and cash flow tied to the ledger | `M-VAT-01`, `M-VAT-02`, `M-VAT-03`, `M-VAT-04`, `M-VAT-05`, `M-VAT-06`, `M-VAT-07`, `M-VAT-08`, `M-VAT-09`, `M-VAT-10`, `M-VAT-11`, `M-VAT-12`, `M-VAT-13`, `R-REP-01` | — | Y8-opening-balances, Y8-coa |
-| [ ] | 123 | `R-REP-03` | KPI registry, utilisation and revenue per available room-hour | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `R-REP-01` | — | — |
+| [x] | 123 | `R-REP-03` | KPI registry, utilisation and revenue per available room-hour | `B-CAT-01`, `B-CAT-02`, `B-CAT-03`, `B-CAT-04`, `B-CAT-05`, `B-CAT-06`, `P-HR-01`, `P-HR-02`, `P-HR-03`, `P-HR-04`, `P-HR-05`, `P-HR-06`, `P-HR-07`, `P-HR-08`, `P-HR-09`, `P-HR-10`, `P-HR-11`, `P-HR-12`, `P-HR-13`, `P-HR-14`, `R-REP-01` | — | — |
 | [x] | 124 | `R-REP-04` | Contribution margin per service and the operational KPI set | `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `R-REP-03` | — | Y9-commission, Y7-mcc |
 | [ ] | 125 | `R-REP-05` | Cohorts, LTV, CAC and payback, outstanding package liability | `A-FIRST-08`, `M-TILL-01`, `M-TILL-02`, `M-TILL-03`, `M-TILL-04`, `M-TILL-05`, `M-TILL-06`, `M-TILL-07`, `M-TILL-08`, `M-TILL-09`, `M-TILL-10`, `M-TILL-11`, `M-TILL-12`, `M-TILL-13`, `R-REP-04` | — | Y9-package-policy, Y11-vat-package |
 | [ ] | 126 | `R-REP-06` | Seasonality and the 13-week cash-flow forecast | `R-REP-02`, `R-REP-04` | — | Y8-hours, Y9-windows |

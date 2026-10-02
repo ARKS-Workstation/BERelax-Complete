@@ -13937,7 +13937,7 @@ units:
       with therapist utilisation, room utilisation and revenue per available room-hour, whose denominator
       is premises open minutes minus closures rather than a constant.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - B-CAT-01
@@ -13974,11 +13974,98 @@ units:
       returns an explicit NoDenominator result rather than NaN, Infinity or 0'
     - 'registry test: every KPI reachable from a dashboard resolves to a registered pure function with a
       non-empty formula string, and an arch test fails on ad-hoc SQL inside a page component'
+    - 'NOTE: "each carrying its formula as a documented string" is implemented with the formula DERIVED
+      rather than declared, and ADR 0068 records why. A formula field beside a function body is two
+      statements of one fact: they drift and NOTHING fails, because a wrong formula is still a string and
+      the figure it misdescribes is still a figure. A KPI therefore declares one expression, and formula,
+      expandedFormula and compute are three renderings of it. The derivation comes with its own control,
+      because a renderer returning a constant satisfies every "the formula is not empty" assertion ever
+      written: kpi-formula-names-every-reference-it-computes requires each name the expression reaches to
+      appear in the rendered string, and gate case 146i pins the renderer to a constant and requires the
+      suite to notice.'
+    - 'NOTE: the one place a second statement was unavoidable is a MEASURE''s reads declaration — an
+      aggregation is a fold and cannot be an expression — so it arrives with the check that holds it equal
+      in the same commit. measure-reads-exactly-the-fields-it-declares replays each reducer against a
+      recording copy of a probe input and compares the observed <dataset>.<field> accesses with the
+      declaration, in both directions. The direction that earns it is "declared and not read": fifteen
+      hours IS the trading day (Y8-hours, resolved), so an implementation that multiplied 15 by 60 passes
+      BOTH acceptance fixtures — 75.0 and 73.0 — and answers 75.0 for ever after the hours change. The
+      13-hour fixture catches one that reads dim_date.open_minutes and ignores it; the rule catches one
+      that stops reading it. A consequence stated rather than implied: the rule needs a probe with rows,
+      so an EMPTY probe FAILS it, and the suite asserts that too.'
+    - 'NOTE: the KPI input carries NO instant. ADR 0060''s rule is that a trading date comes from
+      business_day and is never derived from an instant, so a room closure arrives as MINUTES AFTER the
+      day''s opening instant rather than as resource_block''s tstzrange: rebasing it against
+      dim_date.opens_at is one expression in the caller''s SQL, and after it there is nothing here a date
+      could be derived from. "A 01:30 appointment counts in the previous business_day" is therefore
+      structural — the row''s businessDay is the only date it has — and is asserted as behaviour by two
+      periods over one appointment, with the calendar-date period counting nothing.'
+    - 'NOTE: two pieces of arithmetic the acceptance line does not ask for, both of which the 100% property
+      rests on. A closure is CLIPPED to [0, open_minutes) — maintenance while the premises is shut is
+      ordinary, and unclipped its length goes negative and ADDS capacity — and the closures of one room-day
+      are UNIONED before they are summed, because nothing in 0012 forbids two overlapping resource_block
+      rows and summing them raw subtracts the overlap twice. Together they make available_room_minutes
+      non-negative and never greater than the open minutes BY CONSTRUCTION, which is why no utilisation can
+      exceed 100% for an arithmetic reason. Gate cases 146k and 146l break each.'
+    - 'NOTE: the RevPARH numerator reads ACCOUNT CODES, because invoice_line (0026) carries no revenue kind
+      at all — so "treatment revenue, excluding retail" is not a question a tax document can answer. The
+      two exclusions are then different kinds of thing: a tip is not excluded, it is NOT REVENUE (0068: it
+      appears on no tax invoice, and posts to the 2040 tips-payable LIABILITY), so it is outside the
+      partition by construction; retail is excluded by a declared choice with a reason. REVPARH_REVENUE_
+      PARTITION states BOTH sides and is held equal to STANDARD_SPA_CHART itself, so an account added to
+      the chart and claimed by neither side is a failing test (ADR 0064''s arrangement). It is provisional
+      against Y8-coa and the marker is on every figure; the placement that will move a reported number is
+      4095 discounts and allowances, there being one contra-revenue account for the whole business. No new
+      open question was opened — Y8-coa already covers the grouping.'
+    - 'NOTE: "every KPI reachable from a dashboard" is DEFERRED TO R-REP-08, which builds the dashboards and
+      does not exist yet, so the scan over apps/web finds no call site today. The mechanism is here and has
+      been SEEN to fire: apps/web/src/kpi-arch.test.ts scans every page component for a database VALUE
+      import and a sql template and every app source for a resolveKpi id the registry does not hold, and
+      gate cases 146r, 146s and 146t PLANT a page component breaking each rule and require the failure by
+      the rule''s name (ADR 0003). The scan''s scope is the route tree''s rendering modules — page.tsx,
+      render.ts(x), view.ts(x) under apps/web/app, 58 of them, with the count asserted against a floor.
+      apps/web/src/components is deliberately OUT of scope: google-reauth-source.ts lives there and
+      legitimately imports readSetting from @berelax/db because it is the SOURCE for a banner, and
+      classifying every file in that directory is wider than one unit should decide. R-REP-07 owns the KPI
+      tile and has its own arch acceptance line for it.'
+    - 'NOTE: two files were added beyond the manifest''s list, and both are named here rather than left
+      unrecorded. packages/core/src/reporting/kpi-expression.ts holds the expression language, the exact
+      rational arithmetic and the reads recorder: kpi-registry.ts must IMPORT utilisation.ts and revpar.ts
+      to assemble the registry, so those two cannot import their types from it without a module cycle, and
+      pnpm boundaries refuses one. apps/web/src/kpi-arch.test.ts is the arch test, which cannot live in a
+      pure package because it reads apps/web.'
+    - 'NOTE: a defect this unit''s OWN gate block found in its own code. Gate case 146d blinds the cycle
+      rule; with it blind the rules pass reached unitOfExpr, which had no cycle guard, and died with
+      RangeError: Maximum call stack size exceeded instead of naming the rule that had stopped firing — so
+      the case read a blinded detector as undetected. unitOfExpr now carries the same path guard every
+      other walk in the module already had, and the suite asserts it. The lesson is the gate block''s, not
+      the module''s: a detector blinded must still leave a FINDING rather than a crash.'
+    - 'NOTE: every figure is an exact rational of two bigints and none is a Fils, for ADR 0064''s reason —
+      Fils is a branded number capped at Number.MAX_SAFE_INTEGER. It also removes the acceptance line''s
+      own hazard structurally: bigint division by zero THROWS rather than returning NaN or Infinity, so
+      there is no path from an empty denominator to a non-finite value even without the NoDenominator
+      answer. publishedFigure takes the MEASURED variant rather than the union, so the type system forces a
+      caller past the empty case before it can print — R-REP-07''s "no numeric fallback branch" one unit
+      early.'
+    - 'NOTE: the (room, trading day) set is the CALLER''s and rooms.is_bookable (0012) carries no history,
+      so available room-hours for a past period uses the rooms in service now. A decommissioned room''s
+      past capacity is recorded nowhere, so this is a property of the data and not of the arithmetic.
+      DEFERRED TO R-REP-04, which owns packages/db/src/reporting/kpi-queries.ts — the queries that fill
+      this input.'
+    - 'NOTE: this unit adds NO migration, NO private SQLSTATE and starts no server, and ADR 0068 records
+      why: every input already exists in reporting or in journal_line, and a private code is for a refusal
+      with a runbook answer (ADR 0043, 0061) while a pure function''s refusals are named AppErrors. The
+      migration number 0118, the band ZY241-ZY250 and the test port band { start: 15_800, width: 300 } are
+      RELEASED UNUSED. SCHEMA_VERSION is untouched and no paragraph was added to the migration ledger,
+      there being no migration to document.'
     files:
+    - packages/core/src/reporting/kpi-expression.ts
     - packages/core/src/reporting/kpi-registry.ts
     - packages/core/src/reporting/utilisation.ts
     - packages/core/src/reporting/revpar.ts
     - packages/core/src/reporting/utilisation.test.ts
+    - apps/web/src/kpi-arch.test.ts
+    - docs/adr/0068-a-kpi-is-an-expression-so-its-formula-cannot-drift-from-its-figure.md
   - id: R-REP-04
     order: 124
     title: Contribution margin per service and the operational KPI set
