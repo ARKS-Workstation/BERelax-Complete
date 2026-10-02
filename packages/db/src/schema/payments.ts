@@ -300,3 +300,106 @@ export const depositMovement = pgTable(
     index('deposit_movement_trading_date_idx').on(table.tradingDate, table.kind),
   ],
 )
+
+/**
+ * The card-on-file mandate: the paperwork, and no instrument. Mirrors `0134_payment_mandate.sql`.
+ *
+ * There is deliberately no `lastFour`, no `expiryMonth`, no `scheme` and no `bin` column here, and the
+ * absence is the point rather than an omission: each of those is a fragment of card data, each is
+ * individually defensible, and the set of them is a cardholder data environment this build is not in
+ * (ADR 0067). `tokenReference` is the gateway's opaque handle and ZY423 refuses a card-shaped value, which
+ * is a trigger and therefore has no Drizzle expression.
+ *
+ * There is also no `state` column and no `revokedAt`, which is ADR 0057's shape: the state is the view
+ * `payment_mandate_status` over the dates and the revocation row. A stored state would read `active` for
+ * ever after an expiry, because nothing runs at the instant a mandate lapses.
+ */
+export const paymentMandate = pgTable(
+  'payment_mandate',
+  {
+    id: uuid('id').primaryKey(),
+    customerId: uuid('customer_id').notNull(),
+    /** Free text, not an enum: no gateway has been chosen (`PENDING['card-gateway']`). */
+    gateway: text('gateway').notNull(),
+    /** The gateway's OPAQUE handle. ZY423 refuses a 13-to-19-digit Luhn-valid run. */
+    tokenReference: text('token_reference').notNull(),
+    /** WHICH disclosure the customer was shown. A version, never the words. */
+    wordingVersion: text('wording_version').notNull(),
+    /** sha256 of the words shown, lowercase hex. ZY422 refuses the hash of the empty string. */
+    wordingSha256: text('wording_sha256').notNull(),
+    /** The per-charge maximum the customer agreed to. ZY424 holds every attempt to it. */
+    capFils: bigint('cap_fils', { mode: 'bigint' }).notNull(),
+    agreedAt: timestamp('agreed_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    tradingDate: date('trading_date').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check('payment_mandate_cap_positive', sql`${table.capFils} > 0`),
+    check('payment_mandate_expires_after_agreement', sql`${table.expiresAt} > ${table.agreedAt}`),
+    index('payment_mandate_customer_idx').on(table.customerId, table.agreedAt.desc()),
+  ],
+)
+
+/**
+ * A revocation, as its own append-only row.
+ *
+ * The primary key IS the mandate id, so a mandate cannot be revoked twice — a second revocation would be
+ * a statement about an authority that no longer existed. It is a separate TABLE rather than a column
+ * because `payment_mandate` is append-only (ZY421) and a `revoked_at` column there would be an UPDATE,
+ * which is the one thing the evidence rule forbids.
+ */
+export const paymentMandateRevocation = pgTable('payment_mandate_revocation', {
+  mandateId: uuid('mandate_id')
+    .primaryKey()
+    .references(() => paymentMandate.id),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }).notNull(),
+  /** `customer`, `staff` or `gateway`. Which one changes what may be said to the customer next. */
+  revokedBy: text('revoked_by').notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+})
+
+/**
+ * Every attempt to charge a fee against a mandate, including — especially — the ones the database stopped.
+ *
+ * A refusal with no row is a refusal nothing can count, which is why `refused_no_policy`,
+ * `refused_cap` and `refused_not_active` are members of `outcome` rather than an absence of a row.
+ * ZY426 is what makes "the charge path ships disabled" a statement PostgreSQL enforces: no row here can
+ * read `charged` while `cancellation_fee_policy_on_file()` answers false, which it does.
+ */
+export const mandateChargeAttempt = pgTable(
+  'mandate_charge_attempt',
+  {
+    id: uuid('id').primaryKey(),
+    mandateId: uuid('mandate_id')
+      .notNull()
+      .references(() => paymentMandate.id),
+    /** Plain uuid, NO foreign key — `deposit_movement.appointment_id`'s reason, four suites truncate it. */
+    appointmentId: uuid('appointment_id').notNull(),
+    /** `no_show` or `late_cancellation`. Judged by different people at different moments. */
+    reason: text('reason').notNull(),
+    requestedFils: bigint('requested_fils', { mode: 'bigint' }).notNull(),
+    outcome: text('outcome').notNull(),
+    paymentIntentId: uuid('payment_intent_id').references(() => paymentIntent.id),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull(),
+    tradingDate: date('trading_date').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check('mandate_charge_attempt_requested_positive', sql`${table.requestedFils} > 0`),
+    check(
+      'mandate_charge_attempt_reason_known',
+      sql`${table.reason} in ('no_show', 'late_cancellation')`,
+    ),
+    check(
+      'mandate_charge_attempt_outcome_known',
+      sql`${table.outcome} in ('refused_no_policy', 'refused_cap', 'refused_not_active', 'charged')`,
+    ),
+    check(
+      'mandate_charge_attempt_intent_is_a_charge',
+      sql`(${table.paymentIntentId} is null) = (${table.outcome} <> 'charged')`,
+    ),
+    index('mandate_charge_attempt_mandate_idx').on(table.mandateId, table.attemptedAt.desc()),
+  ],
+)

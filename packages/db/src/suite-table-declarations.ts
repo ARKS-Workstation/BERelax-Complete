@@ -459,6 +459,14 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     kind: 'refused',
     why: 'issued as the application role to show ZG007 refuses it. The truncate that used to stand beside it moved to `truncatePackageFamily`, so this entry is the probe alone',
   },
+
+  // ## The card-on-file mandate (Y-PAY-07)
+  {
+    file: 'packages/fixtures/src/mandate.itest.ts',
+    tables: ['mandate_charge_attempt', 'payment_mandate_revocation', 'payment_mandate'],
+    kind: 'owns',
+    why: 'every mandate, revocation and charge attempt in these three tables is this file\u2019s own, and truncate is the only legal removal because ZY421 refuses DELETE on all three for every role including the owner \u2014 `deposit_movement` is in the same position one subject along. All three go in ONE statement because PostgreSQL refuses a truncate whose referencing tables are absent from it, and there is no `restoredBy` because the seed writes none of them: a mandate is evidence a person agreed to something, and a seeded one would be a consent record nobody gave',
+  },
 ])
 
 /**

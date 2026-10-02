@@ -22371,7 +22371,7 @@ units:
       opaque gateway token. The fee charge path exists and is provably disabled: with the provisional policy
       a no-show is flagged and posts zero fils.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - Y-PAY-06

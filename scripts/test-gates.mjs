@@ -51245,6 +51245,385 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   )
 }
 
+// 166a-166z. (Y-PAY-07) The card-on-file mandate and the no-show fee: every way a charge nobody
+//            authorised could come to be made, shown to be caught — and the refusal shown to be a refusal
+//            rather than a charge of zero fils.
+//
+//            The unit charges nothing, so there is almost no arithmetic to break. What there is to break
+//            is the DISTINCTION the whole unit rests on: **"no fee because nobody has agreed one" and "a
+//            fee of zero is due under the policy" are different facts, and only the second one may post.**
+//            Y9-commission recorded the identical mistake in so many words — a run that produced no lines
+//            was reported as no commission being due — and ADR 0070 is the decision. A zero here posts,
+//            balances, and reports as a fee that had been correctly worked out to be nothing, which is why
+//            every case below that looks like it is testing a `null` is testing the one thing an operator
+//            could not afterwards detect.
+//
+//            The cases come in four groups and each fails in a way the others cannot see:
+//
+//              * **the refusal that must not become a zero.** 166a and 166b turn each half of it into a
+//                zero: the gate answering `0` instead of throwing, and `noShowOutcome` reporting
+//                `feeFils: 0` instead of absent. Both edits leave a build that compiles, balances and
+//                reports.
+//              * **the ORDER of the gate, which is the reverse of the obvious one.** 166c moves the policy
+//                check to the front. That is the edit a reviewer would wave through as a simplification,
+//                and it makes four of this unit's five acceptance refusals unreachable — the cap rule and
+//                the revocation rule become code nobody has ever seen run, which is ADR 0003's subject.
+//              * **the mandate's state, which is derived and must stay so.** 166d swaps revocation and
+//                expiry, 166e flips the expiry boundary and 166f flips the cap boundary. Each one either
+//                refuses a customer who complied or authorises one who took the authority back.
+//              * **the service, and the log an operator reads.** 166g gives `OUTCOME_FOR_REFUSAL` a
+//                default, so a cap breach is recorded as a missing policy; 166h logs the attempt after the
+//                rethrow, which is a log nobody writes; 166i stops `activeMandateAmong` re-sorting.
+//
+//            166j to 166n are the gates this unit had to stay inside: the two directions of the SQLSTATE
+//            registry (an unused code registered, and a raised code missing), the registry read as a
+//            SEQUENCE rather than a set, `pnpm db:conventions` on the append-only claim, and `pnpm saq-a`
+//            on the one-detector rule — because the obvious way to write ZY423 is to spell a second Luhn
+//            walk, and the second detector is the one that misses the spelling with spaces in it.
+//
+//            166y and 166z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree PASSING — the two pure suites and the pairing suite, all
+//            unedited.
+//
+//            Nothing here edits `packages/db/migrations/0134_payment_mandate.sql` in order to test a
+//            DATABASE rule, for gate blocks 134 and 154's reason: the database the suites run against has
+//            already had the migration applied, so an edit to the file changes nothing a statement can see
+//            and a PASS would be a report about a file nothing read. ZY421-ZY426 are proved against a real
+//            PostgreSQL by `packages/fixtures/src/mandate.itest.ts`, which probes each one and asserts the
+//            row survived. What the migration file IS edited for is 166m, where the checker genuinely
+//            reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const FEE_POLICY = 'packages/core/src/payments/fee-policy.ts'
+  const SERVICE = 'packages/payments/src/mandate.ts'
+  const MIGRATION = 'packages/db/migrations/0134_payment_mandate.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const CORE_SUITE = 'packages/core/src/payments/fee-policy.test.ts'
+  const SERVICE_SUITE = 'packages/payments/src/mandate.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/mandate.itest.ts'
+  const REGISTRY_SUITE = 'packages/db/src/sqlstate-registry.test.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    CORE_SUITE,
+    SERVICE_SUITE,
+  ]
+  const pairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 154's `breakDeposit`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge, which is the note block 133 carries about its
+   * own helper.
+   */
+  const breakMandate = (name, file, find, into, rule, args = pureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the refusal that must not become a zero -------------------------------------------------
+
+  // 166a. The gate answering zero instead of refusing. THIS is the unit: the edit compiles, every figure
+  //       it produces balances, and a fee of nothing is reported as a fee that was worked out.
+  breakMandate(
+    'mandate: a fee gate that answers zero instead of refusing fails by name',
+    FEE_POLICY,
+    `  if (!policy.onFile) {
+    throw new NoFeePolicyOnFile(
+      \`a fee charge of \${requestedFils} fils against this mandate\`,
+      policy,
+    )
+  }`,
+    `  if (!policy.onFile) {
+    return
+  }`,
+    'refuses rather than answering zero when no policy is on file',
+  )
+
+  // 166b. `noShowOutcome` reporting a measured nothing. A `0` here is summed into a "fees charged" total
+  //       by anything downstream; `null` refuses to be. ADR 0070, in one field.
+  breakMandate(
+    'mandate: a no-show fee reported as zero rather than absent fails by name',
+    FEE_POLICY,
+    '    feeFils: null,',
+    '    feeFils: 0 as unknown as null,',
+    'reports the fee as ABSENT and never as zero',
+  )
+
+  // ---- the order of the gate -------------------------------------------------------------------
+
+  // 166c. The policy check moved to the front — the edit that reads as a simplification and makes the cap
+  //       rule and the revocation rule unreachable until a fee policy exists.
+  breakMandate(
+    'mandate: a policy gate that fires first makes four refusals unreachable, and fails by name',
+    FEE_POLICY,
+    `  if (mandate === null) throw new NoMandateOnFile(customerId)`,
+    `  if (!policy.onFile) {
+    throw new NoFeePolicyOnFile('a fee charge against this mandate', policy)
+  }
+  if (mandate === null) throw new NoMandateOnFile(customerId)`,
+    'fires the policy gate LAST, so the cap and revocation rules stay reachable today',
+  )
+
+  // ---- the state, which is derived -------------------------------------------------------------
+
+  // 166d. Expiry reported in place of revocation. Both mean "not active now" and only one may be asked for
+  //       again on the same visit, so the wrong one is the wrong thing said to a customer.
+  breakMandate(
+    'mandate: expiry beating revocation fails by name',
+    FEE_POLICY,
+    `  if (mandate.revokedAt !== null && at >= mandate.revokedAt) return 'revoked'
+  if (at >= mandate.expiresAt) return 'expired'`,
+    `  if (at >= mandate.expiresAt) return 'expired'
+  if (mandate.revokedAt !== null && at >= mandate.revokedAt) return 'revoked'`,
+    'is revoked from the revocation instant, and revocation beats expiry when both apply',
+  )
+
+  // 166e. The expiry boundary one instant late, which authorises a charge against an authority that has
+  //       just ended.
+  breakMandate(
+    'mandate: an expiry boundary that admits the expiry instant fails by name',
+    FEE_POLICY,
+    `  if (at >= mandate.expiresAt) return 'expired'`,
+    `  if (at > mandate.expiresAt) return 'expired'`,
+    'is expired from the expiry instant, which is exclusive',
+  )
+
+  // 166f. The cap boundary one fil tight, which refuses the one figure the mandate was taken for.
+  breakMandate(
+    'mandate: a cap boundary that refuses the agreed maximum fails by name',
+    FEE_POLICY,
+    '  if (requestedFils > mandate.capFils) {',
+    '  if (requestedFils >= mandate.capFils) {',
+    'refuses a figure above the cap, and names both numbers',
+  )
+
+  // ---- the service, and the log an operator reads ----------------------------------------------
+
+  // 166g. A default outcome. The map exists for exactly this: a refusal with no entry would be recorded as
+  //       `refused_no_policy`, so an operator reading the log would not know the customer had been asked
+  //       for more than they authorised.
+  breakMandate(
+    'mandate: a default charge outcome records a cap breach as a missing policy, and fails by name',
+    SERVICE,
+    `  const found = OUTCOME_FOR_REFUSAL.get((error as { constructor?: unknown })?.constructor)
+  if (found !== undefined) return found`,
+    `  const found = OUTCOME_FOR_REFUSAL.get((error as { constructor?: unknown })?.constructor)
+  if (found !== undefined) return found
+  return 'refused_no_policy'`,
+    'throws rather than defaulting for a refusal it has never seen',
+  )
+
+  // 166h. The attempt logged after the rethrow, which is a log nobody writes. The edit leaves every other
+  //       assertion in the file intact, which is why it needs its own case.
+  breakMandate(
+    'mandate: an attempt logged after the rethrow fails by name',
+    SERVICE,
+    `    if (error instanceof NoMandateOnFile || mostRecent === undefined) throw error
+    await deps.logChargeAttempt({`,
+    `    if (error instanceof NoMandateOnFile || mostRecent === undefined) throw error
+    throw error
+    await deps.logChargeAttempt({`,
+    'records the attempt BEFORE it rethrows, under the rule that fired',
+  )
+
+  // 166i. The re-sort removed, so the service trusts an order the repository happens to return. A later
+  //       query change would then hand the gate the wrong mandate and the refusal would name the wrong row.
+  breakMandate(
+    'mandate: trusting the caller’s mandate order fails by name',
+    SERVICE,
+    `  const newestFirst = [...stored].sort((a, b) => b.agreedAtMs - a.agreedAtMs)
+  for (const row of newestFirst) {`,
+    `  for (const row of stored) {`,
+    're-sorts rather than trusting the caller',
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 166j. A code registered that no migration raises. Direction 3 of ADR 0043's gate, and the direction
+  //       that lets the registry grow entries nothing enforces.
+  checkRejectedBy(
+    'mandate: an unused SQLSTATE registered for this band fails by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY422',`,
+          `  {
+    code: 'ZY427',
+    rule: 'A code this band released unused, registered anyway.',
+    migration: '0134',
+    raisedBy: ['assert_charge_attempt_is_authorised'],
+    translators: ['packages/db/src/repositories/mandate.ts'],
+  },
+  {
+    code: 'ZY422',`,
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY427',
+  )
+
+  // 166k. A code raised and not registered, which is the other direction and the one that costs a runbook
+  //       answer at a `psql` prompt.
+  checkRejectedBy(
+    'mandate: a raised SQLSTATE missing from the registry fails by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY423',
+    rule: 'A mandate token reference is an opaque handle to an instrument the gateway holds, so it may not be card-shaped.',
+    migration: '0134',
+    raisedBy: ['refuse_card_shaped_mandate_token'],
+    translators: ['packages/db/src/repositories/mandate.ts'],
+  },
+`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY423',
+  )
+
+  // 166l. The registry read as a SEQUENCE and not a set. `pnpm sqlstate` does not check order, so the
+  //       cheap gate passes while the expensive one fails — which is the trap the brief names and which
+  //       caught a real entry at the last merge.
+  checkRejectedBy(
+    'mandate: a SQLSTATE entry out of ascending order fails the registry suite by name',
+    withEditedFile(
+      REGISTRY,
+      (source) => {
+        const entry = `  {
+    code: 'ZY421',
+    rule: 'A mandate record, its revocation and a charge attempt are append-only: the rows are evidence of what a person consented to and of what the system answered.',
+    migration: '0134',
+    raisedBy: ['refuse_mandate_record_change', 'refuse_charge_attempt_change'],
+    translators: ['packages/db/src/repositories/mandate.ts'],
+  },
+`
+        const without = replaceOnce(source, entry, '')
+        // Re-inserted AFTER ZY426, so the sequence runs 422, 423, 424, 425, 426, 421. Every entry is
+        // still present and every code is still raised, so `pnpm sqlstate` is satisfied — which is the
+        // whole point of the case.
+        return replaceOnce(
+          without,
+          `  {
+    code: 'ZZ001',`,
+          `${entry}  {
+    code: 'ZZ001',`,
+        )
+      },
+      () =>
+        runExpectingFailure('pnpm', [
+          'exec',
+          'vitest',
+          'run',
+          '-c',
+          'vitest.config.ts',
+          REGISTRY_SUITE,
+        ]),
+    ),
+    'ZY421',
+  )
+
+  // 166m. The append-only pair, half removed. This is the one case that edits the migration TEXT, because
+  //       `check-schema-conventions.mjs` genuinely reads it: a table documenting a guarantee it only half
+  //       keeps is invisible in review, because the comment says otherwise.
+  checkRejectedBy(
+    'mandate: an append-only table missing its DELETE trigger fails db:conventions by name',
+    withEditedFile(
+      MIGRATION,
+      (source) =>
+        replaceOnce(
+          source,
+          `create trigger payment_mandate_no_delete before delete on payment_mandate
+  for each row execute function refuse_mandate_record_change();`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'payment_mandate',
+  )
+
+  // 166n. A second Luhn walk, written where ZY423 would obviously want one. `pnpm saq-a` refuses a second
+  //       detector tree-wide, because the second one is the one that misses the spelling with spaces in it
+  //       — and ADR 0067 is why that matters more here than tidiness.
+  checkRejectedBy(
+    'mandate: a second Luhn implementation beside the mandate gate fails saq-a by name',
+    withEditedFile(
+      FEE_POLICY,
+      (source) =>
+        replaceOnce(
+          source,
+          'export function mandateHeadroomFils(mandate: MandateRecord): Fils {',
+          `export function looksLikeACardNumber(digits: string): boolean {
+  let sum = 0
+  let double = false
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let d = digits.charCodeAt(i) - 48
+    if (double) {
+      d = d * 2
+      if (d > 9) d = d - 9
+    }
+    sum = sum + d
+    double = !double
+  }
+  return sum % 10 === 0
+}
+
+export function mandateHeadroomFils(mandate: MandateRecord): Fils {`,
+        ),
+      () => runExpectingFailure('pnpm', ['saq-a']),
+    ),
+    'saq-a-card-shape-has-one-definition',
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 166y. The real tree, unedited. Every case above is satisfied by a FAILURE, so without this one the
+  //       whole block would pass against a suite that could not run at all.
+  check(
+    'mandate: the two pure suites pass unedited',
+    !run('pnpm', pureSuites()).failed,
+    'the fee gate and the mandate service must pass on the real tree, or every case above is vacuous',
+  )
+
+  // 166z. The pairing suite, which is the only place the TypeScript answer and the SQL answer about the
+  //       fee policy can be compared at all.
+  check(
+    'mandate: the pairing suite passes unedited against a real PostgreSQL',
+    !run('pnpm', pairSuite()).failed,
+    'ZY421-ZY426 and the one-fact-two-languages claim are proved only here',
+  )
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

@@ -1027,6 +1027,32 @@ export {
   writeLeaveApprovalDelegation,
   writeLeaveRequest,
 } from './repositories/leave-request.ts'
+/*
+  Y-PAY-07's card-on-file mandate: the paperwork, and no instrument.
+
+  Rows only, for the deposit repository's reason — `packages/db` may never import `packages/core`, so
+  whether a charge is authorised is `packages/core/src/payments/fee-policy.ts` and
+  `packages/fixtures/src/mandate.itest.ts` is where the two statements of the rule are held equal. There
+  is no update path and no revoke-by-edit: `payment_mandate` is append-only (ZY421) because the row is
+  EVIDENCE of what a person consented to, so `revokeMandate` INSERTS a revocation and touches nothing.
+  `feePolicyIsOnFile` reads the database's own answer (false) rather than assuming it, which is what lets
+  the pairing suite catch the one drift that matters: a database permitting a charge the module refuses.
+*/
+export {
+  type ChargeAttemptInput,
+  feePolicyIsOnFile,
+  isMandateRule,
+  logChargeAttempt,
+  MANDATE_SQLSTATE,
+  type MandateRule,
+  type MandateStatusRow,
+  mandateError,
+  mandatesForCustomer,
+  noShowPostingFootprint,
+  type RecordMandateInput,
+  recordMandate,
+  revokeMandate,
+} from './repositories/mandate.ts'
 export {
   applyMergeParticipant,
   assertParticipantKeyIsAUniqueIndex,
@@ -4459,4 +4485,50 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // are about by `on delete cascade`, so `keep_indefinitely` would be false and `raw_row_purge` would
 // declare a purge the cascade has already done.
 //
-export const SCHEMA_VERSION = 125 as const
+// 134 is 0134_payment_mandate.sql (Y-PAY-07) — the card-on-file mandate as a RECORD that a mandate exists
+// at a gateway, and the fee charge path made provably disabled by a trigger rather than by a comment.
+//
+// The decision the whole file turns on is that a mandate row is EVIDENCE, not configuration. It says a
+// specific person was shown a specific disclosure at a specific instant and agreed to a specific maximum,
+// so ZY421 refuses every UPDATE and DELETE on it for every role including the owner — ADR 0008's argument
+// for `audit_event` applied to the one row whose edit would restate what somebody consented to. That
+// forces revocation out of the row: `revoked_at` would be an UPDATE, so a revocation is a row in
+// `payment_mandate_revocation` keyed ON the mandate id, which also makes revoking twice impossible. The
+// live state is the VIEW `payment_mandate_status` over the dates and that row, which is ADR 0057's shape
+// one subject along from `appointment_deposit_balance`; a stored `state` column is the dangerous
+// alternative for a specific reason — nothing runs at the instant a mandate expires, so it would read
+// `active` for ever and the charge path would read `active` from a lapsed authority.
+//
+// There is NO column here able to hold card data and the absence is structural rather than conventional:
+// no PAN, no expiry, no CVV, no last-four and no BIN, because each fragment is individually defensible and
+// the set of them is a cardholder data environment this build is not in (ADR 0067). ZY423 refuses a
+// card-shaped `token_reference` by CALLING 0117's `is_card_shaped()` — never a second Luhn check, which
+// `pnpm saq-a` refuses tree-wide because the second detector is the one that misses the spelling with
+// spaces in it. A separate code from ZY231 and not a branch added to `refuse_card_shaped_payment_text()`
+// by `create or replace`: the two are different rules over one shape — free text a PERSON typed against a
+// value a GATEWAY returned — and `create or replace` would put one function's body in two migration files,
+// so whichever reads second silently wins.
+//
+// **ZY426 is the unit.** No `mandate_charge_attempt` row may read `charged` while
+// `cancellation_fee_policy_on_file()` answers false, which it does. That is "the charge path ships
+// disabled" written where PostgreSQL enforces it rather than where a second call site would not read it,
+// and it is a REFUSAL and never a charge of zero fils: a zero posts, balances, and reports as a fee
+// correctly worked out to be nothing, so the figure ends up in the books as a decision nobody made (ADR
+// 0070, and Y9-commission's recorded version of the same mistake). The figure itself is an ARGUMENT
+// everywhere — `cancellationCharge()` answers zero for every input and `Y9-windows` says "24h window, no
+// fee charged, flagged only" — so nothing in this unit derives a fee, and `cancellation_fee_policy_on_file()`
+// reads no setting at all, because a function that fell back to false over a missing row would make "the
+// policy is off" and "nobody has recorded a policy" indistinguishable.
+//
+// The order of the three attempt refusals is the REVERSE of the obvious one, and that is what keeps four
+// of the five acceptance lines reachable: ZY425 (not active at the attempt's own instant, never at
+// `now()`) and ZY424 (above the cap) are checked BEFORE the policy gate, so the cap rule and the
+// revocation rule fire today instead of collapsing into one "no policy on file" message and becoming code
+// nobody has ever seen run (ADR 0003). Refused attempts are ROWS rather than an absence of rows, because
+// "we tried to charge this customer and the system stopped us" is a fact an operator needs and a refusal
+// nothing counts is a refusal nothing can audit.
+//
+// ZY421-ZY426 of the band ZY421-ZY430 are used; ZY427-ZY430 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 134 as const
