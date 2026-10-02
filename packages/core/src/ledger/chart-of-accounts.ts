@@ -46,6 +46,7 @@ export const ACCOUNTS = {
   bankCurrent: accountCode('1020'),
   gatewayClearing: accountCode('1030'),
   cardTerminalClearing: accountCode('1040'),
+  disputedCardReceipts: accountCode('1045'),
   tradeReceivables: accountCode('1050'),
   prepaidExpenses: accountCode('1060'),
   inventoryRetail: accountCode('1070'),
@@ -162,6 +163,35 @@ const STANDARD_SPA_ACCOUNTS: readonly Account[] = [
     type: 'asset',
     normalBalance: 'debit',
     contra: false,
+    vatBox: null,
+    inputVatRecoverable: false,
+  }),
+  defineAccount({
+    /*
+     * Money a third party has taken back while it decides whether the business may keep it.
+     *
+     * 1045 and not an expense, because at the moment a chargeback lands the business has not lost the
+     * money — it has lost the use of it while an acquirer decides. Recognising a loss that may be
+     * reversed next month is the wrong answer in both directions: it understates the asset, and it
+     * leaves nothing to reverse WITH when the dispute is won, so the win would have to be posted as
+     * income.
+     *
+     * Not folded into 1030/1040 either, although all three are card money in transit. A clearing
+     * balance is money the business WILL receive and a disputed receipt is money it MAY receive, and a
+     * reader of the balance sheet who cannot see the two apart cannot check either — which is ADR
+     * 0064's argument for a partition and 0077's argument for 2045 one liability along.
+     *
+     * [UNVERIFIED] The classification is this build's, like every other row here (`Y8-coa`, 0018).
+     */
+    code: ACCOUNTS.disputedCardReceipts,
+    name: 'Disputed card receipts',
+    type: 'asset',
+    normalBalance: 'debit',
+    contra: false,
+    // Null is a DECISION and not a gap. A dispute moves money between a clearing account and a claim;
+    // it is not a supply and it does not adjust one. The invoice stands and its output VAT stands with
+    // it, which is why a chargeback entry touches neither 2030 nor any revenue account — and a box here
+    // would put the disputed amount into a return as if the supply had been undone.
     vatBox: null,
     inputVatRecoverable: false,
   }),

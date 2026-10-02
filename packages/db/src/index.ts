@@ -563,6 +563,33 @@ export {
   TREATMENTS_INDEX_PATH,
 } from './repositories/catalogue.ts'
 /*
+  Y-PAY-08's chargeback: a third party's decision, arriving late, as a dated event.
+
+  Rows only, and there is no write to `payment_intent` anywhere in that module - `captured_fils` is a
+  projection of append-only transaction rows (ZY163) and the capture HAPPENED, so reducing it would leave
+  the sale's own entry explaining money the header says was never taken. `recordChargebackEvent` takes a
+  `UnitOfWork` rather than a bare `Sql` because ZY436 compares two entries' lines at COMMIT: a row
+  committed without its entry is a refusal that arrives after the damage. `readRefundablePosition` reads
+  the three figures the cap needs in ONE query, because read separately a dispute landing between the
+  second and the third produces a position that was never true - and the refund it would authorise is
+  exactly the one ZY433 exists to refuse.
+*/
+export {
+  CHARGEBACK_CONSTRAINT,
+  CHARGEBACK_SQLSTATE,
+  type ChargebackRow,
+  type ChargebackRule,
+  chargebackError,
+  isChargebackRedelivery,
+  isChargebackRule,
+  journalLineMutationGrants,
+  type RecordChargebackInput,
+  type RefundablePositionRow,
+  readDisputeEvents,
+  readRefundablePosition,
+  recordChargebackEvent,
+} from './repositories/chargeback.ts'
+/*
   P-HR-11's commission side (0097). Reads and writes only: the arithmetic is
   `packages/core/src/hr/commission.ts`'s, this package may not import it, and `packages/hr` is where the two
   halves meet.
@@ -1029,6 +1056,32 @@ export {
   writeLeaveApprovalDelegation,
   writeLeaveRequest,
 } from './repositories/leave-request.ts'
+/*
+  Y-PAY-07's card-on-file mandate: the paperwork, and no instrument.
+
+  Rows only, for the deposit repository's reason — `packages/db` may never import `packages/core`, so
+  whether a charge is authorised is `packages/core/src/payments/fee-policy.ts` and
+  `packages/fixtures/src/mandate.itest.ts` is where the two statements of the rule are held equal. There
+  is no update path and no revoke-by-edit: `payment_mandate` is append-only (ZY421) because the row is
+  EVIDENCE of what a person consented to, so `revokeMandate` INSERTS a revocation and touches nothing.
+  `feePolicyIsOnFile` reads the database's own answer (false) rather than assuming it, which is what lets
+  the pairing suite catch the one drift that matters: a database permitting a charge the module refuses.
+*/
+export {
+  type ChargeAttemptInput,
+  feePolicyIsOnFile,
+  isMandateRule,
+  logChargeAttempt,
+  MANDATE_SQLSTATE,
+  type MandateRule,
+  type MandateStatusRow,
+  mandateError,
+  mandatesForCustomer,
+  noShowPostingFootprint,
+  type RecordMandateInput,
+  recordMandate,
+  revokeMandate,
+} from './repositories/mandate.ts'
 export {
   applyMergeParticipant,
   assertParticipantKeyIsAUniqueIndex,
@@ -4805,4 +4858,105 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // ZY381-ZY384 of the band ZY381-ZY390 are used; ZY385-ZY390 are released UNUSED and deliberately
 // unregistered. No test port band is used: nothing in H-MIG-07 starts a server.
 //
-export const SCHEMA_VERSION = 132 as const
+// 134 is 0134_payment_mandate.sql (Y-PAY-07) — the card-on-file mandate as a RECORD that a mandate exists
+// at a gateway, and the fee charge path made provably disabled by a trigger rather than by a comment.
+//
+// The decision the whole file turns on is that a mandate row is EVIDENCE, not configuration. It says a
+// specific person was shown a specific disclosure at a specific instant and agreed to a specific maximum,
+// so ZY421 refuses every UPDATE and DELETE on it for every role including the owner — ADR 0008's argument
+// for `audit_event` applied to the one row whose edit would restate what somebody consented to. That
+// forces revocation out of the row: `revoked_at` would be an UPDATE, so a revocation is a row in
+// `payment_mandate_revocation` keyed ON the mandate id, which also makes revoking twice impossible. The
+// live state is the VIEW `payment_mandate_status` over the dates and that row, which is ADR 0057's shape
+// one subject along from `appointment_deposit_balance`; a stored `state` column is the dangerous
+// alternative for a specific reason — nothing runs at the instant a mandate expires, so it would read
+// `active` for ever and the charge path would read `active` from a lapsed authority.
+//
+// There is NO column here able to hold card data and the absence is structural rather than conventional:
+// no PAN, no expiry, no CVV, no last-four and no BIN, because each fragment is individually defensible and
+// the set of them is a cardholder data environment this build is not in (ADR 0067). ZY423 refuses a
+// card-shaped `token_reference` by CALLING 0117's `is_card_shaped()` — never a second Luhn check, which
+// `pnpm saq-a` refuses tree-wide because the second detector is the one that misses the spelling with
+// spaces in it. A separate code from ZY231 and not a branch added to `refuse_card_shaped_payment_text()`
+// by `create or replace`: the two are different rules over one shape — free text a PERSON typed against a
+// value a GATEWAY returned — and `create or replace` would put one function's body in two migration files,
+// so whichever reads second silently wins.
+//
+// **ZY426 is the unit.** No `mandate_charge_attempt` row may read `charged` while
+// `cancellation_fee_policy_on_file()` answers false, which it does. That is "the charge path ships
+// disabled" written where PostgreSQL enforces it rather than where a second call site would not read it,
+// and it is a REFUSAL and never a charge of zero fils: a zero posts, balances, and reports as a fee
+// correctly worked out to be nothing, so the figure ends up in the books as a decision nobody made (ADR
+// 0070, and Y9-commission's recorded version of the same mistake). The figure itself is an ARGUMENT
+// everywhere — `cancellationCharge()` answers zero for every input and `Y9-windows` says "24h window, no
+// fee charged, flagged only" — so nothing in this unit derives a fee, and `cancellation_fee_policy_on_file()`
+// reads no setting at all, because a function that fell back to false over a missing row would make "the
+// policy is off" and "nobody has recorded a policy" indistinguishable.
+//
+// The order of the three attempt refusals is the REVERSE of the obvious one, and that is what keeps four
+// of the five acceptance lines reachable: ZY425 (not active at the attempt's own instant, never at
+// `now()`) and ZY424 (above the cap) are checked BEFORE the policy gate, so the cap rule and the
+// revocation rule fire today instead of collapsing into one "no policy on file" message and becoming code
+// nobody has ever seen run (ADR 0003). Refused attempts are ROWS rather than an absence of rows, because
+// "we tried to charge this customer and the system stopped us" is a fact an operator needs and a refusal
+// nothing counts is a refusal nothing can audit.
+//
+// ZY421-ZY426 of the band ZY421-ZY430 are used; ZY427-ZY430 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+// 135 is 0135_chargeback.sql (Y-PAY-08) — a third party's decision, arriving late, as a dated event with
+// its own effect on the ledger, and the refund cap as a refusal rather than a screen's validation.
+//
+// The decision the file turns on is that a chargeback is never an EDIT. The tempting implementation is
+// `captured_fils = captured_fils - disputed`, and it is refused on two grounds: mechanically, that column
+// is a projection of the append-only `payment_intent_transaction` rows and ZY163 holds the two equal at
+// commit, so the subtraction cannot be written without also writing a fake transaction row; and
+// substantively, the capture HAPPENED — restating it would leave the sale's own entry explaining money the
+// header says was never taken, with nothing in the database saying which of the two was edited. So a
+// dispute is a `chargeback` row with its own `received_at`, its own `trading_date` and its own entry, and
+// nothing in `repositories/chargeback.ts` writes to `payment_intent` at all.
+//
+// **ZY433 is the half a screen would otherwise be the only guard for.** `payment_intent` already carries
+// `check (refunded_fils <= captured_fils)`, and that check is satisfied by an intent whose money an
+// acquirer has ALREADY taken back: AED 100 captured, AED 100 charged back, and AED 100 still reads as
+// refundable — so the business refunds money it no longer has and the figure reconciles at both ends. What
+// remains is `captured - refunded - chargedBackNet`, and the trigger is attached to BOTH tables, because
+// either side can break it. The ordering that matters is the second: a dispute arriving AFTER a refund
+// that was legitimate when it was made — a customer refunded in good faith who then disputes the original
+// charge anyway — which a rule attached only to the refund path would miss entirely. Y-PAY-06's deposit
+// refund records the same mistake without a third party in it: an uncapped subtraction returns a NEGATIVE
+// refund, which posts as money ARRIVING from a cancellation.
+//
+// ZY432 is the `business_day` primitive as a refusal. Trading runs 11:00-02:00, so an acquirer's notice at
+// 01:30 belongs to the PREVIOUS trading date; the caller resolves it with `resolveTradingDate` and the
+// trigger checks the answer against `business_day`, because a notice attributed to the calendar date lands
+// in a cash-up for a session that had not started and the two days' card totals are then wrong by the same
+// amount in opposite directions — an error that reconciles perfectly at every level except the one it is
+// wrong at. A notice in no session is REFUSED rather than attributed to the nearest day (ADR 0070): of the
+// two available errors only one is detectable afterwards.
+//
+// `1045 Disputed card receipts` is new and is NOT `1030`: a clearing balance is money the business WILL
+// receive and a disputed receipt is money it MAY receive, and a reader who cannot see the two apart cannot
+// check either against its own source — ADR 0064's argument for a partition, and 0077's for 2045 one
+// liability along. It is not an expense either, because at the moment a chargeback lands the business has
+// not lost the money; it has lost the use of it while somebody else decides. The account gets its own
+// balance-sheet and cash-flow line for the same reason, and `disputed_card_receipts_account_code()` states
+// the code once so the pair with `ACCOUNTS.disputedCardReceipts` is one assertion.
+//
+// `kind` is a TOTAL partition {received, won, lost} and ZY434 keeps it so, which is what makes 1045 a
+// clearing account rather than a place figures accumulate: a resolution with no received event before it
+// would credit a balance the account never held, and a second resolution would unwind it twice and leave
+// it negative. ZY436 holds a won dispute's entry to being the REVERSAL of its received entry and the pair
+// to nought on 1045, read over `journal_line` rather than over the two amounts — because two entries can
+// each balance while moving different amounts on one account, which is the only way the identity can fail.
+// A hand-built mirror entry would be correct today and would be exactly where the two drifted.
+//
+// ZY433 and ZY436 are `deferrable initially deferred`, so they fire at COMMIT. A probe inside a savepoint
+// that is rolled back never reaches either — the rollback discards the pending check — which is why
+// `packages/fixtures/src/chargeback.itest.ts` drives both through real transactions, and it is written
+// down here because it cost that suite a run.
+//
+// ZY431-ZY436 of the band ZY431-ZY440 are used; ZY437-ZY440 are RELEASED unused and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises.
+//
+export const SCHEMA_VERSION = 135 as const

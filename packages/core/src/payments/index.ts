@@ -9,8 +9,10 @@
  */
 
 export * from './deposit.ts'
+export * from './fee-policy.ts'
 export * from './guards.ts'
 export * from './minor-units.ts'
 export * from './port.ts'
+export * from './refund.ts'
 export * from './state.ts'
 export * from './transactions.ts'

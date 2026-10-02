@@ -9,6 +9,7 @@
  */
 
 export * from './account.ts'
+export * from './chargeback.ts'
 export * from './chart-of-accounts.ts'
 export * from './entry.ts'
 export * from './opening-package-liability.ts'

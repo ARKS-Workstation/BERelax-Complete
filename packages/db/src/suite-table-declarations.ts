@@ -459,6 +459,22 @@ export const DECLARED_UNQUALIFIED: readonly DeclaredUnqualified[] = Object.freez
     kind: 'refused',
     why: 'issued as the application role to show ZG007 refuses it. The truncate that used to stand beside it moved to `truncatePackageFamily`, so this entry is the probe alone',
   },
+
+  // ## The card-on-file mandate (Y-PAY-07)
+  {
+    file: 'packages/fixtures/src/mandate.itest.ts',
+    tables: ['mandate_charge_attempt', 'payment_mandate_revocation', 'payment_mandate'],
+    kind: 'owns',
+    why: 'every mandate, revocation and charge attempt in these three tables is this file\u2019s own, and truncate is the only legal removal because ZY421 refuses DELETE on all three for every role including the owner \u2014 `deposit_movement` is in the same position one subject along. All three go in ONE statement because PostgreSQL refuses a truncate whose referencing tables are absent from it, and there is no `restoredBy` because the seed writes none of them: a mandate is evidence a person agreed to something, and a seeded one would be a consent record nobody gave',
+  },
+
+  // ## The card dispute (Y-PAY-08)
+  {
+    file: 'packages/fixtures/src/chargeback.itest.ts',
+    tables: ['chargeback'],
+    kind: 'owns',
+    why: 'every dispute event in the table is this file\u2019s own, and truncate is the only legal removal because ZY431 refuses DELETE for every role including the owner. The JOURNAL is deliberately not in this entry and not emptied by this suite: nothing truncates the journal (0078 says so where it makes `package_sale.journal_entry_id` a real key), which is why every assertion in that file is scoped to its own entry ids and reads 1045 per entry rather than as an account balance. No `restoredBy`, because the seed writes no dispute',
+  },
 ])
 
 /**

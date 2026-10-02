@@ -93,6 +93,27 @@ export {
   STORED_INITIAL_STATE,
   voidPaymentIntent,
 } from './intent.ts'
+/**
+ * The mandate service (Y-PAY-07): where the pure fee gate and the append-only mandate rows meet.
+ *
+ * Exported from the root for `intent.ts`'s reason — it IS the surface a consumer uses, and it constructs
+ * no adapter, so `payment-gateway-adapters-only-through-the-registry` is satisfied rather than exempted.
+ * It reaches no gateway at all today: `PENDING['card-gateway']` means there is not one.
+ */
+export {
+  activeMandateAmong,
+  attemptFeeCharge,
+  CHARGE_OUTCOMES,
+  type ChargeOutcome,
+  type FeeChargeAttempt,
+  type MandateAgreement,
+  type MandateDeps,
+  mandateRecordFrom,
+  outcomeForRefusal,
+  recordMandateAgreement,
+  revokeMandateAgreement,
+  type StoredMandate,
+} from './mandate.ts'
 export { createRecordSink } from './record-sink.ts'
 /**
  * The card-data detector, the refusal and the redactor (Y-PAY-03).
