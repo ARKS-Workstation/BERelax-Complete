@@ -20269,7 +20269,7 @@ units:
       be imported until the shapes exist: package_template rows in settings first, then a generated workbook
       and a validator strict enough that a bad row cannot become a liability.'
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - F09
@@ -20304,11 +20304,69 @@ units:
       line
     - 'the generated workbook template round-trips: a filled copy of the generated file validates clean
       against the synthetic fixture set'
+    - 'NOTE: allocations actually used, and the three that are FREE. Gate block `// 143a-143z.` (22 cases)
+      and ADR 0065 were used. The allocated **migration number 0115 was NOT used and is free**: this unit adds
+      no schema. Every shape it needs already exists — `package_template`, `package_template_version` and their
+      lines are migration 0078''s, the staging ledger and per-row provenance are 0111''s, and the three
+      package-policy settings are rows in `app_setting`. The workbook is a FILE and its rejection vocabulary is
+      a TypeScript constant, which is what H-MIG-01 asked for: it recorded that `import_row.outcome_detail` is
+      free text precisely so that no CHECK here would become a second list for this unit''s to disagree with,
+      so a migration adding one would have contradicted that decision. The **private SQLSTATE band ZY211-ZY220
+      is therefore also wholly FREE and UNREGISTERED** — a code no migration raises is what direction 3 of
+      `pnpm sqlstate` refuses, which is the same reason H-MIG-01 left ZY200 free. The **test port band
+      `{ start: 16_100, width: 300 }` was NOT used and is NOT declared**: this unit starts no server, and a
+      declared-but-unused band fails `apps/web/src/test-ports.test.ts`.'
+    - 'NOTE: what the unit is, since "package templates in settings" could be read as seeding the packages. It
+      is NOT: what this business sells as a package is Y9-package-catalogue and nobody has stated it, so no
+      template, price, session count or discount is invented (brief rule 15). What was built is the two READS
+      the workbook needs and the validator that judges a filled copy. `readPackageTemplateKeys` is the one new
+      query and it answers a question no existing reader does — does this template EXIST — because
+      `readPackageTemplates` (the till''s sell list) correctly drops a retired template and a versionless one,
+      and both are rows a reconstruction meets. A retired template is ACCEPTED on a row (its balances are still
+      redeemable, 0078) and a versionless one is refused with its own reason, because "unknown" would send
+      somebody to create a template that is already there. `readWorkbookPackageTemplates` projects the sell list
+      to the four columns the workbook prints, dropping the drawdown this system has recorded: a reference block
+      showing "0 sales" beside every template would be a true figure making a false suggestion.'
+    - 'NOTE: deferred to H-MIG-03, with what was and was not built. (1) There is **no entry in `IMPORTERS`**.
+      An `ImporterDefinition` needs an `apply`, and `apply` for this importer writes `package_sale`,
+      `package_balance` and the opening deferred-revenue liability — H-MIG-03''s whole unit and its acceptance.
+      Registering one whose `apply` threw would put an unrunnable entry in the registry a person is supposed to
+      be able to enumerate. So the acceptance line "no package row imports before its package_template row
+      exists" is satisfied at the layer that exists: the row is REFUSED at validation naming the missing
+      template, so no import is ever attempted, and `package_sale.template_version_id` being `not null` is the
+      database backstop behind it. `validate.ts` is the one implementation, so composing it into an importer
+      moves no rule. (2) The owner sign-off RECORD is H-MIG-03''s; the per-row `owner_signed_off` flag is here,
+      and ADR 0065 says why both exist. (3) The attestation FLAG on the customer record and in the liability
+      report is H-MIG-03''s; this unit counts the attested rows in the validator''s report so that unit has the
+      population. (4) The report also carries `totalPricePaidFils` and `totalSessionsRemaining`, which are
+      properties of the FILE, for H-MIG-03''s cash reconciliation.'
+    - 'NOTE: two checks deliberately NOT written, because each would refuse a real liability. The price paid is
+      not held against the template''s price, and the expiry is not held against the purchase date plus the
+      template''s validity. A package may have been sold at a discount nobody recorded and under terms this
+      build has never seen; `package_sale` snapshots its own terms (0078) for exactly that reason. What the
+      price has to reconcile to is cash actually received, which is a property of the whole file and is
+      H-MIG-03''s acceptance. The workbook therefore asks for the expiry and the session counts per row rather
+      than deriving either.'
+    - 'NOTE: the validator does NOT normalise a phone number, it refuses one that is not already E.164. That is
+      H-MIG-04''s subject by its own acceptance ("E.164 normalisation, dedup and the consent floor"), and a
+      workbook that quietly repaired `0501234567` would decide which customer a balance belongs to using a rule
+      this unit never proved. The shape checks come from `@berelax/shared` — `phoneSchema.shape.e164`,
+      `isoDateSchema`, `filsStringSchema` — rather than from regular expressions written here, so the workbook
+      cannot accept a number the customer table will not store.'
+    - 'NOTE: `packages/migration` is not in `vitest.config.ts`''s coverage `include` list and this unit did not
+      add it, for the reason H-MIG-01 recorded. Nothing was changed in `vitest.config.ts`, `pnpm verify` or gate
+      case 29''s array: the two new scripts are operator commands driven by the integration suite, not verify
+      steps, which is how `scripts/migrate-import.mjs` is arranged.'
     files:
     - packages/db/src/settings/package-templates.ts
+    - packages/migration/src/importers/packages/workbook.ts
     - packages/migration/src/importers/packages/validate.ts
-    - scripts/gen-package-workbook.mjs
+    - packages/migration/src/importers/packages/validate.test.ts
+    - packages/migration/src/importers/packages/workbook.itest.ts
     - packages/migration/src/importers/packages/fixtures/
+    - scripts/gen-package-workbook.mjs
+    - scripts/validate-package-workbook.mjs
+    - docs/adr/0065-a-reconstructed-balance-is-validated-against-the-workbook-and-an-attested-one-is-admitted.md
   - id: H-MIG-03
     order: 185
     title: Package liability import, opening deferred revenue and cash reconciliation

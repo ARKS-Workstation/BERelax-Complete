@@ -1,0 +1,2 @@
+# Deliberately malformed: a generated workbook nobody filled in. There is no header either.
+# An import of nothing that completed would make the next run of the filled file a re-import.

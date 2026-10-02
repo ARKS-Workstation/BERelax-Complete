@@ -45093,6 +45093,399 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 143a-143z. (H-MIG-02) The reconstruction workbook: every named rejection shown to be able to stop firing,
+// the instructions shown to come from the database, and the file shown to be its own evidence.
+//
+// This unit exists because there is NO INCUMBENT EXPORT. Every other importer in the H-MIG series can be
+// re-run against a source system; outstanding packages cannot, because no system holds them — the source is a
+// human filling in a form. Two consequences shape this block.
+//
+// **The validator is the only thing between a typed digit and a liability on the balance sheet.** There is
+// nothing to reconcile a reconstructed balance against, so a rule that stopped firing would not be caught by
+// a later check: the row would import, the deferred-revenue figure would be wrong, and the first symptom
+// would be a customer at the desk. So each of 143a to 143f breaks exactly one rule and requires the case to
+// fail by that rejection's own NAME — a bare non-zero exit is satisfied by a syntax error (ADR 0003), and
+// here it would also be satisfied by the row being refused for the wrong reason, which sends whoever is
+// correcting the spreadsheet to the wrong cell.
+//
+// **The file is the evidence.** `import_run.source_file_hash` is the sha-256 of its bytes and H-MIG-03's owner
+// sign-off attests to that hash, so the generated workbook has to be the same bytes every time (143g) and has
+// to print what the DATABASE says rather than a constant of its own (143h). Those two are the cases whose
+// absence would be invisible: a workbook with a timestamp in it validates exactly as well as one without, and
+// a workbook whose face states last year's package terms is a correct file giving wrong instructions.
+{
+  const VALIDATE = 'packages/migration/src/importers/packages/validate.ts'
+  const WORKBOOK = 'packages/migration/src/importers/packages/workbook.ts'
+  const SETTINGS = 'packages/db/src/settings/package-templates.ts'
+  const STORE = 'packages/db/src/settings-store.ts'
+  const CLI = 'scripts/validate-package-workbook.mjs'
+  const CLEAN_FIXTURE = 'packages/migration/src/importers/packages/fixtures/clean.tsv'
+  const UNIT_SUITE = 'packages/migration/src/importers/packages/validate.test.ts'
+  const ITEST_SUITE = 'packages/migration/src/importers/packages/workbook.itest.ts'
+  const unit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const itest = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.integration.config.ts', file]
+
+  // 143a. The row stops being able to contradict ITSELF. `sessions_remaining` is arithmetic the validator
+  //       could do, and the workbook asks for it anyway because a reconstructed balance has no second
+  //       source — so this is the ONLY cross-check the file has, and without it a mistyped remaining count
+  //       becomes a liability with nothing in the row looking wrong.
+  checkRejectedBy(
+    'package workbook: a row that contradicts itself on the remaining sessions is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (remaining !== total - used) return PACKAGE_REJECTIONS.sessionsRemainingDisagrees',
+          '  if (false) return PACKAGE_REJECTIONS.sessionsRemainingDisagrees',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'sessions-remaining-must-equal-total-minus-used',
+  )
+
+  // 143b. The template-existence check made permissive. The unit's acceptance line — "no package row imports
+  //       before its package_template row exists; the attempt fails naming the missing template" — and the
+  //       reason it is a refusal rather than a warning: the terms live on the template, so a balance whose
+  //       template does not exist is a number with no validity, no transferability and no session entitlement.
+  checkRejectedBy(
+    'package workbook: a row naming a template the database does not hold is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    (row) => (known.has(row.templateKey) ? null : PACKAGE_REJECTIONS.templateUnknown),',
+          '    (row) => (row.templateKey === row.templateKey ? null : PACKAGE_REJECTIONS.templateUnknown),',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'template-key-names-no-package-template',
+  )
+
+  // 143c. The per-row owner sign-off. H-MIG-03 stores a sign-off for the FILE; this one is per row, because a
+  //       file-level signature over rows nobody read individually is how a wrong balance gets signed for.
+  checkRejectedBy(
+    'package workbook: a row the owner has not signed off is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      row.ownerSignedOff === OWNER_SIGN_OFF_VALUE ? null : PACKAGE_REJECTIONS.ownerSignOffMissing,',
+          '      row.ownerSignedOff === row.ownerSignedOff ? null : PACKAGE_REJECTIONS.ownerSignOffMissing,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'owner-sign-off-must-be-yes-on-every-row',
+  )
+
+  // 143d. The duplicate. Two rows for one holder, one template and one purchase date are one package entered
+  //       twice, and both rows look perfectly well formed — so this rejection is the only thing between a
+  //       re-pasted spreadsheet block and a doubled liability.
+  checkRejectedBy(
+    'package workbook: one package entered twice is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      seen.has(duplicateKey(row)) ? PACKAGE_REJECTIONS.duplicateHolderTemplatePurchase : null,',
+          '      seen.has(row.notes) ? PACKAGE_REJECTIONS.duplicateHolderTemplatePurchase : null,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'duplicate-holder-template-and-purchase-date',
+  )
+
+  // 143e. The money UNIT. `1000.00` in a fils column is a thousandth of what it looks like, and every figure
+  //       downstream — the deferred-revenue liability, the cash reconciliation, what a customer is owed — is
+  //       derived from it. ADR 0007's rule arriving at the one place a human types a price.
+  checkRejectedBy(
+    'package workbook: a price typed in dirhams rather than integer fils is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      filsStringSchema.safeParse(row.pricePaidFils).success\n        ? null\n        : PACKAGE_REJECTIONS.priceNotIntegerFils,',
+          '      row.pricePaidFils.length > 0 ? null : PACKAGE_REJECTIONS.priceNotIntegerFils,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'price-must-be-integer-fils',
+  )
+
+  // 143f. The header check. The one refusal that is about the WHOLE FILE, and the reason it cannot be a row
+  //       rejection: a transposed header parses every row into the wrong field rather than failing, so
+  //       `sessions_used` reads a price and the file validates or does not for reasons unconnected to
+  //       anything anybody typed.
+  checkRejectedBy(
+    'package workbook: an edited header is refused as a fact about the file, not reported per row',
+    withEditedFile(
+      WORKBOOK,
+      (source) =>
+        replaceOnce(
+          source,
+          "  if (header.replace(/\\r$/, '') !== WORKBOOK_HEADER) {",
+          '  if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'refuses the FILE, not a row, when the header has been edited',
+  )
+
+  // 143g. A timestamp in the generated workbook. It changes nothing about whether the file validates, which
+  //       is exactly why it would survive review: the cost lands on `import_run.source_file_hash`, the
+  //       sha-256 of the bytes that IS the file's identity here, and on H-MIG-03's sign-off which attests to
+  //       that hash. A person who regenerated the blank before filling it in would hold a file no sign-off
+  //       could be about.
+  checkRejectedBy(
+    'package workbook: a timestamp in the generated file is caught',
+    withEditedFile(
+      WORKBOOK,
+      (source) =>
+        replaceOnce(
+          source,
+          "    comment('BE RELAX — outstanding package reconstruction workbook'),",
+          "    comment('BE RELAX — generated ' + new Date().toISOString()),",
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'byte-identical when generated twice',
+  )
+
+  // 143h. The generator printing its OWN terms instead of the ones it was handed. A correct file giving wrong
+  //       instructions: the face says six months, non-transferable, retained, and the person filling it in
+  //       reads that as the business's policy — while the settings the panel shows say something else. The
+  //       fixture terms are deliberately not the configured defaults, which is what makes this catchable.
+  checkRejectedBy(
+    'package workbook: a generator printing its own package terms rather than the database’s is caught',
+    withEditedFile(
+      WORKBOOK,
+      (source) =>
+        replaceOnce(
+          source,
+          '  const { templates, terms } = options',
+          '  const { templates } = options\n' +
+            '  const terms = {\n' +
+            '    validityMonths: 6,\n' +
+            '    transferable: false,\n' +
+            "    unredeemedBalancePolicy: 'retained',\n" +
+            '    isProvisional: true,\n' +
+            "    openQuestionId: 'Y9-package-policy',\n" +
+            '  }',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'prints the terms and templates it was HANDED',
+  )
+
+  // 143i. The round trip. `fillPackageWorkbook` silently dropping the rows would make the acceptance line
+  //       "a filled copy of the generated file validates clean" pass over an EMPTY workbook — zero rejections
+  //       out of zero rows, which is the vacuous shape ADR 0002 is about arriving through the fixture.
+  checkRejectedBy(
+    'package workbook: a fill that drops the rows cannot satisfy the round trip',
+    withEditedFile(
+      WORKBOOK,
+      (source) =>
+        replaceOnce(
+          source,
+          // The anchor stops short of the template literal deliberately: a `${...}` inside a plain
+          // string in this file is a `noTemplateCurlyInString` warning, and there are already six.
+          // Commenting the rest of the line out is the same mutation with nothing to suppress.
+          '  return rows.length === 0 ? workbook :',
+          '  return workbook //',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'round-trips: a filled copy of the generated file validates clean',
+  )
+
+  // 143j. The evidence vocabulary opened up. "Evidence" as free text is a column that fills up with the word
+  //       `yes`, and the whole point of the closed set is that every kind names something a person can go and
+  //       look at — or, for exactly one of them, says out loud that there is nothing to look at.
+  checkRejectedBy(
+    'package workbook: evidence outside the declared vocabulary is caught',
+    withEditedFile(
+      VALIDATE,
+      (source) =>
+        replaceOnce(
+          source,
+          '      EVIDENCE_KINDS.includes(row.evidenceKind) ? null : PACKAGE_REJECTIONS.evidenceKindUnknown,',
+          '      row.evidenceKind.length > 0 ? null : PACKAGE_REJECTIONS.evidenceKindUnknown,',
+        ),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'evidence-kind-must-be-one-of-the-declared-kinds',
+  )
+
+  // 143k. `owner_attestation` REMOVED from the vocabulary — the decision this unit makes, broken in the
+  //       direction that looks like tightening. Y9-package-thin's provisional answer is "honour once on
+  //       evidence, logged": a package with a thin paper trail is still money the business took, so refusing
+  //       an attested balance would leave a real liability off the balance sheet and a customer turned away
+  //       at the desk. The case is here because "be stricter" is the plausible edit, and its cost is
+  //       invisible from inside the validator.
+  checkRejectedBy(
+    'package workbook: refusing an attested balance outright is caught',
+    withEditedFile(
+      WORKBOOK,
+      (source) => replaceOnce(source, "  'owner_attestation',\n", ''),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'counts every evidence kind, and counts the attested rows separately',
+  )
+
+  // 143l. A fixture edited onto an ALLOCATED UAE mobile prefix. The fixture holders are on `+97159`, which
+  //       is unallocated and therefore undialable — the guarantee `packages/fixtures/src/synthetic.ts` makes
+  //       for the same reason: a fixture number that can ring a real handset eventually does, and a workbook
+  //       is precisely the kind of file that gets pasted into a support ticket.
+  checkRejectedBy(
+    'package workbook: a fixture holder on a real mobile prefix is caught',
+    withEditedFile(
+      CLEAN_FIXTURE,
+      (source) => replaceOnce(source, '+971590000101', '+971500000101'),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'holds every fixture holder off an allocated mobile prefix',
+  )
+
+  // 143m. A column renamed in ONE place. The columns are stated once — the generator writes the header from
+  //       that array, the parser demands it back, and the preamble's hints come from the same entries — so
+  //       this case is what proves the single statement is load-bearing rather than tidy: the committed
+  //       fixtures stop carrying the generated header and every one of them is refused.
+  checkRejectedBy(
+    'package workbook: a column renamed in the one list breaks the committed fixtures',
+    withEditedFile(
+      WORKBOOK,
+      (source) => replaceOnce(source, "    name: 'notes',", "    name: 'remarks',"),
+      () => runExpectingFailure('pnpm', unit(UNIT_SUITE)),
+    ),
+    'Missing: remarks. Unexpected: notes',
+  )
+
+  // 143n. The CLI's exit code. The acceptance line is "the validator exits non-zero on any rejected row", and
+  //       an exit code cannot be asserted by calling a function: a zero exit over a refused file is read by
+  //       the next script, or by the person skimming, as "imported".
+  checkRejectedBy(
+    'package workbook: a validator that exits zero over a refused file is caught',
+    withEditedFile(
+      CLI,
+      (source) => replaceOnce(source, 'process.exit(report.ok ? 0 : 1)', 'process.exit(0)'),
+      () => runExpectingFailure('pnpm', itest(ITEST_SUITE)),
+    ),
+    'exit non-zero on a rejected row and name every rejection with its file and line',
+  )
+
+  // 143o. `readPackageTemplateKeys` filtering retired templates — the plausible "fix", made by whoever notices
+  //       it disagrees with the till's sell list. `retired_at` withdraws a package from SALE and leaves the
+  //       balances sold under it redeemable (migration 0078), which is the ordinary case for a reconstruction:
+  //       refusing the key would make a real outstanding liability unrecordable.
+  checkRejectedBy(
+    'package workbook: dropping retired templates from the validator’s key set is caught',
+    withEditedFile(
+      SETTINGS,
+      (source) =>
+        replaceOnce(
+          source,
+          '      from package_template t\n      left join package_template_version v on v.template_id = t.id',
+          '      from package_template t\n      left join package_template_version v on v.template_id = t.id\n     where t.retired_at is null',
+        ),
+      () => runExpectingFailure('pnpm', itest(ITEST_SUITE)),
+    ),
+    'keeps returning a RETIRED template',
+  )
+
+  // 143p. The same read losing the `hasVersion` distinction. A template with no version cannot be sold against
+  //       at all — `package_sale.template_version_id` is not null — and reporting it as an unknown key would
+  //       send somebody to create a template that is already there.
+  checkRejectedBy(
+    'package workbook: losing the has-a-version distinction is caught',
+    withEditedFile(
+      SETTINGS,
+      (source) =>
+        replaceOnce(
+          source,
+          '           count(v.id) > 0                    as "hasVersion",',
+          '           true                               as "hasVersion",',
+        ),
+      () => runExpectingFailure('pnpm', itest(ITEST_SUITE)),
+    ),
+    'returns every template key, including the one the sell list hides',
+  )
+
+  // 143q. The Unconfirmed Assumptions query narrowed so the package terms no longer reach the settings screen.
+  //       The workbook prints those terms on its face, so without the held-equal check in
+  //       `readPackageReconstructionPolicy` this drift is silent in the worst direction: the file would keep
+  //       saying the terms are unconfirmed while the screen built to show unanswered assumptions showed
+  //       nothing, and the file would be the only place a reader was told.
+  checkRejectedBy(
+    'package workbook: a narrowed Unconfirmed Assumptions query is caught by the held-equal check',
+    withEditedFile(
+      STORE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    from app_setting\n    where is_provisional\n    order by tier, key',
+          "    from app_setting\n    where is_provisional and key not like 'packages.%'\n    order by tier, key",
+        ),
+      () => runExpectingFailure('pnpm', itest(ITEST_SUITE)),
+    ),
+    'unless one of them has been narrowed',
+  )
+
+  // 143r. The other direction, and it is a different screen: `unconfirmedAssumptionRows` is the PANEL's query
+  //       and reads settings and data alike. A package term reaching one reader and not the other is a term
+  //       visible on one of the two screens, which is how somebody reports it as answered.
+  checkRejectedBy(
+    'package workbook: a package term missing from the assumptions panel is caught',
+    withEditedFile(
+      STORE,
+      (source) =>
+        replaceOnce(
+          source,
+          'from app_setting where is_provisional',
+          "from app_setting where is_provisional and key not like 'packages.%'",
+        ),
+      () => runExpectingFailure('pnpm', itest(ITEST_SUITE)),
+    ),
+    'not on the Unconfirmed Assumptions panel',
+  )
+
+  // 143s-143v. The controls, and they are not a formality: every file edited above, UNEDITED, passes. Without
+  //            them a stale anchor, a validator that refused everything, or a suite that had stopped reading
+  //            the fixture directory would all read as a block of passing cases — and "refuses everything" is
+  //            the specific way a validator goes wrong, because every case above asserts a refusal.
+  {
+    const rules = run('pnpm', unit(UNIT_SUITE))
+    check(`package workbook: ${UNIT_SUITE} passes unedited`, !rules.failed, rules.output)
+
+    const settings = run('pnpm', itest(ITEST_SUITE))
+    check(`package workbook: ${ITEST_SUITE} passes unedited`, !settings.failed, settings.output)
+
+    // The fixture directory is read at run time, so a file renamed or removed has to be a failure here
+    // rather than a quietly smaller `it.each`.
+    const fixtures = readdirSync('packages/migration/src/importers/packages/fixtures').filter(
+      (name) => name.endsWith('.tsv'),
+    )
+    check(
+      'package workbook: every named rejection has a committed fixture file',
+      fixtures.length >= 20,
+      `only ${fixtures.length} .tsv fixtures are committed; the vocabulary has one per rejection plus the ` +
+        'clean file and the two the parser refuses, so a smaller number means a fixture was lost and its ' +
+        `rule is no longer exercised:\n${fixtures.join(', ')}`,
+    )
+
+    // The one settings module this unit adds is in `packages/db`, so it is the drift gate's business too.
+    const drift = run('pnpm', ['db:drift'])
+    check(
+      'package workbook: the schema and its Drizzle mirror still agree',
+      !drift.failed,
+      drift.output,
+    )
+  }
+}
+
 // 144a-144z. (A-FIRST-05) `/api/collect`: the consent gate shown to be able to open by accident, the
 //            identifier shown to be able to arrive before consent, and the gap session shown to be able to
 //            read as daytime trade.

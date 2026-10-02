@@ -1,0 +1,8 @@
+# The clean set: five reconstructed packages, every evidence kind exercised, all signed off.
+# Holders are on +97159, an unallocated UAE mobile prefix, so no number here can reach a handset.
+holder_phone_e164	template_key	purchase_date	price_paid_fils	sessions_total	sessions_used	sessions_remaining	expires_on	evidence_kind	evidence_reference	owner_signed_off	notes
++971590000101	fixture_template_a	2025-03-11	100000	5	0	5	2025-09-11	receipt	receipt 4417, front-desk folder	yes	
++971590000102	fixture_template_a	2025-04-02	100000	5	2	3	2025-10-02	whatsapp_message	thread with the holder, 2025-04-02	yes	two sessions taken before this system existed
++971590000103	fixture_template_b	2025-01-20	60000	3	3	0	2025-07-20	card_terminal_slip	terminal batch 2025-01-20	yes	fully drawn: no balance remains, kept because the history is what the holder will ask about
++971590000104	fixture_template_b	2024-12-05	60000	3	1	2	2025-06-05	owner_attestation	owner recalls the sale; no document of any kind	yes	Y9-package-thin: admitted on attestation alone and counted separately
++971590000105	fixture_template_a	2025-05-19	95000	5	1	4	2025-11-19	customer_copy	holder has the stamped card	yes	paid less than the configured price; the discount is recorded nowhere else
