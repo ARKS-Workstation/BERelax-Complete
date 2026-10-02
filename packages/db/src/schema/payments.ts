@@ -403,3 +403,51 @@ export const mandateChargeAttempt = pgTable(
     index('mandate_charge_attempt_mandate_idx').on(table.mandateId, table.attemptedAt.desc()),
   ],
 )
+
+/**
+ * A card dispute, as the events that made it. Mirrors `0135_chargeback.sql`.
+ *
+ * There is deliberately no `resolved` boolean and no `outcome` column on a single row per dispute: a
+ * chargeback is a THIRD PARTY'S DECISION ARRIVING LATE, so each notice is its own row with its own
+ * `received_at`, its own `trading_date` and its own journal entry. A single mutable row would be an edit
+ * to a dated event, which is the one thing this table exists to make impossible.
+ *
+ * Nothing here writes to `payment_intent`. `captured_fils` is a projection of the append-only transaction
+ * rows (ZY163) and the capture HAPPENED, so reducing it would leave the sale's own entry explaining money
+ * the header says was never taken.
+ *
+ * The four refusals that are triggers have no Drizzle expression: ZY431 (append-only), ZY432 (the trading
+ * date is the business day containing the instant), ZY433 (refunded plus charged-back-net never exceeds
+ * captured), ZY434 (a resolution follows a received dispute, once), ZY435 (nothing to dispute on an
+ * uncaptured intent) and ZY436 (a won dispute's entry reverses its received entry, to the fils).
+ */
+export const chargeback = pgTable(
+  'chargeback',
+  {
+    id: uuid('id').primaryKey(),
+    paymentIntentId: uuid('payment_intent_id')
+      .notNull()
+      .references(() => paymentIntent.id),
+    /** The ACQUIRER's identifier, so two notices about one dispute are one dispute. */
+    disputeRef: text('dispute_ref').notNull(),
+    /** `CHARGEBACK_KINDS` in `@berelax/core`. A total partition, and ZY434 keeps it so. */
+    kind: text('kind').notNull(),
+    amountFils: bigint('amount_fils', { mode: 'bigint' }).notNull(),
+    /** When the NOTICE arrived. What an operator disputes. */
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    /** The business day it belongs to. ZY432 holds it to `business_day` — the 01:30 rule. */
+    tradingDate: date('trading_date').notNull(),
+    /** Mandatory and a real key: a dispute with no entry makes 1045 unexplainable. */
+    journalEntryId: text('journal_entry_id')
+      .notNull()
+      .references(() => journalEntry.entryId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('chargeback_one_row_per_dispute_event').on(table.disputeRef, table.kind),
+    check('chargeback_amount_positive', sql`${table.amountFils} > 0`),
+    check('chargeback_kind_known', sql`${table.kind} in ('received', 'won', 'lost')`),
+    index('chargeback_intent_idx').on(table.paymentIntentId, table.receivedAt),
+    index('chargeback_trading_date_idx').on(table.tradingDate, table.kind),
+  ],
+)

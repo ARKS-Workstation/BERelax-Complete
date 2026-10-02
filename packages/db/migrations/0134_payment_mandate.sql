@@ -420,8 +420,9 @@ comment on table mandate_charge_attempt is
   'refusal with no row is a refusal nothing can count. ZY424, ZY425 and ZY426 are the three refusals, and '
   'ZY426 means no row in this table can read `charged` while no fee policy is on file: that is the '
   'sentence "the charge path ships disabled" written where PostgreSQL enforces it rather than where a '
-  'second call site would not read it. Append-only (ZY421''s sibling rule is not needed here - the table '
-  'holds no grant to change a row).';
+  'second call site would not read it. Append-only: UPDATE and DELETE raise ZY421, for every role '
+  'including the owner - the same code as the mandate record''s, because the attempt log is evidence on '
+  'exactly the same terms (ADR 0043).';
 
 create index mandate_charge_attempt_mandate_idx on mandate_charge_attempt (mandate_id, attempted_at desc);
 create index mandate_charge_attempt_appointment_idx on mandate_charge_attempt (appointment_id);

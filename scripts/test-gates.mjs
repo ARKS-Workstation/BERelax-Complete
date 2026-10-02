@@ -51609,18 +51609,394 @@ export function mandateHeadroomFils(mandate: MandateRecord): Fils {`,
 
   // 166y. The real tree, unedited. Every case above is satisfied by a FAILURE, so without this one the
   //       whole block would pass against a suite that could not run at all.
+  const purePass = run('pnpm', pureSuites())
   check(
     'mandate: the two pure suites pass unedited',
-    !run('pnpm', pureSuites()).failed,
-    'the fee gate and the mandate service must pass on the real tree, or every case above is vacuous',
+    !purePass.failed,
+    'the fee gate and the mandate service must pass on the real tree, or every case above is ' +
+      `vacuous:\n${purePass.output}`,
   )
 
   // 166z. The pairing suite, which is the only place the TypeScript answer and the SQL answer about the
   //       fee policy can be compared at all.
+  const pairPass = run('pnpm', pairSuite())
   check(
     'mandate: the pairing suite passes unedited against a real PostgreSQL',
-    !run('pnpm', pairSuite()).failed,
-    'ZY421-ZY426 and the one-fact-two-languages claim are proved only here',
+    !pairPass.failed,
+    `ZY421-ZY426 and the one-fact-two-languages claim are proved only here:\n${pairPass.output}`,
+  )
+}
+
+// 167a-167z. (Y-PAY-08) Refunds, partial refunds and chargebacks: every way money could come to go back
+//            twice, or come back as an edit, shown to be caught.
+//
+//            The unit has two claims and almost every case below is about one of them.
+//
+//            **A reversal is a dated event, never an edit.** The tempting implementation of a chargeback
+//            is `captured_fils = captured_fils - disputed`, and it is refused twice over — but the SHAPE
+//            of that mistake survives in the entries: a hand-built mirror entry that balances perfectly,
+//            reverses nothing, and ties the win to nothing. 167g is that case, and the reason it is here
+//            and not left to the database is that the pure builder is where a reviewer would write it.
+//
+//            **The refund cap is three figures.** `check (refunded_fils <= captured_fils)` is satisfied by
+//            an intent whose money an acquirer has already taken back, so AED 100 captured and AED 100
+//            charged back still reads as AED 100 refundable. 167a and 167b break each half of the
+//            subtraction; both edits leave a build that compiles, balances and reconciles at both ends.
+//
+//            The cases come in four groups:
+//
+//              * **the cap.** 167a drops the chargeback term, 167b drops the clamp, 167c admits the state
+//                gate's `voided`. Each one authorises money leaving the business with nothing behind it.
+//              * **the chargeback's direction and its accounts.** 167d puts the received entry's debit on
+//                revenue, 167e puts the lost dispute into `4095 Discounts and allowances` — which is the
+//                plausible wrong answer, because an allowance is something the business GRANTED and a lost
+//                dispute is a loss imposed on it — and 167f makes the received entry a `refund` source, so
+//                a dispute becomes indistinguishable from money the business chose to give back.
+//              * **the reversal.** 167g replaces `reverseEntry` with a hand-built mirror; 167h flips the
+//                net-effect sum so a residue reads as nought.
+//              * **the trading date.** 167i substitutes the calendar date for the refusal — the ADR 0070
+//                failure, and the one that reconciles perfectly against a day nothing happened on. 167j
+//                flips the 01:30 resolution.
+//
+//            167k to 167n are the gates this unit had to stay inside: the two directions of the SQLSTATE
+//            registry, `pnpm db:conventions` on the append-only pair, and `pnpm no-invoice-mutation` —
+//            which matters more here than anywhere else in the batch, because `packages/core/src/ledger`
+//            is in its money estate and a `voidChargeback` written there is exactly the function this
+//            unit's subject invites.
+//
+//            167p is the property suite's own vacuity floor, which is the case worth reading. Narrowing
+//            the generator so no sequence ever presses the cap makes 1,000 cases pass over one shape, and
+//            the property would then hold for a completely uncapped implementation — brief rule 22's
+//            recorded failure, where the visible symptom was a gate reporting a rule as missing.
+//
+//            167y and 167z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing.
+//
+//            Nothing here edits `packages/db/migrations/0135_chargeback.sql` in order to test a DATABASE
+//            rule, for blocks 134, 154 and 166's reason. ZY431-ZY436 are proved against a real PostgreSQL
+//            by `packages/fixtures/src/chargeback.itest.ts`, and two of them — ZY433 and ZY436 — are
+//            DEFERRED, so that file drives them through real transactions rather than savepoints: a
+//            rollback discards a pending constraint check and the probe never reaches it. What the
+//            migration IS edited for is 167m, where the checker genuinely reads the text.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const REFUND = 'packages/core/src/payments/refund.ts'
+  const CHARGEBACK = 'packages/core/src/ledger/chargeback.ts'
+  const MIGRATION = 'packages/db/migrations/0135_chargeback.sql'
+  const REGISTRY = 'packages/db/src/sqlstate-registry.ts'
+
+  const UNIT_SUITE = 'packages/core/src/payments/refund.test.ts'
+  const PROPERTY_SUITE = 'packages/core/src/payments/refund.property.test.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/chargeback.itest.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    UNIT_SUITE,
+    PROPERTY_SUITE,
+  ]
+  const propertySuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', PROPERTY_SUITE]
+  const pairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+  ]
+
+  /**
+   * One anchored edit to a shipped module, then the suite that must fail because of it.
+   *
+   * Named for this block rather than reusing block 166's `breakMandate`, and the reason is mechanical
+   * rather than stylistic: two blocks defining a helper of the same shape is how git found the bodies as
+   * shared context and INTERLEAVED two blocks at a merge (block 133's note about its own helper).
+   */
+  const breakReversal = (name, file, find, into, rule, args = pureSuites()) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', args),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the cap ---------------------------------------------------------------------------------
+
+  // 167a. The chargeback term dropped. THIS is the unit's second claim: the edit leaves
+  //       `refunded <= captured` perfectly satisfied, so every figure reconciles at both ends while the
+  //       business refunds money an acquirer has already taken.
+  breakReversal(
+    'chargeback: a refund cap that ignores disputes fails by name',
+    REFUND,
+    `  const remaining = position.capturedFils - position.refundedFils - position.chargedBackFils
+  return filsFrom(remaining > 0 ? remaining : 0)`,
+    `  const remaining = position.capturedFils - position.refundedFils
+  return filsFrom(remaining > 0 ? remaining : 0)`,
+    'counts a disputed amount as gone',
+  )
+
+  // 167b. The clamp removed, so an inconsistent position publishes a negative remainder — which is
+  //       Y-PAY-06's recorded mistake arriving here: a negative refund posts as money ARRIVING.
+  breakReversal(
+    'chargeback: an unclamped remainder fails by name',
+    REFUND,
+    '  return filsFrom(remaining > 0 ? remaining : 0)\n}',
+    '  return filsFrom(remaining)\n}',
+    'clamps at nought rather than publishing a negative remainder',
+  )
+
+  // 167c. `voided` admitted to the refundable states. An authorisation is a reservation and not money, so
+  //       this is a refund against a state in which nothing ever moved.
+  breakReversal(
+    'chargeback: admitting a voided intent to the refundable states fails by name',
+    REFUND,
+    "export const REFUNDABLE_INTENT_STATES = ['captured'] as const",
+    "export const REFUNDABLE_INTENT_STATES = ['captured', 'voided'] as const",
+    'refuses a refund of an intent that captured nothing',
+  )
+
+  // ---- the chargeback's direction and its accounts ---------------------------------------------
+
+  // 167d. The received entry debiting revenue. A chargeback is NOT a cancelled sale — the treatment was
+  //       delivered and the invoice stands — and this edit reverses revenue that was correctly recognised.
+  breakReversal(
+    'chargeback: a received dispute touching revenue fails by name',
+    CHARGEBACK,
+    '        debit(CHARGEBACK_CLEARING_ACCOUNT, amount, `Disputed: ${event.disputeRef}`),',
+    '        debit(ACCOUNTS.treatmentRevenue, amount, `Disputed: ${event.disputeRef}`),',
+    'posts to the disputed-receivable clearing account',
+  )
+
+  // 167e. A lost dispute written to `4095 Discounts and allowances`. The plausible wrong answer: an
+  //       allowance is something the business GRANTED, and a lost dispute is a loss imposed on it.
+  breakReversal(
+    'chargeback: a lost dispute booked as an allowance fails by name',
+    CHARGEBACK,
+    'export const CHARGEBACK_LOSS_ACCOUNT = ACCOUNTS.badDebt',
+    'export const CHARGEBACK_LOSS_ACCOUNT = ACCOUNTS.discountsAndAllowances',
+    'writes a lost dispute off to bad debt and not to an allowance',
+  )
+
+  // 167f. The received entry sourced as a refund, which makes a dispute indistinguishable from money the
+  //       business chose to give back — and those are answered differently when a customer asks, which is
+  //       the reason `EntrySource` exists at all.
+  breakReversal(
+    'chargeback: a dispute sourced as a refund fails by name',
+    CHARGEBACK,
+    `      source: 'adjustment',
+      lines: [
+        debit(CHARGEBACK_CLEARING_ACCOUNT, amount, \`Disputed: \${event.disputeRef}\`),`,
+    `      source: 'refund',
+      lines: [
+        debit(CHARGEBACK_CLEARING_ACCOUNT, amount, \`Disputed: \${event.disputeRef}\`),`,
+    'posts to the disputed-receivable clearing account',
+  )
+
+  // ---- the reversal ----------------------------------------------------------------------------
+
+  // 167g. `reverseEntry` replaced by a hand-built mirror. It balances, it moves the right amount on 1045,
+  //       and it reverses NOTHING — so nothing ties the win to the dispute it is about, and the two
+  //       amounts are free to drift the day a partial resolution exists.
+  breakReversal(
+    'chargeback: a won dispute built as a mirror rather than a reversal fails by name',
+    CHARGEBACK,
+    `  return reverseEntry(received, on, {`,
+    `  return postEntry(
+    {
+      entryId: options.entryId ?? (\`\${received.entryId}-M\` as EntryId),
+      entryDate: on,
+      narrative: 'Chargeback won (mirror)',
+      source: 'adjustment',
+      lines: received.lines.map((line) =>
+        line.debitFils > 0
+          ? credit(line.account, money(line.debitFils))
+          : debit(line.account, money(line.creditFils)),
+      ),
+    },
+    STANDARD_SPA_CHART,
+  )
+  // biome-ignore lint/correctness/noUnreachable: gate fixture
+  return reverseEntry(received, on, {`,
+    'unwinds to nought on the clearing account when the dispute is won',
+  )
+
+  // 167h. The net-effect sum flipped to a sum of magnitudes, so a residue reads as nought. The acceptance
+  //       line is "asserted to the fils", and this is the edit under which that assertion stops measuring.
+  breakReversal(
+    'chargeback: a net effect that adds magnitudes instead of directions fails by name',
+    CHARGEBACK,
+    '      net += (line.debitFils as number) - (line.creditFils as number)',
+    '      net += (line.debitFils as number) + (line.creditFils as number) - (line.debitFils as number) - (line.creditFils as number)',
+    'unwinds to nought on the clearing account when the dispute is won',
+  )
+
+  // ---- the trading date ------------------------------------------------------------------------
+
+  // 167i. The refusal replaced by the calendar date. ADR 0070's failure exactly: the substituted date
+  //       reconciles perfectly against a day nothing happened on, and nothing afterwards can detect it.
+  breakReversal(
+    'chargeback: substituting a calendar date for an unattributable notice fails by name',
+    CHARGEBACK,
+    `    throw new ChargebackIsOutsideTrading(
+      input.disputeRef,
+      resolution.reason,
+      resolution.calendarDate as string,
+    )`,
+    '    return resolution.calendarDate',
+    'refuses an instant that belongs to no trading date',
+  )
+
+  // 167j. The 01:30 resolution thrown away. A notice attributed to the calendar date lands in a cash-up
+  //       for a session that had not started, and the two days' card totals are then wrong by the same
+  //       amount in opposite directions.
+  breakReversal(
+    'chargeback: resolving a late notice to its calendar date fails by name',
+    CHARGEBACK,
+    `  const resolution =
+    input.zone === undefined
+      ? resolveTradingDate(input.receivedAt, input.hoursFor)
+      : resolveTradingDate(input.receivedAt, input.hoursFor, input.zone)`,
+    `  const resolution = {
+    kind: 'trading' as const,
+    date: new Date((input.receivedAt as number) + 4 * 3_600_000)
+      .toISOString()
+      .slice(0, 10) as LocalDate,
+  }`,
+    'resolves 01:30 to the PREVIOUS trading date',
+  )
+
+  // ---- the property suite's own vacuity floor --------------------------------------------------
+
+  // 167p. The generator narrowed so no sequence ever presses the cap. 1,000 cases then pass over one
+  //       shape, and the property holds for a completely uncapped implementation — brief rule 22's
+  //       recorded failure, where the symptom was a gate reporting a rule as missing. The floor fails BY
+  //       NAME rather than the suite simply going quiet.
+  breakReversal(
+    'chargeback: a generator that never presses the cap fails the vacuity floor by name',
+    PROPERTY_SUITE,
+    '    const amount = Math.max(1, Math.floor(remaining * (0.3 + random() * 0.9)))',
+    '    const amount = Math.max(1, Math.floor(remaining * 0.01))',
+    'sequences reached the cap',
+    propertySuite(),
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 167k. A code registered that no migration raises — direction 3 of ADR 0043's gate.
+  checkRejectedBy(
+    'chargeback: an unused SQLSTATE registered for this band fails by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY432',`,
+          `  {
+    code: 'ZY437',
+    rule: 'A code this band released unused, registered anyway.',
+    migration: '0135',
+    raisedBy: ['assert_chargeback_sequence'],
+    translators: ['packages/db/src/repositories/chargeback.ts'],
+  },
+  {
+    code: 'ZY432',`,
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY437',
+  )
+
+  // 167l. A code raised and not registered — the other direction, and the one that costs a runbook answer
+  //       at a `psql` prompt.
+  checkRejectedBy(
+    'chargeback: a raised SQLSTATE missing from the registry fails by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          `  {
+    code: 'ZY433',
+    rule: 'Refunded plus charged-back-net may never exceed captured, because an intent whose capture an acquirer has taken back still looks fully refundable to a captured-against-refunded check.',
+    migration: '0135',
+    raisedBy: ['assert_capture_is_not_over_reversed'],
+    translators: ['packages/db/src/repositories/chargeback.ts'],
+  },
+`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['sqlstate']),
+    ),
+    'ZY433',
+  )
+
+  // 167m. The append-only pair, half removed. The one case that edits the migration TEXT, because
+  //       `check-schema-conventions.mjs` genuinely reads it — and the half that is missing is invisible in
+  //       review, because the table comment says otherwise.
+  checkRejectedBy(
+    'chargeback: an append-only table missing its UPDATE trigger fails db:conventions by name',
+    withEditedFile(
+      MIGRATION,
+      (source) =>
+        replaceOnce(
+          source,
+          `create trigger chargeback_no_update before update on chargeback
+  for each row execute function refuse_chargeback_change();`,
+          '',
+        ),
+      () => runExpectingFailure('pnpm', ['db:conventions']),
+    ),
+    'chargeback',
+  )
+
+  // 167n. A mutating verb exported from the ledger. `packages/core/src/ledger` is in
+  //       `no-invoice-mutation`'s money estate, and `voidChargeback` is precisely the function this unit's
+  //       subject invites somebody to write.
+  checkRejectedBy(
+    'chargeback: a mutating verb exported from the ledger fails no-invoice-mutation by name',
+    withEditedFile(
+      CHARGEBACK,
+      (source) =>
+        replaceOnce(
+          source,
+          'export function chargebackNetEffectFils(',
+          `export function voidChargeback(): void {}
+
+export function chargebackNetEffectFils(`,
+        ),
+      () => runExpectingFailure('pnpm', ['no-invoice-mutation']),
+    ),
+    'no-invoice-mutation',
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 167y. The real tree, unedited. Every case above is satisfied by a FAILURE, so without this the whole
+  //       block would pass against suites that could not run at all.
+  const purePass = run('pnpm', pureSuites())
+  check(
+    'chargeback: the unit and property suites pass unedited',
+    !purePass.failed,
+    'the refund cap, the entries and the 1,000-case property must pass on the real tree:\n' +
+      `${purePass.output}`,
+  )
+
+  // 167z. The pairing suite, which is the only place ZY431-ZY436 are seen to fire and the only place the
+  //       pure cap and the SQL cap can be compared at all.
+  const pairPass = run('pnpm', pairSuite())
+  check(
+    'chargeback: the pairing suite passes unedited against a real PostgreSQL',
+    !pairPass.failed,
+    'ZY431-ZY436, the deferred pair among them, are proved only here:\n' + `${pairPass.output}`,
   )
 }
 

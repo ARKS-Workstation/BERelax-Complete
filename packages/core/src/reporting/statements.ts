@@ -247,6 +247,23 @@ const BALANCE_SHEET_LINES: readonly StatementLineSpec[] = [
     'natural',
     [ACCOUNTS.gatewayClearing, ACCOUNTS.cardTerminalClearing],
   ),
+  /*
+   * The disputed receipt on a line of its OWN, and deliberately not folded into the clearing line above.
+   *
+   * Both are card money in transit, so one line for the three accounts is the obvious reading. It is
+   * wrong for the reason the account exists: a clearing balance is money the business WILL receive and a
+   * disputed receipt is money it MAY receive, and the second is the figure somebody has to act on. ADR
+   * 0064's partition is what makes a reader able to check either one against its own source.
+   */
+  line(
+    'balance_sheet',
+    'assets',
+    'disputed_card_receipts',
+    'Disputed card receipts',
+    'debit_less_credit',
+    'natural',
+    [ACCOUNTS.disputedCardReceipts],
+  ),
   line(
     'balance_sheet',
     'assets',
@@ -649,6 +666,17 @@ const CASH_FLOW_LINES: readonly StatementLineSpec[] = [
     'credit_less_debit',
     'inverted',
     [ACCOUNTS.gatewayClearing, ACCOUNTS.cardTerminalClearing],
+  ),
+  // Operating, and the same `inverted` sense as the clearing line beside it: a disputed receipt rising
+  // is cash the business has NOT got, so the movement reduces the cash position.
+  line(
+    'cash_flow',
+    'operating',
+    'movement_in_disputed_card_receipts',
+    'Movement in disputed card receipts',
+    'credit_less_debit',
+    'inverted',
+    [ACCOUNTS.disputedCardReceipts],
   ),
   line(
     'cash_flow',

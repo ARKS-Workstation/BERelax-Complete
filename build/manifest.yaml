@@ -21727,10 +21727,19 @@ units:
       with a conformance rule that a cursor must advance. Order-independent convergence is already
       discharged here rather than deferred — reduceIntent sorts by the gateway''s occurredAt before folding,
       so a shuffled delivery converges by construction and Y-PAY-04 needs no buffer.'
-    - 'NOTE: deferred to Y-PAY-08 — the dispute/chargeback events. PAYMENT_INTENT_EVENTS deliberately stops
-      at six and carries no disputed event, and the H02 fake''s -DISPUTE reference marker therefore steers
-      nothing in this adapter. Adding the event is a tsc failure until every row of INTENT_TRANSITIONS and
-      every entry of INTENT_EVENT_CARRIES_AMOUNT answers for it, which is gate case 133k.'
+    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-08) — the dispute/chargeback events.
+      PAYMENT_INTENT_EVENTS deliberately stops at six and carries no disputed event, and the H02 fake''s
+      -DISPUTE reference marker therefore steers nothing in this adapter. Adding the event is a tsc failure
+      until every row of INTENT_TRANSITIONS and every entry of INTENT_EVENT_CARRIES_AMOUNT answers for it,
+      which is gate case 133k. Y-PAY-08 DECLINED to add it, and the reason is now a locked decision rather
+      than a scoping choice: ADR 0089 records that a chargeback is a THIRD PARTY''S DECISION ARRIVING LATE
+      and not a gateway movement of the intent, so it is a `chargeback` row with its own received_at,
+      trading_date and journal entry and writes nothing to payment_intent at all — captured_fils is a
+      projection of the append-only transaction rows (ZY163) and the capture HAPPENED. A `disputed` member
+      would therefore be a lifecycle state nothing transitions into. RE-POINTED to Y-PAY-04, which owns the
+      webhook ingest and is the unit that will actually receive a dispute notice: if the port needs a
+      vocabulary for one, that is the unit that will find out, and `chargeback_position` plus
+      isChargebackRedelivery are what Y-PAY-08 left for it.'
     - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03) — the 3DS demo path. The fake exposes
       completeCustomerAction as its stand-in for a customer returning from a challenge, and it is NOT on the
       port, so the conformance suite cannot reach it. packages/payments/src/index.ts re-exports the
@@ -21808,7 +21817,8 @@ units:
       argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
       surface half-versioned. `handler.ts` beside `route.ts` is the split `app/api/v1/otp` uses, so the
       integration suite drives the same code with a frozen clock and the fake gateway.'
-    - 'NOTE: deferred to Y-PAY-08 (RE-POINTED by Y-PAY-03, then by Y-PAY-06) — authentication on the endpoint.
+    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03, then by Y-PAY-06, then by Y-PAY-08) —
+      authentication on the endpoint.
       The intent route''s audit actor is still `system` with the label `payments intent endpoint`. Y-PAY-03
       discharged the
       half it owns: the CHECKOUT path is authenticated, both of its transports are behind guardAdminRoute, and
@@ -21818,11 +21828,15 @@ units:
       and the brief forbids repairing another unit''s file beyond what the current one needs. Y-PAY-03
       re-pointed it at Y-PAY-06 "which owns the refund screen and will already be holding a session", and
       Y-PAY-06 owns NO screen and mints no session: its refund path is a service and a suite, and the suite
-      drives `withUnitOfWork` directly, which is this unit''s own arrangement. RE-POINTED to Y-PAY-08
-      (refunds, partial refunds and chargebacks), which is the unit the refund screen actually belongs to.
-      The honest statement is that this deferral has now landed twice on a unit chosen for its SUBJECT rather
-      than for owning a route, so Y-PAY-08 should discharge it only if it does build a session-bearing
-      surface, and otherwise re-point it at the unit that does. What Y-PAY-03 DID change
+      drives `withUnitOfWork` directly, which is this unit''s own arrangement. Y-PAY-03 then re-pointed it at
+      Y-PAY-08, which owns no route either — its files are two core modules, a migration, a repository and a
+      property suite, and it mints no session, so it did exactly what the previous NOTE told it to do and
+      RE-POINTED rather than claiming the deferral. It now points at Y-PAY-04, which owns
+      apps/web/app/api/webhooks/payments/route.ts and is the only remaining payments unit that owns a route
+      on this API surface. The honest statement is that this deferral has now landed FOUR times on a unit
+      chosen for its SUBJECT rather than for owning this route, and the pattern is the information: nothing
+      in the Y-PAY series after Y-PAY-03 is scoped to touch /api/v1/payments/intent, so if Y-PAY-04 declines
+      it as well it should become an OPEN-QUESTIONS row or a unit of its own rather than a fifth hop. What Y-PAY-03 DID change
       here is the card-data refusal at the top of the handler — its own SAQ-A gate demanded it, because this
       endpoint takes two caller-chosen free-text fields and wrote both to a row and an audit payload with
       nothing refusing a card number. The opaque token half of this NOTE is SATISFIED: it is
@@ -22402,7 +22416,7 @@ units:
       disputed-receivable clearing account and unwind to net zero when a dispute is won, with business_day
       resolved correctly across the 02:00 boundary.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-01
@@ -22429,6 +22443,17 @@ units:
     - refunding more than was captured, or refunding a voided intent, is refused with a named error
     - a chargeback received at 01:30 resolves to the previous trading date, asserted against the business_day
       primitive
+    - 'NOTE: the chargeback INGEST path is deferred to Y-PAY-04 (webhook ingest), which is still todo. A
+      dispute arrives by webhook, so nothing routes a notice into the chargeback table yet; what this unit
+      ships is the table, the entries, the cap and the refusals, plus the two properties that handler will
+      need — isChargebackRedelivery and the (dispute_ref, kind) unique constraint, so a redelivery is a
+      named refusal it can answer 200 to rather than a bare 23505 it cannot tell from the intent''s own
+      idempotency key.'
+    - 'NOTE: the partial refund''s credit note is issued by M-TILL-08''s existing issueCreditNote and the
+      refund row by 0068''s refund table, which already makes credit_note_id mandatory. This unit adds the
+      CAP (three figures, not two) and the chargeback dimension, and does NOT re-derive the net/VAT split:
+      assertReversalMatches in issue-credit-note.ts holds a note''s figures to the lines it corrects, and a
+      second derivation here would be a second answer to how much VAT the business owes back.'
     files:
     - packages/core/src/payments/refund.ts
     - packages/core/src/ledger/chargeback.ts
