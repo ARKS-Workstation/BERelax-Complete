@@ -13662,7 +13662,7 @@ units:
       states no fact of its own, dim_date is keyed on business_day, and every refresh is CONCURRENT. The test
       port band allocated to this unit was NOT used: nothing here starts a server.'
     files:
-    - packages/db/migrations/NNNN_reporting_schema.sql
+    - packages/db/migrations/0110_reporting_schema.sql
     - packages/db/src/schema/reporting.ts
     - apps/worker/src/jobs/reporting-refresh.ts
     - packages/db/src/reporting.itest.ts
