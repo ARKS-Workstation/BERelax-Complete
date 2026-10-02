@@ -2,13 +2,13 @@
 
 Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by hand.**
 
-**164 / 211 units complete.**
+**165 / 211 units complete.**
 
 ## Next up
 
 1. **B-M1 — M1 Bookable: the end-to-end walkthrough, invariant suite and milestone stop**
-1. **C-AUTO-09 — Node-graph journey builder, with misrouting made impossible**
 1. **C-AUTO-10 — Segments, campaigns, spend caps and window-aware scheduling**  — **needs owner input:** Y6-sender-ids
+1. **P-HR-14 — Therapist self-service portal and staff notifications**
 
 ## All units
 
@@ -100,7 +100,7 @@ Generated from `build/manifest.yaml` by `scripts/progress.py`. **Do not edit by 
 | [x] | 79 | `C-AUTO-04` | The messaging compliance gate: one choke point, code not settings, failing closed | `C-AUTO-01`, `C-AUTO-02`, `C-AUTO-03`, `C-CRM-03`, `C-CRM-04` | — | Y6-sender-ids |
 | [x] | 80 | `C-AUTO-05` | Marketing kill switch and promotional-identity containment | `C-AUTO-04`, `H02` | — | — |
 | [x] | 81 | `C-AUTO-07` | The interpreter on pg-boss: idempotency, loop detection and dry run | `C-AUTO-04`, `C-AUTO-06`, `F06` | — | — |
-| [ ] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
+| [x] | 82 | `C-AUTO-09` | Node-graph journey builder, with misrouting made impossible | `C-AUTO-06`, `C-AUTO-07`, `H04` | — | — |
 | [ ] | 83 | `C-AUTO-10` | Segments, campaigns, spend caps and window-aware scheduling | `C-AUTO-03`, `C-AUTO-04`, `H04` | — | Y6-sender-ids |
 | [ ] | 84 | `C-AUTO-11` | Stock journeys - review solicitation, win-back, birthday - and the M3 proof | `B-MSG-01`, `B-MSG-02`, `B-MSG-03`, `B-MSG-04`, `C-AUTO-07`, `C-AUTO-10`, `H03` | — | Y2-gbp-status, Y9-windows |
 | [x] | 85 | `C-CRM-06` | Duplicate review queue and merge preview | `C-CRM-05`, `H04` | — | — |

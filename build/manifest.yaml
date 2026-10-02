@@ -9822,7 +9822,7 @@ units:
       - refused in the UI and again at the API, because a builder is exactly where someone will try. Before
       saving an edit, the builder states how many enrolments will remain on the current version.'
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - C-AUTO-06
@@ -9845,11 +9845,95 @@ units:
     - Every node can be added, selected, connected and deleted keyboard-only; an accessible list view of
       the graph is present as a non-canvas fallback; axe reports zero serious or critical violations
     - Screenshots captured with animations disabled; two consecutive runs produce zero pixel diff
+    - 'NOTE: the acceptance line "with misrouting made impossible" is read as a claim about a TYPE, and
+      ADR 0081 records why. Six wrong edges have no NAME rather than being refused: an edge out of an exit
+      (exitStep is JourneyStep<never>, so it contributes no outlet key), an edge into the trigger (the
+      trigger is a FIELD of the specification rather than a member of the step record, so the edge map''s
+      value type is keyof steps), an edge on a branch the kind does not declare (the keys are `id:branch`
+      literal types from each step''s own labels), two edges on one branch (an object literal cannot repeat
+      a key), a branch with no edge (every key is required), and a promotional step bound to a transactional
+      template (classedMessageStep takes a TemplateRef<C> minted only by templateChoicesFor, behind a
+      unique symbol). packages/core/src/automation/journey.test.ts proves all six with @ts-expect-error,
+      which is a CHECK and not a comment: a directive that stops erroring is TS2578 and fails pnpm
+      typecheck. Gate cases 159a-159f are the six known-bad fixtures, and each weakens one construct and
+      requires TS2578 back by name.'
+    - 'NOTE: a defect in this unit''s OWN type-level claim, found by this unit''s own gate case, and the
+      most useful thing in this entry. 159e removes NoInfer from classedMessageStep''s template parameter
+      and requires TS2578 back. It first reported "exited zero; nothing was rejected", and the first
+      conclusion drawn - that NoInfer was redundant - was wrong: the two directives in journey.test.ts were
+      erroring for a DIFFERENT reason. PROMOTIONAL[0] is TemplateRef<''promotional''> | undefined, an if
+      (... === undefined) throw at module scope does not narrow it inside a nested function, and what the
+      directives suppressed was "Type ''undefined'' is not assignable". So "a promotional node bound to a
+      transactional template does not compile" - the acceptance line itself - was satisfied for the wrong
+      reason, and would have gone on being satisfied with the class tie cut entirely. mustHold in that file
+      is the fix; re-measured against it, removing NoInfer reports TS2578 twice and so does widening the
+      template to TemplateRef<MessageClass>. No review had caught it, and no runtime test could: ADR 0003
+      doing its job on the one assertion in this unit that cannot be checked any other way.'
+    - 'NOTE: no migration. Allocation 0129 is RELEASED UNUSED, and so is SQLSTATE band ZY351-ZY360 - no code
+      in this unit raises one, and the brief refuses an entry for a code no migration raises. The reason
+      there is nothing to migrate: the operator''s work in progress is NOT a version. flow_definition is
+      append-only and refuses UPDATE (ZF001) precisely so a published version cannot be edited under the
+      enrolments pinned to it, so a flow_draft table would be a second place a graph lives, with its own
+      concurrency question. The draft travels in a hidden form field carrying the candidate document, which
+      is also what makes "save, reload, identical serialised graph" a property of ONE structure rather than
+      a round trip between two.'
+    - 'NOTE: the canvas is DEFERRED and the guarantee is not. reactflow is not in apps/web/package.json and
+      adding a dependency is pnpm deps'' decision rather than one to make quietly, so the builder ships as
+      the accessible list the acceptance asks for as a fallback: a <table> of steps, a <table> of
+      connections, native controls, and no script at all - which is the strongest form of "keyboard-only"
+      there is, because there is no focus management to get wrong. A canvas drawn over the same offers
+      inherits the whole guarantee, because the guarantee is in packages/core and not in the view.
+      Re-skinning onto packages/ui when W-SYS lands will need the visual-regression baselines re-taken, as
+      the provisional field already says.'
+    - 'NOTE: two permissions and no new one invented. campaign:read opens the builder and campaign:send
+      publishes, both through the F07 matrix: manager holds the first and not the second, so the floor
+      manager may look at a journey and the marketer or the owner commits one. Publishing a version
+      authorises every message the journey will ever send, which is the authority campaign:send names. A
+      permission added to PERMISSIONS here would be a permission every role''s literal has to be revisited
+      for, which is the widening the brief warns about.'
+    - 'NOTE: the builder does NOT activate a flow, deliberately. flow.is_active is false until somebody
+      enables it, so enrolOnLiveVersion answers flow_not_active and a publish cannot start messaging anybody
+      by itself; turning a journey on stays with setFlowActive and C-AUTO-05''s kill switch. The itest flips
+      that switch itself, which is why it says so in a comment rather than leaving the reader to wonder why
+      a published journey had no enrolments.'
+    - 'NOTE: nothing here sends. Publishing a journey writes a document; every message it eventually sends
+      is C-AUTO-07''s interpreter step through sendMessage in packages/messaging - the one choke point
+      (C-AUTO-04), with consent, suppression, the frequency cap and the F03 staging guard behind it. No file
+      in this unit imports a provider, touches a transport or enqueues a send, and pnpm send-chokepoint and
+      pnpm chokepoint are the checks that say so.'
+    - 'NOTE: orderJourneyDocument is SHARED by composeJourney and draftDocument, so a journey drawn in one
+      order and the identical journey written as a literal serialise identically - the defect was real and
+      the itest''s final comparison is what found it. It is deliberately NOT inside serialiseFlowDefinition:
+      that function''s contract is the byte form of the document it is GIVEN, and flow-corpus.test.ts asserts
+      twelve committed files equal its output exactly, in traversal order, which is how a person reads a
+      flow.'
+    - 'NOTE: readCurrentTemplateClasses was added to packages/db/src/repositories/flow.ts, where
+      FlowDefinitionValidator is declared, because the builder needs the registry per request and
+      packages/core may not read a database. Four inline copies of that query already exist in
+      flow-versioning.itest.ts, crm-pipeline.itest.ts, interpreter.itest.ts and package-liability.itest.ts''s
+      neighbourhood; they are LEFT ALONE (a unit does not repair another unit''s file beyond what its own
+      work needs) and the reader is exported so the next unit to touch one of them can call it instead.'
+    - 'NOTE: what is NOT tested and why. The direction axis is `?dir=rtl` re-rendering the same ENGLISH
+      document mirrored, for the reason the pipeline board and the duplicate queue both record: a registry
+      document must be served in both locales, which needs an Arabic admin document and the W-SYS-01 shell.
+      It is asserted to be a real axis (document.documentElement.dir, and a mirrored capture that differs
+      from the one it mirrors), because the first version of the suite rendered twelve cells of which six
+      were duplicates and nothing said so. The suite publishes to cauto09_drawn and cauto09_refusals on
+      every run and flow_definition refuses DELETE, so every version number it asserts is RELATIVE to what
+      it read first; cauto09_scratch exists solely to be version-less for ever, which is what makes "the
+      builder opens on nothing drawn" true on the second run as well as the first (C-AUTO-06 keeps
+      cauto06_unpublished for the same reason). The four contacts are on the unallocated +971 59 prefix in
+      band 60801-60804, outside every band another suite uses, and are removed in afterAll - their
+      enrolments go with them, which is why flow_enrolment.customer_id cascades.'
     files:
     - apps/web/app/(admin)/crm/flows/[id]/builder/
     - apps/web/app/(admin)/crm/flows/[id]/builder/nodes/
     - apps/web/app/(admin)/crm/flows/api/
+    - apps/web/src/flow-builder.itest.ts
+    - docs/adr/0081-misrouting-is-made-impossible-by-a-type-and-refused-again-at-the-api.md
     - packages/core/src/automation/dsl.ts
+    - packages/core/src/automation/journey-edits.property.test.ts
+    - packages/core/src/automation/journey.test.ts
   - id: C-AUTO-10
     order: 83
     title: Segments, campaigns, spend caps and window-aware scheduling

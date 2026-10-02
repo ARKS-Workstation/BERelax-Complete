@@ -242,6 +242,15 @@ export const TEST_PORT_BANDS = {
   // 18_800 is the band this unit was allocated. 17_000 through 18_700 are allocations held by units in
   // `template-editor` and `book-flow` came to share one. [18_800, 19_100) contains none of
   'reviews-queue': { start: 18_800, width: 300 },
+  // C-AUTO-09's journey builder, which needs a real server for every claim it makes. Three of them can
+  // only be made against the bytes the application serves: the template picker's `<option>` set for each
+  // message class, the save control's `disabled` attribute on a graph the one verdict refuses, and the
+  // enrolment figure printed beside it — counted in SQL per request, so a prerendered copy would print a
+  // number from before. The fourth is the reload: save, open the page again, and the serialised graph is
+  // byte-identical, which is a claim about two responses.
+  // 19_100 is the band this unit was allocated. 16_800 through 19_000 are allocations held by units in
+  // `template-editor` and `book-flow` came to share one. [19_100, 19_400) contains none of
+  'flow-builder': { start: 19_100, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

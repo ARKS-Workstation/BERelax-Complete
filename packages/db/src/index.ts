@@ -813,6 +813,7 @@ export {
   type PublishedFlowVersion,
   type PublishFlowInput,
   publishFlowDefinition,
+  readCurrentTemplateClasses,
   readEnrolmentPinnedDefinition,
   readFlowByKey,
   readFlowDefinition,

@@ -730,6 +730,54 @@ export const ROUTES = [
       'first ISR page that renders NAP.',
   },
   {
+    id: 'flow-builder',
+    path: '/crm/flows/[id]/builder',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-09s node-graph journey builder: the screen an operator draws a journey on, and the one ' +
+      'surface in this build whose hard requirement is structural rather than visual - a promotional ' +
+      'step cannot be wired to a transactional template, because the type that binds the two is only ' +
+      'inhabited when the classes agree (packages/core/src/automation/dsl.ts). The segment is the flow ' +
+      'KEY and not a uuid: flow has no other handle an operator types, readFlowByKey is the reader ' +
+      'every other caller uses, and a uuid in a URL is a uuid somebody reads aloud. A handler ' +
+      'answering text/html rather than a document, for the reason the pipeline board, the Messages ' +
+      'inbox, the template editor and the duplicate queue all give: a registry document must be served ' +
+      'in BOTH locales, which needs an Arabic admin document and the W-SYS-01 shell. It WRITES - every ' +
+      'graph edit is one POST carrying the whole draft, and Save appends a version through ' +
+      'publishFlowDefinition - and it is authenticated and role-gated (campaign:read opens it, ' +
+      'campaign:send publishes). Dynamic because the page states how many enrolments will remain on ' +
+      'the current version, counted in SQL per request: a prerendered copy would print a figure from ' +
+      'before. The /crm prefix in ADMIN_GROUP_PREFIXES is what makes it noindex. No sampleParams, ' +
+      'because a handler is opened by nothing that needs a real path - and a sample key here would be ' +
+      'a journey the screenshot harness drew on every run.',
+  },
+  {
+    id: 'flow-publish-api',
+    path: '/crm/flows/api',
+    kind: 'handler',
+    rendering: 'dynamic',
+    locales: [],
+    indexable: false,
+    sitemap: false,
+    changefreq: null,
+    why:
+      'C-AUTO-09s publish endpoint: the ONE writer of flow_definition, and the layer that refuses a ' +
+      'misrouting sent by something that never saw a type. The builders Save control posts here and so ' +
+      'does a script, so "refused in the UI and again at the API" is one rule applied twice rather ' +
+      'than two rules that agree today - the acceptance line calls the second half "an API test ' +
+      'bypassing the UI", and flow-dsl-message-class-mismatch is the name it comes back under. POST ' +
+      'only: a journey is READ through the builder, which is a different authority (campaign:read ' +
+      'rather than campaign:send), and an endpoint serving both would be one route with two ' +
+      'permissions. Dynamic because it writes. It reaches no transport and enqueues no send - every ' +
+      'message a published journey eventually sends is C-AUTO-07s interpreter step through the ' +
+      'messaging choke point, which is what pnpm send-chokepoint holds shut.',
+  },
+  {
     id: 'pipeline-board',
     path: '/crm/pipeline',
     kind: 'handler',

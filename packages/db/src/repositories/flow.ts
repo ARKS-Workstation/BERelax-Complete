@@ -2,6 +2,7 @@ import {
   AppError,
   type FlowEnrolmentOutcome,
   MAX_ACTIVE_ENROLMENTS_PER_FLOW,
+  type MessageClass,
 } from '@berelax/shared'
 import type { Sql } from '../connection.ts'
 import type { UnitOfWork } from '../tx.ts'
@@ -308,6 +309,41 @@ export async function countEnrolmentsOnVersion(
        and (${options.activeOnly ?? false} = false or status = 'active')
   `
   return Number(row?.n ?? '0')
+}
+
+/**
+ * Every CURRENT template and the class `message_template` holds for it — the validator's registry, read.
+ *
+ * Added by C-AUTO-09, which needs it per request: the builder's template picker is
+ * `templateChoicesFor(registry, class)` in `@berelax/core`, and the registry is a database fact this
+ * package has to fetch. It lives here rather than in the route because {@link FlowDefinitionValidator}
+ * is declared in this file and this is that type's one dependency — a reader in the route would be the
+ * fifth place this query is written.
+ *
+ * Four copies of it already exist, in `flow-versioning.itest.ts`, `crm-pipeline.itest.ts`,
+ * `interpreter.itest.ts` and `package-liability.itest.ts`'s neighbourhood, each inline in a suite. They
+ * are left alone deliberately (a unit does not repair another unit's file beyond what its own work
+ * needs), and they are the reason this is exported rather than private: the next unit to touch one of
+ * them should call this instead.
+ *
+ * `is_current = true` and not every row, because a template has versions (C-AUTO-01) and the class of a
+ * SUPERSEDED version is not the class a node naming that key would send under. Ordered by key so the
+ * picker's list is stable: an unordered registry would make a screenshot of the picker depend on
+ * physical row order.
+ */
+export async function readCurrentTemplateClasses(
+  sql: Sql,
+): Promise<readonly { readonly templateKey: string; readonly messageClass: MessageClass }[]> {
+  const rows = await sql<{ template_key: string; message_class: string }[]>`
+    select template_key, message_class::text as message_class
+      from message_template
+     where is_current = true
+     order by template_key
+  `
+  return rows.map((row) => ({
+    templateKey: row.template_key,
+    messageClass: row.message_class as MessageClass,
+  }))
 }
 
 // ------------------------------------------------------------------------------------------------
