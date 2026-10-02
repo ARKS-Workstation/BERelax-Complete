@@ -1,5 +1,17 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  check,
+  index,
+  jsonb,
+  pgEnum,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core'
 import { funnelStepName } from './analytics.ts'
 
 /**
@@ -32,19 +44,27 @@ import { funnelStepName } from './analytics.ts'
  *      A destination requiring none would be permitted for every session including one that answered the
  *      banner with a flat no, and the natural way to add a destination is to copy a row and clear the
  *      flags.
- *   5. **There is no `eventId`, no payload, no attempt counter and no per-destination unique index.**
- *      A-MEAS-03 owns the consumer, the retries and the deduplication and adds them with the code that
- *      writes them; a column with no producer is indistinguishable from one whose producer stopped
- *      working, which is the reason A-MEAS-01 gives for keeping the shared `event_id` out of its own
- *      allowlist.
+ *   5. **`eventId`, the payload, the attempt counter, the `failed` state and the per-destination unique
+ *      index arrived with their producer (migration 0137, A-MEAS-03).** 0125 left them out because a
+ *      column with no producer is indistinguishable from one whose producer stopped working; the producer
+ *      is `apps/worker/src/jobs/analytics-dispatch.ts`. Two more triggers the mirror cannot say either:
+ *      `ZY451` freezes a sent row's event id, payload and transmission instant and refuses it leaving
+ *      `sent`, and `ZY452` refuses an attempt counter that decreases.
  */
 
-/** Where a dispatch is in its life. A-MEAS-03 owns transport failure and adds its own value. */
+/**
+ * Where a dispatch is in its life.
+ *
+ * Only `sent` is terminal. `failed` (0137) goes back to `queued` and is re-judged by the ZY312 trigger on
+ * the way, so a dispatch that failed while consent was live is refused rather than transmitted after a
+ * withdrawal.
+ */
 export const analyticsDispatchState = pgEnum('analytics_dispatch_state', [
   'queued',
   'sent',
   'suppressed',
   'cancelled_consent_withdrawn',
+  'failed',
 ])
 
 /**
@@ -115,11 +135,43 @@ export const analyticsDispatch = pgTable(
     decidedAt: timestamp('decided_at', { withTimezone: true }).notNull(),
     transmittedAt: timestamp('transmitted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    /**
+     * The deduplication identity, shared by the on-page tag and the server push (0137).
+     *
+     * `analyticsEventId` in `@berelax/analytics` is a pure function of the aggregate kind, the aggregate
+     * id and the funnel stage, so both surfaces DERIVE the same value rather than one minting it and
+     * telling the other. An offline conversion uploaded two days later has no page to tell.
+     */
+    eventId: text('event_id').notNull(),
+    /** The serialised egress payload that went out, frozen once transmitted (ZY451). */
+    payload: jsonb('payload').notNull(),
+    /**
+     * Where the conversion happened, in the receiving platform's vocabulary (0137).
+     *
+     * STORED and not derived, because nothing in this schema links an analytics session to the booking it
+     * produced — A-FIRST-08 owns attribution and A-FIRST-09 the funnel materialisation — so a consumer
+     * that joined the two through anything available today would be joining on nothing. The enqueuer
+     * knows: it is the booking or the payment path, and `BOOKING_SOURCE_ACTION_SOURCE` in
+     * `@berelax/analytics` maps `booking.source` onto it, total by compilation.
+     */
+    actionSource: text('action_source').notNull(),
+    /**
+     * When the conversion HAPPENED, which is not when the gate judged it (`decidedAt`).
+     *
+     * Two columns and not one, because a platform dates the conversion on this value and every
+     * attribution window is measured from it: an offline conversion stamped with the enqueue instant is
+     * credited to whatever campaign was running on the night the worker ran.
+     */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /** Transport attempts so far. Monotonic (ZY452): a reset restarts the backoff for ever. */
+    attempts: smallint('attempts').notNull().default(0),
+    /** What the transport said last. NOT NULL for `failed`, by CHECK. */
+    lastError: text('last_error'),
   },
   (t) => [
     check(
       'analytics_dispatch_reason_known',
-      sql`${t.reason} is null or ${t.reason} in ('consent_denied', 'consent_withdrawn')`,
+      sql`${t.reason} is null or ${t.reason} in ('consent_denied', 'consent_withdrawn', 'transport_failed')`,
     ),
     check(
       'analytics_dispatch_transmitted_iff_sent',
@@ -127,7 +179,7 @@ export const analyticsDispatch = pgTable(
     ),
     check(
       'analytics_dispatch_reason_iff_refused',
-      sql`(${t.state} in ('suppressed', 'cancelled_consent_withdrawn')) = (${t.reason} is not null)`,
+      sql`(${t.state} in ('suppressed', 'cancelled_consent_withdrawn', 'failed')) = (${t.reason} is not null)`,
     ),
     check(
       'analytics_dispatch_suppression_is_a_denial',
@@ -137,7 +189,31 @@ export const analyticsDispatch = pgTable(
       'analytics_dispatch_cancellation_is_a_withdrawal',
       sql`${t.state} <> 'cancelled_consent_withdrawn' or ${t.reason} = 'consent_withdrawn'`,
     ),
+    // 0137's third sibling, beside the two above rather than folded into them: three narrow rules fail by
+    // name, where one alternation fails by saying a row is wrong.
+    check(
+      'analytics_dispatch_failure_is_a_transport_failure',
+      sql`${t.state} <> 'failed' or ${t.reason} = 'transport_failed'`,
+    ),
+    // A CHECK and not an enum, for the reason 0125 gives about `reason`: the vocabulary is the receiving
+    // platform's and this build does not own it, so a fourth value is an ALTER of one constraint rather
+    // than a type the whole schema depends on.
+    check(
+      'analytics_dispatch_action_source_known',
+      sql`${t.actionSource} in ('website', 'phone_call', 'physical_store')`,
+    ),
+    check('analytics_dispatch_occurred_before_decided', sql`${t.occurredAt} <= ${t.decidedAt}`),
+    check(
+      'analytics_dispatch_outcome_had_an_attempt',
+      sql`${t.state} not in ('sent', 'failed') or ${t.attempts} > 0`,
+    ),
+    check(
+      'analytics_dispatch_failure_carries_its_error',
+      sql`(${t.state} = 'failed') <= (${t.lastError} is not null)`,
+    ),
     index('analytics_dispatch_queued_idx').on(t.sessionId),
     index('analytics_dispatch_state_idx').on(t.state, t.decidedAt.desc()),
+    index('analytics_dispatch_due_idx').on(t.decidedAt),
+    uniqueIndex('analytics_dispatch_event_destination_unique').on(t.eventId, t.destination),
   ],
 )

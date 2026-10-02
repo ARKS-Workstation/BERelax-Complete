@@ -1,4 +1,6 @@
+import { analyticsEventId, dispatchPayloadBytes } from '@berelax/analytics'
 import {
+  buildEgressPayload,
   CONSENT_GATED_TARGET_IDS,
   consentGatedTarget,
   consentStateFromSessionRow,
@@ -21,8 +23,41 @@ import {
   ANALYTICS_CONSENT_WORDING,
   CONSENT_MODE_SIGNALS,
   type ConsentModeSignal,
+  type FunnelStage,
 } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+/**
+ * The two fields migration 0137 (A-MEAS-03) made NOT NULL on `analytics_dispatch`.
+ *
+ * This file's subject is the GATE and not the transport, so the identity and the payload are supplied the
+ * way the real consumer supplies them rather than with placeholders: `analyticsEventId` is the same pure
+ * derivation the on-page tag uses, and the payload is a real branded `EgressPayload` serialised by the one
+ * serialiser. A literal string in either place would have made these cases pass against a column whose
+ * shape nothing checks — and `payload` is `jsonb`, so a non-JSON placeholder would have failed anyway for
+ * a reason that had nothing to do with consent.
+ *
+ * The event id is derived from the SESSION rather than from a booking, which is what keeps the cases
+ * independent: the unique index is on `(event_id, destination)`, so two cases enqueuing the same stage to
+ * the same destination would collide on the second if the id did not vary with the fixture's own session.
+ */
+const dispatchEventId = (sessionId: string, stage: FunnelStage): string =>
+  analyticsEventId({ kind: 'booking', aggregateId: sessionId, stage })
+
+/**
+ * The action source and the conversion instant 0137 also made NOT NULL.
+ *
+ * `'website'` and the fixture's own frozen instant, because this file's subject is the GATE: every case
+ * here is about which signals permit a dispatch, and the channel a booking came through has nothing to do
+ * with that. `occurredAtIso` is the same instant as `decidedAtIso`, which the table's
+ * `occurred_at <= decided_at` CHECK admits and which is what a LIVE conversion looks like — an offline
+ * upload's earlier instant is A-MEAS-05's subject.
+ */
+const dispatchPayload = (stage: FunnelStage): string =>
+  dispatchPayloadBytes(
+    buildEgressPayload({ ref: { kind: 'package_template' }, eventType: stage, quantity: 1 })
+      .payload,
+  )
 
 /**
  * The analytics consent store and the dispatch gate, against a real PostgreSQL (A-MEAS-02).
@@ -445,6 +480,10 @@ describe('enqueueing a dispatch', () => {
       destination: 'analytics_measurement_push',
       funnelStage: 'booking_created',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'booking_created'),
+      payload: dispatchPayload('booking_created'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     expect(permitted).toMatchObject({ state: 'queued', reason: null, missing: [] })
 
@@ -453,6 +492,10 @@ describe('enqueueing a dispatch', () => {
       destination: 'advertising_conversion_push',
       funnelStage: 'booking_created',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'booking_created'),
+      payload: dispatchPayload('booking_created'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     // The acceptance line, verbatim: not enqueued, and a row is written with reason = 'consent_denied',
     // so the suppression is visible rather than silent.
@@ -509,6 +552,10 @@ describe('enqueueing a dispatch', () => {
         destination: 'analytics_measurement_push',
         funnelStage: 'booking_created',
         decidedAtIso: AT,
+        eventId: dispatchEventId('00000000-0000-7000-8000-000000000000', 'booking_created'),
+        payload: dispatchPayload('booking_created'),
+        actionSource: 'website',
+        occurredAtIso: AT,
       }),
     ).rejects.toSatisfy(
       (error: unknown) => analyticsConsentStoreRefusalOf(error) === 'dispatch_consent_unreadable',
@@ -562,6 +609,10 @@ describe('withdrawing consent', () => {
       destination: 'advertising_conversion_push',
       funnelStage: 'booking_created',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'booking_created'),
+      payload: dispatchPayload('booking_created'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     expect(queued.state, 'the fixture must have something queued to cancel').toBe('queued')
 
@@ -612,6 +663,10 @@ describe('withdrawing consent', () => {
       destination: 'analytics_measurement_push',
       funnelStage: 'confirmed',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'confirmed'),
+      payload: dispatchPayload('confirmed'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     expect(nextTime).toMatchObject({ state: 'suppressed', reason: 'consent_denied' })
     expect([...consentStateFromSessionRow(await sessionConsentRow(sql, sessionId))]).toEqual([])
@@ -624,6 +679,10 @@ describe('withdrawing consent', () => {
       destination: 'advertising_conversion_push',
       funnelStage: 'booking_created',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'booking_created'),
+      payload: dispatchPayload('booking_created'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     await withdrawAnalyticsConsent(sql, {
       visitorId,
@@ -638,7 +697,7 @@ describe('withdrawing consent', () => {
       sql`update analytics_dispatch set state = 'queued', reason = null
            where dispatch_id = ${queued.dispatchId}::uuid`,
       sql`update analytics_dispatch set state = 'sent', reason = null,
-                 transmitted_at = ${AT}::timestamptz
+                 transmitted_at = ${AT}::timestamptz, attempts = 1
            where dispatch_id = ${queued.dispatchId}::uuid`,
     ]) {
       await expect(statement).rejects.toMatchObject({
@@ -670,12 +729,16 @@ describe('withdrawing consent', () => {
       destination: 'advertising_conversion_push',
       funnelStage: 'booking_created',
       decidedAtIso: AT,
+      eventId: dispatchEventId(sessionId, 'booking_created'),
+      payload: dispatchPayload('booking_created'),
+      actionSource: 'website',
+      occurredAtIso: AT,
     })
     // Transmission is A-MEAS-03's, so the fixture performs it: while consent still stands, the trigger
     // permits the move to `sent`.
     await sql`
       update analytics_dispatch
-         set state = 'sent', transmitted_at = ${AT}::timestamptz
+         set state = 'sent', transmitted_at = ${AT}::timestamptz, attempts = 1
        where dispatch_id = ${queued.dispatchId}::uuid
     `
     await withdrawAnalyticsConsent(sql, {

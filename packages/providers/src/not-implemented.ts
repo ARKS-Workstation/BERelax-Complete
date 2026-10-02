@@ -52,6 +52,26 @@ export const PENDING: Readonly<Record<string, PendingIntegration>> = {
     needs: 'a chosen gateway, a merchant account and an MCC (docs/05). Cards are explicitly later',
   },
   llm: { unit: 'G-SEO', needs: 'an API key and a monthly token budget the owner agrees to' },
+  /*
+   * The two analytics destinations (A-MEAS-03). Their prerequisites are DIFFERENT and are stated
+   * separately for the reason `google-places` is separated from `google-business-profile`: one of the two
+   * needs a review nobody can hurry, and an operator reading the wrong message waits for the wrong thing.
+   * Both are open as OPEN-QUESTIONS `Y1-analytics-credentials`.
+   */
+  'ga4-measurement-protocol': {
+    unit: 'A-MEAS',
+    needs:
+      'a GA4 property with a measurement id and an API secret, plus an answer to the lawful basis for ' +
+      'the push (docs/01 decision 14, OPEN-QUESTIONS Y1-analytics-credentials and Y5-analytics-basis)',
+  },
+  'meta-conversions-api': {
+    unit: 'A-MEAS',
+    // Deliberately NOT the GA4 prerequisite: Meta's dataset is behind Business verification, which is an
+    // application somebody reviews, where a GA4 property is created in an afternoon.
+    needs:
+      'a Meta dataset id, a CAPI access token and completed Meta Business verification, which is granted ' +
+      'by review (OPEN-QUESTIONS Y1-analytics-credentials)',
+  },
 }
 
 /**

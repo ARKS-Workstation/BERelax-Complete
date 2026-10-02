@@ -463,6 +463,15 @@ export {
   withdrawAnalyticsConsent,
 } from './repositories/analytics-consent.ts'
 export {
+  analyticsDispatchStateCounts,
+  DISPATCH_ATTEMPT_OUTCOMES,
+  type DispatchAttemptOutcome,
+  type DueDispatch,
+  type DueDispatchQuery,
+  dueAnalyticsDispatches,
+  recordDispatchAttempt,
+} from './repositories/analytics-dispatch.ts'
+export {
   type DecidedTransition,
   TRANSITION_REFUSALS,
   type TransitionActor,

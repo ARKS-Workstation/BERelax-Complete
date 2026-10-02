@@ -230,6 +230,19 @@ export interface DispatchEnqueueResult {
   readonly reason: 'consent_denied' | null
   /** The required signals the session did not grant, sorted. Empty exactly when queued. */
   readonly missing: readonly string[]
+  /**
+   * True when a row for this `(event_id, destination)` was ALREADY there and nothing was written.
+   *
+   * A-MEAS-03's acceptance line "replaying the outbox event twice writes no second dispatch" is this
+   * field, and the mechanism behind it is the unique index 0137 adds rather than a check in the caller:
+   * the second insert conflicts whichever call site makes it. Reported rather than swallowed, because a
+   * replay that was absorbed and a dispatch that was newly enqueued are different facts and a consumer
+   * counting pushes must not count the first.
+   *
+   * The state returned is then the EXISTING row's — read back, not assumed — so a replay of an event
+   * whose first dispatch was suppressed does not report itself as newly queued.
+   */
+  readonly alreadyPresent: boolean
 }
 
 /**
@@ -257,6 +270,34 @@ export async function enqueueAnalyticsDispatch(
     readonly destination: string
     readonly funnelStage: string
     readonly decidedAtIso: string
+    /**
+     * The shared event identity (0137, A-MEAS-03), derived by `analyticsEventId` in `@berelax/analytics`.
+     *
+     * An argument rather than something this function mints, and that is ADR 0001 rather than a
+     * preference: `packages/db` may not import `packages/core`, where the derivation's inputs live, and
+     * a second derivation here would be the second statement of an identity the on-page tag also
+     * computes — which is the one fact that must be identical on both surfaces.
+     */
+    readonly eventId: string
+    /** The serialised egress payload, from `dispatchPayloadBytes`. Stored so A-MEAS-07 has both sides. */
+    readonly payload: string
+    /**
+     * Where the conversion happened, from `BOOKING_SOURCE_ACTION_SOURCE` in `@berelax/analytics`.
+     *
+     * An argument because the ENQUEUER knows and the consumer cannot: nothing in this schema links an
+     * analytics session to the booking it produced (A-FIRST-08 owns attribution, A-FIRST-09 the funnel
+     * materialisation), so a consumer that derived it would be deriving it from nothing. Mapped by the
+     * caller rather than here, because `packages/db` may not import the mapping's home.
+     */
+    readonly actionSource: string
+    /**
+     * When the conversion HAPPENED, which for an offline upload is days before `decidedAtIso`.
+     *
+     * Separate from the decision instant because a platform dates the conversion on this value and every
+     * attribution window is measured from it. The table refuses one after the decision, which is also
+     * what refuses a future instant.
+     */
+    readonly occurredAtIso: string
   },
 ): Promise<DispatchEnqueueResult> {
   try {
@@ -267,7 +308,8 @@ export async function enqueueAnalyticsDispatch(
         select dispatch_consent_gap(${input.sessionId}::uuid, ${input.destination}) as missing
       )
       insert into analytics_dispatch (
-        session_id, destination, funnel_stage, state, reason, decided_at
+        session_id, destination, funnel_stage, state, reason, decided_at, event_id, payload,
+        action_source, occurred_at
       )
       select
         ${input.sessionId}::uuid,
@@ -277,23 +319,56 @@ export async function enqueueAnalyticsDispatch(
              then 'queued'::analytics_dispatch_state
              else 'suppressed'::analytics_dispatch_state end,
         case when cardinality(gap.missing) = 0 then null else 'consent_denied' end,
-        ${input.decidedAtIso}::timestamptz
+        ${input.decidedAtIso}::timestamptz,
+        ${input.eventId},
+        ${input.payload}::jsonb,
+        ${input.actionSource},
+        ${input.occurredAtIso}::timestamptz
         from gap
+      -- The replay. DO NOTHING and not DO UPDATE: the first row is the record of what was decided
+      -- about this conversion, and overwriting it with a second decision would lose the first, which is
+      -- the whole of A-MEAS-07's comparison.
+      on conflict (event_id, destination) do nothing
       returning dispatch_id, state::text as state, reason,
                 (select missing from gap) as missing
     `
     const row = rows[0]
     if (row === undefined) {
-      throw new AppError(
-        'invariant_violated',
-        'analytics_dispatch insert returned no row, so whether the dispatch was enqueued is unknown.',
-      )
+      /*
+       * Nothing was inserted, which with `on conflict do nothing` means a row for this
+       * `(event_id, destination)` was already there. The EXISTING row is read back rather than its state
+       * being assumed: a replay of an event whose first dispatch was suppressed must not report itself as
+       * newly queued, and a caller that counted it as a push would count a conversion that never went out.
+       */
+      const existing = await sql<{ dispatch_id: string; state: string; reason: string | null }[]>`
+        select dispatch_id, state::text as state, reason
+          from analytics_dispatch
+         where event_id = ${input.eventId} and destination = ${input.destination}
+      `
+      const present = existing[0]
+      if (present === undefined) {
+        throw new AppError(
+          'invariant_violated',
+          'analytics_dispatch inserted no row and no row for that (event_id, destination) exists, so ' +
+            'whether the dispatch was enqueued is unknown. The unique index 0137 creates is the only ' +
+            'reason the insert can be a no-op.',
+          { details: { eventId: input.eventId, destination: input.destination } },
+        )
+      }
+      return {
+        dispatchId: present.dispatch_id,
+        state: present.state === 'queued' ? 'queued' : 'suppressed',
+        reason: present.reason === 'consent_denied' ? 'consent_denied' : null,
+        missing: [],
+        alreadyPresent: true,
+      }
     }
     return {
       dispatchId: row.dispatch_id,
       state: row.state === 'queued' ? 'queued' : 'suppressed',
       reason: row.reason === 'consent_denied' ? 'consent_denied' : null,
       missing: [...row.missing].sort(),
+      alreadyPresent: false,
     }
   } catch (error) {
     if (sqlstateOf(error) === ANALYTICS_CONSENT_SQLSTATE.dispatchConsentGate) {

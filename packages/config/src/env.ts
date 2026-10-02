@@ -33,6 +33,21 @@ const schema = z
     PAYMENT_PROVIDER: providerMode.default('fake'),
     LLM_PROVIDER: providerMode.default('fake'),
     /**
+     * The GA4 Measurement Protocol and Meta Conversions API adapters (A-MEAS-03).
+     *
+     * One key for both destinations rather than two, which is the opposite of the SMS/EMAIL split and
+     * matches `GOOGLE_PROVIDER` covering four Google services: a deployment that has flipped analytics to
+     * real has real analytics credentials, and a state in which one platform was fake and the other real
+     * would be a state nothing in the health panel could describe. There is neither today — OPEN-QUESTIONS
+     * `Y1-analytics-credentials` — so `real` resolves to `notImplemented` and `fake` is the only value
+     * that does anything.
+     *
+     * In the refused-outside-production list below, for the reason SMS and EMAIL are: an advertising
+     * account has no test recipient. A staging run's conversions land in the same property the owner
+     * reads, inflate what a campaign is optimised on, and cannot be removed.
+     */
+    ANALYTICS_PROVIDER: providerMode.default('fake'),
+    /**
      * Where media derivatives are written.
      *
      * In the refused-outside-production list below, and the reason is the private bucket rather than
@@ -198,6 +213,7 @@ const schema = z
         ['EMAIL_PROVIDER', cfg.EMAIL_PROVIDER],
         ['GOOGLE_PROVIDER', cfg.GOOGLE_PROVIDER],
         ['PAYMENT_PROVIDER', cfg.PAYMENT_PROVIDER],
+        ['ANALYTICS_PROVIDER', cfg.ANALYTICS_PROVIDER],
         ['MEDIA_STORAGE', cfg.MEDIA_STORAGE],
       ] as const
     ).filter(([, mode]) => mode === 'real')

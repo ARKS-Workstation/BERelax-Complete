@@ -9,6 +9,7 @@ import {
 } from './automation/runtime.ts'
 import { createBoss, shutdown } from './boss.ts'
 import { enqueue, transactionalEnqueue } from './enqueue.ts'
+import { setAnalyticsDispatchSql } from './jobs/analytics-dispatch.ts'
 import { setAnalyticsMaintenanceSql } from './jobs/analytics-partitions.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
@@ -121,6 +122,11 @@ async function main(): Promise<void> {
   // the business day comes from `tradingDateAt` over the job context's instant, and it THROWS rather than
   // truncating a timestamp when the trading calendar holds nothing for it.
   setCashForecastSql(sql)
+  // A-MEAS-03's dispatch consumer, before `startWorkers` for the same reason. It builds its provider
+  // registry per RUN rather than here, because `ANALYTICS_PROVIDER` decides whether the pass talks to a
+  // stand-in and a value captured at boot would survive a restart-free configuration change while the log
+  // line went on claiming a real push.
+  setAnalyticsDispatchSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first

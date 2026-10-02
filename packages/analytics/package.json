@@ -1,0 +1,17 @@
+{
+  "name": "@berelax/analytics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./port": "./src/port.ts",
+    "./registry": "./src/registry.ts"
+  },
+  "dependencies": {
+    "@berelax/config": "workspace:*",
+    "@berelax/core": "workspace:*",
+    "@berelax/providers": "workspace:*",
+    "@berelax/shared": "workspace:*"
+  }
+}

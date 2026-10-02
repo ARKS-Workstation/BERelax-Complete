@@ -23,6 +23,7 @@ import type { Job, PgBoss } from 'pg-boss'
 import { FLOW_TICK_JOB } from './automation/interpreter.ts'
 import type { JobContext, JobDefinition, JobHandler } from './job.ts'
 import { runWatchdog } from './jobs/agent-watchdog.ts'
+import { ANALYTICS_DISPATCH_JOB_DEFINITION } from './jobs/analytics-dispatch.ts'
 import {
   ANALYTICS_PARTITIONS_JOB_DEFINITION,
   ANALYTICS_RETENTION_JOB_DEFINITION,
@@ -520,6 +521,14 @@ export const JOB_REGISTRY: readonly JobDefinition<never>[] = [
   // 0064's argument for the statements, inherited), so what the cron buys is that the figures this build
   // REFUSES to produce are seen rather than silently rendered as zero (ADR 0073).
   CASH_FORECAST_JOB_DEFINITION,
+  // A-MEAS-03's dispatch consumer at every fifth minute, and the first cron here whose subject is an
+  // OUTBOUND queue rather than a report or a sweep. A cron and not a queue the enqueue announces, which is
+  // the opposite of what BUILD_DERIVATIVES_JOB and RECONCILE_DLR_JOB chose: a dispatch is a row the consent
+  // gate left in `queued`, and the reasons it is still there include "the far end was down for an hour"
+  // and "the consumer stopped" — neither of which an announcement can cover, because the announcement
+  // already happened. What has to be watched is the absence of a drain. Its declared interval in 0137 is
+  // 300 seconds, which is what makes the watchdog's "no success within twice the interval" mean something.
+  ANALYTICS_DISPATCH_JOB_DEFINITION,
 ]
 
 /**
