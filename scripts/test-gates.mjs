@@ -47507,6 +47507,386 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 151a-151z. (R-REP-06) The 13-week cash forecast and the seasonality model: every way a PROJECTION
+//            could come to read as a measurement, shown to be caught, and every refusal shown to be
+//            able to stop refusing.
+//
+//            The unit's acceptance lines are one subtraction and one quotient, so almost nothing here is
+//            about arithmetic. What it is about is that **a forecast is a number nobody can check until
+//            it is too late.** Every other figure in the R-REP set can be audited the moment it is
+//            published — a statement line drills to `journal_line`, a KPI names the expression it came
+//            from, a margin names the costs it is missing — and a closing-cash figure for week nine can
+//            only be checked in week nine, by which time the decision it was read for has been taken.
+//
+//            So the cases come in four groups and each fails in a way the others cannot see:
+//
+//              * **the marking.** 151a to 151e break the figure lattice, the publish function's
+//                qualifier, the always-present caveat and the one-measured-figure rule. Every one of
+//                them turns a projection into something a screen would render as a fact, which is the
+//                only direction that matters here.
+//              * **the refusals.** 151f to 151h break the payroll refusal, the seasonality occurrence
+//                floor and the observance split. A refusal turned into a number is an understated
+//                outflow or a flat 1.00, and both read as good news.
+//              * **what the forecast may be DERIVED from.** 151i is the arch rule and 151j its own scan
+//                with a planted import: `cash-forecast.ts` may not import `seasonality.ts`, because an
+//                index over almost nothing multiplied into a cash figure leaves no trace in the number
+//                it changed (ADR 0073). 151k is the hours denominator, which only a reader of
+//                `dim_date.open_minutes` answers.
+//              * **the gates this unit had to stay inside.** 151l: no clock in the forecast arithmetic,
+//                which is what makes two runs byte-identical. 151m: `packages/db` may not import
+//                `packages/core`, which is why the pairing suite is in `packages/fixtures`. 151n is a
+//                scan of its own: no account code may be written in the query module.
+//
+//            151y and 151z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the two pure suites and the pairing suite,
+//            all unedited.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const FORECAST = 'packages/core/src/reporting/cash-forecast.ts'
+  const SEASONALITY = 'packages/core/src/reporting/seasonality.ts'
+  const FORECAST_SUITE = 'packages/core/src/reporting/cash-forecast.test.ts'
+  const SEASONALITY_SUITE = 'packages/core/src/reporting/seasonality.test.ts'
+  const FORECAST_QUERIES = 'packages/db/src/reporting/forecast-queries.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/cash-forecast.itest.ts'
+  const JOB_SUITE = 'apps/worker/src/jobs/cash-forecast.itest.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    FORECAST_SUITE,
+    SEASONALITY_SUITE,
+  ]
+  const pairSuite = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+    JOB_SUITE,
+  ]
+
+  /** Breaks one line of a shipped module and requires the test written for it back by name. */
+  const breakAndExpect = (name, file, find, into, rule) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', pureSuites()),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the marking -----------------------------------------------------------------------------
+
+  // 151a. The lattice, which is the whole mechanism. A sum as weak as its weakest part is what makes a
+  //       week's closing cash `projected` the moment one projected amount reaches it. Pin `projected`
+  //       at the same rank as `committed` and a figure that had an assumption applied to it reports as a
+  //       quantity on file — the same number, and a different claim.
+  breakAndExpect(
+    'forecast: a projected figure ranked as strong as a committed one fails by name',
+    FORECAST,
+    '  projected: 2,',
+    '  projected: 3,',
+    'never reports a sum stronger than its weakest part',
+  )
+
+  // 151b. And the other direction: `measured` surviving a sum it should not. A bank balance added to a
+  //       contracted amount is not a bank balance, and a screen told the sum was measured has no reason
+  //       to doubt a figure about the future.
+  //       The rule asserted back is the PUBLISH one and not the counting one, and the reason is worth
+  //       stating: with every committed sum marked measured, `publishForecastFigure` hands a figure
+  //       about the future back with an EMPTY qualifier, which is the actual harm. The counting rule
+  //       does not fire, because a week's closing cash reaches the projected branch before this line.
+  breakAndExpect(
+    'forecast: a sum that keeps the measured state through a committed part fails by name',
+    FORECAST,
+    "    state: weakest === 'measured' ? ('measured' as const) : ('committed' as const),",
+    "    state: 'measured' as const,",
+    'hands back a printable number only with the words that must appear beside it',
+  )
+
+  // 151c. The poisoning. Drop the refusal branch and an unknown part contributes nothing to the sum and
+  //       nothing to the refusal, so the closing cash is a NUMBER computed over the costs that happened
+  //       to be known — the understated outflow that overstates cash, which is ADR 0070's direction
+  //       argument at its sharpest in this build.
+  breakAndExpect(
+    'forecast: an unattributable part summed as nothing rather than as a refusal fails by name',
+    FORECAST,
+    "  const refused = parts.filter((part) => part.state === 'unattributable')",
+    '  const refused: ForecastFigure[] = []',
+    'refuses a closing figure in every week when payroll cannot be placed',
+  )
+
+  // 151d. The qualifier. `publishForecastFigure` is the only way to a printable number and it hands the
+  //       words back with it; blank the projected qualifier and a projection prints as a bare figure.
+  breakAndExpect(
+    'forecast: a projected figure published with no qualifier fails by name',
+    FORECAST,
+    "        qualifier: `forecast — projected on ${figure.assumptionIds.join(', ')}`,",
+    "        qualifier: '',",
+    'hands back a printable number only with the words that must appear beside it',
+  )
+
+  // 151e. The caveat no input can remove. It is DERIVED — one entry per assumption used, plus the
+  //       constant — so dropping the constant leaves a caveat list that is still non-empty whenever an
+  //       assumption was used, which is exactly why "the caveats are not empty" would not have been a
+  //       check.
+  breakAndExpect(
+    'forecast: an artefact built without the caveat no input can remove fails by name',
+    FORECAST,
+    '    caveats: Object.freeze([FORECAST_CAVEAT, ...used.map((assumption) => assumption.statement)]),',
+    '    caveats: Object.freeze([...used.map((assumption) => assumption.statement)]),',
+    'carries a caveat no input can remove',
+  )
+
+  // ---- the refusals ----------------------------------------------------------------------------
+
+  // 151f. The payroll refusal, which is this unit's measured answer over this build's own data. Blind
+  //       the pay-date half and the forecast starts producing a figure for a horizon it cannot place a
+  //       wage bill in: three settlements in thirteen weeks, so the error is a whole month's payroll
+  //       moving into or out of the artefact rather than a rounding.
+  breakAndExpect(
+    'forecast: a payroll census that ignores the missing pay date fails by name',
+    FORECAST,
+    '  if (!census.aPayDateIsRecordedAnywhere) {',
+    '  if (false) {',
+    'refuses when no pay date is recorded, naming Y8-payroll-date',
+  )
+
+  // 151f(ii). And the other half of the same mapping, because the two gaps are independent and a census
+  //           in which both hold — which is this build's own state, and what the pairing suite reads —
+  //           would still refuse with one branch missing. Only a case per branch can see that.
+  breakAndExpect(
+    'forecast: a payroll census that ignores an unpriced employee fails by name',
+    FORECAST,
+    '  if (census.unpricedEmployeeIds.length > 0) {',
+    '  if (false) {',
+    'refuses when a wage is missing, naming Y8-staff',
+  )
+
+  // 151g. The seasonality occurrence floor, and the single most dangerous value in this unit. Drop the
+  //       floor and a bucket with ONE observation produces an index — and the index a business with no
+  //       seasonal history produces is near enough 1.00 to read as "this business is not seasonal",
+  //       which docs/06 B6 says is wrong twice a year.
+  breakAndExpect(
+    'seasonality: an index computed below the occurrence floor fails by name',
+    SEASONALITY,
+    '  if (occurrences < input.minimumOccurrences) {',
+    '  if (false) {',
+    'returns no_data naming its observation count',
+  )
+
+  // 151h. The observance split. Put a lunar-dated day on the confirmed side and the impact of a date
+  //       nobody has announced is reported where nobody would know to doubt it — which is the fourth
+  //       acceptance line's whole subject.
+  breakAndExpect(
+    'seasonality: a provisional observance reported on the confirmed side fails by name',
+    SEASONALITY,
+    '  const provisionalDates = new Set(provisional.map((day) => day.businessDay as string))',
+    '  const provisionalDates = new Set<string>()',
+    'reports the lunar holiday on the provisional side',
+  )
+
+  // ---- what the forecast may be DERIVED from ---------------------------------------------------
+
+  // 151i. The refusal that makes the pure layer's guarantee sound. `LunarDatePresentedAsSettled` can only
+  //       be relied on while the DATABASE refuses the row, so blinding the pure refusal must be caught —
+  //       and the pairing suite separately probes the constraint itself.
+  breakAndExpect(
+    'seasonality: a lunar date accepted as settled fails by name',
+    SEASONALITY,
+    '      throw new LunarDatePresentedAsSettled(day.businessDay)',
+    '      void day',
+    'refuses a lunar-dated holiday presented as settled',
+  )
+
+  // 151j. **The decision of ADR 0073, as a scan.**
+  //
+  //       `cash-forecast.ts` may not import `seasonality.ts`. The forecast is built only from
+  //       commitments already on file — the measured cash position, contracted cost occurrences,
+  //       bookings at their snapshotted price, payroll settlements — and never from an extrapolation of
+  //       history. A seasonality index over a business with weeks of trading is an index over almost
+  //       nothing, and multiplying a cash figure by one changes the number with no trace left in it of
+  //       what was assumed. Keeping the two modules unconnected is what makes that impossible rather
+  //       than merely absent.
+  //
+  //       The scan is this case's own, because the rule is about one file in one direction — a
+  //       `depcruise` rule would have to be about a package pair, and both modules are in `packages/core`
+  //       — and `pnpm boundaries` cannot express "A may not import B inside one package" without a rule
+  //       nobody else needs. The known-bad fixture plants the import and the scan must see it.
+  {
+    const forecastImportsSeasonality = (source) =>
+      /from\s+'\.\/seasonality\.ts'/.test(source) || /require\(['"]\.\/seasonality/.test(source)
+    check(
+      'forecast: the cash forecast imports nothing from the seasonality module',
+      !forecastImportsSeasonality(readFileSync(FORECAST, 'utf8')),
+      `${FORECAST} imports ./seasonality.ts. The forecast may be derived only from commitments already ` +
+        'on file (ADR 0073); a seasonality index over weeks of history multiplied into a cash figure is ' +
+        'an assumption that leaves no trace in the number it changed.',
+    )
+    // And the known-bad fixture, because a scan that has never been seen to fire is not a scan
+    // (ADR 0003). The control is the same scan over a file that DOES contain the import.
+    const planted = withEditedFile(
+      FORECAST,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { divideHalfUp, WHOLE_IN_BASIS_POINTS } from './operational-kpis.ts'",
+          [
+            "import { divideHalfUp, WHOLE_IN_BASIS_POINTS } from './operational-kpis.ts'",
+            "import { SEASONALITY_BUCKETS } from './seasonality.ts'",
+            'export const GATE_FIXTURE_BUCKETS = SEASONALITY_BUCKETS',
+          ].join('\n'),
+        ),
+      () => forecastImportsSeasonality(readFileSync(FORECAST, 'utf8')),
+    )
+    check(
+      'forecast: the seasonality-import scan sees a planted import',
+      planted,
+      'the scan found no import in a file that had one planted in it, so it would pass over the ' +
+        'defect it exists to refuse',
+    )
+  }
+
+  // 151k. The hours denominator, which is the third acceptance line. The seasonality index is a quotient
+  //       of the REGISTERED RevPARH over two populations, so the denominator reaches
+  //       `dim_date.open_minutes` through R-REP-03's own measure and this unit states no hours
+  //       arithmetic at all. Replace the registered KPI's id with a literal and the index stops being
+  //       that quotient — which the pure suite notices, because it compares the index against the
+  //       registry's own figure and against a registry the KPI has been removed from.
+  breakAndExpect(
+    'seasonality: an index that does not go through the registered RevPARH fails by name',
+    SEASONALITY,
+    '  const result = resolveKpi(REVENUE_PER_AVAILABLE_ROOM_HOUR.id, registry).compute({',
+    "  const result = resolveKpi('room_utilisation', registry).compute({",
+    'reaches the hours denominator through the REGISTERED RevPARH',
+  )
+
+  // ---- the gates this unit had to stay inside --------------------------------------------------
+
+  // 151l. No clock in the forecast arithmetic. It is what makes "two runs under the frozen clock produce
+  //       byte-identical output" a property of the module rather than of the caller: with an instant in
+  //       here, the same input would produce different bytes on two days and the acceptance line could
+  //       not be stated at all.
+  checkRejectedBy(
+    'forecast: a clock read in the cash-forecast module fails the purity gate',
+    withEditedFile(
+      FORECAST,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const FORECAST_FORMAT_VERSION = 'cash-forecast-1'",
+          [
+            'export const GATE_FIXTURE_NOW = Date.now()',
+            '',
+            "export const FORECAST_FORMAT_VERSION = 'cash-forecast-1'",
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['purity']),
+    ),
+    'reading the clock',
+  )
+
+  // 151m. And the boundary that puts the arithmetic in `core` and the rows in `db`. It is the reason the
+  //       pairing suite is in `packages/fixtures` at all, so an import that reversed it would make this
+  //       unit's two halves one module and nothing else would say so.
+  checkRejectedBy(
+    'forecast: the forecast queries importing @berelax/core fails the boundary gate',
+    withEditedFile(
+      FORECAST_QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          [
+            "import { AppError } from '@berelax/shared'",
+            "import { FORECAST_WEEKS } from '@berelax/core'",
+            'export const GATE_FIXTURE_WEEKS = FORECAST_WEEKS',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'db-must-not-import-core',
+  )
+
+  // 151n. No account code is written in the query module, and this is the scan that keeps it out.
+  //
+  //       148n's rule, inherited for the same reason: the chart of accounts is `ACCOUNTS` in
+  //       `packages/core`, which this package may not import, so a literal `'4010'` here would be a
+  //       second statement of a code whose first statement is somewhere unreachable. Every query that
+  //       needs one takes it as an argument, and the pairing suite passes
+  //       `REVPARH_REVENUE_PARTITION.included` and the balance sheet's own cash set, which is what holds
+  //       the two equal.
+  {
+    const accountCodeLiterals = (source) => {
+      // Strings only, and four digits exactly: `${from}::date` and `make_interval(days => 30)` are not
+      // account codes, and a bare 2026 in a comment is a year.
+      const matches = source.match(/'[0-9]{4}'/g) ?? []
+      return [...new Set(matches)]
+    }
+    const clean = accountCodeLiterals(readFileSync(FORECAST_QUERIES, 'utf8'))
+    check(
+      'forecast: the forecast query module states no account code of its own',
+      clean.length === 0,
+      `${FORECAST_QUERIES} contains the four-digit string literal(s) ${clean.join(', ')}. The chart ` +
+        'lives in packages/core, which this package may not import, so an account code here is a ' +
+        'second statement of it — take it as an argument instead.',
+    )
+    const planted = withEditedFile(
+      FORECAST_QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          'const ISO_DATE = ',
+          "const GATE_FIXTURE_ACCOUNT = '4010'\n\nconst ISO_DATE = ",
+        ),
+      () => accountCodeLiterals(readFileSync(FORECAST_QUERIES, 'utf8')),
+    )
+    check(
+      'forecast: the forecast account-code scan sees a planted account code',
+      planted.includes("'4010'"),
+      `the scan found ${planted.length} literal(s) in a file that had one planted in it, so it would ` +
+        'pass over the defect it exists to refuse',
+    )
+  }
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 151y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the forecast's thirteen weeks, the figure lattice and the seasonality model.
+  {
+    const unit = run('pnpm', pureSuites())
+    check(
+      'forecast: the forecast, the figure lattice and the seasonality model pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+  }
+
+  // 151z. And the two database suites. The pairing suite is where the three claims a pure test cannot
+  //       reach are proved: that a `premises_hours_override` row changes the seasonality index with no
+  //       code change, that the database refuses a lunar date presented as settled, and that this
+  //       build's own data MEASURES the payroll refusal and the `no_data` on every bucket rather than
+  //       being asserted to. The job suite is where the pass itself is shown to COMPOSE — five reads,
+  //       two settings and the chart — and where its log line is shown to survive every figure being a
+  //       refusal, which a pure test of any one part says nothing about.
+  {
+    const pair = run('pnpm', pairSuite())
+    check(
+      'forecast: the hours chain, the observance split, the measured refusals and the weekly pass itself pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

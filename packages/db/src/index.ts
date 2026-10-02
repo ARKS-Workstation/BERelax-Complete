@@ -317,6 +317,28 @@ export {
   vat201UnrepresentableGroupings,
   vat201WorkingPapers,
 } from './queries/vat201-working-papers.ts'
+// R-REP-06's forecast and seasonality reads. The arithmetic is `@berelax/core`'s; these are the rows, and
+// every one of them is of a commitment somebody has already made (ADR 0073) — there is no read of history
+// here to extrapolate from. `payrollForecastCensus` deliberately returns no amount at all: a partial wage
+// bill is a number a screen renders that is lower than the real one by exactly the employees nobody has
+// priced, which is ADR 0070's subject.
+export {
+  FORWARD_APPOINTMENT_STATUSES,
+  type ForecastCashPosition,
+  type ForecastWindow,
+  type ForwardBookingRow,
+  type ForwardBookings,
+  forecastCashPosition,
+  forwardBookingRows,
+  type PayrollForecastCensus,
+  payrollForecastCensus,
+  type SeasonalityDayRow,
+  type SeasonalityPeriod,
+  type SeasonalityRevenueLineRow,
+  type SeasonalityRoomClosureRow,
+  type SeasonalityRoomDayRow,
+  seasonalityPeriod,
+} from './reporting/forecast-queries.ts'
 // R-REP-04's KPI reads. The contribution margin and the eight operational KPIs are ARITHMETIC and live in
 // `@berelax/core`; these are the rows they are computed from. `kpiLedgerMovement` goes through
 // `statementLedgerFigures` rather than aggregating `journal_line` again, which is what that module asks
@@ -4067,4 +4089,35 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // honour-once-on-evidence flag on the customer record, a view rather than a column on `customer` for the
 // reason 0084's `customer_contraindication_flags` is one.
 //
-export const SCHEMA_VERSION = 119 as const
+//
+// 122 is 0122_cash_forecast_agent.sql (R-REP-06) — two rows and no schema: the `agent_definition` and
+// `agent_heartbeat` rows behind the weekly 13-week cash-forecast cron.
+//
+// Worth a paragraph for what it does NOT contain, because three units in a row decided the opposite way
+// and this one nearly did. R-REP-02, R-REP-03 and R-REP-04 each released their migration number unused on
+// the same argument — the arithmetic is pure, and a private code is for a refusal that needs a runbook
+// answer at the database boundary — and all of that holds here too. **The forecast is not materialised**:
+// ADR 0064's reasoning reaches one subject further, because a stored 13-week snapshot is a second
+// statement of a figure that would disagree with the recomputed one the first time a booking was
+// cancelled. What this unit has that those three did not is a CRON, and `apps/worker/src/job.ts` requires
+// an agent on any job with one — "a cron nobody watches is the failure G-AGT-01 exists to remove". An
+// agent is a row, so it is a migration, and that is the whole of the file.
+//
+// The declared interval is seven days, so the watchdog's "no success within twice the interval" means two
+// Sundays with no forecast rather than a number this migration chose. The budget is 0: the pass makes no
+// outbound call, writes nothing and logs one line.
+//
+// It seeds NO `reporting.calendar_observance` row and NO `premises_hours_override` row, deliberately.
+// The dates are `Y9-holiday-calendar` and 0110 ships that table empty because "a plausible lunar date is
+// indistinguishable from a confirmed one" in the one place every report keys on; seeding one here would
+// invent in a replayed migration the figure 0110 refused to invent. The mechanism is built over whatever
+// the table holds and `packages/fixtures/src/cash-forecast.itest.ts` proves it against rows the suite
+// inserts — including the Ramadan hours override that changes the seasonality index with no code change,
+// which is R-REP-06's third acceptance line.
+//
+// The SQLSTATE band ZY281-ZY290 and the test port band { start: 17_000, width: 300 } allocated to this
+// unit are released UNUSED and the codes are deliberately left unregistered, because `pnpm sqlstate`
+// refuses an entry for a code no migration raises — and nothing here can be refused by the database,
+// since nothing here writes.
+//
+export const SCHEMA_VERSION = 122 as const

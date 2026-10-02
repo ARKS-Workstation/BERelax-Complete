@@ -12,6 +12,7 @@ import { enqueue, transactionalEnqueue } from './enqueue.ts'
 import { setAnalyticsMaintenanceSql } from './jobs/analytics-partitions.ts'
 import { createMediaStorageFor, setMediaStorage } from './jobs/build-derivatives.ts'
 import { setVideoRenditionStorage } from './jobs/build-video-renditions.ts'
+import { setCashForecastSql } from './jobs/cash-forecast.ts'
 import {
   obligationNoticeRuntimeFor,
   SEND_OBLIGATION_NOTICE_JOB,
@@ -116,6 +117,10 @@ async function main(): Promise<void> {
   // materialised view it does not own, and it reads no clock: the durations come from the instants the
   // function recorded inside the transaction that did the work.
   setReportingRefreshSql(sql)
+  // R-REP-06's weekly cash forecast, before `startWorkers` for the same reason. It reads no clock either:
+  // the business day comes from `tradingDateAt` over the job context's instant, and it THROWS rather than
+  // truncating a timestamp when the trading calendar holds nothing for it.
+  setCashForecastSql(sql)
   // `singletonKey` is the notice id, so a pass overlapping the previous one does not queue the same notice
   // twice. It is not the guarantee — the notice's own `state = 'pending'` and 0060's
   // `obligation_notice_one_send_per_step` are — but it keeps the queue from filling with work the first
