@@ -27,6 +27,47 @@
  */
 export type { FakeCardGateway, FakeCardGatewayOptions } from './adapters/fake-card.ts'
 /**
+ * The checkout boundary (Y-PAY-03): the one place a card-payment submission is read and refused.
+ *
+ * Exported from the root, unlike the conformance suite, because it IS the surface a consumer uses — the
+ * `/checkout` screen and `/api/v1/payments/token` both call `authoriseCheckout` and nothing else. It
+ * constructs no adapter (it takes the registry), so
+ * `payment-gateway-adapters-only-through-the-registry` is satisfied rather than exempted.
+ */
+export {
+  authoriseCheckout,
+  CHECKOUT_FIELD_NAMES,
+  CHECKOUT_FIELDS,
+  CHECKOUT_INSTRUMENT,
+  CHECKOUT_REFUSAL_SENTENCES,
+  CHECKOUT_REFUSALS,
+  type CheckoutBody,
+  type CheckoutDeps,
+  type CheckoutOutcome,
+  type CheckoutParse,
+  type CheckoutRefusal,
+  type CheckoutSubmission,
+  parseCheckoutSubmission,
+} from './checkout.ts'
+/**
+ * The hosted-fields origins and the checkout's content-security policy.
+ *
+ * A pure function of configuration, exported so the route can set a header it did not assemble and a test can
+ * state the whole expected policy. A policy built inline in a handler is a policy nothing can assert the value
+ * of, which is how a directive comes to be widened by a line that looks like configuration.
+ */
+export {
+  checkoutContentSecurityPolicy,
+  HOSTED_FIELDS_FRAME_ORIGIN_KEY,
+  HOSTED_FIELDS_OPEN_QUESTION,
+  HOSTED_FIELDS_SCRIPT_ORIGIN_KEY,
+  type HostedFieldsConfiguration,
+  type HostedFieldsOrigins,
+  hostedFieldsFrom,
+  isHostedFieldsOrigin,
+  permittedOrigins,
+} from './hosted-fields.ts'
+/**
  * The intent service: where the pure lifecycle in `@berelax/core` and the durable rows in `@berelax/db` meet.
  *
  * Exported from the package root, unlike the conformance suite, because this IS the surface a consumer uses:
@@ -53,6 +94,33 @@ export {
   voidPaymentIntent,
 } from './intent.ts'
 export { createRecordSink } from './record-sink.ts'
+/**
+ * The card-data detector, the refusal and the redactor (Y-PAY-03).
+ *
+ * The ONE implementation of the shape in this build; `scripts/check-saq-a.mjs` refuses a second Luhn check or
+ * a second PAN pattern anywhere in the tree, because a second detector is a second policy and the second one
+ * is the one that misses the spelling with spaces in it.
+ */
+export {
+  assertNoCardData,
+  CARD_DATA_FIELD_NAMES,
+  CARD_DATA_REDACTED,
+  CARD_SHAPE_PROBES,
+  type CardDataFinding,
+  CardDataRefused,
+  cardDataFindings,
+  cardShapedRuns,
+  containsCardNumber,
+  isLuhnValid,
+  normaliseFieldName,
+  PAN_MAX_DIGITS,
+  PAN_MIN_DIGITS,
+  redactCardData,
+  redactedMessage,
+  redactText,
+  SECRET_FIELD_NAMES,
+  SECRET_FIELD_REDACTED,
+} from './redaction.ts'
 export {
   createPaymentGateways,
   instrumentCoverage,

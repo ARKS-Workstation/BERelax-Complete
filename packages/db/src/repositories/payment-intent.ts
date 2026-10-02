@@ -42,7 +42,15 @@ import type { UnitOfWork } from '../tx.ts'
  *   5. **The instrument is one a gateway serves** — ZY165.
  */
 
-/** The SQLSTATEs `0106_payment_intent.sql` raises. Subclass range ZY161-ZY165 of the shared 'ZY' class. */
+/**
+ * Every private SQLSTATE raised against these two tables, whichever migration defines it.
+ *
+ * ZY161-ZY165 are `0106_payment_intent.sql`'s and are this module's original five. `ZY231` is
+ * `0117_card_shape_refusal.sql`'s (Y-PAY-03) and is here rather than in a second constant of its own for the
+ * reason ADR 0043 is about: a caller branches on a RULE, and two homes for "the rules this table refuses by"
+ * is the arrangement in which a caller checks one list and misses the other. The grouping is by TABLE, which
+ * is what a caller holds, not by migration, which is only where the SQL happens to live.
+ */
 export const PAYMENT_INTENT_SQLSTATE = {
   /** A `payment_intent_transaction` row was UPDATEd or DELETEd. */
   transactionAppendOnly: 'ZY161',
@@ -54,6 +62,16 @@ export const PAYMENT_INTENT_SQLSTATE = {
   eventAlreadyRecorded: 'ZY164',
   /** The instrument's `tender_type.adapter` is not `gateway`. */
   instrumentIsNotAGatewayKind: 'ZY165',
+  /**
+   * A payments column would have held text shaped like a card number (migration 0117, Y-PAY-03).
+   *
+   * `invariant_violated` like the others rather than `validation`, and that is the honest kind: the request
+   * boundary (`assertNoCardData` in `@berelax/payments`) refuses this with a 400 before any statement is
+   * issued, so a write that reaches the database has come from a caller that skipped the boundary. The
+   * refusal's message names the column and never the value — see the migration on why it is a trigger and
+   * not a CHECK.
+   */
+  cardShapedText: 'ZY231',
 } as const
 
 export type PaymentIntentRule = keyof typeof PAYMENT_INTENT_SQLSTATE

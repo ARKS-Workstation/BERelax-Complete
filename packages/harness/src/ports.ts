@@ -165,6 +165,26 @@ export const TEST_PORT_BANDS = {
   // RESTRICTED_PORTS — the highest entry in that table below the ephemeral floor is 6697, and Chromium's own
   // list has nothing between 10080 and the floor — so `usableWidth` is the full 300.
   documents: { start: 15_500, width: 300 },
+  // Y-PAY-03's SAQ-A checkout, which needs a real browser for the one claim nothing else can make: that the
+  // card field is inside a CROSS-ORIGIN iframe. "Cross-origin" is `frame.contentDocument === null` in a real
+  // browser enforcing the same-origin policy, and no substring assertion over served HTML can say it — an
+  // `<iframe src>` pointing at our own origin renders identical markup. The suite also reads the
+  // content-security-policy off a served response and sweeps every sink for a Luhn-valid test PAN, which needs
+  // the application's own writes rather than a handler called as a function.
+  //
+  // The stand-in gateway origin the frame points at is a second server this suite starts, and it draws its
+  // port from the KERNEL (`listen(0)`) rather than from this band. That is deliberate and is not a hole in
+  // rule 18: the rule exists because two suites sharing a band answer from each other's `next start`, and an
+  // ephemeral port cannot collide with anything by construction. Drawing a second port from this band would
+  // have been the arithmetic the rule forbids, or a second `startWebServer` for a server that is not the
+  // application.
+  //
+  // 16_700 is the band this unit was allocated. 15_800 through 16_600 are allocations held by units in flight
+  // in other worktrees, and a band chosen from what one worktree can see is exactly how `template-editor` and
+  // `book-flow` came to share one. [16_700, 17_000) contains none of RESTRICTED_PORTS — the highest entry in
+  // that table below the ephemeral floor is 6697, and Chromium's own list has nothing between 10080 and the
+  // floor — so `usableWidth` is the full 300.
+  checkout: { start: 16_700, width: 300 },
 } as const satisfies Record<string, TestPortBand>
 
 /** The suites that own a band. */

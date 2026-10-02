@@ -184,6 +184,7 @@ export function createFakeCardGateway(options: FakeCardGatewayOptions): FakeCard
     summary: string
     idempotencyKey: IdempotencyKey
     suppressedDuplicate?: boolean
+    instrumentTokenPresented?: boolean
   }): void => {
     records.record(
       Object.freeze({
@@ -197,6 +198,12 @@ export function createFakeCardGateway(options: FakeCardGatewayOptions): FakeCard
         occurredAt: clock.now(),
         idempotencyKey: args.idempotencyKey,
         ...(args.suppressedDuplicate === true ? { suppressedDuplicate: true } : {}),
+        // Recorded on every call, `true` or `false`, rather than only when present. An absent field would be
+        // indistinguishable from an adapter that had stopped reporting it, which is the direction a checkout
+        // that stopped forwarding the token would go unnoticed in (Y-PAY-03).
+        ...(args.instrumentTokenPresented === undefined
+          ? {}
+          : { instrumentTokenPresented: args.instrumentTokenPresented }),
       }),
     )
   }
@@ -282,6 +289,7 @@ export function createFakeCardGateway(options: FakeCardGatewayOptions): FakeCard
         amount: request.amount,
         summary: AUTHORISE_SUMMARY[outcome](toDecimalString(request.amount), request.reference),
         idempotencyKey: request.idempotencyKey,
+        instrumentTokenPresented: request.instrumentToken !== undefined,
       })
       return snapshot(intent)
     },

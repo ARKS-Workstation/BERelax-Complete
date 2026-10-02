@@ -553,17 +553,26 @@ describe('the schema mirrors the core enums, in both directions', () => {
     expect([...allowed].slice(1).sort()).not.toEqual([...PAYMENT_INTENT_STATES].sort())
   })
 
-  it('registers a distinct SQLSTATE for each of the five rules', async () => {
-    // The codes are ZY161-ZY165 and the band is ZY161-ZY170. Five distinct values, asserted here because a
-    // translator that matched two rules to one code would report one file's refusal as the other's — the
-    // defect ADR 0043 exists to end — and every probe above would still pass.
+  it('registers a distinct SQLSTATE for every rule these two tables raise', async () => {
+    // SIX distinct values now, not five: ZY161-ZY165 are 0106's and ZY231 is 0117's (Y-PAY-03, card-shaped
+    // text in a payments column). Distinctness is what is asserted, because a translator that matched two
+    // rules to one code would report one file's refusal as the other's — the defect ADR 0043 exists to end —
+    // and every probe above would still pass.
+    //
+    // This case used to assert `size === 5` and `/^ZY16[1-5]$/`, which read as a claim about distinctness and
+    // was really a claim that the constant held one MIGRATION's codes. That stopped being true the moment a
+    // second migration added a refusal to the same table, and grouping the constant by table rather than by
+    // migration is deliberate: a caller branches on a RULE, and two homes for "the rules this table refuses
+    // by" is the arrangement in which a caller checks one list and misses the other.
     const codes = Object.values(PAYMENT_INTENT_SQLSTATE)
-    expect(new Set(codes).size).toBe(5)
-    for (const code of codes) expect(code).toMatch(/^ZY16[1-5]$/)
+    expect(new Set(codes).size).toBe(codes.length)
+    expect(codes.length).toBe(6)
+    for (const code of codes) expect(code).toMatch(/^ZY(?:16[1-5]|231)$/)
     // And a code outside the set is not claimed by the translator, which is what stops it widening to a
     // class prefix — `startsWith('ZY')` would claim seven other units' refusals as this one's.
     expect(paymentIntentError({ code: 'ZY150' })).toBeNull()
     expect(paymentIntentError({ code: 'ZY166' })).toBeNull()
+    expect(paymentIntentError({ code: 'ZY232' })).toBeNull()
   })
 })
 

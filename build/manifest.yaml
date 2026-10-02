@@ -20352,11 +20352,17 @@ units:
       at six and carries no disputed event, and the H02 fake''s -DISPUTE reference marker therefore steers
       nothing in this adapter. Adding the event is a tsc failure until every row of INTENT_TRANSITIONS and
       every entry of INTENT_EVENT_CARRIES_AMOUNT answers for it, which is gate case 133k.'
-    - 'NOTE: deferred to Y-PAY-03 — the 3DS demo path. The fake exposes completeCustomerAction as its
-      stand-in for a customer returning from a challenge, and it is NOT on the port, so the conformance suite
-      cannot reach it. packages/payments/src/index.ts re-exports the FakeCardGateway TYPE (a type-only edge,
-      exempted by the registry-chokepoint rule the way SealedToken is exempted) so that unit can narrow
-      registry.cards to it.'
+    - 'NOTE: deferred to Y-PAY-04 (RE-POINTED by Y-PAY-03) — the 3DS demo path. The fake exposes
+      completeCustomerAction as its stand-in for a customer returning from a challenge, and it is NOT on the
+      port, so the conformance suite cannot reach it. packages/payments/src/index.ts re-exports the
+      FakeCardGateway TYPE (a type-only edge, exempted by the registry-chokepoint rule the way SealedToken is
+      exempted) so that unit can narrow registry.cards to it. Y-PAY-03 did NOT do this and says so rather than
+      claiming it: its checkout RENDERS the requires_customer_action state and states that nothing has moved,
+      which is the honest half, but nothing calls completeCustomerAction, so the challenge round trip has still
+      never been driven. Re-pointed at Y-PAY-04 because a customer returning from a challenge arrives the way a
+      webhook does — as an event that must be believed only when a gateway transaction row names it (ADR 0056) —
+      and Y-PAY-04 owns exactly that path. It is not the checkout screen''s to demo: the screen has no way to
+      make an intent move, by construction.'
     - 'NOTE: no test port band was used. Nothing here starts a server: the port is pure and both adapters are
       in-memory, so every suite in this unit is a unit suite. The band 16_700 allocated to this unit is
       unused and unclaimed, which apps/web/src/test-ports.test.ts requires of a band nobody declares.'
@@ -20423,12 +20429,18 @@ units:
       argues the same three reasons for it; a fifth endpoint outside that prefix would leave the public API
       surface half-versioned. `handler.ts` beside `route.ts` is the split `app/api/v1/otp` uses, so the
       integration suite drives the same code with a frozen clock and the fake gateway.'
-    - 'NOTE: deferred to Y-PAY-03 — authentication on the endpoint. The intent route''s audit actor is
-      `system` with the label `payments intent endpoint`, because nothing on this path is authenticated yet:
-      the checkout is Y-PAY-03''s and inventing a staff identity would put a plausible actor on an audit row
-      nobody stood behind (brief rule 15). The response also deliberately withholds `gatewayIntentId` and any
-      customer-action URL — an opaque token a browser may hold is Y-PAY-03''s to define, and returning one
-      today would make it a contract before anybody decided what it may contain.'
+    - 'NOTE: deferred to Y-PAY-06 (RE-POINTED by Y-PAY-03) — authentication on the endpoint. The intent
+      route''s audit actor is still `system` with the label `payments intent endpoint`. Y-PAY-03 discharged the
+      half it owns: the CHECKOUT path is authenticated, both of its transports are behind guardAdminRoute, and
+      every audit row they write names the signed-in staff member''s employee id with their staff_reference as
+      the label. It deliberately did NOT put the guard on this endpoint, because doing so edits this unit''s
+      route, its handler''s actor and two of its suites for something no acceptance line in Y-PAY-03 asks for,
+      and the brief forbids repairing another unit''s file beyond what the current one needs. Re-pointed at
+      Y-PAY-06, which owns the refund screen and will already be holding a session. What Y-PAY-03 DID change
+      here is the card-data refusal at the top of the handler — its own SAQ-A gate demanded it, because this
+      endpoint takes two caller-chosen free-text fields and wrote both to a row and an audit payload with
+      nothing refusing a card number. The opaque token half of this NOTE is SATISFIED: it is
+      AuthoriseRequest.instrumentToken, defined by Y-PAY-03, forwarded to the adapter and never stored.'
     - 'NOTE: deferred to Y-PAY-04 — the webhook endpoint itself, signature verification and the timestamp
       window. The STORAGE half of exactly-once is here: `unique (payment_intent_id, gateway_event_id)` plus
       ZY164 as a NAMED refusal, so a handler can answer 200 to a redelivery instead of 500 — a bare 23505
@@ -20483,7 +20495,7 @@ units:
       an opaque token. A new static gate plus a redaction test prove no card data can enter our forms, logs,
       audit trail or outbox.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - M-TILL-01
@@ -20512,10 +20524,140 @@ units:
       origin fails the header test
     - a request body containing a 13-19 digit Luhn-valid number is rejected at the schema boundary with
       400 and creates no intent
+    - 'NOTE: the screen is apps/web/app/(admin)/checkout/{route,handler,render,view}.ts and NOT the
+      card-fields.tsx this entry listed. Every admin surface in this build has made the same choice and records
+      the same reason: apps/web/src/routes/registry.ts requires every DOCUMENT to be served in both locales, so a
+      .tsx page here would need an Arabic admin document W-SYS-01 has not built and would join a screenshot
+      matrix whose RTL half has to be a real Arabic route. The till, the three HR screens, the two settings
+      screens, the diary, the pipeline board, quick-book and the review paste form all give this reason.'
+    - 'NOTE: the endpoint is /api/v1/payments/token and NOT the /api/payments/token this entry listed, for the
+      reason Y-PAY-02 restated when it moved the intent endpoint: every other endpoint in this app is under
+      /api/v1, /api is exempt from proxy.ts canonicalisation so a mistyped trailing slash is a 308 rather than a
+      301 that drops a POST body, and a fifth endpoint outside the prefix would leave the public API surface
+      half-versioned. It is AUTHENTICATED - guardAdminRoute first, audit actor the signed-in staff member - which
+      is the deferral Y-PAY-02 handed this unit for the checkout path.'
+    - 'NOTE: the request-boundary refusal is ONE function, authoriseCheckout in packages/payments/src/checkout.ts,
+      and both transports (the screen POST and the JSON endpoint) call it. `pnpm saq-a` rule 3 refuses a payments
+      transport that reads a body any other way, and it found TWO live instances on its first run against this
+      unit''s own tree: the checkout''s own route.ts parsed the form and handed the result on, and Y-PAY-02''s
+      /api/v1/payments/intent refused no card data at all - it takes two caller-chosen free-text fields
+      (reference, idempotencyKey) and wrote both to a row and to an audit_event payload. Both are fixed. The
+      second is a repair to another unit''s file and this unit could not pass without it, which is the brief''s
+      condition; it is 20 lines and adds no behaviour beyond the refusal.'
+    - 'NOTE: migration 0117 is a TRIGGER and not a CHECK, and that is the sharpest finding of the unit. A CHECK
+      would have been the obvious spelling for "reference may not hold card-shaped text", and PostgreSQL appends
+      `DETAIL: Failing row contains (...)` to a check violation - so the constraint that kept the card number out
+      of the column would have written it into the server log and from there into wherever logs ship. The guard
+      would have created the disclosure it exists to prevent. A trigger raises a message we write, naming the
+      TABLE and the COLUMN and never the value, which is also why the refusal needs a private SQLSTATE at all
+      (ADR 0043): the prose is deliberately uninformative. ADR 0067 records it.'
+    - 'NOTE: audit_event and outbox_event deliberately get a REDACTOR and not a refusal, and the grounds are
+      measured rather than aesthetic. is_card_shaped reports a 13-to-19-digit Luhn-valid run and about one
+      arbitrary run in ten of that length is Luhn-valid (of 200,000 random 16-digit runs, 66.5% contained a
+      valid window); those two payloads carry a fifteen-digit TRN, an IBAN whose BBAN can be sixteen digits or
+      more, and E.164 numbers up to fifteen. A trigger there would refuse legitimate writes, and an audit write
+      that can be refused is an audit trail with a hole in it - a worse failure than the one prevented. So:
+      structural where a refusal is safe (ZY231 on the payments columns), redacted plus scanned where it is not.'
+    - 'NOTE: the CVV half of the rule is a FIELD-NAME refusal and not a value scan, because a CVV has no shape:
+      three or four digits is also every fils amount under a hundred dirhams, every OTP and every year. It is
+      enforceable because the checkout has no such field - under SAQ-A the security code is typed into the
+      gateway''s document - so a request presenting one is by construction not a request this checkout made. The
+      limit is stated rather than left to be found: a three-digit number in a field called `note` cannot be told
+      from any other three-digit number, by this build or by anything else. What is defended is that no field
+      exists to put one in and that a field named after one is refused the moment it appears, valued or not.'
+    - 'NOTE: no gateway origin is configured and none is guessed (OPEN-QUESTIONS Y7-hosted-fields, new).
+      PAYMENT_HOSTED_FIELDS_FRAME_ORIGIN and PAYMENT_HOSTED_FIELDS_SCRIPT_ORIGIN have no default, are required
+      together, are never derived from each other, and are refused as plaintext in production. Unset is a
+      first-class state: the screen renders a refusal naming both settings and the open question instead of a
+      frame, the submit control is disabled, and the policy becomes frame-src ''none''; script-src ''none''. The
+      gateway''s own <script> element is not rendered either, because its URL is a third unknown; the policy
+      names the origin so adding it later is one line of markup and not a policy change, which is what the
+      acceptance line is actually about. saq-a rule 7 refuses a literal origin anywhere in the payments estate.'
+    - 'NOTE: script-src does NOT include ''self'', which is the one directive that is an argument. The way a
+      hosted-fields integration is broken in the wild is a first-party script - analytics, a form helper, a
+      session recorder - reading or overlaying the frame, and every one looks like ordinary front-end work. The
+      build is server-rendered with no client JavaScript on any admin screen (ADR 0013), so the strict form costs
+      nothing today and fails the day somebody adds a bundle. style-src DOES allow ''unsafe-inline'' because
+      every admin document delivers its stylesheet in a <style> element; the asymmetry is safe only because
+      there is no same-origin card input for CSS to read, which is the absence rules 1 and 2 defend.'
+    - 'NOTE: the card shape is stated TWICE - cardShapedRuns in packages/payments/src/redaction.ts and
+      is_card_shaped in migration 0117, because SQL cannot read TypeScript - so the check that holds the two
+      equal ships in the same commit: CARD_SHAPE_PROBES is the corpus, stated once, and
+      packages/fixtures/src/card-shape-agreement.itest.ts drives every entry through both and requires identical
+      verdicts. The drift would take the dangerous direction: a database still accepting what the boundary had
+      started refusing, so a test asserting the refusal is satisfied by the wrong layer.'
+    - 'NOTE: the detector checks every 13-to-19-digit WINDOW inside a digit run rather than the whole run, so a
+      card number pasted inside a longer string (INV-0042<PAN>) is caught - the shape an accident actually
+      produces. The cost is measured and accepted: about two thirds of arbitrary 16-digit runs contain a
+      Luhn-valid window, so a number of PAN length is usually refused whether or not its own check digit passes.
+      At a payments boundary a false refusal is a 400 somebody reads and a false acceptance is a PAN in a
+      database. It is also why the negative controls are 13 digits (one window, so Luhn alone decides) plus one
+      MEASURED 16-digit value: a negative at that length has to be searched for, not written by changing a check
+      digit. The first version of this unit''s corpus used 4111111111111112 and was wrong about it.'
+    - 'NOTE: AuthoriseRequest.instrumentToken is this unit''s definition of the opaque token Y-PAY-01 and
+      Y-PAY-02 both deferred to it. OPTIONAL on the port, because the till has none to give, and REQUIRED at the
+      checkout''s own boundary - a submission with no token did not come from the hosted fields. It is forwarded
+      to the adapter and never written down: no column, in SECRET_FIELD_NAMES so every sink redacts it, and what
+      GatewayMovementRecord carries is a BOOLEAN saying whether one was presented, because that record is the
+      operator-visible payments screen and a movement row holding a live charge credential is a credential in
+      every screenshot. The boolean is what makes "the checkout forwarded the token" assertable at all.'
+    - 'NOTE: the cross-origin claim needs a SECOND server in the integration suite. "The card field is inside a
+      cross-origin iframe" is frame.contentDocument === null in a real browser and cannot be asserted against a
+      frame with no card field in it, so apps/web/src/checkout.itest.ts stands a stand-in gateway origin up on a
+      KERNEL-assigned port (listen(0)) and serves a card-entry document from it. That file is the one place in
+      the repository that legitimately contains autocomplete="cc-number", exempted by name in
+      scripts/check-saq-a.mjs with that reason. Its port is not drawn from the band: rule 18 exists because two
+      suites sharing a band answer from each other''s next start, and an ephemeral port cannot collide with
+      anything - drawing a second port from the band would have been the arithmetic the rule forbids.'
+    - 'NOTE: the Sentry breadcrumb half of the redaction acceptance line is scoped OUT and is not deferred,
+      because there is no Sentry integration in this build to sweep: SENTRY_DSN is config and nothing reads it,
+      and packages/clinical/src/logging.ts models an error sink as an INTERFACE for exactly this reason. The
+      request log stream has no table either - the app writes no structured request log. Both are covered in the
+      form they exist in: every payments payload reaching any sink passes through redactCardData (saq-a rule 6
+      refuses a payments module that writes to a sink and names no redactor), so a breadcrumb sink added later
+      is covered on the commit that adds it rather than needing this sweep rewritten. The sinks that DO exist -
+      audit_event, outbox_event, the message outbox and the served response - are swept full-text.'
+    - 'NOTE: NOT discharged, and re-deferred to Y-PAY-06: the audit actor on /api/v1/payments/intent is still
+      `system` with the label "payments intent endpoint". Y-PAY-02 deferred authentication on that endpoint to
+      this unit; what this unit owns is the CHECKOUT path, and both of its transports are behind guardAdminRoute
+      with the signed-in staff member as the actor. Putting the guard on Y-PAY-02''s endpoint as well would edit
+      that unit''s route, its handler''s actor and two of its suites for something no acceptance line here asks
+      for, and the brief forbids repairing another unit''s file beyond what this one needs. What this unit DID
+      have to change there is the card-data refusal, which its own gate demanded. Y-PAY-06 owns the refund screen
+      and will hold a session already.'
+    - 'NOTE: SCHEMA_VERSION is raised to 117 because 0117 is the highest migration on disk. 0117 adds no table,
+      no column and no index, so the Drizzle mirror is unchanged and pnpm db:drift has nothing new to compare -
+      the file is a function and a refusal and nothing else. ZY232-ZY240 of the allocated band ZY231-ZY240 are
+      UNUSED and are NOT registered, which is what direction 3 of ADR 0043''s gate refuses. One code and not two
+      although the trigger is on two tables, because it is ONE rule - a payments column may not hold card-shaped
+      text - and ADR 0043''s subject is precisely one code standing for two rules.'
+    - 'NOTE: the test port band 16_700 IS used, by apps/web/src/checkout.itest.ts, declared as `checkout` in
+      packages/harness/src/ports.ts. ADR 0067 is used. Migration 0117 is used. ZY231 is used and ZY232-ZY240 are
+      free. Gate block 145a-145q is used; 145r-145z are free.'
     files:
-    - apps/web/app/(admin)/checkout/card-fields.tsx
-    - apps/web/app/api/payments/token/route.ts
+    - apps/web/app/(admin)/checkout/route.ts
+    - apps/web/app/(admin)/checkout/handler.ts
+    - apps/web/app/(admin)/checkout/render.ts
+    - apps/web/app/(admin)/checkout/view.ts
+    - apps/web/app/api/v1/payments/token/route.ts
+    - apps/web/app/api/v1/payments/token/handler.ts
     - packages/payments/src/redaction.ts
+    - packages/payments/src/redaction.test.ts
+    - packages/payments/src/checkout.ts
+    - packages/payments/src/checkout.test.ts
+    - packages/payments/src/hosted-fields.ts
+    - packages/payments/src/hosted-fields.test.ts
+    - packages/db/migrations/0117_card_shape_refusal.sql
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/repositories/payment-intent.ts
+    - packages/core/src/payments/port.ts
+    - packages/config/src/env.ts
+    - packages/harness/src/ports.ts
+    - apps/web/src/checkout-render.test.ts
+    - apps/web/src/checkout.itest.ts
+    - apps/web/src/routes/registry.ts
+    - packages/fixtures/src/card-shape-agreement.itest.ts
+    - docs/adr/0067-a-pan-never-touched-claim-is-a-scan-that-fails-not-an-assertion-that-passes.md
     - scripts/check-saq-a.mjs
     - scripts/test-gates.mjs
   - id: Y-PAY-04
