@@ -1,6 +1,7 @@
 export * from './assign-shape.ts'
 export * from './eligibility-port.ts'
 export * from './gender-match.ts'
+export * from './hours-override.ts'
 export * from './intervals.ts'
 export * from './query-adapter.ts'
 export * from './room-predicates.ts'

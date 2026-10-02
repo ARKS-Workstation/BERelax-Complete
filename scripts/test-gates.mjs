@@ -48273,6 +48273,454 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 153a-153z. (P-HR-10) The holiday calendar: every way a PREDICTED date could come to read as an
+//            announced one, shown to be caught, and every refusal shown to be able to stop refusing.
+//
+//            The unit's arithmetic is a set difference over two date ranges, so almost nothing here is
+//            about computation. What it is about is that **a predicted date and an announced one are the
+//            same four characters on a screen.** A holiday the authority has announced and a holiday
+//            somebody guessed produce identical rows, identical counts and identical rota entries, and
+//            the difference only becomes visible on the day the guess turns out to be wrong — by which
+//            time the payslip has been issued and the rota published.
+//
+//            So the cases come in five groups and each fails in a way the others cannot see:
+//
+//              * **the marking.** 153a to 153e break the figure lattice, the published qualifier, the
+//                weakest-date rule, the Ramadan exclusion and the per-day basis. Every one of them turns
+//                a predicted count into one a screen would render as a settled fact, which is the only
+//                direction that matters here.
+//              * **the report.** 153f to 153h break the retained-date omission, the shift-assignment
+//                reference and the report's own basis. A report that names rows nobody has to act on is a
+//                report nobody reads to the end; one that collapses two employees on one shift into one
+//                row hides a person.
+//              * **the bytes.** 153i to 153k break the canonical ordering, the format version and the
+//                absence of an instant. The sixth acceptance line is a golden file, and a golden file over
+//                a non-canonical serialisation passes until the day a refactor reorders an object.
+//              * **the hours.** 153l to 153p break the override's range, its weekday restriction, the
+//                last-window rule, the room-period comparison and the inclusive close. The last two are
+//                the ones that produce a customer standing outside a locked door.
+//              * **what may state the rule at all.** 153q is the boundary that keeps the arithmetic in
+//                `core` and the rows in `db`. 153r is a scan of its own: the repository must call the
+//                database's `holiday_override_stranded_appointments` rather than re-derive "stranded",
+//                because a second reading drifts towards an empty report beside a failing write. 153s is
+//                the brief rule 15 guard and the most valuable case in the block: **no migration may seed
+//                a holiday date.** 153t is the clock, which is what makes two runs byte-identical.
+//              * **the surface.** 153u is the rota rendering a provisional holiday AS provisional, which
+//                is the first acceptance line's second half and the only place a reader sees the state.
+//
+//            153y and 153z are the controls: every case above is satisfied by something FAILING, so one
+//            has to be satisfied by the real tree passing — the two pure suites, the render suite, and the
+//            two database suites, all unedited.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const IMPACT = 'packages/core/src/hr/holiday-impact.ts'
+  const HOURS = 'packages/core/src/availability/hours-override.ts'
+  const IMPACT_SUITE = 'packages/core/src/hr/holiday-impact.test.ts'
+  const HOURS_SUITE = 'packages/core/src/availability/hours-override.test.ts'
+  const RENDER = 'apps/web/app/(admin)/hr/rota/render.ts'
+  const RENDER_SUITE = 'apps/web/src/hr-rota-render.test.ts'
+  const REPO = 'packages/db/src/repositories/holiday-calendar.ts'
+  const MIGRATION = 'packages/db/migrations/0123_hr_holiday_calendar.sql'
+  const PAIR_SUITE = 'packages/fixtures/src/hr-holiday-calendar.itest.ts'
+  const AGREE_SUITE = 'packages/fixtures/src/holiday-hours-agreement.itest.ts'
+
+  const pureSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.config.ts',
+    IMPACT_SUITE,
+    HOURS_SUITE,
+  ]
+  const renderSuite = () => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', RENDER_SUITE]
+  const dbSuites = () => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    PAIR_SUITE,
+    AGREE_SUITE,
+  ]
+
+  /** Breaks one line of a shipped module and requires the test written for it back by name. */
+  const breakAndExpect = (name, file, find, into, rule, suite = pureSuites) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, find, into),
+        () => runExpectingFailure('pnpm', suite()),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the marking -----------------------------------------------------------------------------
+
+  // 153a. The lattice, which is the whole mechanism. A count over one predicted date and nine announced
+  //       ones is a PREDICTED count: a reader cannot act on "mostly announced", and the number is the
+  //       same either way. Pin the basis at `confirmed` and every figure in the unit reports a date
+  //       nobody has announced as a date somebody has.
+  breakAndExpect(
+    'holiday: a figure as strong as its strongest date fails by name',
+    IMPACT,
+    "  return bases.includes('predicted') ? 'predicted' : 'confirmed'",
+    "  return 'confirmed'",
+    'is as weak as its weakest date',
+  )
+
+  // 153b. And the published form of it. A qualifier that can come back empty for a predicted figure is a
+  //       number a screen prints on its own — which is exactly the separation ADR 0073 recorded: a caveat
+  //       beside a figure is separated from it by the first person who copies the number.
+  breakAndExpect(
+    'holiday: a predicted count published with no qualifier fails by name',
+    IMPACT,
+    "    qualifier: figure.basis === 'predicted' ? HOLIDAY_PREDICTED_QUALIFIER : '',",
+    "    qualifier: '',",
+    'returns the qualifier WITH the number, so the two cannot be separated',
+  )
+
+  // 153c. The weakest-part rule one level down. Two observances may cover one date — `dim_date` aggregates
+  //       their names for exactly that reason — so a date an announcement covers AND a prediction covers
+  //       has to be predicted. Remove the demotion and the pay figure for that date reads as settled.
+  breakAndExpect(
+    'holiday: a date covered by both a prediction and an announcement reported as announced fails by name',
+    IMPACT,
+    '  for (const date of predicted) confirmed.delete(date)',
+    '  void predicted',
+    'makes a date covered by both a predicted and an announced observance PREDICTED',
+  )
+
+  // 153d. Ramadan is not a pay bucket. There is no Ramadan multiplier in `working_hours_rule` and
+  //       inventing one would be Y9-overtime answered rather than recorded — so a Ramadan observance
+  //       reaching the public-holiday dates would pay an uplift this build has no authority for.
+  breakAndExpect(
+    'holiday: Ramadan folded into the public-holiday pay dates fails by name',
+    IMPACT,
+    '      for (const date of dates) ramadan.add(date)\n      continue',
+    '      for (const date of dates) ramadan.add(date)',
+    'keeps Ramadan out of the pay dates, because Ramadan changes HOURS and not the bucket',
+  )
+
+  // 153e. The per-DAY basis, which is the acceptance line's real subject: the same 480 minutes on an
+  //       announced date and on a predicted one are the same number and two different claims. Read the
+  //       basis from nowhere and the predicted case silently becomes the announced one.
+  breakAndExpect(
+    'holiday: public-holiday minutes marked announced whatever date they fell on fails by name',
+    IMPACT,
+    "    bases.push(args.calendar.predictedDates.has(day.tradingDate) ? 'predicted' : 'confirmed')",
+    "    bases.push('confirmed')",
+    'marks the same minutes PREDICTED when the date they fell on is predicted',
+  )
+
+  // ---- the report ------------------------------------------------------------------------------
+
+  // 153f. The retained date. A holiday that was on a date before the announcement and is on it after has
+  //       changed nothing about the appointments there, so they are deliberately absent. Count a retained
+  //       date as acquired and the report fills with rows nobody has to act on — and a report whose rows
+  //       are mostly noise is one nobody reads to the end, which is where the real ones are.
+  breakAndExpect(
+    'holiday: a retained date reported as an impact fails by name',
+    IMPACT,
+    "    if (confirmedSet.has(date) && !previousSet.has(date)) return 'acquired'",
+    "    if (confirmedSet.has(date)) return 'acquired'",
+    'omits a row on a RETAINED date, because nothing about it changed',
+  )
+
+  // 153g. `shift_assignment`'s key is the PAIR. Two employees on one shift are two rows somebody has to
+  //       act on, and a reference of the shift id alone collapses them into one — so one of the two people
+  //       is not in the report at all, and nothing says which.
+  breakAndExpect(
+    'holiday: a shift assignment referenced by its shift alone fails by name',
+    IMPACT,
+    '      reference: `${row.shiftId}/${row.employeeId}`,',
+    '      reference: row.shiftId,',
+    'lists the appointments, shift assignments and approved leave on the two changed dates only',
+  )
+
+  // 153h. The report's own basis. The admin surface shows the impact a confirmation WOULD have before it
+  //       is recorded, and that report rests on a date nobody has announced — which is the case the
+  //       marking exists for and the one a constant would silently lose.
+  breakAndExpect(
+    'holiday: an impact report whose basis is a constant fails by name',
+    IMPACT,
+    '  const basis = holidayBasisOf([observance])',
+    "  const basis = 'confirmed'",
+    'marks the SAME counts predicted when the report is run before the announcement',
+  )
+
+  // ---- the bytes -------------------------------------------------------------------------------
+
+  // 153i. The canonical ordering. `JSON.stringify` preserves INSERTION order, so without the sort the
+  //       bytes depend on the order the module happened to build an object in — which no assertion can
+  //       see and any refactor can change. A golden file over a non-canonical serialisation is a golden
+  //       file that passes until the day it does not, for a reason unconnected to any figure.
+  breakAndExpect(
+    'holiday: an impact report serialised in insertion order fails by name',
+    IMPACT,
+    '          .sort(([a], [b]) => ascending(a, b))',
+    '          .filter(() => true)',
+    'sorts keys recursively, so the bytes do not depend on insertion order',
+  )
+
+  // 153j. And the golden file is really compared. A version bump is the smallest change that must be
+  //       caught: if the golden did not discriminate, nothing in the unit would notice the format moving
+  //       under a reader who was comparing two reports.
+  breakAndExpect(
+    'holiday: a changed report format not caught by the golden file fails by name',
+    IMPACT,
+    "export const HOLIDAY_IMPACT_FORMAT_VERSION = 'holiday-impact-1'",
+    "export const HOLIDAY_IMPACT_FORMAT_VERSION = 'holiday-impact-2'",
+    'matches the committed golden exactly',
+  )
+
+  // 153k. The absence of an instant, which is what makes "byte-identical under the frozen clock" cost
+  //       nothing. A `generatedAt` field makes two runs differ BY CONSTRUCTION, and freezing the clock to
+  //       hide that would be a test about the clock rather than about the report.
+  breakAndExpect(
+    'holiday: an instant in the impact report fails by name',
+    IMPACT,
+    '    formatVersion: HOLIDAY_IMPACT_FORMAT_VERSION,\n    observanceId: observance.id,',
+    '    formatVersion: HOLIDAY_IMPACT_FORMAT_VERSION,\n' +
+      "    gateFixtureGeneratedAt: '2026-10-02T00:00:00.000Z',\n" +
+      '    observanceId: observance.id,',
+    'holds no instant at all, which is what makes the clock irrelevant',
+  )
+
+  // ---- the hours -------------------------------------------------------------------------------
+
+  // 153l. The override's RANGE. Ignore it and a Ramadan schedule applies for ever: every date in the year
+  //       answers the reduced hours, and the last bookable start the booking flow offers is wrong on every
+  //       one of them.
+  breakAndExpect(
+    'holiday: an hours override applied outside its own date range fails by name',
+    HOURS,
+    '  if (date < override.startsOn || date > override.endsOn) return false',
+    '  if (false) return false',
+    'is back to 23:40 on the first date AFTER the window — the control',
+  )
+
+  // 153m. And its WEEKDAY restriction. "Fridays open at 14:00 through March" applied to every day in March
+  //       is the same defect one narrower.
+  breakAndExpect(
+    'holiday: a weekday-restricted override applied on every weekday fails by name',
+    HOURS,
+    '  return weekdayIn(date, zone) === override.dayOfWeek',
+    '  return true',
+    'applies a weekday-restricted override only on that weekday',
+  )
+
+  // 153n. The last window of a split date, not the first. A closure in the middle of a session leaves two
+  //       windows, and the last bookable start of the DATE is in the later one — answering from the first
+  //       silently stops offering the whole evening.
+  breakAndExpect(
+    'holiday: a last bookable start taken from the first window of a split date fails by name',
+    HOURS,
+    '    if (candidate !== undefined && (latest === undefined || candidate > latest)) latest = candidate',
+    '    if (candidate !== undefined && latest === undefined) latest = candidate',
+    'takes the LAST window of a split date, not the first',
+  )
+
+  // 153o. The ROOM period and not the treatment. An appointment holds its room for its own turnaround
+  //       after the treatment ends, so a treatment finishing at 01:55 with a 20-minute turnaround needs
+  //       the premises open until 02:15. Compare the treatment alone and the override is accepted — which
+  //       sends the last customer out through a locked door with the room still dirty.
+  breakAndExpect(
+    'holiday: an override judged against the treatment rather than the room period fails by name',
+    HOURS,
+    '    if (addMinutes(appointment.endsAt, appointment.turnaroundMinutes) > closesAt) {',
+    '    if (appointment.endsAt > closesAt) {',
+    'names the appointment an earlier close leaves outside, turnaround included',
+  )
+
+  // 153p. And the other side of the same boundary. A room period may end EXACTLY at close — `solve.ts`
+  //       pins the last room period of an 11:00–02:00 day at 02:00 — so an inclusive comparison here
+  //       strands the last booking of every single day and refuses every override anybody writes.
+  breakAndExpect(
+    'holiday: a close treated as exclusive for an ending room period fails by name',
+    HOURS,
+    'addMinutes(appointment.endsAt, appointment.turnaroundMinutes) > closesAt',
+    'addMinutes(appointment.endsAt, appointment.turnaroundMinutes) >= closesAt',
+    'accepts a room period ending exactly at close, because close is inclusive for an ending',
+  )
+
+  // ---- what may state the rule at all ----------------------------------------------------------
+
+  // 153q. The boundary that puts the arithmetic in `core` and the rows in `db`. It is the reason the two
+  //       pairing suites are in `packages/fixtures` at all, so an import that reversed it would make this
+  //       unit's two halves one module and nothing else would say so.
+  checkRejectedBy(
+    'holiday: the holiday repository importing @berelax/core fails the boundary gate',
+    withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          [
+            "import { AppError } from '@berelax/shared'",
+            "import { HOLIDAY_IMPACT_FORMAT_VERSION } from '@berelax/core'",
+            'export const GATE_FIXTURE_FORMAT = HOLIDAY_IMPACT_FORMAT_VERSION',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'db-must-not-import-core',
+  )
+
+  // 153r. "Stranded" is stated twice — once in SQL, because the database has to be able to refuse the
+  //       write, and once in TypeScript, because `packages/core` is pure. It may not be stated a THIRD
+  //       time in the repository: the report a screen renders and the refusal the database makes have to
+  //       come from one function, or they drift towards the one state nobody can diagnose — an empty
+  //       report beside a failing write.
+  //
+  //       The scan is this case's own, because the rule is about one file calling one SQL function and no
+  //       module graph has an edge to draw for it. The known-bad fixture removes the call and the scan
+  //       must see that it has gone.
+  {
+    const callsTheSqlFunction = (source) =>
+      source.includes('holiday_override_stranded_appointments(')
+    check(
+      'holiday: the repository reads the stranding rule from the database and does not restate it',
+      callsTheSqlFunction(readFileSync(REPO, 'utf8')),
+      `${REPO} does not call holiday_override_stranded_appointments(...). The refusal (ZY294) calls it, ` +
+        'so a reader that computed its own list would be a second statement of the rule — and the ' +
+        'direction it drifts is the one where the report is empty and the write still fails.',
+    )
+    const planted = withEditedFile(
+      REPO,
+      (source) =>
+        replaceOnce(
+          source,
+          '      from holiday_override_stranded_appointments(',
+          '      from (select null::uuid as appointment_id, null::date as trading_date) gate_fixture(',
+        ),
+      () => callsTheSqlFunction(readFileSync(REPO, 'utf8')),
+    )
+    check(
+      'holiday: the stranding-rule scan sees the call removed',
+      !planted,
+      'the scan still reported the call in a file it had been removed from, so it would pass over the ' +
+        'defect it exists to refuse',
+    )
+  }
+
+  // 153s. **Brief rule 15, as a scan, and the most valuable case in this block.**
+  //
+  //       The whole unit's largest decision is that NO holiday date is seeded. A date written into a
+  //       replayed migration is carried by every tree with nothing saying where it came from, and a
+  //       plausible lunar date is indistinguishable from a configured one in the one place the rota, the
+  //       payslip and three reports all key on. The mechanism is in the migration; the figures are an
+  //       open question.
+  //
+  //       So the scan is over the migration itself: no `insert into holiday_observance` and no
+  //       `insert into holiday_confirmation`, anywhere in it. The known-bad fixture plants one and the
+  //       scan must fire.
+  {
+    const seedsAHoliday = (source) =>
+      /insert\s+into\s+holiday_(observance|confirmation)/i.test(source)
+    check(
+      'holiday: migration 0123 seeds no holiday date',
+      !seedsAHoliday(readFileSync(MIGRATION, 'utf8')),
+      `${MIGRATION} inserts a holiday row. Every UAE lunar date is Y9-holiday-calendar, and a date ` +
+        'seeded in a REPLAYED migration is carried by every tree with nothing saying where it came ' +
+        'from — which is brief rule 15 applied to the one column every report keys on.',
+    )
+    const planted = withEditedFile(
+      MIGRATION,
+      (source) =>
+        replaceOnce(
+          source,
+          'grant select, insert, update on holiday_observance to berelax_app;',
+          [
+            'insert into holiday_observance (kind, name, date_basis, confirmation_state, starts_on, ends_on, source)',
+            "values ('public_holiday', 'Gate fixture holiday', 'lunar', 'provisional', date '2099-01-01', date '2099-01-01', 'gate fixture');",
+            'grant select, insert, update on holiday_observance to berelax_app;',
+          ].join('\n'),
+        ),
+      () => seedsAHoliday(readFileSync(MIGRATION, 'utf8')),
+    )
+    check(
+      'holiday: the seeded-date scan sees a planted holiday row',
+      planted,
+      'the scan found no seeded holiday in a migration that had one planted in it, so it would pass ' +
+        'over the defect it exists to refuse',
+    )
+  }
+
+  // 153t. No clock in either pure module, which is what makes two runs byte-identical and what keeps the
+  //       report out of ADR 0073's trap: a figure whose value depends on when it was asked for cannot be
+  //       compared with the same figure asked for yesterday.
+  checkRejectedBy(
+    'holiday: a clock read in the impact module fails the purity gate',
+    withEditedFile(
+      IMPACT,
+      (source) =>
+        replaceOnce(
+          source,
+          "export const HOLIDAY_IMPACT_FORMAT_VERSION = 'holiday-impact-1'",
+          "export const HOLIDAY_IMPACT_FORMAT_VERSION = 'holiday-impact-1'\n" +
+            'export const GATE_FIXTURE_NOW = Date.now()',
+        ),
+      () => runExpectingFailure('pnpm', ['purity']),
+    ),
+    'reading the clock',
+  )
+
+  // ---- the surface -----------------------------------------------------------------------------
+
+  // 153u. The first acceptance line's second half: a provisional holiday is "rendered as provisional in
+  //       the rota". This is the only place a reader SEES the state, so a renderer that printed the name
+  //       and the dates alone would show a date nobody has announced identically to one somebody has —
+  //       brief rule 15's failure arriving on a surface instead of in a column.
+  breakAndExpect(
+    'holiday: the rota rendering a provisional holiday as confirmed fails by name',
+    RENDER,
+    "          ? `<strong>PROVISIONAL</strong> (${safeText(observance.openQuestionId ?? 'unflagged')})`\n          : 'confirmed'",
+    "          ? 'confirmed'\n          : 'confirmed'",
+    'renders a provisional holiday AS provisional, and an announced one as confirmed',
+    renderSuite,
+  )
+
+  // ---- the controls ----------------------------------------------------------------------------
+
+  // 153y. Every case above is satisfied by something failing, so this one is satisfied by the real tree
+  //       passing: the figure lattice, the impact report, the golden file and the hours.
+  {
+    const unit = run('pnpm', pureSuites())
+    check(
+      'holiday: the figure lattice, the impact report, the golden file and the hours pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+    const render = run('pnpm', renderSuite())
+    check(
+      'holiday: the rota document passes over the real tree, provisional row and empty calendar alike',
+      !render.failed,
+      render.output,
+    )
+  }
+
+  // 153z. And the two database suites. They are where the five claims a pure test cannot reach are
+  //       proved: that recording a holiday moves no `business_day` and no `availability_epoch` row while a
+  //       shift insert DOES, that confirming one leaves every appointment, shift assignment and leave row
+  //       byte-identical, that the four refusals fire from the database, that the two statements of
+  //       "stranded" agree with a hand-computed answer on eleven probes, and that `dim_date` does not yet
+  //       read this calendar — which is MEASURED rather than left in a comment, so the day somebody
+  //       re-points it the measurement fails and names ADR 0075.
+  {
+    const pair = run('pnpm', dbSuites())
+    check(
+      'holiday: the calendar, the confirmation, the four refusals and the SQL/TypeScript agreement pass against the real database',
+      !pair.failed,
+      pair.output,
+    )
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.

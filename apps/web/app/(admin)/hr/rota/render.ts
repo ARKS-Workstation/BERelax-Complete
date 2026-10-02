@@ -82,6 +82,27 @@ export interface RotaThresholdView {
   readonly highIntensityTreatmentCodes: readonly string[]
 }
 
+/**
+ * One holiday observance over the period, as the rota shows it (P-HR-10).
+ *
+ * `confirmationState` is printed and is never inferred from anything else. The first acceptance line is
+ * that "a provisional holiday … is rendered as provisional in the rota", and a screen that showed the
+ * name and the dates alone would render a date nobody has announced identically to one somebody has —
+ * which is brief rule 15's failure arriving on a surface instead of in a column.
+ *
+ * `openQuestionId` is on the row rather than in a footnote for the same reason the thresholds' is: a
+ * reader has to be able to go and find out what is unanswered.
+ */
+export interface RotaObservanceView {
+  readonly name: string
+  readonly kind: string
+  readonly dateBasis: string
+  readonly confirmationState: string
+  readonly startsOn: string
+  readonly endsOn: string
+  readonly openQuestionId: string | null
+}
+
 export interface RotaPageView {
   /**
    * The Google re-auth banner and the page a reconnect comes back to (G-CONN-08).
@@ -115,6 +136,14 @@ export interface RotaPageView {
   readonly thresholds: RotaThresholdView
   readonly wageDivisorEffectiveFrom: string
   readonly wageDivisorOpenQuestionId: string | null
+  /**
+   * The holiday observances over the period, provisional ones included (P-HR-10).
+   *
+   * Required rather than optional, and an empty array is the honest state of a fresh database: every UAE
+   * lunar date is `Y9-holiday-calendar` and `holiday_observance` ships empty. An optional field would
+   * make "no calendar entered" and "the screen forgot to read the calendar" the same rendering.
+   */
+  readonly observances: readonly RotaObservanceView[]
 }
 
 const DUBAI = new Intl.DateTimeFormat('en-GB', {
@@ -219,6 +248,54 @@ function shortfallList(view: RotaPageView): string {
   ].join('')
 }
 
+/**
+ * The holiday calendar over the period, each row saying what its date rests on (P-HR-10).
+ *
+ * The empty case says what the absence MEANS and names the question, because "no public holidays this
+ * period" and "nobody has entered the calendar" are different facts and the screen would otherwise read
+ * as the first one. The salon trades through a public holiday unless somebody records a closure, so the
+ * sentence also says that a row here changes no trading hour — a reader who assumed otherwise would look
+ * at a holiday with a full rota under it and think the rota was wrong.
+ */
+function observanceList(view: RotaPageView): string {
+  if (view.observances.length === 0) {
+    return (
+      '<p class="empty">No holiday observance is recorded over this period. That is not the same as ' +
+      '“there are none”: UAE public holidays are lunar and announced at short notice, so the dates are ' +
+      'unanswered (<code>Y9-holiday-calendar</code>) and nothing has been entered. A recorded holiday ' +
+      'does not close the premises — closing is a separate decision — and it is what puts a worked ' +
+      'minute in the public-holiday bucket.</p>'
+    )
+  }
+  return [
+    '<ul class="rules">',
+    view.observances
+      .map((observance) => {
+        const provisional = observance.confirmationState !== 'confirmed'
+        const span =
+          observance.startsOn === observance.endsOn
+            ? safeText(observance.startsOn)
+            : `${safeText(observance.startsOn)} to ${safeText(observance.endsOn)}`
+        // The state is the FIRST thing on the row and is in the strongest markup available, because the
+        // only error that matters here is reading a predicted date as an announced one.
+        const state = provisional
+          ? `<strong>PROVISIONAL</strong> (${safeText(observance.openQuestionId ?? 'unflagged')})`
+          : 'confirmed'
+        return (
+          `<li>${state} — <strong>${safeText(observance.name)}</strong>, ${span}, ` +
+          `<code>${safeText(observance.kind)}</code>, ${safeText(observance.dateBasis)}-dated` +
+          (provisional
+            ? '. The date may move; the uplift is paid on it anyway, because not paying one is a ' +
+              'shortfall on a payslip nobody re-reads.'
+            : '.') +
+          '</li>'
+        )
+      })
+      .join(''),
+    '</ul>',
+  ].join('')
+}
+
 export function renderRotaHtml(view: RotaPageView): string {
   return [
     '<!doctype html>',
@@ -274,6 +351,8 @@ export function renderRotaHtml(view: RotaPageView): string {
         : `over ${safeText(view.thresholds.highIntensityTreatmentCodes.join(', '))}`) +
       '</dd>',
     '</dl></div>',
+    '<h2>Holiday calendar</h2>',
+    observanceList(view),
     '<h2>Published</h2>',
     publishedCard(view),
     '<h2>The draft</h2>',

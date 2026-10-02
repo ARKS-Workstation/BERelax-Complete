@@ -12147,7 +12147,7 @@ units:
       override that the availability engine honours, and a public-holiday pay bucket feeding the working-hours
       maths.
     owner: claude
-    status: todo
+    status: done
     size: M
     depends_on:
     - B-LIFE-01
@@ -12181,12 +12181,94 @@ units:
       holiday the salon trades through has no closure row at all (Y9-overtime). Ramadan HOURS need nothing
       from this: dim_date.open_minutes derives from business_day.duration_seconds, so a dated
       premises_hours_override plus a regeneration changes every denominator with no code change.'
+    - 'NOTE: allocations. Migration 0123 is USED: packages/db/migrations/0123_hr_holiday_calendar.sql,
+      two tables and four refusals, with SCHEMA_VERSION raised to 123 and a ledger paragraph added. ADR
+      0075 is USED. SQLSTATEs ZY291-ZY294 of the band ZY291-ZY300 are used; ZY295-ZY300 are RELEASED and
+      deliberately left UNREGISTERED, because `pnpm sqlstate` refuses an entry for a code no migration
+      raises. Gate block `// 153a-153z.` is USED, inserted after `// 151a` and before `// 79a` (no
+      `// 152a` block exists in this tree). The test port band { start: 17_300, width: 300 } is RELEASED
+      UNUSED: this unit starts no server. The calendar is rendered by P-HR-06''s existing `/hr/rota`
+      handler and the pure render is asserted in `apps/web/src/hr-rota-render.test.ts`, so there is no new
+      route, no registry entry and no `next build` — which also kept this unit inside the batch''s disk
+      budget.'
+    - 'NOTE: `apps/web/app/(admin)/hr/calendar/page.tsx` is NOT what was built, and the surface is the
+      ROTA. Two reasons, and the first is this entry''s own acceptance line: "a provisional holiday ... is
+      rendered as provisional in the rota" names the rota and not a calendar screen, so the observances,
+      their confirmation state and the question that owns a provisional date are rendered by
+      `apps/web/app/(admin)/hr/rota/render.ts` with `RotaObservanceView`, and the route reads them through
+      `readHolidayObservances`. A second screen showing the same rows would be a second surface for one
+      fact with no acceptance line asking for it. The second reason is P-HR-08''s, recorded one directory
+      along: `apps/web/src/routes/registry.ts` is in exact bijection with the filesystem and requires
+      every DOCUMENT to be served in both locales, so a `page.tsx` under /hr would need an Arabic admin
+      document that W-SYS-01 has not built. The same NOTE applies to the files list''s omissions: the two
+      pure suites, the Drizzle mirror, the repository and the two pairing suites are all listed below.'
+    - 'NOTE: what 0110 deferred here and what is NOT discharged, measured rather than argued.
+      `reporting.calendar_observance` is NOT dropped and `reporting.dim_date` is NOT re-pointed at the
+      operational calendar. 0110 asked for both; doing them now would be an integrating change across
+      three units'' committed work, and the measurement is the argument: thirteen files read that table,
+      `packages/fixtures/src/cash-forecast.itest.ts` asserts `calendar_observance_lunar_is_provisional` BY
+      NAME ("the DATABASE refuses a lunar date presented as settled"), gate block 151 rests on that
+      assertion, and ADR 0060 and ADR 0073 both describe the table. DEFERRED to the integrator or to a
+      reporting unit, with the successor rule already built and available to it: ZY291 is what that CHECK
+      becomes once an announcement can be recorded — a lunar observance may read as settled only where a
+      `holiday_confirmation` row names the announcement — so the re-point is a change of SOURCE and not a
+      relaxation. Meanwhile the gap is MEASURED rather than left to be discovered:
+      `hr-holiday-calendar.itest.ts` asserts that `dim_date.is_public_holiday` is false for a date the
+      operational calendar holds as a confirmed public holiday, with the control that the trading date IS
+      in `dim_date`, so the day somebody re-points it that case fails and names ADR 0075.'
+    - 'NOTE: the three deferrals this unit SATISFIES for other units, and the one it does not. SATISFIED
+      — P-HR-05 and P-HR-06''s public-holiday flag (both left `summariseTimesheet`''s `publicHolidays`
+      argument unset because "premises_closure is a floor and not a calendar"): `holidayPayCalendar` in
+      `packages/core/src/hr/holiday-impact.ts` is the calendar, the `/hr/rota` route now passes it, and
+      the distinct `publicHoliday` bucket is asserted against real rows in `hr-holiday-calendar.itest.ts`
+      with the control that the same eight hours on a date with no observance are ORDINARY. A provisional
+      observance IS included, which is `publicHolidayTradingDates`''s documented strict direction
+      inherited: not paying an uplift is a shortfall on a payslip nobody re-reads. NOT SATISFIED —
+      P-HR-08''s "a public holiday inside annual leave IS counted as a leave day" is unchanged and needs
+      no change: the calendar now exists, but whether a holiday inside leave is paid back is Y9-leave-detail
+      and this unit answers no figure. P-HR-12''s "an employee on leave for a whole month is named and not
+      paid" is likewise untouched, because it is a question about pay and not about the calendar; both
+      remain where they were recorded.'
+    - 'NOTE: "stranded by an hours override" is stated TWICE and the check that holds the two equal ships
+      in the same commit. `holiday_override_stranded_appointments(...)` in 0123 is the database''s
+      statement — the ZY294 refusal and `readStrandedAppointmentsForOverride` both call it, so the report
+      a screen renders and the refusal the database makes cannot name different appointments — and
+      `hoursOverrideStrandedAppointments` in `packages/core/src/availability/hours-override.ts` is the
+      availability engine''s, because `packages/core` is pure and SQL cannot read TypeScript.
+      `packages/fixtures/src/holiday-hours-agreement.itest.ts` drives ONE probe corpus through both: five
+      appointments covering every boundary in the rule and eleven hour pairs, each carrying the
+      HAND-COMPUTED set of appointments it must strand — so the two agree with the rule rather than merely
+      with each other, because two identically wrong readings agree perfectly. That is 0117''s
+      `is_card_shaped`/`cardShapedRuns` arrangement, and the drift it guards is the dangerous direction: a
+      database still accepting what the availability engine had started refusing.'
+    - 'NOTE: a confirmed observance can never be removed, by any role, and the first thing that cost was a
+      test. `holiday_confirmation` is append-only (ZY292) and pins its observance `on delete restrict`, so
+      `hr-holiday-calendar.itest.ts` cannot clean up after itself: every case that records an announcement
+      runs inside a rolled-back transaction with `set constraints all immediate`, which is ADR 0061''s dry
+      run in a test and is NOT optional — ZY291, ZY293 and ZY294 are DEFERRED constraint triggers, so a
+      transaction that rolls back never reaches the COMMIT they fire at and a probe without that statement
+      would prove nothing while passing. Found by counting the table after three runs: the first draft
+      deleted in `afterAll` behind `.catch(() => undefined)` and left one observance behind per run.'
     files:
-    - packages/db/migrations/*_hr_holiday_calendar.sql
+    - packages/db/migrations/0123_hr_holiday_calendar.sql
     - packages/core/src/hr/holiday-impact.ts
     - packages/core/src/hr/holiday-impact.test.ts
-    - apps/web/app/(admin)/hr/calendar/page.tsx
+    - packages/core/test/fixtures/holiday-impact-golden.json
     - packages/core/src/availability/hours-override.ts
+    - packages/core/src/availability/hours-override.test.ts
+    - packages/core/src/index.ts
+    - packages/core/src/availability/index.ts
+    - packages/db/src/repositories/holiday-calendar.ts
+    - packages/db/src/schema/holiday-calendar.ts
+    - packages/db/src/schema/index.ts
+    - packages/db/src/sqlstate-registry.ts
+    - packages/db/src/index.ts
+    - packages/fixtures/src/hr-holiday-calendar.itest.ts
+    - packages/fixtures/src/holiday-hours-agreement.itest.ts
+    - apps/web/app/(admin)/hr/rota/render.ts
+    - apps/web/app/(admin)/hr/rota/route.ts
+    - apps/web/src/hr-rota-render.test.ts
+    - docs/adr/0075-a-holiday-confirmation-reports-its-impact-and-mutates-nothing.md
   - id: P-HR-11
     order: 100
     title: 'Commission: versioned rules and a reproducible engine'
