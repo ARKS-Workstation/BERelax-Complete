@@ -21,3 +21,6 @@ test-results/
 # leaves a __pycache__ beside it; committing it would put a build artefact in a scripts directory.
 __pycache__/
 *.pyc
+
+# Subagent execution traces (protocol: heavy output to disk, never to context).
+logs/
