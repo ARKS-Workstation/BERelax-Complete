@@ -45929,6 +45929,387 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 146a-146z. (R-REP-03) The KPI registry: every rule about it shown to fail, the formula shown to be
+//            DERIVED rather than described, and the denominator shown to come from `dim_date` rather
+//            than from the fifteen hours that are correct today.
+//
+//            This unit's acceptance asks for "named pure KPI functions each carrying its formula as a
+//            documented string", and the hazard in that sentence is the whole of this block. A `formula`
+//            field beside a body is two statements of one fact: they drift, and NOTHING FAILS, because a
+//            wrong formula is still a string and the figure it misdescribes is still a figure. So the
+//            formula is rendered from the same expression the figure is computed from — and 146i is the
+//            case that proves the rendering can change at all, without which "the formula is derived" is
+//            satisfied by a renderer returning a constant.
+//
+//            The second hazard is quieter and is 146j's. `available_room_hours` must read
+//            `dim_date.open_minutes`, which migration 0110 derives from `business_day.duration_seconds`,
+//            which 0011 GENERATES from the day's own instants — so the chain from `premises_hours` to
+//            this figure already exists and a Ramadan schedule is a settings row with no code change
+//            (R-REP-01's `provisional:` note). An implementation that multiplied 15 by 60 would be right
+//            today and wrong the first time the premises changed its hours, and no fixture built from the
+//            real trading day could tell the two apart. Two mechanisms close it from opposite sides: a
+//            13-hour fixture that only the column-reading implementation answers, and
+//            `measure-reads-exactly-the-fields-it-declares`, which replays each reducer against a
+//            recording input and fires when it STOPS touching that field.
+//
+//            146a to 146h blind each registry rule in turn and require its own name back. 146i to 146q
+//            break the arithmetic — the rendering, the denominator, the closure union, the clip, the
+//            turnaround distinction in both directions, the business-day key, the revenue partition and
+//            the no-denominator answer — and require the case written for each. 146r to 146t PLANT a page
+//            component, because the arch rules govern a dashboard R-REP-08 has not built yet and a check
+//            over an empty set is exactly what ADR 0003 is about. 146u and 146v are the two gates this
+//            unit had to stay inside, and 146w is the control.
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const EXPR = 'packages/core/src/reporting/kpi-expression.ts'
+  const REGISTRY = 'packages/core/src/reporting/kpi-registry.ts'
+  const UTILISATION = 'packages/core/src/reporting/utilisation.ts'
+  const REVPAR = 'packages/core/src/reporting/revpar.ts'
+  const CORE_SUITE = 'packages/core/src/reporting/utilisation.test.ts'
+  const ARCH_SUITE = 'apps/web/src/kpi-arch.test.ts'
+
+  const kpiUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+
+  /**
+   * Blinds one registry detector and requires the rule's own name back.
+   *
+   * The replacement keeps the anchor's indentation, because `withEditedFile` writes the file back byte
+   * for byte and a re-indented line would restore correctly while making the next case's anchor — which
+   * is a copy of the real source — harder to keep true.
+   */
+  const blindRule = (name, anchor, rule) => {
+    const indent = anchor.slice(0, anchor.length - anchor.trimStart().length)
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        REGISTRY,
+        (source) => replaceOnce(source, anchor, `${indent}if (false) {`),
+        () => runExpectingFailure('pnpm', kpiUnit(CORE_SUITE)),
+      ),
+      rule,
+    )
+  }
+
+  /** Breaks one line of a shipped module and requires the named test case to notice. */
+  const breaks = (name, file, from, into, caseName, suite = CORE_SUITE) => {
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        file,
+        (source) => replaceOnce(source, from, into),
+        () => runExpectingFailure('pnpm', kpiUnit(suite)),
+      ),
+      caseName,
+    )
+  }
+
+  // ---- the eight registry rules, each detector blinded in turn ----------------------------------
+
+  // 146a. Two things registered under one name make a published formula ambiguous: the formula is
+  //       rendered as names, so a reader cannot tell which of the two a figure came from.
+  blindRule(
+    'kpi registry: a rule blind to one name registered twice fails by name',
+    '  if (repeated.length > 0) {',
+    'registry-names-are-unique-across-kpis-and-measures',
+  )
+
+  // 146b. A tile with no sentence saying what it is gets read as whatever the reader assumed, which for
+  //       a utilisation figure is the difference between "of the trading day" and "of the roster".
+  blindRule(
+    'kpi registry: a rule blind to an entry with no summary fails by name',
+    "    if (label.trim() === '' || entry.summary.trim() === '') {",
+    'registry-entry-carries-a-label-and-a-summary',
+  )
+
+  // 146c. A dangling reference prints a formula naming something nothing defines — and then `compute`
+  //       throws at read time, on a screen, rather than in this suite.
+  blindRule(
+    'kpi registry: a rule blind to an unregistered reference fails by name',
+    '  if (unknownMeasures.length > 0 || unknownKpis.length > 0) {',
+    'kpi-expression-references-only-registered-names',
+  )
+
+  // 146d. A KPI defined in terms of itself has no value. The expansion stops at a repeat so the module
+  //       still loads, which is what leaves a rule able to say so instead of a process that hangs.
+  blindRule(
+    'kpi registry: a rule blind to a cyclic definition fails by name',
+    '  if (transitive.cycle !== null) {',
+    'kpi-expression-has-no-cycle',
+  )
+
+  // 146e. The check that the DERIVATION is not vacuous. A renderer that dropped the right-hand side of a
+  //       subtraction would publish `room_open_minutes` for a figure that subtracts the closures, which
+  //       is the drift the derivation exists to make impossible — visible only here.
+  blindRule(
+    'kpi registry: a rule blind to a formula that omits what it computes fails by name',
+    "  if (formula.trim() === '' || missingFromFormula.length > 0 || missingFromExpansion.length > 0) {",
+    'kpi-formula-names-every-reference-it-computes',
+  )
+
+  // 146f. Minutes divided by 30 is half-hours. Labelled `hours` it puts a figure twice its true size on
+  //       a screen with the right word beside it, and every identity in the registry still holds.
+  blindRule(
+    'kpi registry: a rule blind to a unit its expression does not imply fails by name',
+    '  if (implied !== spec.unit) {',
+    'kpi-unit-follows-from-its-expression',
+  )
+
+  // 146g. The case this unit's hardest claim rests on. A measure declares the dataset fields it reads and
+  //       the rule replays it against a recording input; blind it and a denominator that stopped reading
+  //       `dim_date.open_minutes` and assumed fifteen hours passes every fixture built from a real
+  //       trading day.
+  blindRule(
+    'kpi registry: a rule blind to a measure that stopped reading dim_date.open_minutes fails by name',
+    '    if (readNotDeclared.length > 0 || declaredNotRead.length > 0) {',
+    'measure-reads-exactly-the-fields-it-declares',
+  )
+
+  // 146h. A revenue account in neither side of the RevPARH partition is revenue the numerator drops in
+  //       silence, and a non-revenue code in either side is how the tips-payable LIABILITY would get
+  //       into a revenue figure. Neither is visible in any figure.
+  checkRejectedBy(
+    'kpi registry: a rule blind to a revenue account in neither side of the partition fails by name',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (duplicated.length === 0 && unclaimed.length === 0 && foreign.length === 0) return []',
+          '  return []',
+        ),
+      () => runExpectingFailure('pnpm', kpiUnit(CORE_SUITE)),
+    ),
+    'revparh-revenue-partition-claims-every-revenue-account-exactly-once',
+  )
+
+  // ---- the arithmetic ---------------------------------------------------------------------------
+
+  // 146i. The control for the whole design: a formula that CANNOT change. Every "the formula is not
+  //       empty" assertion is satisfied by a constant, and so is every reader of it — which is precisely
+  //       the state a hand-written `formula` field is in permanently.
+  breaks(
+    'kpi registry: a formula that cannot change is caught by the derivation case',
+    REGISTRY,
+    '    const formula = renderExpr(spec.expression)',
+    "    const formula = 'the formula, whatever the arithmetic says'",
+    'changes when the expression changes',
+  )
+
+  // 146j. The denominator taken from a constant instead of from `dim_date`. Right today, and the 13-hour
+  //       fixture is the only input that can tell.
+  breaks(
+    'kpi registry: an hours denominator that assumes fifteen hours is caught by the 13-hour fixture',
+    UTILISATION,
+    '    for (const minutes of roomDaysInScope(input).values()) total += BigInt(minutes)',
+    '    for (const _ of roomDaysInScope(input).values()) total += 900n',
+    'follows dim_date open_minutes rather than a constant number of hours',
+  )
+
+  // 146k. Two `resource_block` rows over the same minutes closed the room once. Summed raw they subtract
+  //       the overlap twice, which can drive the denominator below the occupancy and a utilisation above
+  //       100% with nothing in either figure saying why.
+  breaks(
+    'kpi registry: closures summed instead of unioned are caught by the overlap case',
+    UTILISATION,
+    '    for (const intervals of byRoomDay.values()) total += BigInt(unionLength(intervals))',
+    '    for (const intervals of byRoomDay.values())\n' +
+      '      total += BigInt(intervals.reduce((sum, span) => sum + (span.to - span.from), 0))',
+    'closes a room once when two closures overlap',
+  )
+
+  // 146l. A maintenance block in the nine hours the premises is shut closes no trading minute. Without
+  //       the floor its clipped length is NEGATIVE, so capacity that was never for sale is added.
+  breaks(
+    'kpi registry: a clip with no floor is caught by the out-of-hours closure case',
+    UTILISATION,
+    '  return to > from ? { from, to } : null',
+    '  return { from, to }',
+    'subtracts nothing for a closure that falls wholly outside trading hours',
+  )
+
+  // 146m. The acceptance line's own distinction, from the room side: drop the turnaround and the two
+  //       utilisations become one figure printed under two names.
+  breaks(
+    'kpi registry: room occupancy without turnaround is caught by the two-figure case',
+    UTILISATION,
+    '      total += BigInt(appointment.treatmentMinutes) + BigInt(appointment.turnaroundMinutes)',
+    '      total += BigInt(appointment.treatmentMinutes)',
+    'differ by exactly the turnaround minutes on one fixture',
+  )
+
+  // 146n. And from the therapist side, which is the direction nobody checks: a therapist numerator that
+  //       included the reset would read as fully utilised at a lower delivered load than it is.
+  breaks(
+    'kpi registry: a therapist numerator including turnaround is caught by the two-figure case',
+    UTILISATION,
+    [
+      '      if (appointment.employeeId === null || !appointment.isDelivered) continue',
+      '      total += BigInt(appointment.treatmentMinutes)',
+    ].join('\n'),
+    [
+      '      if (appointment.employeeId === null || !appointment.isDelivered) continue',
+      '      total += BigInt(appointment.treatmentMinutes) + BigInt(appointment.turnaroundMinutes)',
+    ].join('\n'),
+    'differ by exactly the turnaround minutes on one fixture',
+  )
+
+  // 146o. The period IS the set of `dim_date` rows, and every measure restricts its rows to it. Drop that
+  //       and a 01:30 treatment counts in every period that holds any day at all — which is how a figure
+  //       for March comes to include February's takings with nothing failing.
+  breaks(
+    'kpi registry: a measure that ignores the period is caught by the business-day case',
+    UTILISATION,
+    [
+      '      if (!days.has(appointment.businessDay)) continue',
+      '      if (appointment.roomId === null || !appointment.isDelivered) continue',
+    ].join('\n'),
+    '      if (appointment.roomId === null || !appointment.isDelivered) continue',
+    'does not count it in a period holding the calendar date the clock said',
+  )
+
+  // 146p. Retail and the tips liability out of the RevPARH numerator. Counting a bottle of oil sold at
+  //       the desk is the one way to raise a room-productivity figure with no extra treatment delivered.
+  breaks(
+    'kpi registry: a numerator that counts every posting is caught by the retail exclusion case',
+    REVPAR,
+    '      if (!included.has(line.accountCode)) continue',
+    '      if (false) continue',
+    'excludes retail revenue from the numerator',
+  )
+
+  // 146q. "A zero denominator returns an explicit NoDenominator result rather than NaN, Infinity or 0" —
+  //       and `0` is the worst of the three, because a room utilisation of zero is a real reading that
+  //       means the rooms were idle rather than that there were none.
+  breaks(
+    'kpi registry: a zero divisor answered with a measured zero is caught by the NoDenominator case',
+    EXPR,
+    '      if (quotient === null) return { ok: false, divisorFormula: renderExpr(expr.divisor) }',
+    '      if (quotient === null) return { ok: true, value: wholeRational(0n) }',
+    'answers NoDenominator naming available_room_minutes',
+  )
+
+  // ---- the arch rules, against a page component that does not exist yet -------------------------
+
+  // 146r. The acceptance line's "an arch test fails on ad-hoc SQL inside a page component". There is no
+  //       such page, so one is planted: a renderer that opens its own query has no registered formula
+  //       and no drill-down behind whatever it prints.
+  checkRejectedBy(
+    'kpi arch: a page component holding a sql template is rejected by name',
+    withFixture(
+      'apps/web/app/_dev/render.ts',
+      [
+        '// A deliberately broken page component (gate case 146r). It is removed in a `finally`.',
+        'export const rows = async (sql: (q: TemplateStringsArray) => Promise<unknown>) =>',
+        '  sql`select count(*) from appointment`',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', kpiUnit(ARCH_SUITE)),
+    ),
+    'page-component-holds-no-sql-template',
+  )
+
+  // 146s. And the import that would make one possible. A row TYPE is allowed and three admin screens use
+  //       one; a VALUE from that package is a connection, and the rule is the difference between the two.
+  checkRejectedBy(
+    'kpi arch: a page component importing a database value is rejected by name',
+    withFixture(
+      'apps/web/app/_dev/view.ts',
+      [
+        '// A deliberately broken page component (gate case 146s). It is removed in a `finally`.',
+        "import { createConnection } from '@berelax/db'",
+        'export const connection = createConnection',
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', kpiUnit(ARCH_SUITE)),
+    ),
+    'page-component-imports-no-database-value',
+  )
+
+  // 146t. "Every KPI reachable from a dashboard resolves to a registered pure function." R-REP-08 builds
+  //       the dashboard; until then the scan has nothing to scan, so the call site is planted here. This
+  //       is the case that makes the rule one that has been SEEN to fire rather than one nobody has run.
+  checkRejectedBy(
+    'kpi arch: a screen naming an unregistered KPI is rejected by name',
+    withFixture(
+      'apps/web/app/_dev/page.ts',
+      [
+        '// A deliberately broken page component (gate case 146t). It is removed in a `finally`.',
+        "import { resolveKpi } from '@berelax/core'",
+        "export const tile = () => resolveKpi('occupancy')",
+      ].join('\n'),
+      () => runExpectingFailure('pnpm', kpiUnit(ARCH_SUITE)),
+    ),
+    'dashboard-kpi-resolves-to-a-registered-kpi',
+  )
+
+  // ---- the two gates this unit had to stay inside -----------------------------------------------
+
+  // 146u. A KPI may not read a clock. Every date is an argument and the period is a set of `dim_date`
+  //       rows, which is what makes a figure for a closed month the same figure a year later — and a
+  //       `Date.now()` here would be invisible to every assertion in the suite, because the figures
+  //       would still be right on the day it was written.
+  checkRejectedBy(
+    'kpi registry: a clock read in a KPI module fails the purity gate',
+    withEditedFile(
+      REGISTRY,
+      (source) =>
+        replaceOnce(
+          source,
+          '/** Every measure, from the two modules that declare them. */',
+          [
+            'export const GATE_FIXTURE_NOW = Date.now()',
+            '',
+            '/** Every measure, from the two modules that declare them. */',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['purity']),
+    ),
+    'reading the clock',
+  )
+
+  // 146v. And the boundary that keeps the arithmetic in `core` and the rows in `db`. The KPI input is
+  //       plain data for exactly this reason: the queries that fill it are R-REP-04's, in `packages/db`,
+  //       and a module here that could reach a connection would make the registry a query layer.
+  checkRejectedBy(
+    'kpi registry: a KPI module importing @berelax/db fails the boundary gate',
+    withEditedFile(
+      UTILISATION,
+      (source) =>
+        replaceOnce(
+          source,
+          "import type { KpiExpr, KpiInput, KpiSpec, Measure } from './kpi-expression.ts'",
+          [
+            "import { createConnection } from '@berelax/db'",
+            "import type { KpiExpr, KpiInput, KpiSpec, Measure } from './kpi-expression.ts'",
+            'export const GATE_FIXTURE_CONNECTION = createConnection',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'core-must-not-import-db',
+  )
+
+  // 146w. The control for the whole block: every case above is satisfied by something FAILING, so one
+  //       has to be satisfied by the tree passing. Both suites unedited, plus the two scanners.
+  {
+    const unit = run('pnpm', kpiUnit(CORE_SUITE))
+    check(
+      'kpi registry: the registry rules, the fixtures and the property pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+    const arch = run('pnpm', kpiUnit(ARCH_SUITE))
+    check(
+      'kpi arch: no page component in the app holds a database or an unregistered KPI',
+      !arch.failed,
+      arch.output,
+    )
+    const purity = run('pnpm', ['purity'])
+    check('kpi registry: the KPI modules are pure', !purity.failed, purity.output)
+    const boundaries = run('pnpm', ['boundaries'])
+    check('kpi registry: the core/db boundary holds', !boundaries.failed, boundaries.output)
+  }
+}
+
 // 79a-79k. The harness that starts the application, and the guard that stops a gate testing nothing.
 //
 // Two mechanisms here, both introduced because the session that wrote them lost real time to their absence.
