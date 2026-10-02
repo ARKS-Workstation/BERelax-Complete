@@ -333,6 +333,10 @@ importers:
       '@berelax/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      '@berelax/fixtures':
+        specifier: workspace:*
+        version: link:../fixtures
 
   packages/harness:
     dependencies:

@@ -12,5 +12,8 @@
     "@berelax/db": "workspace:*",
     "@berelax/providers": "workspace:*",
     "@berelax/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@berelax/fixtures": "workspace:*"
   }
 }

@@ -115,8 +115,23 @@ describe('runAnalyticsRetention', () => {
       `)
       // `purged_rows`: a visitor and a session past the window. The trading date has to be one the seed's
       // `business_day` table holds, because the session carries a real foreign key to it.
-      const [day] = await tx<{ trading_date: string }[]>`
-        select to_char(max(trading_date), 'YYYY-MM-DD') as trading_date from business_day
+      // The trading date and the basis come from ONE query, because `analytics.session` carries both and
+      // `analytics.assert_session_trading_basis` (ZY222) refuses a pair that disagree. Two things made the
+      // old `max(trading_date)` wrong: A-FIRST-05 made `trading_date_basis` `not null`, so an insert
+      // omitting it fails outright, and R-REP-05 reserved a far-future span in `business_day`, so `max`
+      // stopped meaning "the newest day the salon trades" and started meaning a date in 2415. The day
+      // nearest this session's own instant is what the row is actually about.
+      const [day] = await tx<{ trading_date: string; basis: string }[]>`
+        select to_char(trading_date, 'YYYY-MM-DD') as trading_date,
+               case
+                 when ${at(200)}::timestamptz >= opens_at and ${at(200)}::timestamptz < closes_at
+                   then 'trading'
+                 when ${at(200)}::timestamptz < opens_at then 'before_opening'
+                 else 'after_closing'
+               end as basis
+          from business_day
+         order by abs(extract(epoch from (opens_at - ${at(200)}::timestamptz)))
+         limit 1
       `
       const [visitor] = await tx<{ visitor_id: string }[]>`
         insert into analytics.visitor (first_seen_at, last_seen_at)
@@ -124,9 +139,11 @@ describe('runAnalyticsRetention', () => {
       `
       await tx`
         insert into analytics.session
-          (visitor_id, started_at, last_event_at, trading_date, landing_path, device_kind, breakpoint, bot)
+          (visitor_id, started_at, last_event_at, trading_date, trading_date_basis,
+           landing_path, device_kind, breakpoint, bot)
         values (${visitor?.visitor_id as string}, ${at(200)}::timestamptz, ${at(200)}::timestamptz,
-                ${day?.trading_date as string}, '/', 'mobile', 'sm', false)
+                ${day?.trading_date as string}, ${day?.basis as string},
+                '/', 'mobile', 'sm', false)
       `
       // `exempt` and `guarded_default_partition` need no fixture: the rollups and the default partitions are
       // in the committed schema, which is the point of asserting them here rather than constructing them.

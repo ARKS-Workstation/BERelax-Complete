@@ -504,13 +504,24 @@ describe('the opening cash position', () => {
 describe("payroll over this build's own data", () => {
   it('refuses, for two independent reasons both read from the database', async () => {
     const census = await payrollForecastCensus(sql, window)
-    // The seed creates nineteen employment records with `basic_wage_fils` NULL (Y8-staff), and nothing in
-    // the schema records a pay date (Y8-payroll-date). Both are MEASURED here rather than asserted as
+    // The seed creates employment records with `basic_wage_fils` NULL (Y8-staff), and nothing in the
+    // schema records a pay date (Y8-payroll-date). Both are MEASURED here rather than asserted as
     // constants, so the day either is answered this case changes rather than lies.
+    //
+    // `pricedEmployees` is NOT required to be nought, and the reason is the one `pnpm verify` taught this
+    // case: every suite runs against one database, so an HR suite that records a wage for its own
+    // employee makes a `toBe(0)` here fail while nothing about this unit changed — it read 13 on the
+    // integrating run and 0 in a worktree. What the refusal actually rests on is that SOMEBODY is
+    // unpriced: one employee nobody has priced makes the wage bill unknowable, which is ADR 0070's whole
+    // argument, and a `0` for the rest would be the free rota it refuses. So the claim is the partition
+    // identity — every active record is priced or named as unpriced, with at least one of the latter.
     expect(census.activeEmploymentRecords).toBeGreaterThan(0)
     expect(census.aPayDateIsRecordedAnywhere).toBe(false)
-    expect(census.pricedEmployees).toBe(0)
-    expect(census.unpricedEmployeeIds).toHaveLength(census.activeEmploymentRecords)
+    expect(census.unpricedEmployeeIds.length).toBeGreaterThan(0)
+    expect(census.pricedEmployees + census.unpricedEmployeeIds.length).toBe(
+      census.activeEmploymentRecords,
+    )
+    expect(new Set(census.unpricedEmployeeIds).size).toBe(census.unpricedEmployeeIds.length)
 
     const payroll = payrollFromCensus(census)
     expect(payroll.state).toBe('unattributable')
@@ -615,15 +626,25 @@ describe("the seasonality model over this build's own history", () => {
       )
     }
     // A second measured fact, worth recording because it would otherwise be mistaken for this unit's
-    // doing: the seeded ledger holds NO journal line at all, so even an observance with two occurrences
-    // would have a numerator of zero here. The seed creates appointments and invoices and posts nothing.
+    // doing: the SEED posts no journal entry at all — it creates appointments and invoices and posts
+    // nothing — so on a freshly seeded database the numerator here is empty for any observance the
+    // fixture could have. It is reported rather than required to be empty, because `pnpm verify` runs
+    // every suite against ONE database and a till suite's six revenue lines are not this model changing
+    // its answer: the refusal above rests on the OCCURRENCE count, which the loop measures, and not on an
+    // empty numerator. What is held instead is that the read is about the right rows — every line it
+    // returned is on an included account and inside the window — which an empty-set assertion could
+    // never have said.
     const [lines] = await sql<{ rows: string }[]>`
       select count(*)::text as rows from journal_line l
         join journal_entry e on e.entry_id = l.entry_id
        where e.entry_date <= ${FIXTURE_TODAY}::date
     `
-    expect(lines?.rows).toBe('0')
-    expect(period.revenueLines).toEqual([])
+    expect(Number(lines?.rows)).toBeGreaterThanOrEqual(period.revenueLines.length)
+    for (const line of period.revenueLines) {
+      expect(REVPARH_REVENUE_PARTITION.included as readonly string[]).toContain(line.accountCode)
+      expect(line.businessDay <= FIXTURE_TODAY).toBe(true)
+      expect(line.businessDay >= (historyFrom?.day ?? FIXTURE_TODAY)).toBe(true)
+    }
   }, 30_000)
 })
 

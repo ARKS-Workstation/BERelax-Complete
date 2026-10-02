@@ -1,6 +1,7 @@
 import { fixedClock } from '@berelax/core'
 import type { Sql } from '@berelax/db'
 import { createConnection, readPreConsentLandings } from '@berelax/db'
+import { partitionWindowDate } from '@berelax/fixtures'
 import { startWebServer, type WebServer } from '@berelax/harness/server'
 import {
   AI_CRAWLER_FETCHERS,
@@ -54,8 +55,16 @@ if (!url)
  * 21:00 Asia/Dubai on a date the seed's calendar holds, so `session_trading_date_fk` is satisfied and the
  * basis is `trading` — which is the ordinary case and therefore the one the ordinary assertions should be
  * made in. The daytime gap gets cases of its own further down, at an instant chosen the same way.
+ *
+ * The DATE comes from `partitionWindowDate()` and is not written down here any more. It was pinned, true
+ * when it was written, and three days later seventeen of this suite's cases failed with ZY061:
+ * `analytics.event` is monthly partitioned with no default partition, `ensure_partitions` creates the
+ * current month and three ahead, so the pinned month had no partition on a database migrated in the next
+ * one. The seeded calendar moves with the clock for the same reason, so a pinned date eventually leaves
+ * that too. Today's date is the only one in both windows at once.
  */
-const TRADING_ISO = '2026-09-29T17:00:00.000Z' // 21:00 Asia/Dubai
+const TRADING_DATE = partitionWindowDate()
+const TRADING_ISO = `${TRADING_DATE}T17:00:00.000Z` // 21:00 Asia/Dubai
 const RUN = `afirst05-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 let sql: Sql
@@ -907,7 +916,7 @@ describe('a session that began in the daytime gap', () => {
    * 09:00 Asia/Dubai, which is inside the 02:00-11:00 gap: the premises is shut and `resolveTradingDate`
    * correctly answers that the instant belongs to no trading date, while web traffic carries on.
    */
-  const GAP_ISO = '2026-09-29T05:00:00.000Z'
+  const GAP_ISO = `${TRADING_DATE}T05:00:00.000Z`
 
   it('is filed under the next day the calendar opens and SAYS the basis', async () => {
     const response = await post(
@@ -931,7 +940,7 @@ describe('a session that began in the daytime gap', () => {
     // Not `trading`. The whole point: nine hours a day of browsing must not read as daytime trade.
     expect(session.trading_date_basis).toBe('before_opening')
     // And the date it is filed under is the day about to open, which is the same calendar date here.
-    expect(session.trading_date).toBe('2026-09-29')
+    expect(session.trading_date).toBe(TRADING_DATE)
   })
 
   it('cannot claim `trading` for an instant outside the window, by name', async () => {
@@ -947,7 +956,7 @@ describe('a session that began in the daytime gap', () => {
         landing_path, device_kind, breakpoint, bot
       ) values (
         ${visitor?.visitor_id as string}::uuid, ${GAP_ISO}::timestamptz, ${GAP_ISO}::timestamptz,
-        '2026-09-29', 'trading', '/en/lying', 'mobile', 'xs', false
+        ${TRADING_DATE}, 'trading', '/en/lying', 'mobile', 'xs', false
       )
     `)
     expect(lying.code).toBe('ZY222')
@@ -961,7 +970,7 @@ describe('a session that began in the daytime gap', () => {
         landing_path, device_kind, breakpoint, bot
       ) values (
         ${visitor?.visitor_id as string}::uuid, ${TRADING_ISO}::timestamptz, ${TRADING_ISO}::timestamptz,
-        '2026-09-29', 'before_opening', '/en/lying-too', 'mobile', 'xs', false
+        ${TRADING_DATE}, 'before_opening', '/en/lying-too', 'mobile', 'xs', false
       )
     `)
     expect(alsoLying.code).toBe('ZY222')
@@ -975,7 +984,7 @@ describe('a session that began in the daytime gap', () => {
         landing_path, device_kind, breakpoint, bot
       ) values (
         ${visitor?.visitor_id as string}::uuid, ${GAP_ISO}::timestamptz, ${GAP_ISO}::timestamptz,
-        '2026-09-29', 'before_opening', '/en/honest', 'mobile', 'xs', false
+        ${TRADING_DATE}, 'before_opening', '/en/honest', 'mobile', 'xs', false
       )
     `)
     expect(honest.code).toBeUndefined()
@@ -985,7 +994,7 @@ describe('a session that began in the daytime gap', () => {
     // The cohort this table exists for. A foreign key to `business_day` on the counter would have refused
     // the row and dropped exactly the traffic the denominator is about.
     const path = `/en/${RUN}/gap-pre-consent`
-    const key = { bucketDate: '2026-09-29', basis: 'before_opening' as const, path }
+    const key = { bucketDate: TRADING_DATE, basis: 'before_opening' as const, path }
     const before = (await readPreConsentLandings(sql, key)) ?? 0
     await post(GAP_ISO, {
       ...batch(),

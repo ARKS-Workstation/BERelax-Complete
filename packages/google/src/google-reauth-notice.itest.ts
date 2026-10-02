@@ -1,5 +1,6 @@
 import { instantFromIso, REAUTH_SKIP_REASONS, reauthIncidentKey } from '@berelax/core'
 import { createConnection, type Sql } from '@berelax/db'
+import { partitionWindowIso } from '@berelax/fixtures'
 import { MAX_GOOGLE_REAUTH_LADDER_STEPS } from '@berelax/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createPostgresReauthNoticeStore } from './notify/postgres-notice-store.ts'
@@ -37,7 +38,20 @@ let connectionId = ''
 
 const SUB = 'sub-gconn08-reauth-notice'
 const ACCOUNT = 'google-admin@example.invalid'
-const NOW = instantFromIso('2026-09-25T10:00:00.000Z')
+/**
+ * The clock, on a date the current month's partition covers.
+ *
+ * It was pinned at `2026-09-25`, and one case failed a week later with `no partition of relation
+ * "audit_event" found for row`: the audit trigger carries the BUSINESS instant rather than `now()`, and
+ * `ensure_audit_partitions` creates the current month and three ahead, so a row backdated into the
+ * previous month has nowhere to land on a freshly migrated database. `partitionWindowIso` clamps to the
+ * first of the current month for exactly that reason.
+ */
+const NOW_ISO = partitionWindowIso('10:00')
+const OPENED_ISO = partitionWindowIso('09:00')
+/** Later than {@link OPENED_ISO} and still before the frozen clock, so the newest event is unambiguous. */
+const REOPENED_ISO = partitionWindowIso('09:30')
+const NOW = instantFromIso(NOW_ISO)
 /** A sealed token stands in as opaque bytes. Nothing here opens one; this file is about the schema. */
 const CT = Buffer.from('ciphertext-stand-in')
 
@@ -88,7 +102,7 @@ const insert = async (over: Record<string, unknown> = {}): Promise<void> => {
             ${row.step as string}, ${row.rung_index as number}, ${row.to_role as string},
             ${row.channel as string}, ${row.outcome as string},
             ${row.skipped_reason as string | null},
-            '2026-09-25T10:00:00.000Z'::timestamptz, now())
+            ${NOW_ISO}::timestamptz, now())
   `
 }
 
@@ -318,18 +332,18 @@ describe('the store reads what the pass needs', () => {
     const inserted = await sql<{ id: string }[]>`
       insert into google_connection_events (connection_id, google_sub, event, detail, occurred_at)
       values (${connectionId}::uuid, ${SUB}, 'reauth_required', '{}'::jsonb,
-              '2026-09-25T09:00:00.000Z'::timestamptz)
+              ${OPENED_ISO}::timestamptz)
       returning id::text as id
     `
     const first = await store.latestReauthIncident(connectionId)
     expect(first?.key).toBe(reauthIncidentKey(inserted[0]?.id ?? ''))
-    expect(first?.openedAt).toBe(instantFromIso('2026-09-25T09:00:00.000Z'))
+    expect(first?.openedAt).toBe(instantFromIso(OPENED_ISO))
     // A second incident later: the NEWEST event is the incident, which is what makes a re-broken connection
     // a new ladder rather than a spent one.
     const second = await sql<{ id: string }[]>`
       insert into google_connection_events (connection_id, google_sub, event, detail, occurred_at)
       values (${connectionId}::uuid, ${SUB}, 'reauth_required', '{}'::jsonb,
-              '2026-09-26T09:00:00.000Z'::timestamptz)
+              ${REOPENED_ISO}::timestamptz)
       returning id::text as id
     `
     const after = await store.latestReauthIncident(connectionId)
