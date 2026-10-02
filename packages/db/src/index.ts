@@ -4003,8 +4003,15 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // than numbers anybody is waiting on. 110 through 113 were handed out together to the units of one batch,
 // and all four have now landed or released: 110 with R-REP-01, 111 with H-MIG-01 (out of order, before
 // 110 — which is the arrangement this note exists for: the number is a high-water mark and not a count),
-// 112 released unused by A-FIRST-04 and so a permanent gap, and 113 with G-REV-05. 114 is the first number
-// nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
+// 112 released unused by A-FIRST-04 and so a permanent gap, and 113 with G-REV-05. 114 (R-REP-02), 115
+// (H-MIG-02), 118 (R-REP-03) and 120 were all RELEASED unused and are permanent gaps, each on one
+// argument: a statement, a KPI and a cohort figure are arithmetic over rows other units already write, and
+// a private SQLSTATE is for a refusal that needs a runbook answer at the database boundary. 120 is the one
+// number this note records as allocated TWICE, to R-REP-04 and then to R-REP-05 — an integrator's error,
+// harmless only because both released it, and recorded because the gate walks what is on disk and would
+// never have seen it. 116 landed with A-FIRST-05, 117 with Y-PAY-03, 119 with H-MIG-03 and 122 with
+// R-REP-06, which is the newest on disk. 121 is HELD by H-MIG-04, in flight in another worktree, so it is
+// neither landed nor free. 123 is the first number nobody holds. Gate case 90a walks the migrations that EXIST on disk rather
 // than consecutive integers, which is what makes a non-contiguous allocation cost nothing; a held number
 // that turns out to need no migration becomes a permanent gap like 22, 41, 44, 47, 71, 74 and now 88, and is
 // NOT renumbered, because renumbering to close a gap is how two branches come to apply one number to
