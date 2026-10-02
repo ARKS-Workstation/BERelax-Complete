@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MalformedTender, TENDER_ACCOUNT, TENDER_KINDS } from '../checkout/posting.ts'
-import { accountFor, STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
+import { ACCOUNTS, accountFor, STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
 import { aed, filsFrom, money } from '../money.ts'
 import type { TenderTypeSpec } from './tender.ts'
 import {
@@ -46,7 +46,19 @@ describe('the tender-type registry', () => {
     // code that looks plausible and names nothing, and `accountFor` throws on one.
     const account = accountFor(CHART, spec.account)
     expect(account.code).toBe(spec.account)
-    expect(account.type).toBe('asset')
+    // Every kind that COLLECTS money debits an asset: the drawer, a clearing account or the bank. The one
+    // kind that collects nothing debits the liability it discharges — `deposit_on_account` releases
+    // `2045 Customer deposits held`, which was credited when the deposit was taken (Y-PAY-06, 0124).
+    //
+    // Named as that one account rather than relaxed to "asset or liability", because the relaxed version
+    // would also accept a tender posted to 2050 package deferred revenue or to 2040 tips payable — and a
+    // tender debiting the tips liability is how a gratuity owed to a therapist comes to settle a document.
+    if (kind === 'deposit_on_account') {
+      expect(account.type).toBe('liability')
+      expect(spec.account).toBe(ACCOUNTS.customerDepositsHeld)
+    } else {
+      expect(account.type).toBe('asset')
+    }
     // Read from the posting rule rather than restated, so this asserts the two are the SAME map.
     expect(spec.account).toBe(TENDER_ACCOUNT[kind])
     expect(TENDER_ADAPTERS).toContain(spec.adapter)

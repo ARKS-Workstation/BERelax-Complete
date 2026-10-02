@@ -699,6 +699,49 @@ export {
   findCustomerByPhone,
   markPhoneVerified,
 } from './repositories/customer.ts'
+/*
+  Y-PAY-02's payment intents (0106). Rows only, for the payroll block's reason one paragraph down: the
+  lifecycle table, the amount fold and the projection from events to transaction rows are all
+  `packages/core/src/payments/`, this package may not import it, and `packages/payments/src/intent.ts` is
+  where the halves meet.
+
+  `claimPaymentIntent` inserts the row — and so claims the idempotency key — BEFORE anything calls the
+  gateway, and reports which of the two happened. That ordering is the acceptance line "a repeated
+  idempotency key returns the original intent and the adapter records zero additional calls": deduplicating
+  on the gateway's answer instead would still return the first snapshot, because the adapter is idempotent
+  too, and would still reach it — so the replay would appear in the operator-visible call log as a second
+  authorisation.
+
+  `deriveFiguresFromTransactions` is a SECOND derivation of the figures `@berelax/core` already computes, and
+  the duplication is deliberate: the acceptance line is a claim about two independent derivations agreeing,
+  and one of them has to be over the stored rows.
+
+  There is no delete anywhere and no update beyond `applyPaymentIntentMovement` and `recordGatewayIntentId`.
+  A transaction row is append-only for every role (ZY161), which makes the intent it references undeletable
+  too, so a suite over these tables asserts a DELTA and never a total (brief rule 9).
+*/
+/*
+  Y-PAY-06's deposit liability (0124). Rows only: the arithmetic — what a deposit settles, what a
+  cancellation refunds, which redemption targets are refused — is `packages/core/src/payments/deposit.ts`,
+  and `packages/fixtures/src/deposit.itest.ts` is where the pair is asserted. There is no update and no
+  delete anywhere: a movement is append-only for every role (ZY301), because each one NAMES the journal
+  entry that moved the liability, so a figure that is wrong is a NEW movement and a suite over the table
+  asserts a DELTA and never a total (brief rule 9).
+*/
+export {
+  type AppendDepositMovementInput,
+  appendDepositMovement,
+  DEPOSIT_CONSTRAINT,
+  DEPOSIT_SQLSTATE,
+  type DepositBalanceRow,
+  type DepositMovementRow,
+  type DepositRule,
+  depositError,
+  isDepositMovementRace,
+  isDepositRule,
+  readDepositBalance,
+  readDepositMovements,
+} from './repositories/deposit.ts'
 export {
   DUPLICATE_CANDIDATE_LIMIT,
   DUPLICATE_CANDIDATE_REFUSALS,
@@ -1051,27 +1094,6 @@ export {
   readOtpResendWindow,
   verifyOtpCode,
 } from './repositories/otp.ts'
-/*
-  Y-PAY-02's payment intents (0106). Rows only, for the payroll block's reason one paragraph down: the
-  lifecycle table, the amount fold and the projection from events to transaction rows are all
-  `packages/core/src/payments/`, this package may not import it, and `packages/payments/src/intent.ts` is
-  where the halves meet.
-
-  `claimPaymentIntent` inserts the row — and so claims the idempotency key — BEFORE anything calls the
-  gateway, and reports which of the two happened. That ordering is the acceptance line "a repeated
-  idempotency key returns the original intent and the adapter records zero additional calls": deduplicating
-  on the gateway's answer instead would still return the first snapshot, because the adapter is idempotent
-  too, and would still reach it — so the replay would appear in the operator-visible call log as a second
-  authorisation.
-
-  `deriveFiguresFromTransactions` is a SECOND derivation of the figures `@berelax/core` already computes, and
-  the duplication is deliberate: the acceptance line is a claim about two independent derivations agreeing,
-  and one of them has to be over the stored rows.
-
-  There is no delete anywhere and no update beyond `applyPaymentIntentMovement` and `recordGatewayIntentId`.
-  A transaction row is append-only for every role (ZY161), which makes the intent it references undeletable
-  too, so a suite over these tables asserts a DELTA and never a total (brief rule 9).
-*/
 export {
   applyPaymentIntentMovement,
   claimPaymentIntent,
@@ -2028,6 +2050,13 @@ export {
   readWorkbookPackageTemplates,
   type WorkbookPackageTemplate,
 } from './settings/package-templates.ts'
+export {
+  DEPOSIT_ENABLED_SETTING_KEY,
+  DEPOSIT_PERCENT_BP_SETTING_KEY,
+  DEPOSIT_POLICY_SETTING_KEYS,
+  readDepositPolicy,
+  type StoredDepositPolicy,
+} from './settings/payments.ts'
 export {
   REMINDER_OFFSETS_SETTING_KEY,
   readReminderOffsets,
@@ -4229,4 +4258,49 @@ export { type UnitOfWork, withUnitOfWork } from './tx.ts'
 // refuses an entry for a code no migration raises — and nothing here can be refused by the database,
 // since nothing here writes.
 //
-export const SCHEMA_VERSION = 122 as const
+// 124 is 0124_deposit.sql (Y-PAY-06) — one account, one tender type, one append-only table and six
+// refusals: a deposit is money received against ONE appointment, held as a liability until the treatment
+// is delivered.
+//
+// Three decisions in it are worth a paragraph, because each was a choice between two codes or two
+// vocabularies that both looked right.
+//
+// **`2045 Customer deposits held` is a NEW account and not `2050`.** 2050 is Deferred revenue — packages,
+// it has the right type and the right side, and it was sitting there. docs/01 decision 19b is why not: a
+// deposit "is not a prepaid product", and the whole reason 19b admits packages and nothing else is that
+// "one prepaid product means one deferred-revenue path, one liability account, one migration artefact and
+// one VAT date-of-supply question". Posting a deposit to 2050 would put a second kind of money into the
+// outstanding package liability R-REP-05 reports and H-MIG-03 reconciles to a workbook, and nothing on a
+// journal_line would say which kind it was.
+//
+// **Applying a deposit is a fifth `tender_type` and not a mechanism of its own.** 0105's rule for this
+// exact decision is "reuse a word when it means the same thing, and do not reuse one when it does not",
+// and `payment` means ONE SETTLEMENT against an issued document — which is what a deposit release is.
+// Three things read those rows and nothing else: ZT001, the ceiling that stops a document being overpaid;
+// `invoice_payable_fils`, the outstanding figure; and `TenderPostingDisagrees`. A release outside that
+// vocabulary would be a second answer to how much of a document is paid, and the first answer would say
+// the invoice was owed in full for ever. `deposit_on_account` is therefore the only tender type whose
+// posting account is a LIABILITY: every other kind debits an asset because money is arriving, and this one
+// debits 2045 because a liability already recorded is being discharged.
+//
+// **The VAT treatment is an open question, `Y11-vat-deposit`, and no rate is applied.** A payment received
+// before a supply can be a date of supply in its own right. The provisional answer is the SHAPE of
+// Y11-vat-package's — the deposit is held at its whole gross, UNSPLIT, and the invoice carries the entire
+// net/VAT split on delivery — and ZY303 is that reading as a refusal. Holding it unsplit is what makes the
+// other answer a new entry rather than a restatement: there is no net and no VAT figure on a deposit row to
+// have been wrong. `vat201_box_mapping` carries 2045 as `out_of_scope` with 2050's own wording, which is
+// not the same claim: the question decides which ENTRY is posted, not whether an account holding money
+// owed feeds a box — 0078 records the identical separation for ZG005.
+//
+// `deposit_movement.appointment_id` carries NO foreign key, which is `invoice_appointment`'s decision
+// (0063) for its stated reason: `truncate appointment` would break in four suites, in teardown, after
+// their assertions had passed. ADR 0057's cumulative figure is the primitive — `held_before_fils` and
+// `held_after_fils` on every row, with a CHECK for the per-row identity and ZY304 for the chain — and the
+// live balance is the VIEW `appointment_deposit_balance` rather than a stored column, which is that ADR's
+// rejection of a second statement of a sum the rows already make.
+//
+// ZY301-ZY306 of the band ZY301-ZY310 are used; ZY307-ZY310 are released UNUSED and deliberately
+// unregistered, because `pnpm sqlstate` refuses an entry for a code no migration raises. The test port band
+// { start: 17_600, width: 300 } allocated to this unit is released UNUSED: nothing here starts a server.
+//
+export const SCHEMA_VERSION = 124 as const

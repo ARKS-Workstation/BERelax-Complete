@@ -1,6 +1,20 @@
 import { sql } from 'drizzle-orm'
-import { bigint, check, index, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
-import { account } from './ledger.ts'
+import {
+  bigint,
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core'
+import { invoice } from './invoice.ts'
+import { account, journalEntry } from './ledger.ts'
 import { tenderType } from './payment.ts'
 
 /**
@@ -182,5 +196,107 @@ export const paymentIntentTransaction = pgTable(
                then ${table.amountFils} > 0 else ${table.amountFils} = 0 end`,
     ),
     index('payment_intent_transaction_intent_idx').on(table.paymentIntentId, table.occurredAt),
+  ],
+)
+
+/**
+ * The deposit liability, as the differences that made it. Mirrors `0124_deposit.sql` (Y-PAY-06).
+ *
+ * In this file rather than in `./payment.ts` for the reason the module note draws: `payment.ts` holds
+ * what was TENDERED against an issued document, and a deposit movement is neither a tender nor against a
+ * document — a receipt happens before there is one and a refund happens because there will not be one.
+ * It sits beside `payment_intent` because that is where the money a deposit is taken with arrives
+ * (0106: *"an intent is authorised before there is a document (a deposit on a booking)"*), and
+ * `paymentIntentId` is the column that joins the two.
+ *
+ * The seven CHECK constraints are mirrored for documentation; the six plpgsql refusals are not, because a
+ * trigger has no Drizzle expression. They are `ZY301` to `ZY306` and
+ * `packages/db/src/repositories/deposit.ts` is where a caller meets them as typed errors.
+ *
+ * The three fils columns are `mode: 'bigint'` for `payment.amountFils`'s reason: the driver returns bigint
+ * as a string precisely so a money figure cannot lose precision in transit, and a mirror that put a JS
+ * number back would undo that for the balance a cancellation refunds in full.
+ */
+export const depositMovement = pgTable(
+  'deposit_movement',
+  {
+    id: uuid('id').primaryKey(),
+    /**
+     * The ONE appointment this money was taken for. No foreign key, deliberately.
+     *
+     * `invoice_appointment.appointment_id` carries the same decision for the same reason (0063):
+     * PostgreSQL refuses `truncate appointment` while a referencing table is absent from the statement,
+     * and four suites truncate it by list — a key here would break all four in teardown, after their
+     * assertions had passed.
+     */
+    appointmentId: uuid('appointment_id').notNull(),
+    /** Position in this appointment's own history, from 1. `ZY304` walks it. */
+    seq: integer('seq').notNull(),
+    /** `DEPOSIT_MOVEMENT_KINDS` in `@berelax/core`. There is no `transferred`; see 0124 §6. */
+    kind: text('kind').notNull(),
+    /** The WHOLE liability either side of this movement (ADR 0057), with its magnitude beside it. */
+    heldBeforeFils: bigint('held_before_fils', { mode: 'bigint' }).notNull(),
+    heldAfterFils: bigint('held_after_fils', { mode: 'bigint' }).notNull(),
+    amountFils: bigint('amount_fils', { mode: 'bigint' }).notNull(),
+    /** Mandatory and a real key: money moving with no entry behind it makes 2045 unexplainable. */
+    journalEntryId: text('journal_entry_id')
+      .notNull()
+      .references(() => journalEntry.entryId),
+    /** The document this movement settled. Required for `applied`, refused for the other two. */
+    invoiceId: uuid('invoice_id').references(() => invoice.id),
+    /** How the money arrived or left. NULL for `applied`: no money moves at an application. */
+    tenderKind: text('tender_kind').references(() => tenderType.code),
+    paymentIntentId: uuid('payment_intent_id').references(() => paymentIntent.id),
+    tradingDate: date('trading_date').notNull(),
+    /** The cancellation verdict, on a refund row only. Y-PAY-07 reads it rather than re-deriving it. */
+    insideWindow: boolean('inside_window'),
+    windowHours: smallint('window_hours'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique('deposit_movement_one_row_per_position').on(table.appointmentId, table.seq),
+    check('deposit_movement_seq_positive', sql`${table.seq} >= 1`),
+    check('deposit_movement_kind_known', sql`${table.kind} in ('received', 'applied', 'refunded')`),
+    check('deposit_movement_amount_positive', sql`${table.amountFils} > 0`),
+    check(
+      'deposit_movement_window_bounded',
+      sql`${table.windowHours} is null or ${table.windowHours} between 0 and 168`,
+    ),
+    // ADR 0057's identity, per row: the closing balance is the opening balance moved by exactly the
+    // amount, in the direction the KIND says — never the sign of a column (0018's argument).
+    check(
+      'deposit_movement_balance_moves_by_its_amount',
+      sql`${table.heldAfterFils} = case when ${table.kind} = 'received'
+               then ${table.heldBeforeFils} + ${table.amountFils}
+               else ${table.heldBeforeFils} - ${table.amountFils} end`,
+    ),
+    check(
+      'deposit_movement_cannot_overdraw',
+      sql`${table.kind} = 'received' or ${table.amountFils} <= ${table.heldBeforeFils}`,
+    ),
+    check(
+      'deposit_movement_applied_names_its_document',
+      sql`(${table.invoiceId} is not null) = (${table.kind} = 'applied')`,
+    ),
+    check(
+      'deposit_movement_money_moves_only_in_or_out',
+      sql`(${table.tenderKind} is not null) = (${table.kind} in ('received', 'refunded'))`,
+    ),
+    check(
+      'deposit_movement_is_not_tendered_as_itself',
+      sql`${table.tenderKind} is null or ${table.tenderKind} <> 'deposit_on_account'`,
+    ),
+    check(
+      'deposit_movement_intent_needs_a_tender',
+      sql`${table.paymentIntentId} is null or ${table.tenderKind} is not null`,
+    ),
+    check(
+      'deposit_movement_window_is_a_refund_verdict',
+      sql`(${table.insideWindow} is null) = (${table.kind} <> 'refunded')
+          and (${table.windowHours} is null) = (${table.kind} <> 'refunded')`,
+    ),
+    index('deposit_movement_appointment_idx').on(table.appointmentId, table.seq.desc()),
+    index('deposit_movement_trading_date_idx').on(table.tradingDate, table.kind),
   ],
 )

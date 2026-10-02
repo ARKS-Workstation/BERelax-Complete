@@ -2044,6 +2044,57 @@ export const PRIVATE_SQLSTATES: readonly PrivateSqlState[] = [
     raisedBy: ['assert_imported_contact_outcome'],
     translators: ['packages/db/src/services/import-contacts.ts'],
   },
+  // ZY301-ZY306 are Y-PAY-06's, of the band ZY301-ZY310; ZY307 to ZY310 are left free and deliberately
+  // absent, because an entry for a code no migration raises is direction 3. Six and not one because each
+  // names a different thing to go and do — "a figure that is wrong is a NEW movement", "the entry and the
+  // movement are two statements of one fact", "a deposit recognises no revenue until the treatment is
+  // delivered", "the sequence is contiguous and opens at zero", "bill the appointment the money was taken
+  // for" and "packages are the only prepaid product". The two that carry the unit's whole point are ZY305
+  // and ZY306: together they are what makes "appointment-scoped" a property of the schema rather than a
+  // convention, and ZY306 is on `journal_line` precisely because the conversion docs/01 decision 19b
+  // forbids writes no deposit row at all — it is an entry, and it balances.
+  {
+    code: 'ZY301',
+    rule: 'A deposit movement is append-only.',
+    migration: '0124',
+    raisedBy: ['refuse_deposit_movement_change'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
+  {
+    code: 'ZY302',
+    rule: "A deposit movement's journal entry must move the deposit account by exactly that movement, in the direction its kind says, on its own business day.",
+    migration: '0124',
+    raisedBy: ['deposit_movement_matches_its_entry'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
+  {
+    code: 'ZY303',
+    rule: 'A deposit received or refunded recognises no revenue and charges no output VAT.',
+    migration: '0124',
+    raisedBy: ['deposit_movement_matches_its_entry'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
+  {
+    code: 'ZY304',
+    rule: "A deposit movement's opening balance must be the previous movement's closing balance, the sequence must be contiguous, and the first movement must open at zero.",
+    migration: '0124',
+    raisedBy: ['deposit_movement_continues_the_chain'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
+  {
+    code: 'ZY305',
+    rule: 'An applied deposit movement must name a document that bills its own appointment.',
+    migration: '0124',
+    raisedBy: ['deposit_applies_only_to_its_own_appointment'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
+  {
+    code: 'ZY306',
+    rule: 'No journal entry may move the deposit account and a deferred-revenue account in one entry.',
+    migration: '0124',
+    raisedBy: ['deposit_is_not_a_prepaid_product'],
+    translators: ['packages/db/src/repositories/deposit.ts'],
+  },
   {
     code: 'ZZ001',
     rule: 'A lint pass, an approval and a publication record are append-only.',

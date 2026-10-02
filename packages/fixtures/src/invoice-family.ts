@@ -43,6 +43,12 @@ import type { Sql } from '@berelax/db'
 export const INVOICE_FAMILY_TABLES: readonly string[] = Object.freeze([
   // Referencing tables first for readability; TRUNCATE takes them as one set, so the order is not load-bearing.
   'refund',
+  // Y-PAY-06's deposit liability (0124). It references `invoice` — an `applied` movement names the document
+  // it settled — so whichever suite empties the family has to take it or TRUNCATE refuses the whole
+  // statement. `journal_entry` is its other parent and is deliberately NOT here: nothing truncates the
+  // journal (0078 says so where it makes `package_sale.journal_entry_id` a real key), and a suite emptying
+  // it would remove the entries every other suite's documents are explained by.
+  'deposit_movement',
   'checkout_finalisation',
   'payment',
   'commission_line',
@@ -145,6 +151,9 @@ export const DOCUMENT_FAMILY_TABLES: readonly string[] = Object.freeze([
   'credit_note_line',
   'credit_note',
   'refund',
+  // Y-PAY-06's deposit liability (0124), which references `invoice`. Named here as well as in the invoice
+  // closure because this list is the UNION written out — see the note above on why it is literals.
+  'deposit_movement',
   'checkout_finalisation',
   'payment',
   'commission_line',

@@ -74,8 +74,27 @@ import { AppError } from '@berelax/shared'
 
 export const MANUAL_GATEWAY = 'manual-till' as GatewayName
 
-/** Cash, the card machine and a transfer: every tender kind whose registry adapter is `manual`. */
-const SERVES: readonly TenderKind[] = Object.freeze(['cash', 'card_in_salon', 'bank_transfer'])
+/**
+ * Cash, the card machine, a transfer and an appointment's own deposit: every tender kind whose registry
+ * adapter is `manual`.
+ *
+ * The list is held equal to `tender_type.adapter = 'manual'` in BOTH directions by
+ * `packages/fixtures/src/gateway-tender.itest.ts`, which is what makes it a statement rather than a
+ * comment — a kind the till could offer and no gateway could take is what `NoGatewayServesInstrument`
+ * refuses, and that test found the omission the moment `deposit_on_account` was added to the registry.
+ *
+ * `deposit_on_account` is Y-PAY-06's (migration 0124) and it belongs here for the reason cash does, one
+ * step further along: there is nothing to reserve because the money is already the business's, and
+ * `capture` records a liability being discharged instead of a note going into a drawer. Every capability
+ * this adapter declares false is false for it too — the amount applied IS the amount, there is no
+ * reservation to void, and nothing settles later.
+ */
+const SERVES: readonly TenderKind[] = Object.freeze([
+  'cash',
+  'card_in_salon',
+  'bank_transfer',
+  'deposit_on_account',
+])
 
 interface TillIntent {
   readonly gatewayIntentId: GatewayIntentId

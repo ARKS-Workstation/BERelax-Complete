@@ -93,6 +93,12 @@ describe('registry integrity — properties over the whole registry, not example
     ).map((s) => s.key)
     expect(accountants).toEqual([
       'packages.unredeemed_balance_policy',
+      // Y-PAY-06's deposit percentage. It belongs on this list for the reason the package policy does:
+      // money taken before a supply is a revenue-recognition decision with a VAT consequence
+      // (Y11-vat-deposit), so it is the accountant's as well as the owner's. The ENABLED flag beside it
+      // is deliberately NOT here — it is `operational` and owner-only, because whether the business asks
+      // a customer for money before a treatment is a trading decision and not a bookkeeping one.
+      'payments.deposit_percent_bp',
       'hr.gratuity_expense_account',
       'hr.gratuity_liability_account',
       'hr.gratuity_settlement_payable_account',
