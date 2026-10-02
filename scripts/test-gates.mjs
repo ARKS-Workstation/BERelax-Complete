@@ -44864,6 +44864,426 @@ const TOUCH = ['exec', 'tsx', 'scripts/check-touch-targets.mjs']
   }
 }
 
+// 142a-142z. (R-REP-02) The three statements: every rule about the LAYOUT shown to fail, the identity that
+//            cannot see a misfiling shown to be blind, and every tie to `journal_line` shown to be
+//            breakable.
+//
+//            The unit's whole claim is "tied to the ledger", and the thing that makes that hard to check is
+//            that the obvious check is nearly vacuous. `assets - (liabilities + equity) = 0` is the
+//            trial-balance identity and holds for ANY total, disjoint partition of the chart whose
+//            per-section signs are consistent — including one that files a liability under assets (ADR
+//            0064). So the statements rest on three mechanisms rather than on that zero, and each fails in a
+//            way the other two cannot see:
+//
+//              * eight LAYOUT RULES, pure predicates over the chart. A rule that stops matching reports no
+//                findings, and "the shipped layout is sound" then passes over a layout that has stopped
+//                being one (ADR 0003). 142a to 142h blind each detector and require its own name back.
+//              * the ARITHMETIC. 142i to 142m break a subtraction, a sign and a census and require the case
+//                written for each — including the one that proves the balance identity is sensitive to a
+//                dropped account at all, without which "it balances" is satisfied by an implementation that
+//                ignored the layout.
+//              * the LEDGER READS. 142n to 142s break a window, a refusal, the as-of instant and the
+//                canonical bytes, against real PostgreSQL. These are the cases about the claim a pure test
+//                cannot reach: a statement is only tied to `journal_line` if the rows it drills to are the
+//                rows its figure came from.
+//
+//            142t and 142u are the two gates this unit had to stay inside: the statements may not read a
+//            clock (which is what byte-identical output rests on) and `packages/db` may not import
+//            `packages/core` (which is why the pairing suite lives in `packages/fixtures`).
+//
+//            Every case that edits a shipped file goes through `replaceOnce` (brief rule 20).
+{
+  const CORE = 'packages/core/src/reporting/statements.ts'
+  const CORE_SUITE = 'packages/core/src/reporting/statements.test.ts'
+  const QUERIES = 'packages/db/src/reporting/statement-queries.ts'
+  const DB_SUITE = 'packages/db/src/statements.itest.ts'
+  const PAIR_SUITE = 'packages/fixtures/src/statements.itest.ts'
+
+  const statementsUnit = (file) => ['exec', 'vitest', 'run', '-c', 'vitest.config.ts', file]
+  const statementsIntegration = (file) => [
+    'exec',
+    'vitest',
+    'run',
+    '-c',
+    'vitest.integration.config.ts',
+    file,
+  ]
+
+  /**
+   * Blinds one layout detector and requires the rule's own name back.
+   *
+   * The replacement keeps the anchor's indentation, because `withEditedFile` writes the file back byte for
+   * byte and a re-indented line would be restored correctly but would make the next case's anchor — which
+   * is a copy of the real source — harder to keep true.
+   */
+  const blindRule = (name, anchor, rule) => {
+    const indent = anchor.slice(0, anchor.length - anchor.trimStart().length)
+    checkRejectedBy(
+      name,
+      withEditedFile(
+        CORE,
+        (source) => replaceOnce(source, anchor, `${indent}if (false) {`),
+        () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+      ),
+      rule,
+    )
+  }
+
+  // ---- the eight layout rules, each detector blinded in turn ------------------------------------
+
+  // 142a. The balance sheet is a partition of the WHOLE chart, and that is the only thing the balance
+  //       identity checks. Blind it and an account dropped from every line becomes a statement that
+  //       balances while omitting whatever was on that account.
+  blindRule(
+    'statements: a partition rule blind to an account missing from the balance sheet fails by name',
+    '  if (!isSound(wholeChart)) {',
+    'balance-sheet-claims-every-account-in-the-chart-exactly-once',
+  )
+
+  // 142b. And the profit and loss account separately, because it is a RE-partition of the same revenue and
+  //       expense accounts the sheet's last two equity lines claim. A P&L that quietly omitted an expense
+  //       account would still articulate with a balance sheet that did not.
+  blindRule(
+    'statements: a partition rule blind to an expense account missing from the P&L fails by name',
+    '  if (!isSound(pnl)) {',
+    'profit-and-loss-claims-every-revenue-and-expense-account-exactly-once',
+  )
+
+  // 142c. The cash flow is the movement in every NON-cash account, which is only the movement in cash while
+  //       that set is exactly the complement of the cash accounts.
+  blindRule(
+    'statements: a partition rule blind to an account missing from the cash flow fails by name',
+    '  if (!isSound(nonCash)) {',
+    'cash-flow-claims-every-non-cash-account-exactly-once',
+  )
+
+  // 142d. A line claiming no account agrees with its own drill-down for ever, which is the acceptance
+  //       line's property arriving as a presentation decision.
+  blindRule(
+    'statements: a rule blind to a line with no account behind it fails by name',
+    '    if (spec.accountCodes.length === 0) {',
+    'statement-line-claims-at-least-one-account',
+  )
+
+  // 142e. One type per line is what makes a single direction checkable at all. Blind it and 142f has
+  //       nothing to stand on: a line mixing revenue and expense has no natural side to compare against.
+  blindRule(
+    'statements: a rule blind to a line claiming two account types fails by name',
+    '    if (types.length !== 1 || types[0] === undefined) {',
+    'statement-line-claims-accounts-of-one-type',
+  )
+
+  // 142f. The case this unit exists for. The balance identity CANNOT see a liability filed under assets —
+  //       `statements.test.ts` asserts the zero for exactly that layout — so the direction rule is the only
+  //       thing that can, and a blinded one leaves a statement that balances and is misstated.
+  blindRule(
+    'statements: a direction rule blind to a misfiled account fails by name',
+    '    if (sideOfDirection(spec.direction) !== expected) {',
+    'statement-line-direction-matches-its-declared-sense',
+  )
+
+  // 142g. The cash-account set is stated twice — once for the cash flow, once as the balance sheet's cash
+  //       line — so it arrives with the check that holds the two equal, in the same commit.
+  blindRule(
+    'statements: a rule blind to the two cash-account sets disagreeing fails by name',
+    '  if (declared !== onTheSheet) {',
+    'cash-flow-cash-accounts-are-the-balance-sheet-cash-line',
+  )
+
+  // 142h. A repeated line id makes a drill-down ambiguous and a total double-count its own line.
+  blindRule(
+    'statements: a rule blind to a repeated line id fails by name',
+    '    if (repeated.length > 0) {',
+    'statement-line-ids-are-unique-within-a-statement',
+  )
+
+  // ---- the arithmetic --------------------------------------------------------------------------
+
+  // 142i. The balance identity must be able to FAIL. Pin `differenceFils` at zero and the case that proves
+  //       a sheet built from a partition missing an account does not balance is what notices — without it,
+  //       "the balance sheet balances" is satisfied by an implementation that ignored the layout entirely.
+  checkRejectedBy(
+    'statements: a balance sheet whose difference is pinned at zero fails the control case',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    differenceFils: totalAssetsFils - (totalLiabilitiesFils + totalEquityFils),',
+          '    differenceFils: 0n,',
+        ),
+      () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+    ),
+    'a sheet built from a partition missing an account does NOT balance',
+  )
+
+  // 142j. Direction is a subtraction and never a magnitude. Read every line debit-less-credit and the
+  //       liability, equity and revenue sections come back with the sign reversed — and the balance sheet
+  //       still balances, because both sides flip together.
+  checkRejectedBy(
+    'statements: a direction that ignores which subtraction it is fails the arithmetic case',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          "  return direction === 'debit_less_credit' ? debitFils - creditFils : creditFils - debitFils",
+          '  return debitFils - creditFils',
+        ),
+      () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+    ),
+    'reads a direction as a subtraction and never as a magnitude',
+  )
+
+  // 142k. An account posted to that no statement line claims leaves the sheet balancing — the account is
+  //       simply absent from both sides — so it is visible only in the coverage census. Blind that and the
+  //       statements have no way at all to notice a chart the layout has fallen behind.
+  checkRejectedBy(
+    'statements: a coverage census blind to an unclaimed account fails by name',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          '    unclaimedAccountCodes: census.accountCodes.filter((code) => !claimedCodes.has(code)).sort(),',
+          '    unclaimedAccountCodes: [],',
+        ),
+      () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+    ),
+    'names an account posted to that no statement line claims',
+  )
+
+  // 142l. ADR 0053: the statements are not filtered on `created_at`, so the discipline is a LINE. Blind the
+  //       line and a period reopened and posted into reports the figures as filed with nothing saying the
+  //       ledger behind them had moved — which is the one case the filter would have hidden.
+  checkRejectedBy(
+    'statements: a reproducibility check blind to rows written after the lock fails by name',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          '  if (input.rowsWrittenAfterTheSourceInstant > 0) {',
+          '  if (false) {',
+        ),
+      () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+    ),
+    'refuses a period posted into after the instant it was read at',
+  )
+
+  // 142m. The layout itself, rather than a rule about it: one account removed from a balance-sheet line.
+  //       The rules are checked against the CHART and not against a copy of the layout, so this must fail
+  //       by the partition rule's own name — which is what makes an account added to the chart by a later
+  //       unit a failing test rather than a line nobody wrote.
+  checkRejectedBy(
+    'statements: an account dropped from the shipped layout fails against the chart, by name',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          [
+            "    'tips_payable',",
+            "    'Tips payable to therapists',",
+            "    'credit_less_debit',",
+            "    'natural',",
+            '    [ACCOUNTS.tipsPayable],',
+          ].join('\n'),
+          [
+            "    'tips_payable',",
+            "    'Tips payable to therapists',",
+            "    'credit_less_debit',",
+            "    'natural',",
+            '    [],',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', statementsUnit(CORE_SUITE)),
+    ),
+    'balance-sheet-claims-every-account-in-the-chart-exactly-once',
+  )
+
+  // ---- the ledger reads, against real PostgreSQL ------------------------------------------------
+
+  // 142n. The opening position is taken at the day BEFORE the period starts. Take it at the first day and
+  //       every movement loses whatever was posted on that day — a silent off-by-one in a financial report,
+  //       which shows up as a year that does not add up to its months and never as an error.
+  checkRejectedBy(
+    'statements: an opening position taken inside the period is caught by the window case',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          '    select (${period.startsOn}::date - 1)::text as "openingAsAt"',
+          '    select (${period.startsOn}::date - 0)::text as "openingAsAt"',
+        ),
+      () => runExpectingFailure('pnpm', statementsIntegration(DB_SUITE)),
+    ),
+    'opens the period at the day before it starts',
+  )
+
+  // 142o. The census is the anchor that stops the statements being checked only against each other, and its
+  //       window is what makes the movement census a movement. Drop the lower bound and it silently becomes
+  //       the position census, which agrees with the position figures perfectly.
+  checkRejectedBy(
+    'statements: a census that ignores the start of its window is caught by the count case',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          [
+            '     where e.entry_date <= ${window.toInclusive}::date',
+            '       and (${window.fromInclusive}::date is null or e.entry_date >= ${window.fromInclusive}::date)',
+            '  `',
+            '  if (row === undefined) {',
+            "    throw new AppError('invariant_violated', 'the ledger census returned no row, which it cannot')",
+          ].join('\n'),
+          [
+            '     where e.entry_date <= ${window.toInclusive}::date',
+            '  `',
+            '  if (row === undefined) {',
+            "    throw new AppError('invariant_violated', 'the ledger census returned no row, which it cannot')",
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', statementsIntegration(DB_SUITE)),
+    ),
+    'counts every line in the period with no reference to any account set',
+  )
+
+  // 142p. An empty `= any(...)` matches no journal line, so a drill-down over no accounts agrees with any
+  //       figure at all — including a wrong one. The refusal is the same one the layout makes, one layer
+  //       down, and it has to be able to fire.
+  checkRejectedBy(
+    'statements: a drill-down that accepts an empty account set is caught by its own refusal case',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(source, '  if (window.accountCodes.length === 0) {', '  if (false) {'),
+      () => runExpectingFailure('pnpm', statementsIntegration(DB_SUITE)),
+    ),
+    'refuses an empty account set rather than agreeing with any figure at all',
+  )
+
+  // 142q. "Re-running the statements for a locked period produces byte-identical output" rests entirely on
+  //       `sourceAsOf` being the LOCK's instant rather than the caller's. Read the caller's instead and two
+  //       runs years apart produce two different artefacts, with every figure identical — so the only case
+  //       that can notice is the one that passes a different instant on purpose.
+  checkRejectedBy(
+    'statements: reading a closed period at the caller’s instant breaks the byte-identity case',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          [
+            '  return commissionPeriodSource(sql, {',
+            '    periodEndsOn: args.period.endsOn,',
+            '    nowIso: args.nowIso,',
+            '  })',
+          ].join('\n'),
+          [
+            '  return {',
+            '    sourceAsOf: args.nowIso,',
+            '    lockedPeriodId: null,',
+            '    earliestOpenDate: args.period.endsOn,',
+            '  }',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', statementsIntegration(PAIR_SUITE)),
+    ),
+    'is byte-identical when a different evaluation instant is passed',
+  )
+
+  // 142r. And the control for 142q, which is not a formality: a byte function that returned a constant
+  //       would satisfy every byte-identity assertion in the suite. The case that notices is the one
+  //       requiring the bytes to CHANGE when one fil moves.
+  checkRejectedBy(
+    'statements: canonical bytes that cannot change are caught by the one-fil control',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          '  return canonicaliseVat201WorkingPapers(statements)',
+          "  return 'the same bytes, whatever you hand it'",
+        ),
+      () => runExpectingFailure('pnpm', statementsIntegration(PAIR_SUITE)),
+    ),
+    'and the bytes change when one fil moves',
+  )
+
+  // ---- the two gates this unit had to stay inside ----------------------------------------------
+
+  // 142s. The statements may not read a clock. Every date and instant is an argument, which is what makes
+  //       two runs over a closed period the same artefact rather than two artefacts that happen to agree —
+  //       and a `Date.now()` here would be invisible to every assertion in the suite, because the figures
+  //       would still be right on the day it was written.
+  checkRejectedBy(
+    'statements: a clock read in the statement module fails the purity gate',
+    withEditedFile(
+      CORE,
+      (source) =>
+        replaceOnce(
+          source,
+          'export const STATEMENT_FORMAT_VERSION',
+          'export const GATE_FIXTURE_NOW = Date.now()\n\nexport const STATEMENT_FORMAT_VERSION',
+        ),
+      () => runExpectingFailure('pnpm', ['purity']),
+    ),
+    'reading the clock',
+  )
+
+  // 142t. And the boundary that puts the arithmetic in `core` and the rows in `db`. It is the reason the
+  //       pairing suite is in `packages/fixtures` at all, so an import that reversed it would make this
+  //       unit's two halves one module and nothing else would say so.
+  checkRejectedBy(
+    'statements: the statement queries importing @berelax/core fails the boundary gate',
+    withEditedFile(
+      QUERIES,
+      (source) =>
+        replaceOnce(
+          source,
+          "import { AppError } from '@berelax/shared'",
+          [
+            "import { AppError } from '@berelax/shared'",
+            "import { ACCOUNTS } from '@berelax/core'",
+            'export const GATE_FIXTURE_CODE = ACCOUNTS.cashInDrawer',
+          ].join('\n'),
+        ),
+      () => runExpectingFailure('pnpm', ['boundaries']),
+    ),
+    'db-must-not-import-core',
+  )
+
+  // 142u. The control for the whole block: every case above is satisfied by something FAILING, so one has
+  //       to be satisfied by the tree passing. All three suites, unedited, plus the two scanners.
+  {
+    const unit = run('pnpm', statementsUnit(CORE_SUITE))
+    check(
+      'statements: the layout rules and identities pass over the real tree',
+      !unit.failed,
+      unit.output,
+    )
+    const queries = run('pnpm', statementsIntegration(DB_SUITE))
+    check(
+      'statements: the ledger reads pass against the real database',
+      !queries.failed,
+      queries.output,
+    )
+    const pair = run('pnpm', statementsIntegration(PAIR_SUITE))
+    check(
+      'statements: the three statements over a real closed month pass end to end',
+      !pair.failed,
+      pair.output,
+    )
+    const purity = run('pnpm', ['purity'])
+    check('statements: the statement module is pure', !purity.failed, purity.output)
+    const boundaries = run('pnpm', ['boundaries'])
+    check('statements: the core/db boundary holds', !boundaries.failed, boundaries.output)
+  }
+}
+
 // 88. The gate harness itself: a child that was KILLED must not be read as a child that rejected
 //     something. Every `checkRejectedBy` case in this file rests on `runExpectingFailure`'s claim that a
 //     non-zero exit means the fixture was refused, and a signal death breaks that claim silently — the

@@ -7116,9 +7116,12 @@ units:
       to — so the box figure this unit snapshots has a surface a reviewer can read it on. What nobody has
       built is a screen over the vat_return SNAPSHOT itself: the stored figures read back through
       vat_return_box_figure, the two signatures, the amendment chain and the finalisation. M-VAT-12 re-pointed
-      that at M-VAT-09, which was todo when it wrote the sentence and is done by the time this merged, so at
-      the merge it is deferred to R-REP-02, which is todo, builds statements tied to the ledger and is the
-      reporting surface a stored-figures screen belongs on.'
+      that at M-VAT-09, which was todo when it wrote the sentence and is done by the time this merged, and it
+      was then re-pointed at R-REP-02. R-REP-02 has now landed and builds NO SCREEN at all: its output is a
+      pure function in packages/core plus the ledger reads behind it, and every admin reporting surface in
+      this build belongs to R-REP-08 by that unit''s own files list. RE-POINTED BY R-REP-02 to R-REP-08,
+      which is todo, is role-scoped — so an accountant is the role that may see a filed return — and already
+      owes a drill-down from every headline tile to the source rows.'
     - 'NOTE: a snapshot may not make an unfileable return look fileable, and that is a CHECK rather than a
       service guard: vat_return_fileable_only_when_nothing_in_it_refuses_filing reads the HASHED BYTES, so
       fileable = true is impossible while the snapshot carries a notFileableReasons entry or a box marked
@@ -13672,7 +13675,7 @@ units:
     summary: The three financial statements generated from journal_line with period locks respected, each
       headline line drilling to the journal rows that compose it and reproducible to the fils years later.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - M-VAT-01
@@ -13704,11 +13707,77 @@ units:
     - a dated reversal lands in the period of its own date, not the period it corrects, and an attempted
       UPDATE or DELETE on journal_line is refused by the database
     - re-running the statements for a locked period produces byte-identical output
+    - 'NOTE: the balance sheet balancing is NOT what ties the statements to the ledger, and ADR 0064 records
+      why. assets − (liabilities + equity) = 0 is the trial-balance identity, which the journal''s deferred
+      balance trigger already guarantees — and it holds for ANY total, disjoint partition of the chart whose
+      per-section signs are consistent, INCLUDING one that files a liability under assets.
+      statements.test.ts asserts that zero for exactly that misfiling. So the acceptance line is met by a
+      layout rule set (eight named predicates over the chart, each broken in gate block 142) plus a CENSUS of
+      journal_line taken with no reference to any account set: an account posted to that no line claims
+      leaves the sheet balancing and is invisible to every identity.'
+    - 'NOTE: the articulation is implemented as an EXACT identity — movement in retained earnings − net
+      profit − postings straight to retained earnings = 0 — rather than as the acceptance line''s plain
+      sentence. The plain sentence is true only while nothing is posted directly to 3030, because a closing
+      entry moves profit out of the revenue accounts and into it; nothing in this build posts one, so the
+      figure is reported on every statement set and asserted at ZERO for the fixture month, and the plain
+      reading is asserted as well. A report whose headline claim holds only under a condition nobody states
+      is a report that will one day be wrong with nothing failing.'
+    - 'NOTE: the cash flow is INDIRECT — the movement in every non-cash account, which is minus the movement
+      in cash. The direct method was rejected for a measured reason: an ordinary banking run (Dr bank, Dr
+      fee, Cr drawer) has one cash line whose counterparts span an operating cost and another cash account,
+      so the amount needs a pro-rata split, which is a rounding rule inside a statement whose acceptance is
+      "to the fils". Cash and cash equivalents are 1010, 1015 and 1020; the two clearing accounts are
+      deliberately excluded (money earned and not yet held), which is provisional under Y8-coa and moves a
+      reported figure. The fixture banks 50,000 between two cash accounts and asserts that no cash-flow line
+      moves.'
+    - 'NOTE: there is no "seeded closed month". Measured on a database created, migrated and seeded from
+      clean in this worktree: pnpm seed writes ZERO journal_entry rows, zero journal_line rows and no
+      period_lock at all — the opening-balance seed is not part of it. Both suites therefore build their own
+      month through postJournalEntry and close it with closeAccountingPeriod, from a recipe stated once, and
+      search for a virgin window out of a reserved span (2250-2299 for the db suite, 2300-2349 for the
+      pairing suite) because journal_entry refuses DELETE for every role and a fixed month would double
+      every figure on a second run.'
+    - 'NOTE: the suite the manifest named — packages/db/src/statements.itest.ts — cannot assert the
+      acceptance lines, because packages/db may never import packages/core (ADR 0001) and the three
+      statements are core''s arithmetic. It covers the LEDGER READS instead (window semantics, the census,
+      the drill-down, as-of-the-lock, and the database''s ZL001 refusal of an UPDATE and a DELETE on
+      journal_line). The pairing suite is packages/fixtures/src/statements.itest.ts, the one package allowed
+      to depend on both, and it is added to this unit''s files. The dated-reversal acceptance line''s two
+      halves are split the same way: the database refusal is asserted in the db suite, and that a reversal
+      does not restate a filed period — the closed month''s bytes identical before and after — in the
+      pairing suite.'
+    - 'NOTE: the statement LAYOUT (which accounts group into which line) is a second statement of the chart
+      and is provisional against Y8-coa, whose second half is "what the accountant expects monthly". It
+      arrives with the check that holds the two equal in the same commit, over STANDARD_SPA_CHART itself
+      rather than a copy: an account added to the chart and claimed by no line is a failing test. No new
+      open question was opened — Y8-coa already covers the grouping and which accounts count as cash. No
+      statutory figure is computed anywhere: corporate tax appears only if something was posted to the
+      corporate tax accounts.'
+    - 'NOTE: Y8-opening-balances stays open and the consequence is a property of the DATA, not of this code.
+      The seed does not post the provisional opening entry (measured: zero journal rows after pnpm seed), so
+      until an opening position is imported every balance sheet this unit produces is the MOVEMENT since the
+      first entry rather than a position — the seed''s own note in packages/db/src/seed/opening-balances.ts
+      says the same thing. It is not carried as a marker on the statement set because the statements cannot
+      see whether an import happened; that is a row in opening_balance_import, and H-MIG-07 is the unit that
+      ties an opening balance sheet to an imported position.'
+    - 'NOTE: every figure is a bigint and none is a Fils. Fils is a branded number capped at
+      Number.MAX_SAFE_INTEGER, and packages/db/src/queries/trial-balance.ts records what a number did to a
+      cumulative ledger position — a ledger holding 2^53 + 1 fils on each side reported a difference of −4
+      fils out of nothing, because the two sides round independently.'
+    - 'NOTE: this unit adds NO migration and NO private SQLSTATE, and ADR 0064 records why: every refusal a
+      statement can meet already has a code with a runbook answer (ZL001 for an edit to the journal, ZL002
+      for a posting into a closed period, ZE001/ZE002 for closing a period that does not balance or still
+      holds unposted documents), and a private code is for a refusal that needs one (ADR 0043, 0061). The
+      migration number 0114 and the band ZY201-ZY210 are RELEASED UNUSED, as is the test port band
+      { start: 15_800, width: 300 } — nothing here starts a server. SCHEMA_VERSION is untouched and no
+      paragraph was added to the migration ledger, there being no migration to document.'
     files:
     - packages/core/src/reporting/statements.ts
     - packages/core/src/reporting/statements.test.ts
     - packages/db/src/reporting/statement-queries.ts
     - packages/db/src/statements.itest.ts
+    - packages/fixtures/src/statements.itest.ts
+    - docs/adr/0064-a-financial-statement-is-a-directed-sum-over-a-partition-of-the-chart.md
   - id: R-REP-03
     order: 123
     title: KPI registry, utilisation and revenue per available room-hour

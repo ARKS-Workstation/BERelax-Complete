@@ -317,6 +317,27 @@ export {
   vat201UnrepresentableGroupings,
   vat201WorkingPapers,
 } from './queries/vat201-working-papers.ts'
+// R-REP-02's ledger reads. The three statements are ARITHMETIC and live in `@berelax/core`; these are the
+// rows they are computed from, plus the drill-down that lets a caller add the rows up itself and the census
+// that counts what no account set claims. `statementBytes` delegates to M-VAT-07's canonicaliser rather than
+// copying it: a second answer to "what are the bytes of this artefact" is a future disagreement about which
+// set of bytes an accountant was handed.
+export {
+  journalRowsWrittenAfter,
+  type StatementAccountFigure,
+  type StatementDrillDownRow,
+  type StatementDrillDownWindow,
+  type StatementLedgerCensus,
+  type StatementLedgerFigures,
+  type StatementPeriod,
+  type StatementSource,
+  statementBytes,
+  statementContentHash,
+  statementDrillDown,
+  statementLedgerCensus,
+  statementLedgerFigures,
+  statementPeriodSource,
+} from './reporting/statement-queries.ts'
 export {
   type AgentDefinitionRow,
   type AgentHeartbeatRow,
