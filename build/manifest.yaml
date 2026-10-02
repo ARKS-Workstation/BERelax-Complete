@@ -14242,7 +14242,7 @@ units:
       joined to first-touch attribution with ad spend taken from the ledger, and outstanding package liability
       tied to the deferred-revenue account.
     owner: claude
-    status: todo
+    status: done
     size: L
     depends_on:
     - A-FIRST-08
@@ -14277,12 +14277,165 @@ units:
       deferred-revenue ledger account balance to the fils
     - payback_months = CAC ÷ average monthly net contribution per new customer, returning NoDenominator
       when contribution is zero
+    - 'NOTE: "realised, never forecast" is implemented as a REFUSAL rather than as a discipline, and ADR
+      0071 records why. A cohort''s realised value rises every month it is observed, so a twelve-month
+      cohort''s figure and a one-month cohort''s are not the same kind of number and nothing in either says
+      so — put them in one column headed LTV and the forecast is supplied by the READER, from the word
+      "lifetime", without anything having computed one. So a figure is indexed BY its horizon:
+      cohortRealisedWindow is the only thing that builds the cohortMonths rows every cohort measure
+      restricts itself to, and it throws CohortHorizonNotReached for a horizon longer than the months that
+      have fully elapsed. There is no horizon argument in KpiInput at all — the window IS the rows — and
+      comparableHorizon of a set holding a cohort acquired this month is NOUGHT: the caller gets nothing to
+      compare rather than a small number. The figure is never called a lifetime value;
+      cohort_realised_value_per_customer is the registered id, and that id appears in formula, in
+      expandedFormula and on every result.'
+    - 'NOTE: the arch test is an import-closure scan whose own CLOSURE CHECK is the load-bearing part, and
+      it lives in packages/fixtures because packages/core may import @berelax/shared only — node:fs is
+      refused there by core-must-be-pure including from a .test.ts, which is why R-REP-03''s KPI arch test
+      lives in apps/web. An empty closure, a blanked pattern table and a renamed import each produce zero
+      findings and a green tick, so ltv-path-closure-reaches-its-own-modules is a finding of its own and
+      gate block 149 blinds each half separately — including by planting a real decayCurve in a real module
+      on the real path. TWO DEFECTS IN THIS UNIT''S OWN WORK WERE FOUND BY THAT BLOCK''S OWN CASES. (1) The
+      forecast-call pattern required a character BEFORE the keyword, so extrapolateValue( passed and only
+      cohortExtrapolate( fired; the case that enumerates the pattern table found it. (2) The exponent rule
+      refused ** outright and fired on scaledFigure''s TEN ** BigInt(decimals) — ADR 0068''s fixed-point
+      scaling. The repair was not an exception: a compounding projection needs a rate BELOW ONE, which is
+      not a bigint, so the rule now names Math.exp/pow/log/sqrt and ** is not a construct at all. The
+      patterns require CODE syntax rather than words, because this unit''s whole argument is written in the
+      modules the rule scans and a rule that fires on its own documentation gets turned off (stripNonCode''s
+      header records the colour gate doing exactly that).'
+    - 'NOTE: BOTH HALVES OF CAC ARE ABSENT FROM THIS BUILD and they are absent differently — checked before
+      assuming, as the dispatch asked. The SPEND is recorded and not attributed to a channel: ad spend lands
+      on 6070 through bill_line.expense_account_code or recurring_cost.expense_account_code (0028, 0031) and
+      neither table has a channel column, so the 6070 movement mixes paid acquisition with signage and the
+      shopfront. MEASURED on a database migrated and seeded from clean in this worktree: zero bill_line
+      rows, zero recurring_cost rows and zero journal_line rows on 6070, so there is no spend figure at all
+      today. The DENOMINATOR''s classification does not exist and could not be derived:
+      customer_acquisition_source (0053) holds six labels and none records whether a touch was bought — a
+      web booking may be organic search, a link in a reminder or an ad click. So
+      FIRST_TOUCH_PAID_CLASSIFICATION classifies all six not_recorded with a reason on each, its totality is
+      a pnpm typecheck failure rather than a findings rule (a Record over a closed union), and the figure is
+      the new Y9-paid-channel-attribution row in docs/OPEN-QUESTIONS.md. Classifying web as paid would have
+      been one line and is ADR 0070''s rejected pro-rata allocation in a different place. not_recorded is
+      deliberately not unpaid, which would be the claim that these customers cost nothing to acquire.
+      DEFERRED TO A-FIRST-08: when its attribution row lands, KpiCohortMember.firstTouch is resolved from
+      the medium and this classifier narrows to the rows with no attribution; nothing else moves.'
+    - 'NOTE: the spend refusal is UPSTREAM of the registry and that is structural. A measure can only return
+      a bigint, so an absent spend would arrive as an empty dataset and a CAC of zero — ADR 0070''s free
+      treatment with the sign reversed, a free customer. acquisitionSpendRows therefore refuses a
+      not_channel_attributed statement and there is no parameter a bare total could enter through. The
+      statement has TWO states and not three: a period in which the business genuinely spent nothing is
+      channel_attributed with an empty row list, which is a real figure of zero, and there is no "measured
+      total" state because that is the one shape a caller would be tempted to divide by. The unattributed
+      share is published beside every CAC rather than folded into it, which is R-REP-04''s
+      kpiDiscountCoverage arrangement — ADR 0070 names this unit as where it came from — and against this
+      build''s own data it is the whole of it, which packages/fixtures/src/cohorts.itest.ts measures.'
+    - 'NOTE: the LTV''s contribution CANNOT be computed from this build''s data, for ADR 0070''s reason one
+      grain along, and cohortContributionRow makes that structural: it takes R-REP-04''s own
+      ContributionMarginUnit values and refuses a not_attributable one, so there is no parameter a net price
+      could arrive through. Substituting revenue would report the HIGHEST possible lifetime value on the
+      figure an acquisition budget is set from. packages/fixtures/src/cohorts.itest.ts MEASURES the gap
+      through kpiTherapistCostCensus — zero published commission rule versions, every delivering employee
+      unpriced — rather than asserting it, and then asserts the figure to the fils over the SAME real
+      deliveries with the costs stated, so the mechanism is exercised and the gap is visible as a gap.
+      Y9-unit-cost-basis is where the figures are; no new open question was opened for it.'
+    - 'NOTE: the package liability is a THIRD independent read of one figure and that is the point, not an
+      oversight. sold − released is readPackageLiability''s (M-TILL-10) and is wrong if a balance disagrees
+      with its sale; 2050''s balance is wrong if a posting was missed; and the acceptance line''s Σ
+      remaining_sessions × per-session gross is the only one at the grain the entitlement has.
+      reconcilePackageLiabilityToLedger holds all three equal as named LINES, which is
+      month-reconciliation.ts''s own arrangement ("the refinement is not a second answer, it is an answer
+      whose total the report itself holds to the one source"). The per-session gross is the release
+      formula''s own COMPLEMENT — floor(value × remaining ÷ total), which equals value − ceil(value ×
+      redeemed ÷ total) by an algebraic identity — and not a rounded division: 0078 allocates a price across
+      lines by largest remainder (ZG006) and 0083 releases ceil(value × redeemed ÷ total), so a price that
+      does not divide by its session count has no single per-session figure. The broken version AGREES with
+      both hand-computed fixtures (10,000 over 3 sessions gives 6,666 and 3,333 either way) and differs at 5
+      fils over 3; the property test over 500 generated balances is what notices, with its rounding-case
+      count asserted against a floor measured over twelve runs (brief rule 22).'
+    - 'NOTE: 2050 is read SPLIT BY journal_entry.source, because H-MIG-03 posts a reconstructed package''s
+      opening liability as Dr 3030 / Cr 2050 with source = opening_balance AND writes the package_sale and
+      package_balance rows the schedule reads. A schedule compared against a 2050 balance scoped to the
+      till''s two sources — which is readPackageLiability''s scope, correctly, for a claim about what the
+      till wrote — would be out by exactly the imported liability, with a message naming neither the import
+      nor the scope. `other` is REPORTED rather than filtered, because 2050 is a real account and nothing
+      stops an adjustment landing on it (ADR 0064''s census argument). The split''s total is held equal to
+      readPackageDeferredRevenueFils and packageSoldLessReleasedFils to
+      readPackageLiability.outstandingFils, both in the same commit, which is what stops either becoming a
+      second answer.'
+    - 'NOTE: every assertion about 2050 in the pairing suite is a DELTA across this suite''s own sale and
+      redemption and never a total, because journal_line is append-only (ADR 0008, ZL001) and 2050 is one
+      account every package suite in the repository posts to (brief rule 9 and rule 12). What IS asserted as
+      a total is the per-row identity floor(value × remaining ÷ total) = value − released over EVERY
+      entitlement row in the database, which needs no isolation because it is a property of each row — with
+      a count of the part-drawn rows asserted above zero, since a row with nothing released satisfies the
+      identity for any implementation that returns value unchanged.'
+    - 'NOTE: four things in another unit''s files were EXTENDED rather than repaired, all of them required
+      because the registry is one registry (the dispatch''s rule, and ADR 0060''s). kpi-expression.ts gains
+      five datasets on KpiInput, four KpiUnit members and four lines in the quotient table — which ADR 0068
+      names as its own extension point ("a fourth kind of quotient is a line in that table"). The two counts
+      are separate members rather than one dimensionless count deliberately: fils ÷ customers and fils ÷
+      months are different figures and one count would have made a lifetime value and a monthly run rate
+      interchangeable on a screen. kpi-registry.ts gains three modules in KPI_MEASURES and KPI_SPECS.
+      utilisation.test.ts''s REGISTRY_PROBE gains one spread, because
+      measure-reads-exactly-the-fields-it-declares judges every measure in the registry and a probe with no
+      rows in a new dataset reports every new measure as declaring what it does not read; the rows live in
+      the new packages/core/src/reporting/cohort-kpi-probe.ts because that suite and cohorts.test.ts may not
+      import each other. And one KpiInput literal in utilisation.test.ts now spreads EMPTY_KPI_INPUT, so a
+      generator that cannot produce rows for a later unit''s dataset is not a compile error. No pre-existing
+      defect was found in any of those files and none was repaired.'
+    - 'NOTE: four files were added beyond the manifest''s list and all four are named here.
+      packages/core/src/reporting/cohort-kpi-probe.ts for the reason above.
+      packages/fixtures/src/ltv-arch.ts and its suite, because the arch rule reads files and packages/core
+      may not. packages/fixtures/src/cohorts.itest.ts, which is R-REP-02''s and R-REP-04''s reason verbatim:
+      packages/db may never import packages/core (ADR 0001), the arithmetic is core''s and the rows are
+      db''s, and fixtures is the one package allowed to depend on both.'
+    - 'NOTE: the pairing suite reserves trading years 2415-2514 and takes the first run of THREE consecutive
+      months with no business_day row in any of them. Three, because a cohort needs a horizon and a grid
+      over one month proves period 0 and nothing else. A HUNDRED years, and the first version reserved
+      five and was exhausted by this unit''s OWN GATE BLOCK — a third defect found in this unit''s own
+      work. One run consumes three months; gate block 149 drives this suite three times (149r and 149s
+      with a module edited, 149z as the control over the real tree), so a gate-block run costs nine months
+      and a pnpm verify costs twelve with pnpm test:integration''s own run. Sixty months is twenty runs:
+      five runs of the block plus four direct ones used the lot and the twenty-first failed on
+      virginMonths. The arithmetic is now in the module header and in the exhaustion message, so the next
+      person widens the span rather than reusing a month. Per-run months and per-run PEOPLE, because invoice,
+      journal_entry and package_redemption refuse DELETE for every role and customer cannot be deleted at
+      all (0069''s refusal trigger) — so ensureCustomer with a fixed phone would return the previous run''s
+      record, whose first visit is in a month this run does not cover. TWO DEFECTS IN THIS SUITE''S OWN
+      SETUP WERE FOUND BY RUNNING IT. (1) A hand-built +97159… phone of eleven digits was refused by
+      customer_phone_is_e164. (2) Once that was fixed, the duplicate scorer classified the pair as `unknown`
+      rather than `identical`, because crmPhoneKey could not key a number of the wrong length — and the
+      merge this suite needs was refused as merge_verdict_is_distinct, with a message naming a verdict and
+      nothing about a prefix. The people now come from syntheticPerson, which owns the one prefix that is
+      both unallocated and keyable.'
+    - 'NOTE: the merged-customer line is proved against a STALE materialised view, deliberately. The suite
+      refreshes dim_customer, THEN merges, THEN queries without refreshing — which is the only window in
+      which the query''s merge_survivor_of grouping does any work, and is exactly the window in which
+      somebody has just run a merge and is looking at the screen to see whether it worked. The control is
+      that the view still holds the tombstone with a first visit of its own, so the single cohort is the
+      grouping''s doing and not a refresh''s. Two mechanisms for one property: the query groups on the
+      survivor and takes min(first_visit), and collapseCohortMembers collapses whatever arrives — redundant
+      in the steady state and not in the one that matters.'
+    - 'NOTE: this unit adds NO migration and NO private SQLSTATE, and ADR 0071 records why — the same
+      conclusion ADR 0064, 0068 and 0070 reached. Every input already exists in reporting, in public or in
+      journal_line, nothing new is written, and every refusal here is a refusal of ARITHMETIC (a horizon the
+      cohort has not lived, a cost nothing can attribute, a marketing total no channel claims) which no
+      database can raise. Migration number 0120 and the band ZY261-ZY270 are RELEASED UNUSED, as is the test
+      port band { start: 15_800, width: 300 } — nothing here starts a server. SCHEMA_VERSION is untouched
+      and no paragraph was added to the migration ledger, there being no migration to document. Gate block
+      149a-149z and ADR 0071 are the allocations that were used.'
     files:
     - packages/core/src/reporting/cohorts.ts
     - packages/core/src/reporting/cac.ts
     - packages/core/src/reporting/package-liability.ts
+    - packages/core/src/reporting/cohort-kpi-probe.ts
     - packages/db/src/reporting/cohort-queries.ts
     - packages/core/src/reporting/cohorts.test.ts
+    - packages/fixtures/src/ltv-arch.ts
+    - packages/fixtures/src/ltv-arch.test.ts
+    - packages/fixtures/src/cohorts.itest.ts
+    - docs/adr/0071-a-realised-cohort-figure-is-a-figure-at-a-stated-horizon.md
   - id: R-REP-06
     order: 126
     title: Seasonality and the 13-week cash-flow forecast

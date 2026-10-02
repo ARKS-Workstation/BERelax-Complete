@@ -160,6 +160,118 @@ export interface KpiRevenueLine {
 }
 
 /**
+ * One customer whose first DELIVERED visit fell in `cohortMonth` (R-REP-05).
+ *
+ * `cohortMonth` is the first day of a business month, `YYYY-MM-01`, and it is derived from
+ * `reporting.dim_customer.first_visit_business_day` — which migration 0110 defines as "the earliest
+ * trading date of an appointment that was DELIVERED. Not booked, not paid — delivered, because a cohort
+ * of people who booked and never came is a different cohort", and which this module therefore reads
+ * rather than recomputing.
+ *
+ * **`firstTouch` is a RESOLVED state and not an acquisition label, and that is the whole of why CAC
+ * refuses against this build's data.** Whether a customer's first touch was PAID is a fact about the
+ * touch — a medium, a campaign, a click — and A-FIRST-08 owns the attribution row that will carry it.
+ * The vocabulary that exists (`customer_acquisition_source`, migration 0053: `walk_in`, `whatsapp`,
+ * `phone`, `web`, `referral`, `unknown`) records none of that: a `web` booking may have come from
+ * organic search, from a link in a message or from an advertisement, and the row cannot tell the three
+ * apart. So `cac.ts`'s `firstTouchPaidStateOf` classifies all six as `not_recorded`, the share of
+ * customers in that state is published beside every CAC, and a row arriving as `paid` is one a later
+ * attribution model produced rather than one this build inferred.
+ */
+export interface KpiCohortMember {
+  readonly customerId: string
+  /** `YYYY-MM-01`: the first day of the business month of the first delivered visit. */
+  readonly cohortMonth: LocalDate
+  /** Whether the first touch was a paid one, as A-FIRST-08's attribution will resolve it. */
+  readonly firstTouch: FirstTouchPaidState
+}
+
+/** Whether a customer's first touch was bought. See {@link KpiCohortMember.firstTouch}. */
+export type FirstTouchPaidState = 'paid' | 'unpaid' | 'not_recorded'
+
+/**
+ * One (cohort, elapsed month) pair the caller has selected. **This IS the realised window.**
+ *
+ * `businessDays` is the period for every R-REP-03 figure and this is its analogue: there is no horizon
+ * argument anywhere in this module, because a horizon passed as a number is a horizon a caller can pass
+ * a larger one than the cohort has lived. `cohortRealisedWindow` in `cohorts.ts` is the only thing that
+ * builds these rows and it refuses a month that has not fully elapsed, so an LTV extrapolated past the
+ * cohort's own history is unreachable rather than merely discouraged (ADR 0071).
+ *
+ * A month in which the cohort spent nothing still has a row. That is what stops the monthly average
+ * dividing by the months that happened to produce revenue — the same defect as a figure divided by
+ * "days in the period" counting only the days the salon took money.
+ */
+export interface KpiCohortMonth {
+  readonly cohortMonth: LocalDate
+  /** 0 for the acquisition month itself. Whole months elapsed since `cohortMonth`. */
+  readonly monthIndex: number
+}
+
+/**
+ * One customer-month's realised net CONTRIBUTION, in fils.
+ *
+ * Contribution and not revenue, and the distinction is the acceptance line's: "LTV is cumulative
+ * realised net contribution per cohort". A contribution is a net price less the costs attributable to
+ * delivering it, and ADR 0070 established that three of those four costs do not exist in this build —
+ * so `cohortContributionRow` refuses to build one of these out of a delivery whose margin is
+ * `not_attributable`, rather than letting an unknown cost arrive here as a zero and report the highest
+ * possible lifetime value on the screen somebody plans against.
+ *
+ * Negative is legitimate: a month whose credit notes exceed its invoices has a negative contribution,
+ * and clamping it would make a refunded cohort look break-even.
+ */
+export interface KpiCohortContribution {
+  readonly cohortMonth: LocalDate
+  readonly monthIndex: number
+  readonly customerId: string
+  readonly netContributionFils: bigint
+}
+
+/**
+ * Acquisition spend attributed to a PAID channel in one cohort month, in fils.
+ *
+ * Only channel-attributed paid spend may be in this dataset, which is why `cac.ts` is the only thing
+ * that builds a row and why it refuses a total that is not attributed to a channel. Nothing in this
+ * build tags a cost with a marketing channel: `bill_line.expense_account_code` and
+ * `recurring_cost.expense_account_code` reference `account (code)` and carry no channel column, so the
+ * movement on `6070 Marketing and advertising` is the whole of what is readable and it mixes paid
+ * acquisition with signage, print and anything else the owner files there.
+ *
+ * Measured on this build's own database rather than assumed: zero `bill_line` rows, zero
+ * `recurring_cost` rows and zero `journal_line` rows on `6070` after a clean migrate and seed. So there
+ * is no spend figure at all today, let alone a channel-attributed one, and `Y9-paid-channel-attribution`
+ * is the row that would answer it.
+ */
+export interface KpiAcquisitionSpend {
+  readonly cohortMonth: LocalDate
+  /** The paid channel the spend was attributed to. Carried so a figure can drill to its channels. */
+  readonly channel: string
+  /** Net of recoverable VAT, in fils. */
+  readonly netFils: bigint
+}
+
+/**
+ * One package balance's outstanding entitlement: the sessions still owed and the gross they carry.
+ *
+ * The grain is `package_balance` and not `package_sale`, because 0078 allocates the sale's gross across
+ * the template version's LINES by largest remainder so the shares sum to the price exactly (ZG006) —
+ * the per-session gross exists only within a line, and summing a sale-level average over lines would
+ * reintroduce the residue that allocation removed.
+ *
+ * `valueFils` is `package_balance.value_fils`, the share this line carries, which 0078 records is
+ * "never re-derived: re-deriving it at redemption time would give a different answer the moment the
+ * catalogue's prices moved". `sessionsRemaining` is `sessions_total - sessions_redeemed`.
+ */
+export interface KpiPackageEntitlement {
+  readonly packageSaleId: string
+  readonly balanceId: string
+  readonly sessionsTotal: number
+  readonly sessionsRemaining: number
+  readonly valueFils: bigint
+}
+
+/**
  * Everything a KPI may read.
  *
  * **`businessDays` IS the period.** There is no `from`/`to` pair: the days in scope are the `dim_date`
@@ -179,6 +291,16 @@ export interface KpiInput {
   readonly appointments: readonly KpiAppointment[]
   readonly rosteredShifts: readonly KpiRosteredShift[]
   readonly revenueLines: readonly KpiRevenueLine[]
+  /**
+   * R-REP-05's five, and the rule above reaches all of them. `cohortMonths` is the realised window the
+   * way `businessDays` is the period: every cohort measure restricts its own rows to it, so a month the
+   * cohort has not lived cannot enter a figure and no filter here can be written any other way.
+   */
+  readonly cohortMembers: readonly KpiCohortMember[]
+  readonly cohortMonths: readonly KpiCohortMonth[]
+  readonly cohortContributions: readonly KpiCohortContribution[]
+  readonly acquisitionSpend: readonly KpiAcquisitionSpend[]
+  readonly packageEntitlements: readonly KpiPackageEntitlement[]
 }
 
 /** Every dataset of {@link KpiInput}, so a `reads` declaration can be checked against a known set. */
@@ -189,6 +311,11 @@ export const KPI_DATASETS = [
   'appointments',
   'rosteredShifts',
   'revenueLines',
+  'cohortMembers',
+  'cohortMonths',
+  'cohortContributions',
+  'acquisitionSpend',
+  'packageEntitlements',
 ] as const satisfies readonly (keyof KpiInput)[]
 
 export type KpiDataset = (typeof KPI_DATASETS)[number]
@@ -204,6 +331,11 @@ export const EMPTY_KPI_INPUT: KpiInput = Object.freeze({
   appointments: Object.freeze([]),
   rosteredShifts: Object.freeze([]),
   revenueLines: Object.freeze([]),
+  cohortMembers: Object.freeze([]),
+  cohortMonths: Object.freeze([]),
+  cohortContributions: Object.freeze([]),
+  acquisitionSpend: Object.freeze([]),
+  packageEntitlements: Object.freeze([]),
 })
 
 // --- exact rational arithmetic -------------------------------------------------------------------
@@ -571,6 +703,14 @@ export type KpiUnit =
   | 'fils_per_room_hour'
   | 'basis_points'
   | 'composite'
+  // R-REP-05's four. `customers` and `months` are counts a cohort figure divides BY, and they are
+  // separate members rather than one `count` because `fils ÷ customers` and `fils ÷ months` are
+  // different figures that a single dimensionless count would have made interchangeable — a lifetime
+  // value and a monthly run rate reading as the same unit on the same screen.
+  | 'customers'
+  | 'months'
+  | 'fils_per_customer'
+  | 'fils_per_customer_month'
 
 /** How many decimal places a figure of each unit is published to, stated once. */
 export const KPI_UNIT_DECIMALS = {
@@ -585,6 +725,14 @@ export const KPI_UNIT_DECIMALS = {
   // place this record chose would be this module deciding something the KPI's own parts decide.
   basis_points: 0,
   composite: 0,
+  // R-REP-05's four. A count of customers is whole. A payback is published to one decimal place of a
+  // month, because the figure it is compared against — "we get it back inside the quarter" — is a whole
+  // number of months and a second place would suggest a precision a cohort of twenty does not have. The
+  // two money-per-customer figures are fils, so they are whole for ADR 0007's reason.
+  customers: 0,
+  months: 1,
+  fils_per_customer: 0,
+  fils_per_customer_month: 0,
 } as const satisfies Record<KpiUnit, number>
 
 /** A KPI as its author declares it. `formula` and `compute` are derived from `expression`. */
@@ -666,7 +814,7 @@ export function unitOfExpr(
   }
 }
 
-/** The three quotients this build's figures are. See {@link unitOfExpr}. */
+/** The seven quotients this build's figures are. See {@link unitOfExpr}. */
 function quotientUnit(
   dividend: KpiExpr,
   divisor: KpiExpr,
@@ -683,6 +831,23 @@ function quotientUnit(
   const under = unitOfExpr(divisor, context, path)
   if (over === 'minutes' && under === 'minutes') return 'ratio'
   if (over === 'fils' && under === 'hours') return 'fils_per_room_hour'
+  // R-REP-05's four lines in the same table, which ADR 0068 names as this record's extension point
+  // ("a fourth kind of quotient is a line in that table").
+  //
+  //   * **fils ÷ customers is fils per customer.** The realised cohort value and the CAC. It is NOT
+  //     `fils` — a figure in fils on a dashboard is a total, and a per-customer figure labelled as one
+  //     is read as the cohort's whole takings.
+  //   * **customers ÷ customers is a ratio.** The unattributed share. Separate from minutes ÷ minutes
+  //     rather than a general "like over like" rule, because a general rule would also make
+  //     fils ÷ fils a ratio and that is a margin percentage this module has no rounding rule for.
+  //   * **fils_per_customer ÷ months is fils per customer-month.** The monthly contribution run rate.
+  //   * **fils_per_customer ÷ fils_per_customer_month is months.** The payback, and the reason the two
+  //     run-rate units are distinct at all: this is the one division in the build whose ANSWER is a
+  //     duration, and it is only a duration because its divisor carries the month.
+  if (over === 'fils' && under === 'customers') return 'fils_per_customer'
+  if (over === 'customers' && under === 'customers') return 'ratio'
+  if (over === 'fils_per_customer' && under === 'months') return 'fils_per_customer_month'
+  if (over === 'fils_per_customer' && under === 'fils_per_customer_month') return 'months'
   return null
 }
 

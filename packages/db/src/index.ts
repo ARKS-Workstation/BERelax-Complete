@@ -317,6 +317,30 @@ export {
   vat201UnrepresentableGroupings,
   vat201WorkingPapers,
 } from './queries/vat201-working-papers.ts'
+// R-REP-05's cohort, acquisition-spend and package-liability reads. The arithmetic is `@berelax/core`'s
+// `cohorts.ts`, `cac.ts` and `package-liability.ts`; these are the rows. Three things this file states and
+// nothing else does: a cohort month is `date_trunc('month', dim_customer.first_visit_business_day)` and
+// nothing recomputes "first visit" (0110 defines it); a member row is grouped on `merge_survivor_of` so a
+// merged customer is one person even against a materialised view that has not been refreshed since the
+// merge; and `2050` is read SPLIT BY `journal_entry.source`, because H-MIG-03's reconstructed liability
+// posts on `opening_balance` and a scope of the till's two sources alone would be out by exactly the
+// import. `acquisitionSpendCensus` reports a MOVEMENT and a count of channel-tagged rows — which is zero,
+// structurally, because no cost table in this schema carries a marketing channel.
+export {
+  type AcquisitionSpendCensus,
+  acquisitionSpendCensus,
+  type CohortActivityRow,
+  type CohortMemberRow,
+  type CohortRevenueRow,
+  cohortActivity,
+  cohortMembers,
+  cohortNetRevenue,
+  type DeferredRevenueBySource,
+  type PackageEntitlementRow,
+  packageDeferredRevenueBySource,
+  packageEntitlements,
+  packageSoldLessReleasedFils,
+} from './reporting/cohort-queries.ts'
 // R-REP-04's KPI reads. The contribution margin and the eight operational KPIs are ARITHMETIC and live in
 // `@berelax/core`; these are the rows they are computed from. `kpiLedgerMovement` goes through
 // `statementLedgerFigures` rather than aggregating `journal_line` again, which is what that module asks

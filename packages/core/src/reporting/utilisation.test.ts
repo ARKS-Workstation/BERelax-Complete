@@ -4,6 +4,7 @@ import type { AccountCode } from '../ledger/account.ts'
 import { ACCOUNTS, STANDARD_SPA_CHART } from '../ledger/chart-of-accounts.ts'
 import type { LocalDate } from '../time.ts'
 import { localDate } from '../time.ts'
+import { COHORT_KPI_PROBE } from './cohort-kpi-probe.ts'
 import type {
   KpiAppointment,
   KpiBusinessDay,
@@ -176,6 +177,11 @@ const REGISTRY_PROBE: KpiInput = inputOf({
     revenue(ACCOUNTS.treatmentRevenue, 100_000n),
     revenue(ACCOUNTS.retailRevenue, 50n),
   ],
+  // R-REP-05's five datasets. The registry is one registry and the reads rule judges every measure in
+  // it, so a probe with no rows in a dataset R-REP-05 added would report every R-REP-05 measure as
+  // declaring what it does not read. The rows live in their own module rather than here because this
+  // file and `cohorts.test.ts` may not import each other; `cohort-kpi-probe.ts`'s header says why.
+  ...COHORT_KPI_PROBE,
 })
 
 // --- available room-hours ------------------------------------------------------------------------
@@ -1092,7 +1098,11 @@ function worldOf(plan: Plan): KpiInput {
     })
   })
 
+  // Spread over the empty input rather than listing the datasets this generator has nothing to say
+  // about: the property is about utilisation, and a dataset added by a later unit must not make a
+  // generator that cannot produce rows for it a compile error.
   return {
+    ...EMPTY_KPI_INPUT,
     businessDays,
     roomDays: roomDaysOut,
     roomClosures: closuresOut,
