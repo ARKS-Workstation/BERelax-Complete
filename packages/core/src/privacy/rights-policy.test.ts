@@ -242,15 +242,35 @@ describe('the erasure rule registry', () => {
     const registrars = [...new Set([...ERASURE_RULES.values()].map((r) => r.registeredBy))]
     expect(registrars).toContain('C-CRM-10')
     /*
-      A legibility ceiling and not a rule, which is why it moved from 6 to 10 when P-HR-11 became the sixth.
+      A ceiling on the NUMBER OF REGISTRARS used to stand here, and it moved from 6 to 10 when P-HR-11 became
+      the sixth, then tripped again on H-MIG-03's `imported_package_sale.package_sale_id` — twice failing for
+      the right reason and asking for the wrong fix, because another unit classifying a column it created is
+      the registry working. A constant on a dimension that grows honestly only ever buys a bumped number.
 
-      What the case actually means is asserted twice over and neither part is this number: C-CRM-10 still
-      accounts for the majority (below), and the NAMED list two cases down makes a new registrar a diff
-      somebody reads. A cap tight enough to trip on the next honest classification would be a check that fails
-      for the right reason and asks for the wrong fix — the sixth unit to classify a table it created is the
-      registry working, not a set growing out of hand.
+      So the constant moved to the dimension where growth IS the defect. A tenth unit owning one column each
+      is legible; a second unit accumulating dozens of rules is a second engine, and that is what the case
+      means by "led by the unit that built it". The largest non-C-CRM-10 registrar owns 3 — W-SITE-10's
+      publication columns — so a tenth of the registry is headroom for several more honest classifications
+      and still refuses a second engine. Stated as a share rather than a count so it does not go stale as the
+      registry grows, and paired with the majority assertion below, which is the same claim from the other
+      side.
     */
-    expect(registrars.length).toBeLessThan(10)
+    const ruleCountByRegistrar = new Map<string, number>()
+    for (const rule of ERASURE_RULES.values()) {
+      ruleCountByRegistrar.set(
+        rule.registeredBy,
+        (ruleCountByRegistrar.get(rule.registeredBy) ?? 0) + 1,
+      )
+    }
+    for (const [unit, owned] of ruleCountByRegistrar) {
+      if (unit === 'C-CRM-10') continue
+      expect(owned, `${unit} owns ${owned} of ${ERASURE_RULES.size} rules`).toBeLessThanOrEqual(
+        ERASURE_RULES.size / 10,
+      )
+    }
+    // And the control the share needs, or a registry of ten equal registrars would satisfy every line above:
+    // the engine's own unit is not subject to that share, so say outright that it exceeds it.
+    expect(ruleCountByRegistrar.get('C-CRM-10') ?? 0).toBeGreaterThan(ERASURE_RULES.size / 10)
     expect(
       [...ERASURE_RULES.values()].filter((r) => r.registeredBy === 'C-CRM-10').length,
     ).toBeGreaterThan(ERASURE_RULES.size / 2)
@@ -309,6 +329,7 @@ describe('the erasure rule registry', () => {
       'C-CRM-10',
       'G-REV-02',
       'G-REV-05',
+      'H-MIG-03',
       'P-HR-11',
       'P-HR-12',
       'W-SITE-10',

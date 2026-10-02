@@ -1061,6 +1061,21 @@ export const ERASURE_RULES: ReadonlyMap<string, ErasureRule> = ruleRegistry([
 
   // --- financial: the documents a regulator reads ------------------------------------------------
   rule({
+    key: 'public.imported_package_sale.package_sale_id',
+    dataClass: 'financial',
+    action: 'inherits_parent',
+    parent: 'public.package_sale.customer_id',
+    why:
+      'The reconstruction record points at the `package_sale` H-MIG-03 wrote from it. It carries no identity ' +
+      'of its own — the holder is named by the sale, not by this row — so the column is a pointer at a sale ' +
+      'whose own rule decides the matter, and a second answer beside it would be a second answer about one ' +
+      'package. Classified at all because the foreign-key child probe finds it and ADR 0034 refuses an ' +
+      'erasure over an unclassified column: 0119 landing made six of `rights.itest.ts`\u2019s cases fail, ' +
+      'which is the probe working rather than a gap in it — the fourth time a new migration has been caught ' +
+      'this way and the fourth time the catch was correct.',
+    registeredBy: 'H-MIG-03',
+  }),
+  rule({
     key: 'public.commission_line.invoice_id',
     dataClass: 'financial',
     action: 'inherits_parent',
